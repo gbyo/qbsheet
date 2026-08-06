@@ -29,7 +29,7 @@ function safeRead(): IPendingSubmission | null {
     const parsed = JSON.parse(raw);
     if (!parsed?.credentials?.sessionId || !parsed?.qbj) return null;
     return parsed as IPendingSubmission;
-  } catch (err: any) {
+  } catch {
     return null;
   }
 }
@@ -38,7 +38,7 @@ function safeWrite(pending: IPendingSubmission | null) {
   try {
     if (pending === null) window.localStorage.removeItem(storageKey);
     else window.localStorage.setItem(storageKey, JSON.stringify(pending));
-  } catch (err: any) {
+  } catch {
     // Out of space or storage disabled. The in-memory copy still works for this session.
   }
 }

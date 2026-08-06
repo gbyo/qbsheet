@@ -12,6 +12,8 @@
  */
 import { ModaqControl, IGameFormat, IPacket, IPlayer } from 'modaq';
 import { IModaqGameFormat } from '../renderer/Services/YellowFruitScoringRulesToModaq';
+import { HelpRequestCategory, IHelpRequest, IRoomPresence } from '../main/server/ServerTypes';
+import RoomOperatorControls from './RoomOperatorControls';
 import buildScaffoldPacket, { describeScoringBands, scaffoldPacketName } from './ScaffoldPacket';
 
 /** MODAQ's custom-export callback shape, from modaq's ICustomExport */
@@ -42,6 +44,30 @@ export interface IScoringViewProps {
   /** Set when the last automatic upload didn't land */
   // eslint-disable-next-line react/require-default-props
   snapshotError?: string;
+  // eslint-disable-next-line react/require-default-props
+  operatorName?: string;
+  // eslint-disable-next-line react/require-default-props
+  ready?: boolean;
+  // eslint-disable-next-line react/require-default-props
+  readyAllowed?: boolean;
+  // eslint-disable-next-line react/require-default-props
+  presence?: IRoomPresence | null;
+  // eslint-disable-next-line react/require-default-props
+  helpRequest?: IHelpRequest | null;
+  // eslint-disable-next-line react/require-default-props
+  helpBusy?: boolean;
+  // eslint-disable-next-line react/require-default-props
+  onOperatorNameChange?: (name: string) => void;
+  // eslint-disable-next-line react/require-default-props
+  onReadyChange?: (ready: boolean) => void;
+  // eslint-disable-next-line react/require-default-props
+  onRequestHelp?: (category: HelpRequestCategory, message: string) => Promise<void>;
+  // eslint-disable-next-line react/require-default-props
+  onCancelHelp?: () => Promise<void>;
+  // eslint-disable-next-line react/require-default-props
+  onChangeRoom?: () => void;
+  // eslint-disable-next-line react/require-default-props
+  lifecycleNotice?: string;
 }
 
 export default function ScoringView(props: IScoringViewProps) {
@@ -58,6 +84,18 @@ export default function ScoringView(props: IScoringViewProps) {
     questionsPlayed,
     awaitingReview,
     snapshotError,
+    operatorName = '',
+    ready = false,
+    readyAllowed = false,
+    presence = null,
+    helpRequest = null,
+    helpBusy = false,
+    onOperatorNameChange = () => undefined,
+    onReadyChange = () => undefined,
+    onRequestHelp = async () => undefined,
+    onCancelHelp = async () => undefined,
+    onChangeRoom,
+    lifecycleNotice = '',
   } = props;
 
   const packet = buildScaffoldPacket(gameFormat) as unknown as IPacket;
@@ -79,6 +117,7 @@ export default function ScoringView(props: IScoringViewProps) {
           The last automatic update didn&apos;t reach YellowFruit ({snapshotError}). Scoring is unaffected.
         </div>
       )}
+      {lifecycleNotice !== '' && <div className="room-banner room-banner-info">{lifecycleNotice}</div>}
 
       <header className="room-statusbar">
         <div className="room-statusbar-main">
@@ -110,6 +149,23 @@ export default function ScoringView(props: IScoringViewProps) {
       <p className="room-scoresheet-note">
         Digital scoresheet &mdash; questions are read externally. {describeScoringBands(gameFormat)}
       </p>
+
+      {onChangeRoom && (
+        <RoomOperatorControls
+          compact
+          operatorName={operatorName}
+          ready={ready}
+          readyAllowed={readyAllowed}
+          presence={presence}
+          helpRequest={helpRequest}
+          helpBusy={helpBusy}
+          onOperatorNameChange={onOperatorNameChange}
+          onReadyChange={onReadyChange}
+          onRequestHelp={onRequestHelp}
+          onCancelHelp={onCancelHelp}
+          onChangeRoom={onChangeRoom}
+        />
+      )}
 
       <div className="room-modaq">
         <ModaqControl

@@ -14,8 +14,22 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { IPlayer } from 'modaq';
-import { IRoomIdentity, ISessionCredentials, getRoomAssignment, putSnapshot, startAssignedMatch } from './api';
 import {
+  cancelRoomHelp,
+  clearRememberedRoomIdentity,
+  createRoomHelp,
+  getRoomAssignment,
+  getOrCreateDeviceId,
+  IRoomIdentity,
+  ISessionCredentials,
+  putSnapshot,
+  rememberRoomIdentity,
+  startAssignedMatch,
+  updateRoomPresence,
+} from './api';
+import {
+  HelpRequestCategory,
+  IHelpRequest,
   IRoomAssignmentResponse,
   IRoomMatchup,
   IRoomTeam,
@@ -78,6 +92,17 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
   const [submittedSummary, setSubmittedSummary] = useState<string>('');
   const [snapshotError, setSnapshotError] = useState('');
   const [questionsPlayed, setQuestionsPlayed] = useState(0);
+  const [operatorName, setOperatorName] = useState(identity.operatorName ?? '');
+  const [ready, setReady] = useState(false);
+  const [presence, setPresence] = useState(assignment?.presence ?? null);
+  const [helpRequest, setHelpRequest] = useState<IHelpRequest | null>(assignment?.helpRequest ?? null);
+  const [helpBusy, setHelpBusy] = useState(false);
+  const [lifecycleNotice, setLifecycleNotice] = useState('');
+
+  const activeIdentity = useMemo(
+    () => ({ ...identity, deviceId: identity.deviceId ?? getOrCreateDeviceId(), operatorName }),
+    [identity, operatorName],
+  );
 
   // Refs so MODAQ's export callback stays stable; re-creating it resets MODAQ's export interval.
   const credentialsRef = useRef<ISessionCredentials | null>(null);
@@ -101,16 +126,15 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
     let cancelled = false;
 
     const poll = async () => {
-      const result = await getRoomAssignment(identity);
+      const result = await getRoomAssignment(activeIdentity);
       if (cancelled) return;
 
       if (!result.ok) {
         setOnline(false);
         // A 403 means the link itself is wrong, which no amount of retrying will fix.
         if (result.status === 403) {
-          setLoadError(
-            'This room link is not valid for the tournament that is open. Ask tournament control for a new one.',
-          );
+          clearRememberedRoomIdentity();
+          window.location.replace('/join');
         }
         return;
       }
@@ -118,6 +142,21 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
       setOnline(true);
       setLoadError('');
       setAssignment(result.value);
+      setPresence(result.value.presence ?? null);
+      setHelpRequest(result.value.helpRequest ?? null);
+      const devicePresence = result.value.presence?.devices?.find(
+        (device) => device.deviceId === activeIdentity.deviceId,
+      );
+      if (devicePresence) setReady(devicePresence.ready);
+      if (result.value.lastOutcome?.status === SessionStatus.Accepted) {
+        setLifecycleNotice('Tournament control accepted the result. This room is ready for the next assignment.');
+      } else if (result.value.lastOutcome?.status === SessionStatus.Rejected) {
+        setLifecycleNotice(
+          `Tournament control returned this result for correction.${
+            result.value.lastOutcome.rejectionReason ? ` ${result.value.lastOutcome.rejectionReason}` : ''
+          }`,
+        );
+      }
 
       const { current, session } = result.value;
 
@@ -144,7 +183,26 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
       cancelled = true;
       clearInterval(handle);
     };
-  }, [identity]);
+  }, [activeIdentity]);
+
+  // Presence is a separate, low-frequency heartbeat so an idle room remains visible between games.
+  useEffect(() => {
+    let cancelled = false;
+    const checkIn = async () => {
+      const result = await updateRoomPresence(activeIdentity, {
+        deviceId: activeIdentity.deviceId,
+        operatorName,
+        ready,
+      });
+      if (!cancelled && result.ok) setPresence(result.value.presence);
+    };
+    checkIn();
+    const handle = setInterval(checkIn, 10_000);
+    return () => {
+      cancelled = true;
+      clearInterval(handle);
+    };
+  }, [activeIdentity, operatorName, ready]);
 
   // Retry a queued final in the background until it lands.
   useEffect(() => {
@@ -171,7 +229,7 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
 
     setStartError('');
     setStarting(true);
-    const result = await startAssignedMatch(identity, current.scheduledMatchId);
+    const result = await startAssignedMatch(activeIdentity, current.scheduledMatchId);
     setStarting(false);
 
     if (!result.ok) {
@@ -184,6 +242,50 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
       matchup: current,
       credentials: { sessionId: result.value.sessionId, token: result.value.token },
     });
+  };
+
+  const handleOperatorNameChange = (name: string) => {
+    setOperatorName(name);
+    rememberRoomIdentity({ ...activeIdentity, operatorName: name });
+  };
+
+  const handleReadyChange = async (nextReady: boolean) => {
+    const readyAllowed = online && assignment !== null && assignment.gameFormat !== null;
+    if (nextReady && !readyAllowed) return;
+    setReady(nextReady);
+    const result = await updateRoomPresence(activeIdentity, {
+      deviceId: activeIdentity.deviceId,
+      operatorName,
+      ready: nextReady,
+    });
+    if (result.ok) setPresence(result.value.presence);
+    else if (nextReady) setReady(false);
+  };
+
+  const handleRequestHelp = async (category: HelpRequestCategory, message: string) => {
+    setHelpBusy(true);
+    const result = await createRoomHelp(activeIdentity, {
+      category,
+      message,
+      deviceId: activeIdentity.deviceId,
+      operatorName,
+    });
+    setHelpBusy(false);
+    if (result.ok) setHelpRequest(result.value.request);
+    else throw new Error(result.error);
+  };
+
+  const handleCancelHelp = async () => {
+    if (!helpRequest) return;
+    setHelpBusy(true);
+    const result = await cancelRoomHelp(activeIdentity, helpRequest.id);
+    setHelpBusy(false);
+    if (result.ok) setHelpRequest(null);
+  };
+
+  const handleChangeRoom = () => {
+    clearRememberedRoomIdentity();
+    window.location.assign('/join');
   };
 
   /**
@@ -259,11 +361,18 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
     [scoring],
   );
 
+  const readyAllowed = online && assignment !== null && assignment.gameFormat !== null;
+
   if (assignment === null) {
     return (
       <div className="room-shell">
         {loadError !== '' ? (
-          <div className="room-banner room-banner-error">{loadError}</div>
+          <>
+            <div className="room-banner room-banner-error">{loadError}</div>
+            <button type="button" className="room-button" onClick={handleChangeRoom}>
+              Pair this browser again
+            </button>
+          </>
         ) : (
           <p className="room-muted">Connecting to YellowFruit&hellip;</p>
         )}
@@ -287,6 +396,18 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
         questionsPlayed={questionsPlayed}
         awaitingReview={pendingFinal || sessionStatus === SessionStatus.Submitted}
         snapshotError={snapshotError}
+        lifecycleNotice={lifecycleNotice}
+        operatorName={operatorName}
+        ready={ready}
+        readyAllowed={readyAllowed}
+        presence={presence}
+        helpRequest={helpRequest}
+        helpBusy={helpBusy}
+        onOperatorNameChange={handleOperatorNameChange}
+        onReadyChange={handleReadyChange}
+        onRequestHelp={handleRequestHelp}
+        onCancelHelp={handleCancelHelp}
+        onChangeRoom={handleChangeRoom}
       />
     );
   }
@@ -305,10 +426,23 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
         assignment.blockedReason === undefined &&
         assignment.gameFormat !== null &&
         !pendingFinal &&
+        ready &&
         assignment.session?.status !== SessionStatus.Submitted &&
         assignment.session?.finalReceived !== true
       }
       blockedReason={assignment.blockedReason as RoomBlockedReason | undefined}
+      lifecycleNotice={lifecycleNotice}
+      operatorName={operatorName}
+      ready={ready}
+      readyAllowed={readyAllowed}
+      presence={presence}
+      helpRequest={helpRequest}
+      helpBusy={helpBusy}
+      onOperatorNameChange={handleOperatorNameChange}
+      onReadyChange={handleReadyChange}
+      onRequestHelp={handleRequestHelp}
+      onCancelHelp={handleCancelHelp}
+      onChangeRoom={handleChangeRoom}
     />
   );
 }

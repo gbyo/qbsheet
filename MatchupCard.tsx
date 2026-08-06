@@ -10,11 +10,15 @@
  * the useful thing to show is what happens next.
  */
 import {
+  IHelpRequest,
   IRoomAssignmentResponse,
+  IRoomPresence,
   IRoomMatchupSummary,
+  HelpRequestCategory,
   RoomBlockedReason,
   SessionStatus,
 } from '../main/server/ServerTypes';
+import RoomOperatorControls from './RoomOperatorControls';
 
 export interface IMatchupCardProps {
   assignment: IRoomAssignmentResponse;
@@ -26,7 +30,19 @@ export interface IMatchupCardProps {
   canStart: boolean;
   // eslint-disable-next-line react/require-default-props
   blockedReason?: RoomBlockedReason;
+  lifecycleNotice: string;
   onStart: () => void;
+  operatorName: string;
+  ready: boolean;
+  readyAllowed: boolean;
+  presence: IRoomPresence | null;
+  helpRequest: IHelpRequest | null;
+  helpBusy: boolean;
+  onOperatorNameChange: (name: string) => void;
+  onReadyChange: (ready: boolean) => void;
+  onRequestHelp: (category: HelpRequestCategory, message: string) => Promise<void>;
+  onCancelHelp: () => Promise<void>;
+  onChangeRoom: () => void;
 }
 
 function ContextLine({ label, matchup }: { label: string; matchup: IRoomMatchupSummary | null }) {
@@ -49,8 +65,29 @@ function startButtonLabel(starting: boolean, awaitingControl: boolean): string {
 }
 
 export default function MatchupCard(props: IMatchupCardProps) {
-  const { assignment, online, starting, startError, pendingFinal, submittedSummary, canStart, blockedReason, onStart } =
-    props;
+  const {
+    assignment,
+    online,
+    starting,
+    startError,
+    pendingFinal,
+    submittedSummary,
+    canStart,
+    blockedReason,
+    lifecycleNotice,
+    onStart,
+    operatorName,
+    ready,
+    readyAllowed,
+    presence,
+    helpRequest,
+    helpBusy,
+    onOperatorNameChange,
+    onReadyChange,
+    onRequestHelp,
+    onCancelHelp,
+    onChangeRoom,
+  } = props;
   const { current, previous, next, roomName, tournamentName } = assignment;
   const awaitingControl =
     pendingFinal ||
@@ -89,6 +126,7 @@ export default function MatchupCard(props: IMatchupCardProps) {
       )}
 
       {submittedSummary !== '' && <div className="room-banner room-banner-error">{submittedSummary}</div>}
+      {lifecycleNotice !== '' && <div className="room-banner room-banner-info">{lifecycleNotice}</div>}
 
       {current === null ? (
         <div className="room-empty">
@@ -120,6 +158,9 @@ export default function MatchupCard(props: IMatchupCardProps) {
           <button type="button" className="room-button" onClick={onStart} disabled={!canStart || starting}>
             {startButtonLabel(starting, awaitingControl)}
           </button>
+          {!ready && !awaitingControl && (
+            <p className="room-muted room-ready-hint">Mark this device ready before starting the match.</p>
+          )}
         </div>
       )}
 
@@ -127,6 +168,20 @@ export default function MatchupCard(props: IMatchupCardProps) {
         <ContextLine label="Previous" matchup={previous} />
         <ContextLine label="Next" matchup={next} />
       </div>
+
+      <RoomOperatorControls
+        operatorName={operatorName}
+        ready={ready}
+        readyAllowed={readyAllowed}
+        presence={presence}
+        helpRequest={helpRequest}
+        helpBusy={helpBusy}
+        onOperatorNameChange={onOperatorNameChange}
+        onReadyChange={onReadyChange}
+        onRequestHelp={onRequestHelp}
+        onCancelHelp={onCancelHelp}
+        onChangeRoom={onChangeRoom}
+      />
 
       <p className="room-connection">
         <span className={online ? 'room-status room-status-online' : 'room-status room-status-offline'}>

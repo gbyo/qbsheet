@@ -7,7 +7,14 @@
  */
 import {
   ICreateSessionRequest,
+  ICreateHelpRequest,
+  IHelpRequest,
   IRoomAssignmentResponse,
+  IRoomJoinDescriptor,
+  IRoomJoinRequest,
+  IRoomJoinResponse,
+  IRoomPresence,
+  IRoomPresenceUpdateRequest,
   IRoomRound,
   IRoomTeam,
   ISessionCreatedResponse,
@@ -42,6 +49,25 @@ export interface ISessionCredentials {
 export interface IRoomIdentity {
   roomId: string;
   token: string;
+  deviceId?: string;
+  operatorName?: string;
+}
+
+const rememberedIdentityStorageKey = 'yellowfruit.room.identity.v1';
+const rememberedDeviceIdStorageKey = 'yellowfruit.room.device-id.v1';
+
+interface IStorageLike {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+}
+
+function browserStorage(): IStorageLike | null {
+  try {
+    return typeof window !== 'undefined' ? window.localStorage : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -57,6 +83,106 @@ export function readRoomIdentity(location: { pathname: string; search: string })
   const token = new URLSearchParams(location.search).get('token');
   if (!token) return null;
   return { roomId: decodeURIComponent(match[1]), token };
+}
+
+/** Read a previously paired identity without treating it as proof until the server accepts it. */
+export function getRememberedRoomIdentity(storage: IStorageLike | null = browserStorage()): IRoomIdentity | null {
+  if (!storage) return null;
+  try {
+    const parsed = JSON.parse(storage.getItem(rememberedIdentityStorageKey) ?? 'null') as Record<string, unknown>;
+    const roomId = typeof parsed?.roomId === 'string' ? parsed.roomId : '';
+    let token = '';
+    if (typeof parsed?.accessToken === 'string') token = parsed.accessToken;
+    else if (typeof parsed?.token === 'string') token = parsed.token;
+    if (!roomId || !token) return null;
+    return {
+      roomId,
+      token,
+      deviceId: typeof parsed.deviceId === 'string' ? parsed.deviceId : undefined,
+      operatorName: typeof parsed.operatorName === 'string' ? parsed.operatorName : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Persist the room token only in browser storage; it is never rendered as text. */
+export function rememberRoomIdentity(identity: IRoomIdentity, storage: IStorageLike | null = browserStorage()): void {
+  if (!storage || !identity.roomId || !identity.token) return;
+  try {
+    storage.setItem(
+      rememberedIdentityStorageKey,
+      JSON.stringify({
+        roomId: identity.roomId,
+        accessToken: identity.token,
+        deviceId: identity.deviceId,
+        operatorName: identity.operatorName,
+      }),
+    );
+  } catch {
+    // Private browsing/storage-disabled devices can still use the current page session.
+  }
+}
+
+export function clearRememberedRoomIdentity(storage: IStorageLike | null = browserStorage()): void {
+  try {
+    storage?.removeItem(rememberedIdentityStorageKey);
+  } catch {
+    // Ignore storage failures; clearing the in-memory UI remains useful.
+  }
+}
+
+/** Stable per-browser label for presence. It is descriptive only and carries no authority. */
+export function getOrCreateDeviceId(storage: IStorageLike | null = browserStorage()): string {
+  if (storage) {
+    try {
+      const existing = storage.getItem(rememberedDeviceIdStorageKey);
+      if (existing) return existing;
+      const bytes = new Uint8Array(12);
+      crypto.getRandomValues(bytes);
+      const created = `device-${Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+      storage.setItem(rememberedDeviceIdStorageKey, created);
+      return created;
+    } catch {
+      // Fall through to a per-page label if storage is unavailable.
+    }
+  }
+  return 'device-session';
+}
+
+/** Resolve direct QR credentials first, then a remembered identity for the same room path. */
+export function resolveRoomIdentity(
+  location: { pathname: string; search: string },
+  storage: IStorageLike | null = browserStorage(),
+): IRoomIdentity | null {
+  const direct = readRoomIdentity(location);
+  if (direct) {
+    const identity = { ...direct, deviceId: getOrCreateDeviceId(storage) };
+    rememberRoomIdentity(identity, storage);
+    return identity;
+  }
+  const roomMatch = /^\/room\/([^/]+)\/?$/.exec(location.pathname);
+  if (!roomMatch) return null;
+  const remembered = getRememberedRoomIdentity(storage);
+  if (!remembered || remembered.roomId !== decodeURIComponent(roomMatch[1])) return null;
+  return { ...remembered, deviceId: remembered.deviceId ?? getOrCreateDeviceId(storage) };
+}
+
+/** Adopt a QR identity and remove the long token from the visible address bar. */
+export function adoptRoomIdentity(
+  location: { pathname: string; search: string },
+  history: {
+    replaceState: (data: unknown, unused: string, url?: string | URL | null) => void;
+  } | null = typeof window !== 'undefined' ? window.history : null,
+  storage: IStorageLike | null = browserStorage(),
+): IRoomIdentity | null {
+  const direct = readRoomIdentity(location);
+  const identity = resolveRoomIdentity(location, storage);
+  if (direct && identity && history) {
+    const hash = 'hash' in location && typeof location.hash === 'string' ? location.hash : '';
+    history.replaceState(null, '', `${location.pathname}${hash}`);
+  }
+  return identity;
 }
 
 /** How long to wait on a request before treating the server as unreachable */
@@ -75,23 +201,27 @@ async function request<T>(path: string, init: IRequestOptions = {}): Promise<Api
   try {
     const response = await fetch(path, { ...init, signal: controller.signal });
     const text = await response.text();
-    let payload: any = null;
+    let payload: unknown = null;
     if (text !== '') {
       try {
         payload = JSON.parse(text);
-      } catch (err: any) {
+      } catch {
         return { ok: false, error: 'The server sent a response the room app could not read.' };
       }
     }
     if (!response.ok) {
+      const errorPayload =
+        typeof payload === 'object' && payload !== null && 'error' in payload && typeof payload.error === 'string'
+          ? payload.error
+          : undefined;
       return {
         ok: false,
         status: response.status,
-        error: payload?.error ?? `The server refused the request (${response.status}).`,
+        error: errorPayload ?? `The server refused the request (${response.status}).`,
       };
     }
     return { ok: true, value: payload as T };
-  } catch (err: any) {
+  } catch {
     // Aborts and network failures both land here. Either way, YellowFruit is unreachable.
     return { ok: false, error: 'Could not reach the YellowFruit computer.' };
   } finally {
@@ -102,6 +232,14 @@ async function request<T>(path: string, init: IRequestOptions = {}): Promise<Api
 function jsonHeaders(credentials?: ISessionCredentials): Record<string, string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (credentials) headers[sessionTokenHeader] = credentials.token;
+  return headers;
+}
+
+function roomHeaders(identity: IRoomIdentity, contentType = false): Record<string, string> {
+  const headers: Record<string, string> = { [roomTokenHeader]: identity.token };
+  if (contentType) headers['Content-Type'] = 'application/json';
+  if (identity.deviceId) headers['x-yf-device-id'] = identity.deviceId;
+  if (identity.operatorName) headers['x-yf-operator-name'] = identity.operatorName;
   return headers;
 }
 
@@ -122,6 +260,18 @@ export function getTeams(): Promise<ApiResult<{ teams: IRoomTeam[] }>> {
   return request(`${apiPrefix}/teams`);
 }
 
+export function getJoinRooms(): Promise<ApiResult<{ rooms: IRoomJoinDescriptor[] }>> {
+  return request(`${apiPrefix}/join/rooms`);
+}
+
+export function joinRoom(body: IRoomJoinRequest): Promise<ApiResult<IRoomJoinResponse>> {
+  return request(`${apiPrefix}/join`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
 /**
  * What this room should be playing right now.
  *
@@ -131,7 +281,7 @@ export function getTeams(): Promise<ApiResult<{ teams: IRoomTeam[] }>> {
  */
 export function getRoomAssignment(identity: IRoomIdentity): Promise<ApiResult<IRoomAssignmentResponse>> {
   return request(`${apiPrefix}/rooms/${encodeURIComponent(identity.roomId)}/assignment`, {
-    headers: { [roomTokenHeader]: identity.token },
+    headers: roomHeaders(identity),
   });
 }
 
@@ -147,8 +297,49 @@ export function startAssignedMatch(
 ): Promise<ApiResult<ISessionCreatedResponse>> {
   return request(`${apiPrefix}/rooms/${encodeURIComponent(identity.roomId)}/sessions`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', [roomTokenHeader]: identity.token },
+    headers: roomHeaders(identity, true),
     body: JSON.stringify({ scheduledMatchId }),
+  });
+}
+
+export function getRoomPresence(identity: IRoomIdentity): Promise<ApiResult<{ presence: IRoomPresence }>> {
+  return request(`${apiPrefix}/rooms/${encodeURIComponent(identity.roomId)}/presence`, {
+    headers: roomHeaders(identity),
+  });
+}
+
+export function updateRoomPresence(
+  identity: IRoomIdentity,
+  update: IRoomPresenceUpdateRequest,
+): Promise<ApiResult<{ presence: IRoomPresence }>> {
+  return request(`${apiPrefix}/rooms/${encodeURIComponent(identity.roomId)}/presence`, {
+    method: 'POST',
+    headers: roomHeaders(identity, true),
+    body: JSON.stringify(update),
+  });
+}
+
+export function getRoomHelp(identity: IRoomIdentity): Promise<ApiResult<{ request: IHelpRequest | null }>> {
+  return request(`${apiPrefix}/rooms/${encodeURIComponent(identity.roomId)}/help`, {
+    headers: roomHeaders(identity),
+  });
+}
+
+export function createRoomHelp(
+  identity: IRoomIdentity,
+  requestBody: ICreateHelpRequest,
+): Promise<ApiResult<{ request: IHelpRequest }>> {
+  return request(`${apiPrefix}/rooms/${encodeURIComponent(identity.roomId)}/help`, {
+    method: 'POST',
+    headers: roomHeaders(identity, true),
+    body: JSON.stringify(requestBody),
+  });
+}
+
+export function cancelRoomHelp(identity: IRoomIdentity, helpId: string): Promise<ApiResult<{ request: IHelpRequest }>> {
+  return request(`${apiPrefix}/rooms/${encodeURIComponent(identity.roomId)}/help/${encodeURIComponent(helpId)}`, {
+    method: 'DELETE',
+    headers: roomHeaders(identity),
   });
 }
 

@@ -362,6 +362,10 @@ export default function ManualRoomApp() {
 
       {submitMessage !== '' && <div className="room-banner room-banner-error">{submitMessage}</div>}
 
+      <p className="room-join-manual">
+        <a href="/join">Pair this browser to a configured room</a>
+      </p>
+
       {!rulesUnusable && tournament !== null && (
         <>
           {tournament.gameFormatWarnings.length > 0 && (

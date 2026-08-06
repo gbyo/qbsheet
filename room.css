@@ -216,11 +216,187 @@ body {
   cursor: default;
 }
 
+.room-button-secondary {
+  color: var(--room-text);
+  background: var(--room-surface);
+  border-color: var(--room-border-strong);
+}
+
+.room-button-secondary:hover:not(:disabled) {
+  background: var(--room-surface-sunken);
+}
+
+.room-button-ready {
+  background: var(--room-success);
+}
+
+.room-button-ready:hover:not(:disabled) {
+  background: #165626;
+}
+
 /* Keyboard users must be able to see where they are. */
 .room-button:focus-visible,
-.room-field select:focus-visible {
+.room-field select:focus-visible,
+.room-field-label input:focus-visible,
+.room-operator-controls input:focus-visible,
+.room-operator-controls select:focus-visible,
+.room-operator-controls textarea:focus-visible {
   outline: 2px solid var(--room-accent);
   outline-offset: 2px;
+}
+
+.room-join-shell {
+  max-width: 520px;
+}
+
+.room-join-form {
+  display: grid;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.room-field-label,
+.room-operator-name,
+.room-help-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--room-muted);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.room-field-label input,
+.room-field-label select,
+.room-operator-controls input,
+.room-operator-controls select,
+.room-operator-controls textarea,
+.room-help-form textarea {
+  width: 100%;
+  padding: 12px;
+  color: var(--room-text);
+  font: inherit;
+  font-weight: 400;
+  background: var(--room-surface);
+  border: 1px solid var(--room-border-strong);
+  border-radius: 6px;
+}
+
+.room-join-help {
+  margin: -4px 0 8px;
+  font-size: 0.8125rem;
+}
+
+.room-join-manual {
+  margin-top: 28px;
+  text-align: center;
+}
+
+.room-join-manual a {
+  color: var(--room-accent);
+}
+
+.room-ready-hint {
+  margin: 10px 0 0;
+  font-size: 0.8125rem;
+}
+
+.room-operator-controls {
+  margin-top: 20px;
+  padding: 14px;
+  background: var(--room-surface-sunken);
+  border: 1px solid var(--room-border);
+  border-radius: 8px;
+}
+
+.room-operator-controls.is-compact {
+  margin: 0 12px 8px;
+}
+
+.room-operator-row,
+.room-operator-actions,
+.room-help-form-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.room-operator-name {
+  flex: 1 1 180px;
+}
+
+.room-operator-name input {
+  padding: 8px 10px;
+}
+
+.room-operator-row .room-button {
+  width: auto;
+  min-width: 120px;
+  padding: 9px 14px;
+  font-size: 0.875rem;
+}
+
+.room-presence-note {
+  color: var(--room-muted);
+  font-size: 0.75rem;
+}
+
+.room-operator-actions {
+  margin-top: 10px;
+  justify-content: space-between;
+}
+
+.room-text-button {
+  padding: 0;
+  color: var(--room-accent);
+  font: inherit;
+  font-size: 0.8125rem;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.room-text-button:hover {
+  text-decoration: underline;
+}
+
+.room-text-button:disabled {
+  color: var(--room-faint);
+  cursor: default;
+}
+
+.room-help-active {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--room-warning);
+  font-size: 0.8125rem;
+}
+
+.room-help-active strong {
+  color: var(--room-text);
+}
+
+.room-help-form {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--room-border);
+}
+
+.room-help-form textarea {
+  resize: vertical;
+}
+
+.room-help-form-actions {
+  justify-content: flex-end;
+}
+
+.room-help-form-actions .room-button {
+  width: auto;
+  padding: 9px 14px;
+  font-size: 0.875rem;
 }
 
 /* #endregion */

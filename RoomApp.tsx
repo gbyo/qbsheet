@@ -10,13 +10,20 @@
  * than being replaced.
  */
 import { useMemo } from 'react';
-import { readRoomIdentity } from './api';
+import { adoptRoomIdentity } from './api';
 import AssignedRoomApp from './AssignedRoomApp';
+import JoinRoomApp from './JoinRoomApp';
 import ManualRoomApp from './ManualRoomApp';
 
 export default function RoomApp() {
-  const identity = useMemo(() => readRoomIdentity(window.location), []);
+  const identity = useMemo(() => adoptRoomIdentity(window.location), []);
+
+  if (window.location.pathname === '/join' || window.location.pathname === '/join/') return <JoinRoomApp />;
+  if (window.location.pathname === '/room/manual' || window.location.pathname === '/room/manual/') {
+    return <ManualRoomApp />;
+  }
 
   if (identity) return <AssignedRoomApp identity={identity} />;
+  if (/^\/room\/[^/]+\/?$/.test(window.location.pathname)) return <JoinRoomApp />;
   return <ManualRoomApp />;
 }
