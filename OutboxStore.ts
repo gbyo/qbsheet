@@ -63,6 +63,8 @@ export interface IEnqueueResult {
   error?: string;
   /** True when this was recognized as a result the outbox already had. */
   deduplicated: boolean;
+  /** True when this replaced a result tournament control had sent back to be corrected. */
+  supersededCorrection?: boolean;
 }
 
 export interface IOutboxLoadResult {
@@ -148,6 +150,18 @@ export default class RoomResultOutbox {
 
   private legacyStorage: ILegacyStorage | null;
 
+  /**
+   * Ids whose most recent write to the store actually landed.
+   *
+   * A per-entry fact, not a per-driver one, and the distinction is the whole point. `driver.durable`
+   * says "writes to this store survive a reload", which IndexedDB answers yes to even for a write
+   * that just failed on quota. Reporting that as `persisted: true` would tell a scorekeeper their
+   * game is safe on the Chromebook when it exists only in this page's memory — exactly the promise
+   * this outbox exists to keep. So durability is tracked per id, and a result is only ever called
+   * persisted when a write for that id has been observed to succeed.
+   */
+  private persistedIds = new Set<string>();
+
   constructor(driver: IOutboxDriver, options: IOutboxOptions = {}) {
     this.driver = driver;
     this.now = options.now ?? (() => new Date());
@@ -158,6 +172,28 @@ export default class RoomResultOutbox {
   /** True when a write to this outbox survives a reload. */
   get durable(): boolean {
     return this.driver.durable;
+  }
+
+  /** Does this specific result survive a reload right now? */
+  isPersisted(id: string): boolean {
+    return this.driver.durable && this.persistedIds.has(id);
+  }
+
+  /**
+   * Write one entry and record whether it landed.
+   *
+   * The single place `persistedIds` is maintained, so there is no path that can mark an entry
+   * durable without a write having succeeded for it.
+   */
+  private async writeThrough(entry: IRoomResultOutboxEntry): Promise<{ persisted: boolean; error?: string }> {
+    try {
+      await this.driver.write(toOutboxRecord(entry));
+      this.persistedIds.add(entry.id);
+      return { persisted: this.driver.durable };
+    } catch (error: unknown) {
+      this.persistedIds.delete(entry.id);
+      return { persisted: false, error: messageOf(error) };
+    }
   }
 
   /** Everything currently held, newest first. Reads the in-memory cache; call `load` first. */
@@ -199,6 +235,8 @@ export default class RoomResultOutbox {
     }
     this.cache = entries;
     this.loaded = true;
+    // Anything that came back out of the store is, by definition, in the store.
+    this.persistedIds = new Set(entries.map((entry) => entry.id));
 
     const migrated = readError === undefined ? await this.migrateLegacyPendingFinal() : 0;
 
@@ -295,23 +333,83 @@ export default class RoomResultOutbox {
   }
 
   /**
+   * The entry this draft is a correction of, if any.
+   *
+   * A result tournament control sent back is the same *game*, so a correction has to replace it
+   * rather than sit beside it. Matching is by scheduled game where there is one and by session
+   * otherwise — never by payload, because the entire point of a correction is that the payload
+   * changed. Without this, a corrected result either never sends (the payload happened to be
+   * identical, so it deduped onto an entry `deliverOne` refuses to touch) or sends as a second
+   * entry while the rejected one stays unresolved on the device forever.
+   */
+  private findCorrectableEntry(draft: IOutboxDraft): IRoomResultOutboxEntry | undefined {
+    if (draft.deliveryState !== 'queued') return undefined;
+    return this.cache.find((entry) => {
+      if (entry.deliveryState !== 'needs-correction') return false;
+      if (draft.scheduledMatchId !== undefined) return entry.scheduledMatchId === draft.scheduledMatchId;
+      if (draft.sessionCredentials !== undefined) {
+        return entry.sessionCredentials?.sessionId === draft.sessionCredentials.sessionId;
+      }
+      return false;
+    });
+  }
+
+  /**
    * Put a completed game into the outbox, persisting it before anyone tries to upload it.
    *
-   * A result the outbox already holds — same session, same payload — is recognized rather than
-   * duplicated. That is what makes a lost HTTP response safe: the room re-enqueues, gets the
-   * existing entry back, and retries delivery of the one entry that was always there.
+   * Three cases, in order. A correction supersedes the entry it corrects. A result the outbox
+   * already holds — same session, same payload — is recognized rather than duplicated, which is what
+   * makes a lost HTTP response safe. Anything else is new.
+   *
+   * `persisted` is a claim about this specific result surviving a reload, and it is never inferred
+   * from the store's general durability: a dedupe onto an entry whose own write failed reports
+   * false and retries the write, rather than telling the scorekeeper the game is safe because
+   * IndexedDB exists.
    */
   async enqueue(draft: IOutboxDraft): Promise<IEnqueueResult> {
     if (!this.loaded) await this.load();
 
     const fingerprint = fingerprintPayload(draft.qbj);
+
+    const correctable = this.findCorrectableEntry(draft);
+    if (correctable) {
+      const superseded = await this.update(correctable.id, {
+        qbj: draft.qbj,
+        finalFingerprint: fingerprint,
+        // Back to the front of the queue: a correction is a fresh submission of the same game, so
+        // it must not inherit the rejected attempt's backoff or its blocked flag.
+        deliveryState: 'queued',
+        attempts: 0,
+        lastAttemptAt: undefined,
+        retryBlocked: undefined,
+        lastError: undefined,
+        roundNumber: draft.roundNumber ?? correctable.roundNumber,
+        roundName: draft.roundName ?? correctable.roundName,
+        sessionCredentials: draft.sessionCredentials ?? correctable.sessionCredentials,
+      });
+      const entry = superseded ?? correctable;
+      return {
+        entry,
+        persisted: this.isPersisted(entry.id),
+        error: this.isPersisted(entry.id) ? undefined : 'This browser could not save the corrected result locally.',
+        deduplicated: false,
+        supersededCorrection: true,
+      };
+    }
+
     const existing = this.cache.find(
       (entry) =>
         entry.finalFingerprint === fingerprint &&
         entry.sessionCredentials?.sessionId === draft.sessionCredentials?.sessionId,
     );
     if (existing) {
-      return { entry: existing, persisted: this.driver.durable, deduplicated: true };
+      // Already known, but "known" may only mean in memory. Try the write again before making any
+      // claim about it.
+      if (this.isPersisted(existing.id)) {
+        return { entry: existing, persisted: true, deduplicated: true };
+      }
+      const retried = await this.writeThrough(existing);
+      return { entry: existing, persisted: retried.persisted, error: retried.error, deduplicated: true };
     }
 
     const timestamp = this.now().toISOString();
@@ -337,12 +435,8 @@ export default class RoomResultOutbox {
     // refuses it. The store is the durability claim, not the existence of the result.
     this.cache.push(entry);
 
-    try {
-      await this.driver.write(toOutboxRecord(entry));
-    } catch (error: unknown) {
-      return { entry, persisted: false, error: messageOf(error), deduplicated: false };
-    }
-    return { entry, persisted: this.driver.durable, deduplicated: false };
+    const written = await this.writeThrough(entry);
+    return { entry, persisted: written.persisted, error: written.error, deduplicated: false };
   }
 
   /** Write one entry through to the store, keeping the cache and the store in step. */
@@ -350,12 +444,7 @@ export default class RoomResultOutbox {
     const index = this.cache.findIndex((candidate) => candidate.id === entry.id);
     if (index >= 0) this.cache[index] = entry;
     else this.cache.push(entry);
-    try {
-      await this.driver.write(toOutboxRecord(entry));
-      return true;
-    } catch {
-      return false;
-    }
+    return (await this.writeThrough(entry)).persisted;
   }
 
   private async update(id: string, change: Partial<IRoomResultOutboxEntry>): Promise<IRoomResultOutboxEntry | null> {
@@ -386,11 +475,32 @@ export default class RoomResultOutbox {
     return this.update(id, { deliveryState: 'needs-correction', lastError: reason });
   }
 
+  /**
+   * The scorekeeper says they have handed this result over another way.
+   *
+   * The case this exists for: a room's server was replaced, so its session no longer exists and the
+   * result is permanently `retryBlocked`. The director recovers it by importing the downloaded QBJ,
+   * which creates no session — so nothing will ever come back through the assignment poll to mark
+   * this entry accepted. Without an acknowledgement the entry stays unresolved forever, and a room
+   * with an unresolved result is a room that will not start its next game.
+   *
+   * Deliberately not `accepted`: this browser has no standing to say the tournament recorded
+   * anything. It records only that the scorekeeper got the file to tournament control, which is
+   * exactly the fact being asserted. The result and its download stay.
+   */
+  markHandedOver(id: string): Promise<IRoomResultOutboxEntry | null> {
+    const entry = this.cache.find((candidate) => candidate.id === id);
+    // An accepted result needs no acknowledgement, and one still being retried is not stranded.
+    if (!entry || entry.deliveryState === 'accepted') return Promise.resolve(entry ?? null);
+    return this.update(id, { handedOver: true });
+  }
+
   /** Remove one entry explicitly. Only ever called for an accepted result. */
   async remove(id: string): Promise<void> {
     const entry = this.cache.find((candidate) => candidate.id === id);
     if (entry && entry.deliveryState !== 'accepted') return;
     this.cache = this.cache.filter((candidate) => candidate.id !== id);
+    this.persistedIds.delete(id);
     try {
       await this.driver.remove(id);
     } catch {

@@ -37,6 +37,10 @@ export interface IUseResultOutbox {
   markSubmitted: (id: string) => Promise<void>;
   markAccepted: (id: string) => Promise<void>;
   markNeedsCorrection: (id: string, reason?: string) => Promise<void>;
+  /** Record that the scorekeeper got a stranded result to tournament control another way. */
+  markHandedOver: (id: string) => Promise<void>;
+  /** Does this specific result survive a reload right now? */
+  isPersisted: (id: string) => boolean;
   /** Try every due result now, rather than waiting for the next tick. */
   flushNow: () => Promise<void>;
   download: (entry: IRoomResultOutboxEntry, roomName?: string) => boolean;
@@ -158,6 +162,16 @@ export default function useResultOutbox(driver?: IOutboxDriver): IUseResultOutbo
     [outbox, refresh],
   );
 
+  const markHandedOver = useCallback(
+    async (id: string) => {
+      await outbox.markHandedOver(id);
+      refresh();
+    },
+    [outbox, refresh],
+  );
+
+  const isPersisted = useCallback((id: string) => outbox.isPersisted(id), [outbox]);
+
   const download = useCallback(
     (entry: IRoomResultOutboxEntry, roomName?: string) => downloadOutboxQbj(entry, roomName),
     [],
@@ -176,6 +190,8 @@ export default function useResultOutbox(driver?: IOutboxDriver): IUseResultOutbo
     markSubmitted,
     markAccepted,
     markNeedsCorrection,
+    markHandedOver,
+    isPersisted,
     flushNow,
     download,
   };

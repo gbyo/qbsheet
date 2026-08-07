@@ -21,6 +21,15 @@ export interface ISavedResultsProps {
   /** Set when this browser has no durable storage, which changes what we are allowed to claim. */
   // eslint-disable-next-line react/require-default-props
   durable?: boolean;
+  /**
+   * Confirm that a stranded result reached tournament control another way.
+   *
+   * Offered only for a result nothing will ever deliver — the room's server was replaced, so its
+   * session is gone. Without it the entry stays unresolved forever and the room cannot start its
+   * next game.
+   */
+  // eslint-disable-next-line react/require-default-props
+  onMarkHandedOver?: (entry: IRoomResultOutboxEntry) => void;
 }
 
 function roundLabel(entry: IRoomResultOutboxEntry): string {
@@ -29,7 +38,18 @@ function roundLabel(entry: IRoomResultOutboxEntry): string {
   return 'Game';
 }
 
-export default function SavedResults({ entries, roomName, onDownload, durable = true }: ISavedResultsProps) {
+/** A result nothing on this device will ever manage to send. */
+function isStranded(entry: IRoomResultOutboxEntry): boolean {
+  return entry.retryBlocked === true && entry.deliveryState !== 'accepted' && entry.handedOver !== true;
+}
+
+export default function SavedResults({
+  entries,
+  roomName,
+  onDownload,
+  durable = true,
+  onMarkHandedOver,
+}: ISavedResultsProps) {
   if (entries.length === 0) return null;
 
   return (
@@ -53,9 +73,20 @@ export default function SavedResults({ entries, roomName, onDownload, durable = 
                 <span className="room-saved-result-detail">{entry.lastError}</span>
               )}
             </div>
-            <button type="button" className="room-button room-button-secondary" onClick={() => onDownload(entry)}>
-              Download QBJ
-            </button>
+            <div className="room-saved-result-actions">
+              <button type="button" className="room-button room-button-secondary" onClick={() => onDownload(entry)}>
+                Download QBJ
+              </button>
+              {onMarkHandedOver && isStranded(entry) && (
+                <button
+                  type="button"
+                  className="room-button room-button-secondary"
+                  onClick={() => onMarkHandedOver(entry)}
+                >
+                  Tournament control has this
+                </button>
+              )}
+            </div>
           </li>
         ))}
       </ul>

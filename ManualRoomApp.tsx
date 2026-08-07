@@ -373,6 +373,7 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
       roomName={kit?.roomName}
       onDownload={handleDownload}
       durable={outbox.durable}
+      onMarkHandedOver={(entry) => outbox.markHandedOver(entry.id).catch(() => undefined)}
     />
   );
 

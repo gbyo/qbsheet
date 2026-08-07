@@ -47,7 +47,7 @@ import {
 import { isAwaitingReview, reduceConnectionStatus, resolveLifecycleNotice, RoomConnectionState } from './RoomLifecycle';
 import normalizeQbjMatch, { IQbjNormalizeOptions, countPlayedQuestions } from '../renderer/Services/QbjMatchNormalizer';
 import useResultOutbox from './useResultOutbox';
-import { IRoomResultOutboxEntry } from './ResultOutbox';
+import { blocksNewStart, IRoomResultOutboxEntry } from './ResultOutbox';
 import SavedResults, { DeliveryFailureNotice } from './SavedResults';
 import { buildScoringKit, isScoringKitUsable, readScoringKit, writeScoringKit } from './ScoringKit';
 import ScoringView from './ScoringView';
@@ -462,6 +462,23 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
     window.location.assign('/join');
   };
 
+  /**
+   * The scorekeeper confirming a stranded result reached tournament control another way.
+   *
+   * Confirmed rather than immediate: the whole point of the outbox is that a result is not let go of
+   * until somebody actually has it, and this is the one action that lets go.
+   */
+  const handleMarkHandedOver = useCallback(
+    (entry: IRoomResultOutboxEntry) => {
+      // eslint-disable-next-line no-alert
+      const confirmed = window.confirm(
+        `Confirm that tournament control has the result for ${entry.leftTeam} vs ${entry.rightTeam}. This room will stop trying to send it and will be able to start its next game. The file stays on this device.`,
+      );
+      if (confirmed) outbox.markHandedOver(entry.id).catch(() => undefined);
+    },
+    [outbox],
+  );
+
   const handleDownload = useCallback(
     (entry: IRoomResultOutboxEntry) => {
       outbox.download(entry, assignment?.roomName);
@@ -583,6 +600,7 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
       roomName={assignment?.roomName}
       onDownload={handleDownload}
       durable={outbox.durable}
+      onMarkHandedOver={handleMarkHandedOver}
     />
   );
 
@@ -611,8 +629,23 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
     );
   }
 
+  /**
+   * A finished game on this device that has not been sent yet. Informational only.
+   *
+   * Any queued result counts here, because the scorekeeper should be told about all of them. It is
+   * deliberately *not* what gates starting the next game — see `blocksStart`.
+   */
   const pendingFinal = outbox.unresolved.some((entry) => entry.deliveryState === 'queued');
-  const awaitingReview = pendingFinal || isAwaitingReview(assignment);
+  /**
+   * Whether an undelivered result should stop this room starting the game in front of it.
+   *
+   * Scoped to the current assignment. The old rule — any queued result anywhere — meant that after
+   * a server replacement, a permanently undeliverable result the director had already recovered by
+   * importing its file left this Chromebook unable to start every subsequent game, with nothing on
+   * screen able to clear it.
+   */
+  const blocksStart = outbox.unresolved.some((entry) => blocksNewStart(entry, assignment.current?.scheduledMatchId));
+  const awaitingReview = blocksStart || isAwaitingReview(assignment);
 
   if (scoring && assignment.gameFormat) {
     return (

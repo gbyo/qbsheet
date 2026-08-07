@@ -92,6 +92,15 @@ export interface IRoomResultOutboxEntry {
 
   /** ISO 8601 of the last delivery attempt, so backoff survives a reload. */
   lastAttemptAt?: string;
+
+  /**
+   * The scorekeeper has confirmed they got this result to tournament control another way.
+   *
+   * Set only by an explicit action, and it is a claim about the *file* having been handed over, not
+   * about the tournament having recorded anything — this browser has no standing to say the latter.
+   * Its one job is to stop a permanently undeliverable result from blocking the room forever.
+   */
+  handedOver?: boolean;
 }
 
 /** A stored record is the entry plus the schema version it was written under. */
@@ -279,6 +288,7 @@ export function parseOutboxRecord(source: unknown): IRoomResultOutboxEntry | nul
     sessionCredentials: credentials,
     finalFingerprint: typeof record.finalFingerprint === 'string' ? record.finalFingerprint : undefined,
     retryBlocked: record.retryBlocked === true ? true : undefined,
+    handedOver: record.handedOver === true ? true : undefined,
     lastError: typeof record.lastError === 'string' && record.lastError !== '' ? record.lastError : undefined,
     lastAttemptAt: typeof record.lastAttemptAt === 'string' ? record.lastAttemptAt : undefined,
   };
@@ -305,6 +315,25 @@ export function selectPrunableEntries(
   return accepted.slice(Math.max(0, limit));
 }
 
+/**
+ * Does this result stand in the way of the room starting its next game?
+ *
+ * Deliberately narrow. The old rule was "any queued result anywhere", which is how a Chromebook
+ * ended up permanently unable to start a game: after a server replacement its result becomes
+ * permanently `retryBlocked`, the director recovers it by importing the file, and nothing ever comes
+ * back to mark the entry resolved. Three things clear the way — the server accepting it, the
+ * scorekeeper confirming they handed it over, or it belonging to a different game entirely.
+ */
+export function blocksNewStart(entry: IRoomResultOutboxEntry, currentScheduledMatchId: string | undefined): boolean {
+  if (entry.deliveryState === 'accepted') return false;
+  if (entry.handedOver) return false;
+  // An emergency copy is non-authoritative by construction and was never part of an assignment.
+  if (entry.deliveryState === 'manual-backup') return false;
+  // Only the game this room is actually on can gate starting that game.
+  if (currentScheduledMatchId === undefined || entry.scheduledMatchId !== currentScheduledMatchId) return false;
+  return true;
+}
+
 /** The order the Saved results list shows: newest first, stable on ties. */
 export function sortForDisplay(entries: IRoomResultOutboxEntry[]): IRoomResultOutboxEntry[] {
   return entries
@@ -314,6 +343,7 @@ export function sortForDisplay(entries: IRoomResultOutboxEntry[]): IRoomResultOu
 
 /** The scorekeeper-facing name for a delivery state. Never a status code, never a state string. */
 export function describeDeliveryState(entry: IRoomResultOutboxEntry): string {
+  if (entry.handedOver && entry.deliveryState !== 'accepted') return 'Handed to tournament control';
   switch (entry.deliveryState) {
     case 'accepted':
       return 'Accepted by YellowFruit';
