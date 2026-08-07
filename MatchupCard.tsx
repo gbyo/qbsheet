@@ -58,6 +58,9 @@ export interface IMatchupCardProps {
   /** True when this device has cached tournament data good enough to score a game on its own. */
   // eslint-disable-next-line react/require-default-props
   canScoreEmergency?: boolean;
+  /** Enter emergency mode in this already-loaded app shell, so an offline click needs no navigation. */
+  // eslint-disable-next-line react/require-default-props
+  onScoreEmergency?: () => void;
 }
 
 /**
@@ -74,9 +77,11 @@ export interface IMatchupCardProps {
 function OfflineRecoverySteps({
   onChangeRoom,
   canScoreEmergency,
+  onScoreEmergency,
 }: {
   onChangeRoom: () => void;
   canScoreEmergency: boolean;
+  onScoreEmergency?: () => void;
 }) {
   return (
     <details className="room-recovery">
@@ -93,11 +98,19 @@ function OfflineRecoverySteps({
           finished.
         </li>
       </ol>
-      {canScoreEmergency && (
+      {canScoreEmergency && onScoreEmergency && (
         <p className="room-muted">
           If tournament control has told you to start the next game anyway,{' '}
-          <a href="/room/emergency">score it from this device</a>. That result is not in the tournament until they
-          import it.
+          <a
+            href="/room/emergency"
+            onClick={(event) => {
+              event.preventDefault();
+              onScoreEmergency();
+            }}
+          >
+            score it from this device
+          </a>
+          . That result is not in the tournament until they import it.
         </p>
       )}
       <button type="button" className="room-button room-button-secondary" onClick={onChangeRoom}>
@@ -154,6 +167,7 @@ export default function MatchupCard(props: IMatchupCardProps) {
     conflictNotice = '',
     savedResults = null,
     canScoreEmergency = false,
+    onScoreEmergency,
   } = props;
   const { current, previous, next, roomName, tournamentName } = assignment;
 
@@ -170,7 +184,11 @@ export default function MatchupCard(props: IMatchupCardProps) {
             <strong>YellowFruit is not reachable.</strong> This page will update as soon as the connection comes back.
             Nothing about this room&apos;s assignment has changed.
           </div>
-          <OfflineRecoverySteps onChangeRoom={onChangeRoom} canScoreEmergency={canScoreEmergency} />
+          <OfflineRecoverySteps
+            onChangeRoom={onChangeRoom}
+            canScoreEmergency={canScoreEmergency}
+            onScoreEmergency={onScoreEmergency}
+          />
         </>
       )}
 
