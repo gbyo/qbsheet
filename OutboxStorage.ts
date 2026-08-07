@@ -72,7 +72,13 @@ function openDatabase(factory: IDBFactory): Promise<IDBDatabase> {
         database.createObjectStore(outboxStoreName, { keyPath: 'id' });
       }
     };
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      const database = request.result;
+      // Let another tab or a newer bundle upgrade the database instead of holding an obsolete
+      // connection open forever. A later operation against this closed connection will reopen it.
+      database.onversionchange = () => database.close();
+      resolve(database);
+    };
     request.onerror = () => reject(request.error ?? new Error('The browser refused to open local storage.'));
     // Private browsing can leave the open request permanently blocked rather than failing it.
     request.onblocked = () => reject(new Error('Local storage for saved results is blocked in this browser.'));
@@ -100,18 +106,39 @@ export function createIndexedDbDriver(factory: IDBFactory): IOutboxDriver {
     run: (store: IDBObjectStore) => Promise<T>,
   ): Promise<T> => {
     const connection = await database();
-    const transaction = connection.transaction(outboxStoreName, mode);
+    let transaction: IDBTransaction;
+    try {
+      transaction = connection.transaction(outboxStoreName, mode);
+    } catch (error: unknown) {
+      // A connection can be closed underneath us by eviction or a version change. Do not pin that
+      // dead connection in databasePromise: the next operation gets a fresh one.
+      databasePromise = null;
+      try {
+        connection.close();
+      } catch {
+        // It may already be closed; either way the next operation will reopen it.
+      }
+      throw error;
+    }
+
+    // Register lifecycle handlers before `run` gets a chance to await. IndexedDB transactions can
+    // become inactive as soon as control returns to the event loop, and a fast completion must not
+    // race past handlers that are attached afterwards.
+    const commitPromise =
+      mode === 'readwrite'
+        ? new Promise<void>((resolve, reject) => {
+            transaction.oncomplete = () => resolve();
+            transaction.onabort = () =>
+              reject(transaction.error ?? new Error('The saved-result write was rolled back.'));
+            transaction.onerror = () => reject(transaction.error ?? new Error('The saved-result write failed.'));
+          })
+        : null;
+
     const store = transaction.objectStore(outboxStoreName);
     const value = await run(store);
     // A readwrite transaction is not durable until it commits, and its request can succeed while
     // the transaction still aborts on quota. Wait for the commit before telling anyone it is saved.
-    if (mode === 'readwrite') {
-      await new Promise<void>((resolve, reject) => {
-        transaction.oncomplete = () => resolve();
-        transaction.onabort = () => reject(transaction.error ?? new Error('The saved-result write was rolled back.'));
-        transaction.onerror = () => reject(transaction.error ?? new Error('The saved-result write failed.'));
-      });
-    }
+    if (commitPromise) await commitPromise;
     return value;
   };
 
@@ -179,7 +206,7 @@ export function resolveOutboxDriver(
     const factory = scope?.indexedDB;
     if (factory) return createIndexedDbDriver(factory);
   } catch {
-    // Accessing indexedDB itself throws in some locked-down configurations.
+    // Accessing indexedDB itself can throw in a locked-down browser. Fall through to memory.
   }
-  return createMemoryDriver();
+  return createMemoryDriver(false);
 }
