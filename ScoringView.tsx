@@ -10,6 +10,7 @@
  * packet, because the structural packet MODAQ needs in order to have any scoring cycles at all can
  * otherwise be mistaken for real question content.
  */
+import { ReactNode } from 'react';
 import { ModaqControl, IGameFormat, IPacket, IPlayer } from 'modaq';
 import { IModaqGameFormat } from '../renderer/Services/YellowFruitScoringRulesToModaq';
 import { HelpRequestCategory, IHelpRequest, IRoomPresence } from '../main/server/ServerTypes';
@@ -72,6 +73,28 @@ export interface IScoringViewProps {
   onChangeRoom?: () => void;
   // eslint-disable-next-line react/require-default-props
   lifecycleNotice?: string;
+  /**
+   * Set when the server's view of this game no longer matches the one being scored.
+   *
+   * Shown rather than acted on. Replacing a game in progress with the schedule's opinion of it
+   * would destroy the only record of what happened in the room.
+   */
+  // eslint-disable-next-line react/require-default-props
+  conflictNotice?: string;
+  /**
+   * False when this browser could not write the result to local storage.
+   *
+   * The offline message promises the game is saved on this device. That promise is only made when
+   * it is true, which is what this prop is for.
+   */
+  // eslint-disable-next-line react/require-default-props
+  resultIsSaved?: boolean;
+  /** The delivery-failure notice, when the last final has not reached YellowFruit. */
+  // eslint-disable-next-line react/require-default-props
+  deliveryFailure?: ReactNode;
+  /** The saved-results list, rendered below MODAQ. */
+  // eslint-disable-next-line react/require-default-props
+  savedResults?: ReactNode;
 }
 
 export default function ScoringView(props: IScoringViewProps) {
@@ -101,6 +124,10 @@ export default function ScoringView(props: IScoringViewProps) {
     onCancelHelp = async () => undefined,
     onChangeRoom,
     lifecycleNotice = '',
+    conflictNotice = '',
+    resultIsSaved = true,
+    deliveryFailure = null,
+    savedResults = null,
   } = props;
 
   const packet = buildScaffoldPacket(gameFormat) as unknown as IPacket;
@@ -112,12 +139,25 @@ export default function ScoringView(props: IScoringViewProps) {
 
   return (
     <div className="room-scoring">
+      {/*
+        Two sentences, and the second one is a claim about this device rather than about the
+        network. It is only made when local persistence actually worked; a browser that refused the
+        write gets told to get the file off the machine instead.
+      */}
       {!online && (
         <div className="room-banner room-banner-warning">
-          <strong>YellowFruit is not reachable.</strong> Keep scoring &mdash; this game is saved on this device and will
-          be sent when the connection comes back.
+          <strong>Offline &mdash; keep scoring.</strong>{' '}
+          {resultIsSaved
+            ? 'This game is saved on this Chromebook and will be sent when the connection comes back.'
+            : 'This browser cannot save the game locally — download the QBJ as soon as the game is finished.'}
         </div>
       )}
+      {conflictNotice !== '' && (
+        <div className="room-banner room-banner-error" role="alert">
+          <strong>{conflictNotice}</strong>
+        </div>
+      )}
+      {deliveryFailure}
       {/*
         Deliberately small, and deliberately not about the game. YellowFruit could not tell us what
         this room is meant to be doing; the game in MODAQ below is untouched by that, and saying so
@@ -196,6 +236,8 @@ export default function ScoringView(props: IScoringViewProps) {
           customExport={customExport as any}
         />
       </div>
+
+      {savedResults}
     </div>
   );
 }

@@ -9,6 +9,7 @@
  * No celebration when a game lands. A submitted result is a piece of tournament administration, and
  * the useful thing to show is what happens next.
  */
+import { ReactNode } from 'react';
 import {
   IHelpRequest,
   IRoomAssignmentResponse,
@@ -48,6 +49,62 @@ export interface IMatchupCardProps {
   onRequestHelp: (category: HelpRequestCategory, message: string) => Promise<void>;
   onCancelHelp: () => Promise<void>;
   onChangeRoom: () => void;
+  /** Set when the server's view of this room disagrees with what this device is holding. */
+  // eslint-disable-next-line react/require-default-props
+  conflictNotice?: string;
+  /** The saved-results list. Rendered at the bottom, where it belongs on a normal day. */
+  // eslint-disable-next-line react/require-default-props
+  savedResults?: ReactNode;
+  /** True when this device has cached tournament data good enough to score a game on its own. */
+  // eslint-disable-next-line react/require-default-props
+  canScoreEmergency?: boolean;
+}
+
+/**
+ * What to do when this room stays offline.
+ *
+ * Deliberately a closed disclosure and deliberately low in the page. A room that has been offline
+ * for ten seconds needs no instructions — retrying is automatic and the banner already says so. A
+ * room that has been offline for ten minutes needs exactly these four steps, and needs them to be
+ * findable without anyone walking over to explain them.
+ *
+ * The order is the important part: the game finishes here first. Nothing in this list asks a
+ * scorekeeper to abandon a game in progress in order to chase a server.
+ */
+function OfflineRecoverySteps({
+  onChangeRoom,
+  canScoreEmergency,
+}: {
+  onChangeRoom: () => void;
+  canScoreEmergency: boolean;
+}) {
+  return (
+    <details className="room-recovery">
+      <summary>Still offline? What to do</summary>
+      <ol>
+        <li>Finish the game you are on. It is saved on this Chromebook as you score it.</li>
+        <li>When it ends, the result is kept here and sent automatically as soon as YellowFruit is back.</li>
+        <li>
+          If tournament control needs it sooner, use <strong>Download QBJ</strong> under Saved results and hand them the
+          file.
+        </li>
+        <li>
+          If tournament control has moved to a different computer or address, pair this browser again once the game is
+          finished.
+        </li>
+      </ol>
+      {canScoreEmergency && (
+        <p className="room-muted">
+          If tournament control has told you to start the next game anyway,{' '}
+          <a href="/room/emergency">score it from this device</a>. That result is not in the tournament until they
+          import it.
+        </p>
+      )}
+      <button type="button" className="room-button room-button-secondary" onClick={onChangeRoom}>
+        Pair this browser again
+      </button>
+    </details>
+  );
 }
 
 function ContextLine({ label, matchup }: { label: string; matchup: IRoomMatchupSummary | null }) {
@@ -94,6 +151,9 @@ export default function MatchupCard(props: IMatchupCardProps) {
     onRequestHelp,
     onCancelHelp,
     onChangeRoom,
+    conflictNotice = '',
+    savedResults = null,
+    canScoreEmergency = false,
   } = props;
   const { current, previous, next, roomName, tournamentName } = assignment;
 
@@ -105,8 +165,18 @@ export default function MatchupCard(props: IMatchupCardProps) {
       </header>
 
       {connection === RoomConnectionState.Offline && (
-        <div className="room-banner room-banner-warning">
-          <strong>YellowFruit is not reachable.</strong> This page will update as soon as the connection comes back.
+        <>
+          <div className="room-banner room-banner-warning">
+            <strong>YellowFruit is not reachable.</strong> This page will update as soon as the connection comes back.
+            Nothing about this room&apos;s assignment has changed.
+          </div>
+          <OfflineRecoverySteps onChangeRoom={onChangeRoom} canScoreEmergency={canScoreEmergency} />
+        </>
+      )}
+
+      {conflictNotice !== '' && (
+        <div className="room-banner room-banner-error" role="alert">
+          <strong>{conflictNotice}</strong>
         </div>
       )}
 
@@ -210,6 +280,8 @@ export default function MatchupCard(props: IMatchupCardProps) {
           {describeConnection(connection)}
         </span>
       </p>
+
+      {savedResults}
     </div>
   );
 }

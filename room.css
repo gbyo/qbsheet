@@ -596,3 +596,112 @@ body {
 }
 
 /* #endregion */
+
+/* #region Saved results and offline recovery */
+
+/*
+  Deliberately quiet. On a normal day this is one line per game that nobody reads; it only has to be
+  legible on the day it is the only record of what this Chromebook produced.
+*/
+.room-saved-results {
+  margin: 16px 0 0;
+  padding: 12px;
+  border: 1px solid var(--room-border);
+  border-radius: 8px;
+}
+
+.room-saved-results h2 {
+  margin: 0 0 8px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--room-muted);
+}
+
+.room-saved-results ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.room-saved-results-warning {
+  margin: 0 0 8px;
+  font-size: 0.8125rem;
+  color: var(--room-error);
+}
+
+.room-saved-result {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--room-border);
+}
+
+.room-saved-result:first-child {
+  border-top: 0;
+}
+
+.room-saved-result-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.room-saved-result-round {
+  font-size: 0.75rem;
+  color: var(--room-muted);
+}
+
+.room-saved-result-teams {
+  font-weight: 600;
+}
+
+.room-saved-result-state,
+.room-saved-result-detail {
+  font-size: 0.8125rem;
+  color: var(--room-muted);
+}
+
+.room-saved-result .room-button {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 6px 12px;
+  font-size: 0.8125rem;
+}
+
+.room-saved-results-note {
+  margin: 8px 0 0;
+  font-size: 0.75rem;
+}
+
+/* Closed by default: instructions nobody needs until they suddenly need all of them. */
+.room-recovery {
+  margin: 8px 0 0;
+  padding: 8px 12px;
+  border: 1px solid var(--room-border);
+  border-radius: 8px;
+  font-size: 0.875rem;
+}
+
+.room-recovery > summary {
+  cursor: pointer;
+  color: var(--room-muted);
+}
+
+.room-recovery ol {
+  margin: 8px 0;
+  padding-left: 20px;
+  line-height: 1.6;
+}
+
+.room-recovery .room-button {
+  margin: 0;
+  padding: 6px 12px;
+  font-size: 0.8125rem;
+}
+
+/* #endregion */

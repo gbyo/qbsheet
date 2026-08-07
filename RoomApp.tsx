@@ -65,6 +65,12 @@ export default function RoomApp() {
   if (window.location.pathname === '/room/manual' || window.location.pathname === '/room/manual/') {
     return <ManualRoomApp />;
   }
+  // A permanent address rather than a mode toggle, so a director can read it out over a radio when
+  // the server is already down and nobody can be sent a link. It refuses itself when this device
+  // has no usable cached tournament data.
+  if (window.location.pathname === '/room/emergency' || window.location.pathname === '/room/emergency/') {
+    return <ManualRoomApp emergency />;
+  }
 
   if (identity) return <AssignedRoomApp identity={identity} />;
   if (/^\/room\/[^/]+\/?$/.test(window.location.pathname)) return <JoinRoomApp />;
