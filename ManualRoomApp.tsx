@@ -50,12 +50,62 @@ const snapshotIntervalMs = 5000;
 /** How often to re-check whether YellowFruit is reachable */
 const connectivityIntervalMs = 10000;
 
+/** An emergency game must survive the exact refresh/server-outage scenario emergency mode is for. */
+const emergencyGameStorageKey = 'yellowfruit.room.emergency-game.v1';
+
 type Phase = 'loading' | 'setup' | 'scoring' | 'submitted';
 
 interface IGameSetup {
   round: IRoomRound;
   leftTeam: IRoomTeam;
   rightTeam: IRoomTeam;
+}
+
+interface IEmergencyGameState {
+  gameId: string;
+  tournamentKey?: string;
+  roundNumber: number;
+  leftTeamName: string;
+  rightTeamName: string;
+}
+
+function readEmergencyGameState(): IEmergencyGameState | null {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(emergencyGameStorageKey) ?? 'null') as Partial<IEmergencyGameState>;
+    if (
+      typeof parsed?.gameId !== 'string' ||
+      typeof parsed.roundNumber !== 'number' ||
+      typeof parsed.leftTeamName !== 'string' ||
+      typeof parsed.rightTeamName !== 'string'
+    ) {
+      return null;
+    }
+    return {
+      gameId: parsed.gameId,
+      tournamentKey: typeof parsed.tournamentKey === 'string' ? parsed.tournamentKey : undefined,
+      roundNumber: parsed.roundNumber,
+      leftTeamName: parsed.leftTeamName,
+      rightTeamName: parsed.rightTeamName,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeEmergencyGameState(state: IEmergencyGameState): void {
+  try {
+    window.localStorage.setItem(emergencyGameStorageKey, JSON.stringify(state));
+  } catch {
+    // MODAQ still has its in-page state. The result UI will avoid claiming reload durability.
+  }
+}
+
+function clearEmergencyGameState(): void {
+  try {
+    window.localStorage.removeItem(emergencyGameStorageKey);
+  } catch {
+    // Nothing else to do; an old entry is still guarded by tournament identity on restore.
+  }
 }
 
 /** Turn the two chosen rosters into the player list MODAQ expects */
@@ -88,7 +138,9 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
   const [rounds, setRounds] = useState<IRoomRound[]>([]);
   const [teams, setTeams] = useState<IRoomTeam[]>([]);
   const [online, setOnline] = useState(true);
-  const [kit] = useState<IScoringKit | null>(() => (emergency ? readScoringKit() : null));
+  const [cachedKit] = useState<IScoringKit | null>(() => readScoringKit());
+  const [cachedKitUsable] = useState(() => isScoringKitUsable(cachedKit));
+  const kit = emergency ? cachedKit : null;
 
   const [roundNumber, setRoundNumber] = useState<number | ''>('');
   const [leftTeamName, setLeftTeamName] = useState('');
@@ -109,7 +161,7 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
 
   const outbox = useResultOutbox();
 
-  const kitUsable = emergency && isScoringKitUsable(kit);
+  const kitUsable = emergency && cachedKitUsable;
 
   // Held in refs so MODAQ's export callback always sees current values without being re-created
   // (which would reset MODAQ's export interval).
@@ -125,8 +177,8 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
   const emergencyRef = useRef(false);
   emergencyRef.current = emergency;
 
-  const tournamentNameRef = useRef('');
-  tournamentNameRef.current = emergency ? kit?.tournamentName ?? '' : tournament?.name ?? '';
+  const tournamentKeyRef = useRef<string | undefined>(undefined);
+  tournamentKeyRef.current = emergency ? kit?.tournamentKey : tournament?.tournamentKey;
 
   const gameFormat = emergency ? kit?.gameFormat ?? null : tournament?.gameFormat ?? null;
   const timedRounds = emergency ? kit?.timedRounds === true : tournament?.timedRounds === true;
@@ -146,6 +198,24 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
       if (kit) {
         setRounds(kit.rounds);
         setTeams(kit.teams);
+        const saved = readEmergencyGameState();
+        const belongsToKit =
+          saved !== null &&
+          (saved.tournamentKey === undefined || kit.tournamentKey === undefined || saved.tournamentKey === kit.tournamentKey);
+        if (belongsToKit && saved) {
+          const round = kit.rounds.find((candidate) => candidate.number === saved.roundNumber);
+          const leftTeam = kit.teams.find((candidate) => candidate.name === saved.leftTeamName);
+          const rightTeam = kit.teams.find((candidate) => candidate.name === saved.rightTeamName);
+          if (round && leftTeam && rightTeam) {
+            setRoundNumber(round.number);
+            setLeftTeamName(leftTeam.name);
+            setRightTeamName(rightTeam.name);
+            setEmergencyGameId(saved.gameId);
+            setSetup({ round, leftTeam, rightTeam });
+            setPhase('scoring');
+            return undefined;
+          }
+        }
       }
       setPhase('setup');
       return undefined;
@@ -217,8 +287,17 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
 
     if (emergency) {
       // No session, because there is no server to create one with. The result is a local record
-      // until somebody imports it.
-      setEmergencyGameId(`emergency-${round.number}-${Date.now().toString(36)}`);
+      // until somebody imports it. Persist the identity/setup first so refreshing offline restores
+      // the same MODAQ store rather than silently starting an empty game.
+      const gameId = `emergency-${round.number}-${Date.now().toString(36)}`;
+      writeEmergencyGameState({
+        gameId,
+        tournamentKey: kit?.tournamentKey,
+        roundNumber: round.number,
+        leftTeamName: leftTeam.name,
+        rightTeamName: rightTeam.name,
+      });
+      setEmergencyGameId(gameId);
       setActiveResultId(null);
       setDeliveryFailed(false);
       setPersistFailure(false);
@@ -296,7 +375,7 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
 
     const activeSetup = setupRef.current;
     const enqueued = await outboxRef.current.enqueue({
-      tournamentKey: tournamentNameRef.current,
+      tournamentKey: tournamentKeyRef.current,
       roundNumber: activeSetup?.round.number,
       roundName: activeSetup?.round.name,
       leftTeam: activeSetup?.leftTeam.name ?? '',
@@ -309,6 +388,9 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
     setPersistFailure(!enqueued.persisted);
 
     if (isEmergency) {
+      // Once the finished result is durably in the outbox, the in-progress MODAQ recovery record has
+      // done its job. If persistence failed, keep it: it may still be the only reload-safe copy.
+      if (enqueued.persisted) clearEmergencyGameState();
       setPhase('submitted');
       setSubmitMessage(
         enqueued.persisted
@@ -421,6 +503,7 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
             <DeliveryFailureNotice
               persisted={!persistFailure}
               retrying={!activeResult.retryBlocked}
+              reason={activeResult.lastError}
               onDownload={() => handleDownload(activeResult)}
             />
           ) : null
@@ -447,6 +530,7 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
           type="button"
           className="room-button room-button-secondary"
           onClick={() => {
+            clearEmergencyGameState();
             setSetup(null);
             setCredentials(null);
             setEmergencyGameId(null);
@@ -508,12 +592,7 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
         <div className="room-banner room-banner-error">
           Couldn&apos;t load tournament information: {loadError}
           <div>Make sure the YellowFruit computer is on the same network and its server is running.</div>
-          {/*
-            Only offered when this device actually has cached tournament data to score against.
-            Without a kit the link would lead to a page that refuses itself, which is a worse
-            answer than not offering it.
-          */}
-          {isScoringKitUsable(readScoringKit()) && (
+          {cachedKitUsable && (
             <div>
               If tournament control has told you to score anyway, <a href="/room/emergency">score from this device</a>.
               The result is not in the tournament until they import it.
