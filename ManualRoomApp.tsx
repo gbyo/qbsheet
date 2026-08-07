@@ -366,13 +366,21 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
   );
 
   const activeResult = activeResultId ? outbox.entries.find((entry) => entry.id === activeResultId) : undefined;
-  const pendingFinal = outbox.unresolved.some((entry) => entry.deliveryState === 'queued');
+  /**
+   * A finished game that really is still on its way.
+   *
+   * Only results that will be sent on their own: the banner it drives promises exactly that, and a
+   * refused or handed-over result is not going anywhere by itself.
+   */
+  const pendingFinal = outbox.pendingAutomaticDelivery;
   const savedResults = outbox.entries.length > 0 && (
     <SavedResults
       entries={outbox.entries}
       roomName={kit?.roomName}
       onDownload={handleDownload}
       durable={outbox.durable}
+      // SavedResults asks the scorekeeper to confirm before this runs, so manual scoring gets the
+      // same prompt the assigned-room page does.
       onMarkHandedOver={(entry) => outbox.markHandedOver(entry.id).catch(() => undefined)}
     />
   );

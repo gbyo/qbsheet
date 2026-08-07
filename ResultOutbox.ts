@@ -116,6 +116,35 @@ export function isUnresolvedDeliveryState(state: OutboxDeliveryState): boolean {
 }
 
 /**
+ * Is anybody still waiting on this result?
+ *
+ * Deliberately not the same question as "is it Accepted". A result the scorekeeper has confirmed
+ * they handed to tournament control is still stored and still downloadable, but nothing is waiting
+ * on it any more — and every warning driven by "not accepted" contradicts the confirmation they just
+ * gave: the page would go on saying a finished game is waiting to be sent, and the way out of the
+ * page would go on warning about a result the scorekeeper has already delivered by hand.
+ */
+export function needsAction(entry: IRoomResultOutboxEntry): boolean {
+  if (entry.deliveryState === 'accepted') return false;
+  // Tournament control asking for a correction is a new instruction about this game, which a
+  // handover made before it does not answer. The room has to look at it either way.
+  if (entry.deliveryState === 'needs-correction') return true;
+  if (entry.handedOver) return false;
+  return true;
+}
+
+/**
+ * Will this result reach YellowFruit on its own, given time and a network?
+ *
+ * The only thing allowed to put "it will go automatically" on screen. A permanently refused result
+ * will not, and a handed-over one is not being sent at all — telling a scorekeeper to sit and wait
+ * for either is how a result ends up never being carried to tournament control.
+ */
+export function awaitsAutomaticDelivery(entry: IRoomResultOutboxEntry): boolean {
+  return entry.deliveryState === 'queued' && entry.retryBlocked !== true && entry.handedOver !== true;
+}
+
+/**
  * How many accepted results to keep on the device.
  *
  * A fixed limit rather than a setting: nobody running a tournament wants to tune this, and the only
@@ -146,6 +175,9 @@ export function retryDelayMs(attempts: number): number {
 /** Is this entry due for another automatic attempt? */
 export function isDueForRetry(entry: IRoomResultOutboxEntry, nowMs: number): boolean {
   if (entry.retryBlocked) return false;
+  // The scorekeeper was told this room would stop trying. Carrying on would make that untrue, and
+  // could deliver a game tournament control has already entered from the file.
+  if (entry.handedOver) return false;
   if (entry.deliveryState !== 'queued') return false;
   if (!entry.sessionCredentials) return false;
   if (!entry.lastAttemptAt) return true;
@@ -343,7 +375,11 @@ export function sortForDisplay(entries: IRoomResultOutboxEntry[]): IRoomResultOu
 
 /** The scorekeeper-facing name for a delivery state. Never a status code, never a state string. */
 export function describeDeliveryState(entry: IRoomResultOutboxEntry): string {
-  if (entry.handedOver && entry.deliveryState !== 'accepted') return 'Handed to tournament control';
+  // A correction request outranks a handover: it is the newer word from tournament control, and it
+  // is the one the room has to act on.
+  if (entry.handedOver && entry.deliveryState !== 'accepted' && entry.deliveryState !== 'needs-correction') {
+    return 'Handed to tournament control';
+  }
   switch (entry.deliveryState) {
     case 'accepted':
       return 'Accepted by YellowFruit';

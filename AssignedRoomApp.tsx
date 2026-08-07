@@ -176,11 +176,16 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
   const outboxRef = useRef(outbox);
   outboxRef.current = outbox;
 
-  /** Unresolved results, so a poll can tell whether it is safe to move the room on. */
+  /** Results still waiting on something, so a poll can tell whether it is safe to move the room on. */
   const unresolvedRef = useRef<IRoomResultOutboxEntry[]>([]);
   unresolvedRef.current = outbox.unresolved;
 
-  /** Results the tournament still does not have. Drives the leave-the-page warning. */
+  /**
+   * Results somebody is still waiting on. Drives the leave-the-page warning.
+   *
+   * A handed-over result is not one of them: warning a scorekeeper about a result they have just
+   * confirmed they delivered by hand teaches them to click through the warning that matters.
+   */
   const hasUnresolvedResults = outbox.unresolved.length > 0;
 
   // Poll for the assignment. This is the whole mechanism by which a room learns about a new round.
@@ -232,7 +237,10 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
       // The server is the authority on whether a result is in the tournament. The local copy
       // follows its verdict rather than deciding for itself.
       if (lastOutcome?.scheduledMatchId) {
-        const owned = unresolvedRef.current.find(
+        // Every entry, not just the ones still waiting on something: a result the scorekeeper handed
+        // over by hand is exactly the one the director imports, and when control then accepts it,
+        // this is the only place that verdict can be recorded against the local copy.
+        const owned = outboxRef.current.entries.find(
           (entry) => entry.scheduledMatchId === lastOutcome.scheduledMatchId && entry.deliveryState !== 'accepted',
         );
         if (owned && lastOutcome.status === SessionStatus.Accepted) {
@@ -465,16 +473,12 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
   /**
    * The scorekeeper confirming a stranded result reached tournament control another way.
    *
-   * Confirmed rather than immediate: the whole point of the outbox is that a result is not let go of
-   * until somebody actually has it, and this is the one action that lets go.
+   * The confirmation itself lives with the button in SavedResults, so both this page and manual
+   * scoring ask the same question before the one action that lets go of a result.
    */
   const handleMarkHandedOver = useCallback(
     (entry: IRoomResultOutboxEntry) => {
-      // eslint-disable-next-line no-alert
-      const confirmed = window.confirm(
-        `Confirm that tournament control has the result for ${entry.leftTeam} vs ${entry.rightTeam}. This room will stop trying to send it and will be able to start its next game. The file stays on this device.`,
-      );
-      if (confirmed) outbox.markHandedOver(entry.id).catch(() => undefined);
+      outbox.markHandedOver(entry.id).catch(() => undefined);
     },
     [outbox],
   );
@@ -630,12 +634,14 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
   }
 
   /**
-   * A finished game on this device that has not been sent yet. Informational only.
+   * A finished game on this device that really is still on its way. Informational only.
    *
-   * Any queued result counts here, because the scorekeeper should be told about all of them. It is
+   * Every result that will be sent automatically counts here, because the scorekeeper should be told
+   * about all of them — but only those, since the banner promises automatic delivery. A refused
+   * result gets the download notice instead, and a handed-over one is not being sent at all. It is
    * deliberately *not* what gates starting the next game — see `blocksStart`.
    */
-  const pendingFinal = outbox.unresolved.some((entry) => entry.deliveryState === 'queued');
+  const pendingFinal = outbox.pendingAutomaticDelivery;
   /**
    * Whether an undelivered result should stop this room starting the game in front of it.
    *

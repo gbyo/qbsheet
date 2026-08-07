@@ -27,9 +27,24 @@ export interface ISavedResultsProps {
    * Offered only for a result nothing will ever deliver — the room's server was replaced, so its
    * session is gone. Without it the entry stays unresolved forever and the room cannot start its
    * next game.
+   *
+   * Called only after the scorekeeper has confirmed the prompt below, so a caller cannot forget to
+   * ask: this is the one action that lets go of a result, and it lives on one button in one
+   * component, so the confirmation belongs with the button rather than with each page.
    */
   // eslint-disable-next-line react/require-default-props
   onMarkHandedOver?: (entry: IRoomResultOutboxEntry) => void;
+}
+
+/**
+ * What the scorekeeper is being asked to confirm.
+ *
+ * Says exactly what it does and what it does not: this device stops trying, the file stays here, and
+ * nothing about it is a claim that the tournament has recorded the game.
+ */
+export function handOverConfirmation(entry: IRoomResultOutboxEntry): string {
+  const teams = `${entry.leftTeam || 'Team 1'} vs ${entry.rightTeam || 'Team 2'}`;
+  return `Confirm that tournament control has the result for ${teams}. This device will stop trying to send it, and this room will be able to start its next game. The file stays here and can still be downloaded.`;
 }
 
 function roundLabel(entry: IRoomResultOutboxEntry): string {
@@ -81,7 +96,10 @@ export default function SavedResults({
                 <button
                   type="button"
                   className="room-button room-button-secondary"
-                  onClick={() => onMarkHandedOver(entry)}
+                  onClick={() => {
+                    // eslint-disable-next-line no-alert
+                    if (window.confirm(handOverConfirmation(entry))) onMarkHandedOver(entry);
+                  }}
                 >
                   Tournament control has this
                 </button>

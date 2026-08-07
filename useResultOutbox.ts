@@ -13,7 +13,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import RoomResultOutbox, { IEnqueueResult, IOutboxDraft } from './OutboxStore';
 import { IOutboxDriver, resolveOutboxDriver } from './OutboxStorage';
-import { IRoomResultOutboxEntry } from './ResultOutbox';
+import { awaitsAutomaticDelivery, IRoomResultOutboxEntry, needsAction } from './ResultOutbox';
 import { downloadOutboxQbj } from './QbjBackup';
 import { postFinal } from './api';
 
@@ -23,8 +23,15 @@ const flushIntervalMs = 5000;
 export interface IUseResultOutbox {
   /** Everything held on this device, newest first. */
   entries: IRoomResultOutboxEntry[];
-  /** Results the tournament does not yet have. */
+  /**
+   * Results somebody is still waiting on.
+   *
+   * Not "everything that is not Accepted": a result the scorekeeper has confirmed they handed over
+   * stays in `entries`, stays downloadable, and is deliberately absent here.
+   */
   unresolved: IRoomResultOutboxEntry[];
+  /** True while a finished game really will be sent on its own once YellowFruit is reachable. */
+  pendingAutomaticDelivery: boolean;
   /** False when this browser cannot save results between reloads. */
   durable: boolean;
   /** True once the store has been read, so the UI does not flash an empty list. */
@@ -177,11 +184,13 @@ export default function useResultOutbox(driver?: IOutboxDriver): IUseResultOutbo
     [],
   );
 
-  const unresolved = useMemo(() => entries.filter((entry) => entry.deliveryState !== 'accepted'), [entries]);
+  const unresolved = useMemo(() => entries.filter(needsAction), [entries]);
+  const pendingAutomaticDelivery = useMemo(() => entries.some(awaitsAutomaticDelivery), [entries]);
 
   return {
     entries,
     unresolved,
+    pendingAutomaticDelivery,
     durable,
     ready,
     skipped,
