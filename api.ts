@@ -36,6 +36,8 @@ export type ApiResult<T> =
 
 /** Tournament information the room needs before it can start a game */
 export interface ITournamentInfo {
+  /** Stable identity of the open tournament, independent of its display name. */
+  tournamentKey?: string;
   name: string;
   gameFormat: IModaqGameFormat | null;
   gameFormatErrors: string[];
