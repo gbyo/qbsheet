@@ -121,6 +121,9 @@ export interface IDeliveryFailureNoticeProps {
   persisted: boolean;
   /** True while the page is still retrying automatically. */
   retrying: boolean;
+  /** The server's refusal when retrying has stopped. */
+  // eslint-disable-next-line react/require-default-props
+  reason?: string;
   onDownload: () => void;
 }
 
@@ -131,13 +134,16 @@ export interface IDeliveryFailureNoticeProps {
  * the result really is on the device. When persistence failed, the notice says so instead and the
  * download stops being a backup and becomes the only copy.
  */
-export function DeliveryFailureNotice({ persisted, retrying, onDownload }: IDeliveryFailureNoticeProps) {
+export function DeliveryFailureNotice({ persisted, retrying, reason, onDownload }: IDeliveryFailureNoticeProps) {
   return (
-    <div className={persisted ? 'room-banner room-banner-warning' : 'room-banner room-banner-error'} role="status">
+    <div
+      className={persisted ? 'room-banner room-banner-warning' : 'room-banner room-banner-error'}
+      role={persisted ? 'status' : 'alert'}
+    >
       <strong>
         {persisted ? 'Result saved on this Chromebook.' : 'This result could not be saved on this device.'}
       </strong>
-      <div>YellowFruit is unreachable.</div>
+      <div>{reason || 'YellowFruit is unreachable.'}</div>
       <div>
         {persisted && retrying
           ? 'This page will keep trying automatically.'
