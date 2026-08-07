@@ -10,7 +10,7 @@ import {
   ICreateHelpRequest,
   IHelpRequest,
   IRoomAssignmentResponse,
-  IRoomJoinDescriptor,
+  IRoomJoinListResponse,
   IRoomJoinRequest,
   IRoomJoinResponse,
   IRoomPresence,
@@ -260,7 +260,7 @@ export function getTeams(): Promise<ApiResult<{ teams: IRoomTeam[] }>> {
   return request(`${apiPrefix}/teams`);
 }
 
-export function getJoinRooms(): Promise<ApiResult<{ rooms: IRoomJoinDescriptor[] }>> {
+export function getJoinRooms(): Promise<ApiResult<IRoomJoinListResponse>> {
   return request(`${apiPrefix}/join/rooms`);
 }
 

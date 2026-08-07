@@ -436,6 +436,22 @@ body {
   border-color: var(--room-info-border);
 }
 
+/*
+ * The submitted-and-waiting state. Read across a noisy room from a few feet away, so the headline
+ * gets the size; the explanation underneath is for the person actually standing at the Chromebook.
+ */
+.room-awaiting-review {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.room-awaiting-review strong {
+  font-size: 1.0625rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
 /* #endregion */
 
 /* #region Scoring */

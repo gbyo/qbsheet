@@ -16,7 +16,6 @@ import {
   IRoomMatchupSummary,
   HelpRequestCategory,
   RoomBlockedReason,
-  SessionStatus,
 } from '../main/server/ServerTypes';
 import RoomOperatorControls from './RoomOperatorControls';
 
@@ -26,6 +25,8 @@ export interface IMatchupCardProps {
   starting: boolean;
   startError: string;
   pendingFinal: boolean;
+  /** The result is with tournament control. A normal state of a connected room, not a failure. */
+  awaitingReview: boolean;
   submittedSummary: string;
   canStart: boolean;
   // eslint-disable-next-line react/require-default-props
@@ -71,6 +72,7 @@ export default function MatchupCard(props: IMatchupCardProps) {
     starting,
     startError,
     pendingFinal,
+    awaitingReview,
     submittedSummary,
     canStart,
     blockedReason,
@@ -89,10 +91,6 @@ export default function MatchupCard(props: IMatchupCardProps) {
     onChangeRoom,
   } = props;
   const { current, previous, next, roomName, tournamentName } = assignment;
-  const awaitingControl =
-    pendingFinal ||
-    assignment.session?.status === SessionStatus.Submitted ||
-    assignment.session?.finalReceived === true;
 
   return (
     <div className="room-shell">
@@ -143,22 +141,28 @@ export default function MatchupCard(props: IMatchupCardProps) {
           <p className="room-matchup-vs">vs.</p>
           <p className="room-matchup-team">{current.rightTeam.name}</p>
 
-          {blockedReason !== undefined && assignment.blockedMessage !== undefined && (
+          {/* The awaiting-review panel below already says this, and more plainly. */}
+          {!awaitingReview && blockedReason !== undefined && assignment.blockedMessage !== undefined && (
             <p className="room-blocked">{assignment.blockedMessage}</p>
           )}
 
           {startError !== '' && <div className="room-banner room-banner-error">{startError}</div>}
 
-          {awaitingControl && (
-            <div className="room-banner room-banner-info">
-              <strong>Match submitted.</strong> Waiting for tournament control to accept the result.
+          {/*
+            Deliberately not styled as a warning. The room did its job; the result is with tournament
+            control, and there is nothing for the scorekeeper to fix or retry.
+          */}
+          {awaitingReview && (
+            <div className="room-banner room-banner-info room-awaiting-review" role="status">
+              <strong>Result submitted</strong>
+              <span>Waiting for tournament control to review this result.</span>
             </div>
           )}
 
           <button type="button" className="room-button" onClick={onStart} disabled={!canStart || starting}>
-            {startButtonLabel(starting, awaitingControl)}
+            {startButtonLabel(starting, awaitingReview)}
           </button>
-          {!ready && !awaitingControl && (
+          {!ready && !awaitingReview && (
             <p className="room-muted room-ready-hint">Mark this device ready before starting the match.</p>
           )}
         </div>
@@ -186,7 +190,7 @@ export default function MatchupCard(props: IMatchupCardProps) {
       <p className="room-connection">
         <span className={online ? 'room-status room-status-online' : 'room-status room-status-offline'}>
           <span className="room-status-dot" aria-hidden="true" />
-          {online ? 'Server connected' : 'Server unreachable'}
+          {online ? 'Connected' : 'Server unreachable'}
         </span>
       </p>
     </div>

@@ -34,8 +34,8 @@ import {
   IRoomMatchup,
   IRoomTeam,
   RoomBlockedReason,
-  SessionStatus,
 } from '../main/server/ServerTypes';
+import { classifyPollResult, isAwaitingReview, resolveLifecycleNotice } from './RoomLifecycle';
 import normalizeQbjMatch, { IQbjNormalizeOptions, countPlayedQuestions } from '../renderer/Services/QbjMatchNormalizer';
 import {
   clearPendingSubmission,
@@ -129,17 +129,24 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
       const result = await getRoomAssignment(activeIdentity);
       if (cancelled) return;
 
+      // Transport first, tournament state second. A refusal is still an answer from a reachable
+      // server, so it must not put the room into its offline state.
+      const transport = classifyPollResult(result);
+      setOnline(transport.online);
+      if (transport.needsPairing) {
+        // The link itself is wrong for the open tournament, which no amount of retrying will fix.
+        clearRememberedRoomIdentity();
+        window.location.replace('/join');
+        return;
+      }
       if (!result.ok) {
-        setOnline(false);
-        // A 403 means the link itself is wrong, which no amount of retrying will fix.
-        if (result.status === 403) {
-          clearRememberedRoomIdentity();
-          window.location.replace('/join');
-        }
+        // Only meaningful before the first successful poll: once the page has an assignment it keeps
+        // showing it and just marks itself offline, because a Chromebook that has lost the network
+        // mid-round should still be able to see what it is playing.
+        setLoadError(transport.errorMessage);
         return;
       }
 
-      setOnline(true);
       setLoadError('');
       setAssignment(result.value);
       setPresence(result.value.presence ?? null);
@@ -148,15 +155,9 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
         (device) => device.deviceId === activeIdentity.deviceId,
       );
       if (devicePresence) setReady(devicePresence.ready);
-      if (result.value.lastOutcome?.status === SessionStatus.Accepted) {
-        setLifecycleNotice('Tournament control accepted the result. This room is ready for the next assignment.');
-      } else if (result.value.lastOutcome?.status === SessionStatus.Rejected) {
-        setLifecycleNotice(
-          `Tournament control returned this result for correction.${
-            result.value.lastOutcome.rejectionReason ? ` ${result.value.lastOutcome.rejectionReason}` : ''
-          }`,
-        );
-      }
+      // Recomputed from the response every poll rather than accumulated, so a verdict about a game
+      // the room has moved on from cannot linger on the screen.
+      setLifecycleNotice(resolveLifecycleNotice(result.value)?.text ?? '');
 
       const { current, session } = result.value;
 
@@ -368,7 +369,14 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
       <div className="room-shell">
         {loadError !== '' ? (
           <>
-            <div className="room-banner room-banner-error">{loadError}</div>
+            {/* A warning rather than an error: nothing is lost and the page is still trying. */}
+            <div className="room-banner room-banner-warning">
+              <strong>{loadError}</strong>
+              <div>
+                This page keeps trying. Check that the YellowFruit computer is on and that this device is on the same
+                network.
+              </div>
+            </div>
             <button type="button" className="room-button" onClick={handleChangeRoom}>
               Pair this browser again
             </button>
@@ -380,8 +388,9 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
     );
   }
 
+  const awaitingReview = pendingFinal || isAwaitingReview(assignment);
+
   if (scoring && assignment.gameFormat) {
-    const sessionStatus = assignment.session?.status;
     return (
       <ScoringView
         roomName={assignment.roomName}
@@ -394,7 +403,7 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
         customExport={customExport as any}
         online={online}
         questionsPlayed={questionsPlayed}
-        awaitingReview={pendingFinal || sessionStatus === SessionStatus.Submitted}
+        awaitingReview={awaitingReview}
         snapshotError={snapshotError}
         lifecycleNotice={lifecycleNotice}
         operatorName={operatorName}
@@ -419,16 +428,15 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
       starting={starting}
       startError={startError}
       pendingFinal={pendingFinal}
+      awaitingReview={awaitingReview}
       submittedSummary={submittedSummary}
       onStart={handleStart}
       canStart={
         assignment.current !== null &&
         assignment.blockedReason === undefined &&
         assignment.gameFormat !== null &&
-        !pendingFinal &&
-        ready &&
-        assignment.session?.status !== SessionStatus.Submitted &&
-        assignment.session?.finalReceived !== true
+        !awaitingReview &&
+        ready
       }
       blockedReason={assignment.blockedReason as RoomBlockedReason | undefined}
       lifecycleNotice={lifecycleNotice}
