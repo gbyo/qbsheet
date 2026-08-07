@@ -41,11 +41,12 @@ export interface IUseResultOutbox {
   enqueue: (draft: IOutboxDraft) => Promise<IEnqueueResult>;
   /** Deliver one result immediately, ignoring the backoff, and report what happened to it. */
   submitNow: (id: string) => Promise<IRoomResultOutboxEntry | null>;
-  markSubmitted: (id: string) => Promise<void>;
-  markAccepted: (id: string) => Promise<void>;
-  markNeedsCorrection: (id: string, reason?: string) => Promise<void>;
+  /** True when the corresponding state mutation was written durably. */
+  markSubmitted: (id: string) => Promise<boolean>;
+  markAccepted: (id: string) => Promise<boolean>;
+  markNeedsCorrection: (id: string, reason?: string) => Promise<boolean>;
   /** Record that the scorekeeper got a stranded result to tournament control another way. */
-  markHandedOver: (id: string) => Promise<void>;
+  markHandedOver: (id: string) => Promise<boolean>;
   /** Does this specific result survive a reload right now? */
   isPersisted: (id: string) => boolean;
   /** Try every due result now, rather than waiting for the next tick. */
@@ -70,12 +71,14 @@ async function deliverEntry(entry: IRoomResultOutboxEntry) {
 }
 
 export default function useResultOutbox(driver?: IOutboxDriver): IUseResultOutbox {
-  const outbox = useMemo(() => new RoomResultOutbox(driver ?? resolveOutboxDriver()), [driver]);
+  // `driver` is a construction-time test seam. A mounted room owns one outbox for its whole page
+  // lifetime; changing the driver requires remounting rather than forking the cache and connection.
+  const [outbox] = useState(() => new RoomResultOutbox(driver ?? resolveOutboxDriver()));
   const [entries, setEntries] = useState<IRoomResultOutboxEntry[]>([]);
   const [ready, setReady] = useState(false);
   const [skipped, setSkipped] = useState(0);
   const [durable, setDurable] = useState(true);
-  /** Guards against two flushes overlapping, which would double-count attempts. */
+  /** Guards against interval and manual submissions overlapping and double-counting attempts. */
   const flushing = useRef(false);
 
   const refresh = useCallback(() => {
@@ -137,42 +140,51 @@ export default function useResultOutbox(driver?: IOutboxDriver): IUseResultOutbo
 
   const submitNow = useCallback(
     async (id: string) => {
-      const entry = await outbox.deliverOne(id, deliverEntry);
-      refresh();
-      return entry;
+      if (flushing.current) return outbox.find(id) ?? null;
+      flushing.current = true;
+      try {
+        return await outbox.deliverOne(id, deliverEntry);
+      } finally {
+        flushing.current = false;
+        refresh();
+      }
     },
     [outbox, refresh],
   );
 
   const markSubmitted = useCallback(
     async (id: string) => {
-      await outbox.markSubmitted(id);
+      const result = await outbox.markSubmitted(id);
       refresh();
+      return result?.persisted ?? false;
     },
     [outbox, refresh],
   );
 
   const markAccepted = useCallback(
     async (id: string) => {
-      await outbox.markAccepted(id);
+      const result = await outbox.markAccepted(id);
       await outbox.prune();
       refresh();
+      return result?.persisted ?? false;
     },
     [outbox, refresh],
   );
 
   const markNeedsCorrection = useCallback(
     async (id: string, reason?: string) => {
-      await outbox.markNeedsCorrection(id, reason);
+      const result = await outbox.markNeedsCorrection(id, reason);
       refresh();
+      return result?.persisted ?? false;
     },
     [outbox, refresh],
   );
 
   const markHandedOver = useCallback(
     async (id: string) => {
-      await outbox.markHandedOver(id);
+      const result = await outbox.markHandedOver(id);
       refresh();
+      return result?.persisted ?? false;
     },
     [outbox, refresh],
   );
