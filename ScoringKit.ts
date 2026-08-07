@@ -135,7 +135,8 @@ export function isScoringKitUsable(kit: IScoringKit | null, now: Date = new Date
   if (kit.rounds.length === 0) return false;
   const updated = new Date(kit.updatedAt).getTime();
   if (!Number.isFinite(updated)) return false;
-  return now.getTime() - updated <= scoringKitMaxAgeMs;
+  const ageMs = now.getTime() - updated;
+  return ageMs >= 0 && ageMs <= scoringKitMaxAgeMs;
 }
 
 /** Why emergency scoring is unavailable, in words a scorekeeper can act on. */
@@ -149,7 +150,7 @@ export function describeUnusableKit(kit: IScoringKit | null, now: Date = new Dat
     return 'The tournament information saved on this device is incomplete.';
   }
   const updated = new Date(kit.updatedAt).getTime();
-  if (!Number.isFinite(updated) || now.getTime() - updated > scoringKitMaxAgeMs) {
+  if (!Number.isFinite(updated) || updated > now.getTime() || now.getTime() - updated > scoringKitMaxAgeMs) {
     return 'The tournament information saved on this device is too old to be trusted.';
   }
   return 'The tournament information saved on this device cannot be used.';
