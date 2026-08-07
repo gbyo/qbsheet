@@ -128,7 +128,10 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
 
   /** Whether there is a matchup on screen that a failed poll would be leaving stale. */
   const hasAssignmentRef = useRef(false);
-  hasAssignmentRef.current = assignment !== null;
+
+  useEffect(() => {
+    hasAssignmentRef.current = assignment !== null;
+  }, [assignment]);
 
   // Poll for the assignment. This is the whole mechanism by which a room learns about a new round.
   useEffect(() => {
