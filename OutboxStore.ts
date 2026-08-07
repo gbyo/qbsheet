@@ -67,6 +67,13 @@ export interface IEnqueueResult {
   supersededCorrection?: boolean;
 }
 
+/** A mutation keeps the in-memory entry even when its write-through fails. */
+export interface IOutboxMutationResult {
+  entry: IRoomResultOutboxEntry;
+  persisted: boolean;
+  error?: string;
+}
+
 export interface IOutboxLoadResult {
   entries: IRoomResultOutboxEntry[];
   /** Records that could not be read. Left in the store, counted, and otherwise ignored. */
@@ -213,9 +220,8 @@ export default class RoomResultOutbox {
   /**
    * Read the store, migrating the legacy single-result record if one is present.
    *
-   * Called once on mount and safe to call again. A store that cannot be read at all produces an
-   * empty list and an error rather than throwing, because the alternative is a room browser that
-   * shows a stack trace instead of a scoresheet.
+   * Called once on mount and safe to call again. A store that cannot be read at all leaves the
+   * in-memory list untouched, because it may contain the only copy of a write the store refused.
    */
   async load(): Promise<IOutboxLoadResult> {
     let records: IOutboxRecord[] = [];
@@ -233,10 +239,26 @@ export default class RoomResultOutbox {
       if (parsed) entries.push(parsed);
       else skipped += 1;
     }
-    this.cache = entries;
+
+    if (readError === undefined) {
+      const cachedById = new Map(this.cache.map((entry) => [entry.id, entry]));
+      const previouslyPersisted = this.persistedIds;
+      const storedIds = new Set(entries.map((entry) => entry.id));
+      const merged = entries.map((entry) => cachedById.get(entry.id) ?? entry);
+      for (const cached of this.cache) {
+        if (!storedIds.has(cached.id)) merged.push(cached);
+      }
+      this.cache = merged;
+      // A cached entry whose latest write failed stays non-persisted even when an older copy with
+      // the same id is still in IndexedDB. New entries read from the store are persisted by fact.
+      this.persistedIds = new Set(
+        entries.flatMap((entry) => {
+          const cached = cachedById.get(entry.id);
+          return !cached || previouslyPersisted.has(entry.id) ? [entry.id] : [];
+        }),
+      );
+    }
     this.loaded = true;
-    // Anything that came back out of the store is, by definition, in the store.
-    this.persistedIds = new Set(entries.map((entry) => entry.id));
 
     const migrated = readError === undefined ? await this.migrateLegacyPendingFinal() : 0;
 
@@ -328,6 +350,7 @@ export default class RoomResultOutbox {
     }
 
     this.cache.push(entry);
+    this.persistedIds.add(entry.id);
     forgetLegacyRecord(storage);
     return 1;
   }
@@ -387,11 +410,13 @@ export default class RoomResultOutbox {
         roundName: draft.roundName ?? correctable.roundName,
         sessionCredentials: draft.sessionCredentials ?? correctable.sessionCredentials,
       });
-      const entry = superseded ?? correctable;
+      const entry = superseded?.entry ?? correctable;
       return {
         entry,
-        persisted: this.isPersisted(entry.id),
-        error: this.isPersisted(entry.id) ? undefined : 'This browser could not save the corrected result locally.',
+        persisted: superseded?.persisted ?? this.isPersisted(entry.id),
+        error:
+          superseded?.error ??
+          (this.isPersisted(entry.id) ? undefined : 'This browser could not save the corrected result locally.'),
         deduplicated: false,
         supersededCorrection: true,
       };
@@ -440,38 +465,37 @@ export default class RoomResultOutbox {
   }
 
   /** Write one entry through to the store, keeping the cache and the store in step. */
-  private async persist(entry: IRoomResultOutboxEntry): Promise<boolean> {
+  private async persist(entry: IRoomResultOutboxEntry): Promise<{ persisted: boolean; error?: string }> {
     const index = this.cache.findIndex((candidate) => candidate.id === entry.id);
     if (index >= 0) this.cache[index] = entry;
     else this.cache.push(entry);
-    return (await this.writeThrough(entry)).persisted;
+    return this.writeThrough(entry);
   }
 
-  private async update(id: string, change: Partial<IRoomResultOutboxEntry>): Promise<IRoomResultOutboxEntry | null> {
+  private async update(id: string, change: Partial<IRoomResultOutboxEntry>): Promise<IOutboxMutationResult | null> {
     const current = this.cache.find((entry) => entry.id === id);
     if (!current) return null;
     const next: IRoomResultOutboxEntry = { ...current, ...change, updatedAt: this.now().toISOString() };
-    await this.persist(next);
-    return next;
+    const written = await this.persist(next);
+    return { entry: next, persisted: written.persisted, error: written.error };
   }
 
   /**
    * The server has this result and tournament control is looking at it.
-   *
    * The local copy stays. A result under review is precisely the one that might come back needing
    * correction, and the device is the only place the scorekeeper can get it from.
    */
-  markSubmitted(id: string): Promise<IRoomResultOutboxEntry | null> {
+  markSubmitted(id: string): Promise<IOutboxMutationResult | null> {
     return this.update(id, { deliveryState: 'submitted', retryBlocked: undefined, lastError: undefined });
   }
 
   /** Tournament control accepted it. Now — and only now — it becomes prunable. */
-  markAccepted(id: string): Promise<IRoomResultOutboxEntry | null> {
+  markAccepted(id: string): Promise<IOutboxMutationResult | null> {
     return this.update(id, { deliveryState: 'accepted', retryBlocked: undefined, lastError: undefined });
   }
 
   /** Tournament control sent it back. The local copy is what the room corrects from. */
-  markNeedsCorrection(id: string, reason?: string): Promise<IRoomResultOutboxEntry | null> {
+  markNeedsCorrection(id: string, reason?: string): Promise<IOutboxMutationResult | null> {
     return this.update(id, { deliveryState: 'needs-correction', lastError: reason });
   }
 
@@ -488,10 +512,14 @@ export default class RoomResultOutbox {
    * anything. It records only that the scorekeeper got the file to tournament control, which is
    * exactly the fact being asserted. The result and its download stay.
    */
-  markHandedOver(id: string): Promise<IRoomResultOutboxEntry | null> {
+  markHandedOver(id: string): Promise<IOutboxMutationResult | null> {
     const entry = this.cache.find((candidate) => candidate.id === id);
     // An accepted result needs no acknowledgement, and one still being retried is not stranded.
-    if (!entry || entry.deliveryState === 'accepted') return Promise.resolve(entry ?? null);
+    if (!entry || entry.deliveryState === 'accepted') {
+      return Promise.resolve(
+        entry ? { entry, persisted: this.isPersisted(entry.id) } : null,
+      );
+    }
     return this.update(id, { handedOver: true });
   }
 
@@ -535,11 +563,12 @@ export default class RoomResultOutbox {
     entry: IRoomResultOutboxEntry,
     deliver: OutboxDeliverFn,
   ): Promise<'delivered' | 'blocked' | 'retrying'> {
-    const attempted = await this.update(entry.id, {
+    const attemptedResult = await this.update(entry.id, {
       attempts: entry.attempts + 1,
       lastAttemptAt: this.now().toISOString(),
     });
-    if (!attempted) return 'retrying';
+    if (!attemptedResult) return 'retrying';
+    const attempted = attemptedResult.entry;
 
     let result: DeliveryAttemptResult;
     try {
