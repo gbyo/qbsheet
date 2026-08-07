@@ -213,7 +213,11 @@ async function request<T>(path: string, init: IRequestOptions = {}): Promise<Api
       try {
         payload = JSON.parse(text);
       } catch {
-        return { ok: false, error: 'The server sent a response the room app could not read.' };
+        return {
+          ok: false,
+          status: response.status,
+          error: 'The server sent a response the room app could not read.',
+        };
       }
     }
     if (!response.ok) {
