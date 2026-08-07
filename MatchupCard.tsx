@@ -18,10 +18,14 @@ import {
   RoomBlockedReason,
 } from '../main/server/ServerTypes';
 import RoomOperatorControls from './RoomOperatorControls';
+import { connectionStatusClass, describeConnection, RoomConnectionState } from './RoomLifecycle';
 
 export interface IMatchupCardProps {
   assignment: IRoomAssignmentResponse;
-  online: boolean;
+  connection: RoomConnectionState;
+  /** Set when this matchup is retained from an earlier poll that the latest one could not refresh */
+  // eslint-disable-next-line react/require-default-props
+  degradedMessage?: string;
   starting: boolean;
   startError: string;
   pendingFinal: boolean;
@@ -68,7 +72,8 @@ function startButtonLabel(starting: boolean, awaitingControl: boolean): string {
 export default function MatchupCard(props: IMatchupCardProps) {
   const {
     assignment,
-    online,
+    connection,
+    degradedMessage = '',
     starting,
     startError,
     pendingFinal,
@@ -99,9 +104,21 @@ export default function MatchupCard(props: IMatchupCardProps) {
         <h1 className="room-name">{roomName}</h1>
       </header>
 
-      {!online && (
+      {connection === RoomConnectionState.Offline && (
         <div className="room-banner room-banner-warning">
           <strong>YellowFruit is not reachable.</strong> This page will update as soon as the connection comes back.
+        </div>
+      )}
+
+      {/*
+        The server answered, but not with an assignment. The matchup below is the last one YellowFruit
+        confirmed, so it stays exactly where it was and this says, quietly, that it is no longer being
+        refreshed. Nothing here asks the scorekeeper to do anything: retrying is already automatic.
+      */}
+      {connection === RoomConnectionState.Degraded && degradedMessage !== '' && (
+        <div className="room-banner room-banner-warning room-banner-compact" role="status">
+          <strong>{degradedMessage}</strong>
+          <div>Showing the last known assignment. The page will keep trying automatically.</div>
         </div>
       )}
 
@@ -188,9 +205,9 @@ export default function MatchupCard(props: IMatchupCardProps) {
       />
 
       <p className="room-connection">
-        <span className={online ? 'room-status room-status-online' : 'room-status room-status-offline'}>
+        <span className={connectionStatusClass(connection)}>
           <span className="room-status-dot" aria-hidden="true" />
-          {online ? 'Connected' : 'Server unreachable'}
+          {describeConnection(connection)}
         </span>
       </p>
     </div>

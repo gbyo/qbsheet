@@ -15,6 +15,7 @@ import { IModaqGameFormat } from '../renderer/Services/YellowFruitScoringRulesTo
 import { HelpRequestCategory, IHelpRequest, IRoomPresence } from '../main/server/ServerTypes';
 import RoomOperatorControls from './RoomOperatorControls';
 import buildScaffoldPacket, { describeScoringBands, scaffoldPacketName } from './ScaffoldPacket';
+import { connectionStatusClass, describeConnection, RoomConnectionState } from './RoomLifecycle';
 
 /** MODAQ's custom-export callback shape, from modaq's ICustomExport */
 export interface IModaqCustomExport {
@@ -36,7 +37,10 @@ export interface IScoringViewProps {
   // eslint-disable-next-line react/require-default-props
   storeName?: string;
   customExport: IModaqCustomExport;
-  online: boolean;
+  connection: RoomConnectionState;
+  /** Set when the room is degraded: the game on screen is real, the room state behind it is stale */
+  // eslint-disable-next-line react/require-default-props
+  degradedMessage?: string;
   /** Number of questions played so far, from the most recent snapshot */
   questionsPlayed: number;
   /** True once a final has been sent and is waiting on tournament control */
@@ -80,7 +84,8 @@ export default function ScoringView(props: IScoringViewProps) {
     players,
     storeName,
     customExport,
-    online,
+    connection,
+    degradedMessage = '',
     questionsPlayed,
     awaitingReview,
     snapshotError,
@@ -99,6 +104,7 @@ export default function ScoringView(props: IScoringViewProps) {
   } = props;
 
   const packet = buildScaffoldPacket(gameFormat) as unknown as IPacket;
+  const online = connection !== RoomConnectionState.Offline;
 
   // The question being played is the one after the last one with a buzz recorded on it.
   const currentQuestion = Math.min(questionsPlayed + 1, gameFormat.regulationTossupCount + 20);
@@ -110,6 +116,17 @@ export default function ScoringView(props: IScoringViewProps) {
         <div className="room-banner room-banner-warning">
           <strong>YellowFruit is not reachable.</strong> Keep scoring &mdash; this game is saved on this device and will
           be sent when the connection comes back.
+        </div>
+      )}
+      {/*
+        Deliberately small, and deliberately not about the game. YellowFruit could not tell us what
+        this room is meant to be doing; the game in MODAQ below is untouched by that, and saying so
+        matters more than the failure does.
+      */}
+      {online && degradedMessage !== '' && (
+        <div className="room-banner room-banner-warning room-banner-compact" role="status">
+          <strong>{degradedMessage}</strong>
+          <div>Keep scoring &mdash; this game is unaffected and is saved on this device.</div>
         </div>
       )}
       {snapshotError !== undefined && snapshotError !== '' && online && (
@@ -139,9 +156,9 @@ export default function ScoringView(props: IScoringViewProps) {
             {inOvertime ? `Overtime · Q${currentQuestion}` : `Question ${currentQuestion}`}
           </span>
           {awaitingReview && <span className="room-tag room-tag-pending">Awaiting review</span>}
-          <span className={online ? 'room-status room-status-online' : 'room-status room-status-offline'}>
+          <span className={connectionStatusClass(connection)}>
             <span className="room-status-dot" aria-hidden="true" />
-            {online ? 'Connected' : 'Offline'}
+            {describeConnection(connection)}
           </span>
         </div>
       </header>

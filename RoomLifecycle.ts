@@ -21,12 +21,31 @@ import {
 } from '../main/server/ServerTypes';
 import { ApiResult } from './api';
 
+/**
+ * How well the room can currently talk to YellowFruit.
+ *
+ * Three states rather than two, because "reachable" and "up to date" are not the same thing. A room
+ * whose last assignment poll came back 500 is still talking to a server that is plainly there — but
+ * what it is showing on screen is no longer known to be current, and saying "Connected" about that
+ * is a lie the scorekeeper has no way to catch.
+ */
+export enum RoomConnectionState {
+  /** The latest assignment poll succeeded. What is on screen is current. */
+  Connected = 'connected',
+  /** YellowFruit answered, but the latest assignment poll failed. On-screen data may be stale. */
+  Degraded = 'degraded',
+  /** No answer at all: dropped Wi-Fi, refused connection, or our own timeout. */
+  Offline = 'offline',
+}
+
 /** What one poll of the assignment endpoint says about the connection itself. */
 export interface IRoomTransportState {
+  /** The effective connection state, which is what the room's status indicator shows. */
+  connection: RoomConnectionState;
   /**
    * True when YellowFruit answered at all.
    *
-   * Any HTTP status means the server is there and talking, so the room is connected even when the
+   * Any HTTP status means the server is there and talking, so the room is reachable even when the
    * answer is a refusal. Only an aborted or failed request — no status at all — is offline.
    */
   online: boolean;
@@ -34,16 +53,117 @@ export interface IRoomTransportState {
   needsPairing: boolean;
   /** Set when the server answered with something the room should show. Empty on success. */
   errorMessage: string;
+  /** YellowFruit's own explanation, when it gave one. Never our status-code fallback text. */
+  serverDetail: string;
 }
 
 /** Decide connection state from a poll result without looking at any message text. */
 export function classifyPollResult(result: ApiResult<unknown>): IRoomTransportState {
-  if (result.ok) return { online: true, needsPairing: false, errorMessage: '' };
+  if (result.ok) {
+    return {
+      connection: RoomConnectionState.Connected,
+      online: true,
+      needsPairing: false,
+      errorMessage: '',
+      serverDetail: '',
+    };
+  }
+  const serverDetail = result.detail ?? '';
   // No status means fetch never got an answer: DNS, refused connection, dropped Wi-Fi, or our own
   // timeout abort. That, and only that, is what "offline" means to a scorekeeper.
-  if (result.status === undefined) return { online: false, needsPairing: false, errorMessage: result.error };
-  if (result.status === 403) return { online: true, needsPairing: true, errorMessage: result.error };
-  return { online: true, needsPairing: false, errorMessage: result.error };
+  if (result.status === undefined) {
+    return {
+      connection: RoomConnectionState.Offline,
+      online: false,
+      needsPairing: false,
+      errorMessage: result.error,
+      serverDetail,
+    };
+  }
+  // The room link itself is wrong for the open tournament. That is a credential problem, not a
+  // connection problem, and it is resolved by pairing again rather than by retrying.
+  if (result.status === 403) {
+    return {
+      connection: RoomConnectionState.Connected,
+      online: true,
+      needsPairing: true,
+      errorMessage: result.error,
+      serverDetail,
+    };
+  }
+  return {
+    connection: RoomConnectionState.Degraded,
+    online: true,
+    needsPairing: false,
+    errorMessage: result.error,
+    serverDetail,
+  };
+}
+
+/** The room's connection status as the page should present it after one poll. */
+export interface IRoomConnectionStatus {
+  state: RoomConnectionState;
+  needsPairing: boolean;
+  /**
+   * Shown beside a matchup the room is still displaying but could not refresh. Empty unless the
+   * room is degraded and has something retained to be stale about.
+   */
+  degradedMessage: string;
+  /** Shown instead of a matchup, for a room that has never managed to load one. Empty otherwise. */
+  loadError: string;
+}
+
+/** The one sentence a degraded room shows. Not an error: nothing is lost and retrying is automatic. */
+export const degradedHeadline = 'YellowFruit couldn’t refresh this room.';
+
+/**
+ * Fold one assignment poll into the status the page should show.
+ *
+ * The retained assignment is the whole reason this is not just `classifyPollResult`. Before the
+ * first success there is nothing on screen to go stale, so a failure is a load error and belongs
+ * where the matchup would have been. After the first success the matchup stays up — a Chromebook
+ * that has lost touch with the control room mid-round must still be able to see what it is playing —
+ * and the honest thing to add is a note that it is no longer being refreshed, not a replacement
+ * error page.
+ *
+ * Recovery needs no user action and no separate call: the next successful poll produces Connected
+ * with both messages empty, which is what clears the warning.
+ */
+export function reduceConnectionStatus(result: ApiResult<unknown>, hasAssignment: boolean): IRoomConnectionStatus {
+  const transport = classifyPollResult(result);
+  const status: IRoomConnectionStatus = {
+    state: transport.connection,
+    needsPairing: transport.needsPairing,
+    degradedMessage: '',
+    loadError: '',
+  };
+  if (transport.connection === RoomConnectionState.Connected) return status;
+
+  if (!hasAssignment) {
+    status.loadError = transport.errorMessage;
+    return status;
+  }
+  // Offline already has its own retained-assignment messaging, which says the right thing about
+  // local scoring and the submission queue. Only the degraded case needs a new note.
+  if (transport.connection === RoomConnectionState.Degraded) {
+    status.degradedMessage =
+      transport.serverDetail === '' ? degradedHeadline : `${degradedHeadline} ${transport.serverDetail}`;
+  }
+  return status;
+}
+
+/** The scorekeeper-facing name for a connection state. Never a status code. */
+export function describeConnection(state: RoomConnectionState): string {
+  if (state === RoomConnectionState.Connected) return 'Connected';
+  if (state === RoomConnectionState.Degraded) return 'Connection issue';
+  return 'Offline';
+}
+
+/** The status-indicator class for a connection state. */
+export function connectionStatusClass(state: RoomConnectionState): string {
+  if (state === RoomConnectionState.Connected) return 'room-status room-status-online';
+  if (state === RoomConnectionState.Degraded) return 'room-status room-status-degraded';
+  return 'room-status room-status-offline';
 }
 
 /**

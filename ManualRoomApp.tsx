@@ -25,6 +25,7 @@ import {
   queueSubmission,
 } from './SubmissionQueue';
 import ScoringView from './ScoringView';
+import { RoomConnectionState } from './RoomLifecycle';
 
 /** MODAQ requires a status object back from a custom export */
 type ModaqStatus = { isError: false; status: string } | { isError: true; status: string };
@@ -295,7 +296,8 @@ export default function ManualRoomApp() {
         players={modaqPlayers}
         storeName={storeName}
         customExport={customExport as any}
-        online={online}
+        // Manual scoring polls only for reachability, so it has no separate degraded state to show.
+        connection={online ? RoomConnectionState.Connected : RoomConnectionState.Offline}
         questionsPlayed={questionsPlayed}
         awaitingReview={pendingFinal}
         snapshotError={lastSnapshotError}

@@ -25,7 +25,14 @@ import {
 } from '../main/server/ServerTypes';
 import { IModaqGameFormat } from '../renderer/Services/YellowFruitScoringRulesToModaq';
 
-export type ApiResult<T> = { ok: true; value: T } | { ok: false; error: string; status?: number };
+export type ApiResult<T> =
+  | { ok: true; value: T }
+  /**
+   * `error` is always safe to show. `detail` is set only when YellowFruit itself explained the
+   * refusal, so a caller can show the explanation without ever showing our own status-code
+   * fallback text to a scorekeeper.
+   */
+  | { ok: false; error: string; status?: number; detail?: string };
 
 /** Tournament information the room needs before it can start a game */
 export interface ITournamentInfo {
@@ -218,6 +225,7 @@ async function request<T>(path: string, init: IRequestOptions = {}): Promise<Api
         ok: false,
         status: response.status,
         error: errorPayload ?? `The server refused the request (${response.status}).`,
+        detail: errorPayload,
       };
     }
     return { ok: true, value: payload as T };

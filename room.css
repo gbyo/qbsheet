@@ -437,6 +437,20 @@ body {
 }
 
 /*
+ * A refresh that didn't land is not an emergency, and styling it like one would train scorekeepers
+ * to ignore the banners that are. Smaller type, tighter box, same colour family as a warning.
+ */
+.room-banner-compact {
+  padding: 8px 10px;
+  margin: 8px 0;
+  font-size: 0.8125rem;
+}
+
+.room-banner-compact strong {
+  font-weight: 600;
+}
+
+/*
  * The submitted-and-waiting state. Read across a noisy room from a few feet away, so the headline
  * gets the size; the explanation underneath is for the person actually standing at the Chromebook.
  */
@@ -559,6 +573,11 @@ body {
 
 .room-status-offline {
   color: var(--room-error);
+}
+
+/* Reachable but not refreshing. Warning colour, not error colour: nothing has been lost. */
+.room-status-degraded {
+  color: var(--room-warning);
 }
 
 /* Says plainly that this is a scoresheet and the questions come from elsewhere. */

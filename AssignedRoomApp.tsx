@@ -35,7 +35,7 @@ import {
   IRoomTeam,
   RoomBlockedReason,
 } from '../main/server/ServerTypes';
-import { classifyPollResult, isAwaitingReview, resolveLifecycleNotice } from './RoomLifecycle';
+import { isAwaitingReview, reduceConnectionStatus, resolveLifecycleNotice, RoomConnectionState } from './RoomLifecycle';
 import normalizeQbjMatch, { IQbjNormalizeOptions, countPlayedQuestions } from '../renderer/Services/QbjMatchNormalizer';
 import {
   clearPendingSubmission,
@@ -82,7 +82,9 @@ function toModaqPlayers(left: IRoomTeam, right: IRoomTeam): IPlayer[] {
 export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity }) {
   const [assignment, setAssignment] = useState<IRoomAssignmentResponse | null>(null);
   const [loadError, setLoadError] = useState('');
-  const [online, setOnline] = useState(true);
+  const [connection, setConnection] = useState<RoomConnectionState>(RoomConnectionState.Connected);
+  /** Set only while a retained assignment is on screen that the latest poll could not refresh. */
+  const [degradedMessage, setDegradedMessage] = useState('');
 
   /** The matchup we are actively scoring, frozen so a poll can't swap MODAQ out mid-game */
   const [scoring, setScoring] = useState<{ matchup: IRoomMatchup; credentials: ISessionCredentials } | null>(null);
@@ -104,6 +106,9 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
     [identity, operatorName],
   );
 
+  /** Reachability, for the things that only care whether the server can be written to at all. */
+  const online = connection !== RoomConnectionState.Offline;
+
   // Refs so MODAQ's export callback stays stable; re-creating it resets MODAQ's export interval.
   const credentialsRef = useRef<ISessionCredentials | null>(null);
   credentialsRef.current = scoring?.credentials ?? null;
@@ -121,6 +126,10 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
   const scoringMatchIdRef = useRef<string | null>(null);
   scoringMatchIdRef.current = scoring?.matchup.scheduledMatchId ?? null;
 
+  /** Whether there is a matchup on screen that a failed poll would be leaving stale. */
+  const hasAssignmentRef = useRef(false);
+  hasAssignmentRef.current = assignment !== null;
+
   // Poll for the assignment. This is the whole mechanism by which a room learns about a new round.
   useEffect(() => {
     let cancelled = false;
@@ -131,23 +140,23 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
 
       // Transport first, tournament state second. A refusal is still an answer from a reachable
       // server, so it must not put the room into its offline state.
-      const transport = classifyPollResult(result);
-      setOnline(transport.online);
-      if (transport.needsPairing) {
+      const status = reduceConnectionStatus(result, hasAssignmentRef.current);
+      setConnection(status.state);
+      setDegradedMessage(status.degradedMessage);
+      setLoadError(status.loadError);
+      if (status.needsPairing) {
         // The link itself is wrong for the open tournament, which no amount of retrying will fix.
         clearRememberedRoomIdentity();
         window.location.replace('/join');
         return;
       }
       if (!result.ok) {
-        // Only meaningful before the first successful poll: once the page has an assignment it keeps
-        // showing it and just marks itself offline, because a Chromebook that has lost the network
-        // mid-round should still be able to see what it is playing.
-        setLoadError(transport.errorMessage);
+        // A room that already has a matchup keeps showing it and says so, rather than replacing the
+        // scorekeeper's game with an error page: a Chromebook that has lost touch with the control
+        // room mid-round must still be able to see what it is playing.
         return;
       }
 
-      setLoadError('');
       setAssignment(result.value);
       setPresence(result.value.presence ?? null);
       setHelpRequest(result.value.helpRequest ?? null);
@@ -401,7 +410,8 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
         players={players}
         storeName={`yf-room-${scoring.credentials.sessionId}`}
         customExport={customExport as any}
-        online={online}
+        connection={connection}
+        degradedMessage={degradedMessage}
         questionsPlayed={questionsPlayed}
         awaitingReview={awaitingReview}
         snapshotError={snapshotError}
@@ -424,7 +434,8 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
   return (
     <MatchupCard
       assignment={assignment}
-      online={online}
+      connection={connection}
+      degradedMessage={degradedMessage}
       starting={starting}
       startError={startError}
       pendingFinal={pendingFinal}
