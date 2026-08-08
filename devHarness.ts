@@ -88,6 +88,21 @@ async function main() {
         );
       }
     },
+    /**
+     * The same callback ServerIpc uses to push help requests at the desktop UI, so a request raised in
+     * a browser can be seen arriving without running Electron. Without this the harness gives no sign
+     * that a room asking for help reached anything.
+     */
+    onHelpRequestsChanged: (requests) => {
+      for (const request of requests) {
+        // eslint-disable-next-line no-console
+        console.log(
+          `[help ${request.status}] ${request.roomName}: ${request.category}${
+            request.message ? ` — ${request.message}` : ''
+          }`,
+        );
+      }
+    },
   });
 
   server.setTournamentSnapshot(makeSampleSnapshot());

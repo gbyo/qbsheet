@@ -32,7 +32,15 @@ const categories: Array<[HelpRequestCategory, string]> = [
   ['other', helpRequestCategoryLabels.other],
 ];
 
-/** Small, keyboard-friendly operational controls shared by the waiting and scoring screens. */
+/**
+ * Small, keyboard-friendly operational controls shared by the waiting and scoring screens.
+ *
+ * `compact` is for the scoring screen, where this sits between the status bar and the scoresheet and
+ * every row it takes is a row of MODAQ pushed off a Chromebook's screen. It collapses to a single
+ * line: the name field, Ready, and the two text actions on the same row, with the "Operator" caption
+ * left in the accessibility tree but out of the layout. The waiting screen has room to spare and
+ * keeps the full-size version.
+ */
 export default function RoomOperatorControls(props: IRoomOperatorControlsProps) {
   const {
     operatorName,
@@ -74,12 +82,13 @@ export default function RoomOperatorControls(props: IRoomOperatorControlsProps) 
     <section className={`room-operator-controls${compact ? ' is-compact' : ''}`} aria-label="Room controls">
       <div className="room-operator-row">
         <label className="room-operator-name" htmlFor="room-operator-name">
-          Operator
+          <span className="room-operator-caption">Operator</span>
           <input
             id="room-operator-name"
             value={operatorName}
             onChange={(event) => onOperatorNameChange(event.target.value)}
-            placeholder="Optional name"
+            // The caption is hidden when compact, so the placeholder has to carry the meaning.
+            placeholder={compact ? 'Operator name (optional)' : 'Optional name'}
             maxLength={80}
           />
         </label>

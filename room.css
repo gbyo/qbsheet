@@ -308,8 +308,62 @@ body {
   border-radius: 8px;
 }
 
+/*
+  The scoring screen's version: one line, flush with the chrome above it.
+
+  This box sits between the status bar and the scoresheet, so its height comes straight out of
+  MODAQ's. Full size it ran to three rows — caption, field and button, then a row of text actions —
+  which on a Chromebook pushed the bonus parts below the fold. Everything folds onto one row instead,
+  and the panel loses its card treatment so it reads as part of the header rather than as content.
+*/
 .room-operator-controls.is-compact {
-  margin: 0 12px 8px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin: 0;
+  padding: 6px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--room-border);
+  border-radius: 0;
+}
+
+.room-operator-controls.is-compact .room-operator-row {
+  flex: 1 1 320px;
+}
+
+.room-operator-controls.is-compact .room-operator-actions {
+  flex: 0 0 auto;
+  gap: 16px;
+  margin-top: 0;
+}
+
+/* The label still names the field for a screen reader; it just stops taking a row of its own. */
+.room-operator-controls.is-compact .room-operator-caption {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.room-operator-controls.is-compact .room-operator-name {
+  flex: 1 1 200px;
+}
+
+.room-operator-controls.is-compact .room-operator-name input {
+  padding: 6px 10px;
+}
+
+.room-operator-controls.is-compact .room-operator-row .room-button {
+  min-width: 96px;
+  padding: 6px 12px;
+}
+
+/* The help form is the one thing that still needs its own space, below the row. */
+.room-operator-controls.is-compact .room-help-form {
+  flex: 1 1 100%;
 }
 
 .room-operator-row,
@@ -593,6 +647,28 @@ body {
 .room-modaq {
   flex: 1 1 auto;
   min-height: 0;
+}
+
+/*
+  Make the value bands look clickable.
+
+  A buzz is recorded by clicking a word of the question, which in a real packet is prose a scorekeeper
+  is already following along. Ours is a row of point values with nothing to suggest they are targets:
+  MODAQ leaves the cursor alone, so the bands read as a caption and a scorekeeper concludes the
+  scoresheet is inert. The hover tint is what makes the row answer the question "am I allowed to touch
+  this?" — see ScaffoldPacket.ts for why the bands exist at all.
+
+  Keyed on Fluent's focusable-span marker, which is what MODAQ puts on each buzzable word and on the
+  power markers between them.
+*/
+.room-modaq span[data-is-focusable='true'] {
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.room-modaq span[data-is-focusable='true']:hover {
+  background: var(--room-info-bg);
+  box-shadow: 0 0 0 2px var(--room-info-bg);
 }
 
 /* #endregion */

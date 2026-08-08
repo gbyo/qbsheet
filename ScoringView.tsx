@@ -4,7 +4,14 @@
  * MODAQ stays the primary interface. Everything YellowFruit adds is confined to one compact bar, so a
  * scorekeeper's eyes stay on the scoresheet rather than on our chrome. The bar carries the things
  * MODAQ cannot know — which room this is, which round, whether the result has reached tournament
- * control — plus the question number, which MODAQ tracks internally but doesn't expose to a host.
+ * control.
+ *
+ * It deliberately does not show a question number. MODAQ prints the question it is on a few pixels
+ * below ("Question #1", with Previous/Next either side), and the only count available to a host is
+ * how many questions have been *played*, which is a different number the moment a scorekeeper
+ * navigates back to fix an earlier buzz. Two disagreeing question numbers on one screen is worse
+ * than one, so the bar shows only what the played count is genuinely evidence of: that the game has
+ * gone past regulation.
  *
  * It also says plainly that questions are read externally and that this is a scoresheet rather than a
  * packet, because the structural packet MODAQ needs in order to have any scoring cycles at all can
@@ -42,7 +49,13 @@ export interface IScoringViewProps {
   /** Set when the room is degraded: the game on screen is real, the room state behind it is stale */
   // eslint-disable-next-line react/require-default-props
   degradedMessage?: string;
-  /** Number of questions played so far, from the most recent snapshot */
+  /**
+   * Number of questions played so far, from the most recent snapshot.
+   *
+   * Not the question the scorekeeper is looking at — MODAQ owns that, and shows it. This is the
+   * highest question with anything recorded against it, which is what tells us the game has run into
+   * overtime.
+   */
   questionsPlayed: number;
   /** True once a final has been sent and is waiting on tournament control */
   awaitingReview: boolean;
@@ -144,9 +157,7 @@ export default function ScoringView(props: IScoringViewProps) {
   const packet = buildScaffoldPacket(gameFormat) as unknown as IPacket;
   const online = connection !== RoomConnectionState.Offline;
 
-  // The question being played is the one after the last one with a buzz recorded on it.
-  const currentQuestion = Math.min(questionsPlayed + 1, gameFormat.regulationTossupCount + 20);
-  const inOvertime = currentQuestion > gameFormat.regulationTossupCount;
+  const inOvertime = questionsPlayed > gameFormat.regulationTossupCount;
 
   return (
     <div className="room-scoring">
@@ -202,9 +213,7 @@ export default function ScoringView(props: IScoringViewProps) {
         </div>
 
         <div className="room-statusbar-meta">
-          <span className={inOvertime ? 'room-tag room-tag-overtime' : 'room-tag'}>
-            {inOvertime ? `Overtime · Q${currentQuestion}` : `Question ${currentQuestion}`}
-          </span>
+          {inOvertime && <span className="room-tag room-tag-overtime">Overtime</span>}
           {awaitingReview && <span className="room-tag room-tag-pending">Awaiting review</span>}
           <span className={connectionStatusClass(connection)}>
             <span className="room-status-dot" aria-hidden="true" />

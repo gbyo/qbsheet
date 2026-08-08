@@ -5,6 +5,9 @@
  * browser on a scorekeeper's machine, has no access to Electron APIs, and talks to YellowFruit only
  * over the local HTTP API.
  */
+// Before RoomApp, which reaches modaq: modaq registers Fluent's icons at import time, and only the
+// first registration counts. See fluentIcons.ts.
+import './fluentIcons';
 import { createRoot } from 'react-dom/client';
 import RoomApp from './RoomApp';
 import './room.css';
