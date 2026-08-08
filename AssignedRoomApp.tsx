@@ -238,7 +238,11 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
     let cancelled = false;
 
     const refreshKit = async () => {
-      const [tournamentResult, roundsResult, teamsResult] = await Promise.all([getTournament(), getRounds(), getTeams()]);
+      const [tournamentResult, roundsResult, teamsResult] = await Promise.all([
+        getTournament(),
+        getRounds(),
+        getTeams(),
+      ]);
       if (cancelled || !tournamentResult.ok || !roundsResult.ok || !teamsResult.ok) return;
       const kit = buildScoringKit({
         tournamentKey: tournamentResult.value.tournamentKey,
@@ -428,7 +432,9 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
     setDeliveryFailed(true);
     if (delivered?.retryBlocked) {
       setSubmittedSummary(
-        `${delivered.lastError ?? 'YellowFruit refused this result.'} The game is saved on this device — use Download QBJ under Saved results and give the file to tournament control.`,
+        `${
+          delivered.lastError ?? 'YellowFruit refused this result.'
+        } The game is saved on this device — use Download QBJ under Saved results and give the file to tournament control.`,
       );
       return { isError: true, status: delivered.lastError ?? 'YellowFruit refused this result.' };
     }

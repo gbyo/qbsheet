@@ -81,6 +81,9 @@ function OfflineRecoverySteps({
 }: {
   onChangeRoom: () => void;
   canScoreEmergency: boolean;
+  // Absent on any page that cannot enter emergency mode in place. The step that offers it is gated
+  // on `canScoreEmergency`, so there is nothing sensible to default it to.
+  // eslint-disable-next-line react/require-default-props
   onScoreEmergency?: () => void;
 }) {
   return (

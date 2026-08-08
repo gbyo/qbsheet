@@ -71,7 +71,9 @@ interface IEmergencyGameState {
 
 function readEmergencyGameState(): IEmergencyGameState | null {
   try {
-    const parsed = JSON.parse(window.localStorage.getItem(emergencyGameStorageKey) ?? 'null') as Partial<IEmergencyGameState>;
+    const parsed = JSON.parse(
+      window.localStorage.getItem(emergencyGameStorageKey) ?? 'null',
+    ) as Partial<IEmergencyGameState>;
     if (
       typeof parsed?.gameId !== 'string' ||
       typeof parsed.roundNumber !== 'number' ||
@@ -201,7 +203,9 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
         const saved = readEmergencyGameState();
         const belongsToKit =
           saved !== null &&
-          (saved.tournamentKey === undefined || kit.tournamentKey === undefined || saved.tournamentKey === kit.tournamentKey);
+          (saved.tournamentKey === undefined ||
+            kit.tournamentKey === undefined ||
+            saved.tournamentKey === kit.tournamentKey);
         if (belongsToKit && saved) {
           const round = kit.rounds.find((candidate) => candidate.number === saved.roundNumber);
           const leftTeam = kit.teams.find((candidate) => candidate.name === saved.leftTeamName);

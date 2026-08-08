@@ -516,9 +516,7 @@ export default class RoomResultOutbox {
     const entry = this.cache.find((candidate) => candidate.id === id);
     // An accepted result needs no acknowledgement, and one still being retried is not stranded.
     if (!entry || entry.deliveryState === 'accepted') {
-      return Promise.resolve(
-        entry ? { entry, persisted: this.isPersisted(entry.id) } : null,
-      );
+      return Promise.resolve(entry ? { entry, persisted: this.isPersisted(entry.id) } : null);
     }
     return this.update(id, { handedOver: true });
   }
