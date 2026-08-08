@@ -653,7 +653,10 @@ export default function deriveGame(format: IScorekeeperFormat, setup: IGameSetup
     const begun = events.some(
       (event) =>
         event.questionNumber === phase.questionNumber &&
-        (event.type === 'tossup-buzz' || event.type === 'tossup-dead' || event.type === 'bonus'),
+        (event.type === 'tossup-buzz' ||
+          event.type === 'tossup-no-penalty' ||
+          event.type === 'tossup-dead' ||
+          event.type === 'bonus'),
     );
     upcomingBoundary = begun ? phase.questionNumber + 1 : phase.questionNumber;
   } else if (phase.kind === 'bonus') upcomingBoundary = phase.questionNumber + 1;
@@ -711,7 +714,10 @@ export function lineupChangeEffectiveQuestion(game: IDerivedGame, events: ScoreE
   const begun = events.some(
     (event) =>
       event.questionNumber === questionNumber &&
-      (event.type === 'tossup-buzz' || event.type === 'tossup-dead' || event.type === 'bonus'),
+      (event.type === 'tossup-buzz' ||
+        event.type === 'tossup-no-penalty' ||
+        event.type === 'tossup-dead' ||
+        event.type === 'bonus'),
   );
   return begun ? questionNumber + 1 : questionNumber;
 }

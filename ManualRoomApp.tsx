@@ -74,11 +74,26 @@ interface IEmergencyGameState {
   scorer: ScorerChoice;
 }
 
-function readEmergencyGameState(): IEmergencyGameState | null {
+interface IEmergencyStorage {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+}
+
+function emergencyStorage(): IEmergencyStorage | null {
   try {
-    const parsed = JSON.parse(
-      window.localStorage.getItem(emergencyGameStorageKey) ?? 'null',
-    ) as Partial<IEmergencyGameState>;
+    return typeof window === 'undefined' ? null : window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+export function readEmergencyGameState(
+  storage: IEmergencyStorage | null = emergencyStorage(),
+): IEmergencyGameState | null {
+  if (!storage) return null;
+  try {
+    const parsed = JSON.parse(storage.getItem(emergencyGameStorageKey) ?? 'null') as Partial<IEmergencyGameState>;
     if (
       typeof parsed?.gameId !== 'string' ||
       typeof parsed.roundNumber !== 'number' ||
@@ -100,17 +115,23 @@ function readEmergencyGameState(): IEmergencyGameState | null {
   }
 }
 
-function writeEmergencyGameState(state: IEmergencyGameState): void {
+export function writeEmergencyGameState(
+  state: IEmergencyGameState,
+  storage: IEmergencyStorage | null = emergencyStorage(),
+): void {
+  if (!storage) return;
   try {
-    window.localStorage.setItem(emergencyGameStorageKey, JSON.stringify(state));
+    storage.setItem(emergencyGameStorageKey, JSON.stringify(state));
   } catch {
     // MODAQ still has its in-page state. The result UI will avoid claiming reload durability.
   }
 }
 
 function clearEmergencyGameState(): void {
+  const storage = emergencyStorage();
+  if (!storage) return;
   try {
-    window.localStorage.removeItem(emergencyGameStorageKey);
+    storage.removeItem(emergencyGameStorageKey);
   } catch {
     // Nothing else to do; an old entry is still guarded by tournament identity on restore.
   }
