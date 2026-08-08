@@ -5,6 +5,7 @@ import {
   IEditableAttempt,
   IEditableBonus,
   IEditableQuestion,
+  conversion,
   validateEditableQuestion,
 } from '../scoring/questionCorrection';
 
@@ -35,6 +36,12 @@ function syncBonus(bonus: IEditableBonus, parts: IEditableBonus['parts']): IEdit
   };
 }
 
+interface IBonusDrafts {
+  controlled?: string;
+  bounceback?: string;
+  parts: Record<string, string>;
+}
+
 export default function QuestionEditor(props: {
   game: IDerivedGame;
   format: IScorekeeperFormat;
@@ -51,6 +58,7 @@ export default function QuestionEditor(props: {
     bonus: initial.bonus ? { ...initial.bonus, parts: initial.bonus.parts?.map((part) => ({ ...part })) } : undefined,
   }));
   const [errors, setErrors] = useState<string[]>([]);
+  const [bonusDrafts, setBonusDrafts] = useState<IBonusDrafts>({ parts: {} });
   const question = game.questions.find((candidate) => candidate.questionNumber === model.questionNumber);
   const before = question?.scoreAfter ?? { left: game.left.points, right: game.right.points };
   const previous = game.questions.find((candidate) => candidate.questionNumber === model.questionNumber - 1);
@@ -92,6 +100,7 @@ export default function QuestionEditor(props: {
   };
 
   const setBonus = (next: Partial<IEditableBonus>) => {
+    setBonusDrafts({ parts: {} });
     setModel((current) => {
       const existing = current.bonus ?? {
         team: 'left' as const,
@@ -102,8 +111,36 @@ export default function QuestionEditor(props: {
     });
   };
 
+  const updateBonusTotal = (field: 'controlledPoints' | 'bouncebackPoints', raw: string) => {
+    setBonusDrafts((current) => ({ ...current, [field === 'controlledPoints' ? 'controlled' : 'bounceback']: raw }));
+    const parsed = Number(raw);
+    if (raw.trim() === '' || !Number.isFinite(parsed)) return;
+    setBonus({ [field]: parsed, parts: undefined });
+  };
+
+  const updateBonusPart = (index: number, field: 'controlledPoints' | 'bouncebackPoints', raw: string) => {
+    const key = `${index}-${field}`;
+    setBonusDrafts((current) => ({ ...current, parts: { ...current.parts, [key]: raw } }));
+    const parsed = Number(raw);
+    if (raw.trim() === '' || !Number.isFinite(parsed)) return;
+    setModel((current) => {
+      if (!current.bonus?.parts) return current;
+      const parts = current.bonus.parts.map((part, partIndex) =>
+        partIndex === index ? { ...part, [field]: parsed } : part,
+      );
+      return { ...current, bonus: syncBonus(current.bonus, parts) };
+    });
+  };
+
   const save = () => {
-    const nextErrors = validateEditableQuestion(format, game, model);
+    const draftErrors = Object.entries({
+      controlled: bonusDrafts.controlled,
+      bounceback: bonusDrafts.bounceback,
+      ...Object.fromEntries(Object.entries(bonusDrafts.parts).map(([key, value]) => [`part-${key}`, value])),
+    })
+      .filter(([, value]) => value !== undefined && (value.trim() === '' || !Number.isFinite(Number(value))))
+      .map(([field]) => `Enter a valid number for ${field.replace(/-/g, ' ')}.`);
+    const nextErrors = [...draftErrors, ...validateEditableQuestion(format, game, model)];
     setErrors(nextErrors);
     if (nextErrors.length === 0 && onSave(model)) onCancel();
   };
@@ -210,6 +247,7 @@ export default function QuestionEditor(props: {
                       return { ...current, attempts };
                     })
                   }
+                  aria-label={`Move attempt ${index + 1} earlier`}
                 >
                   Up
                 </button>
@@ -224,6 +262,7 @@ export default function QuestionEditor(props: {
                       return { ...current, attempts };
                     })
                   }
+                  aria-label={`Move attempt ${index + 1} later`}
                 >
                   Down
                 </button>
@@ -300,8 +339,8 @@ export default function QuestionEditor(props: {
                 id={`question-${model.questionNumber}-bonus-controlled`}
                 aria-label="Points"
                 type="number"
-                value={model.bonus.controlledPoints}
-                onChange={(event) => setBonus({ controlledPoints: Number(event.target.value), parts: undefined })}
+                value={bonusDrafts.controlled ?? String(model.bonus.controlledPoints)}
+                onChange={(event) => updateBonusTotal('controlledPoints', event.target.value)}
               />
             </label>
             <label htmlFor={`question-${model.questionNumber}-bonus-bounceback`}>
@@ -310,9 +349,9 @@ export default function QuestionEditor(props: {
                 id={`question-${model.questionNumber}-bonus-bounceback`}
                 aria-label="Bonus bounceback points"
                 type="number"
-                value={model.bonus.bouncebackPoints}
+                value={bonusDrafts.bounceback ?? String(model.bonus.bouncebackPoints)}
                 disabled={!format.bonus.bounceBack}
-                onChange={(event) => setBonus({ bouncebackPoints: Number(event.target.value), parts: undefined })}
+                onChange={(event) => updateBonusTotal('bouncebackPoints', event.target.value)}
               />
             </label>
             {format.bonus.regular && (
@@ -341,29 +380,15 @@ export default function QuestionEditor(props: {
                     <input
                       aria-label={`Bonus part ${index + 1} controlled points`}
                       type="number"
-                      value={part.controlledPoints}
-                      onChange={(event) => {
-                        const parts = model.bonus?.parts?.map((current, partIndex) =>
-                          partIndex === index ? { ...current, controlledPoints: Number(event.target.value) } : current,
-                        );
-                        if (model.bonus && parts)
-                          setModel((current) => ({ ...current, bonus: syncBonus(model.bonus!, parts) }));
-                      }}
+                      value={bonusDrafts.parts[`${index}-controlledPoints`] ?? String(part.controlledPoints)}
+                      onChange={(event) => updateBonusPart(index, 'controlledPoints', event.target.value)}
                     />
                     {format.bonus.bounceBack && (
                       <input
                         aria-label={`Bonus part ${index + 1} bounceback points`}
                         type="number"
-                        value={part.bouncebackPoints ?? 0}
-                        onChange={(event) => {
-                          const parts = model.bonus?.parts?.map((current, partIndex) =>
-                            partIndex === index
-                              ? { ...current, bouncebackPoints: Number(event.target.value) }
-                              : current,
-                          );
-                          if (model.bonus && parts)
-                            setModel((current) => ({ ...current, bonus: syncBonus(model.bonus!, parts) }));
-                        }}
+                        value={bonusDrafts.parts[`${index}-bouncebackPoints`] ?? String(part.bouncebackPoints ?? 0)}
+                        onChange={(event) => updateBonusPart(index, 'bouncebackPoints', event.target.value)}
                       />
                     )}
                   </div>
@@ -392,10 +417,5 @@ export default function QuestionEditor(props: {
 }
 
 function conversionTeam(model: IEditableQuestion, format: IScorekeeperFormat): 'left' | 'right' | undefined {
-  return model.attempts.find(
-    (attempt) =>
-      attempt.kind === 'buzz' &&
-      attempt.answerTypeIndex !== undefined &&
-      (format.answerTypes[attempt.answerTypeIndex]?.value ?? 0) > 0,
-  )?.team;
+  return conversion(model, format)?.team;
 }

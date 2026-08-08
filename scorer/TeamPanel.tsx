@@ -104,7 +104,7 @@ export default function TeamPanel(props: ITeamPanelProps) {
                 className="scorer-answer scorer-answer-zero"
                 disabled={!scoringEnabled || !eligible}
                 onClick={() => onWrongNoPenalty(player.name)}
-                aria-label={`${player.name} wrong, no penalty`}
+                aria-label={`${player.name} ${negsAvailable ? '0 after readout' : '0'} wrong, no penalty`}
                 title={negsAvailable ? 'Wrong answer after readout, no penalty' : 'Wrong answer, no penalty'}
               >
                 {negsAvailable ? '0 after readout' : '0'}

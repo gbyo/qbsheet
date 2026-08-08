@@ -4,7 +4,7 @@ import { IScorekeeperFormat } from '../../renderer/Services/ScorekeeperFormat';
 import { IDerivedGame } from '../scoring/deriveGame';
 import { ScoreEvent } from '../scoring/ScoreEvents';
 import { editableQuestionFromEvents, IEditableQuestion } from '../scoring/questionCorrection';
-import { bonusTotalProblem, lightningTotalProblem } from './bonusOptions';
+import { bonusScoreProblem, lightningTotalProblem } from './bonusOptions';
 import QuestionEditor from './QuestionEditor';
 import ScorerDialog from './ScorerDialog';
 import { readScorerRecovery } from './ScorerRecovery';
@@ -122,14 +122,6 @@ export function FlagDialog(props: {
   onClose: () => void;
 }) {
   const { onProtest, onIssue, onClose } = props;
-  const issueChoices: HelpRequestCategory[] = [
-    'question-packet',
-    'scoring-problem',
-    'equipment-technical',
-    'rules-question',
-    'roster-change',
-    'other',
-  ];
   return (
     <ScorerDialog title="Flag" onClose={onClose}>
       <p className="scorer-dialog-note">
@@ -139,7 +131,7 @@ export function FlagDialog(props: {
         <button type="button" className="scorer-choice" onClick={onProtest}>
           Protest / disputed ruling
         </button>
-        {issueChoices.map((category) => (
+        {issueCategories.map((category) => (
           <button key={category} type="button" className="scorer-choice" onClick={() => onIssue(category)}>
             {helpRequestCategoryLabels[category]}
           </button>
@@ -153,7 +145,7 @@ function signed(value: number): string {
   return value > 0 ? `+${value}` : String(value);
 }
 
-function eventDescription(event: ScoreEvent, format: IScorekeeperFormat): string {
+export function eventDescription(event: ScoreEvent, format: IScorekeeperFormat, game: IDerivedGame): string {
   if (event.type === 'tossup-buzz') {
     const value = format.answerTypes[event.answerTypeIndex]?.value;
     return `${event.playerName} ${value === undefined ? 'unknown ruling' : signed(value)}`;
@@ -179,8 +171,8 @@ function eventDescription(event: ScoreEvent, format: IScorekeeperFormat): string
   if (event.type === 'half-resume') return 'Score confirmed at the break';
   if (event.type === 'begin-overtime') return 'Begin overtime';
   if (event.type === 'begin-sudden-death') return 'Begin sudden death';
-  if (event.type === 'timeout') return `Timeout: ${event.team}`;
-  if (event.type === 'timeout-start') return `Timeout started: ${event.team}`;
+  if (event.type === 'timeout') return `Timeout: ${game[event.team].name}`;
+  if (event.type === 'timeout-start') return `Timeout started: ${game[event.team].name}`;
   if (event.type === 'timeout-resume') return 'Timeout ended · play resumed';
   if (event.type === 'protest')
     return `Protest (${event.team}, ${event.status}): ${event.description}${
@@ -261,7 +253,7 @@ function EditableEvent(props: {
       }
       const controlled = Number(points);
       const bounced = Number(bounceback);
-      const reason = bonusTotalProblem(format.bonus, controlled) ?? bonusTotalProblem(format.bonus, bounced);
+      const reason = bonusScoreProblem(format.bonus, controlled, bounced);
       if (reason) {
         setProblem(reason);
         return;
@@ -524,18 +516,17 @@ export function ScoresheetReviewDialog(props: {
                         );
                         return (
                           <li key={event.id} className="scorer-review-event">
-                            <span>{eventDescription(event, format)}</span>
+                            <span>{eventDescription(event, format, game)}</span>
                             <span className="scorer-review-actions">
-                              {!cycleEvent &&
-                                ['substitution', 'adjustment', 'lightning', 'note'].includes(event.type) && (
-                                  <button
-                                    type="button"
-                                    className="scorer-text-action"
-                                    onClick={() => setEditing(event.id)}
-                                  >
-                                    Edit
-                                  </button>
-                                )}
+                              {['substitution', 'adjustment', 'lightning', 'note'].includes(event.type) && (
+                                <button
+                                  type="button"
+                                  className="scorer-text-action"
+                                  onClick={() => setEditing(event.id)}
+                                >
+                                  Edit
+                                </button>
+                              )}
                               {!cycleEvent && (
                                 <button
                                   type="button"

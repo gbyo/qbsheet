@@ -1,7 +1,12 @@
 import { IScorekeeperFormat } from '../../renderer/Services/ScorekeeperFormat';
-import { IRoomProcedure, protestCheckpointPolicy } from '../../renderer/Services/RoomProcedure';
+import {
+  IRoomProcedure,
+  protestBlocksCheckpoint,
+  protestCheckpointPolicy,
+} from '../../renderer/Services/RoomProcedure';
 import deriveGame, { IGameSetup, IDerivedGame, IDerivedQuestion } from './deriveGame';
 import { bonusEventPoints, ScoreEvent, usesTossupOpportunity } from './ScoreEvents';
+import { bonusPartProblem, bonusScoreProblem } from '../scorer/bonusOptions';
 
 export type ScoresheetProblemSeverity = 'blocker' | 'warning';
 
@@ -231,25 +236,7 @@ function validateRuntimeShape(events: readonly ScoreEvent[], format: IScorekeepe
     const { questionNumber } = event;
     if (!isDerivableEvent(candidate, format)) {
       problems.push(problem('blocker', 'malformed-event', 'A scoring record contains invalid required data.'));
-    }
-    if (typeof event.id !== 'string' || event.id.trim() === '' || ids.has(event.id)) {
-      problems.push(
-        problem('blocker', 'malformed-event-id', 'The scoresheet contains a missing or duplicate event id.'),
-      );
-    } else ids.add(event.id);
-    if (typeof event.type !== 'string' || !Number.isInteger(questionNumber) || Number(questionNumber) < 1) {
-      problems.push(problem('blocker', 'malformed-event', 'A scoring record has missing required question data.'));
-      continue;
-    }
-    if (event.type === 'tossup-buzz') {
-      if (
-        (event.team !== 'left' && event.team !== 'right') ||
-        typeof event.playerName !== 'string' ||
-        event.playerName.trim() === '' ||
-        !Number.isInteger(event.answerTypeIndex) ||
-        Number(event.answerTypeIndex) < 0 ||
-        !format.answerTypes.some((answerType) => answerType.index === event.answerTypeIndex)
-      ) {
+      if (event.type === 'tossup-buzz' && Number.isInteger(questionNumber)) {
         problems.push(
           problem(
             'blocker',
@@ -259,32 +246,7 @@ function validateRuntimeShape(events: readonly ScoreEvent[], format: IScorekeepe
           ),
         );
       }
-    }
-    if (event.type === 'bonus') {
-      const bonus = event as Extract<ScoreEvent, { type: 'bonus' }>;
-      const { parts } = bonus;
-      const partsValid =
-        parts === undefined ||
-        (Array.isArray(parts) &&
-          parts.length > 0 &&
-          parts.every(
-            (part) =>
-              typeof part === 'object' &&
-              part !== null &&
-              typeof part.controlledPoints === 'number' &&
-              Number.isFinite(part.controlledPoints) &&
-              (part.bouncebackPoints === undefined ||
-                (typeof part.bouncebackPoints === 'number' && Number.isFinite(part.bouncebackPoints))),
-          ));
-      if (
-        (bonus.team !== 'left' && bonus.team !== 'right') ||
-        (bonus.parts === undefined && typeof bonus.controlledPoints !== 'number') ||
-        !partsValid ||
-        (bonus.controlledPoints !== undefined &&
-          (typeof bonus.controlledPoints !== 'number' || !Number.isFinite(bonus.controlledPoints))) ||
-        (bonus.bouncebackPoints !== undefined &&
-          (typeof bonus.bouncebackPoints !== 'number' || !Number.isFinite(bonus.bouncebackPoints)))
-      ) {
+      if (event.type === 'bonus' && Number.isInteger(questionNumber)) {
         problems.push(
           problem(
             'blocker',
@@ -294,6 +256,15 @@ function validateRuntimeShape(events: readonly ScoreEvent[], format: IScorekeepe
           ),
         );
       }
+    }
+    if (typeof event.id !== 'string' || event.id.trim() === '' || ids.has(event.id)) {
+      problems.push(
+        problem('blocker', 'malformed-event-id', 'The scoresheet contains a missing or duplicate event id.'),
+      );
+    } else ids.add(event.id);
+    if (typeof event.type !== 'string' || !Number.isInteger(questionNumber) || Number(questionNumber) < 1) {
+      problems.push(problem('blocker', 'malformed-event', 'A scoring record has missing required question data.'));
+      continue;
     }
   }
   return problems;
@@ -510,35 +481,14 @@ function validateQuestion(
 
   if (bonus) {
     const [controlled, bounceback] = bonusEventPoints(bonus);
-    if (!Number.isFinite(controlled) || !Number.isFinite(bounceback) || controlled < 0 || bounceback < 0) {
+    const scoreProblem = bonusScoreProblem(format.bonus, controlled, bounceback);
+    if (scoreProblem) {
       addUnique(
         blockers,
         problem(
           'blocker',
           'invalid-bonus-total',
-          `Question ${questionNumber} has an impossible bonus total.`,
-          questionNumber,
-        ),
-      );
-    }
-    if (!format.bonus.bounceBack && bounceback !== 0) {
-      addUnique(
-        blockers,
-        problem(
-          'blocker',
-          'illegal-bounceback',
-          `Question ${questionNumber} has bounceback points in a format that does not allow them.`,
-          questionNumber,
-        ),
-      );
-    }
-    if (controlled + bounceback > format.bonus.maximumScore) {
-      addUnique(
-        blockers,
-        problem(
-          'blocker',
-          'bonus-overflow',
-          `Question ${questionNumber} awards more bonus points than the format permits.`,
+          `Question ${questionNumber} has an impossible bonus total: ${scoreProblem}`,
           questionNumber,
         ),
       );
@@ -557,6 +507,15 @@ function validateQuestion(
       }
       const partsControlled = bonus.parts.reduce((sum, part) => sum + part.controlledPoints, 0);
       const partsBounceback = bonus.parts.reduce((sum, part) => sum + (part.bouncebackPoints ?? 0), 0);
+      for (const part of bonus.parts) {
+        const partProblem = bonusPartProblem(format.bonus, part.controlledPoints, part.bouncebackPoints ?? 0);
+        if (partProblem) {
+          addUnique(
+            blockers,
+            problem('blocker', 'invalid-bonus-part', `Question ${questionNumber}: ${partProblem}`, questionNumber),
+          );
+        }
+      }
       if (
         (bonus.controlledPoints !== undefined && bonus.controlledPoints !== partsControlled) ||
         (bonus.bouncebackPoints !== undefined && bonus.bouncebackPoints !== partsBounceback)
@@ -708,7 +667,8 @@ export default function validateScoresheet(
     );
   }
   for (const protest of game.protests.filter((entry) => entry.status === 'open')) {
-    const strict = protestCheckpointPolicy(procedure) !== 'none';
+    const policy = protestCheckpointPolicy(procedure);
+    const strict = protestBlocksCheckpoint(policy, 'overtime') || protestBlocksCheckpoint(policy, 'sudden-death');
     addUnique(
       strict ? blockers : warnings,
       problem(
@@ -741,12 +701,14 @@ export function validateCorrectedHistory(
     game.phase.kind === 'tossup' || game.phase.kind === 'bonus' || game.phase.kind === 'timeout'
       ? game.phase.questionNumber
       : undefined;
-  if (currentQuestion === undefined) return validation;
   const allowedCodes = new Set(['unfinished-cycle', 'missing-derived-bonus', 'missing-bonus', 'game-not-complete']);
   const blockers = validation.blockers.filter(
     (candidate) =>
-      !(candidate.questionNumber === currentQuestion && allowedCodes.has(candidate.code)) &&
-      candidate.code !== 'game-not-complete',
+      !(
+        currentQuestion !== undefined &&
+        candidate.questionNumber === currentQuestion &&
+        allowedCodes.has(candidate.code)
+      ) && candidate.code !== 'game-not-complete',
   );
   return { ...validation, blockers, valid: blockers.length === 0 };
 }

@@ -36,6 +36,9 @@ export interface IPlayersDialogProps {
   /** Whether the current procedure allows a lineup change at this point in the game. */
   // eslint-disable-next-line react/require-default-props
   lineupChangeAllowed?: boolean;
+  /** Roster additions remain possible during a restricted live substitution phase. */
+  // eslint-disable-next-line react/require-default-props
+  rosterAdditionAllowed?: boolean;
   /** Shown when the roster can be viewed but the procedure does not permit changing it yet. */
   // eslint-disable-next-line react/require-default-props
   lineupChangeReason?: string;
@@ -62,6 +65,7 @@ function TeamLineup(props: {
   timeoutsUsed: number;
   timeoutsPerTeam: number;
   lineupChangeAllowed: boolean;
+  rosterAdditionAllowed: boolean;
   // eslint-disable-next-line react/require-default-props
   onRequestControl?: (team: LeftOrRight, playerName: string) => void;
 }) {
@@ -75,6 +79,7 @@ function TeamLineup(props: {
     timeoutsUsed,
     timeoutsPerTeam,
     lineupChangeAllowed,
+    rosterAdditionAllowed,
     onRequestControl,
   } = props;
   const [selected, setSelected] = useState<string[]>(team.activePlayers);
@@ -171,8 +176,8 @@ function TeamLineup(props: {
         className="scorer-add-player"
         onSubmit={(submitEvent) => {
           submitEvent.preventDefault();
-          if (!lineupChangeAllowed || !canAdd) return;
-          const nextActive = atCapacity ? selected : selected.concat(cleanNewPlayer);
+          if (!rosterAdditionAllowed || !canAdd) return;
+          const nextActive = lineupChangeAllowed && !atCapacity ? selected.concat(cleanNewPlayer) : selected;
           onAddPlayer(side, cleanNewPlayer, nextActive);
         }}
       >
@@ -186,8 +191,8 @@ function TeamLineup(props: {
             onChange={(event) => setNewPlayer(event.target.value)}
           />
         </label>
-        <button type="submit" className="scorer-choice" disabled={!lineupChangeAllowed || !canAdd}>
-          Add{atCapacity ? ' to bench' : ' and activate'}
+        <button type="submit" className="scorer-choice" disabled={!rosterAdditionAllowed || !canAdd}>
+          Add{!lineupChangeAllowed || atCapacity ? ' to bench' : ' and activate'}
         </button>
       </form>
     </section>
@@ -206,6 +211,7 @@ export default function PlayersDialog(props: IPlayersDialogProps) {
     timeouts = { left: 0, right: 0 },
     timeoutsPerTeam = 0,
     lineupChangeAllowed = true,
+    rosterAdditionAllowed = true,
     lineupChangeReason,
     onRequestControl,
     onClose,
@@ -216,6 +222,7 @@ export default function PlayersDialog(props: IPlayersDialogProps) {
       <p className="scorer-dialog-note">
         Changes apply starting Tossup {questionNumber}.
         {!lineupChangeAllowed && <> {lineupChangeReason ?? 'Lineup changes are not available at this checkpoint.'}</>}
+        {!lineupChangeAllowed && rosterAdditionAllowed && <> Added players remain on the bench until that window.</>}
       </p>
       <div className="scorer-lineups">
         <TeamLineup
@@ -228,6 +235,7 @@ export default function PlayersDialog(props: IPlayersDialogProps) {
           timeoutsUsed={timeouts.left}
           timeoutsPerTeam={timeoutsPerTeam}
           lineupChangeAllowed={lineupChangeAllowed}
+          rosterAdditionAllowed={rosterAdditionAllowed}
           onRequestControl={onRequestControl}
         />
         <TeamLineup
@@ -240,6 +248,7 @@ export default function PlayersDialog(props: IPlayersDialogProps) {
           timeoutsUsed={timeouts.right}
           timeoutsPerTeam={timeoutsPerTeam}
           lineupChangeAllowed={lineupChangeAllowed}
+          rosterAdditionAllowed={rosterAdditionAllowed}
           onRequestControl={onRequestControl}
         />
       </div>
