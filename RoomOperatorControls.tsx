@@ -25,6 +25,10 @@ interface IRoomOperatorControlsProps {
 const categories: Array<[HelpRequestCategory, string]> = [
   ['wrong-matchup', helpRequestCategoryLabels['wrong-matchup']],
   ['team-missing', helpRequestCategoryLabels['team-missing']],
+  ['protest', helpRequestCategoryLabels.protest],
+  ['question-packet', helpRequestCategoryLabels['question-packet']],
+  ['roster-change', helpRequestCategoryLabels['roster-change']],
+  ['equipment-technical', helpRequestCategoryLabels['equipment-technical']],
   ['rules-question', helpRequestCategoryLabels['rules-question']],
   ['scoring-problem', helpRequestCategoryLabels['scoring-problem']],
   ['device-network', helpRequestCategoryLabels['device-network']],

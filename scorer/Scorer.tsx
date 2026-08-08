@@ -20,6 +20,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { LeftOrRight } from '../../renderer/Utils/UtilTypes';
+import { HelpRequestCategory } from '../../main/server/ServerTypes';
 import { IScorekeeperAnswerType, IScorekeeperFormat } from '../../renderer/Services/ScorekeeperFormat';
 import deriveGame, { IGameSetup } from '../scoring/deriveGame';
 import { ScoreEvent } from '../scoring/ScoreEvents';
@@ -32,6 +33,9 @@ import GameMenu, { IGameMenuItem } from './GameMenu';
 import PlayersDialog from './PlayersDialog';
 import { AdjustDialog, ForfeitDialog, LightningDialog, NotesDialog } from './GameDialogs';
 import { IGameEventsApi, newEventId } from './useGameEvents';
+import { IssueDialog, RecoveryDialog, ScoresheetReviewDialog } from './OperationsDialogs';
+import { attachScorerRecovery } from './ScorerRecovery';
+import { downloadCurrentQbj } from '../QbjBackup';
 
 export interface IScorerSubmitResult {
   ok: boolean;
@@ -65,9 +69,18 @@ export interface IScorerProps {
   /** Round number and the rest of the non-scoring metadata for the exported match. */
   // eslint-disable-next-line react/require-default-props
   qbjMeta?: IQbjMatchMeta;
+  /** Sends an operational issue to tournament control for the assigned-room workflow. */
+  // eslint-disable-next-line react/require-default-props
+  onRequestControl?: (category: HelpRequestCategory, message: string) => Promise<void>;
+  /** True while this room already has an open request in control's queue. */
+  // eslint-disable-next-line react/require-default-props
+  controlRequestPending?: boolean;
+  /** The event list was restored automatically from local storage. */
+  // eslint-disable-next-line react/require-default-props
+  recovered?: boolean;
 }
 
-type OpenDialog = 'players' | 'lightning' | 'notes' | 'adjust' | 'forfeit' | null;
+type OpenDialog = 'players' | 'lightning' | 'notes' | 'adjust' | 'forfeit' | 'issue' | 'review' | 'recovery' | null;
 
 /** How often, at most, to tell tournament control how the game is going. Matches MODAQ's old timer. */
 const progressIntervalMs = 5000;
@@ -99,15 +112,24 @@ export default function Scorer(props: IScorerProps) {
     onDownload,
     onProgress,
     qbjMeta,
+    onRequestControl,
+    controlRequestPending = false,
+    recovered = false,
   } = props;
 
   const [dialog, setDialog] = useState<OpenDialog>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitResult, setSubmitResult] = useState<IScorerSubmitResult | null>(null);
+  const [operationNotice, setOperationNotice] = useState(
+    recovered ? 'Recovered the in-progress game saved on this device.' : '',
+  );
 
   const game = useMemo(() => deriveGame(format, setup, events.events), [format, setup, events.events]);
   const { phase } = game;
-  const qbj = useMemo(() => toQbjMatch(format, game, qbjMeta), [format, game, qbjMeta]);
+  const qbj = useMemo(
+    () => attachScorerRecovery(toQbjMatch(format, game, qbjMeta), setup, events.events),
+    [format, game, qbjMeta, setup, events.events],
+  );
 
   /** The question anything recorded now belongs to. */
   const currentQuestion = phase.kind === 'complete' ? game.tossupsRead : phase.questionNumber;
@@ -229,6 +251,8 @@ export default function Scorer(props: IScorerProps) {
   const menuItems: IGameMenuItem[] = [
     { label: 'Players', onSelect: () => setDialog('players') },
     { label: 'Notes', onSelect: () => setDialog('notes') },
+    { label: 'Issue / tournament control', onSelect: () => setDialog('issue') },
+    { label: 'Full scoresheet review', onSelect: () => setDialog('review') },
   ];
   if (format.lightning.enabled)
     menuItems.push({ label: 'Lightning / worksheet', onSelect: () => setDialog('lightning') });
@@ -238,7 +262,20 @@ export default function Scorer(props: IScorerProps) {
       onSelect: () => record({ id: newEventId(), type: 'end-regulation', questionNumber: currentQuestion }),
     });
   }
-  if (onDownload) menuItems.push({ label: 'Download QBJ', onSelect: () => onDownload(qbj) });
+  const downloadQbj = () => {
+    if (onDownload) onDownload(qbj);
+    else {
+      downloadCurrentQbj(qbj, {
+        roundName,
+        roundNumber: qbjMeta?.round,
+        roomName,
+        leftTeam: game.left.name,
+        rightTeam: game.right.name,
+      });
+    }
+  };
+  menuItems.push({ label: 'Download QBJ backup', onSelect: downloadQbj });
+  menuItems.push({ label: 'Recover from QBJ', onSelect: () => setDialog('recovery') });
   menuItems.push({ label: 'Adjust score', onSelect: () => setDialog('adjust') });
   if (phase.kind !== 'complete') {
     menuItems.push({ label: 'Record forfeit', onSelect: () => setDialog('forfeit'), destructive: true });
@@ -281,6 +318,10 @@ export default function Scorer(props: IScorerProps) {
           This device could not save the game locally. Do not reload the page &mdash; the questions scored so far exist
           only on this screen.
         </p>
+      )}
+      {operationNotice && <p className="scorer-banner is-info">{operationNotice}</p>}
+      {controlRequestPending && (
+        <p className="scorer-banner is-info">Tournament control has this room&apos;s request.</p>
       )}
 
       <div className="scorer-body">
@@ -352,11 +393,9 @@ export default function Scorer(props: IScorerProps) {
                   <button type="button" className="scorer-submit" onClick={submit} disabled={submitting}>
                     {submitting ? 'Sending…' : 'Submit result'}
                   </button>
-                  {onDownload && (
-                    <button type="button" className="scorer-action" onClick={() => onDownload(qbj)}>
-                      Download QBJ
-                    </button>
-                  )}
+                  <button type="button" className="scorer-action" onClick={downloadQbj}>
+                    Download QBJ backup
+                  </button>
                 </div>
                 {submitResult && (
                   <p className={submitResult.ok ? 'scorer-complete-ok' : 'scorer-complete-warning'}>
@@ -393,6 +432,27 @@ export default function Scorer(props: IScorerProps) {
           onSubstitute={(team, activePlayers) => {
             record({ id: newEventId(), type: 'substitution', questionNumber: currentQuestion, team, activePlayers });
             setDialog(null);
+          }}
+          onAddPlayer={(team, playerName, activePlayers) => {
+            const teamName = team === 'left' ? game.left.name : game.right.name;
+            const message = `Added ${playerName} to ${teamName} during the game at question ${currentQuestion}.`;
+            record(
+              { id: newEventId(), type: 'roster-add', questionNumber: currentQuestion, team, playerName },
+              { id: newEventId(), type: 'substitution', questionNumber: currentQuestion, team, activePlayers },
+              { id: newEventId(), type: 'note', questionNumber: currentQuestion, text: message, flagged: true },
+            );
+            setDialog(null);
+            if (onRequestControl && !controlRequestPending) {
+              onRequestControl('roster-change', message)
+                .then(() => setOperationNotice('Roster addition saved and sent to tournament control.'))
+                .catch(() =>
+                  setOperationNotice(
+                    'Roster addition is saved in this game, but tournament control could not be reached.',
+                  ),
+                );
+            } else {
+              setOperationNotice('Roster addition saved in this game.');
+            }
           }}
           onClose={() => setDialog(null)}
         />
@@ -434,6 +494,59 @@ export default function Scorer(props: IScorerProps) {
           onForfeit={(teams) => {
             record({ id: newEventId(), type: 'forfeit', questionNumber: currentQuestion, teams });
             setDialog(null);
+          }}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog === 'issue' && (
+        <IssueDialog
+          questionNumber={currentQuestion}
+          controlAvailable={onRequestControl !== undefined}
+          requestPending={controlRequestPending}
+          onReport={async (category, details, requestControl) => {
+            let label = 'Issue';
+            if (category === 'protest') label = 'Protest';
+            else if (category === 'question-packet') label = 'Question / packet issue';
+            let controlSent = false;
+            if (requestControl && onRequestControl) {
+              try {
+                await onRequestControl(category, details);
+                controlSent = true;
+              } catch {
+                controlSent = false;
+              }
+            }
+            record({
+              id: newEventId(),
+              type: 'note',
+              questionNumber: currentQuestion,
+              text: `${label}: ${details}`,
+              flagged: true,
+            });
+            if (controlSent) setOperationNotice('Issue saved and sent to tournament control.');
+            else if (requestControl)
+              setOperationNotice('Issue saved on the scoresheet, but tournament control could not be reached.');
+            else setOperationNotice('Issue saved on the scoresheet.');
+          }}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog === 'review' && (
+        <ScoresheetReviewDialog
+          game={game}
+          events={events.events}
+          format={format}
+          onReplace={events.replace}
+          onRemove={events.remove}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog === 'recovery' && (
+        <RecoveryDialog
+          expectedTeams={setup}
+          onRestore={(restoredEvents) => {
+            events.restore(restoredEvents);
+            setOperationNotice('Recovered the scoresheet from the QBJ backup.');
           }}
           onClose={() => setDialog(null)}
         />

@@ -129,6 +129,13 @@ export interface ISubstitutionEvent extends IScoreEventBase {
   activePlayers: string[];
 }
 
+/** A player added to the available roster in the room during this game. */
+export interface IRosterAddEvent extends IScoreEventBase {
+  type: 'roster-add';
+  team: LeftOrRight;
+  playerName: string;
+}
+
 /** The moderator called time. Only meaningful for a timed format. */
 export interface IEndRegulationEvent extends IScoreEventBase {
   type: 'end-regulation';
@@ -169,6 +176,7 @@ export type ScoreEvent =
   | IBonusEvent
   | ILightningEvent
   | ISubstitutionEvent
+  | IRosterAddEvent
   | IEndRegulationEvent
   | IAdjustmentEvent
   | IForfeitEvent

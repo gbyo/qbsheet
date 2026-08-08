@@ -251,7 +251,13 @@ export default function deriveGame(format: IScorekeeperFormat, setup: IGameSetup
     // Substitutions take effect from the cycle they were recorded on, so they are applied before
     // this cycle's tossups heard are counted.
     for (const event of cycleEvents) {
-      if (event.type === 'substitution') teams[event.team].activePlayers = event.activePlayers.slice();
+      if (event.type === 'roster-add') playerRecord(event.team, event.playerName);
+      if (event.type === 'substitution') {
+        teams[event.team].activePlayers = event.activePlayers.slice();
+        // A player added in the room first appears in a lineup event. Materialize them immediately
+        // so they are available on the scoring screen before this tossup has been resolved.
+        for (const name of event.activePlayers) playerRecord(event.team, name);
+      }
     }
 
     const buzzes: IDerivedBuzz[] = [];

@@ -12,10 +12,12 @@ export interface IScorerDialogProps {
   title: string;
   onClose: () => void;
   children: ReactNode;
+  // eslint-disable-next-line react/require-default-props
+  wide?: boolean;
 }
 
 export default function ScorerDialog(props: IScorerDialogProps) {
-  const { title, onClose, children } = props;
+  const { title, onClose, children, wide = false } = props;
   const panel = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -37,7 +39,13 @@ export default function ScorerDialog(props: IScorerDialogProps) {
         if (clickEvent.target === clickEvent.currentTarget) onClose();
       }}
     >
-      <div className="scorer-dialog" role="dialog" aria-modal="true" aria-label={title} ref={panel}>
+      <div
+        className={wide ? 'scorer-dialog is-wide' : 'scorer-dialog'}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        ref={panel}
+      >
         <div className="scorer-dialog-head">
           <h2 className="scorer-dialog-title">{title}</h2>
           <button type="button" className="scorer-action" onClick={onClose}>

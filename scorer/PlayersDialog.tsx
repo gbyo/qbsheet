@@ -22,6 +22,7 @@ export interface IPlayersDialogProps {
   /** The question the change will apply from. */
   questionNumber: number;
   onSubstitute: (team: LeftOrRight, activePlayers: string[]) => void;
+  onAddPlayer: (team: LeftOrRight, playerName: string, activePlayers: string[]) => void;
   onClose: () => void;
 }
 
@@ -30,9 +31,11 @@ function TeamLineup(props: {
   side: LeftOrRight;
   maximumActive: number;
   onSubstitute: (team: LeftOrRight, activePlayers: string[]) => void;
+  onAddPlayer: (team: LeftOrRight, playerName: string, activePlayers: string[]) => void;
 }) {
-  const { team, side, maximumActive, onSubstitute } = props;
+  const { team, side, maximumActive, onSubstitute, onAddPlayer } = props;
   const [selected, setSelected] = useState<string[]>(team.activePlayers);
+  const [newPlayer, setNewPlayer] = useState('');
 
   const toggle = (name: string) => {
     setSelected((current) => {
@@ -45,6 +48,10 @@ function TeamLineup(props: {
   const unchanged =
     selected.length === team.activePlayers.length && selected.every((name) => team.activePlayers.includes(name));
   const atCapacity = selected.length >= maximumActive;
+  const cleanNewPlayer = newPlayer.trim();
+  const canAdd =
+    cleanNewPlayer !== '' &&
+    !team.players.some((player) => player.name.toLocaleLowerCase() === cleanNewPlayer.toLocaleLowerCase());
 
   return (
     <section className="scorer-lineup" aria-label={`${team.name} lineup`}>
@@ -81,19 +88,54 @@ function TeamLineup(props: {
       >
         Apply to {team.name}
       </button>
+      <form
+        className="scorer-add-player"
+        onSubmit={(submitEvent) => {
+          submitEvent.preventDefault();
+          if (!canAdd) return;
+          const nextActive = atCapacity ? selected : selected.concat(cleanNewPlayer);
+          onAddPlayer(side, cleanNewPlayer, nextActive);
+        }}
+      >
+        <label htmlFor={`scorer-add-player-${side}`}>
+          Add player during game
+          <input
+            id={`scorer-add-player-${side}`}
+            value={newPlayer}
+            maxLength={120}
+            placeholder="Player name"
+            onChange={(event) => setNewPlayer(event.target.value)}
+          />
+        </label>
+        <button type="submit" className="scorer-choice" disabled={!canAdd}>
+          Add{atCapacity ? ' to bench' : ' and activate'}
+        </button>
+      </form>
     </section>
   );
 }
 
 export default function PlayersDialog(props: IPlayersDialogProps) {
-  const { left, right, maximumActive, questionNumber, onSubstitute, onClose } = props;
+  const { left, right, maximumActive, questionNumber, onSubstitute, onAddPlayer, onClose } = props;
 
   return (
     <ScorerDialog title="Players" onClose={onClose}>
       <p className="scorer-dialog-note">Changes apply from question {questionNumber}.</p>
       <div className="scorer-lineups">
-        <TeamLineup team={left} side="left" maximumActive={maximumActive} onSubstitute={onSubstitute} />
-        <TeamLineup team={right} side="right" maximumActive={maximumActive} onSubstitute={onSubstitute} />
+        <TeamLineup
+          team={left}
+          side="left"
+          maximumActive={maximumActive}
+          onSubstitute={onSubstitute}
+          onAddPlayer={onAddPlayer}
+        />
+        <TeamLineup
+          team={right}
+          side="right"
+          maximumActive={maximumActive}
+          onSubstitute={onSubstitute}
+          onAddPlayer={onAddPlayer}
+        />
       </div>
     </ScorerDialog>
   );

@@ -28,6 +28,8 @@ export interface IGameEventsApi {
   replace: (id: string, next: ScoreEvent) => void;
   /** Remove an event outright. */
   remove: (id: string) => void;
+  /** Replace the game from a verified recovery file. */
+  restore: (restored: ScoreEvent[]) => void;
   canUndo: boolean;
   canRedo: boolean;
   /** False when the last write to local storage was refused, so nothing promises the game is safe. */
@@ -137,6 +139,17 @@ export default function useGameEvents(
     [persist],
   );
 
+  const restore = useCallback(
+    (restored: ScoreEvent[]) => {
+      undoStack.current = [];
+      redoStack.current = [];
+      const next = restored.map((event) => ({ ...event }));
+      setEvents(next);
+      persist(next);
+    },
+    [persist],
+  );
+
   return useMemo(
     () => ({
       events,
@@ -145,10 +158,11 @@ export default function useGameEvents(
       redo,
       replace,
       remove,
+      restore,
       canUndo: undoStack.current.length > 0,
       canRedo: redoStack.current.length > 0,
       saved,
     }),
-    [events, append, undo, redo, replace, remove, saved],
+    [events, append, undo, redo, replace, remove, restore, saved],
   );
 }

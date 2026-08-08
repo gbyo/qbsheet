@@ -589,6 +589,8 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
         degradedMessage={degradedMessage}
         onSubmit={handleScorerSubmit}
         onProgress={handleScorerProgress}
+        onRequestControl={handleRequestHelp}
+        controlRequestPending={helpRequest !== null && helpRequest.status === 'open'}
         qbjMeta={{
           round: scoring.matchup.roundNumber,
           location: assignment.roomName,

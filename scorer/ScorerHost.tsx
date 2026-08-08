@@ -8,7 +8,7 @@
  */
 import { useState } from 'react';
 import { IScorekeeperFormat } from '../../renderer/Services/ScorekeeperFormat';
-import { IRoomTeam } from '../../main/server/ServerTypes';
+import { IRoomTeam, HelpRequestCategory } from '../../main/server/ServerTypes';
 import { IGameSetup } from '../scoring/deriveGame';
 import { RoomConnectionState } from '../RoomLifecycle';
 import { IQbjMatchMeta } from '../scoring/toQbjMatch';
@@ -36,6 +36,10 @@ export interface IScorerHostProps {
   onProgress?: (qbj: object, questionsPlayed: number) => void;
   // eslint-disable-next-line react/require-default-props
   qbjMeta?: IQbjMatchMeta;
+  // eslint-disable-next-line react/require-default-props
+  onRequestControl?: (category: HelpRequestCategory, message: string) => Promise<void>;
+  // eslint-disable-next-line react/require-default-props
+  controlRequestPending?: boolean;
 }
 
 function toSetup(left: IRoomTeam, right: IRoomTeam): IGameSetup {
@@ -61,6 +65,8 @@ export default function ScorerHost(props: IScorerHostProps) {
     onDownload,
     onProgress,
     qbjMeta,
+    onRequestControl,
+    controlRequestPending,
   } = props;
 
   const [setup] = useState<IGameSetup>(() => toSetup(leftTeam, rightTeam));
@@ -89,6 +95,9 @@ export default function ScorerHost(props: IScorerHostProps) {
       onDownload={onDownload}
       onProgress={onProgress}
       qbjMeta={qbjMeta}
+      onRequestControl={onRequestControl}
+      controlRequestPending={controlRequestPending}
+      recovered={recovered !== null && recovered.events.length > 0}
     />
   );
 }

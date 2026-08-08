@@ -140,3 +140,20 @@ export function downloadOutboxQbj(
     setTimeout(() => environment.revokeObjectURL(url), 10_000);
   }
 }
+
+/** Download the live first-party scoresheet before it has entered the outbox. */
+export function downloadCurrentQbj(
+  qbj: object,
+  details: { roundName?: string; roundNumber?: number; roomName?: string; leftTeam: string; rightTeam: string },
+): boolean {
+  return downloadOutboxQbj(
+    {
+      qbj,
+      roundName: details.roundName,
+      roundNumber: details.roundNumber,
+      leftTeam: details.leftTeam,
+      rightTeam: details.rightTeam,
+    },
+    details.roomName,
+  );
+}
