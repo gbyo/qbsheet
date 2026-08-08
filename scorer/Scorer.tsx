@@ -22,7 +22,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { LeftOrRight } from '../../renderer/Utils/UtilTypes';
 import { HelpRequestCategory } from '../../main/server/ServerTypes';
 import { IScorekeeperAnswerType, IScorekeeperFormat } from '../../renderer/Services/ScorekeeperFormat';
-import { IRoomProcedure, protestCheckpointPolicy, substitutionPolicy } from '../../renderer/Services/RoomProcedure';
+import {
+  IRoomProcedure,
+  lineupChangeAllowedAtPhase,
+  protestBlocksCheckpoint,
+  protestBlocksSuddenDeathTossup,
+  protestCheckpointPolicy,
+  substitutionPolicy,
+} from '../../renderer/Services/RoomProcedure';
 import deriveGame, { IGameSetup, lastPlayedQuestion, lineupChangeEffectiveQuestion } from '../scoring/deriveGame';
 import { IBonusPartResult, ScoreEvent } from '../scoring/ScoreEvents';
 import validateScoresheet from '../scoring/validateScoresheet';
@@ -50,7 +57,7 @@ import { downloadCurrentQbj } from '../QbjBackup';
 import useRoomClock from './useRoomClock';
 import usePlayerSeating from './usePlayerSeating';
 import useScreenWakeLock from './useScreenWakeLock';
-import { formatClock } from './RoomClock';
+import { formatClock, roomClockSegment } from './RoomClock';
 import ScorerBanners, {
   ConnectionDetailDialog,
   IScorerAlert,
@@ -212,7 +219,6 @@ export default function Scorer(props: IScorerProps) {
   const [issueCategory, setIssueCategory] = useState<HelpRequestCategory>('question-packet');
   const [moderatorName, setModeratorName] = useState(qbjMeta?.moderator ?? '');
   const [timeoutNow, setTimeoutNow] = useState(() => Date.now());
-  const roomClock = useRoomClock(gameKey, procedure?.halfLengthMinutes);
   /**
    * What order the two rosters are in on screen.
    *
@@ -223,6 +229,13 @@ export default function Scorer(props: IScorerProps) {
   const seating = usePlayerSeating(gameKey);
 
   const game = useMemo(() => deriveGame(format, setup, events.events), [format, setup, events.events]);
+  const clockSegment = roomClockSegment(
+    procedure?.halves,
+    game.halfBreaks.length,
+    game.awaitingScoreCheck,
+    game.overtimeStarted,
+  );
+  const roomClock = useRoomClock(gameKey, procedure?.halfLengthMinutes, clockSegment);
   const scoresheetValidation = useMemo(
     () => validateScoresheet(format, setup, events.events, procedure),
     [format, setup, events.events, procedure],
@@ -234,6 +247,7 @@ export default function Scorer(props: IScorerProps) {
     pause: pauseRoomClock,
     pauseFor: pauseRoomClockFor,
     resumeAfter: resumeRoomClockAfter,
+    reset: resetRoomClock,
   } = roomClock;
 
   useEffect(() => {
@@ -476,6 +490,18 @@ export default function Scorer(props: IScorerProps) {
     setDialog('replace');
   }, []);
 
+  const openProtests = game.protests.filter((protest) => protest.status === 'open');
+  const playBlockedByProtest =
+    phase.kind === 'tossup' &&
+    phase.period === 'overtime' &&
+    protestBlocksSuddenDeathTossup(
+      protestCheckpointPolicy(procedure),
+      game.suddenDeathStarted,
+      openProtests.length > 0,
+    );
+  const checkpointProtestBlocks = (checkpoint: 'overtime' | 'sudden-death') =>
+    openProtests.length > 0 && protestBlocksCheckpoint(protestCheckpointPolicy(procedure), checkpoint);
+
   // Space records an unanswered tossup, but only when the keyboard is not already aimed at
   // something: with focus on a button, Space is that button, and stealing it would score the wrong
   // thing. Ctrl/Cmd+Z is undo, which is the one shortcut every scorekeeper already expects.
@@ -495,22 +521,15 @@ export default function Scorer(props: IScorerProps) {
         else events.undo();
         return;
       }
-      if (keyEvent.key === ' ' && !inControl && dialog === null && phase.kind === 'tossup') {
+      if (keyEvent.key === ' ' && !inControl && dialog === null && phase.kind === 'tossup' && !playBlockedByProtest) {
         keyEvent.preventDefault();
         recordNoBuzz();
       }
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [events, recordNoBuzz, dialog, phase.kind]);
+  }, [events, recordNoBuzz, dialog, phase.kind, playBlockedByProtest]);
 
-  const openProtests = game.protests.filter((protest) => protest.status === 'open');
-  const playBlockedByProtest =
-    phase.kind === 'tossup' &&
-    phase.period === 'overtime' &&
-    game.suddenDeathStarted &&
-    protestCheckpointPolicy(procedure) === 'strict-overtime' &&
-    openProtests.length > 0;
   const scoringEnabled = phase.kind === 'tossup' && !playBlockedByProtest;
   const eligible = (side: LeftOrRight) =>
     scoringEnabled && phase.kind === 'tossup' && phase.eligibleTeams.includes(side);
@@ -528,14 +547,12 @@ export default function Scorer(props: IScorerProps) {
     noBuzzLabel = `${phase.eligibleTeams[0] === 'left' ? game.left.name : game.right.name} has no answer`;
   }
 
-  const lineupChangeAllowed =
-    phase.kind !== 'complete' &&
-    (substitutionPolicy(procedure) === 'any-boundary' ||
-      phase.kind === 'lineup' ||
-      phase.kind === 'score-check' ||
-      phase.kind === 'checkpoint' ||
-      phase.kind === 'timeout');
-  const lineupChangeReason = 'This procedure allows lineup changes at halftime, timeouts, and phase checkpoints.';
+  const lineupChangeAllowed = lineupChangeAllowedAtPhase(substitutionPolicy(procedure), phase.kind);
+  const rosterAdditionAllowed = phase.kind !== 'complete';
+  const lineupChangeReason =
+    phase.kind === 'complete'
+      ? 'This game is complete. Use scoresheet review to correct historical lineup information.'
+      : 'This procedure allows lineup changes at halftime, timeouts, and phase checkpoints.';
 
   const timeoutDurationMs = (procedure?.timeoutDurationSeconds ?? 0) * 1000;
   const timeoutRemainingMs =
@@ -722,6 +739,11 @@ export default function Scorer(props: IScorerProps) {
                   Resume
                 </button>
               )}
+              {roomClock.state.status === 'expired' && (
+                <button type="button" className="scorer-clock-button" onClick={resetRoomClock}>
+                  Reset
+                </button>
+              )}
             </span>
           )}
           <button
@@ -870,10 +892,7 @@ export default function Scorer(props: IScorerProps) {
                   {openProtests.length > 0 && (
                     <div className="scorer-check-outstanding">
                       <strong>
-                        {(phase.checkpoint === 'overtime' && protestCheckpointPolicy(procedure) !== 'none') ||
-                        (phase.checkpoint === 'sudden-death' &&
-                          (protestCheckpointPolicy(procedure) === 'phase-boundaries' ||
-                            protestCheckpointPolicy(procedure) === 'strict-overtime'))
+                        {checkpointProtestBlocks(phase.checkpoint)
                           ? 'Resolve open protests before continuing.'
                           : 'Open protest recorded; continuing is allowed by this procedure.'}
                       </strong>
@@ -889,13 +908,7 @@ export default function Scorer(props: IScorerProps) {
                     <button
                       type="button"
                       className="scorer-submit"
-                      disabled={
-                        openProtests.length > 0 &&
-                        ((phase.checkpoint === 'overtime' && protestCheckpointPolicy(procedure) !== 'none') ||
-                          (phase.checkpoint === 'sudden-death' &&
-                            (protestCheckpointPolicy(procedure) === 'phase-boundaries' ||
-                              protestCheckpointPolicy(procedure) === 'strict-overtime')))
-                      }
+                      disabled={checkpointProtestBlocks(phase.checkpoint)}
                       onClick={() =>
                         record({
                           id: newEventId(),
@@ -1020,6 +1033,7 @@ export default function Scorer(props: IScorerProps) {
           timeouts={game.timeouts}
           timeoutsPerTeam={procedure?.timeoutsPerTeam ?? 0}
           lineupChangeAllowed={lineupChangeAllowed}
+          rosterAdditionAllowed={rosterAdditionAllowed}
           lineupChangeReason={lineupChangeReason}
           seating={seating.seating}
           onMovePlayer={(team, visibleNames, playerName, direction) =>
@@ -1051,6 +1065,10 @@ export default function Scorer(props: IScorerProps) {
              * added to a full team does only the first. Writing a substitution event that changes
              * nothing would be a lineup change in the history that nobody made — and lineup events
              * are what tossups heard are computed from.
+             *
+             * Compared as a set rather than position by position, because the order of a lineup is
+             * a seating preference and not a fact about the game: two arrangements of the same four
+             * players are the same lineup, and rearranging the rows must not write an event.
              */
             const lineupChanged =
               activePlayers.length !== current.length || activePlayers.some((name) => !current.includes(name));
@@ -1068,7 +1086,29 @@ export default function Scorer(props: IScorerProps) {
             }
             record(...added);
             setDialog(null);
-            if (onSyncRosterPlayer && authoritativeRosters) {
+            /*
+             * A player who joined the bench and one who walked onto the floor need different
+             * sentences: the first is waiting for a substitution window, the second is already
+             * hearing tossups, and telling a scorekeeper the wrong one leaves them either watching
+             * for a change that already happened or expecting one that has not.
+             */
+            if (!lineupChanged) {
+              if (onRequestControl) {
+                setOperationNotice(`Added ${playerName} to the bench; requesting tournament control.`);
+                Promise.resolve()
+                  .then(() => onRequestControl('roster-change', `Please add ${playerName} to ${teamName}.`))
+                  .then(
+                    () => setOperationNotice(`Added ${playerName} to the bench; tournament control was notified.`),
+                    () =>
+                      setOperationNotice(
+                        `Added ${playerName} to the bench for this game. Tournament control could not be reached.`,
+                      ),
+                  )
+                  .catch(() => undefined);
+              } else {
+                setOperationNotice(`Added ${playerName} to the bench; available at the next substitution window.`);
+              }
+            } else if (onSyncRosterPlayer && authoritativeRosters) {
               setOperationNotice(`Added ${playerName} to ${teamName}; syncing with tournament control.`);
             } else if (onRequestControl) {
               setOperationNotice(`Added ${playerName} to ${teamName}; requesting tournament control.`);
@@ -1267,6 +1307,8 @@ export default function Scorer(props: IScorerProps) {
             (reviewFocus === undefined && (phase.kind === 'bonus' || currentCycleHasBonus))
           }
           onReplace={(scope, reason) => {
+            // Resolved once: the note, the void and the message must all be about one question.
+            const questionNumber = reviewFocus ?? currentQuestion;
             /*
              * The void and the note go together as one action: a cycle removed from the scoresheet
              * with no record of why is indistinguishable from a scorekeeper who deleted it by
@@ -1276,14 +1318,14 @@ export default function Scorer(props: IScorerProps) {
               {
                 id: newEventId(),
                 type: 'note',
-                questionNumber: reviewFocus ?? currentQuestion,
+                questionNumber,
                 text: `${scope === 'bonus' ? 'Bonus' : 'Question'} replaced: ${reason}`,
                 flagged: true,
               },
               {
                 id: newEventId(),
                 type: 'question-void',
-                questionNumber: reviewFocus ?? currentQuestion,
+                questionNumber,
                 scope,
                 reason,
               },
@@ -1291,10 +1333,8 @@ export default function Scorer(props: IScorerProps) {
             setDialog(null);
             setOperationNotice(
               scope === 'bonus'
-                ? `The bonus on question ${reviewFocus ?? currentQuestion} was cleared. Score the replacement.`
-                : `Question ${reviewFocus ?? currentQuestion} was cleared. Score the replacement as question ${
-                    reviewFocus ?? currentQuestion
-                  }.`,
+                ? `The bonus on question ${questionNumber} was cleared. Score the replacement.`
+                : `Question ${questionNumber} was cleared. Score the replacement as question ${questionNumber}.`,
             );
           }}
           onClose={() => {

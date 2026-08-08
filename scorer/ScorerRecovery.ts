@@ -140,7 +140,8 @@ export function validEvent(value: unknown): value is ScoreEvent {
   if (event.type === 'timeout-start') {
     return (
       validTeam(event.team) &&
-      (event.startedAt === undefined || (typeof event.startedAt === 'number' && Number.isFinite(event.startedAt)))
+      (event.startedAt === undefined ||
+        (typeof event.startedAt === 'number' && Number.isFinite(event.startedAt) && event.startedAt >= 0))
     );
   }
   if (event.type === 'timeout-resume' || event.type === 'begin-overtime' || event.type === 'begin-sudden-death')

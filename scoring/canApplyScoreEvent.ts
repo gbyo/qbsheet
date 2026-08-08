@@ -25,7 +25,13 @@
  */
 import { LeftOrRight } from '../../renderer/Utils/UtilTypes';
 import { IScorekeeperFormat } from '../../renderer/Services/ScorekeeperFormat';
-import { IRoomProcedure, protestCheckpointPolicy, substitutionPolicy } from '../../renderer/Services/RoomProcedure';
+import {
+  IRoomProcedure,
+  lineupChangeAllowedAtPhase,
+  protestBlocksCheckpoint,
+  protestBlocksSuddenDeathTossup,
+  protestCheckpointPolicy,
+} from '../../renderer/Services/RoomProcedure';
 import deriveGame, { IGameSetup, IDerivedGame, lineupChangeEffectiveQuestion } from './deriveGame';
 import { ScoreEvent, usesTossupOpportunity } from './ScoreEvents';
 
@@ -71,9 +77,11 @@ export default function canApplyScoreEvent(
   const openProtestStopsSuddenDeath =
     phase.kind === 'tossup' &&
     phase.period === 'overtime' &&
-    game.suddenDeathStarted &&
-    protestCheckpointPolicy(procedure) === 'strict-overtime' &&
-    game.protests.some((protest) => protest.status === 'open');
+    protestBlocksSuddenDeathTossup(
+      protestCheckpointPolicy(procedure),
+      game.suddenDeathStarted,
+      game.protests.some((protest) => protest.status === 'open'),
+    );
 
   if (events.some((event) => event.id === candidate.id)) {
     return refuse('That action was already recorded.');
@@ -178,13 +186,7 @@ export default function canApplyScoreEvent(
       if (candidate.questionNumber !== lineupChangeEffectiveQuestion(game, events)) {
         return refuse(`The next safe lineup boundary is Tossup ${lineupChangeEffectiveQuestion(game, events)}.`);
       }
-      if (
-        substitutionPolicy(procedure) === 'breaks-timeouts-overtime' &&
-        phase.kind !== 'lineup' &&
-        phase.kind !== 'score-check' &&
-        phase.kind !== 'checkpoint' &&
-        phase.kind !== 'timeout'
-      ) {
+      if (!lineupChangeAllowedAtPhase(procedure?.substitutionPolicy ?? 'any-boundary', phase.kind)) {
         return refuse('Lineup changes are available at halftime, timeouts, and overtime checkpoints.');
       }
       return allowed;
@@ -217,10 +219,7 @@ export default function canApplyScoreEvent(
       }
       const openProtests = game.protests.filter((protest) => protest.status === 'open');
       const policy = protestCheckpointPolicy(procedure);
-      if (
-        openProtests.length > 0 &&
-        (policy === 'phase-boundaries' || (policy === 'strict-overtime' && expected === 'sudden-death'))
-      ) {
+      if (openProtests.length > 0 && protestBlocksCheckpoint(policy, expected)) {
         return refuse('Resolve the open protest before continuing at this checkpoint.');
       }
       return allowed;
@@ -255,8 +254,18 @@ export default function canApplyScoreEvent(
       const permitted = procedure?.timeoutsPerTeam ?? 0;
       if (permitted <= 0) return refuse('This tournament does not track timeouts.');
       if (game.activeTimeout) return refuse('A timeout is already active.');
-      if (phase.kind === 'lineup' || phase.kind === 'score-check' || phase.kind === 'checkpoint') {
-        return refuse('A timeout is not available at this checkpoint.');
+      if (phase.kind !== 'tossup') return refuse('A timeout is available only before the current tossup begins.');
+      if (candidate.questionNumber !== phase.questionNumber) {
+        return refuse(`That timeout belongs to Tossup ${phase.questionNumber}.`);
+      }
+      if (
+        events.some(
+          (event) =>
+            event.questionNumber === phase.questionNumber &&
+            (event.type === 'tossup-dead' || usesTossupOpportunity(event)),
+        )
+      ) {
+        return refuse('A timeout is only available before the current tossup begins.');
       }
       if (game.timeouts[candidate.team] >= permitted) {
         return refuse(`${game[candidate.team].name} has no timeouts remaining.`);
@@ -269,6 +278,9 @@ export default function canApplyScoreEvent(
 
     case 'timeout-resume':
       if (!game.activeTimeout) return refuse('There is no active timeout to resume.');
+      if (candidate.questionNumber !== game.activeTimeout.questionNumber) {
+        return refuse(`That timeout belongs to Tossup ${game.activeTimeout.questionNumber}.`);
+      }
       return allowed;
 
     case 'end-game-early': {

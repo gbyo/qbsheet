@@ -51,6 +51,15 @@ export interface IPlayersDialogProps {
   /** Whether the current procedure allows a lineup change at this point in the game. */
   // eslint-disable-next-line react/require-default-props
   lineupChangeAllowed?: boolean;
+  /**
+   * Whether somebody may be added to the roster at all.
+   *
+   * Separate from `lineupChangeAllowed` because they are separate acts: a player who has turned up
+   * exists whether or not the procedure lets them on the floor this second, and a room that cannot
+   * write them down has to remember them instead.
+   */
+  // eslint-disable-next-line react/require-default-props
+  rosterAdditionAllowed?: boolean;
   /** Shown when the roster can be viewed but the procedure does not permit changing it yet. */
   // eslint-disable-next-line react/require-default-props
   lineupChangeReason?: string;
@@ -194,6 +203,7 @@ function TeamLineup(props: {
   timeoutsUsed: number;
   timeoutsPerTeam: number;
   lineupChangeAllowed: boolean;
+  rosterAdditionAllowed: boolean;
   seatOrder: readonly string[];
   // eslint-disable-next-line react/require-default-props
   onRequestControl?: (team: LeftOrRight, playerName: string) => void;
@@ -213,6 +223,7 @@ function TeamLineup(props: {
     timeoutsUsed,
     timeoutsPerTeam,
     lineupChangeAllowed,
+    rosterAdditionAllowed,
     seatOrder,
     onRequestControl,
     onMovePlayer,
@@ -368,7 +379,12 @@ function TeamLineup(props: {
             >
               Edit full lineup…
             </button>
-            <button type="button" className="scorer-text-action" onClick={() => setMode({ kind: 'add' })}>
+            <button
+              type="button"
+              className="scorer-text-action"
+              disabled={!rosterAdditionAllowed}
+              onClick={() => setMode({ kind: 'add' })}
+            >
               Add missing player…
             </button>
           </div>
@@ -444,7 +460,7 @@ function TeamLineup(props: {
           className="scorer-lineup-step scorer-add-player"
           onSubmit={(submitEvent) => {
             submitEvent.preventDefault();
-            if (!canAdd) return;
+            if (!rosterAdditionAllowed || !canAdd) return;
             /*
              * Two decisions, kept apart. Adding somebody to the roster is always allowed — a player
              * who turned up late exists whether or not the procedure lets them on right now — and
@@ -479,7 +495,7 @@ function TeamLineup(props: {
             <button type="button" className="scorer-text-action" onClick={() => setMode({ kind: 'idle' })}>
               Cancel
             </button>
-            <button type="submit" className="scorer-choice" disabled={!canAdd}>
+            <button type="submit" className="scorer-choice" disabled={!rosterAdditionAllowed || !canAdd}>
               Add to roster
             </button>
           </div>
@@ -501,6 +517,7 @@ export default function PlayersDialog(props: IPlayersDialogProps) {
     timeouts = { left: 0, right: 0 },
     timeoutsPerTeam = 0,
     lineupChangeAllowed = true,
+    rosterAdditionAllowed = true,
     lineupChangeReason,
     onRequestControl,
     seating = { left: [], right: [] },
@@ -528,6 +545,7 @@ export default function PlayersDialog(props: IPlayersDialogProps) {
           timeoutsUsed={timeouts.left}
           timeoutsPerTeam={timeoutsPerTeam}
           lineupChangeAllowed={lineupChangeAllowed}
+          rosterAdditionAllowed={rosterAdditionAllowed}
           seatOrder={seating.left}
           onRequestControl={onRequestControl}
           onMovePlayer={onMovePlayer}
@@ -544,6 +562,7 @@ export default function PlayersDialog(props: IPlayersDialogProps) {
           timeoutsUsed={timeouts.right}
           timeoutsPerTeam={timeoutsPerTeam}
           lineupChangeAllowed={lineupChangeAllowed}
+          rosterAdditionAllowed={rosterAdditionAllowed}
           seatOrder={seating.right}
           onRequestControl={onRequestControl}
           onMovePlayer={onMovePlayer}

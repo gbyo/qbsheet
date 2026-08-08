@@ -32,6 +32,7 @@ import {
   IEditableAttempt,
   IEditableBonus,
   IEditableQuestion,
+  conversion,
   validateEditableQuestion,
 } from '../scoring/questionCorrection';
 import { bouncebackOptions, regularBonusTotals } from './bonusOptions';
@@ -71,6 +72,20 @@ function defaultParts(format: IScorekeeperFormat): { controlledPoints: number; b
   return Array.from({ length: count }, () => ({ controlledPoints: 0, bouncebackPoints: 0 }));
 }
 
+/**
+ * What is in the number fields while somebody is still typing in them.
+ *
+ * A controlled number input coerced straight to `Number` turns an empty field into 0 and a
+ * half-typed "-" into NaN, so clearing a box to retype it silently rewrites the bonus. The raw text
+ * is kept here until it parses, and a field left unparseable is refused at save rather than saved
+ * as a number nobody entered.
+ */
+interface IBonusDrafts {
+  controlled?: string;
+  bounceback?: string;
+  parts: Record<string, string>;
+}
+
 function syncBonus(bonus: IEditableBonus, parts: IEditableBonus['parts']): IEditableBonus {
   if (!parts) return { ...bonus, parts: undefined };
   return {
@@ -83,12 +98,7 @@ function syncBonus(bonus: IEditableBonus, parts: IEditableBonus['parts']): IEdit
 
 /** Which team, if any, this proposed cycle says converted the tossup. */
 function conversionTeam(model: IEditableQuestion, format: IScorekeeperFormat): 'left' | 'right' | undefined {
-  return model.attempts.find(
-    (attempt) =>
-      attempt.kind === 'buzz' &&
-      attempt.answerTypeIndex !== undefined &&
-      (format.answerTypes[attempt.answerTypeIndex]?.value ?? 0) > 0,
-  )?.team;
+  return conversion(model, format)?.team;
 }
 
 export default function QuestionEditor(props: {
@@ -107,6 +117,7 @@ export default function QuestionEditor(props: {
     bonus: initial.bonus ? { ...initial.bonus, parts: initial.bonus.parts?.map((part) => ({ ...part })) } : undefined,
   }));
   const [errors, setErrors] = useState<string[]>([]);
+  const [bonusDrafts, setBonusDrafts] = useState<IBonusDrafts>({ parts: {} });
   const [showMore, setShowMore] = useState(false);
   const [showParts, setShowParts] = useState(() => initial.bonus?.parts !== undefined);
 
@@ -159,14 +170,44 @@ export default function QuestionEditor(props: {
   };
 
   const setBonus = (next: Partial<IEditableBonus>) => {
+    setBonusDrafts({ parts: {} });
     setModel((current) => {
       const existing = current.bonus ?? { team: 'left' as const, controlledPoints: 0, bouncebackPoints: 0 };
       return { ...current, bonus: { ...existing, ...next } };
     });
   };
 
+  /** Hold what was typed; only commit it to the model once it is a number. */
+  const updateBonusTotal = (field: 'controlledPoints' | 'bouncebackPoints', raw: string) => {
+    setBonusDrafts((current) => ({ ...current, [field === 'controlledPoints' ? 'controlled' : 'bounceback']: raw }));
+    const parsed = Number(raw);
+    if (raw.trim() === '' || !Number.isFinite(parsed)) return;
+    setBonus({ [field]: parsed, parts: undefined });
+  };
+
+  const updateBonusPart = (index: number, field: 'controlledPoints' | 'bouncebackPoints', raw: string) => {
+    setBonusDrafts((current) => ({ ...current, parts: { ...current.parts, [`${index}-${field}`]: raw } }));
+    const parsed = Number(raw);
+    if (raw.trim() === '' || !Number.isFinite(parsed)) return;
+    setModel((current) => {
+      if (!current.bonus?.parts) return current;
+      const parts = current.bonus.parts.map((part, partIndex) =>
+        partIndex === index ? { ...part, [field]: parsed } : part,
+      );
+      return { ...current, bonus: syncBonus(current.bonus, parts) };
+    });
+  };
+
   const save = () => {
-    const nextErrors = validateEditableQuestion(format, game, model);
+    // A field somebody emptied and never refilled is not a zero. Say so rather than saving one.
+    const draftErrors = Object.entries({
+      controlled: bonusDrafts.controlled,
+      bounceback: bonusDrafts.bounceback,
+      ...Object.fromEntries(Object.entries(bonusDrafts.parts).map(([key, value]) => [`part-${key}`, value])),
+    })
+      .filter(([, value]) => value !== undefined && (value.trim() === '' || !Number.isFinite(Number(value))))
+      .map(([field]) => `Enter a valid number for ${field.replace(/-/g, ' ')}.`);
+    const nextErrors = [...draftErrors, ...validateEditableQuestion(format, game, model)];
     setErrors(nextErrors);
     if (nextErrors.length === 0 && onSave(model)) onCancel();
   };
@@ -357,9 +398,9 @@ export default function QuestionEditor(props: {
                   id={`question-${model.questionNumber}-bonus-controlled`}
                   aria-label="Points"
                   type="number"
-                  value={model.bonus.controlledPoints}
+                  value={bonusDrafts.controlled ?? String(model.bonus.controlledPoints)}
                   disabled={showParts}
-                  onChange={(event) => setBonus({ controlledPoints: Number(event.target.value), parts: undefined })}
+                  onChange={(event) => updateBonusTotal('controlledPoints', event.target.value)}
                 />
               </label>
             )}
@@ -410,33 +451,15 @@ export default function QuestionEditor(props: {
                     <input
                       aria-label={`Bonus part ${index + 1} controlled points`}
                       type="number"
-                      value={part.controlledPoints}
-                      onChange={(event) => {
-                        const parts = model.bonus?.parts?.map((current, partIndex) =>
-                          partIndex === index ? { ...current, controlledPoints: Number(event.target.value) } : current,
-                        );
-                        if (model.bonus && parts) {
-                          const { bonus } = model;
-                          setModel((current) => ({ ...current, bonus: syncBonus(bonus, parts) }));
-                        }
-                      }}
+                      value={bonusDrafts.parts[`${index}-controlledPoints`] ?? String(part.controlledPoints)}
+                      onChange={(event) => updateBonusPart(index, 'controlledPoints', event.target.value)}
                     />
                     {format.bonus.bounceBack && (
                       <input
                         aria-label={`Bonus part ${index + 1} bounceback points`}
                         type="number"
-                        value={part.bouncebackPoints ?? 0}
-                        onChange={(event) => {
-                          const parts = model.bonus?.parts?.map((current, partIndex) =>
-                            partIndex === index
-                              ? { ...current, bouncebackPoints: Number(event.target.value) }
-                              : current,
-                          );
-                          if (model.bonus && parts) {
-                            const { bonus } = model;
-                            setModel((current) => ({ ...current, bonus: syncBonus(bonus, parts) }));
-                          }
-                        }}
+                        value={bonusDrafts.parts[`${index}-bouncebackPoints`] ?? String(part.bouncebackPoints ?? 0)}
+                        onChange={(event) => updateBonusPart(index, 'bouncebackPoints', event.target.value)}
                       />
                     )}
                   </div>

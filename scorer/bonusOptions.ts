@@ -58,9 +58,46 @@ export function bonusTotalProblem(bonus: IScorekeeperBonus, points: number): str
   if (!Number.isFinite(points) || !Number.isInteger(points)) return 'Enter a whole number of points.';
   if (points < 0) return 'Bonus points cannot be negative.';
   if (points > bonus.maximumScore) return `The most a bonus can be worth is ${bonus.maximumScore}.`;
-  if (bonus.divisor > 0 && points % bonus.divisor !== 0) {
-    return `Bonus points should be divisible by ${bonus.divisor}.`;
+  const divisor = bonus.regular && bonus.pointsPerPart && bonus.pointsPerPart > 0 ? bonus.pointsPerPart : bonus.divisor;
+  if (divisor > 0 && points % divisor !== 0) {
+    return `Bonus points should be divisible by ${divisor}.`;
   }
+  return null;
+}
+
+/** Validate a controlled/bounceback pair using the same rules as total entry and correction. */
+export function bonusScoreProblem(
+  bonus: IScorekeeperBonus,
+  controlledPoints: number,
+  bouncebackPoints: number,
+): string | null {
+  const controlledProblem = bonusTotalProblem(bonus, controlledPoints);
+  if (controlledProblem) return controlledProblem;
+  const bouncebackProblem = bonusTotalProblem(bonus, bouncebackPoints);
+  if (bouncebackProblem) return bouncebackProblem;
+  if (!bonus.bounceBack && bouncebackPoints !== 0) return 'This format does not allow bounceback points.';
+  if (controlledPoints + bouncebackPoints > bonus.maximumScore) {
+    return `The bounceback cannot exceed ${Math.max(0, bonus.maximumScore - controlledPoints)} points.`;
+  }
+  return null;
+}
+
+/** Validate one regular part; irregular bonuses have no fixed per-part outcome to enforce. */
+export function bonusPartProblem(
+  bonus: IScorekeeperBonus,
+  controlledPoints: number,
+  bouncebackPoints: number,
+): string | null {
+  if (bonus.regular && bonus.pointsPerPart !== undefined) {
+    const valid = (points: number) => points === 0 || points === bonus.pointsPerPart;
+    if (Number.isFinite(controlledPoints) && Number.isFinite(bouncebackPoints)) {
+      if (!valid(controlledPoints) || !valid(bouncebackPoints)) {
+        return `Each regular bonus part is worth 0 or ${bonus.pointsPerPart} points.`;
+      }
+    }
+  }
+  const pairProblem = bonusScoreProblem(bonus, controlledPoints, bouncebackPoints);
+  if (pairProblem) return pairProblem;
   return null;
 }
 

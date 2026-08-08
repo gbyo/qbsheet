@@ -2,6 +2,7 @@ import { IScorekeeperFormat } from '../../renderer/Services/ScorekeeperFormat';
 import { IDerivedGame } from './deriveGame';
 import { IBonusPartResult, ScoreEvent } from './ScoreEvents';
 import { effectiveQuestionEvents } from './validateScoresheet';
+import { bonusPartProblem, bonusScoreProblem } from '../scorer/bonusOptions';
 
 export type EditableAttemptKind = 'buzz' | 'no-penalty';
 
@@ -57,9 +58,13 @@ export function editableQuestionFromEvents(events: readonly ScoreEvent[], questi
     else if (event.type === 'bonus') {
       const parts = event.parts?.map((part) => ({ ...part }));
       const controlledPoints =
-        parts?.reduce((total, part) => total + part.controlledPoints, 0) ?? event.controlledPoints ?? 0;
+        parts && parts.length > 0
+          ? parts.reduce((total, part) => total + part.controlledPoints, 0)
+          : event.controlledPoints ?? 0;
       const bouncebackPoints =
-        parts?.reduce((total, part) => total + (part.bouncebackPoints ?? 0), 0) ?? event.bouncebackPoints ?? 0;
+        parts && parts.length > 0
+          ? parts.reduce((total, part) => total + (part.bouncebackPoints ?? 0), 0)
+          : event.bouncebackPoints ?? 0;
       bonus = {
         id: event.id,
         team: event.team,
@@ -72,7 +77,7 @@ export function editableQuestionFromEvents(events: readonly ScoreEvent[], questi
   return { questionNumber, attempts, dead, bonus };
 }
 
-function conversion(model: IEditableQuestion, format: IScorekeeperFormat): IEditableAttempt | undefined {
+export function conversion(model: IEditableQuestion, format: IScorekeeperFormat): IEditableAttempt | undefined {
   return model.attempts.find(
     (attempt) =>
       attempt.kind === 'buzz' &&
@@ -138,30 +143,8 @@ export function validateEditableQuestion(
     errors.push(`The bonus on Question ${model.questionNumber} belongs to the converting team.`);
   }
   if (model.bonus) {
-    if (
-      !Number.isFinite(model.bonus.controlledPoints) ||
-      !Number.isFinite(model.bonus.bouncebackPoints) ||
-      model.bonus.controlledPoints < 0 ||
-      model.bonus.bouncebackPoints < 0
-    ) {
-      errors.push(`Question ${model.questionNumber} has invalid bonus totals.`);
-    }
-    if (!format.bonus.bounceBack && model.bonus.bouncebackPoints !== 0) {
-      errors.push(`Question ${model.questionNumber} cannot award bouncebacks in this format.`);
-    }
-    if (
-      model.bonus.controlledPoints <= format.bonus.maximumScore &&
-      model.bonus.bouncebackPoints <= format.bonus.maximumScore &&
-      model.bonus.controlledPoints + model.bonus.bouncebackPoints > format.bonus.maximumScore
-    ) {
-      errors.push(`Question ${model.questionNumber} exceeds the format's maximum bonus.`);
-    }
-    if (
-      model.bonus.controlledPoints > format.bonus.maximumScore ||
-      model.bonus.bouncebackPoints > format.bonus.maximumScore
-    ) {
-      errors.push(`The most a bonus can be worth is ${format.bonus.maximumScore}.`);
-    }
+    const scoreProblem = bonusScoreProblem(format.bonus, model.bonus.controlledPoints, model.bonus.bouncebackPoints);
+    if (scoreProblem) errors.push(scoreProblem);
     if (model.bonus.parts) {
       if (
         model.bonus.parts.length < format.bonus.minimumParts ||
@@ -171,6 +154,10 @@ export function validateEditableQuestion(
       }
       const controlled = model.bonus.parts.reduce((sum, part) => sum + part.controlledPoints, 0);
       const bounceback = model.bonus.parts.reduce((sum, part) => sum + (part.bouncebackPoints ?? 0), 0);
+      for (const part of model.bonus.parts) {
+        const partProblem = bonusPartProblem(format.bonus, part.controlledPoints, part.bouncebackPoints ?? 0);
+        if (partProblem) errors.push(`Question ${model.questionNumber}: ${partProblem}`);
+      }
       if (controlled !== model.bonus.controlledPoints || bounceback !== model.bonus.bouncebackPoints) {
         errors.push(`Question ${model.questionNumber}'s bonus parts do not match its totals.`);
       }
@@ -237,6 +224,9 @@ export function replaceQuestionEvents(
     .filter((index) => index >= 0);
   const firstLaterEvent = original.findIndex((event) => event.questionNumber > questionNumber);
   let insertionIndex = cycleIndexes[0];
+  if (insertionIndex !== undefined && voidIndexes.length > 0) {
+    insertionIndex = Math.max(insertionIndex, Math.max(...voidIndexes) + 1);
+  }
   if (insertionIndex === undefined) {
     insertionIndex = voidIndexes.length > 0 ? Math.max(...voidIndexes) + 1 : original.length;
     if (voidIndexes.length === 0 && firstLaterEvent >= 0) insertionIndex = firstLaterEvent;

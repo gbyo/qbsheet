@@ -1,5 +1,19 @@
 /** A timestamp-based room clock. The displayed seconds are never the source of truth. */
-export const roomClockVersion = 1;
+export const roomClockVersion = 2;
+
+export type RoomClockSegment = string;
+
+/** Select the persisted timer from derived procedure state, never from elapsed wall-clock time. */
+export function roomClockSegment(
+  halves: boolean | undefined,
+  halfBreakCount: number,
+  awaitingScoreCheck: boolean,
+  overtimeStarted: boolean,
+): RoomClockSegment {
+  if (overtimeStarted) return 'overtime';
+  if (halves && halfBreakCount > 0 && !awaitingScoreCheck) return 'half-2';
+  return 'half-1';
+}
 
 export type RoomClockStatus = 'idle' | 'running' | 'paused' | 'expired';
 export type RoomClockPauseReason = 'manual' | 'timeout' | 'checkpoint' | undefined;
@@ -27,12 +41,16 @@ function browserStorage(): IClockStorage | null {
   }
 }
 
-function storageKey(gameKey: string): string {
-  return `yellowfruit.room.clock.v${roomClockVersion}.${encodeURIComponent(gameKey)}`;
+function storageKey(gameKey: string, segment: RoomClockSegment): string {
+  return `yellowfruit.room.clock.v${roomClockVersion}.${encodeURIComponent(gameKey)}.${encodeURIComponent(segment)}`;
 }
 
 export function idleRoomClock(durationMs: number): IRoomClockState {
   return { version: roomClockVersion, durationMs, status: 'idle', accumulatedMs: 0 };
+}
+
+export function resetRoomClock(state: IRoomClockState): IRoomClockState {
+  return idleRoomClock(state.durationMs);
 }
 
 export function elapsedRoomClock(state: IRoomClockState, now = Date.now()): number {
@@ -57,20 +75,30 @@ export function normalizeRoomClock(value: unknown, durationMs: number): IRoomClo
   ) {
     return idleRoomClock(durationMs);
   }
+  if ((durationMs > 0 && raw.accumulatedMs >= durationMs) || raw.status === 'expired') {
+    return { version: roomClockVersion, durationMs, status: 'expired', accumulatedMs: durationMs };
+  }
+  if (raw.status === 'idle') return idleRoomClock(durationMs);
   if (raw.status === 'running' && (typeof raw.runningSince !== 'number' || !Number.isFinite(raw.runningSince))) {
     return idleRoomClock(durationMs);
+  }
+  if (raw.status === 'paused') {
+    return {
+      version: roomClockVersion,
+      durationMs,
+      status: 'paused',
+      accumulatedMs: raw.accumulatedMs,
+      ...(raw.pauseReason === 'manual' || raw.pauseReason === 'timeout' || raw.pauseReason === 'checkpoint'
+        ? { pauseReason: raw.pauseReason }
+        : {}),
+    };
   }
   return {
     version: roomClockVersion,
     durationMs,
-    status: raw.status,
-    accumulatedMs: Math.min(durationMs, raw.accumulatedMs),
-    ...(typeof raw.runningSince === 'number' && Number.isFinite(raw.runningSince)
-      ? { runningSince: raw.runningSince }
-      : {}),
-    ...(raw.pauseReason === 'manual' || raw.pauseReason === 'timeout' || raw.pauseReason === 'checkpoint'
-      ? { pauseReason: raw.pauseReason }
-      : {}),
+    status: 'running',
+    accumulatedMs: raw.accumulatedMs,
+    runningSince: raw.runningSince,
   };
 }
 
@@ -118,10 +146,11 @@ export function loadRoomClock(
   gameKey: string,
   durationMs: number,
   storage: IClockStorage | null = browserStorage(),
+  segment: RoomClockSegment = 'regulation',
 ): IRoomClockState {
   if (!storage || gameKey === '') return idleRoomClock(durationMs);
   try {
-    return normalizeRoomClock(JSON.parse(storage.getItem(storageKey(gameKey)) ?? 'null'), durationMs);
+    return normalizeRoomClock(JSON.parse(storage.getItem(storageKey(gameKey, segment)) ?? 'null'), durationMs);
   } catch {
     return idleRoomClock(durationMs);
   }
@@ -131,19 +160,24 @@ export function saveRoomClock(
   gameKey: string,
   state: IRoomClockState,
   storage: IClockStorage | null = browserStorage(),
+  segment: RoomClockSegment = 'regulation',
 ): boolean {
   if (!storage || gameKey === '') return false;
   try {
-    storage.setItem(storageKey(gameKey), JSON.stringify(state));
+    storage.setItem(storageKey(gameKey, segment), JSON.stringify(state));
     return true;
   } catch {
     return false;
   }
 }
 
-export function clearRoomClock(gameKey: string, storage: IClockStorage | null = browserStorage()): void {
+export function clearRoomClock(
+  gameKey: string,
+  storage: IClockStorage | null = browserStorage(),
+  segment: RoomClockSegment = 'regulation',
+): void {
   try {
-    storage?.removeItem(storageKey(gameKey));
+    storage?.removeItem(storageKey(gameKey, segment));
   } catch {
     // Clock persistence is a recovery convenience, never a reason to stop scoring.
   }

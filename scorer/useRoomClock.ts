@@ -8,6 +8,7 @@ import {
   loadRoomClock,
   pauseRoomClock,
   remainingRoomClock,
+  resetRoomClock,
   resumeRoomClock,
   saveRoomClock,
   startRoomClock,
@@ -24,33 +25,41 @@ export interface IRoomClockApi {
   resume: () => void;
   pauseFor: (reason: 'timeout' | 'checkpoint') => void;
   resumeAfter: (reason: 'timeout' | 'checkpoint') => void;
+  reset: () => void;
 }
 
 /** React lifecycle around the pure timestamp clock. */
-export default function useRoomClock(gameKey: string, halfLengthMinutes?: number): IRoomClockApi {
+export default function useRoomClock(
+  gameKey: string,
+  halfLengthMinutes?: number,
+  segment = 'regulation',
+): IRoomClockApi {
   const durationMs =
     halfLengthMinutes !== undefined && Number.isFinite(halfLengthMinutes) && halfLengthMinutes > 0
       ? halfLengthMinutes * 60 * 1000
       : 0;
   const configured = durationMs > 0;
+  const identity = `${gameKey}\u0000${segment}\u0000${durationMs}`;
   const [state, setState] = useState<IRoomClockState>(() =>
-    configured ? expireRoomClock(loadRoomClock(gameKey, durationMs), Date.now()) : idleRoomClock(0),
+    configured ? expireRoomClock(loadRoomClock(gameKey, durationMs, undefined, segment), Date.now()) : idleRoomClock(0),
   );
+  const [loadedIdentity, setLoadedIdentity] = useState(() => (configured ? identity : ''));
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
-    setState((current) => {
+    setLoadedIdentity('');
+    setState(() => {
       if (!configured) return idleRoomClock(0);
-      if (current.durationMs === durationMs) return current;
-      return expireRoomClock(loadRoomClock(gameKey, durationMs), Date.now());
+      return expireRoomClock(loadRoomClock(gameKey, durationMs, undefined, segment), Date.now());
     });
-  }, [configured, durationMs, gameKey]);
+    setLoadedIdentity(configured ? identity : '');
+  }, [configured, durationMs, gameKey, identity, segment]);
 
   useEffect(() => {
-    if (!configured) return undefined;
-    saveRoomClock(gameKey, state);
+    if (!configured || loadedIdentity !== identity) return undefined;
+    saveRoomClock(gameKey, state, undefined, segment);
     return undefined;
-  }, [configured, gameKey, state]);
+  }, [configured, gameKey, identity, loadedIdentity, segment, state]);
 
   useEffect(() => {
     if (!configured || state.status !== 'running') return undefined;
@@ -101,6 +110,7 @@ export default function useRoomClock(gameKey: string, halfLengthMinutes?: number
       ),
     [transition],
   );
+  const reset = useCallback(() => transition(resetRoomClock), [transition]);
 
   const api = useMemo<IRoomClockApi>(() => {
     const elapsedMs = elapsedRoomClock(state, now);
@@ -116,8 +126,9 @@ export default function useRoomClock(gameKey: string, halfLengthMinutes?: number
       resume,
       pauseFor,
       resumeAfter,
+      reset,
     };
-  }, [configured, now, pause, pauseFor, resume, resumeAfter, start, state]);
+  }, [configured, now, pause, pauseFor, reset, resume, resumeAfter, start, state]);
 
   return api;
 }
