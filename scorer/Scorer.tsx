@@ -83,7 +83,10 @@ export interface IScorerProps {
   authoritativeRosters?: Record<LeftOrRight, string[]>;
   /** Narrow authoritative roster-add request for an assigned room. */
   // eslint-disable-next-line react/require-default-props
-  onSyncRosterPlayer?: (teamName: string, playerName: string) => Promise<{ ok: boolean; error?: string }>;
+  onSyncRosterPlayer?: (
+    teamName: string,
+    playerName: string,
+  ) => Promise<{ ok: boolean; error?: string; rejected?: boolean }>;
 }
 
 type OpenDialog = 'players' | 'lightning' | 'notes' | 'adjust' | 'forfeit' | 'issue' | 'review' | 'recovery' | null;
@@ -180,14 +183,12 @@ export default function Scorer(props: IScorerProps) {
       const teamName = addition.team === 'left' ? game.left.name : game.right.name;
       onSyncRosterPlayer(teamName, addition.playerName)
         .then((result) => {
-          if (!result.ok) {
+          if (!result.ok && result.rejected) {
             setRejectedRosterSyncs((current) => ({ ...current, [key]: true }));
           }
           return undefined;
         })
-        .catch(() => {
-          setRejectedRosterSyncs((current) => ({ ...current, [key]: true }));
-        });
+        .catch(() => undefined);
     }
   }, [authoritativeRosters, connection, game.left.name, game.right.name, localRosterAdds, onSyncRosterPlayer]);
 
@@ -453,7 +454,12 @@ export default function Scorer(props: IScorerProps) {
                   </p>
                 ))}
                 <div className="scorer-complete-actions">
-                  <button type="button" className="scorer-submit" onClick={submit} disabled={submitting}>
+                  <button
+                    type="button"
+                    className="scorer-submit"
+                    onClick={submit}
+                    disabled={submitting || game.personnelProblems.length > 0}
+                  >
                     {submitting ? 'Sending…' : 'Submit result'}
                   </button>
                   <button type="button" className="scorer-action" onClick={downloadQbj}>

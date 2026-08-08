@@ -40,6 +40,7 @@ import ScoringUnavailable from './ScoringUnavailable';
 import ScorerHost from './scorer/ScorerHost';
 import { readScorerChoice } from './ScorerChoice';
 import { RoomConnectionState } from './RoomLifecycle';
+import { scorekeeperFormatProblems } from '../renderer/Services/ScorekeeperFormat';
 
 /** MODAQ requires a status object back from a custom export */
 type ModaqStatus = { isError: false; status: string } | { isError: true; status: string };
@@ -188,6 +189,11 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
   tournamentKeyRef.current = emergency ? kit?.tournamentKey : tournament?.tournamentKey;
 
   const gameFormat = emergency ? kit?.gameFormat ?? null : tournament?.gameFormat ?? null;
+  const scoringFormat = emergency ? kit?.scoringFormat ?? null : tournament?.scoringFormat ?? null;
+  const selectedRulesUsable =
+    scorerChoice === 'legacy'
+      ? gameFormat !== null
+      : scoringFormat !== null && scorekeeperFormatProblems(scoringFormat).length === 0;
   const timedRounds = emergency ? kit?.timedRounds === true : tournament?.timedRounds === true;
 
   const normalizeOptionsRef = useRef<IQbjNormalizeOptions | null>(null);
@@ -532,7 +538,6 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
 
   if (phase === 'scoring' && setup && scorerChoice === 'first-party') {
     // The same key the game is saved under, so a reload comes back to this game and only this one.
-    const scoringFormat = emergency ? kit?.scoringFormat ?? null : tournament?.scoringFormat ?? null;
     return scoringFormat && storeName ? (
       <>
         <ScorerHost
@@ -628,7 +633,7 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
   }
 
   // Setup screen
-  const rulesUnusable = !emergency && tournament !== null && gameFormat === null;
+  const rulesUnusable = !emergency && tournament !== null && !selectedRulesUsable;
 
   if (emergency && !kitUsable) {
     return (
@@ -679,7 +684,9 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
       {rulesUnusable && (
         <div className="room-banner room-banner-error">
           <strong>This tournament&apos;s scoring rules can&apos;t be used for browser scorekeeping.</strong>
-          <ul>{tournament?.gameFormatErrors.map((message) => <li key={message}>{message}</li>)}</ul>
+          {scorerChoice === 'legacy' && (
+            <ul>{tournament?.gameFormatErrors.map((message) => <li key={message}>{message}</li>)}</ul>
+          )}
         </div>
       )}
 
@@ -698,13 +705,16 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
 
       {!rulesUnusable && (emergency ? kitUsable : tournament !== null) && (
         <>
-          {!emergency && tournament !== null && tournament.gameFormatWarnings.length > 0 && (
-            <div className="room-banner room-banner-info">
-              {tournament.gameFormatWarnings.map((message) => (
-                <div key={message}>{message}</div>
-              ))}
-            </div>
-          )}
+          {!emergency &&
+            scorerChoice === 'legacy' &&
+            tournament !== null &&
+            tournament.gameFormatWarnings.length > 0 && (
+              <div className="room-banner room-banner-info">
+                {tournament.gameFormatWarnings.map((message) => (
+                  <div key={message}>{message}</div>
+                ))}
+              </div>
+            )}
 
           <label className="room-field" htmlFor="round-select">
             <span>Round</span>

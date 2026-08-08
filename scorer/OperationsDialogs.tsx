@@ -376,6 +376,11 @@ export function ScoresheetReviewDialog(props: {
         {game.left.name} {game.left.points} · {game.right.name} {game.right.points}. Corrections recalculate every total
         and player stat.
       </p>
+      {game.personnelProblems.map((problem) => (
+        <p key={problem.eventId} className="scorer-problem">
+          {problem.message}
+        </p>
+      ))}
       {!questionNumbers.length ? (
         <p className="scorer-rail-empty">Nothing has been recorded yet.</p>
       ) : (

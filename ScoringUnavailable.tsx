@@ -1,13 +1,9 @@
 /**
- * What the room shows where the scoresheet goes, before the first-party scorer exists.
+ * What the room shows when a game exists but its selected scorekeeper cannot be opened.
  *
- * MODAQ has been taken out of the room UI, and its replacement is not built yet, so on this build
- * the default path has no scorer to render. This says so rather than showing a blank panel or a
- * spinner that will never resolve — a scorekeeper who cannot score needs to know immediately that
- * the problem is the software and not their Chromebook, because the alternative is a room quietly
- * losing a round while somebody tries reloading.
- *
- * Temporary by construction. It goes when the scorer lands.
+ * This should be a useful operational state, not an implementation note. A scorekeeper needs to
+ * know whether to ask tournament control to repair the room setup or move to paper, not that a
+ * particular UI migration is in progress.
  */
 
 export interface IScoringUnavailableProps {
@@ -25,13 +21,15 @@ export default function ScoringUnavailable(props: IScoringUnavailableProps) {
   return (
     <div className="room-shell">
       <div className="room-empty">
-        <p className="room-empty-title">Scorekeeping is not available in this build</p>
+        <p className="room-empty-title">Room scorekeeping is unavailable</p>
         {context !== '' && <p className="room-muted">{context}</p>}
         <p className="room-muted">
-          This copy of YellowFruit is part-way through replacing its browser scorekeeping interface. The new one is not
-          finished, and the old one has been taken out of the way.
+          YellowFruit could not load usable scorekeeping rules for this game. Ask tournament control to check the room
+          setup before trying to start it again.
         </p>
-        <p className="room-muted">Score this game on paper and give it to tournament control to enter.</p>
+        <p className="room-muted">
+          If the game must begin now, use a paper scoresheet and give it to tournament control.
+        </p>
       </div>
     </div>
   );

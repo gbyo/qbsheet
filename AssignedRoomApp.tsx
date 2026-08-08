@@ -614,7 +614,10 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
           }
           onSyncRosterPlayer={async (teamName, playerName) => {
             const result = await addRoomPlayer(activeIdentity, scoring.credentials, teamName, playerName);
-            return result.ok ? { ok: true } : { ok: false, error: result.error };
+            if (result.ok) return { ok: true };
+            const rejected =
+              result.status === 400 || result.status === 403 || result.error.includes('cannot accept another player');
+            return { ok: false, error: result.error, rejected };
           }}
           tournamentName={assignment.tournamentName}
           roundName={scoring.matchup.roundName}
@@ -685,6 +688,7 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
       pendingFinal={pendingFinal}
       awaitingReview={awaitingReview}
       submittedSummary={submittedSummary}
+      scorerChoice={scorerChoice}
       conflictNotice={conflictNotice}
       onStart={handleStart}
       canStart={

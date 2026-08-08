@@ -20,6 +20,8 @@ import {
 } from '../main/server/ServerTypes';
 import RoomOperatorControls from './RoomOperatorControls';
 import { connectionStatusClass, describeConnection, RoomConnectionState } from './RoomLifecycle';
+import { ScorerChoice } from './ScorerChoice';
+import { scorekeeperFormatProblems } from '../renderer/Services/ScorekeeperFormat';
 
 export interface IMatchupCardProps {
   assignment: IRoomAssignmentResponse;
@@ -34,6 +36,7 @@ export interface IMatchupCardProps {
   awaitingReview: boolean;
   submittedSummary: string;
   canStart: boolean;
+  scorerChoice: ScorerChoice;
   // eslint-disable-next-line react/require-default-props
   blockedReason?: RoomBlockedReason;
   lifecycleNotice: string;
@@ -142,6 +145,29 @@ function startButtonLabel(starting: boolean, awaitingControl: boolean): string {
   return 'Start Match';
 }
 
+function scoringRulesIssue(assignment: IRoomAssignmentResponse, scorerChoice: ScorerChoice) {
+  if (scorerChoice === 'legacy') {
+    if (assignment.gameFormat !== null) return null;
+    return {
+      title: "This tournament's rules cannot be used by the legacy scorer.",
+      details: assignment.gameFormatErrors,
+    };
+  }
+
+  if (assignment.scoringFormat === null) {
+    return {
+      title: 'Room scoring rules are not available yet.',
+      details: ['Tournament control has not provided usable room-scoring rules to this browser.'],
+    };
+  }
+  const details = scorekeeperFormatProblems(assignment.scoringFormat);
+  if (details.length === 0) return null;
+  return {
+    title: 'Room scoring rules need attention before this game can start.',
+    details,
+  };
+}
+
 export default function MatchupCard(props: IMatchupCardProps) {
   const {
     assignment,
@@ -153,6 +179,7 @@ export default function MatchupCard(props: IMatchupCardProps) {
     awaitingReview,
     submittedSummary,
     canStart,
+    scorerChoice,
     blockedReason,
     lifecycleNotice,
     onStart,
@@ -173,6 +200,7 @@ export default function MatchupCard(props: IMatchupCardProps) {
     onScoreEmergency,
   } = props;
   const { current, previous, next, roomName, tournamentName } = assignment;
+  const rulesIssue = current === null ? null : scoringRulesIssue(assignment, scorerChoice);
 
   return (
     <div className="room-shell">
@@ -213,16 +241,29 @@ export default function MatchupCard(props: IMatchupCardProps) {
         </div>
       )}
 
-      {assignment.gameFormat === null && (
+      {rulesIssue && (
         <div className="room-banner room-banner-error">
-          <strong>This tournament&apos;s scoring rules can&apos;t be used for browser scorekeeping.</strong>
-          <ul>
-            {assignment.gameFormatErrors.map((message) => (
-              <li key={message}>{message}</li>
-            ))}
-          </ul>
+          <strong>{rulesIssue.title}</strong>
+          {rulesIssue.details.length > 0 && (
+            <ul>
+              {rulesIssue.details.map((message) => (
+                <li key={message}>{message}</li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
+
+      {current !== null &&
+        scorerChoice === 'legacy' &&
+        rulesIssue === null &&
+        assignment.gameFormatWarnings.length > 0 && (
+          <div className="room-banner room-banner-info">
+            {assignment.gameFormatWarnings.map((message) => (
+              <div key={message}>{message}</div>
+            ))}
+          </div>
+        )}
 
       {pendingFinal && (
         <div className="room-banner room-banner-warning">
@@ -250,9 +291,10 @@ export default function MatchupCard(props: IMatchupCardProps) {
           <p className="room-matchup-team">{current.rightTeam.name}</p>
 
           {/* The awaiting-review panel below already says this, and more plainly. */}
-          {!awaitingReview && blockedReason !== undefined && assignment.blockedMessage !== undefined && (
-            <p className="room-blocked">{assignment.blockedMessage}</p>
-          )}
+          {!awaitingReview &&
+            blockedReason !== RoomBlockedReason.RulesUnusable &&
+            blockedReason !== undefined &&
+            assignment.blockedMessage !== undefined && <p className="room-blocked">{assignment.blockedMessage}</p>}
 
           {startError !== '' && <div className="room-banner room-banner-error">{startError}</div>}
 

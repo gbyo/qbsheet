@@ -46,7 +46,10 @@ export interface IScorerHostProps {
   // eslint-disable-next-line react/require-default-props
   authoritativeRightTeam?: IRoomTeam;
   // eslint-disable-next-line react/require-default-props
-  onSyncRosterPlayer?: (teamName: string, playerName: string) => Promise<{ ok: boolean; error?: string }>;
+  onSyncRosterPlayer?: (
+    teamName: string,
+    playerName: string,
+  ) => Promise<{ ok: boolean; error?: string; rejected?: boolean }>;
 }
 
 function toSetup(left: IRoomTeam, right: IRoomTeam): IGameSetup {
