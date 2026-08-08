@@ -43,6 +43,7 @@ export default function ScorerDialog(props: IScorerDialogProps) {
   return (
     <dialog
       className={wide ? 'scorer-dialog is-wide' : 'scorer-dialog'}
+      role="dialog"
       aria-label={title}
       ref={panel}
       onClose={onClose}
