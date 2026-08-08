@@ -6,10 +6,19 @@
  * step is where a scorekeeper falls behind a reader.
  *
  * The values come from the format. There is no +15 / +10 / -5 anywhere in this file.
+ *
+ * # The numbers down the left
+ *
+ * A scoresheet gives each player a column, and a scorekeeper who has been watching one all morning
+ * knows the person in the third seat by the number rather than by reading the name. The number here
+ * is the same thing: the player's position on the floor, in whatever order the room has arranged
+ * them (see `PlayerSeating`). It is positional and not an identity — a substitute takes the seat of
+ * the player they came on for — which is what keeps the third column the third column all game.
  */
 import { CSSProperties } from 'react';
 import { IScorekeeperAnswerType, IScorekeeperFormat } from '../../renderer/Services/ScorekeeperFormat';
 import { IDerivedTeam } from '../scoring/deriveGame';
+import { orderBySeating } from './PlayerSeating';
 
 export interface ITeamPanelProps {
   format: IScorekeeperFormat;
@@ -32,6 +41,14 @@ export interface ITeamPanelProps {
   onBuzz: (playerName: string, answerType: IScorekeeperAnswerType) => void;
   /** An answer worth nothing that still spends this team's chance at the tossup. */
   onWrongNoPenalty: (playerName: string) => void;
+  /**
+   * The players on the floor, in the order the room wants to see them.
+   *
+   * A view preference and nothing more; the team's own `activePlayers` decides who is playing. See
+   * `PlayerSeating`.
+   */
+  // eslint-disable-next-line react/require-default-props
+  seatOrder?: readonly string[];
 }
 
 /** "+15" / "-5". The sign is the fastest thing to read, so it is always shown. */
@@ -48,8 +65,13 @@ function answerButtonClass(answerType: IScorekeeperAnswerType): string {
 }
 
 export default function TeamPanel(props: ITeamPanelProps) {
-  const { format, team, scoringEnabled, eligible, negsAvailable, timeoutsUsed, onBuzz, onWrongNoPenalty } = props;
-  const active = team.players.filter((player) => team.activePlayers.includes(player.name));
+  const { format, team, scoringEnabled, eligible, negsAvailable, timeoutsUsed, onBuzz, onWrongNoPenalty, seatOrder } =
+    props;
+  const active = orderBySeating(
+    team.players.filter((player) => team.activePlayers.includes(player.name)),
+    seatOrder ?? [],
+    (player) => player.name,
+  );
   /*
    * The rulings actually available to this team on this tossup. Negs disappear once anybody has
    * answered, because from that point the question has been read out and nobody can be penalized on
@@ -78,8 +100,12 @@ export default function TeamPanel(props: ITeamPanelProps) {
        * way down, and ragged flex rows are what stop it being.
        */}
       <ul className="scorer-roster" style={{ '--scorer-answer-columns': columns } as CSSProperties}>
-        {active.map((player) => (
+        {active.map((player, seat) => (
           <li key={player.name} className="scorer-player">
+            {/* The seat, not an identity. Hidden from assistive technology, which reads the name. */}
+            <span className="scorer-player-seat" aria-hidden="true">
+              {seat + 1}
+            </span>
             <span className="scorer-player-name">{player.name}</span>
             <span className="scorer-answers">
               {answerTypes.map((answerType) => (

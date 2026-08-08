@@ -48,6 +48,7 @@ import { FlagDialog, IssueDialog, RecoveryDialog, ScoresheetReviewDialog } from 
 import { attachScorerRecovery } from './ScorerRecovery';
 import { downloadCurrentQbj } from '../QbjBackup';
 import useRoomClock from './useRoomClock';
+import usePlayerSeating from './usePlayerSeating';
 import useScreenWakeLock from './useScreenWakeLock';
 import { formatClock } from './RoomClock';
 import ScorerBanners, {
@@ -212,6 +213,14 @@ export default function Scorer(props: IScorerProps) {
   const [moderatorName, setModeratorName] = useState(qbjMeta?.moderator ?? '');
   const [timeoutNow, setTimeoutNow] = useState(() => Date.now());
   const roomClock = useRoomClock(gameKey, procedure?.halfLengthMinutes);
+  /**
+   * What order the two rosters are in on screen.
+   *
+   * Local to this device and this game, and read by nothing that scores — a room arranging its
+   * rows to match the table must not be able to write anything into the scoresheet. See
+   * `PlayerSeating`.
+   */
+  const seating = usePlayerSeating(gameKey);
 
   const game = useMemo(() => deriveGame(format, setup, events.events), [format, setup, events.events]);
   const scoresheetValidation = useMemo(
@@ -780,6 +789,7 @@ export default function Scorer(props: IScorerProps) {
               <TeamPanel
                 format={format}
                 team={game.left}
+                seatOrder={seating.seating.left}
                 scoringEnabled={scoringEnabled}
                 eligible={eligible('left')}
                 negsAvailable={negsAvailable}
@@ -790,6 +800,7 @@ export default function Scorer(props: IScorerProps) {
               <TeamPanel
                 format={format}
                 team={game.right}
+                seatOrder={seating.seating.right}
                 scoringEnabled={scoringEnabled}
                 eligible={eligible('right')}
                 negsAvailable={negsAvailable}
@@ -1010,6 +1021,24 @@ export default function Scorer(props: IScorerProps) {
           timeoutsPerTeam={procedure?.timeoutsPerTeam ?? 0}
           lineupChangeAllowed={lineupChangeAllowed}
           lineupChangeReason={lineupChangeReason}
+          seating={seating.seating}
+          onMovePlayer={(team, visibleNames, playerName, direction) =>
+            seating.move(
+              team,
+              (team === 'left' ? game.left : game.right).players.map((player) => player.name),
+              visibleNames,
+              playerName,
+              direction,
+            )
+          }
+          onSeatSubstitute={(team, outgoing, incoming) =>
+            seating.substitute(
+              team,
+              (team === 'left' ? game.left : game.right).players.map((player) => player.name),
+              outgoing,
+              incoming,
+            )
+          }
           onSubstitute={(team, activePlayers) => {
             record({ id: newEventId(), type: 'substitution', questionNumber: lineupQuestion, team, activePlayers });
             setDialog(null);

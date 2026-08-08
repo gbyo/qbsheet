@@ -255,8 +255,7 @@ div.scorer-banner .scorer-text-action {
 .scorer-player {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  gap: 10px;
   padding: 7px 0;
   border-bottom: 1px solid var(--room-border);
 }
@@ -265,7 +264,20 @@ div.scorer-banner .scorer-text-action {
   border-bottom: none;
 }
 
+/*
+ * The seat number, in a fixed column so the names still start on one line down the sheet. Muted and
+ * tabular: it is a label for the row, not a value anybody reads for meaning.
+ */
+.scorer-player-seat {
+  flex: none;
+  width: 16px;
+  color: var(--room-faint);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
 .scorer-player-name {
+  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -866,6 +878,24 @@ div.scorer-banner .scorer-text-action {
   padding: 5px 0;
   font-size: 13px;
   border-bottom: 1px solid var(--room-border);
+}
+
+.scorer-lineup-seat {
+  flex: none;
+  width: 16px;
+  color: var(--room-faint);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* The two arrows sit together so they read as one control rather than as two more actions. */
+.scorer-lineup-move {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.scorer-lineup-move .scorer-text-action {
+  min-width: 20px;
 }
 
 .scorer-lineup-actions {

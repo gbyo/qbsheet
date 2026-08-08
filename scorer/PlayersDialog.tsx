@@ -28,6 +28,7 @@ import { LeftOrRight } from '../../renderer/Utils/UtilTypes';
 import { IDerivedTeam } from '../scoring/deriveGame';
 import ScorerDialog from './ScorerDialog';
 import { roomPlayerNameMaxLength } from '../../main/server/ServerTypes';
+import { orderBySeating } from './PlayerSeating';
 
 export interface IPlayersDialogProps {
   left: IDerivedTeam;
@@ -65,6 +66,19 @@ export interface IPlayersDialogProps {
   rosterSyncStatus?: Record<string, 'synced' | 'waiting' | 'local' | 'rejected'>;
   // eslint-disable-next-line react/require-default-props
   onRequestControl?: (team: LeftOrRight, playerName: string) => void;
+  /**
+   * The order the room wants to see each team in, and how to change it.
+   *
+   * A view preference, kept out of the event history on purpose — see `PlayerSeating`. Absent means
+   * the roster's own order, and no reordering controls.
+   */
+  // eslint-disable-next-line react/require-default-props
+  seating?: Record<LeftOrRight, string[]>;
+  // eslint-disable-next-line react/require-default-props
+  onMovePlayer?: (team: LeftOrRight, visibleNames: string[], playerName: string, direction: -1 | 1) => void;
+  /** Told which way round a one-for-one substitution went, so the replacement takes the same seat. */
+  // eslint-disable-next-line react/require-default-props
+  onSeatSubstitute?: (team: LeftOrRight, outgoing: string, incoming: string) => void;
   onClose: () => void;
 }
 
@@ -99,10 +113,11 @@ function FullLineupEditor(props: {
   team: IDerivedTeam;
   side: LeftOrRight;
   maximumActive: number;
+  seatOrder: readonly string[];
   onApply: (activePlayers: string[]) => void;
   onCancel: () => void;
 }) {
-  const { team, side, maximumActive, onApply, onCancel } = props;
+  const { team, side, maximumActive, seatOrder, onApply, onCancel } = props;
   const [selected, setSelected] = useState<string[]>(team.activePlayers);
   const focusPlayerIndex = useRef<number | null>(null);
 
@@ -128,7 +143,7 @@ function FullLineupEditor(props: {
   return (
     <div className="scorer-lineup-editor">
       <ul className="scorer-lineup-list">
-        {team.players.map((player, index) => {
+        {orderBySeating(team.players, seatOrder, (player) => player.name).map((player, index) => {
           const id = `scorer-lineup-${side}-${index}`;
           const active = selected.includes(player.name);
           return (
@@ -179,8 +194,13 @@ function TeamLineup(props: {
   timeoutsUsed: number;
   timeoutsPerTeam: number;
   lineupChangeAllowed: boolean;
+  seatOrder: readonly string[];
   // eslint-disable-next-line react/require-default-props
   onRequestControl?: (team: LeftOrRight, playerName: string) => void;
+  // eslint-disable-next-line react/require-default-props
+  onMovePlayer?: (team: LeftOrRight, visibleNames: string[], playerName: string, direction: -1 | 1) => void;
+  // eslint-disable-next-line react/require-default-props
+  onSeatSubstitute?: (team: LeftOrRight, outgoing: string, incoming: string) => void;
 }) {
   const {
     team,
@@ -193,33 +213,96 @@ function TeamLineup(props: {
     timeoutsUsed,
     timeoutsPerTeam,
     lineupChangeAllowed,
+    seatOrder,
     onRequestControl,
+    onMovePlayer,
+    onSeatSubstitute,
   } = props;
   const [mode, setMode] = useState<PanelMode>({ kind: 'idle' });
   const [newPlayer, setNewPlayer] = useState('');
 
-  const playing = team.players.filter((player) => team.activePlayers.includes(player.name));
-  const bench = team.players.filter((player) => !team.activePlayers.includes(player.name));
+  // Both lists follow the room's seating, so what is on screen here is what is on screen out
+  // there. The bench is ordered too, so a player who comes on lands where the room expects.
+  const playing = orderBySeating(
+    team.players.filter((player) => team.activePlayers.includes(player.name)),
+    seatOrder,
+    (player) => player.name,
+  );
+  const bench = orderBySeating(
+    team.players.filter((player) => !team.activePlayers.includes(player.name)),
+    seatOrder,
+    (player) => player.name,
+  );
+  const playingNames = playing.map((player) => player.name);
   const atCapacity = team.activePlayers.length >= maximumActive;
   const cleanNewPlayer = newPlayer.trim();
   const canAdd =
     cleanNewPlayer !== '' &&
     !team.players.some((player) => player.name.toLocaleLowerCase() === cleanNewPlayer.toLocaleLowerCase());
 
-  /** Build the complete lineup a one-for-one substitution produces, in the order it was played. */
+  /**
+   * The complete lineup a one-for-one substitution produces.
+   *
+   * The incoming player is placed where the outgoing one was rather than appended, so the stored
+   * lineup reads in the same order the room is looking at. Nothing downstream depends on that
+   * order — tossups heard is set membership — but a scoresheet that reads out of order is a
+   * scoresheet somebody has to re-check.
+   */
   const lineupAfter = (out: string | undefined, incoming: string): string[] => {
-    const without = out === undefined ? team.activePlayers : team.activePlayers.filter((name) => name !== out);
-    return without.concat(incoming);
+    if (out === undefined) return team.activePlayers.concat(incoming);
+    const next = team.activePlayers.slice();
+    const seat = next.indexOf(out);
+    if (seat < 0) return next.concat(incoming);
+    next.splice(seat, 1, incoming);
+    return next;
   };
 
-  const playerRow = (player: IDerivedTeam['players'][number], active: boolean) => {
+  /** Record the substitution, and give the replacement the seat the outgoing player was in. */
+  const confirmSubstitution = (out: string | undefined, incoming: string) => {
+    if (out !== undefined && onSeatSubstitute) onSeatSubstitute(side, out, incoming);
+    onSubstitute(side, lineupAfter(out, incoming));
+  };
+
+  const playerRow = (player: IDerivedTeam['players'][number], active: boolean, seat: number) => {
     const sync = rosterSyncStatus[rosterSyncKey(side, player.name)];
     const syncLabel = syncLabelFor(sync);
+    const canMove = active && onMovePlayer !== undefined && playing.length > 1;
     return (
       <li key={player.name} className="scorer-lineup-entry">
+        {/* The seat number, matching the column this player occupies on the scoring screen. */}
+        <span className="scorer-lineup-seat" aria-hidden="true">
+          {active ? seat + 1 : '\u2014'}
+        </span>
         <span className="scorer-lineup-name">{player.name}</span>
         <span className="scorer-lineup-tuh">{player.tossupsHeard} TUH</span>
         {syncLabel && <span className="scorer-lineup-sync">{syncLabel}</span>}
+        {/*
+          Two buttons rather than a drag handle. This is a touchscreen a scorekeeper is using with
+          one hand while the other holds a pen, and a drag that ends one row off is a mis-seat
+          nobody notices until somebody buzzes.
+        */}
+        {canMove && (
+          <span className="scorer-lineup-move">
+            <button
+              type="button"
+              className="scorer-text-action"
+              aria-label={`Move ${player.name} up`}
+              disabled={seat === 0}
+              onClick={() => onMovePlayer?.(side, playingNames, player.name, -1)}
+            >
+              &uarr;
+            </button>
+            <button
+              type="button"
+              className="scorer-text-action"
+              aria-label={`Move ${player.name} down`}
+              disabled={seat === playing.length - 1}
+              onClick={() => onMovePlayer?.(side, playingNames, player.name, 1)}
+            >
+              &darr;
+            </button>
+          </span>
+        )}
         {active ? (
           <button
             type="button"
@@ -266,11 +349,11 @@ function TeamLineup(props: {
       {mode.kind === 'idle' && (
         <>
           <h4 className="scorer-lineup-group">Playing</h4>
-          <ul className="scorer-lineup-list">{playing.map((player) => playerRow(player, true))}</ul>
+          <ul className="scorer-lineup-list">{playing.map((player, seat) => playerRow(player, true, seat))}</ul>
           {bench.length > 0 && (
             <>
               <h4 className="scorer-lineup-group">Bench</h4>
-              <ul className="scorer-lineup-list">{bench.map((player) => playerRow(player, false))}</ul>
+              <ul className="scorer-lineup-list">{bench.map((player) => playerRow(player, false, -1))}</ul>
             </>
           )}
           <p className="scorer-lineup-count">
@@ -337,7 +420,7 @@ function TeamLineup(props: {
             <button
               type="button"
               className="scorer-choice"
-              onClick={() => onSubstitute(side, lineupAfter(mode.out, mode.incoming))}
+              onClick={() => confirmSubstitution(mode.out, mode.incoming)}
             >
               Confirm
             </button>
@@ -350,6 +433,7 @@ function TeamLineup(props: {
           team={team}
           side={side}
           maximumActive={maximumActive}
+          seatOrder={seatOrder}
           onApply={(activePlayers) => onSubstitute(side, activePlayers)}
           onCancel={() => setMode({ kind: 'idle' })}
         />
@@ -419,6 +503,9 @@ export default function PlayersDialog(props: IPlayersDialogProps) {
     lineupChangeAllowed = true,
     lineupChangeReason,
     onRequestControl,
+    seating = { left: [], right: [] },
+    onMovePlayer,
+    onSeatSubstitute,
     onClose,
   } = props;
 
@@ -441,7 +528,10 @@ export default function PlayersDialog(props: IPlayersDialogProps) {
           timeoutsUsed={timeouts.left}
           timeoutsPerTeam={timeoutsPerTeam}
           lineupChangeAllowed={lineupChangeAllowed}
+          seatOrder={seating.left}
           onRequestControl={onRequestControl}
+          onMovePlayer={onMovePlayer}
+          onSeatSubstitute={onSeatSubstitute}
         />
         <TeamLineup
           team={right}
@@ -454,7 +544,10 @@ export default function PlayersDialog(props: IPlayersDialogProps) {
           timeoutsUsed={timeouts.right}
           timeoutsPerTeam={timeoutsPerTeam}
           lineupChangeAllowed={lineupChangeAllowed}
+          seatOrder={seating.right}
           onRequestControl={onRequestControl}
+          onMovePlayer={onMovePlayer}
+          onSeatSubstitute={onSeatSubstitute}
         />
       </div>
     </ScorerDialog>
