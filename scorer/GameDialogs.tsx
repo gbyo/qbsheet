@@ -236,6 +236,7 @@ export function ForfeitDialog(props: {
       <div className="scorer-choices">
         <button
           type="button"
+          aria-pressed={choice === 'left'}
           className={choice === 'left' ? 'scorer-choice is-selected' : 'scorer-choice'}
           onClick={() => setChoice('left')}
         >
@@ -243,6 +244,7 @@ export function ForfeitDialog(props: {
         </button>
         <button
           type="button"
+          aria-pressed={choice === 'right'}
           className={choice === 'right' ? 'scorer-choice is-selected' : 'scorer-choice'}
           onClick={() => setChoice('right')}
         >
@@ -250,6 +252,7 @@ export function ForfeitDialog(props: {
         </button>
         <button
           type="button"
+          aria-pressed={choice === 'both'}
           className={choice === 'both' ? 'scorer-choice is-selected' : 'scorer-choice'}
           onClick={() => setChoice('both')}
         >

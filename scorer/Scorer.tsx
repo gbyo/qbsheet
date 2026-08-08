@@ -22,7 +22,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { LeftOrRight } from '../../renderer/Utils/UtilTypes';
 import { HelpRequestCategory } from '../../main/server/ServerTypes';
 import { IScorekeeperAnswerType, IScorekeeperFormat } from '../../renderer/Services/ScorekeeperFormat';
-import deriveGame, { IGameSetup } from '../scoring/deriveGame';
+import deriveGame, { IGameSetup, lineupChangeEffectiveQuestion } from '../scoring/deriveGame';
 import { ScoreEvent } from '../scoring/ScoreEvents';
 import toQbjMatch, { IQbjMatchMeta } from '../scoring/toQbjMatch';
 import { RoomConnectionState } from '../RoomLifecycle';
@@ -30,7 +30,7 @@ import TeamPanel from './TeamPanel';
 import BonusPrompt from './BonusPrompt';
 import RecentRail from './RecentRail';
 import GameMenu, { IGameMenuItem } from './GameMenu';
-import PlayersDialog from './PlayersDialog';
+import PlayersDialog, { rosterSyncKey } from './PlayersDialog';
 import { AdjustDialog, ForfeitDialog, LightningDialog, NotesDialog } from './GameDialogs';
 import { IGameEventsApi, newEventId } from './useGameEvents';
 import { IssueDialog, RecoveryDialog, ScoresheetReviewDialog } from './OperationsDialogs';
@@ -78,6 +78,12 @@ export interface IScorerProps {
   /** The event list was restored automatically from local storage. */
   // eslint-disable-next-line react/require-default-props
   recovered?: boolean;
+  /** Latest server rosters confirm durable tournament synchronization; they never replace setup. */
+  // eslint-disable-next-line react/require-default-props
+  authoritativeRosters?: Record<LeftOrRight, string[]>;
+  /** Narrow authoritative roster-add request for an assigned room. */
+  // eslint-disable-next-line react/require-default-props
+  onSyncRosterPlayer?: (teamName: string, playerName: string) => Promise<{ ok: boolean; error?: string }>;
 }
 
 type OpenDialog = 'players' | 'lightning' | 'notes' | 'adjust' | 'forfeit' | 'issue' | 'review' | 'recovery' | null;
@@ -115,6 +121,8 @@ export default function Scorer(props: IScorerProps) {
     onRequestControl,
     controlRequestPending = false,
     recovered = false,
+    authoritativeRosters,
+    onSyncRosterPlayer,
   } = props;
 
   const [dialog, setDialog] = useState<OpenDialog>(null);
@@ -123,6 +131,8 @@ export default function Scorer(props: IScorerProps) {
   const [operationNotice, setOperationNotice] = useState(
     recovered ? 'Recovered the in-progress game saved on this device.' : '',
   );
+  const [rejectedRosterSyncs, setRejectedRosterSyncs] = useState<Record<string, true>>({});
+  const rosterSyncAttempts = useRef(new Map<string, { attempts: number; lastAt: number }>());
 
   const game = useMemo(() => deriveGame(format, setup, events.events), [format, setup, events.events]);
   const { phase } = game;
@@ -133,6 +143,53 @@ export default function Scorer(props: IScorerProps) {
 
   /** The question anything recorded now belongs to. */
   const currentQuestion = phase.kind === 'complete' ? game.tossupsRead : phase.questionNumber;
+  const lineupQuestion = lineupChangeEffectiveQuestion(game, events.events);
+
+  const localRosterAdds = useMemo(
+    () =>
+      events.events.filter(
+        (event): event is Extract<ScoreEvent, { type: 'roster-add' }> => event.type === 'roster-add',
+      ),
+    [events.events],
+  );
+  const rosterSyncStatus = useMemo(() => {
+    const status: Record<string, 'synced' | 'waiting' | 'local' | 'rejected'> = {};
+    for (const addition of localRosterAdds) {
+      const key = rosterSyncKey(addition.team, addition.playerName);
+      const authoritative = authoritativeRosters?.[addition.team] ?? [];
+      if (authoritative.some((name) => name.toLocaleLowerCase() === addition.playerName.toLocaleLowerCase())) {
+        status[key] = 'synced';
+      } else if (rejectedRosterSyncs[key]) status[key] = 'rejected';
+      else if (connection === RoomConnectionState.Connected && onSyncRosterPlayer) status[key] = 'waiting';
+      else status[key] = 'local';
+    }
+    return status;
+  }, [authoritativeRosters, connection, localRosterAdds, onSyncRosterPlayer, rejectedRosterSyncs]);
+
+  useEffect(() => {
+    if (connection !== RoomConnectionState.Connected || !onSyncRosterPlayer || !authoritativeRosters) return;
+    const now = Date.now();
+    for (const addition of localRosterAdds) {
+      const authoritative = authoritativeRosters[addition.team];
+      if (authoritative.some((name) => name.toLocaleLowerCase() === addition.playerName.toLocaleLowerCase())) continue;
+      const key = rosterSyncKey(addition.team, addition.playerName);
+      const previous = rosterSyncAttempts.current.get(key) ?? { attempts: 0, lastAt: 0 };
+      const backoff = Math.min(30_000, 5_000 * 2 ** Math.min(previous.attempts, 3));
+      if (now - previous.lastAt < backoff) continue;
+      rosterSyncAttempts.current.set(key, { attempts: previous.attempts + 1, lastAt: now });
+      const teamName = addition.team === 'left' ? game.left.name : game.right.name;
+      onSyncRosterPlayer(teamName, addition.playerName)
+        .then((result) => {
+          if (!result.ok) {
+            setRejectedRosterSyncs((current) => ({ ...current, [key]: true }));
+          }
+          return undefined;
+        })
+        .catch(() => {
+          setRejectedRosterSyncs((current) => ({ ...current, [key]: true }));
+        });
+    }
+  }, [authoritativeRosters, connection, game.left.name, game.right.name, localRosterAdds, onSyncRosterPlayer]);
 
   /**
    * Tell tournament control how the game is going, but not on every click.
@@ -204,7 +261,12 @@ export default function Scorer(props: IScorerProps) {
       const target = keyEvent.target as HTMLElement | null;
       const inControl = !!target?.closest('button, input, select, textarea, [role="dialog"]');
 
-      if ((keyEvent.metaKey || keyEvent.ctrlKey) && keyEvent.key.toLowerCase() === 'z') {
+      if (
+        (keyEvent.metaKey || keyEvent.ctrlKey) &&
+        keyEvent.key.toLowerCase() === 'z' &&
+        !inControl &&
+        dialog === null
+      ) {
         keyEvent.preventDefault();
         if (keyEvent.shiftKey) events.redo();
         else events.undo();
@@ -233,9 +295,10 @@ export default function Scorer(props: IScorerProps) {
         }.`,
       );
     }
-    if (game.left.points === game.right.points && phase.kind === 'complete') found.push('This game is a tie.');
+    if (game.regulationComplete && game.left.points === game.right.points) found.push('This game is a tie.');
+    for (const problem of game.personnelProblems) found.push(problem.message);
     return found;
-  }, [game, phase.kind]);
+  }, [game]);
 
   const progress = (() => {
     if (phase.kind === 'complete') return 'Game complete';
@@ -249,7 +312,6 @@ export default function Scorer(props: IScorerProps) {
   })();
 
   const menuItems: IGameMenuItem[] = [
-    { label: 'Players', onSelect: () => setDialog('players') },
     { label: 'Notes', onSelect: () => setDialog('notes') },
     { label: 'Issue / tournament control', onSelect: () => setDialog('issue') },
     { label: 'Full scoresheet review', onSelect: () => setDialog('review') },
@@ -359,6 +421,7 @@ export default function Scorer(props: IScorerProps) {
 
             {phase.kind === 'bonus' && (
               <BonusPrompt
+                key={phase.questionNumber}
                 format={format}
                 controllingTeamName={phase.team === 'left' ? game.left.name : game.right.name}
                 opponentName={phase.team === 'left' ? game.right.name : game.left.name}
@@ -417,6 +480,12 @@ export default function Scorer(props: IScorerProps) {
         <button type="button" className="scorer-action" onClick={events.redo} disabled={!events.canRedo}>
           Redo
         </button>
+        <button type="button" className="scorer-action" onClick={() => setDialog('players')}>
+          Players
+        </button>
+        <button type="button" className="scorer-action" onClick={() => setDialog('issue')}>
+          Mark issue
+        </button>
         <GameMenu items={menuItems} />
         {warnings.length > 0 && phase.kind !== 'complete' && (
           <span className="scorer-footer-warning">{warnings[0]}</span>
@@ -428,32 +497,45 @@ export default function Scorer(props: IScorerProps) {
           left={game.left}
           right={game.right}
           maximumActive={format.players.maximumActive}
-          questionNumber={currentQuestion}
+          questionNumber={lineupQuestion}
+          rosterSyncStatus={rosterSyncStatus}
           onSubstitute={(team, activePlayers) => {
-            record({ id: newEventId(), type: 'substitution', questionNumber: currentQuestion, team, activePlayers });
+            record({ id: newEventId(), type: 'substitution', questionNumber: lineupQuestion, team, activePlayers });
             setDialog(null);
           }}
           onAddPlayer={(team, playerName, activePlayers) => {
             const teamName = team === 'left' ? game.left.name : game.right.name;
-            const message = `Added ${playerName} to ${teamName} during the game at question ${currentQuestion}.`;
             record(
-              { id: newEventId(), type: 'roster-add', questionNumber: currentQuestion, team, playerName },
-              { id: newEventId(), type: 'substitution', questionNumber: currentQuestion, team, activePlayers },
-              { id: newEventId(), type: 'note', questionNumber: currentQuestion, text: message, flagged: true },
+              { id: newEventId(), type: 'roster-add', questionNumber: lineupQuestion, team, playerName },
+              { id: newEventId(), type: 'substitution', questionNumber: lineupQuestion, team, activePlayers },
             );
             setDialog(null);
-            if (onRequestControl && !controlRequestPending) {
-              onRequestControl('roster-change', message)
-                .then(() => setOperationNotice('Roster addition saved and sent to tournament control.'))
-                .catch(() =>
-                  setOperationNotice(
-                    'Roster addition is saved in this game, but tournament control could not be reached.',
-                  ),
-                );
+            if (onSyncRosterPlayer && authoritativeRosters) {
+              setOperationNotice(`Added ${playerName} to ${teamName}; syncing with tournament control.`);
+            } else if (onRequestControl) {
+              setOperationNotice(`Added ${playerName} to ${teamName}; requesting tournament control.`);
+              Promise.resolve()
+                .then(() => onRequestControl('roster-change', `Please add ${playerName} to ${teamName}.`))
+                .then(
+                  () => setOperationNotice(`Added ${playerName} to ${teamName}; tournament control was notified.`),
+                  () =>
+                    setOperationNotice(
+                      `Added ${playerName} to ${teamName} for this game. Tournament control could not be reached.`,
+                    ),
+                )
+                .catch(() => undefined);
             } else {
-              setOperationNotice('Roster addition saved in this game.');
+              setOperationNotice(`Added ${playerName} to ${teamName} for this game.`);
             }
           }}
+          onRequestControl={
+            onRequestControl
+              ? (team, playerName) => {
+                  const teamName = team === 'left' ? game.left.name : game.right.name;
+                  onRequestControl('roster-change', `Please add ${playerName} to ${teamName}.`).catch(() => undefined);
+                }
+              : undefined
+          }
           onClose={() => setDialog(null)}
         />
       )}

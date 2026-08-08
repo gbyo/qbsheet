@@ -144,10 +144,10 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
   const [teams, setTeams] = useState<IRoomTeam[]>([]);
   const [online, setOnline] = useState(true);
   const [cachedKit] = useState<IScoringKit | null>(() => readScoringKit());
-  const [cachedKitUsable] = useState(() => isScoringKitUsable(cachedKit));
-  const kit = emergency ? cachedKit : null;
   // Read once per mount; see AssignedRoomApp.
   const [scorerChoice] = useState(() => readScorerChoice());
+  const [cachedKitUsable] = useState(() => isScoringKitUsable(cachedKit, new Date(), scorerChoice));
+  const kit = emergency ? cachedKit : null;
 
   const [roundNumber, setRoundNumber] = useState<number | ''>('');
   const [leftTeamName, setLeftTeamName] = useState('');
@@ -320,6 +320,7 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
       roundNumber: round.number,
       leftTeam: leftTeam.name,
       rightTeam: rightTeam.name,
+      scorer: scorerChoice,
     });
     setStarting(false);
     if (!result.ok) {
@@ -335,17 +336,6 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
     setPhase('scoring');
   };
 
-  /**
-   * MODAQ's custom export callback.
-   *
-   * The export source decides what this means. A Timer export is a live snapshot for the desktop
-   * dashboard and must never be treated as a finished game. Pressing Next on the last tossup, or
-   * choosing the export item in MODAQ's menu, is a real submission.
-   *
-   * Manual and emergency diverge only at the end: both normalize and both write to the device
-   * before anything else, but an emergency result has no session to be uploaded to and is stored as
-   * a non-authoritative backup instead.
-   */
   /**
    * Put a finished game into the outbox and try to send it.
    *
@@ -501,6 +491,15 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
   );
 
   const activeResult = activeResultId ? outbox.entries.find((entry) => entry.id === activeResultId) : undefined;
+  const showDeliveryFailure = deliveryFailed && activeResult !== undefined && activeResult.deliveryState === 'queued';
+  const deliveryFailureNotice = showDeliveryFailure ? (
+    <DeliveryFailureNotice
+      persisted={!persistFailure}
+      retrying={!activeResult.retryBlocked}
+      reason={activeResult.lastError}
+      onDownload={() => handleDownload(activeResult)}
+    />
+  ) : null;
   /**
    * A finished game that really is still on its way.
    *
@@ -535,20 +534,25 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
     // The same key the game is saved under, so a reload comes back to this game and only this one.
     const scoringFormat = emergency ? kit?.scoringFormat ?? null : tournament?.scoringFormat ?? null;
     return scoringFormat && storeName ? (
-      <ScorerHost
-        key={storeName}
-        gameKey={storeName}
-        format={scoringFormat}
-        leftTeam={setup.leftTeam}
-        rightTeam={setup.rightTeam}
-        tournamentName={emergency ? kit?.tournamentName ?? '' : tournament?.name ?? ''}
-        roundName={setup.round.name}
-        roomName={emergency ? kit?.roomName : undefined}
-        connection={online ? RoomConnectionState.Connected : RoomConnectionState.Offline}
-        onSubmit={handleScorerSubmit}
-        onProgress={handleScorerProgress}
-        qbjMeta={{ round: setup.round.number, location: emergency ? kit?.roomName : undefined }}
-      />
+      <>
+        <ScorerHost
+          key={storeName}
+          gameKey={storeName}
+          format={scoringFormat}
+          leftTeam={setup.leftTeam}
+          rightTeam={setup.rightTeam}
+          tournamentName={emergency ? kit?.tournamentName ?? '' : tournament?.name ?? ''}
+          roundName={setup.round.name}
+          roomName={emergency ? kit?.roomName : undefined}
+          connection={online ? RoomConnectionState.Connected : RoomConnectionState.Offline}
+          onSubmit={handleScorerSubmit}
+          onDownload={activeResult ? () => handleDownload(activeResult) : undefined}
+          onProgress={handleScorerProgress}
+          qbjMeta={{ round: setup.round.number, location: emergency ? kit?.roomName : undefined }}
+        />
+        {deliveryFailureNotice}
+        {savedResults}
+      </>
     ) : (
       <ScoringUnavailable roundName={setup.round.name} roomName={emergency ? kit?.roomName : undefined} />
     );
@@ -578,16 +582,7 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
         conflictNotice={
           emergency ? 'Emergency scoring: this game is not in the tournament until tournament control imports it.' : ''
         }
-        deliveryFailure={
-          deliveryFailed && activeResult?.deliveryState === 'queued' ? (
-            <DeliveryFailureNotice
-              persisted={!persistFailure}
-              retrying={!activeResult.retryBlocked}
-              reason={activeResult.lastError}
-              onDownload={() => handleDownload(activeResult)}
-            />
-          ) : null
-        }
+        deliveryFailure={deliveryFailureNotice}
         savedResults={savedResults || null}
       />
     );
@@ -639,7 +634,7 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
     return (
       <div className="room-shell">
         <h1>Emergency scoring is not available</h1>
-        <div className="room-banner room-banner-error">{describeUnusableKit(kit)}</div>
+        <div className="room-banner room-banner-error">{describeUnusableKit(kit, new Date(), scorerChoice)}</div>
         <p className="room-muted">
           This device can only score a game on its own using tournament information it saved while it was connected.
           Pair this browser with its room, or ask tournament control for a paper scoresheet.

@@ -19,15 +19,30 @@ function signed(value: number): string {
   return value > 0 ? `+${value}` : String(value);
 }
 
-function questionLines(question: IDerivedQuestion, teamNames: { left: string; right: string }): string[] {
-  if (question.dead && question.buzzes.length === 0) return ['No buzz'];
+/**
+ * One line of activity, split so the points can be set in their own column.
+ *
+ * A rail of "Sarah Mitchell +15" strings has its numbers wherever the names happen to end, which
+ * makes the one thing worth scanning — did that question go 10 or 15, 20 or 30 — the hardest thing
+ * on it to find. Separating the value lets it be right-aligned against a rule.
+ */
+interface IRailLine {
+  what: string;
+  points: string;
+}
 
-  const lines = question.buzzes.map((buzz) => `${buzz.playerName} ${signed(buzz.answerType.value)}`);
+function questionLines(question: IDerivedQuestion, teamNames: { left: string; right: string }): IRailLine[] {
+  if (question.dead && question.buzzes.length === 0) return [{ what: 'No buzz', points: '' }];
+
+  const lines: IRailLine[] = question.buzzes.map((buzz) => ({
+    what: buzz.playerName,
+    points: signed(buzz.answerType.value),
+  }));
   if (question.bonus) {
-    lines.push(`${teamNames[question.bonus.team]} bonus +${question.bonus.controlledPoints}`);
+    lines.push({ what: `${teamNames[question.bonus.team]} bonus`, points: `+${question.bonus.controlledPoints}` });
     if (question.bonus.bouncebackPoints > 0) {
       const other = question.bonus.team === 'left' ? 'right' : 'left';
-      lines.push(`${teamNames[other]} bounceback +${question.bonus.bouncebackPoints}`);
+      lines.push({ what: `${teamNames[other]} bounceback`, points: `+${question.bonus.bouncebackPoints}` });
     }
   }
   return lines;
@@ -52,9 +67,12 @@ export default function RecentRail(props: IRecentRailProps) {
                 {question.period === 'overtime' && <span className="scorer-rail-ot">OT</span>}
               </span>
               <span className="scorer-rail-lines">
-                {questionLines(question, teamNames).map((line) => (
-                  <span key={line} className="scorer-rail-line">
-                    {line}
+                {questionLines(question, teamNames).map((line, index) => (
+                  // Position is the identity: identical activity lines may legitimately repeat.
+                  // eslint-disable-next-line react/no-array-index-key
+                  <span key={index} className="scorer-rail-line">
+                    <span className="scorer-rail-what">{line.what}</span>
+                    <span className="scorer-rail-points">{line.points}</span>
                   </span>
                 ))}
               </span>

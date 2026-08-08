@@ -7,6 +7,7 @@
  *
  * The values come from the format. There is no +15 / +10 / -5 anywhere in this file.
  */
+import { CSSProperties } from 'react';
 import { IScorekeeperAnswerType, IScorekeeperFormat } from '../../renderer/Services/ScorekeeperFormat';
 import { IDerivedTeam } from '../scoring/deriveGame';
 
@@ -46,7 +47,13 @@ export default function TeamPanel(props: ITeamPanelProps) {
         </p>
       </header>
 
-      <ul className="scorer-roster">
+      {/*
+       * The answer columns are set once on the roster rather than per row, so every player's +15
+       * sits directly under the last one. A scorekeeper going for the middle button on the third
+       * row should not have to look: on a real scoresheet that column is in the same place all the
+       * way down, and ragged flex rows are what stop it being.
+       */}
+      <ul className="scorer-roster" style={{ '--scorer-answer-columns': format.answerTypes.length } as CSSProperties}>
         {active.map((player) => (
           <li key={player.name} className="scorer-player">
             <span className="scorer-player-name">{player.name}</span>

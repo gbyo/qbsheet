@@ -22,6 +22,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { IPlayer } from 'modaq';
 import {
   cancelRoomHelp,
+  addRoomPlayer,
   clearRememberedRoomIdentity,
   createRoomHelp,
   getRoomAssignment,
@@ -57,6 +58,7 @@ import ScorerHost from './scorer/ScorerHost';
 import { readScorerChoice } from './ScorerChoice';
 import MatchupCard from './MatchupCard';
 import ManualRoomApp from './ManualRoomApp';
+import { scorekeeperFormatProblems } from '../renderer/Services/ScorekeeperFormat';
 
 type ModaqStatus = { isError: false; status: string } | { isError: true; status: string };
 type ExportSource = 'Menu' | 'NewGame' | 'NextButton' | 'Timer';
@@ -92,16 +94,18 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
   const [helpBusy, setHelpBusy] = useState(false);
   const [lifecycleNotice, setLifecycleNotice] = useState('');
   const [emergencyMode, setEmergencyMode] = useState(false);
+  // Read once per mount: it consults storage, and a scorer that could change under a game in
+  // progress would be worse than either scorer on its own.
+  const [scorerChoice] = useState(() => readScorerChoice());
   // Only whether this device could score on its own. The kit's tournament key is deliberately not
   // kept here — see `verifiedTournamentKeyRef` for the one results are tagged with.
-  const [scoringKitUsable, setScoringKitUsable] = useState(() => isScoringKitUsable(readScoringKit()));
+  const [scoringKitUsable, setScoringKitUsable] = useState(() =>
+    isScoringKitUsable(readScoringKit(), new Date(), scorerChoice),
+  );
   const [conflictNotice, setConflictNotice] = useState('');
   const [activeResultId, setActiveResultId] = useState<string | null>(null);
   const [persistFailure, setPersistFailure] = useState(false);
   const [deliveryFailed, setDeliveryFailed] = useState(false);
-  // Read once per mount: it consults storage, and a scorer that could change under a game in
-  // progress would be worse than either scorer on its own.
-  const [scorerChoice] = useState(() => readScorerChoice());
 
   const outbox = useResultOutbox();
   const activeIdentity = useMemo(
@@ -109,6 +113,11 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
     [identity, operatorName],
   );
   const online = connection !== RoomConnectionState.Offline;
+  const assignmentRulesUsable =
+    assignment !== null &&
+    (scorerChoice === 'legacy'
+      ? assignment.gameFormat !== null
+      : assignment.scoringFormat !== null && scorekeeperFormatProblems(assignment.scoringFormat).length === 0);
 
   const credentialsRef = useRef<ISessionCredentials | null>(null);
   credentialsRef.current = scoring?.credentials ?? null;
@@ -245,7 +254,7 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
   const kitRoomName = assignment?.roomName;
   const kitTimedRounds = assignment?.timedRounds === true;
   // This dependency makes the kit rebuild as soon as the scoring format becomes available.
-  const kitRulesUsable = assignment?.gameFormat != null;
+  const kitRulesUsable = assignmentRulesUsable;
   const assignmentRef = useRef<IRoomAssignmentResponse | null>(null);
   assignmentRef.current = assignment;
 
@@ -276,7 +285,7 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
         roomName: kitRoomName,
       });
       if (writeScoringKit(kit) && !cancelled) {
-        setScoringKitUsable(isScoringKitUsable(kit));
+        setScoringKitUsable(isScoringKitUsable(kit, new Date(), scorerChoice));
       }
     };
 
@@ -288,7 +297,7 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
       cancelled = true;
       clearInterval(handle);
     };
-  }, [kitTournamentName, kitRoomId, kitRoomName, kitTimedRounds, kitRulesUsable, connection]);
+  }, [kitTournamentName, kitRoomId, kitRoomName, kitTimedRounds, kitRulesUsable, connection, scorerChoice]);
 
   // A different room, or a different tournament, and the confirmed key no longer describes what
   // this page is scoring. Dropped rather than carried until a refresh happens to replace it.
@@ -303,6 +312,7 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
         deviceId: activeIdentity.deviceId,
         operatorName,
         ready,
+        scorer: scorerChoice,
       });
       if (!cancelled && result.ok) setPresence(result.value.presence);
     };
@@ -312,7 +322,7 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
       cancelled = true;
       clearInterval(handle);
     };
-  }, [activeIdentity, operatorName, ready]);
+  }, [activeIdentity, operatorName, ready, scorerChoice]);
 
   useEffect(() => {
     const shouldWarn = scoring !== null || hasUnresolvedResults;
@@ -331,7 +341,7 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
     setStartError('');
     setSubmittedSummary('');
     setStarting(true);
-    const result = await startAssignedMatch(activeIdentity, current.scheduledMatchId);
+    const result = await startAssignedMatch(activeIdentity, current.scheduledMatchId, scorerChoice);
     setStarting(false);
     if (!result.ok) {
       setStartError(result.error);
@@ -353,13 +363,14 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
   };
 
   const handleReadyChange = async (nextReady: boolean) => {
-    const readyAllowed = online && assignment !== null && assignment.gameFormat !== null;
+    const readyAllowed = online && assignmentRulesUsable;
     if (nextReady && !readyAllowed) return;
     setReady(nextReady);
     const result = await updateRoomPresence(activeIdentity, {
       deviceId: activeIdentity.deviceId,
       operatorName,
       ready: nextReady,
+      scorer: scorerChoice,
     });
     if (result.ok) setPresence(result.value.presence);
     else if (nextReady) setReady(false);
@@ -528,10 +539,18 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
     () => (scoring ? toModaqPlayers(scoring.matchup.leftTeam, scoring.matchup.rightTeam) : []),
     [scoring],
   );
-  const readyAllowed = online && assignment !== null && assignment.gameFormat !== null;
+  const readyAllowed = online && assignmentRulesUsable;
   const canScoreEmergency = scoring === null && !online && scoringKitUsable;
   const activeResult = activeResultId ? outbox.entries.find((entry) => entry.id === activeResultId) : undefined;
   const showDeliveryFailure = deliveryFailed && activeResult !== undefined && activeResult.deliveryState === 'queued';
+  const deliveryFailureNotice = showDeliveryFailure ? (
+    <DeliveryFailureNotice
+      persisted={!persistFailure}
+      retrying={!activeResult.retryBlocked}
+      reason={activeResult.lastError}
+      onDownload={() => handleDownload(activeResult)}
+    />
+  ) : null;
 
   const savedResults = outbox.entries.length > 0 && (
     <SavedResults
@@ -576,26 +595,45 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
   if (scoring && scorerChoice === 'first-party') {
     // Keyed by the session so each game gets its own state, and its own chance to recover a saved one.
     return assignment.scoringFormat ? (
-      <ScorerHost
-        key={scoring.credentials.sessionId}
-        gameKey={scoring.credentials.sessionId}
-        format={assignment.scoringFormat}
-        leftTeam={scoring.matchup.leftTeam}
-        rightTeam={scoring.matchup.rightTeam}
-        tournamentName={assignment.tournamentName}
-        roundName={scoring.matchup.roundName}
-        roomName={assignment.roomName}
-        connection={connection}
-        degradedMessage={degradedMessage}
-        onSubmit={handleScorerSubmit}
-        onProgress={handleScorerProgress}
-        onRequestControl={handleRequestHelp}
-        controlRequestPending={helpRequest !== null && helpRequest.status === 'open'}
-        qbjMeta={{
-          round: scoring.matchup.roundNumber,
-          location: assignment.roomName,
-        }}
-      />
+      <>
+        <ScorerHost
+          key={scoring.credentials.sessionId}
+          gameKey={scoring.credentials.sessionId}
+          format={assignment.scoringFormat}
+          leftTeam={scoring.matchup.leftTeam}
+          rightTeam={scoring.matchup.rightTeam}
+          authoritativeLeftTeam={
+            assignment.current?.scheduledMatchId === scoring.matchup.scheduledMatchId
+              ? assignment.current.leftTeam
+              : scoring.matchup.leftTeam
+          }
+          authoritativeRightTeam={
+            assignment.current?.scheduledMatchId === scoring.matchup.scheduledMatchId
+              ? assignment.current.rightTeam
+              : scoring.matchup.rightTeam
+          }
+          onSyncRosterPlayer={async (teamName, playerName) => {
+            const result = await addRoomPlayer(activeIdentity, scoring.credentials, teamName, playerName);
+            return result.ok ? { ok: true } : { ok: false, error: result.error };
+          }}
+          tournamentName={assignment.tournamentName}
+          roundName={scoring.matchup.roundName}
+          roomName={assignment.roomName}
+          connection={connection}
+          degradedMessage={degradedMessage}
+          onSubmit={handleScorerSubmit}
+          onDownload={activeResult ? () => handleDownload(activeResult) : undefined}
+          onProgress={handleScorerProgress}
+          onRequestControl={handleRequestHelp}
+          controlRequestPending={helpRequest !== null && helpRequest.status === 'open'}
+          qbjMeta={{
+            round: scoring.matchup.roundNumber,
+            location: assignment.roomName,
+          }}
+        />
+        {deliveryFailureNotice}
+        {savedResults}
+      </>
     ) : (
       <ScoringUnavailable roundName={scoring.matchup.roundName} roomName={assignment.roomName} />
     );
@@ -631,16 +669,7 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
         onRequestHelp={handleRequestHelp}
         onCancelHelp={handleCancelHelp}
         onChangeRoom={handleChangeRoom}
-        deliveryFailure={
-          showDeliveryFailure ? (
-            <DeliveryFailureNotice
-              persisted={!persistFailure}
-              retrying={!activeResult?.retryBlocked}
-              reason={activeResult?.lastError}
-              onDownload={() => handleDownload(activeResult)}
-            />
-          ) : null
-        }
+        deliveryFailure={deliveryFailureNotice}
         savedResults={savedResults || null}
       />
     );
@@ -661,7 +690,7 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
       canStart={
         assignment.current !== null &&
         assignment.blockedReason === undefined &&
-        assignment.gameFormat !== null &&
+        assignmentRulesUsable &&
         !awaitingReview &&
         ready
       }

@@ -17,7 +17,14 @@
  */
 import { LeftOrRight } from '../../renderer/Utils/UtilTypes';
 import { IScorekeeperAnswerType, IScorekeeperFormat } from '../../renderer/Services/ScorekeeperFormat';
-import { bonusEventPoints, IBonusEvent, otherTeam, ScoreEvent } from './ScoreEvents';
+import {
+  bonusEventPoints,
+  IBonusEvent,
+  IRosterAddEvent,
+  ISubstitutionEvent,
+  otherTeam,
+  ScoreEvent,
+} from './ScoreEvents';
 
 /** One team as the game began. */
 export interface ITeamSetup {
@@ -62,6 +69,8 @@ export interface IDerivedQuestion {
   resolved: boolean;
   /** Still owes a bonus before the game can move on. */
   awaitingBonus: boolean;
+  /** The lineup that heard this tossup, frozen at its effective personnel boundary. */
+  activePlayers: Record<LeftOrRight, string[]>;
 }
 
 export interface IDerivedPlayer {
@@ -101,6 +110,8 @@ export interface IDerivedGame {
   /** True once regulation is behind us, whether or not overtime has been played. */
   regulationComplete: boolean;
   notes: { questionNumber: number; text: string; flagged: boolean }[];
+  /** Engine-level personnel invariants that must be corrected before submission. */
+  personnelProblems: { eventId: string; questionNumber: number; message: string }[];
 }
 
 function emptyPlayer(name: string): IDerivedPlayer {
@@ -205,12 +216,19 @@ export default function deriveGame(format: IScorekeeperFormat, setup: IGameSetup
   };
 
   const notes: IDerivedGame['notes'] = [];
+  const personnelProblems: IDerivedGame['personnelProblems'] = [];
   const lightningByTeam = new Map<LeftOrRight, number>();
 
-  // Group by cycle. Events carry their question number, so a correction inserted into an earlier
-  // question lands in the right place rather than wherever it happens to sit in the list.
+  // Only scoring activity creates a tossup cycle. Personnel events can point at the next boundary,
+  // but that must not make a future unresolved question appear on the scoresheet.
   const cycleNumbers = new Set<number>();
   const eventsByCycle = new Map<number, ScoreEvent[]>();
+  // A type predicate rather than a bare boolean, so the branches below narrow to the two events
+  // this actually holds instead of the whole union.
+  const personnelEvents = events.filter(
+    (event): event is ISubstitutionEvent | IRosterAddEvent =>
+      event.type === 'substitution' || event.type === 'roster-add',
+  );
   for (const event of events) {
     if (event.type === 'note') {
       notes.push({ questionNumber: event.questionNumber, text: event.text, flagged: event.flagged === true });
@@ -230,7 +248,7 @@ export default function deriveGame(format: IScorekeeperFormat, setup: IGameSetup
       teams[event.team].adjustmentPoints += event.points;
       continue;
     }
-    if (event.type === 'end-regulation') continue;
+    if (event.type === 'end-regulation' || event.type === 'substitution' || event.type === 'roster-add') continue;
 
     cycleNumbers.add(event.questionNumber);
     const list = eventsByCycle.get(event.questionNumber) ?? [];
@@ -243,22 +261,29 @@ export default function deriveGame(format: IScorekeeperFormat, setup: IGameSetup
 
   const questions: IDerivedQuestion[] = [];
   let overtimeCyclesPlayed = 0;
+  const appliedPersonnel = new Set<string>();
+
+  const applyPersonnelThrough = (questionNumber: number) => {
+    for (const event of personnelEvents) {
+      if (appliedPersonnel.has(event.id) || event.questionNumber > questionNumber) continue;
+      appliedPersonnel.add(event.id);
+      if (event.type === 'roster-add') playerRecord(event.team, event.playerName);
+      else {
+        teams[event.team].activePlayers = event.activePlayers.slice();
+        for (const name of event.activePlayers) playerRecord(event.team, name);
+      }
+    }
+  };
 
   for (const questionNumber of orderedCycles) {
     const cycleEvents = eventsByCycle.get(questionNumber) ?? [];
     const period: GamePeriod = questionNumber > boundary ? 'overtime' : 'regulation';
 
-    // Substitutions take effect from the cycle they were recorded on, so they are applied before
-    // this cycle's tossups heard are counted.
-    for (const event of cycleEvents) {
-      if (event.type === 'roster-add') playerRecord(event.team, event.playerName);
-      if (event.type === 'substitution') {
-        teams[event.team].activePlayers = event.activePlayers.slice();
-        // A player added in the room first appears in a lineup event. Materialize them immediately
-        // so they are available on the scoring screen before this tossup has been resolved.
-        for (const name of event.activePlayers) playerRecord(event.team, name);
-      }
-    }
+    applyPersonnelThrough(questionNumber);
+    const activePlayers: Record<LeftOrRight, string[]> = {
+      left: teams.left.activePlayers.slice(),
+      right: teams.right.activePlayers.slice(),
+    };
 
     const buzzes: IDerivedBuzz[] = [];
     for (const event of cycleEvents) {
@@ -266,6 +291,15 @@ export default function deriveGame(format: IScorekeeperFormat, setup: IGameSetup
       const answerType = byIndex(event.answerTypeIndex);
       // An event referencing an answer type the format no longer has is not something to guess at.
       if (!answerType) continue;
+      if (!activePlayers[event.team].includes(event.playerName)) {
+        personnelProblems.push({
+          eventId: event.id,
+          questionNumber,
+          message: `${event.playerName} was not active for ${
+            teams[event.team].name
+          } on Tossup ${questionNumber}. Correct the lineup first.`,
+        });
+      }
       buzzes.push({ team: event.team, playerName: event.playerName, answerType });
     }
 
@@ -283,7 +317,7 @@ export default function deriveGame(format: IScorekeeperFormat, setup: IGameSetup
     // Tossups heard. Every active player on both teams heard a tossup that was read, whoever got it.
     if (resolved) {
       for (const side of ['left', 'right'] as LeftOrRight[]) {
-        for (const name of teams[side].activePlayers) playerRecord(side, name).tossupsHeard += 1;
+        for (const name of activePlayers[side]) playerRecord(side, name).tossupsHeard += 1;
       }
       if (period === 'overtime') overtimeCyclesPlayed += 1;
     }
@@ -311,7 +345,7 @@ export default function deriveGame(format: IScorekeeperFormat, setup: IGameSetup
       teams[otherTeam(bonusEvent.team)].bonusBouncebackPoints += bounceback;
     }
 
-    questions.push({ questionNumber, period, buzzes, dead, bonus, resolved, awaitingBonus });
+    questions.push({ questionNumber, period, buzzes, dead, bonus, resolved, awaitingBonus, activePlayers });
   }
 
   for (const [side, points] of lightningByTeam) teams[side].lightningPoints = points;
@@ -340,6 +374,14 @@ export default function deriveGame(format: IScorekeeperFormat, setup: IGameSetup
     overtimeCyclesPlayed,
   });
 
+  // A lineup selected for the upcoming tossup should be visible immediately without inventing that
+  // tossup. A bonus is still part of the current tossup, so personnel changes cannot apply until
+  // the following boundary.
+  let upcomingBoundary = (questions.at(-1)?.questionNumber ?? 0) + 1;
+  if (phase.kind === 'tossup') upcomingBoundary = phase.questionNumber;
+  else if (phase.kind === 'bonus') upcomingBoundary = phase.questionNumber + 1;
+  applyPersonnelThrough(upcomingBoundary);
+
   return {
     left: teams.left,
     right: teams.right,
@@ -349,7 +391,26 @@ export default function deriveGame(format: IScorekeeperFormat, setup: IGameSetup
     overtimeTossupsRead,
     regulationComplete,
     notes,
+    personnelProblems,
   };
+}
+
+/**
+ * The first tossup whose lineup may safely change right now.
+ *
+ * A displayed tossup with no scoring activity has not begun. Once either team has buzzed, or while
+ * its bonus is being scored, that tossup's lineup is historical and the next boundary is used.
+ */
+export function lineupChangeEffectiveQuestion(game: IDerivedGame, events: ScoreEvent[]): number {
+  if (game.phase.kind === 'bonus') return game.phase.questionNumber + 1;
+  if (game.phase.kind === 'complete') return (game.questions.at(-1)?.questionNumber ?? 0) + 1;
+  const { questionNumber } = game.phase;
+  const begun = events.some(
+    (event) =>
+      event.questionNumber === questionNumber &&
+      (event.type === 'tossup-buzz' || event.type === 'tossup-dead' || event.type === 'bonus'),
+  );
+  return begun ? questionNumber + 1 : questionNumber;
 }
 
 /**

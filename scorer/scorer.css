@@ -1,12 +1,20 @@
 /* The scorekeeping screen.
  *
- * Built to look like event software rather than a dashboard: white and neutral grey, 1px borders,
- * small radii, no shadows, no gradients, no colour used for decoration. The only colours that carry
- * meaning are blue for something you can press, green for connected, and red for a neg or a
- * destructive action. Both teams get the same treatment — a team's identity is its name, not a hue.
+ * Built like a scoresheet, not like a dashboard. The distinction that matters in practice: a
+ * scoresheet is ruled, and a dashboard is made of cards. So there are no panels floating inside
+ * padding here — the surfaces meet along 1px rules, the two teams are columns of one sheet divided
+ * by a vertical rule, and radius appears only on things you press.
  *
- * The numbers are the hierarchy. A team's score is the largest thing on the screen; everything else
- * is 13-14px and gets out of its way.
+ * Colour is information, never decoration. Red is a neg or a destructive action, green is
+ * connected, amber is a warning. Blue is reserved for the control you are touching — focus, hover,
+ * the one primary action — which is why the twenty-odd scoring buttons on screen are *not* blue.
+ * A roster of blue buttons reads as a page of links and gives the eye nothing to catch on; neutral
+ * buttons with a red neg let the exception stand out, which is the one a scorekeeper must not
+ * misclick.
+ *
+ * Numbers are the hierarchy, and they are aligned. Scores share a baseline so they can be compared
+ * without reading; answer buttons sit in fixed columns so the same value is in the same place on
+ * every row; the activity rail right-aligns its points. Tabular figures throughout.
  *
  * Laid out to fit 1366x768 without scrolling during ordinary scoring, which is the Chromebook a
  * school actually owns. It reuses the palette from room.css.
@@ -116,16 +124,31 @@
 .scorer-main {
   flex: 1;
   min-width: 0;
-  padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
 }
 
+/* One sheet in two columns, divided by a rule. Not two cards with a gutter between them. */
 .scorer-teams {
+  flex: 1;
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
+  grid-template-columns: 1fr 1px 1fr;
+  align-content: start;
+}
+
+.scorer-teams::before {
+  content: '';
+  grid-column: 2;
+  grid-row: 1;
+  background: var(--room-border);
+}
+
+.scorer-team:first-of-type {
+  grid-column: 1;
+}
+
+.scorer-team:last-of-type {
+  grid-column: 3;
 }
 
 /* #endregion */
@@ -133,35 +156,42 @@
 /* #region Teams */
 
 .scorer-team {
-  border: 1px solid var(--room-border);
-  border-radius: 8px;
-  padding: 12px;
+  grid-row: 1;
+  min-width: 0;
+  padding: 14px 16px 16px;
 }
 
+/*
+ * Name and score share a baseline, and both teams' heads are the same height, so the two scores sit
+ * on one line across the sheet and can be compared without reading either label.
+ */
 .scorer-team-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
-  padding-bottom: 8px;
+  padding-bottom: 10px;
   border-bottom: 1px solid var(--room-border);
 }
 
 .scorer-team-name {
   margin: 0;
-  font-size: 13px;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 15px;
   font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--room-muted);
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .scorer-team-score {
   margin: 0;
-  font-size: 32px;
-  font-weight: 600;
+  font-size: 34px;
+  font-weight: 500;
   line-height: 1;
   font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum';
 }
 
 .scorer-roster {
@@ -174,9 +204,9 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 6px 0;
-  border-bottom: 1px solid var(--room-surface-sunken);
+  gap: 16px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--room-border);
 }
 
 .scorer-player:last-child {
@@ -190,9 +220,21 @@
   white-space: nowrap;
 }
 
-/* A custom ruleset may define more values than fit; scroll the buttons rather than shrink them. */
+/*
+ * Equal columns, set from the format's answer-type count, so the same value lands in the same place
+ * on every row. A custom ruleset with an unusual number of values scrolls rather than shrinking the
+ * buttons below a size a finger can hit.
+ */
 .scorer-answers {
-  display: flex;
+  display: grid;
+  /*
+   * Bounded rather than 1fr. Equal columns that stretch to fill the row would make a three-value
+   * format's buttons a hundred pixels wide — a target far larger than the thing it is labelled
+   * with, which reads as filler. Held between a thumb's width and a comfortable maximum, the block
+   * of buttons keeps the same shape whether the format defines two values or six.
+   */
+  grid-template-columns: repeat(var(--scorer-answer-columns, 3), minmax(46px, 62px));
+  justify-content: end;
   gap: 4px;
   overflow-x: auto;
   scrollbar-width: thin;
@@ -208,22 +250,33 @@
 
 /* #region Buttons */
 
+/*
+ * Neutral on purpose. Twenty-four accent-coloured buttons would read as a page of links and flatten
+ * everything to the same importance; leaving them the colour of text lets the neg be the one thing
+ * that stands out, which is the button that must not be pressed by accident.
+ */
 .scorer-answer {
-  min-width: 44px;
-  padding: 6px 8px;
+  min-width: 46px;
+  padding: 7px 8px;
   font: inherit;
   font-variant-numeric: tabular-nums;
-  color: var(--room-accent);
+  color: var(--room-text);
   background: var(--room-surface);
   border: 1px solid var(--room-border-strong);
-  border-radius: 6px;
+  border-radius: 4px;
   cursor: pointer;
 }
 
 .scorer-answer:hover:not(:disabled) {
+  border-color: var(--room-accent);
+  color: var(--room-accent);
+}
+
+.scorer-answer:active:not(:disabled) {
   background: var(--room-info-bg);
 }
 
+/* The highest tier carries weight rather than colour, so it reads first without shouting. */
 .scorer-answer-power {
   font-weight: 600;
 }
@@ -233,6 +286,8 @@
 }
 
 .scorer-answer-neg:hover:not(:disabled) {
+  border-color: var(--room-error);
+  color: var(--room-error);
   background: var(--room-error-bg);
 }
 
@@ -243,12 +298,12 @@
 }
 
 .scorer-nobuzz {
-  padding: 8px 20px;
+  padding: 9px 20px;
   font: inherit;
   color: var(--room-text);
   background: var(--room-surface);
   border: 1px solid var(--room-border-strong);
-  border-radius: 6px;
+  border-radius: 4px;
   cursor: pointer;
 }
 
@@ -262,10 +317,10 @@
   font: inherit;
   font-size: 15px;
   font-variant-numeric: tabular-nums;
-  color: var(--room-accent);
+  color: var(--room-text);
   background: var(--room-surface);
   border: 1px solid var(--room-border-strong);
-  border-radius: 6px;
+  border-radius: 4px;
   cursor: pointer;
 }
 
@@ -285,7 +340,7 @@
   color: var(--room-text);
   background: var(--room-surface);
   border: 1px solid var(--room-border-strong);
-  border-radius: 6px;
+  border-radius: 4px;
   cursor: pointer;
 }
 
@@ -303,6 +358,10 @@
 .scorer-nobuzz:focus-visible,
 .scorer-choice:focus-visible,
 .scorer-action:focus-visible,
+.scorer-menu-item:focus-visible,
+.scorer-text-action:focus-visible,
+.scorer-submit:focus-visible,
+.scorer-danger:focus-visible,
 .scorer-inline-form input:focus-visible {
   outline: 2px solid var(--room-accent);
   outline-offset: 1px;
@@ -312,14 +371,21 @@
 
 /* #region Contextual stage */
 
+/*
+ * The contextual row: whatever the game is asking for right now.
+ *
+ * A bar ruled off from the sheet above it, not a card sitting on it. The fixed height is doing real
+ * work — this area swaps between a No buzz row, a set of bonus buttons and the completion summary,
+ * and if it resized on each swap the scoring buttons above would move under the scorekeeper's hand
+ * between one tossup and the next. 96px is what the tallest of those three needs.
+ */
 .scorer-stage {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  min-height: 108px;
-  padding: 12px;
-  border: 1px solid var(--room-border);
-  border-radius: 8px;
+  min-height: 96px;
+  padding: 14px 16px;
+  border-top: 1px solid var(--room-border-strong);
   background: var(--room-surface-sunken);
 }
 
@@ -340,9 +406,7 @@
   align-items: baseline;
   gap: 8px;
   margin: 0 0 10px;
-  font-size: 13px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  font-size: 14px;
   color: var(--room-muted);
 }
 
@@ -352,8 +416,6 @@
 }
 
 .scorer-prompt-context {
-  text-transform: none;
-  letter-spacing: 0;
   color: var(--room-faint);
 }
 
@@ -385,7 +447,7 @@
   color: var(--room-text);
   background: var(--room-surface);
   border: 1px solid var(--room-border-strong);
-  border-radius: 6px;
+  border-radius: 4px;
 }
 
 .scorer-problem {
@@ -413,20 +475,18 @@
 /* #region Recent rail */
 
 .scorer-rail {
-  width: 260px;
+  width: 244px;
   flex-shrink: 0;
-  padding: 16px;
-  border-left: 1px solid var(--room-border);
+  padding: 14px 16px;
+  border-left: 1px solid var(--room-border-strong);
   overflow-y: auto;
 }
 
 .scorer-rail-heading {
-  margin: 0 0 10px;
-  font-size: 12px;
+  margin: 0 0 8px;
+  font-size: 13px;
   font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--room-faint);
+  color: var(--room-muted);
 }
 
 .scorer-rail-empty {
@@ -446,12 +506,16 @@
   gap: 8px;
   padding: 6px 0;
   font-size: 13px;
-  border-bottom: 1px solid var(--room-surface-sunken);
+  border-bottom: 1px solid var(--room-border);
+}
+
+.scorer-rail-item:last-child {
+  border-bottom: none;
 }
 
 .scorer-rail-q {
   flex-shrink: 0;
-  width: 44px;
+  width: 34px;
   color: var(--room-faint);
   font-variant-numeric: tabular-nums;
 }
@@ -463,15 +527,32 @@
 }
 
 .scorer-rail-lines {
+  flex: 1;
   display: flex;
   flex-direction: column;
   min-width: 0;
 }
 
+/* Name on the left, points against the right rule, so the column of values reads on its own. */
 .scorer-rail-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.scorer-rail-what {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.scorer-rail-points {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  color: var(--room-muted);
 }
 
 /* #endregion */
@@ -481,7 +562,8 @@
   align-items: center;
   gap: 8px;
   padding: 8px 16px;
-  border-top: 1px solid var(--room-border);
+  border-top: 1px solid var(--room-border-strong);
+  background: var(--room-surface);
 }
 
 /* #region Narrower screens
@@ -503,9 +585,30 @@
   }
 }
 
+/*
+ * Stacked, so the divider becomes the rule between the two teams rather than beside them. The
+ * explicit column placements have to be undone too, or the second team would still be reaching for
+ * a third column that no longer exists.
+ */
 @media (max-width: 760px) {
   .scorer-teams {
     grid-template-columns: 1fr;
+  }
+
+  .scorer-teams::before {
+    grid-column: 1;
+    grid-row: 2;
+    height: 1px;
+  }
+
+  .scorer-team:first-of-type {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .scorer-team:last-of-type {
+    grid-column: 1;
+    grid-row: 3;
   }
 }
 
@@ -566,25 +669,20 @@
   color: var(--room-warning);
 }
 
-.scorer-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 30;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
+.scorer-dialog::backdrop {
   background: rgb(28 29 32 / 32%);
 }
 
 .scorer-dialog {
-  width: 100%;
+  width: calc(100% - 48px);
   max-width: 560px;
-  max-height: 100%;
+  max-height: calc(100% - 48px);
+  padding: 0;
   overflow-y: auto;
+  color: var(--room-text);
   background: var(--room-surface);
   border: 1px solid var(--room-border-strong);
-  border-radius: 8px;
+  border-radius: 6px;
 }
 
 .scorer-dialog.is-wide {
@@ -624,11 +722,8 @@
 
 .scorer-lineup-team {
   margin: 0 0 8px;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--room-muted);
 }
 
 .scorer-lineup-list {
@@ -743,7 +838,7 @@
   color: var(--room-text);
   background: var(--room-surface);
   border: 1px solid var(--room-border-strong);
-  border-radius: 6px;
+  border-radius: 4px;
 }
 
 .scorer-checkbox {
@@ -817,7 +912,7 @@
   color: var(--room-surface);
   background: var(--room-error);
   border: 1px solid var(--room-error);
-  border-radius: 6px;
+  border-radius: 4px;
   cursor: pointer;
 }
 
@@ -860,7 +955,7 @@
   color: var(--room-surface);
   background: var(--room-accent);
   border: 1px solid var(--room-accent);
-  border-radius: 6px;
+  border-radius: 4px;
   cursor: pointer;
 }
 

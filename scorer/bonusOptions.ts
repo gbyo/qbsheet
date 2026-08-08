@@ -44,6 +44,7 @@ export function bouncebackOptions(bonus: IScorekeeperBonus, controlledPoints: nu
 
   const options: number[] = [];
   for (let points = 0; points <= available; points += step) options.push(points);
+  if (options[options.length - 1] !== available) options.push(available);
   return options;
 }
 

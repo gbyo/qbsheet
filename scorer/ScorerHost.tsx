@@ -6,7 +6,7 @@
  * game read in its own hooks would be read once — at page load, before there was a game to read.
  * Render this with `key={gameKey}` and each game gets its own state, and its own chance to recover.
  */
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { IScorekeeperFormat } from '../../renderer/Services/ScorekeeperFormat';
 import { IRoomTeam, HelpRequestCategory } from '../../main/server/ServerTypes';
 import { IGameSetup } from '../scoring/deriveGame';
@@ -40,6 +40,13 @@ export interface IScorerHostProps {
   onRequestControl?: (category: HelpRequestCategory, message: string) => Promise<void>;
   // eslint-disable-next-line react/require-default-props
   controlRequestPending?: boolean;
+  /** Latest assignment rosters, used only to confirm roster synchronization. */
+  // eslint-disable-next-line react/require-default-props
+  authoritativeLeftTeam?: IRoomTeam;
+  // eslint-disable-next-line react/require-default-props
+  authoritativeRightTeam?: IRoomTeam;
+  // eslint-disable-next-line react/require-default-props
+  onSyncRosterPlayer?: (teamName: string, playerName: string) => Promise<{ ok: boolean; error?: string }>;
 }
 
 function toSetup(left: IRoomTeam, right: IRoomTeam): IGameSetup {
@@ -67,7 +74,18 @@ export default function ScorerHost(props: IScorerHostProps) {
     qbjMeta,
     onRequestControl,
     controlRequestPending,
+    authoritativeLeftTeam,
+    authoritativeRightTeam,
+    onSyncRosterPlayer,
   } = props;
+
+  const initialGameKey = useRef(gameKey);
+  useEffect(() => {
+    if (process.env.NODE_ENV !== 'production' && initialGameKey.current !== gameKey) {
+      // eslint-disable-next-line no-console
+      console.warn('ScorerHost gameKey changed without a remount. Render it with key={gameKey} to isolate each game.');
+    }
+  }, [gameKey]);
 
   const [setup] = useState<IGameSetup>(() => toSetup(leftTeam, rightTeam));
   /**
@@ -97,6 +115,15 @@ export default function ScorerHost(props: IScorerHostProps) {
       qbjMeta={qbjMeta}
       onRequestControl={onRequestControl}
       controlRequestPending={controlRequestPending}
+      authoritativeRosters={
+        authoritativeLeftTeam && authoritativeRightTeam
+          ? {
+              left: authoritativeLeftTeam.players.map((player) => player.name),
+              right: authoritativeRightTeam.players.map((player) => player.name),
+            }
+          : undefined
+      }
+      onSyncRosterPlayer={onSyncRosterPlayer}
       recovered={recovered !== null && recovered.events.length > 0}
     />
   );

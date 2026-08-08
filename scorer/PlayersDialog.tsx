@@ -23,7 +23,15 @@ export interface IPlayersDialogProps {
   questionNumber: number;
   onSubstitute: (team: LeftOrRight, activePlayers: string[]) => void;
   onAddPlayer: (team: LeftOrRight, playerName: string, activePlayers: string[]) => void;
+  // eslint-disable-next-line react/require-default-props
+  rosterSyncStatus?: Record<string, 'synced' | 'waiting' | 'local' | 'rejected'>;
+  // eslint-disable-next-line react/require-default-props
+  onRequestControl?: (team: LeftOrRight, playerName: string) => void;
   onClose: () => void;
+}
+
+export function rosterSyncKey(team: LeftOrRight, playerName: string): string {
+  return `${team}\u0000${playerName.toLocaleLowerCase()}`;
 }
 
 function TeamLineup(props: {
@@ -32,8 +40,11 @@ function TeamLineup(props: {
   maximumActive: number;
   onSubstitute: (team: LeftOrRight, activePlayers: string[]) => void;
   onAddPlayer: (team: LeftOrRight, playerName: string, activePlayers: string[]) => void;
+  rosterSyncStatus: Record<string, 'synced' | 'waiting' | 'local' | 'rejected'>;
+  // eslint-disable-next-line react/require-default-props
+  onRequestControl?: (team: LeftOrRight, playerName: string) => void;
 }) {
-  const { team, side, maximumActive, onSubstitute, onAddPlayer } = props;
+  const { team, side, maximumActive, onSubstitute, onAddPlayer, rosterSyncStatus, onRequestControl } = props;
   const [selected, setSelected] = useState<string[]>(team.activePlayers);
   const [newPlayer, setNewPlayer] = useState('');
 
@@ -53,32 +64,48 @@ function TeamLineup(props: {
     cleanNewPlayer !== '' &&
     !team.players.some((player) => player.name.toLocaleLowerCase() === cleanNewPlayer.toLocaleLowerCase());
 
+  const playerRow = (player: IDerivedTeam['players'][number], active: boolean) => {
+    const sync = rosterSyncStatus[rosterSyncKey(side, player.name)];
+    let syncLabel = '';
+    if (sync === 'synced') syncLabel = 'Synced';
+    else if (sync === 'waiting') syncLabel = 'Waiting to sync';
+    else if (sync === 'local') syncLabel = 'Saved in this game';
+    else if (sync === 'rejected') syncLabel = 'Needs tournament control';
+    return (
+      <li key={player.name}>
+        <label className="scorer-lineup-row" htmlFor={`scorer-lineup-${side}-${player.name}`}>
+          <input
+            id={`scorer-lineup-${side}-${player.name}`}
+            type="checkbox"
+            checked={active}
+            disabled={!active && atCapacity}
+            onChange={() => toggle(player.name)}
+          />
+          <span className="scorer-lineup-name">{player.name}</span>
+          <span className="scorer-lineup-tuh">{player.tossupsHeard} TUH</span>
+          {syncLabel && <span className="scorer-lineup-sync">{syncLabel}</span>}
+        </label>
+        {sync === 'rejected' && onRequestControl && (
+          <button type="button" className="scorer-text-action" onClick={() => onRequestControl(side, player.name)}>
+            Request tournament control
+          </button>
+        )}
+      </li>
+    );
+  };
+
+  const playing = team.players.filter((player) => selected.includes(player.name));
+  const bench = team.players.filter((player) => !selected.includes(player.name));
+
   return (
     <section className="scorer-lineup" aria-label={`${team.name} lineup`}>
       <h3 className="scorer-lineup-team">{team.name}</h3>
-      <ul className="scorer-lineup-list">
-        {team.players.map((player) => {
-          const active = selected.includes(player.name);
-          return (
-            <li key={player.name}>
-              <label className="scorer-lineup-row" htmlFor={`scorer-lineup-${side}-${player.name}`}>
-                <input
-                  id={`scorer-lineup-${side}-${player.name}`}
-                  type="checkbox"
-                  checked={active}
-                  // A full lineup can still be reduced; it just cannot grow.
-                  disabled={!active && atCapacity}
-                  onChange={() => toggle(player.name)}
-                />
-                <span className="scorer-lineup-name">{player.name}</span>
-                <span className="scorer-lineup-tuh">{player.tossupsHeard} TUH</span>
-              </label>
-            </li>
-          );
-        })}
-      </ul>
+      <h4>Playing</h4>
+      <ul className="scorer-lineup-list">{playing.map((player) => playerRow(player, true))}</ul>
+      <h4>Bench</h4>
+      <ul className="scorer-lineup-list">{bench.map((player) => playerRow(player, false))}</ul>
       <p className="scorer-lineup-count">
-        {selected.length} of {maximumActive} on the floor
+        {selected.length} of {maximumActive} active
       </p>
       <button
         type="button"
@@ -116,11 +143,21 @@ function TeamLineup(props: {
 }
 
 export default function PlayersDialog(props: IPlayersDialogProps) {
-  const { left, right, maximumActive, questionNumber, onSubstitute, onAddPlayer, onClose } = props;
+  const {
+    left,
+    right,
+    maximumActive,
+    questionNumber,
+    onSubstitute,
+    onAddPlayer,
+    rosterSyncStatus = {},
+    onRequestControl,
+    onClose,
+  } = props;
 
   return (
     <ScorerDialog title="Players" onClose={onClose}>
-      <p className="scorer-dialog-note">Changes apply from question {questionNumber}.</p>
+      <p className="scorer-dialog-note">Changes apply starting Tossup {questionNumber}.</p>
       <div className="scorer-lineups">
         <TeamLineup
           team={left}
@@ -128,6 +165,8 @@ export default function PlayersDialog(props: IPlayersDialogProps) {
           maximumActive={maximumActive}
           onSubstitute={onSubstitute}
           onAddPlayer={onAddPlayer}
+          rosterSyncStatus={rosterSyncStatus}
+          onRequestControl={onRequestControl}
         />
         <TeamLineup
           team={right}
@@ -135,6 +174,8 @@ export default function PlayersDialog(props: IPlayersDialogProps) {
           maximumActive={maximumActive}
           onSubstitute={onSubstitute}
           onAddPlayer={onAddPlayer}
+          rosterSyncStatus={rosterSyncStatus}
+          onRequestControl={onRequestControl}
         />
       </div>
     </ScorerDialog>

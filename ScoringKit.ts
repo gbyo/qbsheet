@@ -15,8 +15,8 @@
  * it to go.
  */
 import { IModaqGameFormat } from '../renderer/Services/YellowFruitScoringRulesToModaq';
-import { IScorekeeperFormat } from '../renderer/Services/ScorekeeperFormat';
-import { IRoomRound, IRoomTeam } from '../main/server/ServerTypes';
+import { IScorekeeperFormat, scorekeeperFormatProblems } from '../renderer/Services/ScorekeeperFormat';
+import { IRoomRound, IRoomTeam, RoomScorerKind } from '../main/server/ServerTypes';
 
 /**
  * Bumped when the kit's shape changes. An unrecognized version is treated as no kit at all.
@@ -52,9 +52,9 @@ export interface IScoringKit {
    * The scoring rules as structural data, for the first-party scorer.
    *
    * Null both for a kit written before this field existed and for one cached with no tournament
-   * loaded. Nothing reads it yet, so `isScoringKitUsable` still asks only for `gameFormat`; when the
-   * first-party scorer can stand on its own that condition becomes a choice between the two rather
-   * than a requirement for MODAQ's.
+   * loaded. `ManualRoomApp` reads it for emergency first-party scoring, and
+   * `isScoringKitUsable` validates it when the first-party scorer is selected; `gameFormat` remains
+   * the corresponding requirement for the legacy scorer.
    */
   scoringFormat: IScorekeeperFormat | null;
   /** Timed rounds can end before every regulation tossup is read. */
@@ -147,30 +147,50 @@ export function buildScoringKit(source: IScoringKitSource, now: Date = new Date(
  * MODAQ, without teams there is nothing to pick, and a kit from a different day is a kit from a
  * different tournament.
  */
-export function isScoringKitUsable(kit: IScoringKit | null, now: Date = new Date()): kit is IScoringKit {
+export function isScoringKitUsable(kit: IScoringKit | null, now?: Date, scorer?: RoomScorerKind): kit is IScoringKit {
   if (!kit) return false;
+  const checkedAt = now ?? new Date();
+  // Kits written before the selector existed may contain only MODAQ rules. If no choice was
+  // supplied, use whichever rules this kit actually carries; active room pages pass explicitly.
+  const selectedScorer = scorer ?? (kit.scoringFormat !== null ? 'first-party' : 'legacy');
   if (kit.version !== scoringKitVersion) return false;
-  if (kit.gameFormat === null) return false;
+  if (selectedScorer === 'legacy' && kit.gameFormat === null) return false;
+  if (
+    selectedScorer === 'first-party' &&
+    (kit.scoringFormat === null || scorekeeperFormatProblems(kit.scoringFormat).length > 0)
+  )
+    return false;
   if (kit.teams.length < 2) return false;
   if (kit.rounds.length === 0) return false;
   const updated = new Date(kit.updatedAt).getTime();
   if (!Number.isFinite(updated)) return false;
-  const ageMs = now.getTime() - updated;
+  const ageMs = checkedAt.getTime() - updated;
   return ageMs >= 0 && ageMs <= scoringKitMaxAgeMs;
 }
 
 /** Why emergency scoring is unavailable, in words a scorekeeper can act on. */
-export function describeUnusableKit(kit: IScoringKit | null, now: Date = new Date()): string {
+export function describeUnusableKit(kit: IScoringKit | null, now?: Date, scorer?: RoomScorerKind): string {
   if (!kit) return 'This device has not loaded tournament information yet, so it cannot score a game on its own.';
+  const checkedAt = now ?? new Date();
+  const selectedScorer = scorer ?? (kit.scoringFormat !== null ? 'first-party' : 'legacy');
   if (kit.version !== scoringKitVersion) {
     return 'The tournament information saved on this device is from an older version and cannot be used.';
   }
-  if (kit.gameFormat === null) return "This tournament's scoring rules cannot be used for browser scorekeeping.";
+  if (selectedScorer === 'legacy' && kit.gameFormat === null)
+    return "This tournament's scoring rules cannot be used by the legacy scorer.";
+  if (selectedScorer === 'first-party' && kit.scoringFormat === null)
+    return "This tournament's scoring rules cannot be used by the room scorer.";
+  if (selectedScorer === 'first-party' && scorekeeperFormatProblems(kit.scoringFormat!).length > 0)
+    return "This tournament's scoring rules cannot be used by the room scorer.";
   if (kit.teams.length < 2 || kit.rounds.length === 0) {
     return 'The tournament information saved on this device is incomplete.';
   }
   const updated = new Date(kit.updatedAt).getTime();
-  if (!Number.isFinite(updated) || updated > now.getTime() || now.getTime() - updated > scoringKitMaxAgeMs) {
+  if (
+    !Number.isFinite(updated) ||
+    updated > checkedAt.getTime() ||
+    checkedAt.getTime() - updated > scoringKitMaxAgeMs
+  ) {
     return 'The tournament information saved on this device is too old to be trusted.';
   }
   return 'The tournament information saved on this device cannot be used.';

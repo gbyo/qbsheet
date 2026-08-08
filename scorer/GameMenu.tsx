@@ -47,13 +47,14 @@ export default function GameMenu(props: { items: IGameMenuItem[] }) {
         type="button"
         className="scorer-action"
         aria-haspopup="menu"
+        aria-controls="scorer-game-menu-list"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
       >
         Game
       </button>
       {open && (
-        <ul className="scorer-menu-list" role="menu">
+        <ul id="scorer-game-menu-list" className="scorer-menu-list" role="menu">
           {items.map((item) => (
             <li key={item.label} role="none">
               <button

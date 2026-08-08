@@ -23,21 +23,60 @@ const eventTypes = new Set([
   'note',
 ]);
 
-function validEvent(value: unknown): value is ScoreEvent {
+function validTeam(value: unknown): value is 'left' | 'right' {
+  return value === 'left' || value === 'right';
+}
+
+function validBonusPart(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null) return false;
+  const part = value as Record<string, unknown>;
+  if (typeof part.controlledPoints !== 'number' || !Number.isFinite(part.controlledPoints)) return false;
+  return (
+    part.bouncebackPoints === undefined ||
+    (typeof part.bouncebackPoints === 'number' && Number.isFinite(part.bouncebackPoints))
+  );
+}
+
+export function validEvent(value: unknown): value is ScoreEvent {
   if (typeof value !== 'object' || value === null) return false;
   const event = value as Record<string, unknown>;
   if (typeof event.id !== 'string' || !eventTypes.has(String(event.type))) return false;
   if (!Number.isInteger(event.questionNumber) || Number(event.questionNumber) < 1) return false;
-  if ('team' in event && event.team !== 'left' && event.team !== 'right') return false;
+  if ('team' in event && !validTeam(event.team)) return false;
   if (event.type === 'tossup-buzz')
-    return typeof event.playerName === 'string' && Number.isInteger(event.answerTypeIndex);
-  if (event.type === 'roster-add') return typeof event.playerName === 'string' && event.playerName.trim() !== '';
+    return validTeam(event.team) && typeof event.playerName === 'string' && Number.isInteger(event.answerTypeIndex);
+  if (event.type === 'bonus') {
+    if (!validTeam(event.team)) return false;
+    const totalsValid =
+      event.controlledPoints === undefined ||
+      (typeof event.controlledPoints === 'number' && Number.isFinite(event.controlledPoints));
+    const bouncebackValid =
+      event.bouncebackPoints === undefined ||
+      (typeof event.bouncebackPoints === 'number' && Number.isFinite(event.bouncebackPoints));
+    const partsValid =
+      event.parts === undefined ||
+      (Array.isArray(event.parts) && event.parts.length > 0 && event.parts.every(validBonusPart));
+    return (
+      totalsValid &&
+      bouncebackValid &&
+      partsValid &&
+      (event.controlledPoints !== undefined || event.parts !== undefined)
+    );
+  }
+  if (event.type === 'roster-add')
+    return validTeam(event.team) && typeof event.playerName === 'string' && event.playerName.trim() !== '';
   if (event.type === 'substitution')
-    return Array.isArray(event.activePlayers) && event.activePlayers.every((name) => typeof name === 'string');
+    return (
+      validTeam(event.team) &&
+      Array.isArray(event.activePlayers) &&
+      event.activePlayers.length > 0 &&
+      event.activePlayers.every((name) => typeof name === 'string' && name.trim() !== '')
+    );
   if (event.type === 'forfeit')
     return Array.isArray(event.teams) && event.teams.every((team) => team === 'left' || team === 'right');
   if (event.type === 'note') return typeof event.text === 'string';
-  if (event.type === 'lightning' || event.type === 'adjustment') return Number.isFinite(event.points);
+  if (event.type === 'lightning' || event.type === 'adjustment')
+    return validTeam(event.team) && typeof event.points === 'number' && Number.isFinite(event.points);
   return true;
 }
 

@@ -60,6 +60,7 @@ export default function useGameEvents(
 ): IGameEventsApi {
   const [events, setEvents] = useState<ScoreEvent[]>(initialEvents);
   const [saved, setSaved] = useState(true);
+  const [history, setHistory] = useState({ canUndo: false, canRedo: false });
   /** Sizes of the actions that can be undone, oldest first. */
   const undoStack = useRef<UndoFrame[]>([]);
   /** Events taken off by undo, newest action last, so redo can put them back. */
@@ -72,41 +73,43 @@ export default function useGameEvents(
     [gameKey, setup],
   );
 
+  const syncHistory = useCallback(() => {
+    setHistory({ canUndo: undoStack.current.length > 0, canRedo: redoStack.current.length > 0 });
+  }, []);
+
   const append = useCallback(
     (...added: ScoreEvent[]) => {
       if (added.length === 0) return;
       undoStack.current.push(added.length);
       redoStack.current = [];
-      setEvents((current) => {
-        const next = current.concat(added);
-        persist(next);
-        return next;
-      });
+      syncHistory();
+      const next = events.concat(added);
+      setEvents(next);
+      persist(next);
     },
-    [persist],
+    [events, persist, syncHistory],
   );
 
   const undo = useCallback(() => {
     const frame = undoStack.current.pop();
     if (frame === undefined) return;
-    setEvents((current) => {
-      const next = current.slice(0, Math.max(0, current.length - frame));
-      redoStack.current.push(current.slice(Math.max(0, current.length - frame)));
-      persist(next);
-      return next;
-    });
-  }, [persist]);
+    const cut = Math.max(0, events.length - frame);
+    const next = events.slice(0, cut);
+    redoStack.current.push(events.slice(cut));
+    syncHistory();
+    setEvents(next);
+    persist(next);
+  }, [events, persist, syncHistory]);
 
   const redo = useCallback(() => {
     const frame = redoStack.current.pop();
     if (frame === undefined) return;
     undoStack.current.push(frame.length);
-    setEvents((current) => {
-      const next = current.concat(frame);
-      persist(next);
-      return next;
-    });
-  }, [persist]);
+    const next = events.concat(frame);
+    syncHistory();
+    setEvents(next);
+    persist(next);
+  }, [events, persist, syncHistory]);
 
   /**
    * Editing an earlier question is not undoable in the same sense — there is no "before" to step
@@ -117,26 +120,24 @@ export default function useGameEvents(
     (id: string, nextEvent: ScoreEvent) => {
       undoStack.current = [];
       redoStack.current = [];
-      setEvents((current) => {
-        const next = current.map((event) => (event.id === id ? nextEvent : event));
-        persist(next);
-        return next;
-      });
+      const next = events.map((event) => (event.id === id ? nextEvent : event));
+      syncHistory();
+      setEvents(next);
+      persist(next);
     },
-    [persist],
+    [events, persist, syncHistory],
   );
 
   const remove = useCallback(
     (id: string) => {
       undoStack.current = [];
       redoStack.current = [];
-      setEvents((current) => {
-        const next = current.filter((event) => event.id !== id);
-        persist(next);
-        return next;
-      });
+      const next = events.filter((event) => event.id !== id);
+      syncHistory();
+      setEvents(next);
+      persist(next);
     },
-    [persist],
+    [events, persist, syncHistory],
   );
 
   const restore = useCallback(
@@ -144,10 +145,11 @@ export default function useGameEvents(
       undoStack.current = [];
       redoStack.current = [];
       const next = restored.map((event) => ({ ...event }));
+      syncHistory();
       setEvents(next);
       persist(next);
     },
-    [persist],
+    [persist, syncHistory],
   );
 
   return useMemo(
@@ -159,10 +161,10 @@ export default function useGameEvents(
       replace,
       remove,
       restore,
-      canUndo: undoStack.current.length > 0,
-      canRedo: redoStack.current.length > 0,
+      canUndo: history.canUndo,
+      canRedo: history.canRedo,
       saved,
     }),
-    [events, append, undo, redo, replace, remove, restore, saved],
+    [events, append, undo, redo, replace, remove, restore, history, saved],
   );
 }

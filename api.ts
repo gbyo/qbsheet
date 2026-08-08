@@ -24,7 +24,7 @@ import {
   sessionTokenHeader,
 } from '../main/server/ServerTypes';
 import { IModaqGameFormat } from '../renderer/Services/YellowFruitScoringRulesToModaq';
-import { IScorekeeperFormat } from '../renderer/Services/ScorekeeperFormat';
+import type { IScorekeeperFormat } from '../renderer/Services/ScorekeeperFormat';
 
 export type ApiResult<T> =
   | { ok: true; value: T }
@@ -311,11 +311,26 @@ export function getRoomAssignment(identity: IRoomIdentity): Promise<ApiResult<IR
 export function startAssignedMatch(
   identity: IRoomIdentity,
   scheduledMatchId: string,
+  scorer: 'first-party' | 'legacy' = 'legacy',
 ): Promise<ApiResult<ISessionCreatedResponse>> {
   return request(`${apiPrefix}/rooms/${encodeURIComponent(identity.roomId)}/sessions`, {
     method: 'POST',
     headers: roomHeaders(identity, true),
-    body: JSON.stringify({ scheduledMatchId }),
+    body: JSON.stringify({ scheduledMatchId, scorer }),
+  });
+}
+
+/** Ask the authoritative renderer to append one player to a team in this room's playing session. */
+export function addRoomPlayer(
+  identity: IRoomIdentity,
+  credentials: ISessionCredentials,
+  teamName: string,
+  playerName: string,
+): Promise<ApiResult<{ requested: true }>> {
+  return request(`${apiPrefix}/rooms/${encodeURIComponent(identity.roomId)}/players`, {
+    method: 'POST',
+    headers: { ...roomHeaders(identity, true), [sessionTokenHeader]: credentials.token },
+    body: JSON.stringify({ sessionId: credentials.sessionId, teamName, playerName }),
   });
 }
 

@@ -21,11 +21,12 @@
  */
 import { ScoreEvent } from '../scoring/ScoreEvents';
 import { IGameSetup } from '../scoring/deriveGame';
+import { validEvent } from './ScorerRecovery';
 
 /** Bumped when the stored shape changes. An unrecognized version is treated as no saved game. */
 export const gameSessionVersion = 1;
 
-const storagePrefix = 'yellowfruit.room.game.v1.';
+const storagePrefix = `yellowfruit.room.game.v${gameSessionVersion}.`;
 
 /** Everything needed to put a half-scored game back on the screen. */
 export interface IStoredGame {
@@ -113,7 +114,7 @@ export function loadGame(
     const parsed = JSON.parse(raw) as Partial<IStoredGame>;
     if (parsed?.version !== gameSessionVersion) return null;
     if (parsed.gameKey !== gameKey) return null;
-    if (!Array.isArray(parsed.events)) return null;
+    if (!Array.isArray(parsed.events) || !parsed.events.every(validEvent)) return null;
     if (!parsed.setup?.left?.name || !parsed.setup?.right?.name) return null;
     if (typeof parsed.updatedAt !== 'string') return null;
 

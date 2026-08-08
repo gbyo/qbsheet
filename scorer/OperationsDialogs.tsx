@@ -3,6 +3,7 @@ import { HelpRequestCategory, helpRequestCategoryLabels } from '../../main/serve
 import { IScorekeeperFormat } from '../../renderer/Services/ScorekeeperFormat';
 import { IDerivedGame } from '../scoring/deriveGame';
 import { ScoreEvent } from '../scoring/ScoreEvents';
+import { bonusTotalProblem, lightningTotalProblem } from './bonusOptions';
 import ScorerDialog from './ScorerDialog';
 import { readScorerRecovery } from './ScorerRecovery';
 
@@ -110,7 +111,8 @@ function eventDescription(event: ScoreEvent, format: IScorekeeperFormat): string
     return `Bonus ${event.controlledPoints ?? 0}${
       event.bouncebackPoints ? ` / ${event.bouncebackPoints} bounceback` : ''
     }`;
-  if (event.type === 'substitution') return `Lineup: ${event.activePlayers.join(', ')}`;
+  if (event.type === 'substitution')
+    return `Before Tossup ${event.questionNumber}, lineup changed: ${event.activePlayers.join(', ')}`;
   if (event.type === 'roster-add') return `Added player: ${event.playerName}`;
   if (event.type === 'lightning') return `Lightning ${signed(event.points)}`;
   if (event.type === 'adjustment')
@@ -123,10 +125,11 @@ function eventDescription(event: ScoreEvent, format: IScorekeeperFormat): string
 function EditableEvent(props: {
   event: ScoreEvent;
   format: IScorekeeperFormat;
+  game: IDerivedGame;
   onSave: (event: ScoreEvent) => void;
   onCancel: () => void;
 }) {
-  const { event, format, onSave, onCancel } = props;
+  const { event, format, game, onSave, onCancel } = props;
   const [playerName, setPlayerName] = useState(event.type === 'tossup-buzz' ? event.playerName : '');
   const [answerTypeIndex, setAnswerTypeIndex] = useState(
     event.type === 'tossup-buzz' ? String(event.answerTypeIndex) : '0',
@@ -145,17 +148,90 @@ function EditableEvent(props: {
   const [bounceback, setBounceback] = useState(event.type === 'bonus' ? String(event.bouncebackPoints ?? 0) : '0');
   const [text, setText] = useState(initialText);
   const [flagged, setFlagged] = useState(event.type === 'note' && event.flagged === true);
+  const [problem, setProblem] = useState('');
+  const [effectiveQuestion, setEffectiveQuestion] = useState(String(event.questionNumber));
+  const [activePlayers, setActivePlayers] = useState(event.type === 'substitution' ? event.activePlayers : []);
+
+  const eventTeam = event.type === 'tossup-buzz' || event.type === 'substitution' ? game[event.team] : undefined;
+  const question = game.questions.find((candidate) => candidate.questionNumber === event.questionNumber);
+  const activeBuzzPlayers = event.type === 'tossup-buzz' ? question?.activePlayers[event.team] ?? [] : [];
 
   const save = () => {
-    if (event.type === 'tossup-buzz' && playerName.trim())
+    setProblem('');
+    if (event.type === 'tossup-buzz') {
+      if (!activeBuzzPlayers.includes(playerName)) {
+        setProblem('That player was not active for this tossup. Correct the lineup first.');
+        return;
+      }
+      const ruling = Number(answerTypeIndex);
+      if (!format.answerTypes.some((answerType) => answerType.index === ruling)) {
+        setProblem('Choose a valid ruling.');
+        return;
+      }
       onSave({ ...event, playerName: playerName.trim(), answerTypeIndex: Number(answerTypeIndex) });
-    else if (event.type === 'bonus')
-      onSave({ ...event, parts: undefined, controlledPoints: Number(points), bouncebackPoints: Number(bounceback) });
-    else if (event.type === 'adjustment' && Number.isInteger(Number(points)) && Number(points) !== 0)
+      return;
+    }
+    if (event.type === 'substitution') {
+      const boundary = Number(effectiveQuestion);
+      if (!Number.isInteger(boundary) || boundary < 1) {
+        setProblem('Choose a valid tossup boundary.');
+        return;
+      }
+      if (activePlayers.length < 1 || activePlayers.length > format.players.maximumActive) {
+        setProblem(`Choose between 1 and ${format.players.maximumActive} active players.`);
+        return;
+      }
+      onSave({ ...event, questionNumber: boundary, activePlayers });
+      return;
+    }
+    if (event.type === 'bonus') {
+      if (points.trim() === '' || bounceback.trim() === '') {
+        setProblem('Enter both bonus totals.');
+        return;
+      }
+      const controlled = Number(points);
+      const bounced = Number(bounceback);
+      const reason = bonusTotalProblem(format.bonus, controlled) ?? bonusTotalProblem(format.bonus, bounced);
+      if (reason) {
+        setProblem(reason);
+        return;
+      }
+      if (!format.bonus.bounceBack && bounced !== 0) {
+        setProblem('This format does not allow bounceback points.');
+        return;
+      }
+      if (bounced > format.bonus.maximumScore - controlled) {
+        setProblem(`The bounceback cannot exceed ${Math.max(0, format.bonus.maximumScore - controlled)} points.`);
+        return;
+      }
+      onSave({ ...event, parts: undefined, controlledPoints: controlled, bouncebackPoints: bounced });
+      return;
+    }
+    if (event.type === 'adjustment' && Number.isInteger(Number(points)) && Number(points) !== 0) {
       onSave({ ...event, points: Number(points), reason: text.trim() });
-    else if (event.type === 'lightning' && Number.isFinite(Number(points)))
+      return;
+    }
+    if (event.type === 'adjustment') {
+      setProblem('Enter a non-zero whole number of points.');
+      return;
+    }
+    if (event.type === 'lightning') {
+      const reason =
+        points.trim() === ''
+          ? 'Enter a lightning total.'
+          : lightningTotalProblem(format.lightning.divisor, Number(points));
+      if (reason) {
+        setProblem(reason);
+        return;
+      }
       onSave({ ...event, points: Number(points) });
-    else if (event.type === 'note' && text.trim()) onSave({ ...event, text: text.trim(), flagged });
+      return;
+    }
+    if (event.type === 'note' && text.trim()) {
+      onSave({ ...event, text: text.trim(), flagged });
+      return;
+    }
+    if (event.type === 'note') setProblem('Enter a note.');
   };
 
   return (
@@ -164,7 +240,14 @@ function EditableEvent(props: {
         <>
           <label htmlFor={`event-player-${event.id}`}>
             Player
-            <input id={`event-player-${event.id}`} value={playerName} onChange={(e) => setPlayerName(e.target.value)} />
+            <select id={`event-player-${event.id}`} value={playerName} onChange={(e) => setPlayerName(e.target.value)}>
+              {!activeBuzzPlayers.includes(playerName) && <option value={playerName}>{playerName} — not active</option>}
+              {activeBuzzPlayers.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
           </label>
           <label htmlFor={`event-ruling-${event.id}`}>
             Ruling
@@ -180,6 +263,48 @@ function EditableEvent(props: {
               ))}
             </select>
           </label>
+        </>
+      )}
+      {event.type === 'substitution' && eventTeam && (
+        <>
+          <label htmlFor={`event-boundary-${event.id}`}>
+            Effective tossup
+            <input
+              id={`event-boundary-${event.id}`}
+              type="number"
+              min={1}
+              value={effectiveQuestion}
+              onChange={(e) => setEffectiveQuestion(e.target.value)}
+            />
+          </label>
+          <fieldset>
+            <legend>Active players</legend>
+            {eventTeam.players.map((player) => {
+              const checked = activePlayers.includes(player.name);
+              return (
+                <label
+                  key={player.name}
+                  className="scorer-checkbox"
+                  htmlFor={`event-lineup-${event.id}-${player.name}`}
+                >
+                  <input
+                    id={`event-lineup-${event.id}-${player.name}`}
+                    type="checkbox"
+                    checked={checked}
+                    disabled={!checked && activePlayers.length >= format.players.maximumActive}
+                    onChange={() =>
+                      setActivePlayers((current) =>
+                        current.includes(player.name)
+                          ? current.filter((name) => name !== player.name)
+                          : current.concat(player.name),
+                      )
+                    }
+                  />
+                  {player.name}
+                </label>
+              );
+            })}
+          </fieldset>
         </>
       )}
       {(event.type === 'bonus' || event.type === 'adjustment' || event.type === 'lightning') && (
@@ -221,6 +346,7 @@ function EditableEvent(props: {
           Flag for control
         </label>
       )}
+      {problem && <p className="scorer-problem">{problem}</p>}
       <div className="scorer-event-edit-actions">
         <button type="button" className="scorer-choice" onClick={save}>
           Save correction
@@ -264,7 +390,9 @@ export function ScoresheetReviewDialog(props: {
                     <li key={event.id} className="scorer-review-event">
                       <span>{eventDescription(event, format)}</span>
                       <span className="scorer-review-actions">
-                        {['tossup-buzz', 'bonus', 'adjustment', 'lightning', 'note'].includes(event.type) && (
+                        {['tossup-buzz', 'bonus', 'substitution', 'adjustment', 'lightning', 'note'].includes(
+                          event.type,
+                        ) && (
                           <button type="button" className="scorer-text-action" onClick={() => setEditing(event.id)}>
                             Edit
                           </button>
@@ -272,7 +400,10 @@ export function ScoresheetReviewDialog(props: {
                         <button
                           type="button"
                           className="scorer-text-action is-destructive"
-                          onClick={() => onRemove(event.id)}
+                          onClick={() => {
+                            // eslint-disable-next-line no-alert
+                            if (window.confirm('Remove this event from the scoresheet?')) onRemove(event.id);
+                          }}
                         >
                           Remove
                         </button>
@@ -281,6 +412,7 @@ export function ScoresheetReviewDialog(props: {
                         <EditableEvent
                           event={event}
                           format={format}
+                          game={game}
                           onSave={(next) => {
                             onReplace(event.id, next);
                             setEditing(null);
