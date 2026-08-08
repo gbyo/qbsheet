@@ -159,6 +159,25 @@ export function describeConnection(state: RoomConnectionState): string {
   return 'Offline';
 }
 
+/**
+ * The second sentence of the offline banner: what happens to the game being scored.
+ *
+ * Every branch is a promise the room will be held to, so none is made unless the page can keep it.
+ * Only a result that is both saved on this device and headed for automatic delivery is told to
+ * wait — a game with no session behind it (emergency scoring) reaches the tournament when a human
+ * carries the file, and telling that scorekeeper the connection will handle it is how a played game
+ * ends up in nobody's standings.
+ */
+export function offlineReassurance(resultIsSaved: boolean, automaticDelivery: boolean): string {
+  if (!resultIsSaved) {
+    return 'This browser cannot save the game locally — download the QBJ as soon as the game is finished.';
+  }
+  if (!automaticDelivery) {
+    return 'This game is saved on this Chromebook, but it will not be sent on its own — download the QBJ when the game ends and give it to tournament control.';
+  }
+  return 'This game is saved on this Chromebook and will be sent when the connection comes back.';
+}
+
 /** The status-indicator class for a connection state. */
 export function connectionStatusClass(state: RoomConnectionState): string {
   if (state === RoomConnectionState.Connected) return 'room-status room-status-online';

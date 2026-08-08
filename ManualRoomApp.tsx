@@ -499,6 +499,10 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
         awaitingReview={pendingFinal}
         snapshotError={lastSnapshotError}
         resultIsSaved={!persistFailure}
+        // An emergency game is stored as a non-authoritative backup with no session behind it, so
+        // nothing will ever send it: the offline banner must say so rather than promise a delivery
+        // that cannot happen.
+        automaticDelivery={!emergency}
         conflictNotice={
           emergency ? 'Emergency scoring: this game is not in the tournament until tournament control imports it.' : ''
         }

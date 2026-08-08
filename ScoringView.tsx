@@ -16,7 +16,7 @@ import { IModaqGameFormat } from '../renderer/Services/YellowFruitScoringRulesTo
 import { HelpRequestCategory, IHelpRequest, IRoomPresence } from '../main/server/ServerTypes';
 import RoomOperatorControls from './RoomOperatorControls';
 import buildScaffoldPacket, { describeScoringBands, scaffoldPacketName } from './ScaffoldPacket';
-import { connectionStatusClass, describeConnection, RoomConnectionState } from './RoomLifecycle';
+import { connectionStatusClass, describeConnection, offlineReassurance, RoomConnectionState } from './RoomLifecycle';
 
 /** MODAQ's custom-export callback shape, from modaq's ICustomExport */
 export interface IModaqCustomExport {
@@ -89,6 +89,16 @@ export interface IScoringViewProps {
    */
   // eslint-disable-next-line react/require-default-props
   resultIsSaved?: boolean;
+  /**
+   * False when finishing this game produces a result nothing will send on its own.
+   *
+   * Emergency scoring is the case: it has no session to upload to, so its result is stored as a
+   * non-authoritative backup and reaches the tournament only when a human imports the file. The
+   * offline banner must not tell that scorekeeper to sit and wait for the connection to come back —
+   * waiting is how the game ends up in nobody's standings.
+   */
+  // eslint-disable-next-line react/require-default-props
+  automaticDelivery?: boolean;
   /** The delivery-failure notice, when the last final has not reached YellowFruit. */
   // eslint-disable-next-line react/require-default-props
   deliveryFailure?: ReactNode;
@@ -126,6 +136,7 @@ export default function ScoringView(props: IScoringViewProps) {
     lifecycleNotice = '',
     conflictNotice = '',
     resultIsSaved = true,
+    automaticDelivery = true,
     deliveryFailure = null,
     savedResults = null,
   } = props;
@@ -142,14 +153,13 @@ export default function ScoringView(props: IScoringViewProps) {
       {/*
         Two sentences, and the second one is a claim about this device rather than about the
         network. It is only made when local persistence actually worked; a browser that refused the
-        write gets told to get the file off the machine instead.
+        write gets told to get the file off the machine instead. And it only promises the game will
+        be sent when something is actually going to send it — an emergency game has no session to be
+        uploaded to, and telling that scorekeeper to wait would leave the result with nobody.
       */}
       {!online && (
         <div className="room-banner room-banner-warning">
-          <strong>Offline &mdash; keep scoring.</strong>{' '}
-          {resultIsSaved
-            ? 'This game is saved on this Chromebook and will be sent when the connection comes back.'
-            : 'This browser cannot save the game locally — download the QBJ as soon as the game is finished.'}
+          <strong>Offline &mdash; keep scoring.</strong> {offlineReassurance(resultIsSaved, automaticDelivery)}
         </div>
       )}
       {conflictNotice !== '' && (
