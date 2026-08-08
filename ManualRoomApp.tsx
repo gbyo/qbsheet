@@ -37,6 +37,7 @@ import SavedResults, { DeliveryFailureNotice } from './SavedResults';
 import { IScoringKit, describeUnusableKit, isScoringKitUsable, readScoringKit } from './ScoringKit';
 import ScoringView from './ScoringView';
 import ScoringUnavailable from './ScoringUnavailable';
+import ScorerHost from './scorer/ScorerHost';
 import { readScorerChoice } from './ScorerChoice';
 import { RoomConnectionState } from './RoomLifecycle';
 
@@ -345,96 +346,140 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
    * before anything else, but an emergency result has no session to be uploaded to and is stored as
    * a non-authoritative backup instead.
    */
-  const handleExport = useCallback(async (rawQbj: object, context?: { source: ExportSource }): Promise<ModaqStatus> => {
-    const activeCredentials = credentialsRef.current;
-    const isEmergency = emergencyRef.current;
-    if (!activeCredentials && !isEmergency) {
-      return { isError: true, status: 'This room is not connected to a game yet.' };
-    }
+  /**
+   * Put a finished game into the outbox and try to send it.
+   *
+   * Shared by both scorers. Manual and emergency diverge only at the end: both write to the device
+   * first, but an emergency result has no session to upload to and is stored as a non-authoritative
+   * backup that reaches the tournament only when somebody imports the file.
+   */
+  const deliverFinal = useCallback(
+    async (
+      qbj: Record<string, any>,
+      activeCredentials: ISessionCredentials | null,
+      isEmergency: boolean,
+    ): Promise<ModaqStatus> => {
+      const activeSetup = setupRef.current;
+      const enqueued = await outboxRef.current.enqueue({
+        tournamentKey: tournamentKeyRef.current,
+        roundNumber: activeSetup?.round.number,
+        roundName: activeSetup?.round.name,
+        leftTeam: activeSetup?.leftTeam.name ?? '',
+        rightTeam: activeSetup?.rightTeam.name ?? '',
+        qbj,
+        deliveryState: isEmergency ? 'manual-backup' : 'queued',
+        sessionCredentials: activeCredentials ?? undefined,
+      });
+      setActiveResultId(enqueued.entry.id);
+      setPersistFailure(!enqueued.persisted);
 
-    const source = context?.source ?? 'Menu';
-
-    // MODAQ counts questions from the scaffold packet's length, which overstates them for a game
-    // that stayed tied. Correct that here so nothing downstream ever sees the inflated counts.
-    const normalizeOptions = normalizeOptionsRef.current;
-    const qbj = normalizeOptions ? normalizeQbjMatch(rawQbj, normalizeOptions).qbj : (rawQbj as Record<string, any>);
-    setQuestionsPlayed(countPlayedQuestions(qbj));
-
-    if (source === 'Timer') {
-      if (isEmergency || !activeCredentials) {
-        // Nothing to send a live snapshot to. Not an error: there is no dashboard watching.
-        return { isError: false, status: 'Saved on this device' };
+      if (isEmergency) {
+        // Once the finished result is durably in the outbox, the in-progress recovery record has done
+        // its job. If persistence failed, keep it: it may still be the only reload-safe copy.
+        if (enqueued.persisted) clearEmergencyGameState();
+        setPhase('submitted');
+        setSubmitMessage(
+          enqueued.persisted
+            ? 'Saved on this device. Download the QBJ file and give it to tournament control — this game is not in the tournament until they import it.'
+            : 'This browser could not save the game. Download the QBJ file now, before closing this page.',
+        );
+        return {
+          isError: !enqueued.persisted,
+          status: enqueued.persisted ? 'Saved on this device' : 'Not saved — download the file now',
+        };
       }
-      const result = await putSnapshot(activeCredentials, qbj);
-      if (!result.ok) {
-        setLastSnapshotError(result.error);
-        // Reported as an error so MODAQ shows the scorekeeper that the upload didn't land, but
-        // nothing local is discarded and scoring continues.
-        return { isError: true, status: result.error };
+
+      const delivered = await outboxRef.current.submitNow(enqueued.entry.id);
+      if (delivered?.deliveryState === 'submitted') {
+        setDeliveryFailed(false);
+        setPhase('submitted');
+        setSubmitMessage('Game submitted successfully. Waiting for tournament control to accept the result.');
+        return { isError: false, status: 'Submitted to YellowFruit' };
       }
-      setLastSnapshotError('');
-      return { isError: false, status: 'Sent to YellowFruit' };
-    }
 
-    if (source === 'NewGame') {
-      // Starting a fresh game in MODAQ isn't a submission for this session.
-      return { isError: false, status: 'Not submitted' };
-    }
+      setDeliveryFailed(true);
+      if (delivered?.retryBlocked) {
+        setSubmitMessage(
+          `${
+            delivered.lastError ?? 'YellowFruit refused this result.'
+          } The game is saved on this device — use Download QBJ under Saved results and give the file to the statskeeper.`,
+        );
+        return { isError: true, status: delivered.lastError ?? 'YellowFruit refused this result.' };
+      }
 
-    const activeSetup = setupRef.current;
-    const enqueued = await outboxRef.current.enqueue({
-      tournamentKey: tournamentKeyRef.current,
-      roundNumber: activeSetup?.round.number,
-      roundName: activeSetup?.round.name,
-      leftTeam: activeSetup?.leftTeam.name ?? '',
-      rightTeam: activeSetup?.rightTeam.name ?? '',
-      qbj,
-      deliveryState: isEmergency ? 'manual-backup' : 'queued',
-      sessionCredentials: activeCredentials ?? undefined,
-    });
-    setActiveResultId(enqueued.entry.id);
-    setPersistFailure(!enqueued.persisted);
-
-    if (isEmergency) {
-      // Once the finished result is durably in the outbox, the in-progress MODAQ recovery record has
-      // done its job. If persistence failed, keep it: it may still be the only reload-safe copy.
-      if (enqueued.persisted) clearEmergencyGameState();
-      setPhase('submitted');
-      setSubmitMessage(
-        enqueued.persisted
-          ? 'Saved on this device. Download the QBJ file and give it to tournament control — this game is not in the tournament until they import it.'
-          : 'This browser could not save the game. Download the QBJ file now, before closing this page.',
-      );
       return {
-        isError: !enqueued.persisted,
-        status: enqueued.persisted ? 'Saved on this device' : 'Not saved — download the file now',
+        isError: true,
+        status: enqueued.persisted
+          ? 'Saved on this device. It will be sent automatically when YellowFruit is reachable again.'
+          : 'This browser could not save the result. Download the QBJ file now.',
       };
-    }
+    },
+    [],
+  );
 
-    const delivered = await outboxRef.current.submitNow(enqueued.entry.id);
-    if (delivered?.deliveryState === 'submitted') {
-      setDeliveryFailed(false);
-      setPhase('submitted');
-      setSubmitMessage('Game submitted successfully. Waiting for tournament control to accept the result.');
-      return { isError: false, status: 'Submitted to YellowFruit' };
-    }
+  const handleExport = useCallback(
+    async (rawQbj: object, context?: { source: ExportSource }): Promise<ModaqStatus> => {
+      const activeCredentials = credentialsRef.current;
+      const isEmergency = emergencyRef.current;
+      if (!activeCredentials && !isEmergency) {
+        return { isError: true, status: 'This room is not connected to a game yet.' };
+      }
 
-    setDeliveryFailed(true);
-    if (delivered?.retryBlocked) {
-      setSubmitMessage(
-        `${
-          delivered.lastError ?? 'YellowFruit refused this result.'
-        } The game is saved on this device — use Download QBJ under Saved results and give the file to the statskeeper.`,
-      );
-      return { isError: true, status: delivered.lastError ?? 'YellowFruit refused this result.' };
-    }
+      const source = context?.source ?? 'Menu';
 
-    return {
-      isError: true,
-      status: enqueued.persisted
-        ? 'Saved on this device. It will be sent automatically when YellowFruit is reachable again.'
-        : 'This browser could not save the result. Download the QBJ file now.',
-    };
+      // MODAQ counts questions from the scaffold packet's length, which overstates them for a game
+      // that stayed tied. Correct that here so nothing downstream ever sees the inflated counts.
+      const normalizeOptions = normalizeOptionsRef.current;
+      const qbj = normalizeOptions ? normalizeQbjMatch(rawQbj, normalizeOptions).qbj : (rawQbj as Record<string, any>);
+      setQuestionsPlayed(countPlayedQuestions(qbj));
+
+      if (source === 'Timer') {
+        if (isEmergency || !activeCredentials) {
+          // Nothing to send a live snapshot to. Not an error: there is no dashboard watching.
+          return { isError: false, status: 'Saved on this device' };
+        }
+        const result = await putSnapshot(activeCredentials, qbj);
+        if (!result.ok) {
+          setLastSnapshotError(result.error);
+          // Reported as an error so MODAQ shows the scorekeeper that the upload didn't land, but
+          // nothing local is discarded and scoring continues.
+          return { isError: true, status: result.error };
+        }
+        setLastSnapshotError('');
+        return { isError: false, status: 'Sent to YellowFruit' };
+      }
+
+      if (source === 'NewGame') {
+        // Starting a fresh game in MODAQ isn't a submission for this session.
+        return { isError: false, status: 'Not submitted' };
+      }
+
+      return deliverFinal(qbj, activeCredentials, isEmergency);
+    },
+    [deliverFinal],
+  );
+
+  /** The first-party scorer's final submission. Its counts are exact, so nothing is normalized. */
+  const handleScorerSubmit = useCallback(
+    async (qbj: object) => {
+      const activeCredentials = credentialsRef.current;
+      const isEmergency = emergencyRef.current;
+      if (!activeCredentials && !isEmergency) {
+        return { ok: false, message: 'This room is not connected to a game yet.' };
+      }
+      const outcome = await deliverFinal(qbj as Record<string, any>, activeCredentials, isEmergency);
+      return { ok: !outcome.isError, message: outcome.status };
+    },
+    [deliverFinal],
+  );
+
+  /** Live progress, when there is a session listening. An emergency game has nothing to tell. */
+  const handleScorerProgress = useCallback(async (qbj: object, questionsHeard: number) => {
+    setQuestionsPlayed(questionsHeard);
+    const activeCredentials = credentialsRef.current;
+    if (!activeCredentials || emergencyRef.current) return;
+    const result = await putSnapshot(activeCredentials, qbj);
+    setLastSnapshotError(result.ok ? '' : result.error);
   }, []);
 
   const modaqPlayers = useMemo(() => (setup ? toModaqPlayers(setup.leftTeam, setup.rightTeam) : []), [setup]);
@@ -487,7 +532,26 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
   );
 
   if (phase === 'scoring' && setup && scorerChoice === 'first-party') {
-    return <ScoringUnavailable roundName={setup.round.name} roomName={emergency ? kit?.roomName : undefined} />;
+    // The same key the game is saved under, so a reload comes back to this game and only this one.
+    const scoringFormat = emergency ? kit?.scoringFormat ?? null : tournament?.scoringFormat ?? null;
+    return scoringFormat && storeName ? (
+      <ScorerHost
+        key={storeName}
+        gameKey={storeName}
+        format={scoringFormat}
+        leftTeam={setup.leftTeam}
+        rightTeam={setup.rightTeam}
+        tournamentName={emergency ? kit?.tournamentName ?? '' : tournament?.name ?? ''}
+        roundName={setup.round.name}
+        roomName={emergency ? kit?.roomName : undefined}
+        connection={online ? RoomConnectionState.Connected : RoomConnectionState.Offline}
+        onSubmit={handleScorerSubmit}
+        onProgress={handleScorerProgress}
+        qbjMeta={{ round: setup.round.number, location: emergency ? kit?.roomName : undefined }}
+      />
+    ) : (
+      <ScoringUnavailable roundName={setup.round.name} roomName={emergency ? kit?.roomName : undefined} />
+    );
   }
 
   if (phase === 'scoring' && setup && gameFormat) {

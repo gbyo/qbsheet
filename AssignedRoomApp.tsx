@@ -53,6 +53,7 @@ import SavedResults, { DeliveryFailureNotice } from './SavedResults';
 import { buildScoringKit, clearScoringKit, isScoringKitUsable, readScoringKit, writeScoringKit } from './ScoringKit';
 import ScoringView from './ScoringView';
 import ScoringUnavailable from './ScoringUnavailable';
+import ScorerHost from './scorer/ScorerHost';
 import { readScorerChoice } from './ScorerChoice';
 import MatchupCard from './MatchupCard';
 import ManualRoomApp from './ManualRoomApp';
@@ -413,25 +414,14 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
     [outbox, assignment?.roomName],
   );
 
-  const handleExport = useCallback(async (rawQbj: object, context?: { source: ExportSource }): Promise<ModaqStatus> => {
-    const activeCredentials = credentialsRef.current;
-    if (!activeCredentials) return { isError: true, status: 'This room is not connected to a game yet.' };
-    const source = context?.source ?? 'Menu';
-    const options = normalizeOptionsRef.current;
-    const qbj = options ? normalizeQbjMatch(rawQbj, options).qbj : (rawQbj as Record<string, any>);
-    setQuestionsPlayed(countPlayedQuestions(qbj));
-
-    if (source === 'Timer') {
-      const result = await putSnapshot(activeCredentials, qbj);
-      if (!result.ok) {
-        setSnapshotError(result.error);
-        return { isError: true, status: result.error };
-      }
-      setSnapshotError('');
-      return { isError: false, status: 'Sent to YellowFruit' };
-    }
-    if (source === 'NewGame') return { isError: false, status: 'Not submitted' };
-
+  /**
+   * Put a finished game into the outbox and try to send it.
+   *
+   * Shared by both scorers on purpose. The outbox is what makes a result survive a dead network, a
+   * closed laptop and a refusal from tournament control, and a second delivery path would be a
+   * second set of those bugs.
+   */
+  const deliverFinal = useCallback(async (qbj: Record<string, any>, activeCredentials: ISessionCredentials) => {
     setSubmittedSummary('');
     const matchup = scoringMatchupRef.current;
     const roomContext = contextRef.current;
@@ -470,6 +460,59 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
         ? 'Saved on this device. It will be sent automatically when YellowFruit is reachable again.'
         : 'This browser could not save the result. Download the QBJ file now.',
     };
+  }, []);
+
+  const handleExport = useCallback(
+    async (rawQbj: object, context?: { source: ExportSource }): Promise<ModaqStatus> => {
+      const activeCredentials = credentialsRef.current;
+      if (!activeCredentials) return { isError: true, status: 'This room is not connected to a game yet.' };
+      const source = context?.source ?? 'Menu';
+      const options = normalizeOptionsRef.current;
+      const qbj = options ? normalizeQbjMatch(rawQbj, options).qbj : (rawQbj as Record<string, any>);
+      setQuestionsPlayed(countPlayedQuestions(qbj));
+
+      if (source === 'Timer') {
+        const result = await putSnapshot(activeCredentials, qbj);
+        if (!result.ok) {
+          setSnapshotError(result.error);
+          return { isError: true, status: result.error };
+        }
+        setSnapshotError('');
+        return { isError: false, status: 'Sent to YellowFruit' };
+      }
+      if (source === 'NewGame') return { isError: false, status: 'Not submitted' };
+
+      return deliverFinal(qbj, activeCredentials);
+    },
+    [deliverFinal],
+  );
+
+  /**
+   * The first-party scorer's final submission.
+   *
+   * Its QBJ deliberately skips `normalizeQbjMatch`. That exists to strip padding MODAQ invents from
+   * the scaffold packet it is handed; a derived game counts only the cycles that were actually
+   * played, so there is nothing to strip and running it could only take something real away.
+   */
+  const handleScorerSubmit = useCallback(
+    async (qbj: object) => {
+      const activeCredentials = credentialsRef.current;
+      if (!activeCredentials) {
+        return { ok: false, message: 'This room is not connected to a game yet.' };
+      }
+      const outcome = await deliverFinal(qbj as Record<string, any>, activeCredentials);
+      return { ok: !outcome.isError, message: outcome.status };
+    },
+    [deliverFinal],
+  );
+
+  /** Live progress for tournament control, on the same endpoint MODAQ's timer export used. */
+  const handleScorerProgress = useCallback(async (qbj: object, questionsHeard: number) => {
+    const activeCredentials = credentialsRef.current;
+    setQuestionsPlayed(questionsHeard);
+    if (!activeCredentials) return;
+    const result = await putSnapshot(activeCredentials, qbj);
+    setSnapshotError(result.ok ? '' : result.error);
   }, []);
 
   const customExport = useMemo(
@@ -531,7 +574,29 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
   const awaitingReview = blocksStart || isAwaitingReview(assignment);
 
   if (scoring && scorerChoice === 'first-party') {
-    return <ScoringUnavailable roundName={scoring.matchup.roundName} roomName={assignment.roomName} />;
+    // Keyed by the session so each game gets its own state, and its own chance to recover a saved one.
+    return assignment.scoringFormat ? (
+      <ScorerHost
+        key={scoring.credentials.sessionId}
+        gameKey={scoring.credentials.sessionId}
+        format={assignment.scoringFormat}
+        leftTeam={scoring.matchup.leftTeam}
+        rightTeam={scoring.matchup.rightTeam}
+        tournamentName={assignment.tournamentName}
+        roundName={scoring.matchup.roundName}
+        roomName={assignment.roomName}
+        connection={connection}
+        degradedMessage={degradedMessage}
+        onSubmit={handleScorerSubmit}
+        onProgress={handleScorerProgress}
+        qbjMeta={{
+          round: scoring.matchup.roundNumber,
+          location: assignment.roomName,
+        }}
+      />
+    ) : (
+      <ScoringUnavailable roundName={scoring.matchup.roundName} roomName={assignment.roomName} />
+    );
   }
 
   if (scoring && assignment.gameFormat) {

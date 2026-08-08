@@ -505,3 +505,290 @@
 }
 
 /* #endregion */
+
+/* #region Menu, dialogs and completion
+ *
+ * The infrequent actions. Same restraint as everything else: a dialog is a bordered white panel over
+ * a dimmed page, not a floating card with a shadow.
+ */
+
+.scorer-menu {
+  position: relative;
+}
+
+.scorer-menu-list {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  min-width: 200px;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--room-surface);
+  border: 1px solid var(--room-border-strong);
+  border-radius: 6px;
+}
+
+.scorer-menu-item {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  color: var(--room-text);
+  background: none;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.scorer-menu-item:hover {
+  background: var(--room-surface-sunken);
+}
+
+.scorer-menu-item.is-destructive {
+  margin-top: 4px;
+  border-top: 1px solid var(--room-border);
+  border-radius: 0 0 4px 4px;
+  color: var(--room-error);
+}
+
+.scorer-footer-warning {
+  margin-left: auto;
+  font-size: 13px;
+  color: var(--room-warning);
+}
+
+.scorer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgb(28 29 32 / 32%);
+}
+
+.scorer-dialog {
+  width: 100%;
+  max-width: 560px;
+  max-height: 100%;
+  overflow-y: auto;
+  background: var(--room-surface);
+  border: 1px solid var(--room-border-strong);
+  border-radius: 8px;
+}
+
+.scorer-dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--room-border);
+}
+
+.scorer-dialog-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.scorer-dialog-body {
+  padding: 16px;
+}
+
+.scorer-dialog-note {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--room-muted);
+}
+
+.scorer-lineups {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+
+.scorer-lineup-team {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--room-muted);
+}
+
+.scorer-lineup-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+}
+
+.scorer-lineup-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.scorer-lineup-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scorer-lineup-tuh {
+  color: var(--room-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.scorer-lineup-count {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--room-faint);
+}
+
+.scorer-note-list {
+  margin: 0 0 16px;
+  padding: 0 0 0 0;
+  list-style: none;
+  font-size: 13px;
+}
+
+.scorer-note-list li {
+  display: flex;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--room-surface-sunken);
+}
+
+.scorer-note-q {
+  color: var(--room-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.scorer-note-flag {
+  color: var(--room-warning);
+}
+
+.scorer-note-form {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.scorer-note-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  font-size: 13px;
+  color: var(--room-muted);
+}
+
+.scorer-note-form textarea,
+.scorer-note-form input,
+.scorer-note-form select {
+  width: 100%;
+  padding: 8px;
+  font: inherit;
+  color: var(--room-text);
+  background: var(--room-surface);
+  border: 1px solid var(--room-border-strong);
+  border-radius: 6px;
+}
+
+.scorer-checkbox {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px !important;
+  width: auto !important;
+}
+
+.scorer-choice.is-selected {
+  color: var(--room-surface);
+  background: var(--room-accent);
+  border-color: var(--room-accent);
+}
+
+.scorer-danger {
+  margin-top: 16px;
+  padding: 10px 16px;
+  font: inherit;
+  color: var(--room-surface);
+  background: var(--room-error);
+  border: 1px solid var(--room-error);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.scorer-danger:disabled {
+  color: var(--room-muted);
+  background: var(--room-surface-sunken);
+  border-color: var(--room-border);
+  cursor: default;
+}
+
+.scorer-complete-score {
+  display: flex;
+  gap: 32px;
+  margin: 0 0 4px;
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+}
+
+.scorer-complete-warning {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--room-warning);
+}
+
+.scorer-complete-ok {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--room-success);
+}
+
+.scorer-complete-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.scorer-submit {
+  padding: 10px 20px;
+  font: inherit;
+  color: var(--room-surface);
+  background: var(--room-accent);
+  border: 1px solid var(--room-accent);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.scorer-submit:hover:not(:disabled) {
+  background: var(--room-accent-hover);
+}
+
+.scorer-submit:disabled {
+  color: var(--room-muted);
+  background: var(--room-surface-sunken);
+  border-color: var(--room-border);
+  cursor: default;
+}
+
+@media (max-width: 700px) {
+  .scorer-lineups {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* #endregion */
