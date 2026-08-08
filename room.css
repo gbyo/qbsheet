@@ -809,3 +809,45 @@ body {
 }
 
 /* #endregion */
+
+/* #region Repair connection */
+
+/*
+ * Over the top of the game rather than instead of it. A credential problem must never be able to
+ * take the scoresheet off the screen, so this is a layer and the scorer keeps rendering underneath.
+ */
+.room-repair-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgb(15 23 42 / 45%);
+}
+
+.room-repair {
+  width: min(440px, 100%);
+  max-height: 100%;
+  overflow: auto;
+  padding: 20px;
+  background: var(--room-surface);
+  border: 1px solid var(--room-border);
+  border-radius: 8px;
+}
+
+.room-repair-title {
+  margin: 0 0 8px;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.room-repair-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* #endregion */

@@ -67,7 +67,12 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  padding: 0;
+  font: inherit;
   white-space: nowrap;
+  background: none;
+  border: 0;
+  cursor: pointer;
 }
 
 .scorer-dot {
@@ -111,6 +116,53 @@
 .scorer-banner.is-info {
   background: var(--room-info-bg);
   color: var(--room-text);
+}
+
+/*
+ * A banner with a headline, an explanation and an action stays one line high on a 1366×768 room
+ * screen. It is a warning, not a card: no border radius, no shadow, no icon.
+ */
+div.scorer-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+
+div.scorer-banner .scorer-text-action {
+  color: inherit;
+  text-decoration: underline;
+}
+
+/* #endregion */
+
+/* #region Connection detail */
+
+.scorer-detail-rows {
+  margin: 12px 0;
+  border-top: 1px solid var(--room-border);
+}
+
+.scorer-detail-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 6px 0;
+  font-size: 13px;
+  border-bottom: 1px solid var(--room-border);
+}
+
+.scorer-detail-label {
+  color: var(--room-muted);
+}
+
+.scorer-detail-value {
+  font-variant-numeric: tabular-nums;
+}
+
+.scorer-detail-row.is-problem .scorer-detail-value {
+  color: var(--room-error);
+  font-weight: 600;
 }
 
 /* #region Body layout */
@@ -794,6 +846,46 @@
   color: var(--room-faint);
 }
 
+/*
+ * Playing and Bench read as two groups without being two cards. A heading and the row divider are
+ * enough; a box around each would double the vertical space this dialog needs on a 768px screen.
+ */
+.scorer-lineup-group {
+  margin: 12px 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--room-muted);
+}
+
+.scorer-lineup-entry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  font-size: 13px;
+  border-bottom: 1px solid var(--room-border);
+}
+
+.scorer-lineup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.scorer-lineup-step {
+  margin-top: 8px;
+}
+
+.scorer-lineup-step-title {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
 .scorer-add-player {
   margin-top: 16px;
   padding-top: 12px;
@@ -1082,6 +1174,33 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.scorer-question-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.scorer-question-heading {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--room-muted);
+}
+
+/* The quick bonus totals, sized to be tapped rather than aimed at. */
+.scorer-question-totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.scorer-question-more {
+  padding-top: 8px;
+  border-top: 1px solid var(--room-border);
 }
 
 .scorer-question-scoreline {

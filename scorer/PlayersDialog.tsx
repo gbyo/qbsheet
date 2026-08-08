@@ -8,6 +8,20 @@
  * The change takes effect from the question about to be played, which is what keeps tossups heard
  * honest: a player who came on at question eleven heard ten fewer tossups than one who started, and
  * that difference is a real statistic rather than an approximation.
+ *
+ * # Substitutions, not a spreadsheet
+ *
+ * What the engine stores is the complete lineup effective at a question boundary, and that is the
+ * right thing to store: it is unambiguous, it survives a reload, and tossups heard fall out of it
+ * exactly. What it is not is the thing a scorekeeper is thinking about. They are being told "eleven
+ * for four" by a coach, and the old screen answered that with a grid of checkboxes, a running total
+ * to verify by eye, and an Apply button — four steps and an arithmetic check for the single most
+ * common thing that happens in a game.
+ *
+ * So the ordinary path is now the sentence itself: Sub out, choose who comes on, confirm. The
+ * complete-lineup event is built from that. The checkbox editor is still here, one click away,
+ * because halftime really is four changes at once and a format change really does need it — but it
+ * is no longer what a one-for-one substitution costs.
  */
 import { useEffect, useRef, useState } from 'react';
 import { LeftOrRight } from '../../renderer/Utils/UtilTypes';
@@ -40,6 +54,12 @@ export interface IPlayersDialogProps {
   // eslint-disable-next-line react/require-default-props
   lineupChangeReason?: string;
   onSubstitute: (team: LeftOrRight, activePlayers: string[]) => void;
+  /**
+   * Add somebody to the roster, and say who should be on the floor afterwards.
+   *
+   * The two are separate decisions and are passed separately: a player added while the team is
+   * already at capacity joins the bench, and `activePlayers` simply comes back unchanged.
+   */
   onAddPlayer: (team: LeftOrRight, playerName: string, activePlayers: string[]) => void;
   // eslint-disable-next-line react/require-default-props
   rosterSyncStatus?: Record<string, 'synced' | 'waiting' | 'local' | 'rejected'>;
@@ -52,10 +72,107 @@ export function rosterSyncKey(team: LeftOrRight, playerName: string): string {
   return `${team}\u0000${playerName.toLocaleLowerCase()}`;
 }
 
+function syncLabelFor(status: string | undefined): string {
+  if (status === 'synced') return 'Synced';
+  if (status === 'waiting') return 'Waiting to sync';
+  if (status === 'local') return 'Saved in this game';
+  if (status === 'rejected') return 'Needs tournament control';
+  return '';
+}
+
+/**
+ * What the panel is in the middle of.
+ *
+ * A substitution is two decisions — who comes off, who goes on — and the confirmation exists
+ * because it is the one place the effective question number can be shown before the event is
+ * written. `full` and `add` are the two escapes from the ordinary path.
+ */
+type PanelMode =
+  | { kind: 'idle' }
+  | { kind: 'choose-replacement'; out: string }
+  | { kind: 'confirm'; out?: string; incoming: string }
+  | { kind: 'full' }
+  | { kind: 'add' };
+
+/** The checkbox editor, kept for halftime and for anything that is not one-for-one. */
+function FullLineupEditor(props: {
+  team: IDerivedTeam;
+  side: LeftOrRight;
+  maximumActive: number;
+  onApply: (activePlayers: string[]) => void;
+  onCancel: () => void;
+}) {
+  const { team, side, maximumActive, onApply, onCancel } = props;
+  const [selected, setSelected] = useState<string[]>(team.activePlayers);
+  const focusPlayerIndex = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (focusPlayerIndex.current === null) return;
+    document.getElementById(`scorer-lineup-${side}-${focusPlayerIndex.current}`)?.focus();
+    focusPlayerIndex.current = null;
+  }, [selected, side]);
+
+  const atCapacity = selected.length >= maximumActive;
+  const unchanged =
+    selected.length === team.activePlayers.length && selected.every((name) => team.activePlayers.includes(name));
+
+  const toggle = (name: string, index: number) => {
+    focusPlayerIndex.current = index;
+    setSelected((current) => {
+      if (current.includes(name)) return current.filter((other) => other !== name);
+      if (current.length >= maximumActive) return current;
+      return current.concat(name);
+    });
+  };
+
+  return (
+    <div className="scorer-lineup-editor">
+      <ul className="scorer-lineup-list">
+        {team.players.map((player, index) => {
+          const id = `scorer-lineup-${side}-${index}`;
+          const active = selected.includes(player.name);
+          return (
+            <li key={id}>
+              <label className="scorer-lineup-row" htmlFor={id}>
+                <input
+                  id={id}
+                  type="checkbox"
+                  checked={active}
+                  disabled={!active && atCapacity}
+                  onChange={() => toggle(player.name, index)}
+                />
+                <span className="scorer-lineup-name">{player.name}</span>
+                <span className="scorer-lineup-tuh">{player.tossupsHeard} TUH</span>
+              </label>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="scorer-lineup-count">
+        {selected.length} of {maximumActive} selected
+      </p>
+      <div className="scorer-lineup-actions">
+        <button
+          type="button"
+          className="scorer-choice"
+          disabled={unchanged || selected.length === 0}
+          onClick={() => onApply(selected)}
+        >
+          Apply lineup
+        </button>
+        <button type="button" className="scorer-text-action" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function TeamLineup(props: {
   team: IDerivedTeam;
   side: LeftOrRight;
   maximumActive: number;
+  questionNumber: number;
   onSubstitute: (team: LeftOrRight, activePlayers: string[]) => void;
   onAddPlayer: (team: LeftOrRight, playerName: string, activePlayers: string[]) => void;
   rosterSyncStatus: Record<string, 'synced' | 'waiting' | 'local' | 'rejected'>;
@@ -69,6 +186,7 @@ function TeamLineup(props: {
     team,
     side,
     maximumActive,
+    questionNumber,
     onSubstitute,
     onAddPlayer,
     rosterSyncStatus,
@@ -77,57 +195,53 @@ function TeamLineup(props: {
     lineupChangeAllowed,
     onRequestControl,
   } = props;
-  const [selected, setSelected] = useState<string[]>(team.activePlayers);
+  const [mode, setMode] = useState<PanelMode>({ kind: 'idle' });
   const [newPlayer, setNewPlayer] = useState('');
-  const focusPlayerIndex = useRef<number | null>(null);
 
-  const playerInputId = (index: number) => `scorer-lineup-${side}-${index}`;
-
-  useEffect(() => {
-    if (focusPlayerIndex.current === null) return;
-    document.getElementById(`scorer-lineup-${side}-${focusPlayerIndex.current}`)?.focus();
-    focusPlayerIndex.current = null;
-  }, [selected, side]);
-
-  const toggle = (name: string, index: number) => {
-    focusPlayerIndex.current = index;
-    setSelected((current) => {
-      if (current.includes(name)) return current.filter((other) => other !== name);
-      if (current.length >= maximumActive) return current;
-      return current.concat(name);
-    });
-  };
-
-  const unchanged =
-    selected.length === team.activePlayers.length && selected.every((name) => team.activePlayers.includes(name));
-  const atCapacity = selected.length >= maximumActive;
+  const playing = team.players.filter((player) => team.activePlayers.includes(player.name));
+  const bench = team.players.filter((player) => !team.activePlayers.includes(player.name));
+  const atCapacity = team.activePlayers.length >= maximumActive;
   const cleanNewPlayer = newPlayer.trim();
   const canAdd =
     cleanNewPlayer !== '' &&
     !team.players.some((player) => player.name.toLocaleLowerCase() === cleanNewPlayer.toLocaleLowerCase());
 
-  const playerRow = (player: IDerivedTeam['players'][number], index: number, active: boolean) => {
+  /** Build the complete lineup a one-for-one substitution produces, in the order it was played. */
+  const lineupAfter = (out: string | undefined, incoming: string): string[] => {
+    const without = out === undefined ? team.activePlayers : team.activePlayers.filter((name) => name !== out);
+    return without.concat(incoming);
+  };
+
+  const playerRow = (player: IDerivedTeam['players'][number], active: boolean) => {
     const sync = rosterSyncStatus[rosterSyncKey(side, player.name)];
-    const id = playerInputId(index);
-    let syncLabel = '';
-    if (sync === 'synced') syncLabel = 'Synced';
-    else if (sync === 'waiting') syncLabel = 'Waiting to sync';
-    else if (sync === 'local') syncLabel = 'Saved in this game';
-    else if (sync === 'rejected') syncLabel = 'Needs tournament control';
+    const syncLabel = syncLabelFor(sync);
     return (
-      <li key={id}>
-        <label className="scorer-lineup-row" htmlFor={id}>
-          <input
-            id={id}
-            type="checkbox"
-            checked={active}
-            disabled={!lineupChangeAllowed || (!active && atCapacity)}
-            onChange={() => toggle(player.name, index)}
-          />
-          <span className="scorer-lineup-name">{player.name}</span>
-          <span className="scorer-lineup-tuh">{player.tossupsHeard} TUH</span>
-          {syncLabel && <span className="scorer-lineup-sync">{syncLabel}</span>}
-        </label>
+      <li key={player.name} className="scorer-lineup-entry">
+        <span className="scorer-lineup-name">{player.name}</span>
+        <span className="scorer-lineup-tuh">{player.tossupsHeard} TUH</span>
+        {syncLabel && <span className="scorer-lineup-sync">{syncLabel}</span>}
+        {active ? (
+          <button
+            type="button"
+            className="scorer-text-action"
+            disabled={!lineupChangeAllowed}
+            onClick={() => setMode({ kind: 'choose-replacement', out: player.name })}
+          >
+            Sub out
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="scorer-text-action"
+            // At capacity there is no free seat, so coming on has to be somebody else coming off.
+            // Sub out is the control that expresses that, and offering Put in here would only
+            // produce a refusal.
+            disabled={!lineupChangeAllowed || atCapacity}
+            onClick={() => setMode({ kind: 'confirm', incoming: player.name })}
+          >
+            Put in
+          </button>
+        )}
         {sync === 'rejected' && onRequestControl && (
           <button type="button" className="scorer-text-action" onClick={() => onRequestControl(side, player.name)}>
             Request tournament control
@@ -136,10 +250,6 @@ function TeamLineup(props: {
       </li>
     );
   };
-
-  const indexedPlayers = team.players.map((player, index) => ({ player, index }));
-  const playing = indexedPlayers.filter(({ player }) => selected.includes(player.name));
-  const bench = indexedPlayers.filter(({ player }) => !selected.includes(player.name));
 
   return (
     <section className="scorer-lineup" aria-label={`${team.name} lineup`}>
@@ -152,44 +262,145 @@ function TeamLineup(props: {
           {timeoutsUsed > 1 && `${timeoutsUsed} timeouts used`}
         </p>
       )}
-      <h4>Playing</h4>
-      <ul className="scorer-lineup-list">{playing.map(({ player, index }) => playerRow(player, index, true))}</ul>
-      <h4>Bench</h4>
-      <ul className="scorer-lineup-list">{bench.map(({ player, index }) => playerRow(player, index, false))}</ul>
-      <p className="scorer-lineup-count">
-        {selected.length} of {maximumActive} active
-      </p>
-      <button
-        type="button"
-        className="scorer-choice"
-        disabled={!lineupChangeAllowed || unchanged || selected.length === 0}
-        onClick={() => onSubstitute(side, selected)}
-      >
-        Apply to {team.name}
-      </button>
-      <form
-        className="scorer-add-player"
-        onSubmit={(submitEvent) => {
-          submitEvent.preventDefault();
-          if (!lineupChangeAllowed || !canAdd) return;
-          const nextActive = atCapacity ? selected : selected.concat(cleanNewPlayer);
-          onAddPlayer(side, cleanNewPlayer, nextActive);
-        }}
-      >
-        <label htmlFor={`scorer-add-player-${side}`}>
-          Add player during game
-          <input
-            id={`scorer-add-player-${side}`}
-            value={newPlayer}
-            maxLength={roomPlayerNameMaxLength}
-            placeholder="Player name"
-            onChange={(event) => setNewPlayer(event.target.value)}
-          />
-        </label>
-        <button type="submit" className="scorer-choice" disabled={!lineupChangeAllowed || !canAdd}>
-          Add{atCapacity ? ' to bench' : ' and activate'}
-        </button>
-      </form>
+
+      {mode.kind === 'idle' && (
+        <>
+          <h4 className="scorer-lineup-group">Playing</h4>
+          <ul className="scorer-lineup-list">{playing.map((player) => playerRow(player, true))}</ul>
+          {bench.length > 0 && (
+            <>
+              <h4 className="scorer-lineup-group">Bench</h4>
+              <ul className="scorer-lineup-list">{bench.map((player) => playerRow(player, false))}</ul>
+            </>
+          )}
+          <p className="scorer-lineup-count">
+            {team.activePlayers.length} of {maximumActive} playing
+          </p>
+          <div className="scorer-lineup-actions">
+            <button
+              type="button"
+              className="scorer-text-action"
+              disabled={!lineupChangeAllowed}
+              onClick={() => setMode({ kind: 'full' })}
+            >
+              Edit full lineup…
+            </button>
+            <button type="button" className="scorer-text-action" onClick={() => setMode({ kind: 'add' })}>
+              Add missing player…
+            </button>
+          </div>
+        </>
+      )}
+
+      {mode.kind === 'choose-replacement' && (
+        <div className="scorer-lineup-step">
+          <p className="scorer-lineup-step-title">Replace {mode.out} with:</p>
+          {bench.length === 0 ? (
+            <p className="scorer-dialog-note">
+              Everybody on the roster is already playing. Use Add missing player to bring somebody else on.
+            </p>
+          ) : (
+            <ul className="scorer-lineup-list">
+              {bench.map((player) => (
+                <li key={player.name} className="scorer-lineup-entry">
+                  <span className="scorer-lineup-name">{player.name}</span>
+                  <span className="scorer-lineup-tuh">{player.tossupsHeard} TUH</span>
+                  <button
+                    type="button"
+                    className="scorer-text-action"
+                    onClick={() => setMode({ kind: 'confirm', out: mode.out, incoming: player.name })}
+                  >
+                    Put in
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="scorer-lineup-actions">
+            <button type="button" className="scorer-text-action" onClick={() => setMode({ kind: 'idle' })}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {mode.kind === 'confirm' && (
+        <div className="scorer-lineup-step">
+          <p className="scorer-lineup-step-title">
+            {mode.out ? `${mode.out} → ${mode.incoming}` : `${mode.incoming} comes on`}
+          </p>
+          <p className="scorer-dialog-note">Effective starting Tossup {questionNumber}</p>
+          <div className="scorer-lineup-actions">
+            <button type="button" className="scorer-text-action" onClick={() => setMode({ kind: 'idle' })}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="scorer-choice"
+              onClick={() => onSubstitute(side, lineupAfter(mode.out, mode.incoming))}
+            >
+              Confirm
+            </button>
+          </div>
+        </div>
+      )}
+
+      {mode.kind === 'full' && (
+        <FullLineupEditor
+          team={team}
+          side={side}
+          maximumActive={maximumActive}
+          onApply={(activePlayers) => onSubstitute(side, activePlayers)}
+          onCancel={() => setMode({ kind: 'idle' })}
+        />
+      )}
+
+      {mode.kind === 'add' && (
+        <form
+          className="scorer-lineup-step scorer-add-player"
+          onSubmit={(submitEvent) => {
+            submitEvent.preventDefault();
+            if (!canAdd) return;
+            /*
+             * Two decisions, kept apart. Adding somebody to the roster is always allowed — a player
+             * who turned up late exists whether or not the procedure lets them on right now — and
+             * whether they also go on the floor depends on there being a seat and on the lineup
+             * being changeable at this moment.
+             */
+            const goesOn = lineupChangeAllowed && !atCapacity;
+            onAddPlayer(side, cleanNewPlayer, goesOn ? team.activePlayers.concat(cleanNewPlayer) : team.activePlayers);
+          }}
+        >
+          <p className="scorer-lineup-step-title">Add missing player</p>
+          <label htmlFor={`scorer-add-player-${side}`}>
+            Player name
+            <input
+              id={`scorer-add-player-${side}`}
+              value={newPlayer}
+              maxLength={roomPlayerNameMaxLength}
+              placeholder="Player name"
+              onChange={(changeEvent) => setNewPlayer(changeEvent.target.value)}
+            />
+          </label>
+          <p className="scorer-dialog-note">
+            {(() => {
+              if (!lineupChangeAllowed)
+                return 'They will be added to the bench and can come on at the next allowed substitution.';
+              if (atCapacity)
+                return `${team.name} already has ${maximumActive} playing, so they join the bench. Use Sub out to bring them on.`;
+              return `They will start playing from Tossup ${questionNumber}.`;
+            })()}
+          </p>
+          <div className="scorer-lineup-actions">
+            <button type="button" className="scorer-text-action" onClick={() => setMode({ kind: 'idle' })}>
+              Cancel
+            </button>
+            <button type="submit" className="scorer-choice" disabled={!canAdd}>
+              Add to roster
+            </button>
+          </div>
+        </form>
+      )}
     </section>
   );
 }
@@ -214,14 +425,16 @@ export default function PlayersDialog(props: IPlayersDialogProps) {
   return (
     <ScorerDialog title="Players" onClose={onClose}>
       <p className="scorer-dialog-note">
-        Changes apply starting Tossup {questionNumber}.
-        {!lineupChangeAllowed && <> {lineupChangeReason ?? 'Lineup changes are not available at this checkpoint.'}</>}
+        {lineupChangeAllowed
+          ? `Changes apply starting Tossup ${questionNumber}.`
+          : lineupChangeReason ?? 'Lineup changes are not available at this checkpoint.'}
       </p>
       <div className="scorer-lineups">
         <TeamLineup
           team={left}
           side="left"
           maximumActive={maximumActive}
+          questionNumber={questionNumber}
           onSubstitute={onSubstitute}
           onAddPlayer={onAddPlayer}
           rosterSyncStatus={rosterSyncStatus}
@@ -234,6 +447,7 @@ export default function PlayersDialog(props: IPlayersDialogProps) {
           team={right}
           side="right"
           maximumActive={maximumActive}
+          questionNumber={questionNumber}
           onSubstitute={onSubstitute}
           onAddPlayer={onAddPlayer}
           rosterSyncStatus={rosterSyncStatus}

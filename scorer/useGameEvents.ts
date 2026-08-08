@@ -61,6 +61,8 @@ export interface IGameEventsApi {
   canRedo: boolean;
   /** False when the last write to local storage was refused, so nothing promises the game is safe. */
   saved: boolean;
+  /** When this device last accepted a write of this game, or null if it never has. */
+  savedAt: number | null;
   /** Why the last action was refused, if it was. Cleared by the next accepted one. */
   rejection: string;
   clearRejection: () => void;
@@ -92,6 +94,13 @@ export default function useGameEvents(
 ): IGameEventsApi {
   const [events, setEvents] = useState<ScoreEvent[]>(initialEvents);
   const [saved, setSaved] = useState(true);
+  /**
+   * When local storage last accepted this game.
+   *
+   * Kept so the connection detail can say "saved just now" as a fact rather than as a reassurance:
+   * a scorekeeper deciding whether it is safe to reload deserves a timestamp we can prove.
+   */
+  const [savedAt, setSavedAt] = useState<number | null>(null);
   const [history, setHistory] = useState({ canUndo: false, canRedo: false });
   const [rejection, setRejection] = useState('');
   /** The authority. State follows it; it never follows state. See the note at the top of the file. */
@@ -108,7 +117,9 @@ export default function useGameEvents(
     (next: ScoreEvent[]) => {
       current.current = next;
       setEvents(next);
-      setSaved(saveGame(gameKey, setup, next));
+      const written = saveGame(gameKey, setup, next);
+      setSaved(written);
+      if (written) setSavedAt(Date.now());
       syncHistory();
     },
     [gameKey, setup, syncHistory],
@@ -226,9 +237,24 @@ export default function useGameEvents(
       canUndo: history.canUndo,
       canRedo: history.canRedo,
       saved,
+      savedAt,
       rejection,
       clearRejection,
     }),
-    [events, append, undo, redo, replace, remove, replaceQuestion, restore, history, saved, rejection, clearRejection],
+    [
+      events,
+      append,
+      undo,
+      redo,
+      replace,
+      remove,
+      replaceQuestion,
+      restore,
+      history,
+      saved,
+      savedAt,
+      rejection,
+      clearRejection,
+    ],
   );
 }

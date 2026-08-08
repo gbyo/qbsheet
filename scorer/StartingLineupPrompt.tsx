@@ -19,6 +19,7 @@
 import { useState } from 'react';
 import { LeftOrRight } from '../../renderer/Utils/UtilTypes';
 import { IDerivedTeam } from '../scoring/deriveGame';
+import { IRoomProcedure, substitutionPolicy } from '../../renderer/Services/RoomProcedure';
 
 export interface IStartingLineupPromptProps {
   left: IDerivedTeam;
@@ -26,7 +27,23 @@ export interface IStartingLineupPromptProps {
   maximumActive: number;
   /** Sides that must be chosen. A side not listed here already has a settled lineup. */
   needed: LeftOrRight[];
+  /** How this room runs a game, which decides when the bench can come on. */
+  // eslint-disable-next-line react/require-default-props
+  procedure?: IRoomProcedure;
   onConfirm: (lineups: Partial<Record<LeftOrRight, string[]>>) => void;
+}
+
+/**
+ * When the players not chosen here can come on.
+ *
+ * Said from the configured procedure rather than from the usual case. A room running the
+ * restrictive policy that is told it can substitute "between any two tossups" will try to, be
+ * refused, and reasonably conclude the software is broken.
+ */
+export function substitutionSentence(procedure: IRoomProcedure | undefined): string {
+  return substitutionPolicy(procedure) === 'any-boundary'
+    ? 'The rest start on the bench and can come on between any two tossups.'
+    : 'The rest start on the bench and can come on at halftime, at a timeout, or at a phase checkpoint.';
 }
 
 function TeamStarters(props: {
@@ -60,13 +77,19 @@ function TeamStarters(props: {
                       onChange={() => onToggle(player.name)}
                     />
                     <span className="scorer-lineup-name">{player.name}</span>
+                    {/*
+                      Only once the seats are full, and only on the names that did not get one. Said
+                      earlier it would be labelling every unticked name "Bench" before the
+                      scorekeeper has decided anything.
+                    */}
+                    {!checked && atCapacity && <span className="scorer-lineup-tuh">Bench</span>}
                   </label>
                 </li>
               );
             })}
           </ul>
           <p className="scorer-lineup-count">
-            {selected.length} of {maximumActive} chosen
+            {selected.length} of {maximumActive} selected
           </p>
         </>
       )}
@@ -75,7 +98,7 @@ function TeamStarters(props: {
 }
 
 export default function StartingLineupPrompt(props: IStartingLineupPromptProps) {
-  const { left, right, maximumActive, needed, onConfirm } = props;
+  const { left, right, maximumActive, needed, procedure, onConfirm } = props;
   const [chosen, setChosen] = useState<Record<LeftOrRight, string[]>>({ left: [], right: [] });
 
   const toggle = (side: LeftOrRight, name: string) => {
@@ -93,8 +116,8 @@ export default function StartingLineupPrompt(props: IStartingLineupPromptProps) 
     <section className="scorer-starters" aria-label="Starting lineups">
       <h2 className="scorer-starters-title">Who is starting?</h2>
       <p className="scorer-dialog-note">
-        These rosters have more players than the {maximumActive} who can be on the floor. Choose the starters and the
-        rest go on the bench; you can substitute between any two tossups.
+        These rosters have more players than the {maximumActive} who can be on the floor.{' '}
+        {substitutionSentence(procedure)}
       </p>
       <div className="scorer-lineups">
         <TeamStarters
@@ -122,7 +145,7 @@ export default function StartingLineupPrompt(props: IStartingLineupPromptProps) 
           onConfirm(lineups);
         }}
       >
-        Start the game
+        Start game
       </button>
     </section>
   );

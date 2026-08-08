@@ -18,6 +18,7 @@ import {
   IRoomRound,
   IRoomTeam,
   ISessionCreatedResponse,
+  ISessionRecoveryResponse,
   ISessionStateResponse,
   apiPrefix,
   roomTokenHeader,
@@ -388,6 +389,19 @@ export function createSession(body: ICreateSessionRequest): Promise<ApiResult<IS
 
 export function getSession(credentials: ISessionCredentials): Promise<ApiResult<ISessionStateResponse>> {
   return request(`${apiPrefix}/sessions/${encodeURIComponent(credentials.sessionId)}`, {
+    headers: { [sessionTokenHeader]: credentials.token },
+  });
+}
+
+/**
+ * Read back this session's own latest snapshot, for a browser that has lost its local copy.
+ *
+ * Second in the recovery order, behind the device's own ScoreEvent history — the local copy keeps
+ * the scorer's complete editing semantics and this does not. Requires the session token, so it can
+ * only ever return the game the caller is already holding credentials for.
+ */
+export function getSessionRecovery(credentials: ISessionCredentials): Promise<ApiResult<ISessionRecoveryResponse>> {
+  return request(`${apiPrefix}/sessions/${encodeURIComponent(credentials.sessionId)}/recovery`, {
     headers: { [sessionTokenHeader]: credentials.token },
   });
 }

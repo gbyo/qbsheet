@@ -579,6 +579,15 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
           onSubmit={handleScorerSubmit}
           onDownload={activeResult ? () => handleDownload(activeResult) : undefined}
           onProgress={handleScorerProgress}
+          recovery={{
+            /*
+             * An emergency game has no session behind it, so nothing will collect it on its own.
+             * Saying otherwise here is how a played game ends up in nobody's standings: the
+             * scorekeeper waits for a delivery that was never possible instead of handing over the
+             * file.
+             */
+            automaticDelivery: !emergency && credentials !== null,
+          }}
           qbjMeta={{ round: setup.round.number, location: emergency ? kit?.roomName : undefined }}
         />
         {deliveryFailureNotice}

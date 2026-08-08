@@ -17,6 +17,16 @@
  * The rule that shapes the offline behavior: while YellowFruit is unreachable, this page does not
  * invent or change room, round, assignment, or schedule state. It shows the last thing YellowFruit
  * actually said, keeps MODAQ working, and says plainly which of the two it is doing.
+ *
+ * # A game in progress outranks everything the server says
+ *
+ * The rule that shapes the *failure* behavior, and the one that took the longest to get right: once
+ * a game is on screen, nothing arriving over the network may take it off. Not a timeout, not a
+ * 500, not a shutdown, not a 403, not tournament control reassigning the room. All of those are
+ * operational problems with a scorekeeper's day; none of them is permission to destroy the only
+ * copy of the questions this room has scored. So the page freezes what the game started with, keeps
+ * writing every action to this device, says what is wrong and what can be done about it, and waits.
+ * The scorekeeper leaves the game when the scorekeeper decides to.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { IPlayer } from 'modaq';
@@ -28,6 +38,7 @@ import {
   getRoomAssignment,
   getOrCreateDeviceId,
   getRounds,
+  getSessionRecovery,
   getTeams,
   getTournament,
   IRoomIdentity,
@@ -55,16 +66,66 @@ import { buildScoringKit, clearScoringKit, isScoringKitUsable, readScoringKit, w
 import ScoringView from './ScoringView';
 import ScoringUnavailable from './ScoringUnavailable';
 import ScorerHost from './scorer/ScorerHost';
+import { IScorerAlert } from './scorer/ConnectionStatus';
 import { readScorerChoice } from './ScorerChoice';
 import MatchupCard from './MatchupCard';
 import ManualRoomApp from './ManualRoomApp';
-import { scorekeeperFormatProblems } from '../renderer/Services/ScorekeeperFormat';
+import RepairConnectionDialog from './RepairConnectionDialog';
+import { clearActiveGame, IActiveRoomGame, readActiveGame, touchActiveGame, writeActiveGame } from './ActiveGameRecord';
+import { IScorekeeperFormat, scorekeeperFormatProblems } from '../renderer/Services/ScorekeeperFormat';
+import { IRoomProcedure } from '../renderer/Services/RoomProcedure';
+import { downloadCurrentQbj } from './QbjBackup';
 
 type ModaqStatus = { isError: false; status: string } | { isError: true; status: string };
 type ExportSource = 'Menu' | 'NewGame' | 'NextButton' | 'Timer';
 const snapshotIntervalMs = 5000;
 const assignmentPollMs = 5000;
 const scoringKitRefreshMs = 5 * 60 * 1000;
+
+/**
+ * The context a game keeps for its whole life, whatever the server says afterwards.
+ *
+ * Frozen on purpose. The scoring rules a game was started under decide what every buzz in it was
+ * worth, and the rosters decide who the substitutions moved; letting a poll replace either would
+ * rewrite the meaning of questions already scored. It is also what makes an offline reload
+ * possible at all — none of it has to be fetched to put the game back on screen.
+ */
+interface IFrozenGameContext {
+  tournamentName: string;
+  roomName?: string;
+  roundName: string;
+  roundNumber?: number;
+  packetName?: string;
+  scoringFormat: IScorekeeperFormat;
+  procedure?: IRoomProcedure;
+  /** The tournament the server had confirmed when this game started, if it had confirmed one. */
+  tournamentKey?: string;
+}
+
+/** The game on screen: what is being scored, what it is being scored against, and who it is for. */
+interface IActiveScoring {
+  matchup: IRoomMatchup;
+  credentials: ISessionCredentials;
+  frozen: IFrozenGameContext;
+}
+
+/** Rebuild the game on screen from local storage alone, with no server involved. */
+function scoringFromActiveGame(record: IActiveRoomGame): IActiveScoring {
+  return {
+    matchup: record.matchup,
+    credentials: { sessionId: record.sessionId, token: record.sessionToken },
+    frozen: {
+      tournamentName: record.tournamentName,
+      roomName: record.roomName,
+      roundName: record.roundName,
+      roundNumber: record.roundNumber,
+      packetName: record.packetName,
+      scoringFormat: record.scoringFormat,
+      procedure: record.roomProcedure,
+      tournamentKey: record.tournamentKey,
+    },
+  };
+}
 
 function toModaqPlayers(left: IRoomTeam, right: IRoomTeam): IPlayer[] {
   const forTeam = (team: IRoomTeam): IPlayer[] =>
@@ -81,7 +142,22 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
   const [loadError, setLoadError] = useState('');
   const [connection, setConnection] = useState<RoomConnectionState>(RoomConnectionState.Connected);
   const [degradedMessage, setDegradedMessage] = useState('');
-  const [scoring, setScoring] = useState<{ matchup: IRoomMatchup; credentials: ISessionCredentials } | null>(null);
+  /**
+   * Read before the first render, and before anything has been asked of the server.
+   *
+   * This is what makes a reload during an outage land on the scoresheet instead of on
+   * "Connecting…". The tournament key is deliberately not required here: a browser that cannot
+   * reach the server cannot confirm one, and refusing to reopen the game for want of a confirmation
+   * that is impossible to obtain is the exact failure this is for. The confirmation happens later,
+   * when the server answers, and a genuine mismatch is surfaced then.
+   */
+  const [scoring, setScoring] = useState<IActiveScoring | null>(() => {
+    // Only the first-party scorer can be rebuilt from this record; the MODAQ fallback keeps its own
+    // storage and its own recovery, and inventing a half-restored one for it would be a new bug.
+    if (readScorerChoice() !== 'first-party') return null;
+    const record = readActiveGame({ roomId: identity.roomId });
+    return record ? scoringFromActiveGame(record) : null;
+  });
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState('');
   const [submittedSummary, setSubmittedSummary] = useState<string>('');
@@ -106,11 +182,26 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
   const [activeResultId, setActiveResultId] = useState<string | null>(null);
   const [persistFailure, setPersistFailure] = useState(false);
   const [deliveryFailed, setDeliveryFailed] = useState(false);
+  /**
+   * The server can no longer authenticate this browser.
+   *
+   * A fact about credentials, not about the game. It never clears the identity and never navigates:
+   * see the note at the top of the file.
+   */
+  const [authProblem, setAuthProblem] = useState(false);
+  const [repairOpen, setRepairOpen] = useState(false);
+  /** Set once the server has said this browser is scoring a game from a different tournament. */
+  const [tournamentConflict, setTournamentConflict] = useState(false);
+  /** Credentials adopted by a successful repair, which replace the ones this page was mounted with. */
+  const [repairedIdentity, setRepairedIdentity] = useState<IRoomIdentity | null>(null);
+  /** When the server last accepted a live snapshot of the game on screen. Null means never. */
+  const [lastSnapshotAt, setLastSnapshotAt] = useState<number | null>(null);
 
   const outbox = useResultOutbox();
+  const baseIdentity = repairedIdentity ?? identity;
   const activeIdentity = useMemo(
-    () => ({ ...identity, deviceId: identity.deviceId ?? getOrCreateDeviceId(), operatorName }),
-    [identity, operatorName],
+    () => ({ ...baseIdentity, deviceId: baseIdentity.deviceId ?? getOrCreateDeviceId(), operatorName }),
+    [baseIdentity, operatorName],
   );
   const online = connection !== RoomConnectionState.Offline;
   const assignmentRulesUsable =
@@ -121,6 +212,8 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
 
   const credentialsRef = useRef<ISessionCredentials | null>(null);
   credentialsRef.current = scoring?.credentials ?? null;
+  const scoringRef = useRef<IActiveScoring | null>(null);
+  scoringRef.current = scoring;
   const scoringMatchupRef = useRef<IRoomMatchup | null>(null);
   scoringMatchupRef.current = scoring?.matchup ?? null;
   const normalizeOptionsRef = useRef<IQbjNormalizeOptions | null>(null);
@@ -157,8 +250,30 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
    */
   const verifiedTournamentKeyRef = useRef<string | undefined>(undefined);
 
+  /**
+   * The game as it last stood, kept only so a backup can be downloaded from outside the scorer.
+   *
+   * The scorer owns the QBJ and offers its own download; this exists for the repair dialog, which
+   * is rendered over the top of the scorer and has to be able to say "download it and hand it over"
+   * with a button rather than with an instruction.
+   */
+  const latestQbjRef = useRef<object | null>(null);
+
   const outboxRef = useRef(outbox);
   outboxRef.current = outbox;
+
+  /**
+   * Has this game's result reached the outbox, or has tournament control confirmed it did?
+   *
+   * The one question that decides whether the page may take the scorer down. Before it is true,
+   * this device holds the only copy of what the scorekeeper entered, and every reason the page used
+   * to have for clearing the scorer — the assignment moved on, the poll disagreed, the session went
+   * away — is a reason to keep it instead.
+   */
+  const resultHandedOffRef = useRef(false);
+  resultHandedOffRef.current = activeResultId !== null;
+  /** Set when the server itself says the session on screen already has a final under review. */
+  const serverHasFinalRef = useRef(false);
 
   /** Results that automatic retry can still deliver; rejected results stay downloadable but do not latch the room. */
   const deliverableResults = outbox.unresolved.filter(
@@ -167,6 +282,43 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
   const unresolvedRef = useRef<IRoomResultOutboxEntry[]>([]);
   unresolvedRef.current = deliverableResults;
   const hasUnresolvedResults = deliverableResults.length > 0;
+
+  /**
+   * File the game under this room so a reload can find it without asking anybody.
+   *
+   * The session token goes in because this record never leaves browser storage — it is not
+   * exported, not attached to QBJ and not displayed. Everything that *is* handed around goes
+   * through `GameSession` and the outbox, and neither of those has ever carried a credential.
+   */
+  const roomIdForRecord = activeIdentity.roomId;
+  const rememberActiveGame = useCallback(
+    (active: IActiveScoring) => {
+      // Rewriting the record — to stamp a confirmed tournament key, say — must not restart the
+      // clock that ages an abandoned game out.
+      const existing = readActiveGame({ roomId: roomIdForRecord });
+      const startedAt =
+        existing?.sessionId === active.credentials.sessionId ? existing.startedAt : new Date().toISOString();
+      writeActiveGame({
+        roomId: roomIdForRecord,
+        tournamentKey: active.frozen.tournamentKey,
+        scheduledMatchId: active.matchup.scheduledMatchId,
+        sessionId: active.credentials.sessionId,
+        sessionToken: active.credentials.token,
+        tournamentName: active.frozen.tournamentName,
+        roomName: active.frozen.roomName,
+        roundNumber: active.frozen.roundNumber,
+        roundName: active.frozen.roundName,
+        packetName: active.frozen.packetName,
+        matchup: active.matchup,
+        scoringFormat: active.frozen.scoringFormat,
+        roomProcedure: active.frozen.procedure,
+        startedAt,
+      });
+    },
+    [roomIdForRecord],
+  );
+  const rememberActiveGameRef = useRef(rememberActiveGame);
+  rememberActiveGameRef.current = rememberActiveGame;
 
   useEffect(() => {
     let cancelled = false;
@@ -178,12 +330,47 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
       setDegradedMessage(status.degradedMessage);
       setLoadError(status.loadError);
       if (status.needsPairing) {
-        clearRememberedRoomIdentity();
-        clearScoringKit();
-        window.location.replace('/join');
+        /*
+         * The server will not accept this browser's room token any more: control reset the room's
+         * access, or restored a file with different tokens in it.
+         *
+         * With a game on screen this is a warning and nothing else. Clearing the identity and
+         * navigating to /join — which is what used to happen — would take a scorekeeper mid-round
+         * to a pairing form, and the game they had scored would be under a session id nothing was
+         * left holding. With no game there is nothing to protect, so the old behavior stands.
+         */
+        setAuthProblem(true);
+        if (scoringRef.current === null) {
+          clearRememberedRoomIdentity();
+          clearScoringKit();
+          window.location.replace('/join');
+        }
         return;
       }
       if (!result.ok) return;
+      setAuthProblem(false);
+
+      /*
+       * Which tournament this server is serving, checked on the poll the room is already making.
+       *
+       * The scoring kit's own refresh confirms the same thing but only every few minutes, and every
+       * snapshot sent in between would be filed against the wrong event. A game is stamped with the
+       * first key the server confirms — Start can win the race against the first `/tournament`
+       * response — and any later disagreement stops synchronization rather than being reconciled.
+       */
+      const active = scoringRef.current;
+      const servedKey = result.value.tournamentKey;
+      if (active && servedKey !== undefined) {
+        if (active.frozen.tournamentKey === undefined) {
+          const stamped = { ...active, frozen: { ...active.frozen, tournamentKey: servedKey } };
+          setScoring(stamped);
+          rememberActiveGameRef.current(stamped);
+        } else if (active.frozen.tournamentKey !== servedKey) {
+          setTournamentConflict(true);
+        } else {
+          setTournamentConflict(false);
+        }
+      }
 
       setAssignment(result.value);
       setPresence(result.value.presence ?? null);
@@ -195,8 +382,28 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
       setLifecycleNotice(resolveLifecycleNotice(result.value)?.text ?? '');
 
       const { current, session, lastOutcome } = result.value;
+      if (session !== null && scoringRef.current?.credentials.sessionId === session.sessionId) {
+        serverHasFinalRef.current = session.finalReceived;
+      }
       if (current && session && scoringMatchIdRef.current === null && !session.finalReceived) {
-        setScoring({ matchup: current, credentials: { sessionId: session.sessionId, token: session.token } });
+        const resumed: IActiveScoring = {
+          matchup: current,
+          credentials: { sessionId: session.sessionId, token: session.token },
+          frozen: {
+            tournamentName: result.value.tournamentName,
+            roomName: result.value.roomName,
+            roundName: current.roundName,
+            roundNumber: current.roundNumber,
+            packetName: current.packetName,
+            // A resumed session with no usable scoring format has nothing to render, so this stays
+            // null and the existing "scoring unavailable" path handles it.
+            scoringFormat: result.value.scoringFormat as IScorekeeperFormat,
+            procedure: result.value.roomProcedure,
+            tournamentKey: verifiedTournamentKeyRef.current,
+          },
+        };
+        if (resumed.frozen.scoringFormat) rememberActiveGameRef.current(resumed);
+        setScoring(resumed);
       }
 
       if (lastOutcome?.scheduledMatchId) {
@@ -228,13 +435,31 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
           setConflictNotice(
             'A result from this room has not reached tournament control yet. Finish here, then use Saved results to download it if it still has not been sent.',
           );
-        } else {
+        } else if (resultHandedOffRef.current || serverHasFinalRef.current) {
+          /*
+           * The room has moved on and this game's result is somewhere safe: in the outbox on this
+           * device, or with tournament control. Only now is it right to take the scorer down and
+           * show whatever is next.
+           */
+          const finished = scoringRef.current;
           setScoring(null);
           setQuestionsPlayed(0);
           setActiveResultId(null);
           setDeliveryFailed(false);
           setPersistFailure(false);
           setConflictNotice('');
+          setLastSnapshotAt(null);
+          serverHasFinalRef.current = false;
+          if (finished) clearActiveGame(finished.credentials.sessionId);
+        } else {
+          /*
+           * The assignment moved without this room's game reaching anywhere. That is a control-room
+           * decision colliding with a game in progress, and the resolution is a human's, not a
+           * poll's: the scorer stays, the events stay, and the room is told what happened.
+           */
+          setConflictNotice(
+            'Tournament control has given this room a different game. The game on screen is still saved on this device — finish it and submit it, or download the QBJ and hand it to tournament control.',
+          );
         }
       } else {
         setConflictNotice('');
@@ -272,6 +497,36 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
       if (cancelled || !tournamentResult.ok) return;
       // Known as soon as the server says so, whatever becomes of the cached kit below.
       verifiedTournamentKeyRef.current = tournamentResult.value.tournamentKey;
+      /*
+       * The server is serving a different tournament than the one this game started under.
+       *
+       * Almost always a Chromebook that reconnected to a machine which has since opened another
+       * file. The game is not touched and not sent: a result filed against the wrong tournament is
+       * worse than one that arrives on a USB stick, so this stops automatic synchronization and
+       * says so, and the QBJ remains downloadable.
+       */
+      const active = scoringRef.current;
+      const confirmed = tournamentResult.value.tournamentKey;
+      if (active && confirmed !== undefined && active.frozen.tournamentKey === undefined) {
+        /*
+         * The game started before the server had told this page which tournament it was — a race
+         * between Start and the first `getTournament`. Adopting the first confirmation makes the
+         * game comparable from here on; without it a later switch would be undetectable, because
+         * "no key" matches everything.
+         */
+        const stamped = { ...active, frozen: { ...active.frozen, tournamentKey: confirmed } };
+        setScoring(stamped);
+        rememberActiveGameRef.current(stamped);
+      } else if (
+        active &&
+        active.frozen.tournamentKey !== undefined &&
+        confirmed !== undefined &&
+        confirmed !== active.frozen.tournamentKey
+      ) {
+        setTournamentConflict(true);
+      } else {
+        setTournamentConflict(false);
+      }
       if (!roundsResult.ok || !teamsResult.ok) return;
       const kit = buildScoringKit({
         tournamentKey: tournamentResult.value.tournamentKey,
@@ -325,8 +580,21 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
     };
   }, [activeIdentity, operatorName, ready, scorerChoice]);
 
+  /**
+   * The native "leave site?" dialog, for an actual user leaving.
+   *
+   * Nothing on this page navigates during a game any more, so this fires only for a real refresh,
+   * close or back — which is the only thing it was ever meant to be about.
+   *
+   * What it is *not* raised for matters as much: a finished result sitting in a durable outbox is
+   * safe across a reload by construction, and warning about it anyway teaches a room to click
+   * through the dialog without reading it, which is exactly the habit that loses the game the
+   * warning was for. So: a game still being scored, or storage this browser could not write to.
+   */
+  const gameInProgress = scoring !== null && activeResultId === null;
+  const strandedResults = outbox.unresolved.some((entry) => !outbox.isPersisted(entry.id));
   useEffect(() => {
-    const shouldWarn = scoring !== null || hasUnresolvedResults;
+    const shouldWarn = gameInProgress || persistFailure || strandedResults;
     if (!shouldWarn) return undefined;
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
       event.preventDefault();
@@ -334,11 +602,11 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
     };
     window.addEventListener('beforeunload', onBeforeUnload);
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
-  }, [scoring, hasUnresolvedResults]);
+  }, [gameInProgress, persistFailure, strandedResults]);
 
   const handleStart = async () => {
     const current = assignment?.current;
-    if (!current) return;
+    if (!current || !assignment) return;
     setStartError('');
     setSubmittedSummary('');
     setStarting(true);
@@ -352,10 +620,26 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
     setActiveResultId(null);
     setDeliveryFailed(false);
     setPersistFailure(false);
-    setScoring({
+    setLastSnapshotAt(null);
+    serverHasFinalRef.current = false;
+    const started: IActiveScoring = {
       matchup: current,
       credentials: { sessionId: result.value.sessionId, token: result.value.token },
-    });
+      frozen: {
+        tournamentName: assignment.tournamentName,
+        roomName: assignment.roomName,
+        roundName: current.roundName,
+        roundNumber: current.roundNumber,
+        packetName: current.packetName,
+        scoringFormat: assignment.scoringFormat as IScorekeeperFormat,
+        procedure: assignment.roomProcedure,
+        tournamentKey: verifiedTournamentKeyRef.current,
+      },
+    };
+    // The moment the session is authoritative is the moment a reload has to be able to find it
+    // again, so this is written before the scorer is even on screen.
+    if (started.frozen.scoringFormat) rememberActiveGame(started);
+    setScoring(started);
   };
 
   const handleOperatorNameChange = (name: string) => {
@@ -407,6 +691,10 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
       // eslint-disable-next-line no-alert
       if (!window.confirm(message)) return;
     }
+    // The one place a game is abandoned, and only ever behind that confirmation. The saved
+    // `GameSession` and the outbox are left alone: what is being given up is this browser's claim
+    // to be this room, not the record of what it scored.
+    if (scoring !== null) clearActiveGame(scoring.credentials.sessionId);
     clearRememberedRoomIdentity();
     clearScoringKit();
     window.location.assign('/join');
@@ -451,26 +739,39 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
     });
     setActiveResultId(enqueued.entry.id);
     setPersistFailure(!enqueued.persisted);
+    /*
+     * The game has become a result, and the outbox is now the thing that survives a reload for it.
+     * Retiring the active-game record here is what stops the room reopening a finished game on its
+     * next reload — but only once the outbox has actually accepted the write. A browser that could
+     * not persist the result keeps its recovery record, because otherwise a refresh would leave the
+     * room with neither copy.
+     */
+    if (enqueued.persisted) clearActiveGame(activeCredentials.sessionId);
 
     const delivered = await outboxRef.current.submitNow(enqueued.entry.id);
     if (delivered?.deliveryState === 'submitted') {
       setDeliveryFailed(false);
-      return { isError: false, status: 'Submitted to YellowFruit' };
+      return { isError: false, status: 'Sent to tournament control' };
     }
     setDeliveryFailed(true);
+    /*
+     * Everything below is a promise about what happens to a finished game, so each branch says only
+     * what this device can actually deliver on. A refusal will not retry itself and a result that
+     * could not be saved will not survive a reload; telling a scorekeeper to wait in either case is
+     * how a played game ends up in nobody's standings.
+     */
     if (delivered?.retryBlocked) {
+      const refusal = delivered.lastError ?? 'Tournament control refused this result.';
       setSubmittedSummary(
-        `${
-          delivered.lastError ?? 'YellowFruit refused this result.'
-        } The game is saved on this device — use Download QBJ under Saved results and give the file to tournament control.`,
+        `${refusal} The game is saved on this device — use Download QBJ under Saved results and give the file to tournament control.`,
       );
-      return { isError: true, status: delivered.lastError ?? 'YellowFruit refused this result.' };
+      return { isError: true, status: `${refusal} Download the QBJ and give it to tournament control.` };
     }
     return {
       isError: true,
       status: enqueued.persisted
-        ? 'Saved on this device. It will be sent automatically when YellowFruit is reachable again.'
-        : 'This browser could not save the result. Download the QBJ file now.',
+        ? 'Tournament control could not be reached. Automatic delivery will continue if the connection returns.'
+        : 'This browser could not save the result. Download the QBJ now and give it to tournament control.',
     };
   }, []);
 
@@ -490,6 +791,7 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
           return { isError: true, status: result.error };
         }
         setSnapshotError('');
+        setLastSnapshotAt(Date.now());
         return { isError: false, status: 'Sent to YellowFruit' };
       }
       if (source === 'NewGame') return { isError: false, status: 'Not submitted' };
@@ -518,13 +820,53 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
     [deliverFinal],
   );
 
-  /** Live progress for tournament control, on the same endpoint MODAQ's timer export used. */
-  const handleScorerProgress = useCallback(async (qbj: object, questionsHeard: number) => {
+  /**
+   * Live progress for tournament control, on the same endpoint MODAQ's timer export used.
+   *
+   * Deliberately after the fact and deliberately allowed to fail: the scoring action has already
+   * been committed locally by the time this runs, so a refused or unanswered snapshot costs the
+   * room nothing but a stale score line on the control-room dashboard. The one case it is skipped
+   * entirely is a server that has since opened a different tournament, where sending would file
+   * this game's progress against somebody else's event.
+   */
+  const handleScorerProgress = useCallback(
+    async (qbj: object, questionsHeard: number) => {
+      const activeCredentials = credentialsRef.current;
+      setQuestionsPlayed(questionsHeard);
+      latestQbjRef.current = qbj;
+      if (activeCredentials) touchActiveGame(activeCredentials.sessionId);
+      if (!activeCredentials || tournamentConflict) return;
+      const result = await putSnapshot(activeCredentials, qbj);
+      setSnapshotError(result.ok ? '' : result.error);
+      if (result.ok) setLastSnapshotAt(Date.now());
+    },
+    [tournamentConflict],
+  );
+
+  const handleDownloadBackup = useCallback(() => {
+    const qbj = latestQbjRef.current;
+    const active = scoringRef.current;
+    if (!qbj || !active) return;
+    downloadCurrentQbj(qbj, {
+      roundName: active.frozen.roundName,
+      roundNumber: active.frozen.roundNumber,
+      roomName: active.frozen.roomName,
+      leftTeam: active.matchup.leftTeam.name,
+      rightTeam: active.matchup.rightTeam.name,
+    });
+  }, []);
+
+  /**
+   * This session's own snapshot from the server, for a device whose local copy is gone.
+   *
+   * Only ever this session, only ever with this session's token, and only ever consulted by
+   * `ScorerHost` when there is nothing local — see the ordering note there.
+   */
+  const recoverFromServer = useCallback(async () => {
     const activeCredentials = credentialsRef.current;
-    setQuestionsPlayed(questionsHeard);
-    if (!activeCredentials) return;
-    const result = await putSnapshot(activeCredentials, qbj);
-    setSnapshotError(result.ok ? '' : result.error);
+    if (!activeCredentials) return null;
+    const result = await getSessionRecovery(activeCredentials);
+    return result.ok ? result.value.latestQbj : null;
   }, []);
 
   const customExport = useMemo(
@@ -563,7 +905,123 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
     />
   );
 
+  /** Where the finished result has got to, for the connection detail. Only what is known. */
+  let deliveryProgress: 'in-progress' | 'waiting' | 'sent' | 'accepted' | 'hand-over' = 'in-progress';
+  if (activeResult) {
+    if (activeResult.deliveryState === 'accepted') deliveryProgress = 'accepted';
+    else if (activeResult.deliveryState === 'submitted') deliveryProgress = 'sent';
+    else if (activeResult.retryBlocked || activeResult.deliveryState === 'manual-backup')
+      deliveryProgress = 'hand-over';
+    else deliveryProgress = 'waiting';
+  }
+
+  /**
+   * Everything the scorekeeper needs to know that the scorer itself cannot work out.
+   *
+   * Each one is an operational problem with an action attached, and none of them removes the game
+   * from the screen — that is the whole distinction this pass is about.
+   */
+  const scorerAlerts: IScorerAlert[] = [];
+  if (authProblem) {
+    scorerAlerts.push({
+      id: 'auth',
+      tone: 'warning',
+      title: 'Room connection changed — keep scoring.',
+      body: 'Tournament control can no longer authenticate this Chromebook. This game is still saved on this device. If the connection is not restored by the end of the game, download the QBJ and give it to tournament control.',
+      actions: [{ label: 'Repair connection', onSelect: () => setRepairOpen(true) }],
+      offerDownload: true,
+    });
+  }
+  if (tournamentConflict) {
+    scorerAlerts.push({
+      id: 'tournament',
+      tone: 'error',
+      title: 'This computer is now running a different tournament.',
+      body: 'Nothing from this game is being sent, so it cannot be filed against the wrong event. Keep scoring, then download the QBJ and give it to tournament control.',
+      offerDownload: true,
+    });
+  }
+  if (conflictNotice)
+    scorerAlerts.push({ id: 'conflict', tone: 'warning', title: conflictNotice, offerDownload: true });
+  if (lifecycleNotice) scorerAlerts.push({ id: 'lifecycle', tone: 'info', title: lifecycleNotice });
+
   if (emergencyMode) return <ManualRoomApp emergency />;
+
+  const repairDialog = repairOpen ? (
+    <RepairConnectionDialog
+      roomId={activeIdentity.roomId}
+      gameInProgress={gameInProgress}
+      onRepaired={(repaired) => {
+        setRepairedIdentity(repaired);
+        setAuthProblem(false);
+        setRepairOpen(false);
+      }}
+      onDownloadBackup={handleDownloadBackup}
+      onClose={() => setRepairOpen(false)}
+    />
+  ) : null;
+
+  /*
+   * The scorer is rendered before anything is checked about the assignment, and that ordering is
+   * the whole point: a Chromebook that reloaded while the server was unreachable has a complete
+   * game on this device and no way to fetch an assignment, and it used to sit on "Connecting…"
+   * looking at nothing. Everything the screen needs is frozen in `scoring.frozen`.
+   */
+  if (scoring && scorerChoice === 'first-party') {
+    const authoritative =
+      assignment?.current?.scheduledMatchId === scoring.matchup.scheduledMatchId ? assignment.current : null;
+    return scoring.frozen.scoringFormat ? (
+      <>
+        {/* Keyed by the session so each game gets its own state, and its own chance to recover. */}
+        <ScorerHost
+          key={scoring.credentials.sessionId}
+          gameKey={scoring.credentials.sessionId}
+          format={scoring.frozen.scoringFormat}
+          leftTeam={scoring.matchup.leftTeam}
+          rightTeam={scoring.matchup.rightTeam}
+          authoritativeLeftTeam={authoritative?.leftTeam ?? scoring.matchup.leftTeam}
+          authoritativeRightTeam={authoritative?.rightTeam ?? scoring.matchup.rightTeam}
+          onSyncRosterPlayer={async (teamName, playerName) => {
+            const result = await addRoomPlayer(activeIdentity, scoring.credentials, teamName, playerName);
+            if (result.ok) return { ok: true };
+            const rejected =
+              result.status === 400 || result.status === 403 || result.error.includes('cannot accept another player');
+            return { ok: false, error: result.error, rejected };
+          }}
+          tournamentName={scoring.frozen.tournamentName}
+          roundName={scoring.frozen.roundName}
+          roomName={scoring.frozen.roomName}
+          packetName={scoring.frozen.packetName}
+          procedure={scoring.frozen.procedure}
+          operatorName={operatorName}
+          connection={connection}
+          degradedMessage={degradedMessage}
+          onSubmit={handleScorerSubmit}
+          onDownload={activeResult ? () => handleDownload(activeResult) : undefined}
+          onProgress={handleScorerProgress}
+          onRecoverFromServer={recoverFromServer}
+          onRequestControl={handleRequestHelp}
+          controlRequestPending={helpRequest !== null && helpRequest.status === 'open'}
+          alerts={scorerAlerts}
+          recovery={{
+            serverSnapshotAt: lastSnapshotAt,
+            snapshotError,
+            automaticDelivery: !tournamentConflict,
+            delivery: deliveryProgress,
+          }}
+          qbjMeta={{
+            round: scoring.frozen.roundNumber,
+            location: scoring.frozen.roomName,
+          }}
+        />
+        {deliveryFailureNotice}
+        {savedResults}
+        {repairDialog}
+      </>
+    ) : (
+      <ScoringUnavailable roundName={scoring.frozen.roundName} roomName={scoring.frozen.roomName} />
+    );
+  }
 
   if (assignment === null) {
     return (
@@ -592,59 +1050,6 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
   const pendingFinal = outbox.pendingAutomaticDelivery;
   const blocksStart = outbox.unresolved.some((entry) => blocksNewStart(entry, assignment.current?.scheduledMatchId));
   const awaitingReview = blocksStart || isAwaitingReview(assignment);
-
-  if (scoring && scorerChoice === 'first-party') {
-    // Keyed by the session so each game gets its own state, and its own chance to recover a saved one.
-    return assignment.scoringFormat ? (
-      <>
-        <ScorerHost
-          key={scoring.credentials.sessionId}
-          gameKey={scoring.credentials.sessionId}
-          format={assignment.scoringFormat}
-          leftTeam={scoring.matchup.leftTeam}
-          rightTeam={scoring.matchup.rightTeam}
-          authoritativeLeftTeam={
-            assignment.current?.scheduledMatchId === scoring.matchup.scheduledMatchId
-              ? assignment.current.leftTeam
-              : scoring.matchup.leftTeam
-          }
-          authoritativeRightTeam={
-            assignment.current?.scheduledMatchId === scoring.matchup.scheduledMatchId
-              ? assignment.current.rightTeam
-              : scoring.matchup.rightTeam
-          }
-          onSyncRosterPlayer={async (teamName, playerName) => {
-            const result = await addRoomPlayer(activeIdentity, scoring.credentials, teamName, playerName);
-            if (result.ok) return { ok: true };
-            const rejected =
-              result.status === 400 || result.status === 403 || result.error.includes('cannot accept another player');
-            return { ok: false, error: result.error, rejected };
-          }}
-          tournamentName={assignment.tournamentName}
-          roundName={scoring.matchup.roundName}
-          roomName={assignment.roomName}
-          packetName={scoring.matchup.packetName}
-          procedure={assignment.roomProcedure}
-          operatorName={operatorName}
-          connection={connection}
-          degradedMessage={degradedMessage}
-          onSubmit={handleScorerSubmit}
-          onDownload={activeResult ? () => handleDownload(activeResult) : undefined}
-          onProgress={handleScorerProgress}
-          onRequestControl={handleRequestHelp}
-          controlRequestPending={helpRequest !== null && helpRequest.status === 'open'}
-          qbjMeta={{
-            round: scoring.matchup.roundNumber,
-            location: assignment.roomName,
-          }}
-        />
-        {deliveryFailureNotice}
-        {savedResults}
-      </>
-    ) : (
-      <ScoringUnavailable roundName={scoring.matchup.roundName} roomName={assignment.roomName} />
-    );
-  }
 
   if (scoring && assignment.gameFormat) {
     return (
