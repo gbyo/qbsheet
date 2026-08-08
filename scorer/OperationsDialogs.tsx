@@ -154,7 +154,7 @@ function EditableEvent(props: {
 
   const eventTeam = event.type === 'tossup-buzz' || event.type === 'substitution' ? game[event.team] : undefined;
   const question = game.questions.find((candidate) => candidate.questionNumber === event.questionNumber);
-  const activeBuzzPlayers = event.type === 'tossup-buzz' ? (question?.activePlayers[event.team] ?? []) : [];
+  const activeBuzzPlayers = event.type === 'tossup-buzz' ? question?.activePlayers[event.team] ?? [] : [];
 
   const save = () => {
     setProblem('');
