@@ -42,7 +42,8 @@ function makeSampleAssignments() {
     scheduledMatchId: `sched-r${roundNumber}-${roomId}`,
     roomId,
     roundNumber,
-    roundName: String(roundNumber),
+    // Matches the real snapshot, which sends Round.displayName() rather than a bare number.
+    roundName: `Round ${roundNumber}`,
     leftTeam,
     rightTeam,
     status: ScheduledMatchStatus.Scheduled,
@@ -54,7 +55,7 @@ function makeSampleSnapshot(): ITournamentSnapshot {
   const formatResult = scoringRulesToModaqGameFormat(rules);
   return {
     name: 'Harness Invitational',
-    rounds: [1, 2, 3].map((n) => ({ number: n, name: String(n) })),
+    rounds: [1, 2, 3].map((n) => ({ number: n, name: `Round ${n}` })),
     teams: sampleTeamNames.map((name) => ({
       name,
       players: [1, 2, 3, 4].map((i) => ({ name: `${name} Player ${i}` })),

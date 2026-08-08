@@ -48,7 +48,8 @@ export function handOverConfirmation(entry: IRoomResultOutboxEntry): string {
 }
 
 function roundLabel(entry: IRoomResultOutboxEntry): string {
-  if (entry.roundName && entry.roundName !== '') return `Round ${entry.roundName}`;
+  // The name arrives already spelled out ("Round 4", "Finals"); only a bare number needs the word.
+  if (entry.roundName && entry.roundName !== '') return entry.roundName;
   if (typeof entry.roundNumber === 'number') return `Round ${entry.roundNumber}`;
   return 'Game';
 }
