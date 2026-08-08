@@ -489,9 +489,6 @@ export default function Scorer(props: IScorerProps) {
         <button type="button" className="scorer-action" onClick={() => setDialog('players')}>
           Players
         </button>
-        <button type="button" className="scorer-action" onClick={() => setDialog('issue')}>
-          Mark issue
-        </button>
         <GameMenu items={menuItems} />
         {warnings.length > 0 && phase.kind !== 'complete' && (
           <span className="scorer-footer-warning">{warnings[0]}</span>
