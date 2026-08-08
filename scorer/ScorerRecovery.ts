@@ -27,6 +27,23 @@ function validTeam(value: unknown): value is 'left' | 'right' {
   return value === 'left' || value === 'right';
 }
 
+function validPlayerList(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((name) => typeof name === 'string' && name.trim() !== '');
+}
+
+export function validSetup(value: unknown): value is IGameSetup {
+  if (typeof value !== 'object' || value === null) return false;
+  const setup = value as Partial<IGameSetup>;
+  return (
+    typeof setup.left?.name === 'string' &&
+    setup.left.name.trim() !== '' &&
+    validPlayerList(setup.left.players) &&
+    typeof setup.right?.name === 'string' &&
+    setup.right.name.trim() !== '' &&
+    validPlayerList(setup.right.players)
+  );
+}
+
 function validBonusPart(value: unknown): boolean {
   if (typeof value !== 'object' || value === null) return false;
   const part = value as Record<string, unknown>;
@@ -44,7 +61,13 @@ export function validEvent(value: unknown): value is ScoreEvent {
   if (!Number.isInteger(event.questionNumber) || Number(event.questionNumber) < 1) return false;
   if ('team' in event && !validTeam(event.team)) return false;
   if (event.type === 'tossup-buzz')
-    return validTeam(event.team) && typeof event.playerName === 'string' && Number.isInteger(event.answerTypeIndex);
+    return (
+      validTeam(event.team) &&
+      typeof event.playerName === 'string' &&
+      event.playerName.trim() !== '' &&
+      Number.isInteger(event.answerTypeIndex) &&
+      Number(event.answerTypeIndex) >= 0
+    );
   if (event.type === 'bonus') {
     if (!validTeam(event.team)) return false;
     const totalsValid =
@@ -101,8 +124,7 @@ export function readScorerRecovery(
   const payload = (value as Record<string, unknown>)[scorerRecoveryKey] as Partial<IScorerRecoveryPayload> | undefined;
   if (payload?.version !== scorerRecoveryVersion || !Array.isArray(payload.events)) return null;
   if (!payload.events.every(validEvent)) return null;
-  if (!payload.setup?.left?.name || !payload.setup?.right?.name) return null;
-  if (!Array.isArray(payload.setup.left.players) || !Array.isArray(payload.setup.right.players)) return null;
+  if (!validSetup(payload.setup)) return null;
   if (payload.setup.left.name !== expected.left.name || payload.setup.right.name !== expected.right.name) return null;
   return {
     version: scorerRecoveryVersion,
