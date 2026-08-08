@@ -52,6 +52,8 @@ import { blocksNewStart, IRoomResultOutboxEntry } from './ResultOutbox';
 import SavedResults, { DeliveryFailureNotice } from './SavedResults';
 import { buildScoringKit, clearScoringKit, isScoringKitUsable, readScoringKit, writeScoringKit } from './ScoringKit';
 import ScoringView from './ScoringView';
+import ScoringUnavailable from './ScoringUnavailable';
+import { readScorerChoice } from './ScorerChoice';
 import MatchupCard from './MatchupCard';
 import ManualRoomApp from './ManualRoomApp';
 
@@ -96,6 +98,9 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
   const [activeResultId, setActiveResultId] = useState<string | null>(null);
   const [persistFailure, setPersistFailure] = useState(false);
   const [deliveryFailed, setDeliveryFailed] = useState(false);
+  // Read once per mount: it consults storage, and a scorer that could change under a game in
+  // progress would be worse than either scorer on its own.
+  const [scorerChoice] = useState(() => readScorerChoice());
 
   const outbox = useResultOutbox();
   const activeIdentity = useMemo(
@@ -524,6 +529,10 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
   const pendingFinal = outbox.pendingAutomaticDelivery;
   const blocksStart = outbox.unresolved.some((entry) => blocksNewStart(entry, assignment.current?.scheduledMatchId));
   const awaitingReview = blocksStart || isAwaitingReview(assignment);
+
+  if (scoring && scorerChoice === 'first-party') {
+    return <ScoringUnavailable roundName={scoring.matchup.roundName} roomName={assignment.roomName} />;
+  }
 
   if (scoring && assignment.gameFormat) {
     return (

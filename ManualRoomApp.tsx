@@ -36,6 +36,8 @@ import { IRoomResultOutboxEntry } from './ResultOutbox';
 import SavedResults, { DeliveryFailureNotice } from './SavedResults';
 import { IScoringKit, describeUnusableKit, isScoringKitUsable, readScoringKit } from './ScoringKit';
 import ScoringView from './ScoringView';
+import ScoringUnavailable from './ScoringUnavailable';
+import { readScorerChoice } from './ScorerChoice';
 import { RoomConnectionState } from './RoomLifecycle';
 
 /** MODAQ requires a status object back from a custom export */
@@ -143,6 +145,8 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
   const [cachedKit] = useState<IScoringKit | null>(() => readScoringKit());
   const [cachedKitUsable] = useState(() => isScoringKitUsable(cachedKit));
   const kit = emergency ? cachedKit : null;
+  // Read once per mount; see AssignedRoomApp.
+  const [scorerChoice] = useState(() => readScorerChoice());
 
   const [roundNumber, setRoundNumber] = useState<number | ''>('');
   const [leftTeamName, setLeftTeamName] = useState('');
@@ -481,6 +485,10 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
       connection comes back.
     </div>
   );
+
+  if (phase === 'scoring' && setup && scorerChoice === 'first-party') {
+    return <ScoringUnavailable roundName={setup.round.name} roomName={emergency ? kit?.roomName : undefined} />;
+  }
 
   if (phase === 'scoring' && setup && gameFormat) {
     return (
