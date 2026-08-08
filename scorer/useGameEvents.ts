@@ -11,7 +11,7 @@
  * undoes a mis-recorded buzz and then records the right one must not be able to reach forward and
  * re-apply the wrong one; the game would gain a buzz nobody made.
  */
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ScoreEvent } from '../scoring/ScoreEvents';
 import { IGameSetup } from '../scoring/deriveGame';
 import { saveGame } from './GameSession';
@@ -37,13 +37,13 @@ export interface IGameEventsApi {
 }
 
 /**
- * How many events one action produced, newest first.
+ * Events one action produced, oldest first.
  *
  * Undo is per *action*, not per event, because some actions are more than one: recording a bonus on
  * a tossup that was converted in the same click is two events, and a scorekeeper pressing undo means
  * "take back what I just did", not "take back half of it".
  */
-type UndoFrame = number;
+type UndoFrame = ScoreEvent[];
 
 let sequence = 0;
 
@@ -61,10 +61,11 @@ export default function useGameEvents(
   const [events, setEvents] = useState<ScoreEvent[]>(initialEvents);
   const [saved, setSaved] = useState(true);
   const [history, setHistory] = useState({ canUndo: false, canRedo: false });
-  /** Sizes of the actions that can be undone, oldest first. */
+  /** Actions that can be undone, oldest first. */
   const undoStack = useRef<UndoFrame[]>([]);
   /** Events taken off by undo, newest action last, so redo can put them back. */
   const redoStack = useRef<ScoreEvent[][]>([]);
+  const persistedEvents = useRef(initialEvents);
 
   const persist = useCallback(
     (next: ScoreEvent[]) => {
@@ -73,6 +74,12 @@ export default function useGameEvents(
     [gameKey, setup],
   );
 
+  useEffect(() => {
+    if (persistedEvents.current === events) return;
+    persistedEvents.current = events;
+    persist(events);
+  }, [events, persist]);
+
   const syncHistory = useCallback(() => {
     setHistory({ canUndo: undoStack.current.length > 0, canRedo: redoStack.current.length > 0 });
   }, []);
@@ -80,36 +87,29 @@ export default function useGameEvents(
   const append = useCallback(
     (...added: ScoreEvent[]) => {
       if (added.length === 0) return;
-      undoStack.current.push(added.length);
+      undoStack.current.push(added);
       redoStack.current = [];
       syncHistory();
-      const next = events.concat(added);
-      setEvents(next);
-      persist(next);
+      setEvents((current) => current.concat(added));
     },
-    [events, persist, syncHistory],
+    [syncHistory],
   );
 
   const undo = useCallback(() => {
     const frame = undoStack.current.pop();
     if (frame === undefined) return;
-    const cut = Math.max(0, events.length - frame);
-    const next = events.slice(0, cut);
-    redoStack.current.push(events.slice(cut));
+    redoStack.current.push(frame);
     syncHistory();
-    setEvents(next);
-    persist(next);
-  }, [events, persist, syncHistory]);
+    setEvents((current) => current.slice(0, Math.max(0, current.length - frame.length)));
+  }, [syncHistory]);
 
   const redo = useCallback(() => {
     const frame = redoStack.current.pop();
     if (frame === undefined) return;
-    undoStack.current.push(frame.length);
-    const next = events.concat(frame);
+    undoStack.current.push(frame);
     syncHistory();
-    setEvents(next);
-    persist(next);
-  }, [events, persist, syncHistory]);
+    setEvents((current) => current.concat(frame));
+  }, [syncHistory]);
 
   /**
    * Editing an earlier question is not undoable in the same sense — there is no "before" to step
@@ -120,36 +120,30 @@ export default function useGameEvents(
     (id: string, nextEvent: ScoreEvent) => {
       undoStack.current = [];
       redoStack.current = [];
-      const next = events.map((event) => (event.id === id ? nextEvent : event));
       syncHistory();
-      setEvents(next);
-      persist(next);
+      setEvents((current) => current.map((event) => (event.id === id ? nextEvent : event)));
     },
-    [events, persist, syncHistory],
+    [syncHistory],
   );
 
   const remove = useCallback(
     (id: string) => {
       undoStack.current = [];
       redoStack.current = [];
-      const next = events.filter((event) => event.id !== id);
       syncHistory();
-      setEvents(next);
-      persist(next);
+      setEvents((current) => current.filter((event) => event.id !== id));
     },
-    [events, persist, syncHistory],
+    [syncHistory],
   );
 
   const restore = useCallback(
     (restored: ScoreEvent[]) => {
       undoStack.current = [];
       redoStack.current = [];
-      const next = restored.map((event) => ({ ...event }));
       syncHistory();
-      setEvents(next);
-      persist(next);
+      setEvents(() => restored.map((event) => ({ ...event })));
     },
-    [persist, syncHistory],
+    [syncHistory],
   );
 
   return useMemo(
