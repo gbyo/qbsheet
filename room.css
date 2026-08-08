@@ -370,9 +370,29 @@ body {
 .room-operator-actions,
 .room-help-form-actions {
   display: flex;
-  align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.room-operator-actions,
+.room-help-form-actions {
+  align-items: center;
+}
+
+/*
+  The name field carries a caption above it and the other two items do not, so centring the row
+  would float Ready and the device count up against the caption instead of against the field they
+  sit beside. They line up with the bottom of the field; the count centres on the button within
+  .room-operator-status.
+*/
+.room-operator-row {
+  align-items: flex-end;
+}
+
+.room-operator-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .room-operator-name {
@@ -383,10 +403,11 @@ body {
   padding: 8px 10px;
 }
 
+/* The vertical padding matches the name field's so the two are the same height side by side. */
 .room-operator-row .room-button {
   width: auto;
   min-width: 120px;
-  padding: 9px 14px;
+  padding: 8px 14px;
   font-size: 0.875rem;
 }
 
@@ -441,6 +462,12 @@ body {
 
 .room-help-form textarea {
   resize: vertical;
+}
+
+/* The caption is one grid row, so "(optional)" reads as an aside on it rather than as its own line. */
+.room-help-form .room-muted {
+  display: inline;
+  font-weight: 400;
 }
 
 .room-help-form-actions {

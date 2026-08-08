@@ -131,7 +131,7 @@ function ContextLine({ label, matchup }: { label: string; matchup: IRoomMatchupS
   return (
     <div className="room-context-line">
       <span className="room-context-label">{label}</span>
-      <span className="room-context-round">Round {matchup.roundName}</span>
+      <span className="room-context-round">{matchup.roundName}</span>
       <span className="room-context-teams">
         {matchup.leftTeam} vs {matchup.rightTeam}
       </span>
@@ -285,7 +285,7 @@ export default function MatchupCard(props: IMatchupCardProps) {
         </div>
       ) : (
         <div className="room-matchup">
-          <p className="room-matchup-round">Round {current.roundName}</p>
+          <p className="room-matchup-round">{current.roundName}</p>
           <p className="room-matchup-team">{current.leftTeam.name}</p>
           <p className="room-matchup-vs">vs.</p>
           <p className="room-matchup-team">{current.rightTeam.name}</p>

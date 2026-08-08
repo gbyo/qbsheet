@@ -402,7 +402,7 @@ export default function Scorer(props: IScorerProps) {
         <div className="scorer-header-main">
           <h1 className="scorer-tournament">{tournamentName}</h1>
           <p className="scorer-context">
-            Round {roundName}
+            {roundName}
             {roomName && <> · {roomName}</>}
           </p>
         </div>

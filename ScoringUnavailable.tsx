@@ -7,7 +7,10 @@
  */
 
 export interface IScoringUnavailableProps {
-  /** Round and room, so a director reading over a shoulder knows which game is stuck. */
+  /**
+   * Round and room, so a director reading over a shoulder knows which game is stuck. The round
+   * arrives already named ("Round 4", "Finals") and is shown as it stands.
+   */
   // eslint-disable-next-line react/require-default-props
   roundName?: string;
   // eslint-disable-next-line react/require-default-props
@@ -16,7 +19,7 @@ export interface IScoringUnavailableProps {
 
 export default function ScoringUnavailable(props: IScoringUnavailableProps) {
   const { roundName, roomName } = props;
-  const context = [roundName ? `Round ${roundName}` : null, roomName].filter(Boolean).join(' · ');
+  const context = [roundName, roomName].filter(Boolean).join(' · ');
 
   return (
     <div className="room-shell">

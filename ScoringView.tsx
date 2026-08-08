@@ -203,7 +203,7 @@ export default function ScoringView(props: IScoringViewProps) {
           <span className="room-statusbar-sep" aria-hidden="true">
             ·
           </span>
-          <span>Round {roundName}</span>
+          <span>{roundName}</span>
           <span className="room-statusbar-sep" aria-hidden="true">
             ·
           </span>
