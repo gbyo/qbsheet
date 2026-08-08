@@ -41,6 +41,13 @@ function validPlayerList(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((name) => typeof name === 'string' && name.trim() !== '');
 }
 
+function validStartingLineup(value: unknown, players: string[]): boolean {
+  if (value === undefined) return true;
+  if (!validPlayerList(value)) return false;
+  const lineup = value as string[];
+  return new Set(lineup).size === lineup.length && lineup.every((name) => players.includes(name));
+}
+
 export function validSetup(value: unknown): value is IGameSetup {
   if (typeof value !== 'object' || value === null) return false;
   const setup = value as Partial<IGameSetup>;
@@ -48,9 +55,11 @@ export function validSetup(value: unknown): value is IGameSetup {
     typeof setup.left?.name === 'string' &&
     setup.left.name.trim() !== '' &&
     validPlayerList(setup.left.players) &&
+    validStartingLineup(setup.left.startingLineup, setup.left.players) &&
     typeof setup.right?.name === 'string' &&
     setup.right.name.trim() !== '' &&
-    validPlayerList(setup.right.players)
+    validPlayerList(setup.right.players) &&
+    validStartingLineup(setup.right.startingLineup, setup.right.players)
   );
 }
 
@@ -103,6 +112,7 @@ export function validEvent(value: unknown): value is ScoreEvent {
       validTeam(event.team) &&
       Array.isArray(event.activePlayers) &&
       event.activePlayers.length > 0 &&
+      new Set(event.activePlayers).size === event.activePlayers.length &&
       event.activePlayers.every((name) => typeof name === 'string' && name.trim() !== '')
     );
   if (event.type === 'forfeit')
@@ -112,7 +122,10 @@ export function validEvent(value: unknown): value is ScoreEvent {
     return validTeam(event.team) && typeof event.points === 'number' && Number.isFinite(event.points);
   // The player is optional: the event is about the team's opportunity, not about a buzz.
   if (event.type === 'tossup-no-penalty')
-    return validTeam(event.team) && (event.playerName === undefined || typeof event.playerName === 'string');
+    return (
+      validTeam(event.team) &&
+      (event.playerName === undefined || (typeof event.playerName === 'string' && event.playerName.trim() !== ''))
+    );
   if (event.type === 'end-regulation')
     return (
       event.lastRegulationQuestion === undefined ||
