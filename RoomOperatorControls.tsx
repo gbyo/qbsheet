@@ -96,25 +96,28 @@ export default function RoomOperatorControls(props: IRoomOperatorControlsProps) 
             maxLength={80}
           />
         </label>
-        <button
-          type="button"
-          className={ready ? 'room-button room-button-ready' : 'room-button room-button-secondary'}
-          onClick={() => onReadyChange(!ready)}
-          disabled={!ready && !readyAllowed}
-          aria-pressed={ready}
-          title={
-            readyAllowed
-              ? undefined
-              : 'Ready becomes available after this browser connects and loads usable scoring rules.'
-          }
-        >
-          {ready ? 'Ready' : 'Mark ready'}
-        </button>
-        <span className="room-presence-note">
-          {presence?.connected
-            ? `${presence.readyDeviceCount ?? 0} device${presence.readyDeviceCount === 1 ? '' : 's'} ready`
-            : 'Not connected'}
-        </span>
+        {/* Grouped so the device count centres on the button rather than on the taller name field. */}
+        <div className="room-operator-status">
+          <button
+            type="button"
+            className={ready ? 'room-button room-button-ready' : 'room-button room-button-secondary'}
+            onClick={() => onReadyChange(!ready)}
+            disabled={!ready && !readyAllowed}
+            aria-pressed={ready}
+            title={
+              readyAllowed
+                ? undefined
+                : 'Ready becomes available after this browser connects and loads usable scoring rules.'
+            }
+          >
+            {ready ? 'Ready' : 'Mark ready'}
+          </button>
+          <span className="room-presence-note">
+            {presence?.connected
+              ? `${presence.readyDeviceCount ?? 0} device${presence.readyDeviceCount === 1 ? '' : 's'} ready`
+              : 'Not connected'}
+          </span>
+        </div>
       </div>
 
       <div className="room-operator-actions">
@@ -139,7 +142,8 @@ export default function RoomOperatorControls(props: IRoomOperatorControlsProps) 
       {helpOpen && !helpRequest && (
         <div className="room-help-form">
           <label htmlFor="room-help-category">
-            Help category
+            {/* One element per grid row: loose text would become a row of its own. */}
+            <span>Help category</span>
             <select
               id="room-help-category"
               value={category}
@@ -153,7 +157,9 @@ export default function RoomOperatorControls(props: IRoomOperatorControlsProps) 
             </select>
           </label>
           <label htmlFor="room-help-message">
-            Note <span className="room-muted">(optional)</span>
+            <span>
+              Note <span className="room-muted">(optional)</span>
+            </span>
             <textarea
               id="room-help-message"
               value={message}
