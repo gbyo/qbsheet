@@ -54,9 +54,9 @@ function TeamLineup(props: {
 
   useEffect(() => {
     if (focusPlayerIndex.current === null) return;
-    document.getElementById(playerInputId(focusPlayerIndex.current))?.focus();
+    document.getElementById(`scorer-lineup-${side}-${focusPlayerIndex.current}`)?.focus();
     focusPlayerIndex.current = null;
-  }, [selected]);
+  }, [selected, side]);
 
   const toggle = (name: string, index: number) => {
     focusPlayerIndex.current = index;
@@ -114,13 +114,9 @@ function TeamLineup(props: {
     <section className="scorer-lineup" aria-label={`${team.name} lineup`}>
       <h3 className="scorer-lineup-team">{team.name}</h3>
       <h4>Playing</h4>
-      <ul className="scorer-lineup-list">
-        {playing.map(({ player, index }) => playerRow(player, index, true))}
-      </ul>
+      <ul className="scorer-lineup-list">{playing.map(({ player, index }) => playerRow(player, index, true))}</ul>
       <h4>Bench</h4>
-      <ul className="scorer-lineup-list">
-        {bench.map(({ player, index }) => playerRow(player, index, false))}
-      </ul>
+      <ul className="scorer-lineup-list">{bench.map(({ player, index }) => playerRow(player, index, false))}</ul>
       <p className="scorer-lineup-count">
         {selected.length} of {maximumActive} active
       </p>

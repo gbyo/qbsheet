@@ -38,7 +38,7 @@ import { IScoringKit, describeUnusableKit, isScoringKitUsable, readScoringKit } 
 import ScoringView from './ScoringView';
 import ScoringUnavailable from './ScoringUnavailable';
 import ScorerHost from './scorer/ScorerHost';
-import { readScorerChoice } from './ScorerChoice';
+import { readScorerChoice, type ScorerChoice } from './ScorerChoice';
 import { RoomConnectionState } from './RoomLifecycle';
 import { scorekeeperFormatProblems } from '../renderer/Services/ScorekeeperFormat';
 
@@ -71,6 +71,7 @@ interface IEmergencyGameState {
   roundNumber: number;
   leftTeamName: string;
   rightTeamName: string;
+  scorer: ScorerChoice;
 }
 
 function readEmergencyGameState(): IEmergencyGameState | null {
@@ -92,6 +93,7 @@ function readEmergencyGameState(): IEmergencyGameState | null {
       roundNumber: parsed.roundNumber,
       leftTeamName: parsed.leftTeamName,
       rightTeamName: parsed.rightTeamName,
+      scorer: parsed.scorer === 'first-party' || parsed.scorer === 'legacy' ? parsed.scorer : 'legacy',
     };
   } catch {
     return null;
@@ -145,9 +147,8 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
   const [teams, setTeams] = useState<IRoomTeam[]>([]);
   const [online, setOnline] = useState(true);
   const [cachedKit] = useState<IScoringKit | null>(() => readScoringKit());
-  // Read once per mount; see AssignedRoomApp.
-  const [scorerChoice] = useState(() => readScorerChoice());
-  const [cachedKitUsable] = useState(() => isScoringKitUsable(cachedKit, new Date(), scorerChoice));
+  const [scorerChoice, setScorerChoice] = useState(() => readScorerChoice());
+  const cachedKitUsable = isScoringKitUsable(cachedKit, new Date(), scorerChoice);
   const kit = emergency ? cachedKit : null;
 
   const [roundNumber, setRoundNumber] = useState<number | ''>('');
@@ -188,8 +189,8 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
   const tournamentKeyRef = useRef<string | undefined>(undefined);
   tournamentKeyRef.current = emergency ? kit?.tournamentKey : tournament?.tournamentKey;
 
-  const gameFormat = emergency ? kit?.gameFormat ?? null : tournament?.gameFormat ?? null;
-  const scoringFormat = emergency ? kit?.scoringFormat ?? null : tournament?.scoringFormat ?? null;
+  const gameFormat = emergency ? (kit?.gameFormat ?? null) : (tournament?.gameFormat ?? null);
+  const scoringFormat = emergency ? (kit?.scoringFormat ?? null) : (tournament?.scoringFormat ?? null);
   const selectedRulesUsable =
     scorerChoice === 'legacy'
       ? gameFormat !== null
@@ -226,6 +227,7 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
             setLeftTeamName(leftTeam.name);
             setRightTeamName(rightTeam.name);
             setEmergencyGameId(saved.gameId);
+            setScorerChoice(saved.scorer);
             setSetup({ round, leftTeam, rightTeam });
             setPhase('scoring');
             return undefined;
@@ -311,6 +313,7 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
         roundNumber: round.number,
         leftTeamName: leftTeam.name,
         rightTeamName: rightTeam.name,
+        scorer: scorerChoice,
       });
       setEmergencyGameId(gameId);
       setActiveResultId(null);
@@ -546,7 +549,7 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
           format={scoringFormat}
           leftTeam={setup.leftTeam}
           rightTeam={setup.rightTeam}
-          tournamentName={emergency ? kit?.tournamentName ?? '' : tournament?.name ?? ''}
+          tournamentName={emergency ? (kit?.tournamentName ?? '') : (tournament?.name ?? '')}
           roundName={setup.round.name}
           roomName={emergency ? kit?.roomName : undefined}
           connection={online ? RoomConnectionState.Connected : RoomConnectionState.Offline}
@@ -566,7 +569,7 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
   if (phase === 'scoring' && setup && gameFormat) {
     return (
       <ScoringView
-        roomName={emergency ? kit?.roomName ?? 'Emergency scoring' : undefined}
+        roomName={emergency ? (kit?.roomName ?? 'Emergency scoring') : undefined}
         roundName={setup.round.name}
         leftTeamName={setup.leftTeam.name}
         rightTeamName={setup.rightTeam.name}
@@ -685,7 +688,11 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
         <div className="room-banner room-banner-error">
           <strong>This tournament&apos;s scoring rules can&apos;t be used for browser scorekeeping.</strong>
           {scorerChoice === 'legacy' && (
-            <ul>{tournament?.gameFormatErrors.map((message) => <li key={message}>{message}</li>)}</ul>
+            <ul>
+              {tournament?.gameFormatErrors.map((message) => (
+                <li key={message}>{message}</li>
+              ))}
+            </ul>
           )}
         </div>
       )}

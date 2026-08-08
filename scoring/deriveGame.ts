@@ -384,8 +384,14 @@ export default function deriveGame(format: IScorekeeperFormat, setup: IGameSetup
   // tossup. A bonus is still part of the current tossup, so personnel changes cannot apply until
   // the following boundary.
   let upcomingBoundary = (questions.at(-1)?.questionNumber ?? 0) + 1;
-  if (phase.kind === 'tossup') upcomingBoundary = phase.questionNumber;
-  else if (phase.kind === 'bonus') upcomingBoundary = phase.questionNumber + 1;
+  if (phase.kind === 'tossup') {
+    const begun = events.some(
+      (event) =>
+        event.questionNumber === phase.questionNumber &&
+        (event.type === 'tossup-buzz' || event.type === 'tossup-dead' || event.type === 'bonus'),
+    );
+    upcomingBoundary = begun ? phase.questionNumber + 1 : phase.questionNumber;
+  } else if (phase.kind === 'bonus') upcomingBoundary = phase.questionNumber + 1;
   applyPersonnelThrough(upcomingBoundary);
 
   return {

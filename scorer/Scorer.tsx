@@ -163,34 +163,74 @@ export default function Scorer(props: IScorerProps) {
       if (authoritative.some((name) => name.toLocaleLowerCase() === addition.playerName.toLocaleLowerCase())) {
         status[key] = 'synced';
       } else if (rejectedRosterSyncs[key]) status[key] = 'rejected';
-      else if (connection === RoomConnectionState.Connected && onSyncRosterPlayer) status[key] = 'waiting';
+      else if (authoritativeRosters && connection === RoomConnectionState.Connected && onSyncRosterPlayer)
+        status[key] = 'waiting';
       else status[key] = 'local';
     }
     return status;
   }, [authoritativeRosters, connection, localRosterAdds, onSyncRosterPlayer, rejectedRosterSyncs]);
 
   useEffect(() => {
-    if (connection !== RoomConnectionState.Connected || !onSyncRosterPlayer || !authoritativeRosters) return;
-    const now = Date.now();
-    for (const addition of localRosterAdds) {
-      const authoritative = authoritativeRosters[addition.team];
-      if (authoritative.some((name) => name.toLocaleLowerCase() === addition.playerName.toLocaleLowerCase())) continue;
-      const key = rosterSyncKey(addition.team, addition.playerName);
-      const previous = rosterSyncAttempts.current.get(key) ?? { attempts: 0, lastAt: 0 };
-      const backoff = Math.min(30_000, 5_000 * 2 ** Math.min(previous.attempts, 3));
-      if (now - previous.lastAt < backoff) continue;
-      rosterSyncAttempts.current.set(key, { attempts: previous.attempts + 1, lastAt: now });
-      const teamName = addition.team === 'left' ? game.left.name : game.right.name;
-      onSyncRosterPlayer(teamName, addition.playerName)
-        .then((result) => {
-          if (!result.ok && result.rejected) {
-            setRejectedRosterSyncs((current) => ({ ...current, [key]: true }));
-          }
-          return undefined;
-        })
-        .catch(() => undefined);
-    }
-  }, [authoritativeRosters, connection, game.left.name, game.right.name, localRosterAdds, onSyncRosterPlayer]);
+    if (connection !== RoomConnectionState.Connected || !onSyncRosterPlayer || !authoritativeRosters) return undefined;
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const syncPending = () => {
+      if (cancelled) return;
+      const now = Date.now();
+      let nextRetryAt: number | undefined;
+      const scheduleRetry = (deadline: number) => {
+        nextRetryAt = nextRetryAt === undefined ? deadline : Math.min(nextRetryAt, deadline);
+      };
+
+      for (const addition of localRosterAdds) {
+        const authoritative = authoritativeRosters[addition.team];
+        if (authoritative.some((name) => name.toLocaleLowerCase() === addition.playerName.toLocaleLowerCase()))
+          continue;
+        const key = rosterSyncKey(addition.team, addition.playerName);
+        if (rejectedRosterSyncs[key]) continue;
+        const previous = rosterSyncAttempts.current.get(key) ?? { attempts: 0, lastAt: 0 };
+        const backoff = Math.min(30_000, 5_000 * 2 ** Math.min(previous.attempts, 3));
+        const retryAt = previous.lastAt + backoff;
+        if (now < retryAt) {
+          scheduleRetry(retryAt);
+          continue;
+        }
+
+        const attempts = previous.attempts + 1;
+        rosterSyncAttempts.current.set(key, { attempts, lastAt: now });
+        const nextBackoff = Math.min(30_000, 5_000 * 2 ** Math.min(attempts, 3));
+        scheduleRetry(now + nextBackoff);
+        const teamName = addition.team === 'left' ? game.left.name : game.right.name;
+        onSyncRosterPlayer(teamName, addition.playerName)
+          .then((result) => {
+            if (!result.ok && result.rejected) {
+              setRejectedRosterSyncs((current) => ({ ...current, [key]: true }));
+            }
+            return undefined;
+          })
+          .catch(() => undefined);
+      }
+
+      if (nextRetryAt !== undefined) {
+        retryTimer = setTimeout(syncPending, Math.max(0, nextRetryAt - Date.now()));
+      }
+    };
+
+    syncPending();
+    return () => {
+      cancelled = true;
+      if (retryTimer !== undefined) clearTimeout(retryTimer);
+    };
+  }, [
+    authoritativeRosters,
+    connection,
+    game.left.name,
+    game.right.name,
+    localRosterAdds,
+    onSyncRosterPlayer,
+    rejectedRosterSyncs,
+  ]);
 
   /**
    * Tell tournament control how the game is going, but not on every click.

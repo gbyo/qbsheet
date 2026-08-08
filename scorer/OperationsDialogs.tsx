@@ -154,7 +154,7 @@ function EditableEvent(props: {
 
   const eventTeam = event.type === 'tossup-buzz' || event.type === 'substitution' ? game[event.team] : undefined;
   const question = game.questions.find((candidate) => candidate.questionNumber === event.questionNumber);
-  const activeBuzzPlayers = event.type === 'tossup-buzz' ? question?.activePlayers[event.team] ?? [] : [];
+  const activeBuzzPlayers = event.type === 'tossup-buzz' ? (question?.activePlayers[event.team] ?? []) : [];
 
   const save = () => {
     setProblem('');
@@ -279,16 +279,13 @@ function EditableEvent(props: {
           </label>
           <fieldset>
             <legend>Active players</legend>
-            {eventTeam.players.map((player) => {
+            {eventTeam.players.map((player, index) => {
               const checked = activePlayers.includes(player.name);
+              const id = `event-lineup-${event.id}-${index}`;
               return (
-                <label
-                  key={player.name}
-                  className="scorer-checkbox"
-                  htmlFor={`event-lineup-${event.id}-${player.name}`}
-                >
+                <label key={player.name} className="scorer-checkbox" htmlFor={id}>
                   <input
-                    id={`event-lineup-${event.id}-${player.name}`}
+                    id={id}
                     type="checkbox"
                     checked={checked}
                     disabled={!checked && activePlayers.length >= format.players.maximumActive}
