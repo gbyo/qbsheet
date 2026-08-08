@@ -16,9 +16,22 @@ export interface ITeamPanelProps {
   team: IDerivedTeam;
   /** False while the other team is on a bonus, or the game is over. */
   scoringEnabled: boolean;
-  /** False when this team has already buzzed on the current tossup. */
+  /** False when this team has already answered on the current tossup. */
   eligible: boolean;
+  /**
+   * False once anybody has answered this tossup.
+   *
+   * A team answering second has heard the whole question, and a team that has heard the whole
+   * question cannot be penalized for missing it. Leaving −5 on screen for them is an invitation to
+   * record a neg that the rules do not have.
+   */
+  negsAvailable: boolean;
+  /** Whether a timeout has been used, when the tournament tracks them. */
+  // eslint-disable-next-line react/require-default-props
+  timeoutsUsed?: number;
   onBuzz: (playerName: string, answerType: IScorekeeperAnswerType) => void;
+  /** An answer worth nothing that still spends this team's chance at the tossup. */
+  onWrongNoPenalty: (playerName: string) => void;
 }
 
 /** "+15" / "-5". The sign is the fastest thing to read, so it is always shown. */
@@ -35,8 +48,16 @@ function answerButtonClass(answerType: IScorekeeperAnswerType): string {
 }
 
 export default function TeamPanel(props: ITeamPanelProps) {
-  const { format, team, scoringEnabled, eligible, onBuzz } = props;
+  const { format, team, scoringEnabled, eligible, negsAvailable, timeoutsUsed, onBuzz, onWrongNoPenalty } = props;
   const active = team.players.filter((player) => team.activePlayers.includes(player.name));
+  /*
+   * The rulings actually available to this team on this tossup. Negs disappear once anybody has
+   * answered, because from that point the question has been read out and nobody can be penalized on
+   * it — which is exactly why the zero-point button beside them exists.
+   */
+  const answerTypes = negsAvailable ? format.answerTypes : format.answerTypes.filter((type) => !type.isNeg);
+  // One extra column for the zero, so the values stay in the same place down every row.
+  const columns = answerTypes.length + 1;
 
   return (
     <section className="scorer-team" aria-label={team.name}>
@@ -46,6 +67,9 @@ export default function TeamPanel(props: ITeamPanelProps) {
           {team.points}
         </p>
       </header>
+      {timeoutsUsed !== undefined && timeoutsUsed > 0 && (
+        <p className="scorer-team-timeout">{timeoutsUsed === 1 ? 'Timeout used' : `${timeoutsUsed} timeouts used`}</p>
+      )}
 
       {/*
        * The answer columns are set once on the roster rather than per row, so every player's +15
@@ -53,12 +77,12 @@ export default function TeamPanel(props: ITeamPanelProps) {
        * row should not have to look: on a real scoresheet that column is in the same place all the
        * way down, and ragged flex rows are what stop it being.
        */}
-      <ul className="scorer-roster" style={{ '--scorer-answer-columns': format.answerTypes.length } as CSSProperties}>
+      <ul className="scorer-roster" style={{ '--scorer-answer-columns': columns } as CSSProperties}>
         {active.map((player) => (
           <li key={player.name} className="scorer-player">
             <span className="scorer-player-name">{player.name}</span>
             <span className="scorer-answers">
-              {format.answerTypes.map((answerType) => (
+              {answerTypes.map((answerType) => (
                 <button
                   key={answerType.index}
                   type="button"
@@ -70,6 +94,21 @@ export default function TeamPanel(props: ITeamPanelProps) {
                   {buttonLabel(answerType)}
                 </button>
               ))}
+              {/*
+                An answer that was simply wrong. It ends this team's chance at the tossup and adds
+                nothing to anybody's score or answer counts, which is what makes it different from
+                both a neg and No buzz.
+              */}
+              <button
+                type="button"
+                className="scorer-answer scorer-answer-zero"
+                disabled={!scoringEnabled || !eligible}
+                onClick={() => onWrongNoPenalty(player.name)}
+                aria-label={`${player.name} wrong, no penalty`}
+                title="Wrong answer, no penalty"
+              >
+                0
+              </button>
             </span>
           </li>
         ))}

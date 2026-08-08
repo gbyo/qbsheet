@@ -279,6 +279,7 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
         gameFormat: assignmentRef.current?.gameFormat ?? null,
         scoringFormat: assignmentRef.current?.scoringFormat ?? null,
         timedRounds: kitTimedRounds,
+        roomProcedure: assignmentRef.current?.roomProcedure,
         teams: teamsResult.value.teams,
         rounds: roundsResult.value.rounds,
         roomId: kitRoomId,
@@ -622,6 +623,9 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
           tournamentName={assignment.tournamentName}
           roundName={scoring.matchup.roundName}
           roomName={assignment.roomName}
+          packetName={scoring.matchup.packetName}
+          procedure={assignment.roomProcedure}
+          operatorName={operatorName}
           connection={connection}
           degradedMessage={degradedMessage}
           onSubmit={handleScorerSubmit}
