@@ -13,6 +13,7 @@ import path from 'path';
 import TournamentServer from '../main/server/TournamentServer';
 import { ITournamentSnapshot, defaultServerPort } from '../main/server/ServerTypes';
 import scoringRulesToModaqGameFormat from '../renderer/Services/YellowFruitScoringRulesToModaq';
+import scoringRulesToScorekeeperFormat from '../renderer/Services/ScorekeeperFormat';
 import { CommonRuleSets, ScoringRules } from '../renderer/DataModel/ScoringRules';
 import { ScheduledMatchStatus } from '../renderer/DataModel/ScheduledMatch';
 
@@ -49,7 +50,8 @@ function makeSampleAssignments() {
 }
 
 function makeSampleSnapshot(): ITournamentSnapshot {
-  const formatResult = scoringRulesToModaqGameFormat(new ScoringRules(CommonRuleSets.AcfPowers));
+  const rules = new ScoringRules(CommonRuleSets.AcfPowers);
+  const formatResult = scoringRulesToModaqGameFormat(rules);
   return {
     name: 'Harness Invitational',
     rounds: [1, 2, 3].map((n) => ({ number: n, name: String(n) })),
@@ -60,6 +62,7 @@ function makeSampleSnapshot(): ITournamentSnapshot {
     gameFormat: formatResult.ok ? formatResult.gameFormat : null,
     gameFormatErrors: formatResult.ok ? [] : formatResult.errors,
     gameFormatWarnings: formatResult.ok ? formatResult.warnings : [],
+    scoringFormat: scoringRulesToScorekeeperFormat(rules),
     timedRounds: false,
     rooms: sampleRooms,
     assignments: makeSampleAssignments(),

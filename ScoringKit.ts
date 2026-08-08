@@ -15,9 +15,18 @@
  * it to go.
  */
 import { IModaqGameFormat } from '../renderer/Services/YellowFruitScoringRulesToModaq';
+import { IScorekeeperFormat } from '../renderer/Services/ScorekeeperFormat';
 import { IRoomRound, IRoomTeam } from '../main/server/ServerTypes';
 
-/** Bumped when the kit's shape changes. An unrecognized version is treated as no kit at all. */
+/**
+ * Bumped when the kit's shape changes. An unrecognized version is treated as no kit at all.
+ *
+ * Deliberately not bumped for `scoringFormat`. Bumping discards every kit already sitting in a
+ * Chromebook's localStorage, which is the opposite of what this cache is for: the devices that would
+ * lose emergency scoring are exactly the ones that cannot reach YellowFruit to re-sync. A kit
+ * written before that field existed reads back with it null, which is indistinguishable from a
+ * tournament whose rules could not be described, and both are already handled.
+ */
 export const scoringKitVersion = 1;
 
 const scoringKitStorageKey = 'yellowfruit.room.scoring-kit.v1';
@@ -39,6 +48,15 @@ export interface IScoringKit {
   tournamentName: string;
   /** The scoring rules, in the form MODAQ needs. Null means emergency scoring is not possible. */
   gameFormat: IModaqGameFormat | null;
+  /**
+   * The scoring rules as structural data, for the first-party scorer.
+   *
+   * Null both for a kit written before this field existed and for one cached with no tournament
+   * loaded. Nothing reads it yet, so `isScoringKitUsable` still asks only for `gameFormat`; when the
+   * first-party scorer can stand on its own that condition becomes a choice between the two rather
+   * than a requirement for MODAQ's.
+   */
+  scoringFormat: IScorekeeperFormat | null;
   /** Timed rounds can end before every regulation tossup is read. */
   timedRounds: boolean;
   teams: IRoomTeam[];
@@ -55,6 +73,7 @@ export interface IScoringKitSource {
   tournamentKey?: string;
   tournamentName: string;
   gameFormat: IModaqGameFormat | null;
+  scoringFormat: IScorekeeperFormat | null;
   timedRounds: boolean;
   teams: IRoomTeam[];
   rounds: IRoomRound[];
@@ -111,6 +130,7 @@ export function buildScoringKit(source: IScoringKitSource, now: Date = new Date(
     tournamentKey: source.tournamentKey,
     tournamentName: source.tournamentName,
     gameFormat: source.gameFormat,
+    scoringFormat: source.scoringFormat,
     timedRounds: source.timedRounds === true,
     teams: copyTeams(source.teams),
     rounds: copyRounds(source.rounds),
@@ -169,6 +189,7 @@ export function readScoringKit(storage: IStorageLike | null = browserStorage()):
       tournamentKey: typeof parsed.tournamentKey === 'string' ? parsed.tournamentKey : undefined,
       tournamentName: parsed.tournamentName,
       gameFormat: (parsed.gameFormat as IModaqGameFormat | null) ?? null,
+      scoringFormat: (parsed.scoringFormat as IScorekeeperFormat | null) ?? null,
       timedRounds: parsed.timedRounds === true,
       teams: copyTeams(parsed.teams),
       rounds: copyRounds(parsed.rounds),

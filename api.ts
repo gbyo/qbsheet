@@ -24,6 +24,7 @@ import {
   sessionTokenHeader,
 } from '../main/server/ServerTypes';
 import { IModaqGameFormat } from '../renderer/Services/YellowFruitScoringRulesToModaq';
+import { IScorekeeperFormat } from '../renderer/Services/ScorekeeperFormat';
 
 export type ApiResult<T> =
   | { ok: true; value: T }
@@ -42,6 +43,8 @@ export interface ITournamentInfo {
   gameFormat: IModaqGameFormat | null;
   gameFormatErrors: string[];
   gameFormatWarnings: string[];
+  /** The scoring rules as structural data. See `ITournamentSnapshot.scoringFormat`. */
+  scoringFormat: IScorekeeperFormat | null;
   /** Timed rounds can end before every regulation tossup is read */
   timedRounds: boolean;
   roundCount: number;

@@ -262,6 +262,7 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
         tournamentKey: tournamentResult.value.tournamentKey,
         tournamentName: kitTournamentName,
         gameFormat: assignmentRef.current?.gameFormat ?? null,
+        scoringFormat: assignmentRef.current?.scoringFormat ?? null,
         timedRounds: kitTimedRounds,
         teams: teamsResult.value.teams,
         rounds: roundsResult.value.rounds,
