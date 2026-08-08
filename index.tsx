@@ -11,6 +11,7 @@ import './fluentIcons';
 import { createRoot } from 'react-dom/client';
 import RoomApp from './RoomApp';
 import './room.css';
+import './scorer/scorer.css';
 
 const container = document.getElementById('root');
 if (container) {

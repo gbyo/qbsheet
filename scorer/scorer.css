@@ -1,0 +1,507 @@
+/* The scorekeeping screen.
+ *
+ * Built to look like event software rather than a dashboard: white and neutral grey, 1px borders,
+ * small radii, no shadows, no gradients, no colour used for decoration. The only colours that carry
+ * meaning are blue for something you can press, green for connected, and red for a neg or a
+ * destructive action. Both teams get the same treatment — a team's identity is its name, not a hue.
+ *
+ * The numbers are the hierarchy. A team's score is the largest thing on the screen; everything else
+ * is 13-14px and gets out of its way.
+ *
+ * Laid out to fit 1366x768 without scrolling during ordinary scoring, which is the Chromebook a
+ * school actually owns. It reuses the palette from room.css.
+ */
+
+.scorer {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+/* #region Header */
+
+.scorer-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--room-border);
+}
+
+.scorer-tournament {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.scorer-context {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: var(--room-muted);
+}
+
+.scorer-header-side {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 13px;
+}
+
+.scorer-progress {
+  color: var(--room-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.scorer-conn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.scorer-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentcolor;
+}
+
+.scorer-conn.is-ok {
+  color: var(--room-success);
+}
+
+.scorer-conn.is-degraded {
+  color: var(--room-warning);
+}
+
+.scorer-conn.is-offline {
+  color: var(--room-error);
+}
+
+/* #endregion */
+
+.scorer-banner {
+  margin: 0;
+  padding: 8px 16px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--room-border);
+}
+
+.scorer-banner.is-warning {
+  background: var(--room-warning-bg);
+  color: var(--room-warning);
+}
+
+.scorer-banner.is-error {
+  background: var(--room-error-bg);
+  color: var(--room-error);
+}
+
+/* #region Body layout */
+
+.scorer-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.scorer-main {
+  flex: 1;
+  min-width: 0;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.scorer-teams {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+/* #endregion */
+
+/* #region Teams */
+
+.scorer-team {
+  border: 1px solid var(--room-border);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.scorer-team-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--room-border);
+}
+
+.scorer-team-name {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--room-muted);
+}
+
+.scorer-team-score {
+  margin: 0;
+  font-size: 32px;
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.scorer-roster {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.scorer-player {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--room-surface-sunken);
+}
+
+.scorer-player:last-child {
+  border-bottom: none;
+}
+
+.scorer-player-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A custom ruleset may define more values than fit; scroll the buttons rather than shrink them. */
+.scorer-answers {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.scorer-empty-roster {
+  padding: 8px 0;
+  font-size: 13px;
+  color: var(--room-faint);
+}
+
+/* #endregion */
+
+/* #region Buttons */
+
+.scorer-answer {
+  min-width: 44px;
+  padding: 6px 8px;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  color: var(--room-accent);
+  background: var(--room-surface);
+  border: 1px solid var(--room-border-strong);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.scorer-answer:hover:not(:disabled) {
+  background: var(--room-info-bg);
+}
+
+.scorer-answer-power {
+  font-weight: 600;
+}
+
+.scorer-answer-neg {
+  color: var(--room-error);
+}
+
+.scorer-answer-neg:hover:not(:disabled) {
+  background: var(--room-error-bg);
+}
+
+.scorer-answer:disabled {
+  color: var(--room-faint);
+  border-color: var(--room-border);
+  cursor: default;
+}
+
+.scorer-nobuzz {
+  padding: 8px 20px;
+  font: inherit;
+  color: var(--room-text);
+  background: var(--room-surface);
+  border: 1px solid var(--room-border-strong);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.scorer-nobuzz:hover {
+  background: var(--room-surface-sunken);
+}
+
+.scorer-choice {
+  min-width: 56px;
+  padding: 10px 16px;
+  font: inherit;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  color: var(--room-accent);
+  background: var(--room-surface);
+  border: 1px solid var(--room-border-strong);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.scorer-choice:hover:not(:disabled) {
+  background: var(--room-info-bg);
+}
+
+.scorer-choice:disabled {
+  color: var(--room-faint);
+  cursor: default;
+}
+
+.scorer-action {
+  padding: 6px 14px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--room-text);
+  background: var(--room-surface);
+  border: 1px solid var(--room-border-strong);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.scorer-action:hover:not(:disabled) {
+  background: var(--room-surface-sunken);
+}
+
+.scorer-action:disabled {
+  color: var(--room-faint);
+  border-color: var(--room-border);
+  cursor: default;
+}
+
+.scorer-answer:focus-visible,
+.scorer-nobuzz:focus-visible,
+.scorer-choice:focus-visible,
+.scorer-action:focus-visible,
+.scorer-inline-form input:focus-visible {
+  outline: 2px solid var(--room-accent);
+  outline-offset: 1px;
+}
+
+/* #endregion */
+
+/* #region Contextual stage */
+
+.scorer-stage {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 108px;
+  padding: 12px;
+  border: 1px solid var(--room-border);
+  border-radius: 8px;
+  background: var(--room-surface-sunken);
+}
+
+.scorer-tossup-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.scorer-hint {
+  margin: 0;
+  font-size: 13px;
+  color: var(--room-muted);
+}
+
+.scorer-prompt-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 10px;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--room-muted);
+}
+
+.scorer-prompt-team {
+  font-weight: 600;
+  color: var(--room-text);
+}
+
+.scorer-prompt-context {
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--room-faint);
+}
+
+.scorer-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.scorer-inline-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.scorer-inline-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--room-muted);
+}
+
+.scorer-inline-form input {
+  width: 120px;
+  padding: 8px;
+  font: inherit;
+  color: var(--room-text);
+  background: var(--room-surface);
+  border: 1px solid var(--room-border-strong);
+  border-radius: 6px;
+}
+
+.scorer-problem {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 13px;
+  color: var(--room-error);
+}
+
+.scorer-complete-title {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.scorer-complete-detail {
+  margin: 0;
+  font-size: 13px;
+  color: var(--room-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* #endregion */
+
+/* #region Recent rail */
+
+.scorer-rail {
+  width: 260px;
+  flex-shrink: 0;
+  padding: 16px;
+  border-left: 1px solid var(--room-border);
+  overflow-y: auto;
+}
+
+.scorer-rail-heading {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--room-faint);
+}
+
+.scorer-rail-empty {
+  margin: 0;
+  font-size: 13px;
+  color: var(--room-faint);
+}
+
+.scorer-rail-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.scorer-rail-item {
+  display: flex;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 13px;
+  border-bottom: 1px solid var(--room-surface-sunken);
+}
+
+.scorer-rail-q {
+  flex-shrink: 0;
+  width: 44px;
+  color: var(--room-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.scorer-rail-ot {
+  display: block;
+  font-size: 11px;
+  color: var(--room-warning);
+}
+
+.scorer-rail-lines {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.scorer-rail-line {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* #endregion */
+
+.scorer-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-top: 1px solid var(--room-border);
+}
+
+/* #region Narrower screens
+ *
+ * The rail moves below the scorer rather than being squeezed, and the teams stack only when they
+ * genuinely cannot sit side by side. Scoring buttons keep their size throughout: a control too small
+ * to hit is worse than one that needs a scroll.
+ */
+
+@media (max-width: 1100px) {
+  .scorer-body {
+    flex-direction: column;
+  }
+
+  .scorer-rail {
+    width: auto;
+    border-left: none;
+    border-top: 1px solid var(--room-border);
+  }
+}
+
+@media (max-width: 760px) {
+  .scorer-teams {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* #endregion */
