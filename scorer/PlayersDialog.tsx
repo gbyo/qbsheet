@@ -9,7 +9,7 @@
  * honest: a player who came on at question eleven heard ten fewer tossups than one who started, and
  * that difference is a real statistic rather than an approximation.
  */
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { LeftOrRight } from '../../renderer/Utils/UtilTypes';
 import { IDerivedTeam } from '../scoring/deriveGame';
 import ScorerDialog from './ScorerDialog';
@@ -48,8 +48,18 @@ function TeamLineup(props: {
   const { team, side, maximumActive, onSubstitute, onAddPlayer, rosterSyncStatus, onRequestControl } = props;
   const [selected, setSelected] = useState<string[]>(team.activePlayers);
   const [newPlayer, setNewPlayer] = useState('');
+  const focusPlayerIndex = useRef<number | null>(null);
 
-  const toggle = (name: string) => {
+  const playerInputId = (index: number) => `scorer-lineup-${side}-${index}`;
+
+  useEffect(() => {
+    if (focusPlayerIndex.current === null) return;
+    document.getElementById(playerInputId(focusPlayerIndex.current))?.focus();
+    focusPlayerIndex.current = null;
+  }, [selected]);
+
+  const toggle = (name: string, index: number) => {
+    focusPlayerIndex.current = index;
     setSelected((current) => {
       if (current.includes(name)) return current.filter((other) => other !== name);
       if (current.length >= maximumActive) return current;
@@ -65,22 +75,23 @@ function TeamLineup(props: {
     cleanNewPlayer !== '' &&
     !team.players.some((player) => player.name.toLocaleLowerCase() === cleanNewPlayer.toLocaleLowerCase());
 
-  const playerRow = (player: IDerivedTeam['players'][number], active: boolean) => {
+  const playerRow = (player: IDerivedTeam['players'][number], index: number, active: boolean) => {
     const sync = rosterSyncStatus[rosterSyncKey(side, player.name)];
+    const id = playerInputId(index);
     let syncLabel = '';
     if (sync === 'synced') syncLabel = 'Synced';
     else if (sync === 'waiting') syncLabel = 'Waiting to sync';
     else if (sync === 'local') syncLabel = 'Saved in this game';
     else if (sync === 'rejected') syncLabel = 'Needs tournament control';
     return (
-      <li key={player.name}>
-        <label className="scorer-lineup-row" htmlFor={`scorer-lineup-${side}-${player.name}`}>
+      <li key={id}>
+        <label className="scorer-lineup-row" htmlFor={id}>
           <input
-            id={`scorer-lineup-${side}-${player.name}`}
+            id={id}
             type="checkbox"
             checked={active}
             disabled={!active && atCapacity}
-            onChange={() => toggle(player.name)}
+            onChange={() => toggle(player.name, index)}
           />
           <span className="scorer-lineup-name">{player.name}</span>
           <span className="scorer-lineup-tuh">{player.tossupsHeard} TUH</span>
@@ -95,16 +106,21 @@ function TeamLineup(props: {
     );
   };
 
-  const playing = team.players.filter((player) => selected.includes(player.name));
-  const bench = team.players.filter((player) => !selected.includes(player.name));
+  const indexedPlayers = team.players.map((player, index) => ({ player, index }));
+  const playing = indexedPlayers.filter(({ player }) => selected.includes(player.name));
+  const bench = indexedPlayers.filter(({ player }) => !selected.includes(player.name));
 
   return (
     <section className="scorer-lineup" aria-label={`${team.name} lineup`}>
       <h3 className="scorer-lineup-team">{team.name}</h3>
       <h4>Playing</h4>
-      <ul className="scorer-lineup-list">{playing.map((player) => playerRow(player, true))}</ul>
+      <ul className="scorer-lineup-list">
+        {playing.map(({ player, index }) => playerRow(player, index, true))}
+      </ul>
       <h4>Bench</h4>
-      <ul className="scorer-lineup-list">{bench.map((player) => playerRow(player, false))}</ul>
+      <ul className="scorer-lineup-list">
+        {bench.map(({ player, index }) => playerRow(player, index, false))}
+      </ul>
       <p className="scorer-lineup-count">
         {selected.length} of {maximumActive} active
       </p>
