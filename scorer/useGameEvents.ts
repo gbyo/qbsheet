@@ -10,16 +10,34 @@
  * Standard undo-stack behaviour, and it matters more here than in a text editor. A scorekeeper who
  * undoes a mis-recorded buzz and then records the right one must not be able to reach forward and
  * re-apply the wrong one; the game would gain a buzz nobody made.
+ *
+ * # Why the list lives in a ref as well as in state
+ *
+ * Because `append` has to see what the last `append` did, and React state does not work that way
+ * inside one event loop turn. Two clicks fifty milliseconds apart both run against the render that
+ * was on screen when the first one started; both read the same `events`, both pass the same checks,
+ * and the game gains an answer nobody gave. The ref is the authority and the state is what renders
+ * from it, so every append is judged against everything already recorded.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { ScoreEvent } from '../scoring/ScoreEvents';
 import { IGameSetup } from '../scoring/deriveGame';
+import { IScorekeeperFormat } from '../../renderer/Services/ScorekeeperFormat';
+import { IRoomProcedure } from '../../renderer/Services/RoomProcedure';
+import { applyScoreEvents } from '../scoring/canApplyScoreEvent';
 import { saveGame } from './GameSession';
 
 export interface IGameEventsApi {
   events: ScoreEvent[];
-  /** Record something new. Clears anything that had been undone. */
-  append: (...added: ScoreEvent[]) => void;
+  /**
+   * Record something new. Clears anything that had been undone.
+   *
+   * All of the events or none of them, and nothing at all if the engine says the transition is
+   * impossible — in which case `rejection` says why.
+   *
+   * @returns whether it was accepted
+   */
+  append: (...added: ScoreEvent[]) => boolean;
   /** Take back the most recent action. */
   undo: () => void;
   /** Put back what undo took. */
@@ -34,16 +52,19 @@ export interface IGameEventsApi {
   canRedo: boolean;
   /** False when the last write to local storage was refused, so nothing promises the game is safe. */
   saved: boolean;
+  /** Why the last action was refused, if it was. Cleared by the next accepted one. */
+  rejection: string;
+  clearRejection: () => void;
 }
 
 /**
- * Events one action produced, oldest first.
+ * How many events one action produced, newest first.
  *
  * Undo is per *action*, not per event, because some actions are more than one: recording a bonus on
  * a tossup that was converted in the same click is two events, and a scorekeeper pressing undo means
  * "take back what I just did", not "take back half of it".
  */
-type UndoFrame = ScoreEvent[];
+type UndoFrame = number;
 
 let sequence = 0;
 
@@ -55,96 +76,110 @@ export function newEventId(): string {
 
 export default function useGameEvents(
   gameKey: string,
+  format: IScorekeeperFormat,
   setup: IGameSetup,
   initialEvents: ScoreEvent[] = [],
+  procedure: IRoomProcedure | undefined = undefined,
 ): IGameEventsApi {
   const [events, setEvents] = useState<ScoreEvent[]>(initialEvents);
   const [saved, setSaved] = useState(true);
   const [history, setHistory] = useState({ canUndo: false, canRedo: false });
-  /** Actions that can be undone, oldest first. */
+  const [rejection, setRejection] = useState('');
+  /** The authority. State follows it; it never follows state. See the note at the top of the file. */
+  const current = useRef<ScoreEvent[]>(initialEvents);
+  /** Sizes of the actions that can be undone, oldest first. */
   const undoStack = useRef<UndoFrame[]>([]);
   /** Events taken off by undo, newest action last, so redo can put them back. */
   const redoStack = useRef<ScoreEvent[][]>([]);
-  const persistedEvents = useRef(initialEvents);
-
-  const persist = useCallback(
-    (next: ScoreEvent[]) => {
-      setSaved(saveGame(gameKey, setup, next));
-    },
-    [gameKey, setup],
-  );
-
-  useEffect(() => {
-    if (persistedEvents.current === events) return;
-    persistedEvents.current = events;
-    persist(events);
-  }, [events, persist]);
-
   const syncHistory = useCallback(() => {
     setHistory({ canUndo: undoStack.current.length > 0, canRedo: redoStack.current.length > 0 });
   }, []);
 
+  const commit = useCallback(
+    (next: ScoreEvent[]) => {
+      current.current = next;
+      setEvents(next);
+      setSaved(saveGame(gameKey, setup, next));
+      syncHistory();
+    },
+    [gameKey, setup, syncHistory],
+  );
+
   const append = useCallback(
     (...added: ScoreEvent[]) => {
-      if (added.length === 0) return;
-      undoStack.current.push(added);
+      if (added.length === 0) return true;
+      const result = applyScoreEvents({ format, setup, procedure }, current.current, added);
+      if (!result.ok) {
+        setRejection(result.reason);
+        return false;
+      }
+      setRejection('');
+      undoStack.current.push(added.length);
       redoStack.current = [];
-      syncHistory();
-      setEvents((current) => current.concat(added));
+      commit(result.events);
+      return true;
     },
-    [syncHistory],
+    [commit, format, procedure, setup],
   );
 
   const undo = useCallback(() => {
     const frame = undoStack.current.pop();
     if (frame === undefined) return;
-    redoStack.current.push(frame);
-    syncHistory();
-    setEvents((current) => current.slice(0, Math.max(0, current.length - frame.length)));
-  }, [syncHistory]);
+    const existing = current.current;
+    const cut = Math.max(0, existing.length - frame);
+    redoStack.current.push(existing.slice(cut));
+    setRejection('');
+    commit(existing.slice(0, cut));
+  }, [commit]);
 
   const redo = useCallback(() => {
     const frame = redoStack.current.pop();
     if (frame === undefined) return;
-    undoStack.current.push(frame);
-    syncHistory();
-    setEvents((current) => current.concat(frame));
-  }, [syncHistory]);
+    undoStack.current.push(frame.length);
+    setRejection('');
+    commit(current.current.concat(frame));
+  }, [commit]);
 
   /**
    * Editing an earlier question is not undoable in the same sense — there is no "before" to step
    * back to that would make sense after later questions have been scored — so it clears both stacks
    * rather than pretending otherwise.
+   *
+   * Corrections are not put through `canApplyScoreEvent`. That function says what could happen next
+   * in a game being played forwards, and a correction is explicitly not that: fixing question six
+   * after question twenty has been scored is a legitimate act that no forward transition allows.
    */
   const replace = useCallback(
     (id: string, nextEvent: ScoreEvent) => {
       undoStack.current = [];
       redoStack.current = [];
-      syncHistory();
-      setEvents((current) => current.map((event) => (event.id === id ? nextEvent : event)));
+      setRejection('');
+      commit(current.current.map((event) => (event.id === id ? nextEvent : event)));
     },
-    [syncHistory],
+    [commit],
   );
 
   const remove = useCallback(
     (id: string) => {
       undoStack.current = [];
       redoStack.current = [];
-      syncHistory();
-      setEvents((current) => current.filter((event) => event.id !== id));
+      setRejection('');
+      commit(current.current.filter((event) => event.id !== id));
     },
-    [syncHistory],
+    [commit],
   );
 
   const restore = useCallback(
     (restored: ScoreEvent[]) => {
       undoStack.current = [];
       redoStack.current = [];
-      syncHistory();
-      setEvents(() => restored.map((event) => ({ ...event })));
+      setRejection('');
+      commit(restored.map((event) => ({ ...event })));
     },
-    [syncHistory],
+    [commit],
   );
+
+  const clearRejection = useCallback(() => setRejection(''), []);
 
   return useMemo(
     () => ({
@@ -158,7 +193,9 @@ export default function useGameEvents(
       canUndo: history.canUndo,
       canRedo: history.canRedo,
       saved,
+      rejection,
+      clearRejection,
     }),
-    [events, append, undo, redo, replace, remove, restore, history, saved],
+    [events, append, undo, redo, replace, remove, restore, history, saved, rejection, clearRejection],
   );
 }

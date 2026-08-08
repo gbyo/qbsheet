@@ -22,6 +22,17 @@ export interface IPlayersDialogProps {
   maximumActive: number;
   /** The question the change will apply from. */
   questionNumber: number;
+  /**
+   * Timeouts each team has taken, when the tournament tracks them.
+   *
+   * Here as well as on the team panel because this is where a scorekeeper looks when a coach asks,
+   * and because substitutions and timeouts are the same conversation on a real scoresheet.
+   */
+  // eslint-disable-next-line react/require-default-props
+  timeouts?: Record<LeftOrRight, number>;
+  /** How many each team gets. Zero means timeouts are not tracked and nothing is shown. */
+  // eslint-disable-next-line react/require-default-props
+  timeoutsPerTeam?: number;
   onSubstitute: (team: LeftOrRight, activePlayers: string[]) => void;
   onAddPlayer: (team: LeftOrRight, playerName: string, activePlayers: string[]) => void;
   // eslint-disable-next-line react/require-default-props
@@ -42,10 +53,22 @@ function TeamLineup(props: {
   onSubstitute: (team: LeftOrRight, activePlayers: string[]) => void;
   onAddPlayer: (team: LeftOrRight, playerName: string, activePlayers: string[]) => void;
   rosterSyncStatus: Record<string, 'synced' | 'waiting' | 'local' | 'rejected'>;
+  timeoutsUsed: number;
+  timeoutsPerTeam: number;
   // eslint-disable-next-line react/require-default-props
   onRequestControl?: (team: LeftOrRight, playerName: string) => void;
 }) {
-  const { team, side, maximumActive, onSubstitute, onAddPlayer, rosterSyncStatus, onRequestControl } = props;
+  const {
+    team,
+    side,
+    maximumActive,
+    onSubstitute,
+    onAddPlayer,
+    rosterSyncStatus,
+    timeoutsUsed,
+    timeoutsPerTeam,
+    onRequestControl,
+  } = props;
   const [selected, setSelected] = useState<string[]>(team.activePlayers);
   const [newPlayer, setNewPlayer] = useState('');
   const focusPlayerIndex = useRef<number | null>(null);
@@ -113,6 +136,14 @@ function TeamLineup(props: {
   return (
     <section className="scorer-lineup" aria-label={`${team.name} lineup`}>
       <h3 className="scorer-lineup-team">{team.name}</h3>
+      {timeoutsPerTeam > 0 && (
+        <p className="scorer-team-timeout">
+          {timeoutsUsed === 0 &&
+            (timeoutsPerTeam === 1 ? 'Timeout available' : `${timeoutsPerTeam} timeouts available`)}
+          {timeoutsUsed > 0 && timeoutsUsed === 1 && 'Timeout used'}
+          {timeoutsUsed > 1 && `${timeoutsUsed} timeouts used`}
+        </p>
+      )}
       <h4>Playing</h4>
       <ul className="scorer-lineup-list">{playing.map(({ player, index }) => playerRow(player, index, true))}</ul>
       <h4>Bench</h4>
@@ -164,6 +195,8 @@ export default function PlayersDialog(props: IPlayersDialogProps) {
     onSubstitute,
     onAddPlayer,
     rosterSyncStatus = {},
+    timeouts = { left: 0, right: 0 },
+    timeoutsPerTeam = 0,
     onRequestControl,
     onClose,
   } = props;
@@ -179,6 +212,8 @@ export default function PlayersDialog(props: IPlayersDialogProps) {
           onSubstitute={onSubstitute}
           onAddPlayer={onAddPlayer}
           rosterSyncStatus={rosterSyncStatus}
+          timeoutsUsed={timeouts.left}
+          timeoutsPerTeam={timeoutsPerTeam}
           onRequestControl={onRequestControl}
         />
         <TeamLineup
@@ -188,6 +223,8 @@ export default function PlayersDialog(props: IPlayersDialogProps) {
           onSubstitute={onSubstitute}
           onAddPlayer={onAddPlayer}
           rosterSyncStatus={rosterSyncStatus}
+          timeoutsUsed={timeouts.right}
+          timeoutsPerTeam={timeoutsPerTeam}
           onRequestControl={onRequestControl}
         />
       </div>

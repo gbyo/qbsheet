@@ -16,6 +16,7 @@
  */
 import { IModaqGameFormat } from '../renderer/Services/YellowFruitScoringRulesToModaq';
 import { IScorekeeperFormat, scorekeeperFormatProblems } from '../renderer/Services/ScorekeeperFormat';
+import { IRoomProcedure, readRoomProcedure } from '../renderer/Services/RoomProcedure';
 import { IRoomRound, IRoomTeam, RoomScorerKind } from '../main/server/ServerTypes';
 
 /**
@@ -59,6 +60,8 @@ export interface IScoringKit {
   scoringFormat: IScorekeeperFormat | null;
   /** Timed rounds can end before every regulation tossup is read. */
   timedRounds: boolean;
+  /** How the room runs a game: halves, clock, timeouts. Inert when absent. */
+  roomProcedure?: IRoomProcedure;
   teams: IRoomTeam[];
   rounds: IRoomRound[];
   /** Which room cached this. Used for labelling and filenames, never as a credential. */
@@ -75,6 +78,7 @@ export interface IScoringKitSource {
   gameFormat: IModaqGameFormat | null;
   scoringFormat: IScorekeeperFormat | null;
   timedRounds: boolean;
+  roomProcedure?: IRoomProcedure;
   teams: IRoomTeam[];
   rounds: IRoomRound[];
   roomId?: string;
@@ -132,6 +136,7 @@ export function buildScoringKit(source: IScoringKitSource, now: Date = new Date(
     gameFormat: source.gameFormat,
     scoringFormat: source.scoringFormat,
     timedRounds: source.timedRounds === true,
+    roomProcedure: source.roomProcedure,
     teams: copyTeams(source.teams),
     rounds: copyRounds(source.rounds),
     roomId: source.roomId,
@@ -211,6 +216,7 @@ export function readScoringKit(storage: IStorageLike | null = browserStorage()):
       gameFormat: (parsed.gameFormat as IModaqGameFormat | null) ?? null,
       scoringFormat: (parsed.scoringFormat as IScorekeeperFormat | null) ?? null,
       timedRounds: parsed.timedRounds === true,
+      roomProcedure: readRoomProcedure(parsed.roomProcedure),
       teams: copyTeams(parsed.teams),
       rounds: copyRounds(parsed.rounds),
       roomId: typeof parsed.roomId === 'string' ? parsed.roomId : undefined,

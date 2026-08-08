@@ -12,16 +12,26 @@ export interface IScorerRecoveryPayload {
 
 const eventTypes = new Set([
   'tossup-buzz',
+  'tossup-no-penalty',
   'tossup-dead',
   'bonus',
   'lightning',
   'roster-add',
   'substitution',
   'end-regulation',
+  'half-break',
+  'half-resume',
+  'timeout',
+  'protest',
+  'question-void',
+  'end-game-early',
   'adjustment',
   'forfeit',
   'note',
 ]);
+
+const protestSubjects = new Set(['tossup-answer', 'bonus-answer', 'question', 'procedure', 'other']);
+const protestStatuses = new Set(['open', 'upheld', 'declined', 'withdrawn']);
 
 function validTeam(value: unknown): value is 'left' | 'right' {
   return value === 'left' || value === 'right';
@@ -100,6 +110,28 @@ export function validEvent(value: unknown): value is ScoreEvent {
   if (event.type === 'note') return typeof event.text === 'string';
   if (event.type === 'lightning' || event.type === 'adjustment')
     return validTeam(event.team) && typeof event.points === 'number' && Number.isFinite(event.points);
+  // The player is optional: the event is about the team's opportunity, not about a buzz.
+  if (event.type === 'tossup-no-penalty')
+    return validTeam(event.team) && (event.playerName === undefined || typeof event.playerName === 'string');
+  if (event.type === 'end-regulation')
+    return (
+      event.lastRegulationQuestion === undefined ||
+      (Number.isInteger(event.lastRegulationQuestion) && Number(event.lastRegulationQuestion) >= 0)
+    );
+  if (event.type === 'half-break') return Number.isInteger(event.lastQuestion) && Number(event.lastQuestion) >= 0;
+  if (event.type === 'timeout') return validTeam(event.team);
+  if (event.type === 'protest')
+    return (
+      validTeam(event.team) &&
+      protestSubjects.has(String(event.subject)) &&
+      protestStatuses.has(String(event.status)) &&
+      typeof event.description === 'string' &&
+      (event.resolution === undefined || typeof event.resolution === 'string')
+    );
+  if (event.type === 'question-void')
+    return (event.scope === 'tossup' || event.scope === 'bonus') && typeof event.reason === 'string';
+  if (event.type === 'end-game-early')
+    return typeof event.reason === 'string' && Number.isInteger(event.tossupsRead) && Number(event.tossupsRead) >= 0;
   return true;
 }
 

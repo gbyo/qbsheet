@@ -22,8 +22,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { LeftOrRight } from '../../renderer/Utils/UtilTypes';
 import { HelpRequestCategory } from '../../main/server/ServerTypes';
 import { IScorekeeperAnswerType, IScorekeeperFormat } from '../../renderer/Services/ScorekeeperFormat';
-import deriveGame, { IGameSetup, lineupChangeEffectiveQuestion } from '../scoring/deriveGame';
-import { ScoreEvent } from '../scoring/ScoreEvents';
+import { IRoomProcedure } from '../../renderer/Services/RoomProcedure';
+import deriveGame, {
+  IGameSetup,
+  lastPlayedQuestion,
+  lineupChangeEffectiveQuestion,
+  overtimeIsSuddenDeath,
+} from '../scoring/deriveGame';
+import { IBonusPartResult, ScoreEvent } from '../scoring/ScoreEvents';
 import toQbjMatch, { IQbjMatchMeta } from '../scoring/toQbjMatch';
 import { RoomConnectionState } from '../RoomLifecycle';
 import TeamPanel from './TeamPanel';
@@ -31,7 +37,16 @@ import BonusPrompt from './BonusPrompt';
 import RecentRail from './RecentRail';
 import GameMenu, { IGameMenuItem } from './GameMenu';
 import PlayersDialog, { rosterSyncKey } from './PlayersDialog';
+import StartingLineupPrompt from './StartingLineupPrompt';
+import PreSubmitReview, { HalftimeCheck } from './PreSubmitReview';
 import { AdjustDialog, ForfeitDialog, LightningDialog, NotesDialog } from './GameDialogs';
+import {
+  EndGameEarlyDialog,
+  GameDetailsDialog,
+  ProtestDialog,
+  ReplaceQuestionDialog,
+  TimeoutDialog,
+} from './ProcedureDialogs';
 import { IGameEventsApi, newEventId } from './useGameEvents';
 import { IssueDialog, RecoveryDialog, ScoresheetReviewDialog } from './OperationsDialogs';
 import { attachScorerRecovery } from './ScorerRecovery';
@@ -51,6 +66,20 @@ export interface IScorerProps {
   roundName: string;
   // eslint-disable-next-line react/require-default-props
   roomName?: string;
+  /**
+   * The packet this round uses, when the tournament named one.
+   *
+   * Identity only, never any question text. A reader working from paper can be handed the wrong
+   * packet, and one line saying which one this round is on is the cheapest catch there is.
+   */
+  // eslint-disable-next-line react/require-default-props
+  packetName?: string;
+  /** Halves, clock and timeouts. Absent means the room runs none of it, which is the default. */
+  // eslint-disable-next-line react/require-default-props
+  procedure?: IRoomProcedure;
+  /** Whoever is signed in to this room browser. Recorded on the result as the scorekeeper. */
+  // eslint-disable-next-line react/require-default-props
+  operatorName?: string;
   connection: RoomConnectionState;
   /** Set when the room is degraded: the game is real, the room state behind it is stale. */
   // eslint-disable-next-line react/require-default-props
@@ -89,7 +118,21 @@ export interface IScorerProps {
   ) => Promise<{ ok: boolean; error?: string; rejected?: boolean }>;
 }
 
-type OpenDialog = 'players' | 'lightning' | 'notes' | 'adjust' | 'forfeit' | 'issue' | 'review' | 'recovery' | null;
+type OpenDialog =
+  | 'players'
+  | 'lightning'
+  | 'notes'
+  | 'adjust'
+  | 'forfeit'
+  | 'issue'
+  | 'review'
+  | 'recovery'
+  | 'protests'
+  | 'timeout'
+  | 'replace'
+  | 'end-early'
+  | 'details'
+  | null;
 
 /** How often, at most, to tell tournament control how the game is going. Matches MODAQ's old timer. */
 const progressIntervalMs = 5000;
@@ -114,6 +157,9 @@ export default function Scorer(props: IScorerProps) {
     tournamentName,
     roundName,
     roomName,
+    packetName,
+    procedure,
+    operatorName,
     connection,
     degradedMessage,
     saved,
@@ -136,16 +182,39 @@ export default function Scorer(props: IScorerProps) {
   );
   const [rejectedRosterSyncs, setRejectedRosterSyncs] = useState<Record<string, true>>({});
   const rosterSyncAttempts = useRef(new Map<string, { attempts: number; lastAt: number }>());
+  /** Which question the scoresheet review should open at, when it was opened from somewhere specific. */
+  const [reviewFocus, setReviewFocus] = useState<number | undefined>(undefined);
+  const [moderatorName, setModeratorName] = useState(qbjMeta?.moderator ?? '');
 
   const game = useMemo(() => deriveGame(format, setup, events.events), [format, setup, events.events]);
   const { phase } = game;
+  /**
+   * Who was in the room, filled in rather than asked for where it can be.
+   *
+   * `toQbjMatch` has always carried these; the room simply never told it. The scorekeeper is known
+   * already — it is whoever signed in to this browser — so asking would be asking a question we have
+   * the answer to. The reader is not known to anything, so it stays optional.
+   */
+  const meta = useMemo<IQbjMatchMeta | undefined>(() => {
+    if (!qbjMeta && !operatorName && !moderatorName) return undefined;
+    return {
+      ...qbjMeta,
+      scorekeeper: qbjMeta?.scorekeeper || operatorName || undefined,
+      moderator: moderatorName || qbjMeta?.moderator || undefined,
+    };
+  }, [qbjMeta, operatorName, moderatorName]);
   const qbj = useMemo(
-    () => attachScorerRecovery(toQbjMatch(format, game, qbjMeta), setup, events.events),
-    [format, game, qbjMeta, setup, events.events],
+    () => attachScorerRecovery(toQbjMatch(format, game, meta), setup, events.events),
+    [format, game, meta, setup, events.events],
   );
 
   /** The question anything recorded now belongs to. */
-  const currentQuestion = phase.kind === 'complete' ? game.tossupsRead : phase.questionNumber;
+  const currentQuestion = (() => {
+    if (phase.kind === 'tossup' || phase.kind === 'bonus') return phase.questionNumber;
+    if (phase.kind === 'score-check') return Math.max(1, phase.afterQuestion);
+    if (phase.kind === 'lineup') return 1;
+    return Math.max(1, lastPlayedQuestion(game));
+  })();
   const lineupQuestion = lineupChangeEffectiveQuestion(game, events.events);
 
   const localRosterAdds = useMemo(
@@ -274,6 +343,26 @@ export default function Scorer(props: IScorerProps) {
     [record, phase],
   );
 
+  /**
+   * A wrong answer that costs nothing.
+   *
+   * Not the same thing as No buzz even though both end this team's involvement: somebody answered,
+   * and if the other team has not yet had its chance, it still has one.
+   */
+  const recordWrongNoPenalty = useCallback(
+    (team: LeftOrRight, playerName: string) => {
+      if (phase.kind !== 'tossup') return;
+      record({
+        id: newEventId(),
+        type: 'tossup-no-penalty',
+        questionNumber: phase.questionNumber,
+        team,
+        playerName,
+      });
+    },
+    [record, phase],
+  );
+
   const recordNoBuzz = useCallback(() => {
     if (phase.kind !== 'tossup') return;
     record({ id: newEventId(), type: 'tossup-dead', questionNumber: phase.questionNumber });
@@ -293,6 +382,25 @@ export default function Scorer(props: IScorerProps) {
     },
     [record, phase],
   );
+
+  const recordBonusParts = useCallback(
+    (parts: IBonusPartResult[]) => {
+      if (phase.kind !== 'bonus') return;
+      record({
+        id: newEventId(),
+        type: 'bonus',
+        questionNumber: phase.questionNumber,
+        team: phase.team,
+        parts,
+      });
+    },
+    [record, phase],
+  );
+
+  const openReviewAt = useCallback((questionNumber?: number) => {
+    setReviewFocus(questionNumber);
+    setDialog('review');
+  }, []);
 
   // Space records an unanswered tossup, but only when the keyboard is not already aimed at
   // something: with focus on a button, Space is that button, and stealing it would score the wrong
@@ -324,6 +432,21 @@ export default function Scorer(props: IScorerProps) {
 
   const scoringEnabled = phase.kind === 'tossup';
   const eligible = (side: LeftOrRight) => phase.kind === 'tossup' && phase.eligibleTeams.includes(side);
+  /**
+   * Nobody has answered this tossup yet, so a neg is still a possible ruling.
+   *
+   * Both teams still being eligible is exactly that condition: an answer of any kind — a buzz or a
+   * zero — removes the team that gave it from the eligible list. See `TeamPanel`.
+   */
+  const negsAvailable = phase.kind === 'tossup' && phase.eligibleTeams.length === 2;
+
+  const unsyncedRosterAdditions = useMemo(
+    () =>
+      localRosterAdds
+        .filter((addition) => rosterSyncStatus[rosterSyncKey(addition.team, addition.playerName)] !== 'synced')
+        .map((addition) => ({ team: addition.team, playerName: addition.playerName })),
+    [localRosterAdds, rosterSyncStatus],
+  );
 
   /** Things worth saying before a result is sent, without stopping anybody scoring. */
   const warnings = useMemo(() => {
@@ -337,15 +460,30 @@ export default function Scorer(props: IScorerProps) {
       );
     }
     if (game.regulationComplete && game.left.points === game.right.points) found.push('This game is a tie.');
-    for (const problem of game.personnelProblems) found.push(problem.message);
+    for (const problem of game.integrityProblems) found.push(problem.message);
     return found;
   }, [game]);
 
+  /** Problems that stop a result being sent at all, as opposed to ones worth mentioning. */
+  const blockers = useMemo(() => game.personnelProblems.map((problem) => problem.message), [game]);
+
+  /** Whether the cycle on screen has a bonus that could be replaced on its own. */
+  const currentCycleHasBonus =
+    (phase.kind === 'tossup' || phase.kind === 'bonus') &&
+    game.questions.some(
+      (question) =>
+        question.questionNumber === phase.questionNumber && (question.bonus !== undefined || question.awaitingBonus),
+    );
+
   const progress = (() => {
     if (phase.kind === 'complete') return 'Game complete';
+    if (phase.kind === 'lineup') return 'Choose starters';
+    if (phase.kind === 'score-check') return `Halftime · after tossup ${phase.afterQuestion}`;
     if (phase.period === 'overtime') {
       const overtimeNumber = game.overtimeTossupsRead + (phase.kind === 'tossup' ? 1 : 0);
-      const suddenDeath = format.overtime.suddenDeath ? ' · sudden death' : '';
+      // Sudden death is a state a game arrives at, not a property a format has: NAQT plays three
+      // overtime tossups and only then becomes sudden death.
+      const suddenDeath = overtimeIsSuddenDeath(format, game.overtimeTossupsRead) ? ' · sudden death' : '';
       return `Overtime tossup ${Math.max(1, overtimeNumber)}${suddenDeath}`;
     }
     if (format.regulation.timed) return `Tossup ${phase.questionNumber} · timed round`;
@@ -354,16 +492,55 @@ export default function Scorer(props: IScorerProps) {
 
   const menuItems: IGameMenuItem[] = [
     { label: 'Notes', onSelect: () => setDialog('notes') },
+    { label: 'Protests', onSelect: () => setDialog('protests') },
     { label: 'Issue / tournament control', onSelect: () => setDialog('issue') },
-    { label: 'Full scoresheet review', onSelect: () => setDialog('review') },
+    { label: 'Game details', onSelect: () => setDialog('details') },
+    { label: 'Full scoresheet review', onSelect: () => openReviewAt(undefined) },
   ];
   if (format.lightning.enabled)
     menuItems.push({ label: 'Lightning / worksheet', onSelect: () => setDialog('lightning') });
-  if (format.regulation.timed && !game.regulationComplete) {
+  if ((procedure?.timeoutsPerTeam ?? 0) > 0 && phase.kind !== 'complete') {
+    menuItems.push({ label: 'Timeout', onSelect: () => setDialog('timeout') });
+  }
+  if (procedure?.halves && phase.kind !== 'complete' && !game.awaitingScoreCheck) {
+    menuItems.push({
+      label: `End ${game.halfBreaks.length === 0 ? 'first' : 'this'} half`,
+      // The boundary is the last tossup actually played, not the one on screen. A displayed
+      // question with nothing recorded against it has not been read.
+      onSelect: () =>
+        record({
+          id: newEventId(),
+          type: 'half-break',
+          questionNumber: currentQuestion,
+          lastQuestion: lastPlayedQuestion(game),
+        }),
+    });
+  }
+  if (format.regulation.timed && !game.regulationComplete && phase.kind !== 'complete') {
     menuItems.push({
       label: 'End regulation',
-      onSelect: () => record({ id: newEventId(), type: 'end-regulation', questionNumber: currentQuestion }),
+      /*
+       * `lastRegulationQuestion` is the fix for the boundary being one out. Q18 finishes, Q19
+       * appears, the horn goes before anybody reads it: the last regulation question is 18, and
+       * recording 19 would make the first overtime tossup count as regulation.
+       */
+      onSelect: () =>
+        record({
+          id: newEventId(),
+          type: 'end-regulation',
+          questionNumber: currentQuestion,
+          lastRegulationQuestion: lastPlayedQuestion(game),
+        }),
     });
+  }
+  if (phase.kind === 'tossup' || phase.kind === 'bonus') {
+    menuItems.push({
+      label: `Replace question ${phase.questionNumber}`,
+      onSelect: () => setDialog('replace'),
+    });
+  }
+  if (phase.kind !== 'complete' && game.tossupsRead > 0) {
+    menuItems.push({ label: 'End game early…', onSelect: () => setDialog('end-early'), destructive: true });
   }
   const downloadQbj = () => {
     if (onDownload) onDownload(qbj);
@@ -404,6 +581,7 @@ export default function Scorer(props: IScorerProps) {
           <p className="scorer-context">
             {roundName}
             {roomName && <> · {roomName}</>}
+            {packetName && <> · {packetName}</>}
           </p>
         </div>
         <div className="scorer-header-side">
@@ -423,101 +601,126 @@ export default function Scorer(props: IScorerProps) {
         </p>
       )}
       {operationNotice && <p className="scorer-banner is-info">{operationNotice}</p>}
+      {/*
+        A refused action is never silent. The engine rejecting a second buzz on the same tossup is
+        almost always a double-tap the scorekeeper did not know they made, and a button that simply
+        did nothing would leave them wondering whether the first one landed either.
+      */}
+      {events.rejection && (
+        <p className="scorer-banner is-warning" role="alert">
+          {events.rejection}
+        </p>
+      )}
       {controlRequestPending && (
         <p className="scorer-banner is-info">Tournament control has this room&apos;s request.</p>
       )}
 
-      <div className="scorer-body">
-        <main className="scorer-main">
-          <div className="scorer-teams">
-            <TeamPanel
-              format={format}
-              team={game.left}
-              scoringEnabled={scoringEnabled}
-              eligible={eligible('left')}
-              onBuzz={(playerName, answerType) => recordBuzz('left', playerName, answerType)}
-            />
-            <TeamPanel
-              format={format}
-              team={game.right}
-              scoringEnabled={scoringEnabled}
-              eligible={eligible('right')}
-              onBuzz={(playerName, answerType) => recordBuzz('right', playerName, answerType)}
-            />
-          </div>
+      {phase.kind === 'lineup' && (
+        <StartingLineupPrompt
+          left={game.left}
+          right={game.right}
+          maximumActive={format.players.maximumActive}
+          needed={phase.teams}
+          onConfirm={(lineups) => {
+            const chosen = (Object.keys(lineups) as LeftOrRight[]).map((side) => ({
+              id: newEventId(),
+              type: 'substitution' as const,
+              questionNumber: 1,
+              team: side,
+              activePlayers: lineups[side] as string[],
+            }));
+            record(...chosen);
+          }}
+        />
+      )}
 
-          <div className="scorer-stage">
-            {phase.kind === 'tossup' && (
-              <div className="scorer-tossup-actions">
-                <button type="button" className="scorer-nobuzz" onClick={recordNoBuzz}>
-                  No buzz
-                </button>
-                {phase.eligibleTeams.length === 1 && (
-                  <p className="scorer-hint">
-                    {phase.eligibleTeams[0] === 'left' ? game.left.name : game.right.name} may still answer.
-                  </p>
-                )}
-              </div>
-            )}
-
-            {phase.kind === 'bonus' && (
-              <BonusPrompt
-                key={phase.questionNumber}
+      {phase.kind !== 'lineup' && (
+        <div className="scorer-body">
+          <main className="scorer-main">
+            <div className="scorer-teams">
+              <TeamPanel
                 format={format}
-                controllingTeamName={phase.team === 'left' ? game.left.name : game.right.name}
-                opponentName={phase.team === 'left' ? game.right.name : game.left.name}
-                questionNumber={phase.questionNumber}
-                onRecord={recordBonus}
+                team={game.left}
+                scoringEnabled={scoringEnabled}
+                eligible={eligible('left')}
+                negsAvailable={negsAvailable}
+                timeoutsUsed={(procedure?.timeoutsPerTeam ?? 0) > 0 ? game.timeouts.left : undefined}
+                onBuzz={(playerName, answerType) => recordBuzz('left', playerName, answerType)}
+                onWrongNoPenalty={(playerName) => recordWrongNoPenalty('left', playerName)}
               />
-            )}
+              <TeamPanel
+                format={format}
+                team={game.right}
+                scoringEnabled={scoringEnabled}
+                eligible={eligible('right')}
+                negsAvailable={negsAvailable}
+                timeoutsUsed={(procedure?.timeoutsPerTeam ?? 0) > 0 ? game.timeouts.right : undefined}
+                onBuzz={(playerName, answerType) => recordBuzz('right', playerName, answerType)}
+                onWrongNoPenalty={(playerName) => recordWrongNoPenalty('right', playerName)}
+              />
+            </div>
 
-            {phase.kind === 'complete' && (
-              <div className="scorer-complete">
-                <p className="scorer-complete-title">
-                  Game complete{phase.reason === 'forfeit' && <> &mdash; forfeit</>}
-                </p>
-                <p className="scorer-complete-score">
-                  <span>
-                    {game.left.name} <strong>{game.left.points}</strong>
-                  </span>
-                  <span>
-                    {game.right.name} <strong>{game.right.points}</strong>
-                  </span>
-                </p>
-                <p className="scorer-complete-detail">
-                  {game.tossupsRead} tossup{game.tossupsRead === 1 ? '' : 's'} heard
-                  {game.overtimeTossupsRead > 0 && <>, {game.overtimeTossupsRead} in overtime</>}
-                </p>
-                {warnings.map((warning) => (
-                  <p key={warning} className="scorer-complete-warning">
-                    {warning}
-                  </p>
-                ))}
-                <div className="scorer-complete-actions">
-                  <button
-                    type="button"
-                    className="scorer-submit"
-                    onClick={submit}
-                    disabled={submitting || game.personnelProblems.length > 0}
-                  >
-                    {submitting ? 'Sending…' : 'Submit result'}
+            <div className="scorer-stage">
+              {phase.kind === 'score-check' && (
+                <HalftimeCheck
+                  game={game}
+                  afterQuestion={phase.afterQuestion}
+                  onPlayers={() => setDialog('players')}
+                  onContinue={() => record({ id: newEventId(), type: 'half-resume', questionNumber: currentQuestion })}
+                />
+              )}
+
+              {phase.kind === 'tossup' && (
+                <div className="scorer-tossup-actions">
+                  <button type="button" className="scorer-nobuzz" onClick={recordNoBuzz}>
+                    No buzz
                   </button>
-                  <button type="button" className="scorer-action" onClick={downloadQbj}>
-                    Download QBJ backup
-                  </button>
+                  {phase.eligibleTeams.length === 1 && (
+                    <p className="scorer-hint">
+                      {phase.eligibleTeams[0] === 'left' ? game.left.name : game.right.name} may still answer.
+                    </p>
+                  )}
                 </div>
-                {submitResult && (
-                  <p className={submitResult.ok ? 'scorer-complete-ok' : 'scorer-complete-warning'}>
-                    {submitResult.message}
-                  </p>
-                )}
-              </div>
-            )}
-          </div>
-        </main>
+              )}
 
-        <RecentRail game={game} />
-      </div>
+              {phase.kind === 'bonus' && (
+                <BonusPrompt
+                  key={phase.questionNumber}
+                  format={format}
+                  controllingTeamName={phase.team === 'left' ? game.left.name : game.right.name}
+                  opponentName={phase.team === 'left' ? game.right.name : game.left.name}
+                  questionNumber={phase.questionNumber}
+                  onRecord={recordBonus}
+                  onRecordParts={recordBonusParts}
+                />
+              )}
+
+              {phase.kind === 'complete' && (
+                <div className="scorer-complete">
+                  <PreSubmitReview
+                    format={format}
+                    game={game}
+                    unsyncedRosterAdditions={unsyncedRosterAdditions}
+                    warnings={warnings}
+                    blockers={blockers}
+                    submitting={submitting}
+                    onSubmit={submit}
+                    onDownload={downloadQbj}
+                    onReview={() => openReviewAt(undefined)}
+                  />
+                  {submitResult && (
+                    <p className={submitResult.ok ? 'scorer-complete-ok' : 'scorer-complete-warning'}>
+                      {submitResult.message}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          </main>
+
+          <RecentRail game={game} onInspect={openReviewAt} />
+        </div>
+      )}
 
       <footer className="scorer-footer">
         <button type="button" className="scorer-action" onClick={events.undo} disabled={!events.canUndo}>
@@ -542,6 +745,8 @@ export default function Scorer(props: IScorerProps) {
           maximumActive={format.players.maximumActive}
           questionNumber={lineupQuestion}
           rosterSyncStatus={rosterSyncStatus}
+          timeouts={game.timeouts}
+          timeoutsPerTeam={procedure?.timeoutsPerTeam ?? 0}
           onSubstitute={(team, activePlayers) => {
             record({ id: newEventId(), type: 'substitution', questionNumber: lineupQuestion, team, activePlayers });
             setDialog(null);
@@ -661,8 +866,116 @@ export default function Scorer(props: IScorerProps) {
           game={game}
           events={events.events}
           format={format}
+          focusQuestion={reviewFocus}
           onReplace={events.replace}
           onRemove={events.remove}
+          onClose={() => {
+            setDialog(null);
+            setReviewFocus(undefined);
+          }}
+        />
+      )}
+      {dialog === 'protests' && (
+        <ProtestDialog
+          game={game}
+          questionNumber={currentQuestion}
+          controlAvailable={onRequestControl !== undefined && !controlRequestPending}
+          onRecord={(team, subject, description, requestControl) => {
+            const teamName = team === 'left' ? game.left.name : game.right.name;
+            record({
+              id: newEventId(),
+              type: 'protest',
+              questionNumber: currentQuestion,
+              team,
+              subject,
+              description,
+              status: 'open',
+            });
+            if (requestControl && onRequestControl) {
+              setOperationNotice('Protest recorded; asking tournament control to come.');
+              onRequestControl('protest', `Q${currentQuestion} protest by ${teamName}: ${description}`)
+                .then(() => setOperationNotice('Protest recorded and tournament control was asked to come.'))
+                .catch(() =>
+                  setOperationNotice(
+                    'Protest recorded on the scoresheet, but tournament control could not be reached.',
+                  ),
+                );
+            } else {
+              setOperationNotice('Protest recorded. Keep scoring; tournament control will see it on the result.');
+            }
+          }}
+          onResolve={(protest, status, resolution) => {
+            const existing = events.events.find((event) => event.id === protest.eventId);
+            if (!existing || existing.type !== 'protest') return;
+            events.replace(protest.eventId, { ...existing, status, resolution: resolution || undefined });
+          }}
+          onEditQuestion={(questionNumber) => {
+            setDialog(null);
+            openReviewAt(questionNumber);
+          }}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog === 'timeout' && (
+        <TimeoutDialog
+          game={game}
+          timeoutsPerTeam={procedure?.timeoutsPerTeam ?? 0}
+          onRecord={(team) => record({ id: newEventId(), type: 'timeout', questionNumber: currentQuestion, team })}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog === 'replace' && (phase.kind === 'tossup' || phase.kind === 'bonus') && (
+        <ReplaceQuestionDialog
+          questionNumber={phase.questionNumber}
+          bonusReplaceable={phase.kind === 'bonus' || currentCycleHasBonus}
+          onReplace={(scope, reason) => {
+            /*
+             * The void and the note go together as one action: a cycle removed from the scoresheet
+             * with no record of why is indistinguishable from a scorekeeper who deleted it by
+             * mistake, and the whole point of this is that the room can explain itself afterwards.
+             */
+            record(
+              {
+                id: newEventId(),
+                type: 'note',
+                questionNumber: phase.questionNumber,
+                text: `${scope === 'bonus' ? 'Bonus' : 'Question'} replaced: ${reason}`,
+                flagged: true,
+              },
+              { id: newEventId(), type: 'question-void', questionNumber: phase.questionNumber, scope, reason },
+            );
+            setDialog(null);
+            setOperationNotice(
+              scope === 'bonus'
+                ? `The bonus on question ${phase.questionNumber} was cleared. Score the replacement.`
+                : `Question ${phase.questionNumber} was cleared. Score the replacement as question ${phase.questionNumber}.`,
+            );
+          }}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog === 'end-early' && (
+        <EndGameEarlyDialog
+          game={game}
+          regulationTossupCount={format.regulation.tossupCount}
+          onEnd={(reason, tossupsRead) => {
+            record({
+              id: newEventId(),
+              type: 'end-game-early',
+              questionNumber: currentQuestion,
+              reason,
+              tossupsRead,
+            });
+            setDialog(null);
+          }}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog === 'details' && (
+        <GameDetailsDialog
+          moderator={moderatorName}
+          scorekeeper={operatorName ?? ''}
+          onSave={setModeratorName}
           onClose={() => setDialog(null)}
         />
       )}

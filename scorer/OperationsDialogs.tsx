@@ -7,8 +7,15 @@ import { bonusTotalProblem, lightningTotalProblem } from './bonusOptions';
 import ScorerDialog from './ScorerDialog';
 import { readScorerRecovery } from './ScorerRecovery';
 
+/**
+ * Everything a room needs somebody for, except a protest.
+ *
+ * A protest is not an issue that gets reported and closed — it has a team, a subject, and a decision
+ * that may still be pending when the result is submitted, so it lives in the Protests dialog and
+ * arrives at tournament control as a structured thing rather than a flagged note. Leaving it here as
+ * well would give a scorekeeper two places to record one and control two things to reconcile.
+ */
 const issueCategories: HelpRequestCategory[] = [
-  'protest',
   'question-packet',
   'roster-change',
   'equipment-technical',
@@ -25,7 +32,7 @@ export function IssueDialog(props: {
   onClose: () => void;
 }) {
   const { questionNumber, controlAvailable, requestPending, onReport, onClose } = props;
-  const [category, setCategory] = useState<HelpRequestCategory>('protest');
+  const [category, setCategory] = useState<HelpRequestCategory>('question-packet');
   const [details, setDetails] = useState('');
   const [requestControl, setRequestControl] = useState(controlAvailable && !requestPending);
   const [sending, setSending] = useState(false);
@@ -106,6 +113,7 @@ function eventDescription(event: ScoreEvent, format: IScorekeeperFormat): string
     const value = format.answerTypes[event.answerTypeIndex]?.value;
     return `${event.playerName} ${value === undefined ? 'unknown ruling' : signed(value)}`;
   }
+  if (event.type === 'tossup-no-penalty') return `${event.playerName ?? 'Answer'} wrong · 0 (no penalty)`;
   if (event.type === 'tossup-dead') return 'No buzz';
   if (event.type === 'bonus')
     return `Bonus ${event.controlledPoints ?? 0}${
@@ -118,7 +126,20 @@ function eventDescription(event: ScoreEvent, format: IScorekeeperFormat): string
   if (event.type === 'adjustment')
     return `Adjustment ${signed(event.points)}${event.reason ? ` — ${event.reason}` : ''}`;
   if (event.type === 'forfeit') return `Forfeit: ${event.teams.join(' and ')}`;
-  if (event.type === 'end-regulation') return 'End regulation';
+  if (event.type === 'end-regulation')
+    return `End regulation${
+      event.lastRegulationQuestion !== undefined ? ` after Tossup ${event.lastRegulationQuestion}` : ''
+    }`;
+  if (event.type === 'half-break') return `End of half after Tossup ${event.lastQuestion}`;
+  if (event.type === 'half-resume') return 'Score confirmed at the break';
+  if (event.type === 'timeout') return `Timeout: ${event.team}`;
+  if (event.type === 'protest')
+    return `Protest (${event.team}, ${event.status}): ${event.description}${
+      event.resolution ? ` — ${event.resolution}` : ''
+    }`;
+  if (event.type === 'question-void')
+    return `${event.scope === 'bonus' ? 'Bonus' : 'Question'} replaced: ${event.reason}`;
+  if (event.type === 'end-game-early') return `Game ended early after ${event.tossupsRead} tossups: ${event.reason}`;
   return `${event.flagged ? 'Flagged note' : 'Note'}: ${event.text}`;
 }
 
@@ -362,9 +383,12 @@ export function ScoresheetReviewDialog(props: {
   format: IScorekeeperFormat;
   onReplace: (id: string, event: ScoreEvent) => void;
   onRemove: (id: string) => void;
+  /** Scroll to and highlight this question. What the rail and an upheld protest both open. */
+  // eslint-disable-next-line react/require-default-props
+  focusQuestion?: number;
   onClose: () => void;
 }) {
-  const { game, events, format, onReplace, onRemove, onClose } = props;
+  const { game, events, format, onReplace, onRemove, focusQuestion, onClose } = props;
   const [editing, setEditing] = useState<string | null>(null);
   const questionNumbers = Array.from(new Set(events.map((event) => event.questionNumber))).sort((a, b) => a - b);
   return (
@@ -378,12 +402,29 @@ export function ScoresheetReviewDialog(props: {
           {problem.message}
         </p>
       ))}
+      {game.integrityProblems.map((problem) => (
+        <p key={problem.eventId} className="scorer-problem">
+          {problem.message}
+        </p>
+      ))}
       {!questionNumbers.length ? (
         <p className="scorer-rail-empty">Nothing has been recorded yet.</p>
       ) : (
         <ol className="scorer-review-list">
           {questionNumbers.map((questionNumber) => (
-            <li key={questionNumber}>
+            <li
+              key={questionNumber}
+              className={questionNumber === focusQuestion ? 'is-focused' : undefined}
+              ref={
+                questionNumber === focusQuestion
+                  ? (element) => {
+                      // Guarded because scrolling is a nicety and not every environment has it;
+                      // the outline is what actually finds the question.
+                      if (typeof element?.scrollIntoView === 'function') element.scrollIntoView({ block: 'nearest' });
+                    }
+                  : undefined
+              }
+            >
               <strong>Q{questionNumber}</strong>
               <ul>
                 {events

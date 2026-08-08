@@ -20,10 +20,15 @@ import { IScorekeeperAnswerType, IScorekeeperFormat } from '../../renderer/Servi
 import {
   bonusEventPoints,
   IBonusEvent,
+  IBonusPartResult,
+  IEndRegulationEvent,
   IRosterAddEvent,
   ISubstitutionEvent,
   otherTeam,
+  ProtestStatus,
+  ProtestSubject,
   ScoreEvent,
+  usesTossupOpportunity,
 } from './ScoreEvents';
 
 /** One team as the game began. */
@@ -31,7 +36,14 @@ export interface ITeamSetup {
   name: string;
   /** Everyone available, bench included. */
   players: string[];
-  /** Who started. Defaults to as many of `players` as the format allows active at once. */
+  /**
+   * Who started.
+   *
+   * Absent means nobody has said, which is only safe when the roster is no larger than the format
+   * allows active at once — then the whole roster starts and there is nothing to choose. A bigger
+   * roster with no lineup is a question the room has to answer before the first tossup; see
+   * `teamsNeedingStartingLineup`.
+   */
   startingLineup?: string[];
 }
 
@@ -42,9 +54,11 @@ export interface IGameSetup {
 
 /** What the interface should be asking for. Derived, never chosen by the scorekeeper. */
 export type ScoringPhase =
+  | { kind: 'lineup'; teams: LeftOrRight[] }
   | { kind: 'tossup'; questionNumber: number; period: GamePeriod; eligibleTeams: LeftOrRight[] }
   | { kind: 'bonus'; questionNumber: number; period: GamePeriod; team: LeftOrRight }
-  | { kind: 'complete'; reason: 'regulation' | 'overtime' | 'forfeit' };
+  | { kind: 'score-check'; afterQuestion: number }
+  | { kind: 'complete'; reason: 'regulation' | 'overtime' | 'forfeit' | 'short' };
 
 export type GamePeriod = 'regulation' | 'overtime';
 
@@ -54,14 +68,33 @@ export interface IDerivedBuzz {
   answerType: IScorekeeperAnswerType;
 }
 
+/** A team that answered and got nothing, without being penalized. Carries no statistic. */
+export interface IDerivedNoPenalty {
+  team: LeftOrRight;
+  playerName?: string;
+}
+
 export interface IDerivedQuestion {
   questionNumber: number;
   period: GamePeriod;
   buzzes: IDerivedBuzz[];
+  /** Teams that used their chance at this tossup for nothing, per `ITossupNoPenaltyEvent`. */
+  noPenalty: IDerivedNoPenalty[];
   /** Recorded as read with nobody converting it. */
   dead: boolean;
-  /** Points from the bonus, as [controlling team, opponent on bouncebacks]. */
-  bonus?: { team: LeftOrRight; controlledPoints: number; bouncebackPoints: number };
+  /**
+   * Points from the bonus, as [controlling team, opponent on bouncebacks].
+   *
+   * `parts` is present only when the scorekeeper actually collected the bonus part by part, which
+   * the fast path deliberately does not. A total is not a lossy version of parts and parts are not
+   * an enriched version of a total; they are two different things the scorer was told.
+   */
+  bonus?: {
+    team: LeftOrRight;
+    controlledPoints: number;
+    bouncebackPoints: number;
+    parts?: IBonusPartResult[];
+  };
   /**
    * The tossup is over: converted, gone dead, or refused by both teams. A cycle can be resolved and
    * still be waiting on its bonus.
@@ -71,6 +104,12 @@ export interface IDerivedQuestion {
   awaitingBonus: boolean;
   /** The lineup that heard this tossup, frozen at its effective personnel boundary. */
   activePlayers: Record<LeftOrRight, string[]>;
+  /** The score as it stood once this cycle was complete. What the rail shows after each question. */
+  scoreAfter: Record<LeftOrRight, number>;
+  /** Protests recorded against this question and not yet resolved. */
+  openProtests: number;
+  /** This cycle is a replacement for one that was voided. */
+  replaced: boolean;
 }
 
 export interface IDerivedPlayer {
@@ -99,6 +138,26 @@ export interface IDerivedTeam {
   overtimeBuzzes: Map<number, number>;
 }
 
+/** A protest as the room and tournament control both need to see it. */
+export interface IDerivedProtest {
+  eventId: string;
+  questionNumber: number;
+  team: LeftOrRight;
+  teamName: string;
+  subject: ProtestSubject;
+  description: string;
+  status: ProtestStatus;
+  resolution?: string;
+}
+
+/** A question that was thrown out and replaced. */
+export interface IDerivedVoid {
+  eventId: string;
+  questionNumber: number;
+  scope: 'tossup' | 'bonus';
+  reason: string;
+}
+
 export interface IDerivedGame {
   left: IDerivedTeam;
   right: IDerivedTeam;
@@ -109,19 +168,72 @@ export interface IDerivedGame {
   overtimeTossupsRead: number;
   /** True once regulation is behind us, whether or not overtime has been played. */
   regulationComplete: boolean;
+  /**
+   * The last tossup that counted as regulation, once that is settled.
+   *
+   * Infinite for a timed game whose clock has not been stopped, because there is no way to know yet.
+   */
+  regulationBoundary: number;
   notes: { questionNumber: number; text: string; flagged: boolean }[];
   /** Engine-level personnel invariants that must be corrected before submission. */
   personnelProblems: { eventId: string; questionNumber: number; message: string }[];
+  /**
+   * Events the model cannot represent, kept out of the totals and reported rather than applied.
+   *
+   * The guard in front of the UI is what stops these being recorded in the first place. This is the
+   * backstop for an event list that arrived some other way — a recovery file, a corrected question,
+   * a build of the room from before the guard existed.
+   */
+  integrityProblems: { eventId: string; questionNumber: number; message: string }[];
+  /** Timeouts each team has taken. */
+  timeouts: Record<LeftOrRight, number>;
+  protests: IDerivedProtest[];
+  voids: IDerivedVoid[];
+  /** Half breaks, in order, by the last question of the half each one ended. */
+  halfBreaks: number[];
+  /** A break is on and the score has not been agreed yet. */
+  awaitingScoreCheck: boolean;
+  /** Set when the scorekeeper deliberately stopped the game short. */
+  endedEarly?: { reason: string; tossupsRead: number };
+  /** Sides that still have to name a starting lineup before anything can be scored. */
+  needsStartingLineup: LeftOrRight[];
 }
 
 function emptyPlayer(name: string): IDerivedPlayer {
   return { name, tossupsHeard: 0, answerCounts: new Map(), points: 0 };
 }
 
-/** Who starts, honouring the format's cap when a caller didn't say. */
+/**
+ * Who starts.
+ *
+ * When the roster fits inside the format's cap there is nothing to decide and everyone plays. When
+ * it doesn't, this still returns the first few — the screen has to show something — but the game is
+ * simultaneously reported as needing a lineup, and the guard refuses to score until one is given.
+ * Quietly starting the first four names in registration order is how a player ends up with a game's
+ * worth of tossups heard that they spent on the bench.
+ */
 function startingLineup(team: ITeamSetup, maximumActive: number): string[] {
-  if (team.startingLineup) return team.startingLineup.slice();
+  if (team.startingLineup) return team.startingLineup.slice(0, maximumActive);
   return team.players.slice(0, maximumActive);
+}
+
+/**
+ * Sides whose starting lineup is a guess rather than a decision.
+ *
+ * A roster no bigger than the cap is not a guess. Neither is one the caller supplied a lineup for,
+ * nor one where the scorekeeper has already set a lineup for the first tossup.
+ */
+export function teamsNeedingStartingLineup(
+  format: IScorekeeperFormat,
+  setup: IGameSetup,
+  events: ScoreEvent[],
+): LeftOrRight[] {
+  return (['left', 'right'] as LeftOrRight[]).filter((side) => {
+    const team = setup[side];
+    if (team.startingLineup && team.startingLineup.length > 0) return false;
+    if (team.players.length <= format.players.maximumActive) return false;
+    return !events.some((event) => event.type === 'substitution' && event.team === side && event.questionNumber <= 1);
+  });
 }
 
 /**
@@ -141,27 +253,45 @@ function bonusFollows(format: IScorekeeperFormat, answerType: IScorekeeperAnswer
  * Which period a cycle belongs to.
  *
  * Regulation is the first `tossupCount` cycles for an untimed format. A timed one runs until the
- * moderator calls time, so the boundary is wherever the `end-regulation` event says it is — there is
- * no duration in the model to compute it from.
+ * moderator calls time, so the boundary is whatever the `end-regulation` event names as the last
+ * regulation question — there is no duration in the model to compute it from.
+ *
+ * `lastRegulationQuestion` is the authority; `questionNumber` is only consulted for events recorded
+ * before that field existed, and reproduces the old off-by-one for them rather than silently moving
+ * a boundary somebody already played through.
  */
 function periodBoundary(format: IScorekeeperFormat, events: ScoreEvent[]): number {
-  const called = events.find((event) => event.type === 'end-regulation');
-  if (called) return called.questionNumber;
+  const called = events.find((event): event is IEndRegulationEvent => event.type === 'end-regulation');
+  if (called) return called.lastRegulationQuestion ?? called.questionNumber;
   if (format.regulation.timed) return Number.POSITIVE_INFINITY;
   return format.regulation.tossupCount;
 }
 
 /**
- * Is the game decided, given the score after a whole number of periods?
+ * May the game end here, given the score after this many overtime tossups?
  *
- * Overtime is played in periods of `minimumOvertimeQuestionCount`, and the score is only examined at
- * the end of one — which is what makes a one-tossup period sudden death without needing a separate
- * flag for it. This mirrors how MODAQ's `playableCycles` walks forward looking for the first
- * checkpoint where the game isn't tied.
+ * `minimumOvertimeQuestionCount` is a minimum, not a period length. YellowFruit's own settings call
+ * it that, and NAQT — which sets it to 3 — plays all three tossups and then goes to sudden death;
+ * it does not play a second block of three. Treating the field as a repeating period is the same
+ * mistake as reading "at least three" as "in multiples of three", and it costs a real game: a team
+ * that leads after four overtime tossups would be made to play two more.
+ *
+ * So: below the minimum, keep playing whatever the score. At or above it, a lead ends the game, and
+ * every further tossup is therefore sudden death. A minimum of one is sudden death from the start,
+ * which is exactly what a one-tossup minimum means and needs no separate flag.
  */
 function overtimeCheckpointReached(format: IScorekeeperFormat, overtimeCyclesPlayed: number): boolean {
-  const period = Math.max(1, format.overtime.minimumQuestionCount);
-  return overtimeCyclesPlayed > 0 && overtimeCyclesPlayed % period === 0;
+  return overtimeCyclesPlayed >= Math.max(1, format.overtime.minimumQuestionCount);
+}
+
+/**
+ * Is the next overtime tossup sudden death — decided the moment it is scored?
+ *
+ * True once the minimum has been played out, which is what the room should be telling a scorekeeper
+ * so they know the round is about to end.
+ */
+export function overtimeIsSuddenDeath(format: IScorekeeperFormat, overtimeCyclesPlayed: number): boolean {
+  return overtimeCyclesPlayed + 1 >= Math.max(1, format.overtime.minimumQuestionCount);
 }
 
 /**
@@ -217,7 +347,18 @@ export default function deriveGame(format: IScorekeeperFormat, setup: IGameSetup
 
   const notes: IDerivedGame['notes'] = [];
   const personnelProblems: IDerivedGame['personnelProblems'] = [];
+  const integrityProblems: IDerivedGame['integrityProblems'] = [];
+  const protests: IDerivedProtest[] = [];
+  const voids: IDerivedVoid[] = [];
+  const halfBreaks: number[] = [];
+  const timeouts: Record<LeftOrRight, number> = { left: 0, right: 0 };
   const lightningByTeam = new Map<LeftOrRight, number>();
+  /** Lightning and adjustments by the cycle they were recorded at, for the running score. */
+  const lightningAt: { questionNumber: number; team: LeftOrRight; points: number }[] = [];
+  const adjustmentAt: { questionNumber: number; team: LeftOrRight; points: number }[] = [];
+  const replacedCycles = new Set<number>();
+  let awaitingScoreCheck = false;
+  let endedEarly: IDerivedGame['endedEarly'];
 
   // Only scoring activity creates a tossup cycle. Personnel events can point at the next boundary,
   // but that must not make a future unresolved question appear on the scoresheet.
@@ -245,6 +386,7 @@ export default function deriveGame(format: IScorekeeperFormat, setup: IGameSetup
       // Last one wins: YellowFruit keeps a single lightning total per team, so a second entry is a
       // correction of the first rather than something to add to it.
       lightningByTeam.set(event.team, event.points);
+      lightningAt.push({ questionNumber: event.questionNumber, team: event.team, points: event.points });
       continue;
     }
     if (event.type === 'forfeit') {
@@ -253,6 +395,55 @@ export default function deriveGame(format: IScorekeeperFormat, setup: IGameSetup
     }
     if (event.type === 'adjustment') {
       teams[event.team].adjustmentPoints += event.points;
+      adjustmentAt.push({ questionNumber: event.questionNumber, team: event.team, points: event.points });
+      continue;
+    }
+    if (event.type === 'timeout') {
+      timeouts[event.team] += 1;
+      continue;
+    }
+    if (event.type === 'protest') {
+      protests.push({
+        eventId: event.id,
+        questionNumber: event.questionNumber,
+        team: event.team,
+        teamName: teams[event.team].name,
+        subject: event.subject,
+        description: event.description,
+        status: event.status,
+        resolution: event.resolution,
+      });
+      continue;
+    }
+    if (event.type === 'half-break') {
+      halfBreaks.push(event.lastQuestion);
+      awaitingScoreCheck = true;
+      continue;
+    }
+    if (event.type === 'half-resume') {
+      awaitingScoreCheck = false;
+      continue;
+    }
+    if (event.type === 'end-game-early') {
+      endedEarly = { reason: event.reason, tossupsRead: event.tossupsRead };
+      continue;
+    }
+    if (event.type === 'question-void') {
+      // Everything recorded for this cycle before the void is gone; everything after it belongs to
+      // the replacement. Order matters, which is why this happens here rather than in a filter.
+      voids.push({
+        eventId: event.id,
+        questionNumber: event.questionNumber,
+        scope: event.scope,
+        reason: event.reason,
+      });
+      replacedCycles.add(event.questionNumber);
+      const existing = eventsByCycle.get(event.questionNumber) ?? [];
+      const kept = event.scope === 'bonus' ? existing.filter((earlier) => earlier.type !== 'bonus') : [];
+      eventsByCycle.set(event.questionNumber, kept);
+      // A wholly voided cycle stops existing until something is scored on the replacement, so it
+      // neither appears on the scoresheet nor charges anybody a second tossup heard.
+      if (kept.length === 0) cycleNumbers.delete(event.questionNumber);
       continue;
     }
     if (event.type === 'end-regulation' || event.type === 'substitution' || event.type === 'roster-add') continue;
@@ -269,6 +460,8 @@ export default function deriveGame(format: IScorekeeperFormat, setup: IGameSetup
   const questions: IDerivedQuestion[] = [];
   let overtimeCyclesPlayed = 0;
   const appliedPersonnel = new Set<string>();
+  /** Cycle-derived points so far, so each question can carry the score as it stood after it. */
+  const running: Record<LeftOrRight, number> = { left: 0, right: 0 };
 
   const applyPersonnelThrough = (questionNumber: number) => {
     for (const event of personnelEvents) {
@@ -292,8 +485,34 @@ export default function deriveGame(format: IScorekeeperFormat, setup: IGameSetup
     };
 
     const buzzes: IDerivedBuzz[] = [];
+    const noPenalty: IDerivedNoPenalty[] = [];
+    /**
+     * Which sides have already spent their chance at this tossup.
+     *
+     * `MatchQuestion.getPoints` finds a team's buzz with `find`, so a second one has nowhere to go
+     * in the model YellowFruit and QBJ share. Adding its points anyway — which is what a naive walk
+     * over the events does — produces a score no importer can reproduce. The guard in front of the
+     * UI stops it being recorded; this is what stops it counting if it gets in another way.
+     */
+    const spent = new Set<LeftOrRight>();
     for (const event of cycleEvents) {
-      if (event.type !== 'tossup-buzz') continue;
+      if (!usesTossupOpportunity(event)) continue;
+      if (spent.has(event.team)) {
+        integrityProblems.push({
+          eventId: event.id,
+          questionNumber,
+          message: `${
+            teams[event.team].name
+          } has two answers recorded on Tossup ${questionNumber}. Only the first counts; remove the other.`,
+        });
+        continue;
+      }
+      spent.add(event.team);
+
+      if (event.type === 'tossup-no-penalty') {
+        noPenalty.push({ team: event.team, playerName: event.playerName });
+        continue;
+      }
       const answerType = byIndex(event.answerTypeIndex);
       // An event referencing an answer type the format no longer has is not something to guess at.
       if (!answerType) continue;
@@ -312,9 +531,9 @@ export default function deriveGame(format: IScorekeeperFormat, setup: IGameSetup
     const dead = cycleEvents.some((event) => event.type === 'tossup-dead');
     const converted = buzzes.find((buzz) => buzz.answerType.value > 0);
     // Both teams having had their say ends the tossup as surely as a conversion does: the model
-    // allows one buzz per team per question, so there is nobody left to ask.
-    const bothTeamsBuzzed = buzzes.some((b) => b.team === 'left') && buzzes.some((b) => b.team === 'right');
-    const resolved = dead || !!converted || bothTeamsBuzzed;
+    // allows one answer per team per question, so there is nobody left to ask. A zero-point wrong
+    // answer spends a team's chance exactly as a buzz does, which is the whole reason it exists.
+    const resolved = dead || !!converted || spent.size === 2;
 
     const bonusEvent = cycleEvents.find((event): event is IBonusEvent => event.type === 'bonus');
     const bonusExpected = !!converted && bonusFollows(format, converted.answerType, period);
@@ -333,10 +552,17 @@ export default function deriveGame(format: IScorekeeperFormat, setup: IGameSetup
       record.answerCounts.set(buzz.answerType.index, (record.answerCounts.get(buzz.answerType.index) ?? 0) + 1);
       record.points += buzz.answerType.value;
       teams[buzz.team].tossupPoints += buzz.answerType.value;
+      running[buzz.team] += buzz.answerType.value;
       if (period === 'overtime') {
         const counts = teams[buzz.team].overtimeBuzzes;
         counts.set(buzz.answerType.index, (counts.get(buzz.answerType.index) ?? 0) + 1);
       }
+    }
+
+    // A zero-point wrong answer is not a buzz in anybody's statistics. The player is named on the
+    // scoresheet and nowhere else, which is the point of the event.
+    for (const missed of noPenalty) {
+      if (missed.playerName) playerRecord(missed.team, missed.playerName);
     }
 
     // Bonuses heard follows MatchTeam.getBonusesHeard: a team hears a bonus for each tossup it
@@ -346,12 +572,45 @@ export default function deriveGame(format: IScorekeeperFormat, setup: IGameSetup
     let bonus: IDerivedQuestion['bonus'];
     if (bonusEvent) {
       const [controlled, bounceback] = bonusEventPoints(bonusEvent);
-      bonus = { team: bonusEvent.team, controlledPoints: controlled, bouncebackPoints: bounceback };
+      bonus = {
+        team: bonusEvent.team,
+        controlledPoints: controlled,
+        bouncebackPoints: bounceback,
+        parts: bonusEvent.parts?.map((part) => ({ ...part })),
+      };
       teams[bonusEvent.team].bonusPoints += controlled;
       teams[otherTeam(bonusEvent.team)].bonusBouncebackPoints += bounceback;
+      running[bonusEvent.team] += controlled;
+      running[otherTeam(bonusEvent.team)] += bounceback;
     }
 
-    questions.push({ questionNumber, period, buzzes, dead, bonus, resolved, awaitingBonus, activePlayers });
+    // The score as it stood after this question, which is what the rail shows. Lightning and manual
+    // adjustments are folded in at the cycle they were recorded against so the column always agrees
+    // with the header once everything is in.
+    const scoreAfter: Record<LeftOrRight, number> = { left: running.left, right: running.right };
+    for (const entry of adjustmentAt) {
+      if (entry.questionNumber <= questionNumber) scoreAfter[entry.team] += entry.points;
+    }
+    for (const side of ['left', 'right'] as LeftOrRight[]) {
+      const applicable = lightningAt.filter((entry) => entry.team === side && entry.questionNumber <= questionNumber);
+      if (applicable.length > 0) scoreAfter[side] += applicable[applicable.length - 1].points;
+    }
+
+    questions.push({
+      questionNumber,
+      period,
+      buzzes,
+      noPenalty,
+      dead,
+      bonus,
+      resolved,
+      awaitingBonus,
+      activePlayers,
+      scoreAfter,
+      openProtests: protests.filter((protest) => protest.questionNumber === questionNumber && protest.status === 'open')
+        .length,
+      replaced: replacedCycles.has(questionNumber),
+    });
   }
 
   for (const [side, points] of lightningByTeam) teams[side].lightningPoints = points;
@@ -371,6 +630,8 @@ export default function deriveGame(format: IScorekeeperFormat, setup: IGameSetup
     ? events.some((event) => event.type === 'end-regulation')
     : regulationCyclesPlayed >= format.regulation.tossupCount;
 
+  const needsStartingLineup = teamsNeedingStartingLineup(format, setup, events);
+
   const phase = derivePhase({
     format,
     questions,
@@ -378,6 +639,10 @@ export default function deriveGame(format: IScorekeeperFormat, setup: IGameSetup
     boundary,
     regulationComplete,
     overtimeCyclesPlayed,
+    awaitingScoreCheck,
+    halfBreaks,
+    endedEarly,
+    needsStartingLineup,
   });
 
   // A lineup selected for the upcoming tossup should be visible immediately without inventing that
@@ -402,9 +667,30 @@ export default function deriveGame(format: IScorekeeperFormat, setup: IGameSetup
     tossupsRead,
     overtimeTossupsRead,
     regulationComplete,
+    regulationBoundary: boundary,
     notes,
     personnelProblems,
+    integrityProblems,
+    timeouts,
+    protests,
+    voids,
+    halfBreaks,
+    awaitingScoreCheck,
+    endedEarly,
+    needsStartingLineup,
   };
+}
+
+/**
+ * The last tossup that has actually been played.
+ *
+ * What "end regulation" and "end of half" both need, and the number the question currently on screen
+ * is not: a displayed tossup with nothing recorded against it has not been read. A cycle that has
+ * been started counts, because a tossup in progress when the horn goes is finished and belongs to
+ * the period it began in.
+ */
+export function lastPlayedQuestion(game: IDerivedGame): number {
+  return game.questions.at(-1)?.questionNumber ?? 0;
 }
 
 /**
@@ -415,7 +701,12 @@ export default function deriveGame(format: IScorekeeperFormat, setup: IGameSetup
  */
 export function lineupChangeEffectiveQuestion(game: IDerivedGame, events: ScoreEvent[]): number {
   if (game.phase.kind === 'bonus') return game.phase.questionNumber + 1;
-  if (game.phase.kind === 'complete') return (game.questions.at(-1)?.questionNumber ?? 0) + 1;
+  if (game.phase.kind === 'lineup') return 1;
+  // A break is the safest boundary there is: nothing is part-scored, and it is exactly where the
+  // rules that bother to say expect substitutions to happen.
+  if (game.phase.kind === 'score-check' || game.phase.kind === 'complete') {
+    return (game.questions.at(-1)?.questionNumber ?? 0) + 1;
+  }
   const { questionNumber } = game.phase;
   const begun = events.some(
     (event) =>
@@ -439,12 +730,34 @@ function derivePhase(input: {
   boundary: number;
   regulationComplete: boolean;
   overtimeCyclesPlayed: number;
+  awaitingScoreCheck: boolean;
+  halfBreaks: number[];
+  endedEarly: IDerivedGame['endedEarly'];
+  needsStartingLineup: LeftOrRight[];
 }): ScoringPhase {
-  const { format, questions, teams, boundary, regulationComplete, overtimeCyclesPlayed } = input;
+  const {
+    format,
+    questions,
+    teams,
+    boundary,
+    regulationComplete,
+    overtimeCyclesPlayed,
+    awaitingScoreCheck,
+    halfBreaks,
+    endedEarly,
+    needsStartingLineup,
+  } = input;
 
   if (teams.left.forfeited || teams.right.forfeited) return { kind: 'complete', reason: 'forfeit' };
+  if (endedEarly) return { kind: 'complete', reason: 'short' };
 
   const lastCycle = questions.length > 0 ? questions[questions.length - 1] : undefined;
+
+  // Nothing can be scored against a lineup nobody chose. This outranks the score check and the
+  // tossup below because it is a precondition of the game having started at all.
+  if (needsStartingLineup.length > 0 && questions.length === 0) {
+    return { kind: 'lineup', teams: needsStartingLineup };
+  }
 
   // An unfinished cycle outranks everything below: a bonus still owed is still owed even if the
   // score already looks decided, and it may well be what decides it.
@@ -460,13 +773,24 @@ function derivePhase(input: {
     }
   }
   if (lastCycle && !lastCycle.resolved) {
-    const buzzed = new Set(lastCycle.buzzes.map((buzz) => buzz.team));
+    // A wrong answer worth nothing spends a team's chance as surely as a buzz does, so both count.
+    const answered = new Set<LeftOrRight>([
+      ...lastCycle.buzzes.map((buzz) => buzz.team),
+      ...lastCycle.noPenalty.map((missed) => missed.team),
+    ]);
     return {
       kind: 'tossup',
       questionNumber: lastCycle.questionNumber,
       period: lastCycle.period,
-      eligibleTeams: (['left', 'right'] as LeftOrRight[]).filter((side) => !buzzed.has(side)),
+      eligibleTeams: (['left', 'right'] as LeftOrRight[]).filter((side) => !answered.has(side)),
     };
+  }
+
+  // A bonus owed at the horn is still played, which is why this sits below the unfinished-cycle
+  // cases and above everything else: once the cycle is closed, the room stops and agrees the score
+  // before another question is read.
+  if (awaitingScoreCheck) {
+    return { kind: 'score-check', afterQuestion: halfBreaks[halfBreaks.length - 1] ?? 0 };
   }
 
   const nextQuestion = (lastCycle?.questionNumber ?? 0) + 1;

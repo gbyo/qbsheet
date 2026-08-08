@@ -66,6 +66,35 @@ export interface ITossupBuzzEvent extends IScoreEventBase {
   answerTypeIndex: number;
 }
 
+/**
+ * A team used its tossup opportunity, scored nothing, and was not penalized.
+ *
+ * # Why this isn't an answer type
+ *
+ * NAQT's tossups have three configured values — 15, 10 and −5 — and a fourth outcome that has no
+ * value at all: an incorrect answer given after the tossup has been read in full is worth zero, and
+ * so is the second team's incorrect answer, because a team that has heard the whole question cannot
+ * be penalized for missing it. That outcome is not `No buzz` — the team is out of the question
+ * either way, but somebody did answer, and on a tied tossup that difference decides who may still
+ * speak.
+ *
+ * Modelling it as a 0-point `AnswerType` would be worse than modelling it not at all: YellowFruit
+ * counts a player's tossups per answer type, and a fabricated zero type would show up in every
+ * player's P/TU/I line as a buzz they never got credit or blame for. So this is an event about the
+ * *team's opportunity*, and it deliberately carries no answer type. `playerName` is recorded when
+ * the scorekeeper knows it, for the scoresheet and for QBJ's question-level layer, and is never
+ * counted in anyone's answer counts.
+ *
+ * Generic, not NAQT-specific: any zero-point procedural outcome that consumes a team's chance at a
+ * tossup — an answer ruled inadmissible, a team that answers out of turn — is this.
+ */
+export interface ITossupNoPenaltyEvent extends IScoreEventBase {
+  type: 'tossup-no-penalty';
+  team: LeftOrRight;
+  /** Who answered, when it is known. Never part of any statistic. */
+  playerName?: string;
+}
+
 /** The tossup went dead: read, nobody converted it. */
 export interface ITossupDeadEvent extends IScoreEventBase {
   type: 'tossup-dead';
@@ -136,9 +165,116 @@ export interface IRosterAddEvent extends IScoreEventBase {
   playerName: string;
 }
 
-/** The moderator called time. Only meaningful for a timed format. */
+/**
+ * The moderator called time. Only meaningful for a timed format.
+ *
+ * # Why the boundary is its own field
+ *
+ * The obvious thing to do is treat the question on screen when time was called as the first overtime
+ * question. That is wrong by one whenever it matters: question 18 finishes, question 19 appears, and
+ * the horn goes before anybody starts reading it. Recording 19 makes 19 a regulation question, so
+ * the first tossup actually played in a tied game's overtime gets classified as regulation and the
+ * game can be declared over on a score that came from an overtime buzz.
+ *
+ * `lastRegulationQuestion` is therefore the last tossup that was *played* in regulation, not the one
+ * being displayed. Everything after it is overtime. `questionNumber` keeps its usual meaning for a
+ * game-level event — where in the log it happened — and is only used as a fallback for events
+ * recorded before this field existed.
+ */
 export interface IEndRegulationEvent extends IScoreEventBase {
   type: 'end-regulation';
+  /** The last tossup that counts as regulation. Anything numbered above it is overtime. */
+  lastRegulationQuestion?: number;
+}
+
+/**
+ * The end of a half.
+ *
+ * Operational, not statistical. YellowFruit's `Match` has no concept of a half and gains none here:
+ * this exists so a room playing timed halves has somewhere to stop, check the score against the
+ * moderator, and substitute — which is what NAQT's rules provide for and what a paper scoresheet
+ * has a line for. Nothing about scoring changes across it.
+ */
+export interface IHalfBreakEvent extends IScoreEventBase {
+  type: 'half-break';
+  /** The last tossup played in the half that just ended. */
+  lastQuestion: number;
+}
+
+/** The score check at a half break was completed and play resumes. */
+export interface IHalfResumeEvent extends IScoreEventBase {
+  type: 'half-resume';
+}
+
+/**
+ * A team took a timeout.
+ *
+ * Tracked because NAQT-style scoresheets track it — one 30-second timeout per team, and a room that
+ * has lost count of them cannot answer the question a coach is about to ask. How many a team gets is
+ * a procedure setting, not a scoring rule, so nothing here knows the number.
+ */
+export interface ITimeoutEvent extends IScoreEventBase {
+  type: 'timeout';
+  team: LeftOrRight;
+}
+
+/** What a protest is about. Broad on purpose: the detail is in the description. */
+export type ProtestSubject = 'tossup-answer' | 'bonus-answer' | 'question' | 'procedure' | 'other';
+
+/** Where a protest has got to. A game can be submitted with one still `open`. */
+export type ProtestStatus = 'open' | 'upheld' | 'declined' | 'withdrawn';
+
+/**
+ * A protest, as a thing with a state rather than a note that happens to be flagged.
+ *
+ * A flagged note tells tournament control that something happened. It does not say what was
+ * protested, by whom, or whether anybody has decided it — and those are exactly what control needs
+ * to route the thing and what a room needs in order to know whether it is still outstanding. The
+ * scorekeeper records it and keeps playing; resolving it is control's job, and an upheld one goes
+ * back into the question editor so the event history is recalculated rather than patched.
+ */
+export interface IProtestEvent extends IScoreEventBase {
+  type: 'protest';
+  /** Who is protesting. */
+  team: LeftOrRight;
+  subject: ProtestSubject;
+  description: string;
+  status: ProtestStatus;
+  /** What was decided, once somebody decided it. */
+  resolution?: string;
+}
+
+/**
+ * A question was spoiled and is being replaced.
+ *
+ * QBJ and YellowFruit both recognize replacement, backup and tiebreaker question roles, and a
+ * moderator who reads question 12 out of the wrong packet needs a way to say so that does not
+ * involve a scorekeeper deleting four events by hand and hoping the tossups-heard count survives.
+ *
+ * Everything recorded for this cycle *before* this event is discarded; everything after it belongs
+ * to the replacement. A `bonus` scope leaves the tossup and its conversion alone, because a spoiled
+ * bonus does not un-answer the tossup that earned it.
+ */
+export interface IQuestionVoidEvent extends IScoreEventBase {
+  type: 'question-void';
+  scope: 'tossup' | 'bonus';
+  reason: string;
+}
+
+/**
+ * The game was deliberately stopped short of its regulation length.
+ *
+ * YellowFruit treats a game with fewer tossups than standard as a warning rather than an error, and
+ * real rounds get shortened: a director calls a round early, a packet runs out, a tiebreaker is
+ * played to whatever length it needs. Without this the room has no honest way to end an untimed
+ * game, and the alternative — inventing dead tossups until the count is reached — puts questions on
+ * the scoresheet that nobody read.
+ */
+export interface IEndGameEarlyEvent extends IScoreEventBase {
+  type: 'end-game-early';
+  reason: string;
+  /** Tossups actually played, as the scorekeeper confirmed them. Derived too; recorded for the audit. */
+  tossupsRead: number;
 }
 
 /**
@@ -172,15 +308,30 @@ export interface INoteEvent extends IScoreEventBase {
 
 export type ScoreEvent =
   | ITossupBuzzEvent
+  | ITossupNoPenaltyEvent
   | ITossupDeadEvent
   | IBonusEvent
   | ILightningEvent
   | ISubstitutionEvent
   | IRosterAddEvent
   | IEndRegulationEvent
+  | IHalfBreakEvent
+  | IHalfResumeEvent
+  | ITimeoutEvent
+  | IProtestEvent
+  | IQuestionVoidEvent
+  | IEndGameEarlyEvent
   | IAdjustmentEvent
   | IForfeitEvent
   | INoteEvent;
+
+/** Events that belong to a tossup cycle rather than to the game as a whole. */
+export type CycleScoreEvent = ITossupBuzzEvent | ITossupNoPenaltyEvent | ITossupDeadEvent | IBonusEvent;
+
+/** Did this event use up a team's chance at the tossup it belongs to? */
+export function usesTossupOpportunity(event: ScoreEvent): event is ITossupBuzzEvent | ITossupNoPenaltyEvent {
+  return event.type === 'tossup-buzz' || event.type === 'tossup-no-penalty';
+}
 
 /**
  * What a bonus was worth, as [controlling team, opponent on bouncebacks].

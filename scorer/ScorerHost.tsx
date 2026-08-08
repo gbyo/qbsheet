@@ -8,6 +8,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { IScorekeeperFormat } from '../../renderer/Services/ScorekeeperFormat';
+import { IRoomProcedure } from '../../renderer/Services/RoomProcedure';
 import { IRoomTeam, HelpRequestCategory } from '../../main/server/ServerTypes';
 import { IGameSetup } from '../scoring/deriveGame';
 import { RoomConnectionState } from '../RoomLifecycle';
@@ -26,6 +27,15 @@ export interface IScorerHostProps {
   roundName: string;
   // eslint-disable-next-line react/require-default-props
   roomName?: string;
+  /** The packet this round uses, when the tournament named one. Identity only. */
+  // eslint-disable-next-line react/require-default-props
+  packetName?: string;
+  /** Halves, clock and timeouts. Absent means the room runs none of it. */
+  // eslint-disable-next-line react/require-default-props
+  procedure?: IRoomProcedure;
+  /** Whoever is signed in to this room browser, recorded on the result as the scorekeeper. */
+  // eslint-disable-next-line react/require-default-props
+  operatorName?: string;
   connection: RoomConnectionState;
   // eslint-disable-next-line react/require-default-props
   degradedMessage?: string;
@@ -69,6 +79,9 @@ export default function ScorerHost(props: IScorerHostProps) {
     tournamentName,
     roundName,
     roomName,
+    packetName,
+    procedure,
+    operatorName,
     connection,
     degradedMessage,
     onSubmit,
@@ -99,16 +112,20 @@ export default function ScorerHost(props: IScorerHostProps) {
    * it from the schedule would silently move players around underneath the events.
    */
   const [recovered] = useState(() => loadGame(gameKey));
-  const events = useGameEvents(gameKey, recovered?.setup ?? setup, recovered?.events ?? []);
+  const activeSetup = recovered?.setup ?? setup;
+  const events = useGameEvents(gameKey, format, activeSetup, recovered?.events ?? [], procedure);
 
   return (
     <Scorer
       format={format}
-      setup={recovered?.setup ?? setup}
+      setup={activeSetup}
       events={events}
       tournamentName={tournamentName}
       roundName={roundName}
       roomName={roomName}
+      packetName={packetName}
+      procedure={procedure}
+      operatorName={operatorName}
       connection={connection}
       degradedMessage={degradedMessage}
       saved={events.saved}
