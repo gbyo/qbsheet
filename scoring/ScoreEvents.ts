@@ -206,6 +206,16 @@ export interface IHalfResumeEvent extends IScoreEventBase {
   type: 'half-resume';
 }
 
+/** The scorekeeper explicitly opened the initial overtime period at the regulation tie checkpoint. */
+export interface IBeginOvertimeEvent extends IScoreEventBase {
+  type: 'begin-overtime';
+}
+
+/** The configured initial overtime period ended tied and sudden death was explicitly opened. */
+export interface IBeginSuddenDeathEvent extends IScoreEventBase {
+  type: 'begin-sudden-death';
+}
+
 /**
  * A team took a timeout.
  *
@@ -216,6 +226,19 @@ export interface IHalfResumeEvent extends IScoreEventBase {
 export interface ITimeoutEvent extends IScoreEventBase {
   type: 'timeout';
   team: LeftOrRight;
+}
+
+/** A timeout has started and play is paused until a matching resume event. */
+export interface ITimeoutStartEvent extends IScoreEventBase {
+  type: 'timeout-start';
+  team: LeftOrRight;
+  /** Wall-clock time used only for the optional procedural countdown. */
+  startedAt?: number;
+}
+
+/** The active timeout ended and normal play may resume. */
+export interface ITimeoutResumeEvent extends IScoreEventBase {
+  type: 'timeout-resume';
 }
 
 /** What a protest is about. Broad on purpose: the detail is in the description. */
@@ -317,7 +340,11 @@ export type ScoreEvent =
   | IEndRegulationEvent
   | IHalfBreakEvent
   | IHalfResumeEvent
+  | IBeginOvertimeEvent
+  | IBeginSuddenDeathEvent
   | ITimeoutEvent
+  | ITimeoutStartEvent
+  | ITimeoutResumeEvent
   | IProtestEvent
   | IQuestionVoidEvent
   | IEndGameEarlyEvent
@@ -343,8 +370,14 @@ export function bonusEventPoints(event: IBonusEvent): [number, number] {
     let controlled = 0;
     let bounceback = 0;
     for (const part of event.parts) {
-      controlled += part.controlledPoints;
-      bounceback += part.bouncebackPoints ?? 0;
+      // Recovery and correction inputs are validated before export, but derivation is also used as
+      // the backstop for data that arrived from an older or hand-edited file. Ignore a malformed
+      // part here so validation can report it instead of crashing the room.
+      if (typeof part !== 'object' || part === null) continue;
+      if (typeof part.controlledPoints === 'number' && Number.isFinite(part.controlledPoints))
+        controlled += part.controlledPoints;
+      if (typeof part.bouncebackPoints === 'number' && Number.isFinite(part.bouncebackPoints))
+        bounceback += part.bouncebackPoints;
     }
     return [controlled, bounceback];
   }

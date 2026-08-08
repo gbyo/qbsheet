@@ -33,6 +33,12 @@ export interface IPlayersDialogProps {
   /** How many each team gets. Zero means timeouts are not tracked and nothing is shown. */
   // eslint-disable-next-line react/require-default-props
   timeoutsPerTeam?: number;
+  /** Whether the current procedure allows a lineup change at this point in the game. */
+  // eslint-disable-next-line react/require-default-props
+  lineupChangeAllowed?: boolean;
+  /** Shown when the roster can be viewed but the procedure does not permit changing it yet. */
+  // eslint-disable-next-line react/require-default-props
+  lineupChangeReason?: string;
   onSubstitute: (team: LeftOrRight, activePlayers: string[]) => void;
   onAddPlayer: (team: LeftOrRight, playerName: string, activePlayers: string[]) => void;
   // eslint-disable-next-line react/require-default-props
@@ -55,6 +61,7 @@ function TeamLineup(props: {
   rosterSyncStatus: Record<string, 'synced' | 'waiting' | 'local' | 'rejected'>;
   timeoutsUsed: number;
   timeoutsPerTeam: number;
+  lineupChangeAllowed: boolean;
   // eslint-disable-next-line react/require-default-props
   onRequestControl?: (team: LeftOrRight, playerName: string) => void;
 }) {
@@ -67,6 +74,7 @@ function TeamLineup(props: {
     rosterSyncStatus,
     timeoutsUsed,
     timeoutsPerTeam,
+    lineupChangeAllowed,
     onRequestControl,
   } = props;
   const [selected, setSelected] = useState<string[]>(team.activePlayers);
@@ -113,7 +121,7 @@ function TeamLineup(props: {
             id={id}
             type="checkbox"
             checked={active}
-            disabled={!active && atCapacity}
+            disabled={!lineupChangeAllowed || (!active && atCapacity)}
             onChange={() => toggle(player.name, index)}
           />
           <span className="scorer-lineup-name">{player.name}</span>
@@ -154,7 +162,7 @@ function TeamLineup(props: {
       <button
         type="button"
         className="scorer-choice"
-        disabled={unchanged || selected.length === 0}
+        disabled={!lineupChangeAllowed || unchanged || selected.length === 0}
         onClick={() => onSubstitute(side, selected)}
       >
         Apply to {team.name}
@@ -163,7 +171,7 @@ function TeamLineup(props: {
         className="scorer-add-player"
         onSubmit={(submitEvent) => {
           submitEvent.preventDefault();
-          if (!canAdd) return;
+          if (!lineupChangeAllowed || !canAdd) return;
           const nextActive = atCapacity ? selected : selected.concat(cleanNewPlayer);
           onAddPlayer(side, cleanNewPlayer, nextActive);
         }}
@@ -178,7 +186,7 @@ function TeamLineup(props: {
             onChange={(event) => setNewPlayer(event.target.value)}
           />
         </label>
-        <button type="submit" className="scorer-choice" disabled={!canAdd}>
+        <button type="submit" className="scorer-choice" disabled={!lineupChangeAllowed || !canAdd}>
           Add{atCapacity ? ' to bench' : ' and activate'}
         </button>
       </form>
@@ -197,13 +205,18 @@ export default function PlayersDialog(props: IPlayersDialogProps) {
     rosterSyncStatus = {},
     timeouts = { left: 0, right: 0 },
     timeoutsPerTeam = 0,
+    lineupChangeAllowed = true,
+    lineupChangeReason,
     onRequestControl,
     onClose,
   } = props;
 
   return (
     <ScorerDialog title="Players" onClose={onClose}>
-      <p className="scorer-dialog-note">Changes apply starting Tossup {questionNumber}.</p>
+      <p className="scorer-dialog-note">
+        Changes apply starting Tossup {questionNumber}.
+        {!lineupChangeAllowed && <> {lineupChangeReason ?? 'Lineup changes are not available at this checkpoint.'}</>}
+      </p>
       <div className="scorer-lineups">
         <TeamLineup
           team={left}
@@ -214,6 +227,7 @@ export default function PlayersDialog(props: IPlayersDialogProps) {
           rosterSyncStatus={rosterSyncStatus}
           timeoutsUsed={timeouts.left}
           timeoutsPerTeam={timeoutsPerTeam}
+          lineupChangeAllowed={lineupChangeAllowed}
           onRequestControl={onRequestControl}
         />
         <TeamLineup
@@ -225,6 +239,7 @@ export default function PlayersDialog(props: IPlayersDialogProps) {
           rosterSyncStatus={rosterSyncStatus}
           timeoutsUsed={timeouts.right}
           timeoutsPerTeam={timeoutsPerTeam}
+          lineupChangeAllowed={lineupChangeAllowed}
           onRequestControl={onRequestControl}
         />
       </div>

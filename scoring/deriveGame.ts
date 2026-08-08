@@ -20,6 +20,8 @@ import { IScorekeeperAnswerType, IScorekeeperFormat } from '../../renderer/Servi
 import {
   bonusEventPoints,
   IBonusEvent,
+  IBeginOvertimeEvent,
+  IBeginSuddenDeathEvent,
   IBonusPartResult,
   IEndRegulationEvent,
   IRosterAddEvent,
@@ -58,6 +60,8 @@ export type ScoringPhase =
   | { kind: 'tossup'; questionNumber: number; period: GamePeriod; eligibleTeams: LeftOrRight[] }
   | { kind: 'bonus'; questionNumber: number; period: GamePeriod; team: LeftOrRight }
   | { kind: 'score-check'; afterQuestion: number }
+  | { kind: 'checkpoint'; checkpoint: 'overtime' | 'sudden-death'; afterQuestion: number }
+  | { kind: 'timeout'; questionNumber: number; team: LeftOrRight }
   | { kind: 'complete'; reason: 'regulation' | 'overtime' | 'forfeit' | 'short' };
 
 export type GamePeriod = 'regulation' | 'overtime';
@@ -187,6 +191,12 @@ export interface IDerivedGame {
   integrityProblems: { eventId: string; questionNumber: number; message: string }[];
   /** Timeouts each team has taken. */
   timeouts: Record<LeftOrRight, number>;
+  /** The timeout that currently owns the game, if a timeout-start lacks a matching resume. */
+  activeTimeout?: { team: LeftOrRight; questionNumber: number; startedAt?: number };
+  /** True after the scorekeeper has crossed the regulation checkpoint. */
+  overtimeStarted: boolean;
+  /** True after the initial overtime checkpoint has opened sudden death. */
+  suddenDeathStarted: boolean;
   protests: IDerivedProtest[];
   voids: IDerivedVoid[];
   /** Half breaks, in order, by the last question of the half each one ended. */
@@ -268,23 +278,6 @@ function periodBoundary(format: IScorekeeperFormat, events: ScoreEvent[]): numbe
 }
 
 /**
- * May the game end here, given the score after this many overtime tossups?
- *
- * `minimumOvertimeQuestionCount` is a minimum, not a period length. YellowFruit's own settings call
- * it that, and NAQT — which sets it to 3 — plays all three tossups and then goes to sudden death;
- * it does not play a second block of three. Treating the field as a repeating period is the same
- * mistake as reading "at least three" as "in multiples of three", and it costs a real game: a team
- * that leads after four overtime tossups would be made to play two more.
- *
- * So: below the minimum, keep playing whatever the score. At or above it, a lead ends the game, and
- * every further tossup is therefore sudden death. A minimum of one is sudden death from the start,
- * which is exactly what a one-tossup minimum means and needs no separate flag.
- */
-function overtimeCheckpointReached(format: IScorekeeperFormat, overtimeCyclesPlayed: number): boolean {
-  return overtimeCyclesPlayed >= Math.max(1, format.overtime.minimumQuestionCount);
-}
-
-/**
  * Is the next overtime tossup sudden death — decided the moment it is scored?
  *
  * True once the minimum has been played out, which is what the room should be telling a scorekeeper
@@ -352,6 +345,11 @@ export default function deriveGame(format: IScorekeeperFormat, setup: IGameSetup
   const voids: IDerivedVoid[] = [];
   const halfBreaks: number[] = [];
   const timeouts: Record<LeftOrRight, number> = { left: 0, right: 0 };
+  let activeTimeout: IDerivedGame['activeTimeout'];
+  const overtimeStartedByEvent = events.some((event): event is IBeginOvertimeEvent => event.type === 'begin-overtime');
+  const suddenDeathStartedByEvent = events.some(
+    (event): event is IBeginSuddenDeathEvent => event.type === 'begin-sudden-death',
+  );
   const lightningByTeam = new Map<LeftOrRight, number>();
   /** Lightning and adjustments by the cycle they were recorded at, for the running score. */
   const lightningAt: { questionNumber: number; team: LeftOrRight; points: number }[] = [];
@@ -402,6 +400,15 @@ export default function deriveGame(format: IScorekeeperFormat, setup: IGameSetup
       timeouts[event.team] += 1;
       continue;
     }
+    if (event.type === 'timeout-start') {
+      timeouts[event.team] += 1;
+      activeTimeout = { team: event.team, questionNumber: event.questionNumber, startedAt: event.startedAt };
+      continue;
+    }
+    if (event.type === 'timeout-resume') {
+      activeTimeout = undefined;
+      continue;
+    }
     if (event.type === 'protest') {
       protests.push({
         eventId: event.id,
@@ -446,7 +453,14 @@ export default function deriveGame(format: IScorekeeperFormat, setup: IGameSetup
       if (kept.length === 0) cycleNumbers.delete(event.questionNumber);
       continue;
     }
-    if (event.type === 'end-regulation' || event.type === 'substitution' || event.type === 'roster-add') continue;
+    if (
+      event.type === 'end-regulation' ||
+      event.type === 'substitution' ||
+      event.type === 'roster-add' ||
+      event.type === 'begin-overtime' ||
+      event.type === 'begin-sudden-death'
+    )
+      continue;
 
     cycleNumbers.add(event.questionNumber);
     const list = eventsByCycle.get(event.questionNumber) ?? [];
@@ -456,6 +470,9 @@ export default function deriveGame(format: IScorekeeperFormat, setup: IGameSetup
 
   const boundary = periodBoundary(format, events);
   const orderedCycles = Array.from(cycleNumbers).sort((a, b) => a - b);
+  // Old recovery payloads have no explicit checkpoint events. Once they contain an OT question,
+  // infer that the first checkpoint was already crossed so loading them does not strand the game.
+  const overtimeStarted = overtimeStartedByEvent || orderedCycles.some((questionNumber) => questionNumber > boundary);
 
   const questions: IDerivedQuestion[] = [];
   let overtimeCyclesPlayed = 0;
@@ -632,14 +649,21 @@ export default function deriveGame(format: IScorekeeperFormat, setup: IGameSetup
 
   const needsStartingLineup = teamsNeedingStartingLineup(format, setup, events);
 
+  const suddenDeathStarted =
+    suddenDeathStartedByEvent ||
+    (overtimeStarted && overtimeCyclesPlayed > Math.max(1, format.overtime.minimumQuestionCount));
+
   const phase = derivePhase({
     format,
     questions,
     teams,
     boundary,
     regulationComplete,
+    overtimeStarted,
+    suddenDeathStarted,
     overtimeCyclesPlayed,
     awaitingScoreCheck,
+    activeTimeout,
     halfBreaks,
     endedEarly,
     needsStartingLineup,
@@ -675,6 +699,9 @@ export default function deriveGame(format: IScorekeeperFormat, setup: IGameSetup
     personnelProblems,
     integrityProblems,
     timeouts,
+    activeTimeout,
+    overtimeStarted,
+    suddenDeathStarted,
     protests,
     voids,
     halfBreaks,
@@ -707,7 +734,12 @@ export function lineupChangeEffectiveQuestion(game: IDerivedGame, events: ScoreE
   if (game.phase.kind === 'lineup') return 1;
   // A break is the safest boundary there is: nothing is part-scored, and it is exactly where the
   // rules that bother to say expect substitutions to happen.
-  if (game.phase.kind === 'score-check' || game.phase.kind === 'complete') {
+  if (
+    game.phase.kind === 'score-check' ||
+    game.phase.kind === 'checkpoint' ||
+    game.phase.kind === 'timeout' ||
+    game.phase.kind === 'complete'
+  ) {
     return (game.questions.at(-1)?.questionNumber ?? 0) + 1;
   }
   const { questionNumber } = game.phase;
@@ -735,8 +767,11 @@ function derivePhase(input: {
   teams: Record<LeftOrRight, IDerivedTeam>;
   boundary: number;
   regulationComplete: boolean;
+  overtimeStarted: boolean;
+  suddenDeathStarted: boolean;
   overtimeCyclesPlayed: number;
   awaitingScoreCheck: boolean;
+  activeTimeout: IDerivedGame['activeTimeout'];
   halfBreaks: number[];
   endedEarly: IDerivedGame['endedEarly'];
   needsStartingLineup: LeftOrRight[];
@@ -747,8 +782,11 @@ function derivePhase(input: {
     teams,
     boundary,
     regulationComplete,
+    overtimeStarted,
+    suddenDeathStarted,
     overtimeCyclesPlayed,
     awaitingScoreCheck,
+    activeTimeout,
     halfBreaks,
     endedEarly,
     needsStartingLineup,
@@ -763,6 +801,10 @@ function derivePhase(input: {
   // tossup below because it is a precondition of the game having started at all.
   if (needsStartingLineup.length > 0 && questions.length === 0) {
     return { kind: 'lineup', teams: needsStartingLineup };
+  }
+
+  if (activeTimeout) {
+    return { kind: 'timeout', questionNumber: activeTimeout.questionNumber, team: activeTimeout.team };
   }
 
   // An unfinished cycle outranks everything below: a bonus still owed is still owed even if the
@@ -806,15 +848,25 @@ function derivePhase(input: {
     return { kind: 'tossup', questionNumber: nextQuestion, period: 'regulation', eligibleTeams: ['left', 'right'] };
   }
 
-  if (overtimeCyclesPlayed === 0) {
+  if (!overtimeStarted) {
     if (!tied) return { kind: 'complete', reason: 'regulation' };
+    return { kind: 'checkpoint', checkpoint: 'overtime', afterQuestion: questions.at(-1)?.questionNumber ?? 0 };
+  }
+
+  const minimumOvertimeQuestionCount = Math.max(1, format.overtime.minimumQuestionCount);
+  if (!suddenDeathStarted && overtimeCyclesPlayed < minimumOvertimeQuestionCount) {
     return { kind: 'tossup', questionNumber: nextQuestion, period: 'overtime', eligibleTeams: ['left', 'right'] };
   }
 
-  // Mid-period overtime always continues; the score is only consulted at a checkpoint.
-  if (overtimeCheckpointReached(format, overtimeCyclesPlayed) && !tied) {
-    return { kind: 'complete', reason: 'overtime' };
+  // At the end of the configured initial OT block, make the tie explicit before sudden death.
+  if (!suddenDeathStarted) {
+    if (!tied) return { kind: 'complete', reason: 'overtime' };
+    return { kind: 'checkpoint', checkpoint: 'sudden-death', afterQuestion: questions.at(-1)?.questionNumber ?? 0 };
   }
+
+  // Sudden death is a live phase: the next score change ends the game, while a dead tossup simply
+  // advances to the next sudden-death question.
+  if (!tied) return { kind: 'complete', reason: 'overtime' };
   return {
     kind: 'tossup',
     questionNumber: nextQuestion,

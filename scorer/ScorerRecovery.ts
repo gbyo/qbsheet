@@ -21,7 +21,11 @@ const eventTypes = new Set([
   'end-regulation',
   'half-break',
   'half-resume',
+  'begin-overtime',
+  'begin-sudden-death',
   'timeout',
+  'timeout-start',
+  'timeout-resume',
   'protest',
   'question-void',
   'end-game-early',
@@ -133,6 +137,14 @@ export function validEvent(value: unknown): value is ScoreEvent {
     );
   if (event.type === 'half-break') return Number.isInteger(event.lastQuestion) && Number(event.lastQuestion) >= 0;
   if (event.type === 'timeout') return validTeam(event.team);
+  if (event.type === 'timeout-start') {
+    return (
+      validTeam(event.team) &&
+      (event.startedAt === undefined || (typeof event.startedAt === 'number' && Number.isFinite(event.startedAt)))
+    );
+  }
+  if (event.type === 'timeout-resume' || event.type === 'begin-overtime' || event.type === 'begin-sudden-death')
+    return true;
   if (event.type === 'protest')
     return (
       validTeam(event.team) &&

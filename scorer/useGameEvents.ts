@@ -21,10 +21,17 @@
  */
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { ScoreEvent } from '../scoring/ScoreEvents';
-import { IGameSetup } from '../scoring/deriveGame';
+import deriveGame, { IGameSetup } from '../scoring/deriveGame';
 import { IScorekeeperFormat } from '../../renderer/Services/ScorekeeperFormat';
 import { IRoomProcedure } from '../../renderer/Services/RoomProcedure';
 import { applyScoreEvents } from '../scoring/canApplyScoreEvent';
+import {
+  IEditableQuestion,
+  eventsFromEditableQuestion,
+  replaceQuestionEvents,
+  validateEditableQuestion,
+} from '../scoring/questionCorrection';
+import { validateCorrectedHistory } from '../scoring/validateScoresheet';
 import { saveGame } from './GameSession';
 
 export interface IGameEventsApi {
@@ -46,6 +53,8 @@ export interface IGameEventsApi {
   replace: (id: string, next: ScoreEvent) => void;
   /** Remove an event outright. */
   remove: (id: string) => void;
+  /** Replace one question atomically after validating its complete proposed cycle. */
+  replaceQuestion: (questionNumber: number, question: IEditableQuestion) => boolean;
   /** Replace the game from a verified recovery file. */
   restore: (restored: ScoreEvent[]) => void;
   canUndo: boolean;
@@ -159,6 +168,29 @@ export default function useGameEvents(
     [commit],
   );
 
+  const replaceQuestion = useCallback(
+    (questionNumber: number, question: IEditableQuestion) => {
+      const currentGame = deriveGame(format, setup, current.current);
+      const questionErrors = validateEditableQuestion(format, currentGame, question);
+      if (questionErrors.length > 0) {
+        setRejection(questionErrors[0]);
+        return false;
+      }
+      const proposed = replaceQuestionEvents(current.current, questionNumber, eventsFromEditableQuestion(question));
+      const validation = validateCorrectedHistory(format, setup, proposed, procedure);
+      if (validation.blockers.length > 0) {
+        setRejection(validation.blockers[0].message);
+        return false;
+      }
+      undoStack.current = [];
+      redoStack.current = [];
+      setRejection('');
+      commit(proposed);
+      return true;
+    },
+    [commit, format, procedure, setup],
+  );
+
   const remove = useCallback(
     (id: string) => {
       undoStack.current = [];
@@ -189,6 +221,7 @@ export default function useGameEvents(
       redo,
       replace,
       remove,
+      replaceQuestion,
       restore,
       canUndo: history.canUndo,
       canRedo: history.canRedo,
@@ -196,6 +229,6 @@ export default function useGameEvents(
       rejection,
       clearRejection,
     }),
-    [events, append, undo, redo, replace, remove, restore, history, saved, rejection, clearRejection],
+    [events, append, undo, redo, replace, remove, replaceQuestion, restore, history, saved, rejection, clearRejection],
   );
 }

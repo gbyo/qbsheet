@@ -22,14 +22,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { LeftOrRight } from '../../renderer/Utils/UtilTypes';
 import { HelpRequestCategory } from '../../main/server/ServerTypes';
 import { IScorekeeperAnswerType, IScorekeeperFormat } from '../../renderer/Services/ScorekeeperFormat';
-import { IRoomProcedure } from '../../renderer/Services/RoomProcedure';
-import deriveGame, {
-  IGameSetup,
-  lastPlayedQuestion,
-  lineupChangeEffectiveQuestion,
-  overtimeIsSuddenDeath,
-} from '../scoring/deriveGame';
+import { IRoomProcedure, protestCheckpointPolicy, substitutionPolicy } from '../../renderer/Services/RoomProcedure';
+import deriveGame, { IGameSetup, lastPlayedQuestion, lineupChangeEffectiveQuestion } from '../scoring/deriveGame';
 import { IBonusPartResult, ScoreEvent } from '../scoring/ScoreEvents';
+import validateScoresheet from '../scoring/validateScoresheet';
 import toQbjMatch, { IQbjMatchMeta } from '../scoring/toQbjMatch';
 import { RoomConnectionState } from '../RoomLifecycle';
 import TeamPanel from './TeamPanel';
@@ -48,9 +44,12 @@ import {
   TimeoutDialog,
 } from './ProcedureDialogs';
 import { IGameEventsApi, newEventId } from './useGameEvents';
-import { IssueDialog, RecoveryDialog, ScoresheetReviewDialog } from './OperationsDialogs';
+import { FlagDialog, IssueDialog, RecoveryDialog, ScoresheetReviewDialog } from './OperationsDialogs';
 import { attachScorerRecovery } from './ScorerRecovery';
 import { downloadCurrentQbj } from '../QbjBackup';
+import useRoomClock from './useRoomClock';
+import useScreenWakeLock from './useScreenWakeLock';
+import { formatClock } from './RoomClock';
 
 export interface IScorerSubmitResult {
   ok: boolean;
@@ -58,6 +57,8 @@ export interface IScorerSubmitResult {
 }
 
 export interface IScorerProps {
+  /** Stable per-game key used for local recovery state such as the room clock. */
+  gameKey: string;
   format: IScorekeeperFormat;
   setup: IGameSetup;
   events: IGameEventsApi;
@@ -125,6 +126,7 @@ type OpenDialog =
   | 'adjust'
   | 'forfeit'
   | 'issue'
+  | 'flag'
   | 'review'
   | 'recovery'
   | 'protests'
@@ -151,6 +153,7 @@ function connectionClass(connection: RoomConnectionState): string {
 
 export default function Scorer(props: IScorerProps) {
   const {
+    gameKey,
     format,
     setup,
     events,
@@ -184,10 +187,45 @@ export default function Scorer(props: IScorerProps) {
   const rosterSyncAttempts = useRef(new Map<string, { attempts: number; lastAt: number }>());
   /** Which question the scoresheet review should open at, when it was opened from somewhere specific. */
   const [reviewFocus, setReviewFocus] = useState<number | undefined>(undefined);
+  const [reviewEditQuestion, setReviewEditQuestion] = useState<number | undefined>(undefined);
+  const [issueCategory, setIssueCategory] = useState<HelpRequestCategory>('question-packet');
   const [moderatorName, setModeratorName] = useState(qbjMeta?.moderator ?? '');
+  const [timeoutNow, setTimeoutNow] = useState(() => Date.now());
+  const roomClock = useRoomClock(gameKey, procedure?.halfLengthMinutes);
 
   const game = useMemo(() => deriveGame(format, setup, events.events), [format, setup, events.events]);
+  const scoresheetValidation = useMemo(
+    () => validateScoresheet(format, setup, events.events, procedure),
+    [format, setup, events.events, procedure],
+  );
   const { phase } = game;
+  useScreenWakeLock(phase.kind === 'tossup' || phase.kind === 'bonus' || phase.kind === 'timeout');
+  const {
+    configured: roomClockConfigured,
+    pause: pauseRoomClock,
+    pauseFor: pauseRoomClockFor,
+    resumeAfter: resumeRoomClockAfter,
+  } = roomClock;
+
+  useEffect(() => {
+    if (!roomClockConfigured) return;
+    if (phase.kind === 'complete') {
+      pauseRoomClock();
+      return;
+    }
+    if (phase.kind === 'timeout') pauseRoomClockFor('timeout');
+    else resumeRoomClockAfter('timeout');
+    if (phase.kind === 'score-check' || phase.kind === 'checkpoint') pauseRoomClockFor('checkpoint');
+    else resumeRoomClockAfter('checkpoint');
+  }, [phase.kind, pauseRoomClock, pauseRoomClockFor, resumeRoomClockAfter, roomClockConfigured]);
+
+  useEffect(() => {
+    if (phase.kind !== 'timeout' || procedure?.timeoutDurationSeconds === undefined) return undefined;
+    const refresh = () => setTimeoutNow(Date.now());
+    refresh();
+    const timer = setInterval(refresh, 1000);
+    return () => clearInterval(timer);
+  }, [game.activeTimeout?.startedAt, phase.kind, procedure?.timeoutDurationSeconds]);
   /**
    * Who was in the room, filled in rather than asked for where it can be.
    *
@@ -397,9 +435,16 @@ export default function Scorer(props: IScorerProps) {
     [record, phase],
   );
 
-  const openReviewAt = useCallback((questionNumber?: number) => {
+  const openReviewAt = useCallback((questionNumber?: number, edit = false) => {
     setReviewFocus(questionNumber);
+    setReviewEditQuestion(edit ? questionNumber : undefined);
     setDialog('review');
+  }, []);
+
+  const openReplacementAt = useCallback((questionNumber: number) => {
+    setReviewFocus(questionNumber);
+    setReviewEditQuestion(undefined);
+    setDialog('replace');
   }, []);
 
   // Space records an unanswered tossup, but only when the keyboard is not already aimed at
@@ -430,15 +475,44 @@ export default function Scorer(props: IScorerProps) {
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [events, recordNoBuzz, dialog, phase.kind]);
 
-  const scoringEnabled = phase.kind === 'tossup';
-  const eligible = (side: LeftOrRight) => phase.kind === 'tossup' && phase.eligibleTeams.includes(side);
+  const openProtests = game.protests.filter((protest) => protest.status === 'open');
+  const playBlockedByProtest =
+    phase.kind === 'tossup' &&
+    phase.period === 'overtime' &&
+    game.suddenDeathStarted &&
+    protestCheckpointPolicy(procedure) === 'strict-overtime' &&
+    openProtests.length > 0;
+  const scoringEnabled = phase.kind === 'tossup' && !playBlockedByProtest;
+  const eligible = (side: LeftOrRight) =>
+    scoringEnabled && phase.kind === 'tossup' && phase.eligibleTeams.includes(side);
   /**
    * Nobody has answered this tossup yet, so a neg is still a possible ruling.
    *
    * Both teams still being eligible is exactly that condition: an answer of any kind — a buzz or a
    * zero — removes the team that gave it from the eligible list. See `TeamPanel`.
    */
-  const negsAvailable = phase.kind === 'tossup' && phase.eligibleTeams.length === 2;
+  const negsAvailable = scoringEnabled && phase.kind === 'tossup' && phase.eligibleTeams.length === 2;
+  let noBuzzLabel = 'No buzz';
+  if (playBlockedByProtest) {
+    noBuzzLabel = 'Resolve protest before play';
+  } else if (phase.kind === 'tossup' && phase.eligibleTeams.length === 1) {
+    noBuzzLabel = `${phase.eligibleTeams[0] === 'left' ? game.left.name : game.right.name} has no answer`;
+  }
+
+  const lineupChangeAllowed =
+    phase.kind !== 'complete' &&
+    (substitutionPolicy(procedure) === 'any-boundary' ||
+      phase.kind === 'lineup' ||
+      phase.kind === 'score-check' ||
+      phase.kind === 'checkpoint' ||
+      phase.kind === 'timeout');
+  const lineupChangeReason = 'This procedure allows lineup changes at halftime, timeouts, and phase checkpoints.';
+
+  const timeoutDurationMs = (procedure?.timeoutDurationSeconds ?? 0) * 1000;
+  const timeoutRemainingMs =
+    phase.kind === 'timeout' && timeoutDurationMs > 0 && game.activeTimeout?.startedAt !== undefined
+      ? Math.max(0, timeoutDurationMs - Math.max(0, timeoutNow - game.activeTimeout.startedAt))
+      : undefined;
 
   const unsyncedRosterAdditions = useMemo(
     () =>
@@ -460,12 +534,15 @@ export default function Scorer(props: IScorerProps) {
       );
     }
     if (game.regulationComplete && game.left.points === game.right.points) found.push('This game is a tie.');
-    for (const problem of game.integrityProblems) found.push(problem.message);
+    for (const problem of scoresheetValidation.warnings) found.push(problem.message);
     return found;
-  }, [game]);
+  }, [game, scoresheetValidation.warnings]);
 
   /** Problems that stop a result being sent at all, as opposed to ones worth mentioning. */
-  const blockers = useMemo(() => game.personnelProblems.map((problem) => problem.message), [game]);
+  const blockers = useMemo(
+    () => scoresheetValidation.blockers.map((problem) => problem.message),
+    [scoresheetValidation.blockers],
+  );
 
   /** Whether the cycle on screen has a bonus that could be replaced on its own. */
   const currentCycleHasBonus =
@@ -479,11 +556,15 @@ export default function Scorer(props: IScorerProps) {
     if (phase.kind === 'complete') return 'Game complete';
     if (phase.kind === 'lineup') return 'Choose starters';
     if (phase.kind === 'score-check') return `Halftime · after tossup ${phase.afterQuestion}`;
+    if (phase.kind === 'checkpoint') {
+      return phase.checkpoint === 'overtime' ? 'Regulation complete' : 'Initial overtime complete';
+    }
+    if (phase.kind === 'timeout') return `Timeout · ${phase.team === 'left' ? game.left.name : game.right.name}`;
     if (phase.period === 'overtime') {
       const overtimeNumber = game.overtimeTossupsRead + (phase.kind === 'tossup' ? 1 : 0);
       // Sudden death is a state a game arrives at, not a property a format has: NAQT plays three
       // overtime tossups and only then becomes sudden death.
-      const suddenDeath = overtimeIsSuddenDeath(format, game.overtimeTossupsRead) ? ' · sudden death' : '';
+      const suddenDeath = game.suddenDeathStarted ? ' · sudden death' : '';
       return `Overtime tossup ${Math.max(1, overtimeNumber)}${suddenDeath}`;
     }
     if (format.regulation.timed) return `Tossup ${phase.questionNumber} · timed round`;
@@ -499,8 +580,14 @@ export default function Scorer(props: IScorerProps) {
   ];
   if (format.lightning.enabled)
     menuItems.push({ label: 'Lightning / worksheet', onSelect: () => setDialog('lightning') });
-  if ((procedure?.timeoutsPerTeam ?? 0) > 0 && phase.kind !== 'complete') {
+  if ((procedure?.timeoutsPerTeam ?? 0) > 0 && phase.kind !== 'complete' && phase.kind !== 'timeout') {
     menuItems.push({ label: 'Timeout', onSelect: () => setDialog('timeout') });
+  }
+  if (phase.kind === 'timeout') {
+    menuItems.push({
+      label: 'Resume play',
+      onSelect: () => record({ id: newEventId(), type: 'timeout-resume', questionNumber: currentQuestion }),
+    });
   }
   if (procedure?.halves && phase.kind !== 'complete' && !game.awaitingScoreCheck) {
     menuItems.push({
@@ -536,7 +623,7 @@ export default function Scorer(props: IScorerProps) {
   if (phase.kind === 'tossup' || phase.kind === 'bonus') {
     menuItems.push({
       label: `Replace question ${phase.questionNumber}`,
-      onSelect: () => setDialog('replace'),
+      onSelect: () => openReplacementAt(phase.questionNumber),
     });
   }
   if (phase.kind !== 'complete' && game.tossupsRead > 0) {
@@ -586,6 +673,28 @@ export default function Scorer(props: IScorerProps) {
         </div>
         <div className="scorer-header-side">
           <span className="scorer-progress">{progress}</span>
+          {roomClock.configured && (
+            <span className={roomClock.state.status === 'expired' ? 'scorer-clock is-expired' : 'scorer-clock'}>
+              <span aria-label="Room clock">
+                {roomClock.state.status === 'expired' ? 'Time expired' : roomClock.display}
+              </span>
+              {roomClock.state.status === 'idle' && (
+                <button type="button" className="scorer-clock-button" onClick={roomClock.start}>
+                  Start
+                </button>
+              )}
+              {roomClock.state.status === 'running' && (
+                <button type="button" className="scorer-clock-button" onClick={roomClock.pause}>
+                  Pause
+                </button>
+              )}
+              {roomClock.state.status === 'paused' && (
+                <button type="button" className="scorer-clock-button" onClick={roomClock.resume}>
+                  Resume
+                </button>
+              )}
+            </span>
+          )}
           <span className={connectionClass(connection)}>
             <span className="scorer-dot" aria-hidden="true" />
             {connectionLabel(connection)}
@@ -670,16 +779,121 @@ export default function Scorer(props: IScorerProps) {
                 />
               )}
 
+              {phase.kind === 'tossup' && playBlockedByProtest && (
+                <div className="scorer-check-outstanding" role="alert">
+                  <strong>Resolve the open protest before the next sudden-death tossup.</strong>
+                  <button type="button" className="scorer-action" onClick={() => setDialog('protests')}>
+                    Resolve protest
+                  </button>
+                </div>
+              )}
+
               {phase.kind === 'tossup' && (
                 <div className="scorer-tossup-actions">
-                  <button type="button" className="scorer-nobuzz" onClick={recordNoBuzz}>
-                    No buzz
+                  <button
+                    type="button"
+                    className="scorer-nobuzz"
+                    onClick={recordNoBuzz}
+                    disabled={playBlockedByProtest}
+                  >
+                    {noBuzzLabel}
                   </button>
                   {phase.eligibleTeams.length === 1 && (
                     <p className="scorer-hint">
                       {phase.eligibleTeams[0] === 'left' ? game.left.name : game.right.name} may still answer.
                     </p>
                   )}
+                </div>
+              )}
+
+              {phase.kind === 'checkpoint' && (
+                <div className="scorer-checkpoint" aria-label={`${phase.checkpoint} checkpoint`}>
+                  <p className="scorer-checkpoint-title">
+                    {phase.checkpoint === 'overtime' ? 'Regulation complete' : 'Initial overtime complete'}
+                  </p>
+                  <p className="scorer-complete-score">
+                    <span>
+                      {game.left.name} <strong>{game.left.points}</strong>
+                    </span>
+                    <span>
+                      {game.right.name} <strong>{game.right.points}</strong>
+                    </span>
+                  </p>
+                  <p className="scorer-dialog-note">
+                    {phase.checkpoint === 'overtime'
+                      ? `${format.overtime.minimumQuestionCount} tossups · ${
+                          format.overtime.includesBonuses ? 'bonuses included' : 'no bonuses'
+                        }. Players may be changed now.`
+                      : 'Next score change wins. Players may be changed now.'}
+                  </p>
+                  {openProtests.length > 0 && (
+                    <div className="scorer-check-outstanding">
+                      <strong>
+                        {(phase.checkpoint === 'overtime' && protestCheckpointPolicy(procedure) !== 'none') ||
+                        (phase.checkpoint === 'sudden-death' &&
+                          (protestCheckpointPolicy(procedure) === 'phase-boundaries' ||
+                            protestCheckpointPolicy(procedure) === 'strict-overtime'))
+                          ? 'Resolve open protests before continuing.'
+                          : 'Open protest recorded; continuing is allowed by this procedure.'}
+                      </strong>
+                      <button type="button" className="scorer-action" onClick={() => setDialog('protests')}>
+                        Resolve protest
+                      </button>
+                    </div>
+                  )}
+                  <div className="scorer-complete-actions">
+                    <button type="button" className="scorer-action" onClick={() => setDialog('players')}>
+                      Players
+                    </button>
+                    <button
+                      type="button"
+                      className="scorer-submit"
+                      disabled={
+                        openProtests.length > 0 &&
+                        ((phase.checkpoint === 'overtime' && protestCheckpointPolicy(procedure) !== 'none') ||
+                          (phase.checkpoint === 'sudden-death' &&
+                            (protestCheckpointPolicy(procedure) === 'phase-boundaries' ||
+                              protestCheckpointPolicy(procedure) === 'strict-overtime')))
+                      }
+                      onClick={() =>
+                        record({
+                          id: newEventId(),
+                          type: phase.checkpoint === 'overtime' ? 'begin-overtime' : 'begin-sudden-death',
+                          questionNumber: currentQuestion,
+                        })
+                      }
+                    >
+                      {phase.checkpoint === 'overtime' ? 'Begin overtime' : 'Begin sudden death'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {phase.kind === 'timeout' && (
+                <div className="scorer-timeout" aria-label="Timeout active">
+                  <p className="scorer-checkpoint-title">
+                    Timeout · {phase.team === 'left' ? game.left.name : game.right.name}
+                  </p>
+                  {timeoutRemainingMs !== undefined && (
+                    <p className="scorer-timeout-clock" aria-label="Timeout remaining">
+                      {timeoutRemainingMs === 0 ? 'Timeout time elapsed' : formatClock(timeoutRemainingMs)}
+                    </p>
+                  )}
+                  <p className="scorer-dialog-note">Players and substitutions are allowed while play is paused.</p>
+                  <div className="scorer-complete-actions">
+                    <button type="button" className="scorer-action" onClick={() => setDialog('players')}>
+                      Players
+                    </button>
+                    <button
+                      type="button"
+                      className="scorer-submit"
+                      onClick={() =>
+                        record({ id: newEventId(), type: 'timeout-resume', questionNumber: currentQuestion })
+                      }
+                    >
+                      Resume play
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -718,7 +932,7 @@ export default function Scorer(props: IScorerProps) {
             </div>
           </main>
 
-          <RecentRail game={game} onInspect={openReviewAt} />
+          <RecentRail game={game} onInspect={(questionNumber) => openReviewAt(questionNumber, true)} />
         </div>
       )}
 
@@ -731,6 +945,9 @@ export default function Scorer(props: IScorerProps) {
         </button>
         <button type="button" className="scorer-action" onClick={() => setDialog('players')}>
           Players
+        </button>
+        <button type="button" className="scorer-action" onClick={() => setDialog('flag')}>
+          Flag
         </button>
         <GameMenu items={menuItems} />
         {warnings.length > 0 && phase.kind !== 'complete' && (
@@ -747,6 +964,8 @@ export default function Scorer(props: IScorerProps) {
           rosterSyncStatus={rosterSyncStatus}
           timeouts={game.timeouts}
           timeoutsPerTeam={procedure?.timeoutsPerTeam ?? 0}
+          lineupChangeAllowed={lineupChangeAllowed}
+          lineupChangeReason={lineupChangeReason}
           onSubstitute={(team, activePlayers) => {
             record({ id: newEventId(), type: 'substitution', questionNumber: lineupQuestion, team, activePlayers });
             setDialog(null);
@@ -833,6 +1052,7 @@ export default function Scorer(props: IScorerProps) {
           questionNumber={currentQuestion}
           controlAvailable={onRequestControl !== undefined}
           requestPending={controlRequestPending}
+          initialCategory={issueCategory}
           onReport={async (category, details, requestControl) => {
             let label = 'Issue';
             if (category === 'protest') label = 'Protest';
@@ -867,12 +1087,26 @@ export default function Scorer(props: IScorerProps) {
           events={events.events}
           format={format}
           focusQuestion={reviewFocus}
+          editQuestion={reviewEditQuestion}
           onReplace={events.replace}
           onRemove={events.remove}
+          onReplaceQuestion={events.replaceQuestion}
+          onOpenReplacement={openReplacementAt}
           onClose={() => {
             setDialog(null);
             setReviewFocus(undefined);
+            setReviewEditQuestion(undefined);
           }}
+        />
+      )}
+      {dialog === 'flag' && (
+        <FlagDialog
+          onProtest={() => setDialog('protests')}
+          onIssue={(category) => {
+            setIssueCategory(category);
+            setDialog('issue');
+          }}
+          onClose={() => setDialog(null)}
         />
       )}
       {dialog === 'protests' && (
@@ -920,14 +1154,27 @@ export default function Scorer(props: IScorerProps) {
         <TimeoutDialog
           game={game}
           timeoutsPerTeam={procedure?.timeoutsPerTeam ?? 0}
-          onRecord={(team) => record({ id: newEventId(), type: 'timeout', questionNumber: currentQuestion, team })}
+          onRecord={(team) =>
+            record({
+              id: newEventId(),
+              type: 'timeout-start',
+              questionNumber: currentQuestion,
+              team,
+              startedAt: Date.now(),
+            })
+          }
           onClose={() => setDialog(null)}
         />
       )}
-      {dialog === 'replace' && (phase.kind === 'tossup' || phase.kind === 'bonus') && (
+      {dialog === 'replace' && (reviewFocus !== undefined || phase.kind === 'tossup' || phase.kind === 'bonus') && (
         <ReplaceQuestionDialog
-          questionNumber={phase.questionNumber}
-          bonusReplaceable={phase.kind === 'bonus' || currentCycleHasBonus}
+          questionNumber={reviewFocus ?? (phase.kind === 'tossup' || phase.kind === 'bonus' ? phase.questionNumber : 1)}
+          bonusReplaceable={
+            (reviewFocus !== undefined &&
+              (game.questions.find((question) => question.questionNumber === reviewFocus)?.bonus !== undefined ||
+                game.questions.find((question) => question.questionNumber === reviewFocus)?.awaitingBonus === true)) ||
+            (reviewFocus === undefined && (phase.kind === 'bonus' || currentCycleHasBonus))
+          }
           onReplace={(scope, reason) => {
             /*
              * The void and the note go together as one action: a cycle removed from the scoresheet
@@ -938,20 +1185,31 @@ export default function Scorer(props: IScorerProps) {
               {
                 id: newEventId(),
                 type: 'note',
-                questionNumber: phase.questionNumber,
+                questionNumber: reviewFocus ?? currentQuestion,
                 text: `${scope === 'bonus' ? 'Bonus' : 'Question'} replaced: ${reason}`,
                 flagged: true,
               },
-              { id: newEventId(), type: 'question-void', questionNumber: phase.questionNumber, scope, reason },
+              {
+                id: newEventId(),
+                type: 'question-void',
+                questionNumber: reviewFocus ?? currentQuestion,
+                scope,
+                reason,
+              },
             );
             setDialog(null);
             setOperationNotice(
               scope === 'bonus'
-                ? `The bonus on question ${phase.questionNumber} was cleared. Score the replacement.`
-                : `Question ${phase.questionNumber} was cleared. Score the replacement as question ${phase.questionNumber}.`,
+                ? `The bonus on question ${reviewFocus ?? currentQuestion} was cleared. Score the replacement.`
+                : `Question ${reviewFocus ?? currentQuestion} was cleared. Score the replacement as question ${
+                    reviewFocus ?? currentQuestion
+                  }.`,
             );
           }}
-          onClose={() => setDialog(null)}
+          onClose={() => {
+            setDialog(null);
+            setReviewFocus(undefined);
+          }}
         />
       )}
       {dialog === 'end-early' && (

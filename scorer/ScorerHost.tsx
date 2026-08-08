@@ -117,6 +117,7 @@ export default function ScorerHost(props: IScorerHostProps) {
 
   return (
     <Scorer
+      gameKey={gameKey}
       format={format}
       setup={activeSetup}
       events={events}

@@ -3,7 +3,9 @@ import { HelpRequestCategory, helpRequestCategoryLabels } from '../../main/serve
 import { IScorekeeperFormat } from '../../renderer/Services/ScorekeeperFormat';
 import { IDerivedGame } from '../scoring/deriveGame';
 import { ScoreEvent } from '../scoring/ScoreEvents';
+import { editableQuestionFromEvents, IEditableQuestion } from '../scoring/questionCorrection';
 import { bonusTotalProblem, lightningTotalProblem } from './bonusOptions';
+import QuestionEditor from './QuestionEditor';
 import ScorerDialog from './ScorerDialog';
 import { readScorerRecovery } from './ScorerRecovery';
 
@@ -28,11 +30,20 @@ export function IssueDialog(props: {
   questionNumber: number;
   controlAvailable: boolean;
   requestPending: boolean;
+  // eslint-disable-next-line react/require-default-props
+  initialCategory?: HelpRequestCategory;
   onReport: (category: HelpRequestCategory, details: string, requestControl: boolean) => Promise<void>;
   onClose: () => void;
 }) {
-  const { questionNumber, controlAvailable, requestPending, onReport, onClose } = props;
-  const [category, setCategory] = useState<HelpRequestCategory>('question-packet');
+  const {
+    questionNumber,
+    controlAvailable,
+    requestPending,
+    initialCategory = 'question-packet',
+    onReport,
+    onClose,
+  } = props;
+  const [category, setCategory] = useState<HelpRequestCategory>(initialCategory);
   const [details, setDetails] = useState('');
   const [requestControl, setRequestControl] = useState(controlAvailable && !requestPending);
   const [sending, setSending] = useState(false);
@@ -104,6 +115,40 @@ export function IssueDialog(props: {
   );
 }
 
+/** One compact entry point for the things a scorekeeper may need to flag during live play. */
+export function FlagDialog(props: {
+  onProtest: () => void;
+  onIssue: (category: HelpRequestCategory) => void;
+  onClose: () => void;
+}) {
+  const { onProtest, onIssue, onClose } = props;
+  const issueChoices: HelpRequestCategory[] = [
+    'question-packet',
+    'scoring-problem',
+    'equipment-technical',
+    'rules-question',
+    'roster-change',
+    'other',
+  ];
+  return (
+    <ScorerDialog title="Flag" onClose={onClose}>
+      <p className="scorer-dialog-note">
+        Choose what needs attention. The game can keep going while control reviews it.
+      </p>
+      <div className="scorer-flag-options">
+        <button type="button" className="scorer-choice" onClick={onProtest}>
+          Protest / disputed ruling
+        </button>
+        {issueChoices.map((category) => (
+          <button key={category} type="button" className="scorer-choice" onClick={() => onIssue(category)}>
+            {helpRequestCategoryLabels[category]}
+          </button>
+        ))}
+      </div>
+    </ScorerDialog>
+  );
+}
+
 function signed(value: number): string {
   return value > 0 ? `+${value}` : String(value);
 }
@@ -132,7 +177,11 @@ function eventDescription(event: ScoreEvent, format: IScorekeeperFormat): string
     }`;
   if (event.type === 'half-break') return `End of half after Tossup ${event.lastQuestion}`;
   if (event.type === 'half-resume') return 'Score confirmed at the break';
+  if (event.type === 'begin-overtime') return 'Begin overtime';
+  if (event.type === 'begin-sudden-death') return 'Begin sudden death';
   if (event.type === 'timeout') return `Timeout: ${event.team}`;
+  if (event.type === 'timeout-start') return `Timeout started: ${event.team}`;
+  if (event.type === 'timeout-resume') return 'Timeout ended · play resumed';
   if (event.type === 'protest')
     return `Protest (${event.team}, ${event.status}): ${event.description}${
       event.resolution ? ` — ${event.resolution}` : ''
@@ -383,92 +432,144 @@ export function ScoresheetReviewDialog(props: {
   format: IScorekeeperFormat;
   onReplace: (id: string, event: ScoreEvent) => void;
   onRemove: (id: string) => void;
+  onReplaceQuestion: (questionNumber: number, question: IEditableQuestion) => boolean;
   /** Scroll to and highlight this question. What the rail and an upheld protest both open. */
   // eslint-disable-next-line react/require-default-props
   focusQuestion?: number;
+  /** Open the focused question directly in the atomic editor, as Recent does. */
+  // eslint-disable-next-line react/require-default-props
+  editQuestion?: number;
+  /** Open the existing replacement workflow for the focused question. */
+  // eslint-disable-next-line react/require-default-props
+  onOpenReplacement?: (questionNumber: number) => void;
   onClose: () => void;
 }) {
-  const { game, events, format, onReplace, onRemove, focusQuestion, onClose } = props;
+  const {
+    game,
+    events,
+    format,
+    onReplace,
+    onRemove,
+    onReplaceQuestion,
+    focusQuestion,
+    editQuestion,
+    onOpenReplacement,
+    onClose,
+  } = props;
   const [editing, setEditing] = useState<string | null>(null);
+  const [editingQuestion, setEditingQuestion] = useState<number | null>(editQuestion ?? null);
   const questionNumbers = Array.from(new Set(events.map((event) => event.questionNumber))).sort((a, b) => a - b);
   return (
-    <ScorerDialog title="Full scoresheet review" onClose={onClose} wide>
-      <p className="scorer-dialog-note">
-        {game.left.name} {game.left.points} · {game.right.name} {game.right.points}. Corrections recalculate every total
-        and player stat.
-      </p>
-      {game.personnelProblems.map((problem) => (
-        <p key={problem.eventId} className="scorer-problem">
-          {problem.message}
-        </p>
-      ))}
-      {game.integrityProblems.map((problem) => (
-        <p key={problem.eventId} className="scorer-problem">
-          {problem.message}
-        </p>
-      ))}
-      {!questionNumbers.length ? (
-        <p className="scorer-rail-empty">Nothing has been recorded yet.</p>
+    <ScorerDialog
+      title={editingQuestion === null ? 'Full scoresheet review' : `Question ${editingQuestion} editor`}
+      onClose={onClose}
+      wide
+    >
+      {editingQuestion !== null ? (
+        <QuestionEditor
+          game={game}
+          format={format}
+          initial={editableQuestionFromEvents(events, editingQuestion)}
+          onSave={(question) => onReplaceQuestion(editingQuestion, question)}
+          onCancel={() => setEditingQuestion(null)}
+          onOpenReplacement={onOpenReplacement ? () => onOpenReplacement(editingQuestion) : undefined}
+        />
       ) : (
-        <ol className="scorer-review-list">
-          {questionNumbers.map((questionNumber) => (
-            <li
-              key={questionNumber}
-              className={questionNumber === focusQuestion ? 'is-focused' : undefined}
-              ref={
-                questionNumber === focusQuestion
-                  ? (element) => {
-                      // Guarded because scrolling is a nicety and not every environment has it;
-                      // the outline is what actually finds the question.
-                      if (typeof element?.scrollIntoView === 'function') element.scrollIntoView({ block: 'nearest' });
-                    }
-                  : undefined
-              }
-            >
-              <strong>Q{questionNumber}</strong>
-              <ul>
-                {events
-                  .filter((event) => event.questionNumber === questionNumber)
-                  .map((event) => (
-                    <li key={event.id} className="scorer-review-event">
-                      <span>{eventDescription(event, format)}</span>
-                      <span className="scorer-review-actions">
-                        {['tossup-buzz', 'bonus', 'substitution', 'adjustment', 'lightning', 'note'].includes(
-                          event.type,
-                        ) && (
-                          <button type="button" className="scorer-text-action" onClick={() => setEditing(event.id)}>
-                            Edit
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          className="scorer-text-action is-destructive"
-                          onClick={() => {
-                            // eslint-disable-next-line no-alert
-                            if (window.confirm('Remove this event from the scoresheet?')) onRemove(event.id);
-                          }}
-                        >
-                          Remove
-                        </button>
-                      </span>
-                      {editing === event.id && (
-                        <EditableEvent
-                          event={event}
-                          format={format}
-                          game={game}
-                          onSave={(next) => {
-                            onReplace(event.id, next);
-                            setEditing(null);
-                          }}
-                          onCancel={() => setEditing(null)}
-                        />
-                      )}
-                    </li>
-                  ))}
-              </ul>
-            </li>
+        <>
+          <p className="scorer-dialog-note">
+            {game.left.name} {game.left.points} · {game.right.name} {game.right.points}. Corrections recalculate every
+            total and player stat.
+          </p>
+          {game.personnelProblems.map((problem) => (
+            <p key={problem.eventId} className="scorer-problem">
+              {problem.message}
+            </p>
           ))}
-        </ol>
+          {game.integrityProblems.map((problem) => (
+            <p key={problem.eventId} className="scorer-problem">
+              {problem.message}
+            </p>
+          ))}
+          {!questionNumbers.length ? (
+            <p className="scorer-rail-empty">Nothing has been recorded yet.</p>
+          ) : (
+            <ol className="scorer-review-list">
+              {questionNumbers.map((questionNumber) => (
+                <li
+                  key={questionNumber}
+                  className={questionNumber === focusQuestion ? 'is-focused' : undefined}
+                  ref={
+                    questionNumber === focusQuestion
+                      ? (element) => {
+                          // Guarded because scrolling is a nicety and not every environment has it;
+                          // the outline is what actually finds the question.
+                          if (typeof element?.scrollIntoView === 'function')
+                            element.scrollIntoView({ block: 'nearest' });
+                        }
+                      : undefined
+                  }
+                >
+                  <div className="scorer-review-question-head">
+                    <strong>Q{questionNumber}</strong>
+                    <button type="button" className="scorer-choice" onClick={() => setEditingQuestion(questionNumber)}>
+                      Edit question
+                    </button>
+                  </div>
+                  <ul>
+                    {events
+                      .filter((event) => event.questionNumber === questionNumber)
+                      .map((event) => {
+                        const cycleEvent = ['tossup-buzz', 'tossup-no-penalty', 'tossup-dead', 'bonus'].includes(
+                          event.type,
+                        );
+                        return (
+                          <li key={event.id} className="scorer-review-event">
+                            <span>{eventDescription(event, format)}</span>
+                            <span className="scorer-review-actions">
+                              {!cycleEvent &&
+                                ['substitution', 'adjustment', 'lightning', 'note'].includes(event.type) && (
+                                  <button
+                                    type="button"
+                                    className="scorer-text-action"
+                                    onClick={() => setEditing(event.id)}
+                                  >
+                                    Edit
+                                  </button>
+                                )}
+                              {!cycleEvent && (
+                                <button
+                                  type="button"
+                                  className="scorer-text-action is-destructive"
+                                  onClick={() => {
+                                    // eslint-disable-next-line no-alert
+                                    if (window.confirm('Remove this event from the scoresheet?')) onRemove(event.id);
+                                  }}
+                                >
+                                  Remove
+                                </button>
+                              )}
+                            </span>
+                            {editing === event.id && (
+                              <EditableEvent
+                                event={event}
+                                format={format}
+                                game={game}
+                                onSave={(next) => {
+                                  onReplace(event.id, next);
+                                  setEditing(null);
+                                }}
+                                onCancel={() => setEditing(null)}
+                              />
+                            )}
+                          </li>
+                        );
+                      })}
+                  </ul>
+                </li>
+              ))}
+            </ol>
+          )}
+        </>
       )}
     </ScorerDialog>
   );

@@ -311,6 +311,12 @@
   background: var(--room-surface-sunken);
 }
 
+.scorer-nobuzz:disabled {
+  color: var(--room-faint);
+  border-color: var(--room-border);
+  cursor: default;
+}
+
 .scorer-choice {
   min-width: 56px;
   padding: 10px 16px;
@@ -669,6 +675,34 @@
   color: var(--room-warning);
 }
 
+.scorer-clock {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.scorer-clock.is-expired {
+  color: var(--room-warning);
+  font-weight: 600;
+}
+
+.scorer-clock-button {
+  padding: 2px 6px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--room-text);
+  background: var(--room-surface);
+  border: 1px solid var(--room-border-strong);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.scorer-clock-button:hover {
+  background: var(--room-surface-sunken);
+}
+
 .scorer-dialog::backdrop {
   background: rgb(28 29 32 / 32%);
 }
@@ -998,6 +1032,164 @@
   margin: 0 0 6px;
   font-size: 12px;
   color: var(--room-warning);
+}
+
+.scorer-checkpoint,
+.scorer-timeout {
+  width: 100%;
+  max-width: 620px;
+  margin: 0 auto;
+  padding: 12px 0;
+  text-align: center;
+}
+
+.scorer-checkpoint-title {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.scorer-checkpoint .scorer-complete-score {
+  display: flex;
+  justify-content: center;
+  gap: 24px;
+  margin: 0 0 8px;
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+}
+
+.scorer-checkpoint .scorer-complete-actions,
+.scorer-timeout .scorer-complete-actions {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.scorer-timeout-clock {
+  margin: 4px 0;
+  font-size: 24px;
+  font-variant-numeric: tabular-nums;
+}
+
+.scorer-flag-options {
+  display: grid;
+  gap: 8px;
+}
+
+.scorer-question-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.scorer-question-scoreline {
+  margin: 0;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--room-muted);
+}
+
+.scorer-question-flags {
+  padding: 8px 10px;
+  border-left: 3px solid var(--room-warning);
+  background: var(--room-surface-sunken);
+  font-size: 12px;
+}
+
+.scorer-question-flags p {
+  margin: 4px 0 0;
+}
+
+.scorer-question-section {
+  padding-top: 12px;
+  border-top: 1px solid var(--room-border);
+}
+
+.scorer-question-section h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.scorer-question-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.scorer-question-attempts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.scorer-question-attempt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.scorer-question-attempt select,
+.scorer-question-bonus select,
+.scorer-question-bonus input,
+.scorer-question-part input {
+  min-width: 0;
+  padding: 6px 7px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--room-text);
+  background: var(--room-surface);
+  border: 1px solid var(--room-border-strong);
+  border-radius: 3px;
+}
+
+.scorer-question-attempt-number {
+  width: 18px;
+  color: var(--room-muted);
+}
+
+.scorer-question-actions,
+.scorer-question-bonus,
+.scorer-question-parts {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.scorer-question-actions {
+  margin-top: 10px;
+}
+
+.scorer-question-bonus {
+  align-items: flex-end;
+}
+
+.scorer-question-bonus label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--room-muted);
+}
+
+.scorer-question-parts {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.scorer-question-part {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--room-muted);
 }
 
 /* Bonus parts. One row per part, the choices in a line, and the running total under them. */

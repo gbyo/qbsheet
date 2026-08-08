@@ -105,9 +105,9 @@ export default function TeamPanel(props: ITeamPanelProps) {
                 disabled={!scoringEnabled || !eligible}
                 onClick={() => onWrongNoPenalty(player.name)}
                 aria-label={`${player.name} wrong, no penalty`}
-                title="Wrong answer, no penalty"
+                title={negsAvailable ? 'Wrong answer after readout, no penalty' : 'Wrong answer, no penalty'}
               >
-                0
+                {negsAvailable ? '0 after readout' : '0'}
               </button>
             </span>
           </li>

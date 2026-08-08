@@ -25,8 +25,8 @@
  */
 import { LeftOrRight } from '../../renderer/Utils/UtilTypes';
 import { IScorekeeperFormat } from '../../renderer/Services/ScorekeeperFormat';
-import { IRoomProcedure } from '../../renderer/Services/RoomProcedure';
-import deriveGame, { IGameSetup, IDerivedGame } from './deriveGame';
+import { IRoomProcedure, protestCheckpointPolicy, substitutionPolicy } from '../../renderer/Services/RoomProcedure';
+import deriveGame, { IGameSetup, IDerivedGame, lineupChangeEffectiveQuestion } from './deriveGame';
 import { ScoreEvent, usesTossupOpportunity } from './ScoreEvents';
 
 export type ScoreEventVerdict = { ok: true } | { ok: false; reason: string };
@@ -68,6 +68,12 @@ export default function canApplyScoreEvent(
 ): ScoreEventVerdict {
   const { format, procedure } = context;
   const { phase } = game;
+  const openProtestStopsSuddenDeath =
+    phase.kind === 'tossup' &&
+    phase.period === 'overtime' &&
+    game.suddenDeathStarted &&
+    protestCheckpointPolicy(procedure) === 'strict-overtime' &&
+    game.protests.some((protest) => protest.status === 'open');
 
   if (events.some((event) => event.id === candidate.id)) {
     return refuse('That action was already recorded.');
@@ -78,14 +84,20 @@ export default function canApplyScoreEvent(
 
   const complete = phase.kind === 'complete';
 
+  if (game.activeTimeout && candidate.type !== 'timeout-resume' && candidate.type !== 'substitution') {
+    return refuse('A timeout is active. Resume play before scoring or changing the game.');
+  }
+
   switch (candidate.type) {
     // #region tossup
 
     case 'tossup-buzz':
     case 'tossup-no-penalty': {
+      if (openProtestStopsSuddenDeath) return refuse('Resolve the open protest before the next sudden-death tossup.');
       if (phase.kind === 'lineup') return refuse('Choose who is starting before scoring the first tossup.');
       if (phase.kind === 'score-check') return refuse('Confirm the score with the moderator before scoring again.');
       if (phase.kind === 'bonus') return refuse('Score the bonus before the next tossup.');
+      if (phase.kind !== 'tossup') return refuse('Wait for the next tossup checkpoint.');
       if (complete) return refuse('This game is over. Reopen it from the scoresheet review to change it.');
       if (candidate.questionNumber !== phase.questionNumber) {
         return refuse(`That answer belongs to Tossup ${phase.questionNumber}.`);
@@ -116,9 +128,11 @@ export default function canApplyScoreEvent(
     }
 
     case 'tossup-dead': {
+      if (openProtestStopsSuddenDeath) return refuse('Resolve the open protest before the next sudden-death tossup.');
       if (phase.kind === 'lineup') return refuse('Choose who is starting before scoring the first tossup.');
       if (phase.kind === 'score-check') return refuse('Confirm the score with the moderator before scoring again.');
       if (phase.kind === 'bonus') return refuse('Score the bonus before the next tossup.');
+      if (phase.kind !== 'tossup') return refuse('Wait for the next tossup checkpoint.');
       if (complete) return refuse('This game is over. Reopen it from the scoresheet review to change it.');
       if (candidate.questionNumber !== phase.questionNumber) {
         return refuse(`That belongs to Tossup ${phase.questionNumber}.`);
@@ -156,7 +170,23 @@ export default function canApplyScoreEvent(
       if (new Set(candidate.activePlayers).size !== candidate.activePlayers.length) {
         return refuse('The same player is listed twice.');
       }
+      const roster = new Set(game[candidate.team].players.map((player) => player.name));
+      if (candidate.activePlayers.some((name) => !roster.has(name))) {
+        return refuse('Every active player must be on the team roster.');
+      }
       if (complete) return refuse('This game is over.');
+      if (candidate.questionNumber !== lineupChangeEffectiveQuestion(game, events)) {
+        return refuse(`The next safe lineup boundary is Tossup ${lineupChangeEffectiveQuestion(game, events)}.`);
+      }
+      if (
+        substitutionPolicy(procedure) === 'breaks-timeouts-overtime' &&
+        phase.kind !== 'lineup' &&
+        phase.kind !== 'score-check' &&
+        phase.kind !== 'checkpoint' &&
+        phase.kind !== 'timeout'
+      ) {
+        return refuse('Lineup changes are available at halftime, timeouts, and overtime checkpoints.');
+      }
       return allowed;
     }
 
@@ -176,7 +206,28 @@ export default function canApplyScoreEvent(
       return allowed;
     }
 
+    case 'begin-overtime':
+    case 'begin-sudden-death': {
+      const expected = candidate.type === 'begin-overtime' ? 'overtime' : 'sudden-death';
+      if (phase.kind !== 'checkpoint' || phase.checkpoint !== expected) {
+        return refuse(`The game is not at the ${expected} checkpoint.`);
+      }
+      if (candidate.questionNumber !== phase.afterQuestion) {
+        return refuse(`That checkpoint belongs after Tossup ${phase.afterQuestion}.`);
+      }
+      const openProtests = game.protests.filter((protest) => protest.status === 'open');
+      const policy = protestCheckpointPolicy(procedure);
+      if (
+        openProtests.length > 0 &&
+        (policy === 'phase-boundaries' || (policy === 'strict-overtime' && expected === 'sudden-death'))
+      ) {
+        return refuse('Resolve the open protest before continuing at this checkpoint.');
+      }
+      return allowed;
+    }
+
     case 'half-break': {
+      if (!procedure?.halves) return refuse('This room does not use halftime checkpoints.');
       if (game.awaitingScoreCheck) return refuse('The score check for this break is still open.');
       if (complete) return refuse('This game is over.');
       return allowed;
@@ -199,6 +250,27 @@ export default function canApplyScoreEvent(
       return allowed;
     }
 
+    case 'timeout-start': {
+      if (complete) return refuse('This game is over.');
+      const permitted = procedure?.timeoutsPerTeam ?? 0;
+      if (permitted <= 0) return refuse('This tournament does not track timeouts.');
+      if (game.activeTimeout) return refuse('A timeout is already active.');
+      if (phase.kind === 'lineup' || phase.kind === 'score-check' || phase.kind === 'checkpoint') {
+        return refuse('A timeout is not available at this checkpoint.');
+      }
+      if (game.timeouts[candidate.team] >= permitted) {
+        return refuse(`${game[candidate.team].name} has no timeouts remaining.`);
+      }
+      if (candidate.startedAt !== undefined && (!Number.isFinite(candidate.startedAt) || candidate.startedAt < 0)) {
+        return refuse('A timeout start needs a valid timestamp.');
+      }
+      return allowed;
+    }
+
+    case 'timeout-resume':
+      if (!game.activeTimeout) return refuse('There is no active timeout to resume.');
+      return allowed;
+
     case 'end-game-early': {
       if (complete) return refuse('This game is already over.');
       if (candidate.reason.trim() === '') return refuse('Say why the game is ending early.');
@@ -210,7 +282,6 @@ export default function canApplyScoreEvent(
 
     case 'question-void': {
       if (candidate.reason.trim() === '') return refuse('Say what went wrong with the question.');
-      if (complete) return refuse('This game is over.');
       const cycle = game.questions.find((question) => question.questionNumber === candidate.questionNumber);
       if (candidate.scope === 'bonus') {
         if (!cycle || (!cycle.bonus && !cycle.awaitingBonus)) return refuse('There is no bonus on that question.');
