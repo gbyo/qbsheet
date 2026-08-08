@@ -13,6 +13,7 @@ import { useState } from 'react';
 import { LeftOrRight } from '../../renderer/Utils/UtilTypes';
 import { IDerivedTeam } from '../scoring/deriveGame';
 import ScorerDialog from './ScorerDialog';
+import { roomPlayerNameMaxLength } from '../../main/server/ServerTypes';
 
 export interface IPlayersDialogProps {
   left: IDerivedTeam;
@@ -129,7 +130,7 @@ function TeamLineup(props: {
           <input
             id={`scorer-add-player-${side}`}
             value={newPlayer}
-            maxLength={120}
+            maxLength={roomPlayerNameMaxLength}
             placeholder="Player name"
             onChange={(event) => setNewPlayer(event.target.value)}
           />

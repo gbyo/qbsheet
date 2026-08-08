@@ -225,10 +225,17 @@ export default function deriveGame(format: IScorekeeperFormat, setup: IGameSetup
   const eventsByCycle = new Map<number, ScoreEvent[]>();
   // A type predicate rather than a bare boolean, so the branches below narrow to the two events
   // this actually holds instead of the whole union.
-  const personnelEvents = events.filter(
-    (event): event is ISubstitutionEvent | IRosterAddEvent =>
-      event.type === 'substitution' || event.type === 'roster-add',
-  );
+  const personnelEvents = events
+    .filter(
+      (event): event is ISubstitutionEvent | IRosterAddEvent =>
+        event.type === 'substitution' || event.type === 'roster-add',
+    )
+    .sort((left, right) => left.questionNumber - right.questionNumber || events.indexOf(left) - events.indexOf(right));
+  // A roster addition makes the player available locally immediately. Its question number is only
+  // the earliest lineup boundary at which that player may become active.
+  for (const event of personnelEvents) {
+    if (event.type === 'roster-add') playerRecord(event.team, event.playerName);
+  }
   for (const event of events) {
     if (event.type === 'note') {
       notes.push({ questionNumber: event.questionNumber, text: event.text, flagged: event.flagged === true });
@@ -267,8 +274,7 @@ export default function deriveGame(format: IScorekeeperFormat, setup: IGameSetup
     for (const event of personnelEvents) {
       if (appliedPersonnel.has(event.id) || event.questionNumber > questionNumber) continue;
       appliedPersonnel.add(event.id);
-      if (event.type === 'roster-add') playerRecord(event.team, event.playerName);
-      else {
+      if (event.type === 'substitution') {
         teams[event.team].activePlayers = event.activePlayers.slice();
         for (const name of event.activePlayers) playerRecord(event.team, name);
       }
