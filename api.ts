@@ -25,6 +25,7 @@ import {
 } from '../main/server/ServerTypes';
 import { IModaqGameFormat } from '../renderer/Services/YellowFruitScoringRulesToModaq';
 import type { IScorekeeperFormat } from '../renderer/Services/ScorekeeperFormat';
+import type { IRoomProcedure } from '../renderer/Services/RoomProcedure';
 
 export type ApiResult<T> =
   | { ok: true; value: T }
@@ -47,6 +48,8 @@ export interface ITournamentInfo {
   scoringFormat: IScorekeeperFormat | null;
   /** Timed rounds can end before every regulation tossup is read */
   timedRounds: boolean;
+  /** Halves, clock and timeouts, when the tournament configured any. See `ITournamentSnapshot`. */
+  roomProcedure?: IRoomProcedure;
   roundCount: number;
   teamCount: number;
 }

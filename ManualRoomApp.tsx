@@ -195,6 +195,7 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
       ? gameFormat !== null
       : scoringFormat !== null && scorekeeperFormatProblems(scoringFormat).length === 0;
   const timedRounds = emergency ? kit?.timedRounds === true : tournament?.timedRounds === true;
+  const roomProcedure = emergency ? kit?.roomProcedure : tournament?.roomProcedure;
 
   const normalizeOptionsRef = useRef<IQbjNormalizeOptions | null>(null);
   normalizeOptionsRef.current = gameFormat
@@ -549,6 +550,7 @@ export default function ManualRoomApp({ emergency = false }: IManualRoomAppProps
           tournamentName={emergency ? kit?.tournamentName ?? '' : tournament?.name ?? ''}
           roundName={setup.round.name}
           roomName={emergency ? kit?.roomName : undefined}
+          procedure={roomProcedure}
           connection={online ? RoomConnectionState.Connected : RoomConnectionState.Offline}
           onSubmit={handleScorerSubmit}
           onDownload={activeResult ? () => handleDownload(activeResult) : undefined}
