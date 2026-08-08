@@ -21,6 +21,7 @@ import {
   classifyDeliveryFailure,
   fingerprintPayload,
   isDueForRetry,
+  needsAction,
   parseOutboxRecord,
   selectPrunableEntries,
   sortForDisplay,
@@ -212,9 +213,15 @@ export default class RoomResultOutbox {
     return this.cache.find((entry) => entry.id === id);
   }
 
-  /** Results that still need something to happen before the tournament has them. */
+  /**
+   * Results that still need something to happen before the tournament has them.
+   *
+   * The same question `needsAction` answers, deliberately rather than a second definition of it: a
+   * caller reaching for this instead of the hook's `unresolved` must not quietly get the older rule
+   * that treats a handed-over result as still outstanding.
+   */
   unresolved(): IRoomResultOutboxEntry[] {
-    return this.list().filter((entry) => entry.deliveryState !== 'accepted');
+    return this.list().filter(needsAction);
   }
 
   /**
@@ -406,6 +413,10 @@ export default class RoomResultOutbox {
         lastAttemptAt: undefined,
         retryBlocked: undefined,
         lastError: undefined,
+        // The handover was about the bytes tournament control sent back. This is a different result
+        // for the same game, and leaving the claim on it would stop the room ever delivering the
+        // correction: nothing retries a handed-over entry, and nothing on screen says one is waiting.
+        handedOver: undefined,
         roundNumber: draft.roundNumber ?? correctable.roundNumber,
         roundName: draft.roundName ?? correctable.roundName,
         sessionCredentials: draft.sessionCredentials ?? correctable.sessionCredentials,

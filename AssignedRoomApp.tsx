@@ -89,10 +89,9 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
   const [helpBusy, setHelpBusy] = useState(false);
   const [lifecycleNotice, setLifecycleNotice] = useState('');
   const [emergencyMode, setEmergencyMode] = useState(false);
-  const [scoringKitState, setScoringKitState] = useState(() => {
-    const kit = readScoringKit();
-    return { usable: isScoringKitUsable(kit), tournamentKey: kit?.tournamentKey };
-  });
+  // Only whether this device could score on its own. The kit's tournament key is deliberately not
+  // kept here — see `verifiedTournamentKeyRef` for the one results are tagged with.
+  const [scoringKitUsable, setScoringKitUsable] = useState(() => isScoringKitUsable(readScoringKit()));
   const [conflictNotice, setConflictNotice] = useState('');
   const [activeResultId, setActiveResultId] = useState<string | null>(null);
   const [persistFailure, setPersistFailure] = useState(false);
@@ -124,12 +123,24 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
     hasAssignmentRef.current = assignment !== null;
   }, [assignment]);
 
-  const contextRef = useRef<{ roomId?: string; roomName?: string; tournamentKey?: string }>({});
+  const contextRef = useRef<{ roomId?: string; roomName?: string }>({});
   contextRef.current = {
     roomId: assignment?.roomId,
     roomName: assignment?.roomName,
-    tournamentKey: scoringKitState.tournamentKey,
   };
+
+  /**
+   * The tournament identity the server itself last confirmed, for tagging results.
+   *
+   * Deliberately not read from the scoring kit. The kit's key is only adopted once localStorage has
+   * accepted a write, so a browser that refuses the write would tag results with no tournament at
+   * all — and before the first refresh the kit is whatever this device cached *last* time, which on
+   * a Chromebook reused at the next tournament is a key belonging to someone else's event. A result
+   * labelled with the wrong tournament is worse than one labelled with none, and both are avoidable:
+   * this holds only what `getTournament` returned for the tournament now open, and is dropped the
+   * moment the room or the tournament changes.
+   */
+  const verifiedTournamentKeyRef = useRef<string | undefined>(undefined);
 
   const outboxRef = useRef(outbox);
   outboxRef.current = outbox;
@@ -243,7 +254,10 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
         getRounds(),
         getTeams(),
       ]);
-      if (cancelled || !tournamentResult.ok || !roundsResult.ok || !teamsResult.ok) return;
+      if (cancelled || !tournamentResult.ok) return;
+      // Known as soon as the server says so, whatever becomes of the cached kit below.
+      verifiedTournamentKeyRef.current = tournamentResult.value.tournamentKey;
+      if (!roundsResult.ok || !teamsResult.ok) return;
       const kit = buildScoringKit({
         tournamentKey: tournamentResult.value.tournamentKey,
         tournamentName: kitTournamentName,
@@ -255,7 +269,7 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
         roomName: kitRoomName,
       });
       if (writeScoringKit(kit) && !cancelled) {
-        setScoringKitState({ usable: isScoringKitUsable(kit), tournamentKey: kit.tournamentKey });
+        setScoringKitUsable(isScoringKitUsable(kit));
       }
     };
 
@@ -268,6 +282,12 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
       clearInterval(handle);
     };
   }, [kitTournamentName, kitRoomId, kitRoomName, kitTimedRounds, kitRulesUsable, connection]);
+
+  // A different room, or a different tournament, and the confirmed key no longer describes what
+  // this page is scoring. Dropped rather than carried until a refresh happens to replace it.
+  useEffect(() => {
+    verifiedTournamentKeyRef.current = undefined;
+  }, [kitTournamentName, kitRoomId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -410,7 +430,7 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
     const matchup = scoringMatchupRef.current;
     const roomContext = contextRef.current;
     const enqueued = await outboxRef.current.enqueue({
-      tournamentKey: roomContext.tournamentKey,
+      tournamentKey: verifiedTournamentKeyRef.current,
       roomId: roomContext.roomId,
       scheduledMatchId: matchup?.scheduledMatchId,
       roundNumber: matchup?.roundNumber,
@@ -460,7 +480,7 @@ export default function AssignedRoomApp({ identity }: { identity: IRoomIdentity 
     [scoring],
   );
   const readyAllowed = online && assignment !== null && assignment.gameFormat !== null;
-  const canScoreEmergency = scoring === null && !online && scoringKitState.usable;
+  const canScoreEmergency = scoring === null && !online && scoringKitUsable;
   const activeResult = activeResultId ? outbox.entries.find((entry) => entry.id === activeResultId) : undefined;
   const showDeliveryFailure = deliveryFailed && activeResult !== undefined && activeResult.deliveryState === 'queued';
 
