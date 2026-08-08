@@ -21,7 +21,7 @@
  */
 import { ScoreEvent } from '../scoring/ScoreEvents';
 import { IGameSetup } from '../scoring/deriveGame';
-import { validEvent } from './ScorerRecovery';
+import { validEvent, validSetup } from './ScorerRecovery';
 
 /** Bumped when the stored shape changes. An unrecognized version is treated as no saved game. */
 export const gameSessionVersion = 1;
@@ -115,7 +115,7 @@ export function loadGame(
     if (parsed?.version !== gameSessionVersion) return null;
     if (parsed.gameKey !== gameKey) return null;
     if (!Array.isArray(parsed.events) || !parsed.events.every(validEvent)) return null;
-    if (!parsed.setup?.left?.name || !parsed.setup?.right?.name) return null;
+    if (!validSetup(parsed.setup)) return null;
     if (typeof parsed.updatedAt !== 'string') return null;
 
     const updated = new Date(parsed.updatedAt).getTime();
