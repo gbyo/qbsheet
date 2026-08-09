@@ -8,6 +8,31 @@ QBSheet owns the browser-safe scorer core and the versioned `quizbowl-game` pack
 consumes that same core through the package entry point, so the desktop and browser applications do
 not maintain separate scoring engines.
 
+## Architecture
+
+The interoperability model is deliberately small:
+
+> **QBSheet reads and writes QBJ, and connects to tournament-control software using QBTCP.**
+
+- **Files are QBJ.** One serialization for assignments, results, and mid-game backups.
+- **The network is [QBTCP](docs/QBTCP.md)**, an application-layer HTTP/JSON protocol for
+  communication between electronic scoresheets and tournament-control software. It is *not* a
+  transport protocol and not a replacement for TCP/IP.
+- QBJ is the game and tournament data; QBTCP is the live conversation around that data. QBTCP does
+  not duplicate QBJ's schema.
+
+Specifications:
+
+| Document | Covers |
+| --- | --- |
+| [`docs/QBTCP.md`](docs/QBTCP.md) | The protocol: discovery, pairing, assignment, progress, result, recovery, help, writer ownership, CORS/LAN, security |
+| [`docs/QBJ_ASSIGNMENT_PROFILE.md`](docs/QBJ_ASSIGNMENT_PROFILE.md) | Which QBJ fields are used, graceful degradation, the `_qbtcp` extension, privacy rules, filenames |
+| [`docs/QBG_MIGRATION.md`](docs/QBG_MIGRATION.md) | Retiring `.qbg`, and the `/api/v1` → `/qbtcp/v1` route mapping |
+
+> **Status.** These specifications are agreed ahead of the implementation. The sections below
+> describe the application as it behaves today, on the `.qbg` package and the `/api/v1` surface;
+> both remain supported for import and compatibility after the migration lands.
+
 ## Workflows
 
 - **Open a game file**: choose a `.qbg` package, score locally, and download the finished QBJ.
