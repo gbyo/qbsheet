@@ -1,0 +1,188 @@
+.shell-header-row,
+.readiness-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.shell-button-quiet {
+  padding: 6px 10px;
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.readiness-shell {
+  max-width: 720px;
+}
+
+.readiness-header {
+  align-items: flex-end;
+}
+
+.shell-back {
+  display: inline-block;
+  margin: 0 0 8px;
+  padding: 0;
+  font: inherit;
+  font-size: 13px;
+  color: var(--room-muted);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.shell-back:hover {
+  color: var(--room-text);
+  text-decoration: underline;
+}
+
+.readiness-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--room-border-strong);
+  background: var(--room-surface-sunken);
+  font-size: 13px;
+}
+
+.readiness-summary strong {
+  font-size: 14px;
+}
+
+.readiness-summary span {
+  color: var(--room-muted);
+  text-align: right;
+}
+
+.readiness-summary.is-ready {
+  border-left-color: var(--room-success);
+  background: var(--room-success-bg);
+}
+
+.readiness-summary.is-pending {
+  border-left-color: var(--room-warning-border);
+  background: var(--room-warning-bg);
+}
+
+.readiness-summary.is-failed {
+  border-left-color: var(--room-error-border);
+  background: var(--room-error-bg);
+}
+
+.readiness-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.readiness-row {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 8px;
+  padding: 11px 0;
+  border-top: 1px solid var(--room-border);
+}
+
+.readiness-row:first-child {
+  border-top: 0;
+}
+
+.readiness-mark {
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  border: 1px solid var(--room-border-strong);
+  border-radius: 50%;
+  color: var(--room-muted);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+
+.readiness-row.is-pass .readiness-mark {
+  color: var(--room-success);
+  border-color: var(--room-success);
+}
+
+.readiness-row.is-warn .readiness-mark {
+  color: var(--room-warning);
+  border-color: var(--room-warning-border);
+}
+
+.readiness-row.is-fail .readiness-mark {
+  color: var(--room-error);
+  border-color: var(--room-error-border);
+}
+
+.readiness-name {
+  margin: 0;
+  font-weight: 600;
+}
+
+.readiness-detail,
+.readiness-copy,
+.readiness-footnote {
+  margin: 2px 0 0;
+  color: var(--room-muted);
+  font-size: 13px;
+}
+
+.readiness-inline-action {
+  margin-top: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+.readiness-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 13px;
+}
+
+.readiness-confirm .shell-button {
+  padding: 5px 10px;
+}
+
+.readiness-server-test {
+  margin-top: 12px;
+}
+
+.readiness-test-result {
+  margin: 12px 0 0;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.readiness-test-result.is-pass {
+  color: var(--room-success);
+  background: var(--room-success-bg);
+}
+
+.readiness-test-result.is-fail {
+  color: var(--room-error);
+  background: var(--room-error-bg);
+}
+
+.readiness-footnote {
+  margin-top: 16px;
+}
+
+@media (max-width: 520px) {
+  .shell-header-row,
+  .readiness-header,
+  .readiness-summary {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .readiness-summary span {
+    text-align: left;
+  }
+}
