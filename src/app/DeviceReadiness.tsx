@@ -432,7 +432,7 @@ export default function DeviceReadiness(props: {
                     <div>
                       <p className="readiness-name">{check.title}</p>
                       <p className="readiness-detail">{check.detail}</p>
-                      {check.id === 'persistent-storage' && snapshot.persistentStorage === false && navigator.storage?.persist && (
+                      {check.id === 'persistent-storage' && snapshot.persistentStorage === false && (
                         <button
                           type="button"
                           className="shell-button readiness-inline-action"
