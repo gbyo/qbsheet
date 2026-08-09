@@ -28,6 +28,7 @@ import useLeaveWarning from './useLeaveWarning';
 import WelcomeScreen from './WelcomeScreen';
 import ConnectedSetup, { IConnectedStart } from './ConnectedSetup';
 import ScoringScreen from './ScoringScreen';
+import GameOriginNotice from './GameOriginNotice';
 import CompletionScreen from './CompletionScreen';
 import DuplicateTabNotice from './DuplicateTabNotice';
 import DeviceReadiness from './DeviceReadiness';
@@ -248,17 +249,20 @@ export default function App() {
 
   if (screen.kind === 'scoring' && current) {
     return (
-      <ScoringScreen
-        record={current}
-        store={store}
-        connection={connection}
-        durable={store.durable}
-        onComplete={onComplete}
-        onConnectionLost={() => {
-          clearConnection();
-          setConnection(null);
-        }}
-      />
+      <>
+        <GameOriginNotice packageValue={current.package} />
+        <ScoringScreen
+          record={current}
+          store={store}
+          connection={connection}
+          durable={store.durable}
+          onComplete={onComplete}
+          onConnectionLost={() => {
+            clearConnection();
+            setConnection(null);
+          }}
+        />
+      </>
     );
   }
 
