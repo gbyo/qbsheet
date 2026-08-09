@@ -12,7 +12,8 @@
   "exports": {
     ".": {
       "types": "./dist/core/index.d.ts",
-      "import": "./dist/core/index.js"
+      "import": "./dist/core/index.js",
+      "require": "./dist/core/index.js"
     }
   },
   "files": ["dist"],
