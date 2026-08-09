@@ -1,0 +1,1103 @@
+/**
+ * @vitest-environment jsdom
+ */
+
+/**
+ * The scoring screen, driven the way a scorekeeper drives it.
+ *
+ * No screenshots and nothing about pixels — what is checked here is that the controls a format
+ * implies actually appear, that one click on a player records a whole tossup, and that the screen
+ * moves itself to the next thing without being told.
+ */
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { IScorekeeperFormat } from '../src/scoring/ScorekeeperFormat';
+import scoringRulesToScorekeeperFormat from './rules';
+import { CommonRuleSets, ScoringRules } from './rules';
+import AnswerType from './AnswerType';
+import ScorerHost from '../src/scorer/ScorerHost';
+import { IRoomProcedure } from '../src/scoring/RoomProcedure';
+import { ITeamRoster } from '../src/game/Roster';
+import { RoomConnectionState } from '../src/app/ConnectionState';
+import { HelpRequestCategory } from '../src/app/HelpRequests';
+
+const leftTeam = {
+  name: 'Ninety Six',
+  players: [{ name: 'Sarah Mitchell' }, { name: 'James Robinson' }],
+};
+const rightTeam = {
+  name: 'Greenwood',
+  players: [{ name: 'Emma Turner' }, { name: 'Jordan Lee' }],
+};
+
+function formatFor(mutate: (rules: ScoringRules) => void = () => {}): IScorekeeperFormat {
+  const rules = new ScoringRules(CommonRuleSets.AcfPowers);
+  rules.maximumPlayersPerTeam = 2;
+  mutate(rules);
+  return scoringRulesToScorekeeperFormat(rules);
+}
+
+let gameCounter = 0;
+
+interface IRosterSyncTestOptions {
+  authoritativeLeftTeam?: ITeamRoster;
+  authoritativeRightTeam?: ITeamRoster;
+  onSyncRosterPlayer?: (
+    teamName: string,
+    playerName: string,
+  ) => Promise<{ ok: boolean; error?: string; rejected?: boolean }>;
+}
+
+function renderScorer(
+  format: IScorekeeperFormat,
+  onSubmit?: ReturnType<typeof vi.fn>,
+  onRequestControl?: (category: HelpRequestCategory, message: string) => Promise<void>,
+  procedure?: IRoomProcedure,
+  packetName?: string,
+  rosterOptions: IRosterSyncTestOptions = {},
+) {
+  const submit = onSubmit ?? vi.fn().mockResolvedValue({ ok: true, message: 'Sent' });
+  gameCounter += 1;
+  render(
+    <ScorerHost
+      gameKey={`test-game-${gameCounter}`}
+      format={format}
+      leftTeam={leftTeam}
+      rightTeam={rightTeam}
+      tournamentName="Ninety Six Invitational"
+      roundName="Round 4"
+      roomName="Room 204"
+      packetName={packetName}
+      procedure={procedure}
+      connection={RoomConnectionState.Connected}
+      onDownload={() => undefined}
+      onSubmit={submit}
+      onRequestControl={onRequestControl}
+      authoritativeLeftTeam={rosterOptions.authoritativeLeftTeam}
+      authoritativeRightTeam={rosterOptions.authoritativeRightTeam}
+      onSyncRosterPlayer={rosterOptions.onSyncRosterPlayer}
+    />,
+  );
+  return { onSubmit: submit };
+}
+
+/**
+ * The scoring buttons on one player's row.
+ *
+ * Matched against the roster specifically: a player's name also appears in the activity rail once
+ * they have buzzed, and a bare text query would find both.
+ */
+function buttonsFor(playerName: string): HTMLElement[] {
+  const row = Array.from(document.querySelectorAll('.scorer-player')).find(
+    (candidate) => candidate.querySelector('.scorer-player-name')?.textContent === playerName,
+  );
+  if (!row) throw new Error(`No roster row for ${playerName}`);
+  return within(row as HTMLElement).getAllByRole('button');
+}
+
+/**
+ * Press a control wherever it currently lives.
+ *
+ * The footer and the Game menu trade controls between them as the layout settles, and a test that
+ * hard-codes which one holds "Players" is asserting on a layout decision rather than on behaviour.
+ * This looks on the footer first, then opens the menu.
+ */
+function pressControl(name: string | RegExp) {
+  const onFooter = screen.queryByRole('button', { name });
+  if (onFooter) {
+    fireEvent.click(onFooter);
+    return;
+  }
+  fireEvent.click(screen.getByText('Game'));
+  fireEvent.click(screen.getByText(name));
+}
+
+/** Every control the screen offers, footer and Game menu together. */
+function availableControls(): string[] {
+  fireEvent.click(screen.getByText('Game'));
+  return Array.from(document.querySelectorAll('.scorer-footer button, .scorer-menu-item')).map(
+    (button) => button.textContent ?? '',
+  );
+}
+
+function scoreOf(teamName: string): string {
+  return screen.getByLabelText(`${teamName} score`).textContent ?? '';
+}
+
+/**
+ * Answer the starting-lineup question, for the formats whose cap is smaller than the roster.
+ *
+ * Only those formats ask it. A roster that fits on the floor has one possible lineup and the screen
+ * goes straight to tossup one, which is why most tests below never call this.
+ */
+function editReviewEvent(description: string) {
+  const row = Array.from(document.querySelectorAll('.scorer-review-event')).find(
+    (candidate) => candidate.textContent?.includes(description),
+  );
+  if (!row) throw new Error(`No scoresheet entry reading "${description}"`);
+  const questionRow = row.closest('.scorer-review-list > li');
+  if (!questionRow) throw new Error(`No question row for scoresheet entry reading "${description}"`);
+  fireEvent.click(within(questionRow as HTMLElement).getByRole('button', { name: 'Edit question' }));
+}
+
+/** Add somebody who turned up late, through the panel that keeps that separate from the lineup. */
+function addMissingPlayer(teamLabel: string, name: string) {
+  const lineup = screen.getByLabelText(teamLabel);
+  fireEvent.click(within(lineup).getByText('Add missing player\u2026'));
+  fireEvent.change(within(lineup).getByLabelText('Player name'), { target: { value: name } });
+  fireEvent.click(within(lineup).getByText('Add to roster'));
+}
+
+function chooseStarters(names: string[]) {
+  const prompt = screen.getByLabelText('Starting lineups');
+  for (const name of names) fireEvent.click(within(prompt).getByLabelText(name));
+  fireEvent.click(within(prompt).getByText('Start game'));
+}
+
+/**
+ * The jsdom this repo resolves does not provide localStorage, and the scorer saves through it.
+ *
+ * Shimmed rather than worked around, because the recovery test below is only meaningful if saving
+ * actually happens. What the real storage does when it is full, corrupt or hostile is covered
+ * properly in RoomGameSession.test.ts, which injects its own.
+ */
+function installLocalStorage() {
+  let store: Record<string, string> = {};
+  Object.defineProperty(window, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: (key: string) => store[key] ?? null,
+      setItem: (key: string, value: string) => {
+        store[key] = String(value);
+      },
+      removeItem: (key: string) => {
+        delete store[key];
+      },
+      clear: () => {
+        store = {};
+      },
+    },
+  });
+}
+
+/** jsdom exposes `<dialog>` but not the modal methods browsers provide. */
+function installDialogMethods() {
+  if (typeof HTMLDialogElement.prototype.showModal !== 'function') {
+    HTMLDialogElement.prototype.showModal = function showModal() {
+      this.open = true;
+    };
+  }
+  if (typeof HTMLDialogElement.prototype.close !== 'function') {
+    HTMLDialogElement.prototype.close = function close() {
+      this.open = false;
+      this.dispatchEvent(new Event('close'));
+    };
+  }
+}
+
+beforeEach(() => {
+  installLocalStorage();
+  installDialogMethods();
+});
+
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
+
+describe('what the header says', () => {
+  test('it names the tournament, round and room, and not the software', () => {
+    renderScorer(formatFor());
+
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Ninety Six Invitational');
+    expect(screen.getByText(/Round 4/).textContent).toContain('Room 204');
+    expect(document.body.textContent).not.toMatch(/YellowFruit|MODAQ|Fruity/);
+  });
+
+  // The round arrives already named, from Round.displayName(). A header that adds "Round" itself
+  // reads "Round Round 4" for every numbered round, and renames "Finals" to "Round Finals".
+  test('it shows the round name as it was given, without prefixing it again', () => {
+    renderScorer(formatFor());
+
+    expect(screen.getByText(/Round 4/).textContent).not.toMatch(/Round Round/);
+  });
+
+  test('it shows the connection state and how far the game has got', () => {
+    renderScorer(formatFor());
+
+    expect(screen.getByText('Connected')).toBeTruthy();
+    expect(screen.getByText('Tossup 1 of 20')).toBeTruthy();
+  });
+});
+
+describe('scoring buttons come from the format', () => {
+  /*
+   * Every row also carries a zero: an answer that was simply wrong, which spends the team's chance
+   * at the tossup without scoring or penalizing anything. It is not an answer type and never will
+   * be — a fabricated 0-point AnswerType would appear in every player's P/TU/I line — so it is
+   * checked as the constant it is rather than mixed into the format's own values.
+   */
+  const wrong = '0 after readout';
+
+  test('mACF gives each player +15 / +10 / -5', () => {
+    renderScorer(formatFor());
+
+    expect(buttonsFor('Sarah Mitchell').map((button) => button.textContent)).toEqual(['+15', '+10', '-5', wrong]);
+  });
+
+  test('a format with no powers gives two', () => {
+    renderScorer(formatFor((rules) => rules.applyRuleSet(CommonRuleSets.Acf)));
+
+    expect(buttonsFor('Sarah Mitchell').map((button) => button.textContent)).toEqual(['+10', '-5', wrong]);
+  });
+
+  test('a 7-point format with a -3 shows exactly that', () => {
+    // MODAQ refuses this outright: its base tossup value is hardcoded at 10.
+    renderScorer(
+      formatFor((rules) => {
+        rules.answerTypes = [new AnswerType(7), new AnswerType(-3)];
+      }),
+    );
+
+    expect(buttonsFor('Sarah Mitchell').map((button) => button.textContent)).toEqual(['+7', '-3', wrong]);
+  });
+
+  test('two power tiers and two negs all appear', () => {
+    renderScorer(
+      formatFor((rules) => {
+        rules.answerTypes = [
+          new AnswerType(20),
+          new AnswerType(15),
+          new AnswerType(10),
+          new AnswerType(-5),
+          new AnswerType(-10),
+        ];
+      }),
+    );
+
+    expect(buttonsFor('Sarah Mitchell').map((button) => button.textContent)).toEqual([
+      '+20',
+      '+15',
+      '+10',
+      '-5',
+      '-10',
+      wrong,
+    ]);
+  });
+
+  test('only active players get a row, and no empty seats are drawn', () => {
+    renderScorer(
+      formatFor((rules) => {
+        rules.maximumPlayersPerTeam = 1;
+      }),
+    );
+    // A roster bigger than the floor is a question, not a default. Answer it, then check the floor.
+    chooseStarters(['Sarah Mitchell', 'Emma Turner']);
+
+    expect(screen.queryByText('James Robinson')).toBeNull();
+    expect(screen.getByText('Sarah Mitchell')).toBeTruthy();
+  });
+});
+
+describe('scoring a tossup', () => {
+  test('one click records the buzz and the score moves', () => {
+    renderScorer(formatFor());
+
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]); // +10
+
+    expect(scoreOf('Ninety Six')).toBe('10');
+  });
+
+  test('a conversion goes straight to the bonus, unasked', () => {
+    renderScorer(formatFor());
+
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+
+    const prompt = screen.getByLabelText('Bonus');
+    expect(within(prompt).getByText('Ninety Six')).toBeTruthy();
+  });
+
+  test('the bonus buttons are generated from the bonus structure', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+
+    const choices = within(screen.getByLabelText('Bonus')).getAllByRole('button');
+
+    // Plus the way into part-by-part entry, which is deliberately one press off the fast path.
+    expect(choices.map((button) => button.textContent)).toEqual(['0', '10', '20', '30', 'Parts…']);
+  });
+
+  test('a four-part bonus offers a fifth button', () => {
+    renderScorer(
+      formatFor((rules) => {
+        rules.minimumPartsPerBonus = 4;
+        rules.maximumPartsPerBonus = 4;
+        rules.pointsPerBonusPart = 10;
+        rules.maximumBonusScore = 40;
+      }),
+    );
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+
+    const choices = within(screen.getByLabelText('Bonus')).getAllByRole('button');
+
+    expect(choices.map((button) => button.textContent)).toEqual(['0', '10', '20', '30', '40', 'Parts…']);
+  });
+
+  test('recording the bonus scores it and returns to the next tossup', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+
+    fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('20'));
+
+    expect(scoreOf('Ninety Six')).toBe('30');
+    expect(screen.getByText('Tossup 2 of 20')).toBeTruthy();
+  });
+
+  test('an irregular bonus asks for a number instead of offering buttons', () => {
+    renderScorer(
+      formatFor((rules) => {
+        rules.pointsPerBonusPart = undefined;
+      }),
+    );
+
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+
+    expect(screen.getByLabelText('Bonus points')).toBeTruthy();
+  });
+});
+
+describe('a tossup that is not over yet', () => {
+  test('a neg leaves the other team able to answer', () => {
+    renderScorer(formatFor());
+
+    fireEvent.click(buttonsFor('Sarah Mitchell')[2]); // -5
+
+    expect(scoreOf('Ninety Six')).toBe('-5');
+    expect(screen.getByText(/Greenwood may still answer/)).toBeTruthy();
+    expect(screen.getByText('Tossup 1 of 20')).toBeTruthy();
+  });
+
+  test('the team that negged cannot buzz again on the same tossup', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[2]);
+
+    expect(buttonsFor('Sarah Mitchell').every((button) => (button as HTMLButtonElement).disabled)).toBe(true);
+    expect(buttonsFor('Emma Turner').every((button) => (button as HTMLButtonElement).disabled)).toBe(false);
+  });
+
+  test('the other team converting scores both teams', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[2]);
+
+    fireEvent.click(buttonsFor('Emma Turner')[1]);
+
+    expect(scoreOf('Ninety Six')).toBe('-5');
+    expect(screen.getByLabelText('Bonus')).toBeTruthy();
+  });
+});
+
+describe('no buzz', () => {
+  test('it records an unanswered tossup and advances on its own', () => {
+    renderScorer(formatFor());
+
+    fireEvent.click(screen.getByRole('button', { name: 'No buzz' }));
+
+    expect(screen.getByText('Tossup 2 of 20')).toBeTruthy();
+    expect(screen.getByText('No buzz', { selector: '.scorer-rail-what' })).toBeTruthy();
+  });
+});
+
+describe('undo', () => {
+  test('it takes back the last thing recorded', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[0]); // +15
+
+    fireEvent.click(screen.getByText('Undo'));
+
+    expect(scoreOf('Ninety Six')).toBe('0');
+    expect(screen.getByText('Tossup 1 of 20')).toBeTruthy();
+  });
+
+  test('it is unavailable before anything has happened', () => {
+    renderScorer(formatFor());
+
+    expect((screen.getByText('Undo') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  test('redo becomes available after undo and restores the action', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[0]);
+    fireEvent.click(screen.getByText('Undo'));
+
+    const redo = screen.getByText('Redo') as HTMLButtonElement;
+    expect(redo.disabled).toBe(false);
+    fireEvent.click(redo);
+
+    expect(scoreOf('Ninety Six')).toBe('15');
+  });
+
+  test('Ctrl+Z in a scoring input is left to the input', () => {
+    renderScorer(
+      formatFor((rules) => {
+        rules.pointsPerBonusPart = undefined;
+      }),
+    );
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+    const input = screen.getByLabelText('Bonus points');
+
+    fireEvent.keyDown(input, { key: 'z', ctrlKey: true });
+
+    expect(scoreOf('Ninety Six')).toBe('10');
+    expect(screen.getByLabelText('Bonus points')).toBeTruthy();
+  });
+});
+
+describe('the recent rail', () => {
+  test('it shows only what actually happened', () => {
+    renderScorer(formatFor());
+
+    expect(screen.getByText('Nothing scored yet.')).toBeTruthy();
+
+    fireEvent.click(buttonsFor('Sarah Mitchell')[0]);
+    fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('20'));
+
+    const rail = screen.getByLabelText('Recent activity');
+    // What happened and what it was worth are separate cells, so the points can be set in their own
+    // right-aligned column. Assert on the pairing rather than on one run of text.
+    const lines = Array.from(rail.querySelectorAll('.scorer-rail-line')).map((line) => [
+      line.querySelector('.scorer-rail-what')?.textContent,
+      line.querySelector('.scorer-rail-points')?.textContent,
+    ]);
+
+    expect(lines).toEqual([
+      ['Sarah Mitchell', '+15'],
+      ['Ninety Six bonus', '+20'],
+    ]);
+  });
+
+  test('a dead tossup reads as one line with nothing in the points column', () => {
+    renderScorer(formatFor());
+
+    fireEvent.click(screen.getByRole('button', { name: 'No buzz' }));
+
+    const rail = screen.getByLabelText('Recent activity');
+    const line = rail.querySelector('.scorer-rail-line');
+
+    expect(line?.querySelector('.scorer-rail-what')?.textContent).toBe('No buzz');
+    expect(line?.querySelector('.scorer-rail-points')?.textContent).toBe('');
+  });
+});
+
+describe('the game menu', () => {
+  test('Flag opens the existing protest workflow', () => {
+    renderScorer(formatFor());
+    fireEvent.click(screen.getByRole('button', { name: 'Flag' }));
+
+    expect(screen.getByRole('dialog', { name: 'Flag' })).toBeTruthy();
+    fireEvent.click(screen.getByText('Protest / disputed ruling'));
+    expect(screen.getByText('Record protest and keep playing')).toBeTruthy();
+  });
+
+  test('keeps operational tools behind the single Game menu', () => {
+    renderScorer(formatFor());
+    const controls = availableControls();
+
+    // Matched loosely: what matters is that each tool is reachable from the scoring screen without
+    // hunting, not which of the footer or the menu is holding it today.
+    for (const tool of [/players/i, /issue/i, /scoresheet review/i, /download qbj/i, /recover from qbj/i]) {
+      expect(
+        controls.some((control) => tool.test(control)),
+        `${tool} should be reachable`,
+      ).toBe(true);
+    }
+  });
+
+  test('lightning is offered only when the format has lightning rounds', () => {
+    renderScorer(formatFor());
+    fireEvent.click(screen.getByText('Game'));
+
+    expect(screen.queryByText('Lightning / worksheet')).toBeNull();
+
+    cleanup();
+    renderScorer(
+      formatFor((rules) => {
+        rules.lightningCountPerTeam = 1;
+      }),
+    );
+    fireEvent.click(screen.getByText('Game'));
+
+    expect(screen.getByText('Lightning / worksheet')).toBeTruthy();
+  });
+
+  test('end regulation is offered only for a timed round', () => {
+    renderScorer(formatFor());
+    fireEvent.click(screen.getByText('Game'));
+
+    expect(screen.queryByText('End regulation')).toBeNull();
+
+    cleanup();
+    renderScorer(
+      formatFor((rules) => {
+        rules.timed = true;
+      }),
+    );
+    fireEvent.click(screen.getByText('Game'));
+
+    expect(screen.getByText('End regulation')).toBeTruthy();
+  });
+
+  test('one Sub out, one Put in, one Confirm changes who is on the floor', () => {
+    renderScorer(
+      formatFor((rules) => {
+        rules.maximumPlayersPerTeam = 1;
+      }),
+    );
+    chooseStarters(['Sarah Mitchell', 'Emma Turner']);
+    pressControl('Players');
+
+    const lineup = screen.getByLabelText('Ninety Six lineup');
+    fireEvent.click(within(lineup).getByText('Sub out'));
+    // The bench is offered as the answer to "replace Sarah with", rather than as a grid to audit.
+    expect(within(lineup).getByText('Replace Sarah Mitchell with:')).toBeTruthy();
+    fireEvent.click(within(lineup).getByText('Put in'));
+    expect(within(lineup).getByText('Sarah Mitchell \u2192 James Robinson')).toBeTruthy();
+    fireEvent.click(within(lineup).getByText('Confirm'));
+
+    expect(screen.queryByText('Sarah Mitchell')).toBeNull();
+    expect(screen.getByText('James Robinson')).toBeTruthy();
+  });
+
+  test('the full lineup editor is still there for a multi-player change', () => {
+    renderScorer(
+      formatFor((rules) => {
+        rules.maximumPlayersPerTeam = 1;
+      }),
+    );
+    chooseStarters(['Sarah Mitchell', 'Emma Turner']);
+    pressControl('Players');
+
+    const lineup = screen.getByLabelText('Ninety Six lineup');
+    fireEvent.click(within(lineup).getByText('Edit full lineup\u2026'));
+    fireEvent.click(within(lineup).getByLabelText(/Sarah Mitchell/));
+    fireEvent.click(within(lineup).getByLabelText(/James Robinson/));
+    fireEvent.click(within(lineup).getByText('Apply lineup'));
+
+    expect(screen.queryByText('Sarah Mitchell')).toBeNull();
+    expect(screen.getByText('James Robinson')).toBeTruthy();
+  });
+
+  test('a lineup change after tossup activity is shown as effective on the next tossup', () => {
+    renderScorer(
+      formatFor((rules) => {
+        rules.maximumPlayersPerTeam = 1;
+      }),
+    );
+    chooseStarters(['Sarah Mitchell', 'Emma Turner']);
+    fireEvent.click(buttonsFor('Sarah Mitchell')[2]); // neg starts Tossup 1
+    pressControl('Players');
+
+    expect(screen.getByText('Changes apply starting Tossup 2.')).toBeTruthy();
+  });
+
+  test('a local roster addition is marked local when no authoritative roster is available', () => {
+    renderScorer(formatFor());
+    pressControl('Players');
+
+    addMissingPlayer('Ninety Six lineup', 'Taylor Brooks');
+    pressControl('Players');
+
+    expect(screen.getByText('Saved in this game')).toBeTruthy();
+  });
+
+  test('a failed roster sync is retried by its timer without another React dependency changing', async () => {
+    vi.useFakeTimers();
+    const sync = vi.fn().mockResolvedValueOnce({ ok: false }).mockResolvedValueOnce({ ok: true });
+    renderScorer(formatFor(), undefined, undefined, undefined, undefined, {
+      authoritativeLeftTeam: leftTeam,
+      authoritativeRightTeam: rightTeam,
+      onSyncRosterPlayer: sync,
+    });
+    pressControl('Players');
+
+    addMissingPlayer('Ninety Six lineup', 'Taylor Brooks');
+
+    expect(sync).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(sync).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(sync).toHaveBeenCalledTimes(2);
+    expect(sync).toHaveBeenLastCalledWith('Ninety Six', 'Taylor Brooks');
+  });
+
+  test('a player can be added during a game and the roster change is sent to control', async () => {
+    const requestControl = vi.fn().mockResolvedValue(undefined);
+    renderScorer(formatFor(), undefined, requestControl);
+    pressControl('Players');
+
+    addMissingPlayer('Ninety Six lineup', 'Taylor Brooks');
+
+    await vi.waitFor(() =>
+      expect(requestControl).toHaveBeenCalledWith('roster-change', expect.stringContaining('Taylor Brooks')),
+    );
+  });
+
+  test('a restricted substitution window adds a player to the bench without changing the lineup', () => {
+    renderScorer(
+      formatFor((rules) => {
+        rules.maximumPlayersPerTeam = 3;
+      }),
+      undefined,
+      undefined,
+      { version: 2, halves: false, timeoutsPerTeam: 0, substitutionPolicy: 'breaks-timeouts-overtime' },
+    );
+    pressControl('Players');
+    const panel = screen.getByLabelText('Ninety Six lineup');
+    fireEvent.click(within(panel).getByText('Add missing player\u2026'));
+    // The panel says where they are going before anything is written.
+    expect(within(panel).getByText(/come on at the next allowed substitution/)).toBeTruthy();
+    fireEvent.change(within(panel).getByLabelText('Player name'), { target: { value: 'Taylor Brooks' } });
+    fireEvent.click(within(panel).getByText('Add to roster'));
+
+    pressControl('Players');
+    const lineup = screen.getByLabelText('Ninety Six lineup');
+    const lists = lineup.querySelectorAll('.scorer-lineup-list');
+    expect(lists[0].textContent).not.toContain('Taylor Brooks');
+    expect(lists[1].textContent).toContain('Taylor Brooks');
+  });
+
+  test('reviewing the scoresheet can correct an earlier ruling', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]); // +10
+    pressControl('Full scoresheet review');
+    fireEvent.click(screen.getByText('Edit question'));
+
+    fireEvent.change(screen.getByLabelText('Ruling'), { target: { value: '0' } }); // +15
+    fireEvent.click(screen.getByText('Save correction'));
+
+    expect(scoreOf('Ninety Six')).toBe('15');
+  });
+
+  test('buzz correction uses the players who were active for that tossup', () => {
+    renderScorer(
+      formatFor((rules) => {
+        rules.maximumPlayersPerTeam = 1;
+      }),
+    );
+    chooseStarters(['Sarah Mitchell', 'Emma Turner']);
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+    pressControl('Full scoresheet review');
+    // The starting lineups are events on question one too, so pick the buzz by what it says.
+    editReviewEvent('Sarah Mitchell +10');
+
+    const player = screen.getByLabelText('Player') as HTMLSelectElement;
+    expect(Array.from(player.options, (option) => option.value)).toEqual(['Sarah Mitchell']);
+    expect(Array.from(player.options, (option) => option.value)).not.toContain('James Robinson');
+  });
+
+  test('the correction offers only the bonus totals this format can produce', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+    fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('20'));
+    pressControl('Full scoresheet review');
+    fireEvent.click(screen.getByText('Edit question'));
+
+    const totals = within(screen.getByRole('group', { name: 'Bonus points' })).getAllByRole('button');
+    expect(totals.map((button) => button.textContent)).toEqual(['0', '10', '20', '30']);
+  });
+
+  test('an invalid bonus correction stays open with an explanation', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+    fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('20'));
+    pressControl('Full scoresheet review');
+    fireEvent.click(screen.getByText('Edit question'));
+
+    // The quick totals cannot express an impossible bonus, so the per-part entry is where an
+    // out-of-range total can still be typed — and it still has to be refused.
+    fireEvent.click(screen.getByText('Enter parts\u2026'));
+    fireEvent.change(screen.getByLabelText('Bonus part 1 controlled points'), { target: { value: '40' } });
+    fireEvent.click(screen.getByText('Save correction'));
+
+    expect(screen.getByText('The most a bonus can be worth is 30.')).toBeTruthy();
+    expect(screen.getByText('Save correction')).toBeTruthy();
+  });
+
+  test('bonus correction drafts can be cleared without entering zero', () => {
+    renderScorer(
+      formatFor((rules) => {
+        rules.minimumPartsPerBonus = 1;
+        rules.maximumPartsPerBonus = 5;
+        rules.pointsPerBonusPart = 0;
+      }),
+    );
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+    fireEvent.change(screen.getByLabelText(/Bonus points/), { target: { value: '20' } });
+    fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('Record'));
+    pressControl('Full scoresheet review');
+    fireEvent.click(screen.getByText('Edit question'));
+
+    const points = screen.getByLabelText('Points') as HTMLInputElement;
+    fireEvent.change(points, { target: { value: '' } });
+    expect(points.value).toBe('');
+    fireEvent.click(screen.getByText('Save correction'));
+
+    expect(screen.getByText('Enter a valid number for controlled.')).toBeTruthy();
+  });
+
+  test('the order of two attempts is changed by one unambiguous control', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[2]); // a neg for Ninety Six
+    fireEvent.click(buttonsFor('Emma Turner')[1]); // Greenwood answers second
+    fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('20'));
+    pressControl('Full scoresheet review');
+    fireEvent.click(screen.getByText('Edit question'));
+
+    const teamOf = (attempt: number) =>
+      (screen.getByLabelText(`Question 1 attempt ${attempt} team`) as HTMLSelectElement).value;
+    expect([teamOf(1), teamOf(2)]).toEqual(['left', 'right']);
+
+    /*
+     * A two-row list has exactly one other order, so an Up and a Down on every row were four
+     * controls for one decision — and two buttons per row sharing a name is what made them need
+     * row-specific labels to be usable at all.
+     */
+    fireEvent.click(screen.getByRole('button', { name: 'Swap order' }));
+
+    expect([teamOf(1), teamOf(2)]).toEqual(['right', 'left']);
+    expect(screen.queryByRole('button', { name: /Move attempt/ })).toBeNull();
+  });
+
+  test('the question editor can remove an attempt and replace it atomically', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+    pressControl('Full scoresheet review');
+
+    fireEvent.click(screen.getByText('Edit question'));
+    fireEvent.click(screen.getByText('Remove'));
+    fireEvent.click(screen.getByLabelText('No buzz'));
+    fireEvent.click(screen.getByText('Save correction'));
+
+    expect(scoreOf('Ninety Six')).toBe('0');
+    expect(screen.getByText('No buzz', { selector: '.scorer-review-event > span' })).toBeTruthy();
+  });
+
+  test('the focused question editor can open the existing replacement workflow', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+    pressControl('Full scoresheet review');
+    fireEvent.click(screen.getByText('Edit question'));
+    // The replacement workflow is secondary information, so it lives behind the disclosure.
+    fireEvent.click(screen.getByText('More\u2026'));
+    fireEvent.click(screen.getByText('Replace question\u2026'));
+
+    const replacementDialog = screen.getByRole('dialog', { name: 'Replace question 1' });
+    expect(replacementDialog).toBeTruthy();
+    fireEvent.change(within(replacementDialog).getByLabelText('What went wrong?'), {
+      target: { value: 'Wrong packet' },
+    });
+    fireEvent.click(within(replacementDialog).getByRole('button', { name: 'Whole cycle' }));
+    fireEvent.click(within(replacementDialog).getByRole('button', { name: 'Replace question 1' }));
+
+    expect(screen.getByText(/Question 1 was cleared/)).toBeTruthy();
+  });
+
+  test('an operational issue is saved and can request tournament control', async () => {
+    const requestControl = vi.fn().mockResolvedValue(undefined);
+    renderScorer(formatFor(), undefined, requestControl);
+    pressControl(/issue/i);
+    fireEvent.change(screen.getByLabelText('What happened?'), { target: { value: 'The buzzers cut out.' } });
+    fireEvent.click(screen.getByText('Save and request control'));
+
+    await vi.waitFor(() => expect(requestControl).toHaveBeenCalledWith('question-packet', 'The buzzers cut out.'));
+  });
+
+  /*
+   * Protests moved out of the Issue dialog and into their own, because a protest is not an issue
+   * that gets reported and closed: it has a team, a subject, and a decision that may still be
+   * pending when the result is submitted. Asking for a director is still one checkbox away.
+   */
+  test('a protest can also ask tournament control to come', async () => {
+    const requestControl = vi.fn().mockResolvedValue(undefined);
+    renderScorer(formatFor(), undefined, requestControl);
+    pressControl('Protests');
+    fireEvent.change(screen.getByLabelText('Details'), { target: { value: 'The ruling was disputed.' } });
+    fireEvent.click(screen.getByLabelText('Ask tournament control to come now'));
+    fireEvent.click(screen.getByText('Record protest and keep playing'));
+
+    await vi.waitFor(() =>
+      expect(requestControl).toHaveBeenCalledWith('protest', expect.stringContaining('The ruling was disputed.')),
+    );
+  });
+});
+
+describe('finishing', () => {
+  /** Play out a full regulation, with one team ahead so it is not a tie. */
+  const playRegulation = () => {
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+    fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('20'));
+    for (let question = 2; question <= 20; question += 1) {
+      fireEvent.click(screen.getByRole('button', { name: 'No buzz' }));
+    }
+  };
+
+  test('the game ends itself and shows what it is about to send', () => {
+    renderScorer(formatFor());
+
+    playRegulation();
+
+    expect(screen.getByText('Game complete')).toBeTruthy();
+    expect(screen.getByText('Final score')).toBeTruthy();
+    // The per-player lines are the point of the check: this is where a misattributed buzz shows up.
+    expect(screen.getByLabelText('Ninety Six players')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Submit result' })).toBeTruthy();
+  });
+
+  test('the result cannot be sent until the score has been confirmed with both teams', () => {
+    const { onSubmit } = renderScorer(formatFor());
+    playRegulation();
+
+    fireEvent.click(screen.getByText('Submit result'));
+
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  test('submitting hands the result over exactly once', async () => {
+    const { onSubmit } = renderScorer(formatFor());
+    playRegulation();
+
+    fireEvent.click(screen.getByLabelText('Final score confirmed with both teams'));
+    fireEvent.click(screen.getByText('Submit result'));
+
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    // What it hands over is a QBJ match, not the scorer's own state.
+    expect(onSubmit.mock.calls[0][0]).toHaveProperty('match_teams');
+  });
+
+  test('a tied regulation pauses at the overtime checkpoint', () => {
+    renderScorer(formatFor());
+    for (let question = 1; question <= 20; question += 1) {
+      fireEvent.click(screen.getByRole('button', { name: 'No buzz' }));
+    }
+
+    expect(screen.getByLabelText('overtime checkpoint')).toBeTruthy();
+    fireEvent.click(screen.getByText('Begin overtime'));
+
+    // Still tied, so the game has not ended: it can now play overtime.
+    expect(screen.getByText(/Overtime tossup 1/)).toBeTruthy();
+  });
+
+  test('a tied game is called out without offering submission', () => {
+    renderScorer(formatFor());
+    for (let question = 1; question <= 20; question += 1) {
+      fireEvent.click(screen.getByRole('button', { name: 'No buzz' }));
+    }
+
+    expect(screen.getByText('This game is a tie.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Submit result' })).toBeNull();
+  });
+});
+
+describe('recovering a game', () => {
+  test('a reload comes back to the same game rather than an empty one', () => {
+    const format = formatFor();
+    gameCounter += 1;
+    const gameKey = `recovery-${gameCounter}`;
+    const submit = vi.fn();
+    // The same game, mounted twice, exactly as a reload would.
+    const mount = () =>
+      render(
+        <ScorerHost
+          gameKey={gameKey}
+          format={format}
+          leftTeam={leftTeam}
+          rightTeam={rightTeam}
+          tournamentName="Ninety Six Invitational"
+          roundName="Round 4"
+          connection={RoomConnectionState.Connected}
+          onDownload={() => undefined}
+          onSubmit={submit}
+        />,
+      );
+
+    const first = mount();
+    fireEvent.click(buttonsFor('Sarah Mitchell')[0]);
+    fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('30'));
+    expect(scoreOf('Ninety Six')).toBe('45');
+    first.unmount();
+
+    mount();
+
+    expect(scoreOf('Ninety Six')).toBe('45');
+    expect(screen.getByText('Tossup 2 of 20')).toBeTruthy();
+  });
+});
+
+describe('a wrong answer that costs nothing', () => {
+  /*
+   * NAQT's answer types are 15, 10 and -5, and it has a fourth tossup outcome none of them can
+   * express: an answer given after the question has been read in full is worth zero. `No buzz` is
+   * not the same thing, because the other team is still owed its chance.
+   */
+  test("the zero ends this team's chance and leaves the other team eligible", () => {
+    renderScorer(formatFor());
+
+    fireEvent.click(screen.getByLabelText('Sarah Mitchell 0 after readout wrong, no penalty'));
+
+    expect(scoreOf('Ninety Six')).toBe('0');
+    expect(screen.getByText(/Greenwood may still answer/)).toBeTruthy();
+    expect(screen.getByText('Tossup 1 of 20')).toBeTruthy();
+  });
+
+  test('the second team is offered its positive values and a zero, but not a neg', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[2]); // -5
+
+    expect(buttonsFor('Emma Turner').map((button) => button.textContent)).toEqual(['+15', '+10', '0']);
+  });
+
+  test('the first team still has the neg available', () => {
+    renderScorer(formatFor());
+
+    expect(buttonsFor('Sarah Mitchell').map((button) => button.textContent)).toContain('-5');
+  });
+});
+
+describe('one action, however many times the button is pressed', () => {
+  test('two clicks on the same buzz score it once', () => {
+    renderScorer(formatFor());
+    const tenPoints = buttonsFor('Sarah Mitchell')[1];
+
+    // Both dispatched against the render that was on screen, which is what a double-tap produces.
+    fireEvent.click(tenPoints);
+    fireEvent.click(tenPoints);
+
+    expect(scoreOf('Ninety Six')).toBe('10');
+  });
+
+  test('a team that has answered has no buttons left to press', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[2]); // -5
+
+    // The engine refuses a second answer outright; the screen simply stops offering one.
+    expect(buttonsFor('Sarah Mitchell').every((button) => (button as HTMLButtonElement).disabled)).toBe(true);
+  });
+});
+
+describe('halves and timeouts, when the tournament asked for them', () => {
+  const procedure = { version: 1, halves: true, timeoutsPerTeam: 1 };
+
+  test('neither appears for a tournament that configured neither', () => {
+    renderScorer(formatFor());
+
+    expect(availableControls()).not.toContain('Timeout');
+    expect(availableControls()).not.toContain('End first half');
+  });
+
+  test('the break stops the game for a score check, and continuing resumes it', () => {
+    renderScorer(formatFor(), undefined, undefined, procedure);
+    fireEvent.click(screen.getByRole('button', { name: 'No buzz' }));
+    pressControl('End first half');
+
+    expect(screen.getByLabelText('Halftime score check')).toBeTruthy();
+    fireEvent.click(screen.getByText('Score confirmed · Continue'));
+
+    expect(screen.getByText('Tossup 2 of 20')).toBeTruthy();
+  });
+
+  test('a timeout is recorded against one team and shown on its panel', () => {
+    renderScorer(formatFor(), undefined, undefined, procedure);
+    pressControl('Timeout');
+    fireEvent.click(within(screen.getByLabelText('Timeout')).getByText('Ninety Six'));
+
+    expect(screen.getByText('Timeout used')).toBeTruthy();
+  });
+});
+
+describe('replacing a spoiled question', () => {
+  test('the cycle is cleared and played again as the same question', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]); // +10 on tossup 1
+    fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('20'));
+    fireEvent.click(buttonsFor('Emma Turner')[1]); // +10 on tossup 2
+
+    pressControl('Replace question 2');
+    // The bonus is owed, so the dialog offers the narrower fix first; this cycle needs the whole one.
+    fireEvent.click(screen.getByText('Whole cycle'));
+    fireEvent.change(screen.getByLabelText('What went wrong?'), { target: { value: 'Wrong packet' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Replace question 2' }));
+
+    expect(scoreOf('Greenwood')).toBe('0');
+    expect(scoreOf('Ninety Six')).toBe('30');
+    expect(screen.getByText('Tossup 2 of 20')).toBeTruthy();
+  });
+});
+
+describe('ending a game short', () => {
+  test('the game stops at the score it had, with the reason on the result', async () => {
+    const { onSubmit } = renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+    fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('20'));
+
+    pressControl('End game early…');
+    fireEvent.change(screen.getByLabelText('Why is the game ending early?'), {
+      target: { value: 'Director stopped the round' },
+    });
+    fireEvent.click(screen.getByText('End the game now'));
+
+    expect(screen.getAllByText(/ended early/).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByLabelText('Final score confirmed with both teams'));
+    fireEvent.click(screen.getByText('Submit result'));
+
+    await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect((onSubmit.mock.calls[0][0] as { notes: string }).notes).toContain('Director stopped the round');
+  });
+});
+
+describe('a protest is a thing with a state', () => {
+  test('it is recorded, the game carries on, and control is warned before submission', () => {
+    renderScorer(formatFor());
+    pressControl('Protests');
+    fireEvent.change(screen.getByLabelText('Details'), { target: { value: 'The ruling was disputed.' } });
+    fireEvent.click(screen.getByText('Record protest and keep playing'));
+    fireEvent.click(within(screen.getByLabelText('Protests')).getByText('Close'));
+
+    // Scoring is untouched by it: the game is still on tossup one and still scoreable.
+    expect(screen.getByText('Tossup 1 of 20')).toBeTruthy();
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+    fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('20'));
+    for (let question = 2; question <= 20; question += 1) {
+      fireEvent.click(screen.getByRole('button', { name: 'No buzz' }));
+    }
+
+    expect(screen.getByText('Unresolved protests')).toBeTruthy();
+  });
+});
+
+describe('the header identifies the packet when the tournament named one', () => {
+  test('it says which packet, and nothing about what is in it', () => {
+    renderScorer(formatFor(), undefined, undefined, undefined, 'Packet 4');
+
+    expect(screen.getByText(/Round 4/).textContent).toContain('Packet 4');
+  });
+});
+
+describe('the Recent rail is a way back into the scoresheet', () => {
+  test('clicking a question opens its editor', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+    fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('20'));
+
+    fireEvent.click(screen.getByLabelText('Review question 1'));
+
+    expect(screen.getByText('Question 1 editor')).toBeTruthy();
+    expect(screen.getByLabelText('Ruling')).toBeTruthy();
+  });
+
+  test('it carries the score as it stood after each question', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+    fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('20'));
+
+    expect(screen.getAllByLabelText('Score after this question')[0].textContent).toBe('30–0');
+  });
+});

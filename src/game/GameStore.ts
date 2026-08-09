@@ -133,13 +133,16 @@ export function isActive(record: IStoredGameRecord): boolean {
 /**
  * Whether this device still owes somebody a copy of this result.
  *
- * Server delivery does not discharge it. The two copies are independent by design — that is the
- * whole point of asking for both — so "the server got it" says nothing about whether the file
- * reached the folder it was supposed to reach.
+ * Server delivery does not discharge it. For a connected game, both the QBJ backup and the explicit
+ * handoff acknowledgement are required. A file-only game has no tournament-control acknowledgement
+ * to make, so downloading its QBJ is the handoff.
  */
 export function needsHandoff(record: IStoredGameRecord): boolean {
   if (isActive(record)) return false;
-  return record.qbjDownloadedAt === undefined || record.handoffAcknowledgedAt === undefined;
+  if (record.qbjDownloadedAt === undefined) return true;
+  return record.connected || Boolean(record.package.handoffInstruction)
+    ? record.handoffAcknowledgedAt === undefined
+    : false;
 }
 
 function recordId(identity: string, attempt: number): string {
@@ -219,7 +222,11 @@ export class GameStore implements IGameStore {
       version: gameRecordVersion,
       updatedAt: (change.updatedAt ?? new Date().toISOString()) as string,
     };
-    await this.records.put(next);
+    const written = await this.records.put(next);
+    // A memory fallback is intentionally usable, but it must remain visible as non-durable through
+    // `durable`. A real IndexedDB failure, on the other hand, is a failed update rather than a
+    // success that only exists in the caller's React state.
+    if (!written && this.records.durable) return null;
     return next;
   }
 

@@ -28,6 +28,7 @@ import { IRoomProcedure } from '../scoring/RoomProcedure';
 import { ITeamRoster } from '../game/Roster';
 import { HelpRequestCategory } from '../app/HelpRequests';
 import { IGameSetup } from '../scoring/deriveGame';
+import { ScoreEvent } from '../scoring/ScoreEvents';
 import { RoomConnectionState } from '../app/ConnectionState';
 import { IQbjMatchMeta } from '../scoring/toQbjMatch';
 import Scorer, { IScorerAlert, IScorerRecoveryStatus, IScorerSubmitResult } from './Scorer';
@@ -55,6 +56,16 @@ export interface IScorerHostProps {
   onSubmit: (qbj: object) => Promise<IScorerSubmitResult>;
   onDownload: (qbj: object) => void;
   onProgress?: (qbj: object, questionsPlayed: number) => void;
+  /**
+   * The complete event history, whenever it changes.
+   *
+   * The scorer's own synchronous journal (`GameSession`) is what makes a scored question safe in
+   * the same turn as the click, and it is not replaceable by anything asynchronous. This is the
+   * seam for a second, durable copy alongside it — a store that is not capped at a few megabytes
+   * and that still has the game when the journal has been cleared. It is called after the journal
+   * write, never instead of it, and nothing waits on what the host does with it.
+   */
+  onEventsChanged?: (events: ScoreEvent[], setup: IGameSetup) => void;
   qbjMeta?: IQbjMatchMeta;
   onRequestControl?: (category: HelpRequestCategory, message: string) => Promise<void>;
   controlRequestPending?: boolean;
@@ -104,6 +115,7 @@ export default function ScorerHost(props: IScorerHostProps) {
     onSubmit,
     onDownload,
     onProgress,
+    onEventsChanged,
     qbjMeta,
     onRequestControl,
     controlRequestPending,
@@ -144,6 +156,14 @@ export default function ScorerHost(props: IScorerHostProps) {
    */
   const eventCount = events.events.length;
   const { restore } = events;
+
+  // Mirror the history into whatever durable store the host has, after the journal has already
+  // taken it. Deliberately keyed on the event list identity rather than its length, so a correction
+  // that replaces a question without changing the count is mirrored too.
+  const eventList = events.events;
+  useEffect(() => {
+    if (onEventsChanged) onEventsChanged(eventList, activeSetup);
+  }, [onEventsChanged, eventList, activeSetup]);
   const attemptedServerRecovery = useRef(false);
   useEffect(() => {
     if (!onRecoverFromServer || attemptedServerRecovery.current) return undefined;

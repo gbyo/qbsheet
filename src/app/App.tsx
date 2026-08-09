@@ -95,10 +95,14 @@ export default function App() {
     [screen, records],
   );
 
+  const handoffOutstanding = records.some(needsHandoff);
+  const localSaveFailed =
+    store !== null && !store.durable && records.some((record) => isActive(record) || needsHandoff(record));
+
   useLeaveWarning({
     gameInProgress: screen.kind === 'scoring' && current !== null && isActive(current),
-    localSaveFailed: store !== null && !store.durable,
-    handoffOutstanding: current !== null && needsHandoff(current),
+    localSaveFailed,
+    handoffOutstanding,
   });
 
   /** Take the tab claim for a game, and say whether we got it. */
@@ -135,9 +139,13 @@ export default function App() {
       if (options.attempt === undefined) {
         const existing = (await store.findByIdentity(identity)).find(isActive);
         if (existing) {
-          await openRecord(existing);
-          setNotice('Resumed the game already saved on this device.');
+          // Offered rather than opened. A scorekeeper who picked the wrong file, or who is checking
+          // they have the right one, must not find themselves inside a half-scored game; and the
+          // saved copy must not be quietly replaced by a fresh one either. So the unfinished game
+          // is named and Resume is one press away.
           await refresh(store);
+          setNotice('This game is already saved on this device. Resume it rather than starting again.');
+          setScreen({ kind: 'home' });
           return;
         }
       }

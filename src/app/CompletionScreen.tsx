@@ -46,6 +46,7 @@ export default function CompletionScreen(props: {
   const [writeFailed, setWriteFailed] = useState(false);
   const score = record.finalScore;
   const connected = record.serverDelivery !== 'none';
+  const requiresHandoffAcknowledgement = connected || Boolean(record.package.handoffInstruction);
 
   const download = () => {
     if (!record.finalQbj) return;
@@ -118,7 +119,9 @@ export default function CompletionScreen(props: {
         {record.qbjDownloadedAt && (
           <div className="final-handoff">
             <p className="shell-hint">Downloaded at {timeOfDay(record.qbjDownloadedAt)}</p>
-            {record.handoffAcknowledgedAt ? (
+            {!requiresHandoffAcknowledgement ? (
+              <p className="final-ok">The QBJ is ready to hand over.</p>
+            ) : record.handoffAcknowledgedAt ? (
               <p className="final-ok">Handoff confirmed at {timeOfDay(record.handoffAcknowledgedAt)}</p>
             ) : (
               <>

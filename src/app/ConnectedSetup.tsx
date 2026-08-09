@@ -194,7 +194,7 @@ export default function ConnectedSetup(props: {
   return (
     <main className="shell">
       <header className="shell-header">
-        <h1 className="shell-title">Electronic Scoresheet</h1>
+        <h1 className="shell-title">QBSheet</h1>
       </header>
 
       {stage.kind === 'address' && (

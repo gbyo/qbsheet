@@ -1,7 +1,7 @@
 {
-  "name": "Electronic Scoresheet",
-  "short_name": "Scoresheet",
-  "description": "A standalone, offline-first electronic quiz bowl scoresheet.",
+  "name": "QBSheet",
+  "short_name": "QBSheet",
+  "description": "An offline-first electronic quiz bowl scoresheet.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

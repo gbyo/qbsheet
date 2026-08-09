@@ -56,6 +56,8 @@ export interface IQbjSourceMetadata {
    */
   roundRevision: number;
   roomName?: string;
+  /** Stable fingerprint of the portable statistical payload, used for backup reconciliation. */
+  resultFingerprint?: string;
 }
 
 /**
@@ -114,6 +116,46 @@ export function sourceMetadata(packageValue: IGamePackage): IQbjSourceMetadata {
   };
 }
 
+/** Canonical JSON for a portable result, with object-key order made irrelevant. */
+function canonicalPortableJson(value: unknown): string {
+  if (value === undefined) return 'undefined';
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map((entry) => canonicalPortableJson(entry)).join(',')}]`;
+  return `{${Object.entries(value as Record<string, unknown>)
+    .filter(([key]) => key !== sourceExtensionKey)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, entry]) => `${JSON.stringify(key)}:${canonicalPortableJson(entry)}`)
+    .join(',')}}`;
+}
+
+/**
+ * A small browser-safe fingerprint for matching an automatic server result to its later QBJ backup.
+ *
+ * This is an equality aid, not an authenticity claim: the server still authenticates the room and
+ * the director still reviews results. BigInt keeps the value deterministic across browsers without
+ * pulling a Node crypto polyfill into the static site.
+ */
+export function portableResultFingerprint(qbj: object): string {
+  const canonical = canonicalPortableJson(stripInternalState(qbj));
+  let hash = 0xcbf29ce484222325n;
+  for (let index = 0; index < canonical.length; index += 1) {
+    hash ^= BigInt(canonical.charCodeAt(index));
+    hash = BigInt.asUintN(64, hash * 0x100000001b3n);
+  }
+  return hash.toString(16).padStart(16, '0');
+}
+
+/** Attach source identity to the internal payload sent to control without removing recovery data. */
+export function qbjWithSourceMetadata(qbj: object, packageValue: IGamePackage): object {
+  return {
+    ...qbj,
+    [sourceExtensionKey]: {
+      ...sourceMetadata(packageValue),
+      resultFingerprint: portableResultFingerprint(qbj),
+    },
+  };
+}
+
 /**
  * The result as a file: an ordinary QBJ Match, plus one block saying which game it came from.
  *
@@ -123,7 +165,13 @@ export function sourceMetadata(packageValue: IGamePackage): IQbjSourceMetadata {
  */
 export function portableQbj(qbj: object, packageValue: IGamePackage): object {
   const stripped = stripInternalState(qbj) as Record<string, unknown>;
-  return { ...stripped, [sourceExtensionKey]: sourceMetadata(packageValue) };
+  return {
+    ...stripped,
+    [sourceExtensionKey]: {
+      ...sourceMetadata(packageValue),
+      resultFingerprint: portableResultFingerprint(qbj),
+    },
+  };
 }
 
 /** Read the source block back, for a tool that wants to know where a result came from. */
@@ -134,5 +182,6 @@ export function readSourceMetadata(qbj: unknown): IQbjSourceMetadata | null {
   const candidate = block as Partial<IQbjSourceMetadata>;
   if (typeof candidate.tournamentName !== 'string') return null;
   if (!Number.isFinite(candidate.roundNumber) || !Number.isInteger(candidate.roundRevision)) return null;
+  if (candidate.resultFingerprint !== undefined && typeof candidate.resultFingerprint !== 'string') return null;
   return candidate as IQbjSourceMetadata;
 }

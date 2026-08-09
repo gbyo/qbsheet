@@ -23,7 +23,9 @@ import { useCallback, useMemo, useState } from 'react';
 import ScorerHost from '../scorer/ScorerHost';
 import { IScorerSubmitResult } from '../scorer/Scorer';
 import { IStoredGameRecord, GameStore } from '../game/GameStore';
-import { portableQbj } from '../game/PortableQbj';
+import { ScoreEvent } from '../scoring/ScoreEvents';
+import { IGameSetup } from '../scoring/deriveGame';
+import { portableQbj, qbjWithSourceMetadata } from '../game/PortableQbj';
 import { downloadQbj } from '../integrations/file/QbjDownload';
 import { RoomConnectionState } from './ConnectionState';
 import { IConnectedSession } from './ConnectedSession';
@@ -84,6 +86,20 @@ export default function ScoringScreen(props: {
     enabled: live !== null,
   });
 
+  /**
+   * The second copy.
+   *
+   * The scorer has already written this to its own synchronous journal by the time this runs; this
+   * puts the same history into the durable store, where it is not competing for a five-megabyte
+   * quota and where it survives the journal being cleared. Nothing waits on it.
+   */
+  const mirror = useCallback(
+    (events: ScoreEvent[], setup: IGameSetup) => {
+      void store.update(record.id, { events, setup });
+    },
+    [record.id, store],
+  );
+
   const write = useCallback(
     (qbj: object) => {
       const written = downloadQbj(qbj, record.package);
@@ -115,7 +131,7 @@ export default function ScoringScreen(props: {
       }
 
       if (live) {
-        const delivered = await runtime.submitFinal(qbj);
+        const delivered = await runtime.submitFinal(qbjWithSourceMetadata(qbj, record.package));
         await store.update(record.id, {
           serverDelivery: delivered.ok ? 'sent' : delivered.status === undefined ? 'pending' : 'rejected',
           serverDeliveryDetail: delivered.ok ? undefined : delivered.detail ?? delivered.error,
@@ -144,7 +160,8 @@ export default function ScoringScreen(props: {
       degradedMessage={live ? runtime.degradedMessage : undefined}
       onSubmit={submit}
       onDownload={write}
-      onProgress={live ? (qbj) => runtime.reportProgress(qbj) : undefined}
+      onProgress={live ? (qbj) => runtime.reportProgress(qbjWithSourceMetadata(qbj, record.package)) : undefined}
+      onEventsChanged={mirror}
       qbjMeta={{
         round: record.package.round.number,
         location: record.package.room?.name,
