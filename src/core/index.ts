@@ -25,5 +25,6 @@ export * from '../scorer/ScorerRecovery';
 export * from '../scorer/bonusOptions';
 
 export { default as deriveGame } from '../scoring/deriveGame';
+export { default as canApplyScoreEvent } from '../scoring/canApplyScoreEvent';
 export { default as toQbjMatch } from '../scoring/toQbjMatch';
 export { default as validateScoresheet } from '../scoring/validateScoresheet';
