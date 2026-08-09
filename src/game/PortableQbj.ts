@@ -34,8 +34,17 @@
  */
 import { IGamePackage, gamePackageProducer, gamePackageVersion } from './GamePackage';
 import { scorerRecoveryKey } from '../scorer/ScorerRecovery';
+import { qbtcpExtensionKey, readQbtcpExtension } from '../qbj/QbtcpExtension';
 
-/** The extension namespace a downloaded result carries. Deliberately one key, deliberately inert. */
+/**
+ * The extension namespace the legacy Match-only download carries.
+ *
+ * Still written, and only there. A bare Match has no envelope, so there is nowhere standard for the
+ * tournament's identity to live and a compatibility block is the only way a receiver can tell which
+ * game the file is. The official serialized document has no such problem — its identity is in
+ * `Tournament`, `Round` and `Match` — so it carries `_qbtcp` for operational extras and nothing
+ * else. That is what "no longer the preferred source metadata" means in practice.
+ */
 export const sourceExtensionKey = '_qbsheet_source';
 /** Read-only compatibility for results downloaded before QBSheet was named. */
 const legacySourceExtensionKey = '_scoresheet_source';
@@ -120,13 +129,23 @@ export function sourceMetadata(packageValue: IGamePackage): IQbjSourceMetadata {
   };
 }
 
+/**
+ * Extension blocks that describe how a result travelled rather than what happened in the game.
+ *
+ * All three are excluded from the fingerprint, because the same game scored once must produce one
+ * fingerprint whether it arrived automatically over QBTCP or as a file a scorekeeper carried. A
+ * fingerprint that moved when the transport metadata moved would report every backup as a conflict,
+ * which is the exact failure the fingerprint exists to prevent.
+ */
+const ignoredForFingerprint = new Set<string>([qbtcpExtensionKey, sourceExtensionKey, legacySourceExtensionKey]);
+
 /** Canonical JSON for a portable result, with object-key order made irrelevant. */
 function canonicalPortableJson(value: unknown): string {
   if (value === undefined) return 'undefined';
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map((entry) => canonicalPortableJson(entry)).join(',')}]`;
   return `{${Object.entries(value as Record<string, unknown>)
-    .filter(([key]) => key !== sourceExtensionKey && key !== legacySourceExtensionKey)
+    .filter(([key]) => !ignoredForFingerprint.has(key))
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([key, entry]) => `${JSON.stringify(key)}:${canonicalPortableJson(entry)}`)
     .join(',')}}`;
@@ -176,6 +195,41 @@ export function portableQbj(qbj: object, packageValue: IGamePackage): object {
       resultFingerprint: portableResultFingerprint(qbj),
     },
   };
+}
+
+/**
+ * A whole serialized document as a file.
+ *
+ * The official path's half of the sanitization boundary. The document is built by `QbjResult` from
+ * `toQbjMatch`, which has never had access to a credential — but the boundary is a property of the
+ * download, not of today's builder, and there is exactly one place where "could this file contain
+ * something it shouldn't" is answered for anything that leaves the device.
+ *
+ * No source block is added: a serialized document already carries its identity in `Tournament`,
+ * `Round` and `Match`, and restating it would be the duplication the profile forbids.
+ */
+export function portableQbjDocument(document: object): object {
+  return stripInternalState(document) as object;
+}
+
+/**
+ * Where a result says it came from, whichever generation wrote it.
+ *
+ * `_qbtcp` is read first because it is what new results carry; the two older blocks are read after
+ * it so a result downloaded before this migration still reconciles. Nothing writes the older blocks
+ * except the legacy Match-only export.
+ */
+export function readResultOrigin(qbj: unknown): { roundRevision?: number; roomId?: string } | null {
+  const extension = readQbtcpExtension(qbj);
+  if (extension) {
+    return {
+      ...(extension.roundRevision !== undefined ? { roundRevision: extension.roundRevision } : {}),
+      ...(extension.roomId !== undefined ? { roomId: extension.roomId } : {}),
+    };
+  }
+  const legacy = readSourceMetadata(qbj);
+  if (!legacy) return null;
+  return { roundRevision: legacy.roundRevision };
 }
 
 /** Read the source block back, for a tool that wants to know where a result came from. */

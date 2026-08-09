@@ -26,6 +26,7 @@
 import { IGamePackage, gamePackageFormat, gamePackageProducer, gamePackageVersion } from '../../game/GamePackage';
 import { validateGamePackage } from '../../game/GamePackageValidation';
 import { GameSourceResult } from '../../game/GameSource';
+import { OpenGameResult, openGameText } from '../../game/OpenGameDefinition';
 import { IAssignmentResponse, IAssignedMatchup } from './FruityServerClient';
 
 /**
@@ -86,5 +87,21 @@ export function assignmentToGamePackage({ assignment, matchup }: IAssignmentConv
     ...(assignment.resultHandoffInstruction ? { handoffInstruction: assignment.resultHandoffInstruction } : {}),
   };
 
-  return validateGamePackage(draft);
+  const validated = validateGamePackage(draft);
+  if (!validated.ok) return validated;
+  return { ok: true, value: { ...validated.value, origin: 'legacy-assignment' } };
+}
+
+/**
+ * The QBTCP path: an assignment body that is already a QBJ document.
+ *
+ * This is the whole of the network-side parsing, and it is deliberately a single delegation. The
+ * body a server sends is the same document it could have written to disk as `*.assignment.qbj`, so
+ * it goes through the same reader a file does and there is no second assignment schema to drift.
+ *
+ * Credentials are not here because they are not in the body. They stay in the connected session's
+ * own state; see `ConnectedSession`.
+ */
+export function qbtcpAssignmentToDefinition(body: string): OpenGameResult {
+  return openGameText(body);
 }

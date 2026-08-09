@@ -27,7 +27,7 @@ import { IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
 import { IRoomProcedure } from '../scoring/RoomProcedure';
 import { ITeamRoster } from '../game/Roster';
 import { HelpRequestCategory } from '../app/HelpRequests';
-import { IGameSetup } from '../scoring/deriveGame';
+import { IDerivedGame, IGameSetup } from '../scoring/deriveGame';
 import { ScoreEvent } from '../scoring/ScoreEvents';
 import { RoomConnectionState } from '../app/ConnectionState';
 import { IQbjMatchMeta } from '../scoring/toQbjMatch';
@@ -55,6 +55,8 @@ export interface IScorerHostProps {
   degradedMessage?: string;
   onSubmit: (qbj: object) => Promise<IScorerSubmitResult>;
   onDownload: (qbj: object) => void;
+  /** Passed straight through to the scorer's menu. See `Scorer`. */
+  onDownloadForm?: (game: IDerivedGame, form: 'partial' | 'legacy-match') => void;
   onProgress?: (qbj: object, questionsPlayed: number) => void;
   /**
    * The complete event history, whenever it changes.
@@ -114,6 +116,7 @@ export default function ScorerHost(props: IScorerHostProps) {
     degradedMessage,
     onSubmit,
     onDownload,
+    onDownloadForm,
     onProgress,
     onEventsChanged,
     qbjMeta,
@@ -213,6 +216,7 @@ export default function ScorerHost(props: IScorerHostProps) {
       saved={events.saved}
       onSubmit={onSubmit}
       onDownload={onDownload}
+      onDownloadForm={onDownloadForm}
       onProgress={onProgress}
       qbjMeta={qbjMeta}
       onRequestControl={onRequestControl}

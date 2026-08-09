@@ -12,10 +12,11 @@
  * this repository, and a registry with lifecycle hooks would be architecture for its own sake. The
  * only thing being prevented here is `fetch` appearing inside a component that scores a tossup.
  */
+import { IGameDefinition } from './GameDefinition';
 import { IGamePackage } from './GamePackage';
 
 export type GameSourceResult =
-  | { ok: true; value: IGamePackage }
+  | { ok: true; value: IGameDefinition }
   | { ok: false; errors: string[] };
 
 export interface IGameSource {

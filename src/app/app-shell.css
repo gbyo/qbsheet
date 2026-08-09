@@ -417,3 +417,229 @@ body {
 }
 
 /* #endregion */
+
+/*
+ * The game picker, shown when a QBJ document holds more than one game.
+ *
+ * Flat and dense on purpose. A whole-tournament file can hold sixty games, and a scorekeeper on a
+ * 1366x768 Chromebook is looking for one row: no cards, no shadows, no icons, one line per game.
+ */
+.game-picker {
+  margin-top: 12px;
+  border: 1px solid var(--room-border);
+  background: var(--room-surface);
+  text-align: left;
+}
+
+.game-picker-title {
+  margin: 0;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--room-border);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--room-text);
+}
+
+.game-picker-round {
+  margin: 0;
+  padding: 6px 12px;
+  background: var(--room-surface-sunken);
+  border-bottom: 1px solid var(--room-border);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--room-muted);
+}
+
+.game-picker-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.game-picker-list > li + li .game-picker-entry {
+  border-top: 1px solid var(--room-border);
+}
+
+.game-picker-entry {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  width: 100%;
+  padding: 7px 12px;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  color: var(--room-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.game-picker-entry:hover {
+  background: var(--room-surface-sunken);
+}
+
+.game-picker-room {
+  flex: 0 0 84px;
+  color: var(--room-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.game-picker-matchup {
+  flex: 1 1 auto;
+}
+
+/* A game that already carries a result. Stated, not hidden, and never offered first. */
+.game-picker-state {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--room-warning);
+}
+
+/* Provenance and assumption notices, shown alongside the game rather than on the picker. */
+.game-origin-notice {
+  margin: 0;
+  padding: 6px 12px;
+  background: var(--room-info-bg);
+  border-bottom: 1px solid var(--room-info-border);
+  font-size: 13px;
+  color: var(--room-text);
+}
+
+.game-origin-notice p {
+  margin: 2px 0;
+}
+
+/*
+ * Asking for scoring rules a document did not carry.
+ *
+ * Same flat, dense treatment as the picker: a short form, not a wizard. It appears in place under
+ * the open button rather than as a modal, so the reason it is asking stays on screen next to it.
+ */
+.rules-setup {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--room-border);
+  background: var(--room-surface);
+  text-align: left;
+}
+
+.rules-setup-title {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.rules-setup-reason {
+  margin: 0 0 6px;
+  font-size: 13px;
+  color: var(--room-muted);
+}
+
+.rules-setup-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px 12px;
+  margin: 8px 0;
+}
+
+.rules-setup-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 13px;
+  color: var(--room-muted);
+}
+
+.rules-setup-grid input {
+  padding: 4px 6px;
+  border: 1px solid var(--room-border-strong);
+  background: var(--room-surface);
+  font: inherit;
+  font-size: 14px;
+  color: var(--room-text);
+}
+
+.rules-setup-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0;
+  font-size: 13px;
+  color: var(--room-text);
+}
+
+.rules-setup-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+/*
+ * Typing in players a document did not list.
+ *
+ * Side-by-side on a 1366x768 screen, stacked when there is not room. One textarea per team rather
+ * than a grid of inputs: a scorekeeper with a paper roster types names and presses Tab.
+ */
+.roster-setup {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--room-border);
+  background: var(--room-surface);
+  text-align: left;
+}
+
+.roster-setup-title {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.roster-setup-reason {
+  margin: 0 0 6px;
+  font-size: 13px;
+  color: var(--room-muted);
+}
+
+.roster-setup-teams {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  margin: 8px 0;
+}
+
+.roster-setup-team {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.roster-setup-team-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--room-text);
+}
+
+.roster-setup-team textarea {
+  padding: 5px 6px;
+  border: 1px solid var(--room-border-strong);
+  background: var(--room-surface);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--room-text);
+  resize: vertical;
+}
+
+.roster-setup-count {
+  font-size: 12px;
+  color: var(--room-faint);
+}
+
+.roster-setup-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}

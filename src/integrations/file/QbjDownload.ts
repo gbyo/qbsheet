@@ -13,7 +13,9 @@
  * Extracted from YellowFruit's room `QbjBackup`.
  */
 import { IGamePackage } from '../../game/GamePackage';
-import { portableQbj } from '../../game/PortableQbj';
+import { IGameDefinition } from '../../game/GameDefinition';
+import { portableQbj, portableQbjDocument } from '../../game/PortableQbj';
+import { qbjFileName as qbjResultFileName } from '../../qbj/QbjResult';
 
 /** One filename component: letters, digits and single hyphens, with nothing that needs escaping. */
 export function sanitizeFileNamePart(value: string, fallback = 'Unknown'): string {
@@ -103,4 +105,48 @@ export function downloadQbj(
   environment: IDownloadEnvironment | null = defaultDownloadEnvironment(),
 ): boolean {
   return downloadFile(qbjFileContents(portableQbj(qbj, packageValue)), qbjFileName(packageValue), environment);
+}
+
+/**
+ * Which shape of QBJ a download is asking for.
+ *
+ * `partial` and `result` are the same document; the word only changes the filename suffix, which is
+ * human guidance and nothing else. `legacy-match` is the compatibility export — a bare Match, the
+ * way MODAQ writes one — kept because the ecosystem reads it and placed behind the menu because it
+ * is no longer what a QBJ file from this application means.
+ */
+export type QbjDownloadForm = 'partial' | 'result' | 'legacy-match';
+
+/**
+ * Save a serialized QBJ document.
+ *
+ * Everything leaving the device goes through `portableQbjDocument` first, so there is one place
+ * where "could this file contain something it shouldn't" is answered rather than one per caller.
+ */
+export function downloadQbjDocument(
+  document: object,
+  definition: IGameDefinition,
+  form: 'partial' | 'result',
+  environment: IDownloadEnvironment | null = defaultDownloadEnvironment(),
+): boolean {
+  return downloadFile(
+    qbjFileContents(portableQbjDocument(document)),
+    qbjResultFileName(definition, form),
+    environment,
+  );
+}
+
+/**
+ * Save the compatibility export.
+ *
+ * A bare Match has no envelope to carry the tournament's identity, so this is the one download that
+ * still writes the legacy source block — see `PortableQbj`. It is a compatibility path, and
+ * compatibility metadata is what it needs.
+ */
+export function downloadLegacyMatchOnly(
+  match: object,
+  definition: IGameDefinition,
+  environment: IDownloadEnvironment | null = defaultDownloadEnvironment(),
+): boolean {
+  return downloadFile(qbjFileContents(portableQbj(match, definition)), qbjFileName(definition), environment);
 }

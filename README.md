@@ -1,16 +1,45 @@
 # QBSheet
 
 QBSheet is a standalone, offline-first browser scoresheet for quiz bowl games. It can be served as
-a static site, installed as a PWA, or opened from a local build. A room can score from a single
-`.qbg` game package without an account, a database, or a network connection.
+a static site, installed as a PWA, or opened from a local build. A room can score from a single QBJ
+file without an account, a database, or a network connection.
 
-QBSheet owns the browser-safe scorer core and the versioned `quizbowl-game` package contract. Fruity
+> **QBSheet reads and writes QBJ, and connects to tournament-control software using QBTCP.**
+
+QBSheet owns the browser-safe scorer core and the QBJ parsing that both applications share. Fruity
 consumes that same core through the package entry point, so the desktop and browser applications do
-not maintain separate scoring engines.
+not maintain separate scoring engines or separate QBJ readers.
+
+## Architecture
+
+The interoperability model is deliberately small:
+
+- **Files are QBJ.** One serialization for assignments, results, and mid-game backups.
+- **The network is [QBTCP](docs/QBTCP.md)**, an application-layer HTTP/JSON protocol for
+  communication between electronic scoresheets and tournament-control software. It is *not* a
+  transport protocol and not a replacement for TCP/IP.
+- QBJ is the game and tournament data; QBTCP is the live conversation around that data. QBTCP does
+  not duplicate QBJ's schema.
+- A QBTCP assignment body *is* a QBJ document, so the connected path and the file path go through
+  one parser and cannot drift apart. `GameDefinition`, what the scorer runs on, is internal: not a
+  file format, not a wire format, and not versioned as a public contract.
+
+Specifications:
+
+| Document | Covers |
+| --- | --- |
+| [`docs/QBTCP.md`](docs/QBTCP.md) | The protocol: discovery, pairing, assignment, progress, result, recovery, help, writer ownership, CORS/LAN, security |
+| [`docs/QBJ_ASSIGNMENT_PROFILE.md`](docs/QBJ_ASSIGNMENT_PROFILE.md) | Which QBJ fields are used, graceful degradation, the `_qbtcp` extension, privacy rules, filenames |
+| [`docs/QBG_MIGRATION.md`](docs/QBG_MIGRATION.md) | Retiring `.qbg`, and the `/api/v1` → `/qbtcp/v1` route mapping |
+
+Legacy `.qbg` game files and the older `/api/v1` server surface both still work; neither is written
+or preferred any more.
 
 ## Workflows
 
-- **Open a game file**: choose a `.qbg` package, score locally, and download the finished QBJ.
+- **Open a game file**: choose a QBJ assignment, score locally, and download the finished QBJ. A
+  whole-tournament QBJ opens a game picker; a document that omits scoring rules asks for them
+  rather than assuming a rule set.
 - **Connect to tournament control**: enter the control server address, verify the room identity,
   pair the room, and score the assigned game. The package and the credentials stay separate; no
   token is written into a game package or portable QBJ.
@@ -54,17 +83,40 @@ origin printed by Vite (normally `http://localhost:5173`). Enter the server's LA
 scoresheet; the local server's origin allowlist is separate from room pairing and still requires a
 valid room/session credential.
 
-## Game packages and results
+## Files
 
-A `.qbg` contains one game: tournament identity, scheduled match identity when available, round and
-assignment revision, room, both rosters, scoring format, procedure, and optional human handoff
-instructions. It contains no room token, session token, device secret, server address, standings, or
-other rooms' games.
+Every public file is QBJ, at serialization version `2.1.1`, with the media type
+`application/vnd.quizbowl.qbj+json`.
 
-Finished results are downloaded as portable QBJs. The `_qbsheet_source` extension identifies the
-QBSheet producer, source tournament, scheduled match, round, revision, and room so tournament
-control can reconcile a result without trusting a filename. The scorer's private recovery journal
-is intentionally omitted from that portable file. Older `_scoresheet_source` files remain readable.
+| Reads | Writes |
+| --- | --- |
+| Official serialized QBJ (`{version, objects}`) — one game or a whole tournament | Official serialized QBJ |
+| Match-only QBJ, as MODAQ and older workflows produce | Match-only QBJ, under a secondary menu entry, for compatibility |
+| Legacy `.qbg` game packages | — |
+
+Filenames carry a descriptive suffix — `.assignment.qbj`, `.result.qbj`, `.partial.qbj` — which is
+guidance for humans. Nothing reads a filename to decide what a document is or which game it belongs
+to; the ids inside it are the identity.
+
+A completed result preserves the assignment's `Tournament`, `Phase`, `Round`, `Match`, team and
+player ids, so reconciliation on the tournament-control side is a lookup rather than a fuzzy match.
+Operational information QBJ cannot express — the round revision, a stable room id, procedure, the
+handoff instruction, and whether rounds are timed — travels in a small, optional, non-secret
+`_qbtcp` extension on the Match.
+
+Portable files never contain a room or session token, a pairing code, a device id, a server address,
+or the scorer's private recovery journal. Results written before this migration remain readable via
+their `_qbsheet_source` and `_scoresheet_source` blocks.
+
+## Recovery, and what a portable file is not
+
+**Game → Download current QBJ** writes the game so far as a portable partial. It carries the
+statistics, lineups and per-question record that standard QBJ can express, and it can be reopened.
+
+It is not the recovery mechanism. The local event journal in `localStorage` and IndexedDB remains
+authoritative for exact recovery — event history, undo, clock internals, connection state and the
+outbox — none of which QBJ can faithfully represent. A partial QBJ is a lifeboat for a dead
+Chromebook, not a substitute for the journal.
 
 ## Development boundary
 
