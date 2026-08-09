@@ -12,6 +12,7 @@ import { registerServiceWorker } from './pwa/registerServiceWorker';
 import './app/app-shell.css';
 import './app/readiness.css';
 import './scorer/scorer.css';
+import './practice/practice.css';
 
 const container = document.getElementById('root');
 if (container) createRoot(container).render(<App />);
