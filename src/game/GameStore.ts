@@ -1,0 +1,280 @@
+/**
+ * Every game this device has scored, and the one it is scoring now.
+ *
+ * # Two stores, on purpose
+ *
+ * The event history is written to `localStorage` synchronously by the scorer itself, on every
+ * accepted operation, through `GameSession`. That path is not negotiable and is not made
+ * asynchronous: `saveGame` returns a boolean in the same turn as the click, which is what lets the
+ * scoresheet say "saved just now" as a fact and what lets it shout when the browser refused. An
+ * IndexedDB write cannot do that, and a scorekeeper who is told a game is safe when the write is
+ * still in flight has been lied to.
+ *
+ * Everything else — the frozen game package, the completion state, the finished QBJ, whether the
+ * result reached tournament control, whether the backup has been handed over — lives in IndexedDB,
+ * which is where a season of results can sit without running into a five-megabyte cap.
+ *
+ * So on load, the journal wins for events and the record wins for everything else. The journal is by
+ * construction at least as new, because it is written first.
+ *
+ * # Nothing is deleted because it worked
+ *
+ * A game does not leave this store because the server accepted it, or because the QBJ was
+ * downloaded, or because somebody clicked the acknowledgement. Those are three independent claims
+ * about three independent copies, and a room that discovers on Sunday that one of them was wrong
+ * needs the fourth copy — this one — to still be here. Retention is by age, generously.
+ */
+import { ScoreEvent } from '../scoring/ScoreEvents';
+import { IGameSetup } from '../scoring/deriveGame';
+import { IGamePackage, gamePackageIdentity } from './GamePackage';
+import { IRecordStore, MemoryRecordStore } from '../persistence/GameDatabase';
+import { clearGame, loadGame, saveGame } from '../scorer/GameSession';
+
+export const gameRecordVersion = 1;
+
+/**
+ * How long a finished game is kept.
+ *
+ * A week, because the failure this guards against is discovered on Monday: a QBJ that never reached
+ * the folder, a result somebody has questions about, a director reconciling a scoresheet. The cost
+ * of keeping it is a few kilobytes; the cost of not keeping it is a game nobody can reconstruct.
+ */
+export const completedGameRetentionMs = 7 * 24 * 60 * 60 * 1000;
+
+/** What is known about the copy tournament control was supposed to receive. */
+export type ServerDeliveryState =
+  /** This game has no tournament control. A file game is complete when its QBJ is handed over. */
+  | 'none'
+  /** Connected, and the final has not been accepted yet. Retried in the background. */
+  | 'pending'
+  /** Control acknowledged the result. Does not remove the obligation to hand over the backup. */
+  | 'sent'
+  /** Control refused it, and said why. The game stays exactly as it is. */
+  | 'rejected';
+
+export interface IStoredGameRecord {
+  version: number;
+  /** Storage key. Identity plus the attempt, so a deliberate re-score is a separate record. */
+  id: string;
+  /** What game this is, independent of how many times it has been opened. */
+  identity: string;
+  /** 1 for the ordinary case; higher only when a scorekeeper deliberately started a game again. */
+  attempt: number;
+  /** What the scorer files its events under. Also the `localStorage` journal key. */
+  gameKey: string;
+  package: IGamePackage;
+  /**
+   * The rosters as this game is being scored against.
+   *
+   * Frozen when the game starts and never rebuilt from the package afterwards, because
+   * substitutions are recorded against these names: rebuilding would move players around underneath
+   * an event history that already refers to them.
+   */
+  setup: IGameSetup;
+  events: ScoreEvent[];
+  /** True when this game came from tournament control rather than from a file. */
+  connected: boolean;
+  /** ISO 8601 */
+  createdAt: string;
+  /** ISO 8601 */
+  updatedAt: string;
+  /** ISO 8601. Set once the scorekeeper has submitted the final. */
+  completedAt?: string;
+  /** The portable QBJ, exactly as it would be downloaded. No recovery layer, no credentials. */
+  finalQbj?: object;
+  /** For the recent list, so it does not have to re-derive a finished game to show a score. */
+  finalScore?: { left: number; right: number };
+  serverDelivery: ServerDeliveryState;
+  /** Whatever control said, when it said something. Shown verbatim. */
+  serverDeliveryDetail?: string;
+  /** ISO 8601. When this device last wrote the QBJ to the downloads folder. */
+  qbjDownloadedAt?: string;
+  /** ISO 8601. When somebody said they had handed the file over. Our workflow state, not proof. */
+  handoffAcknowledgedAt?: string;
+}
+
+export interface IGameStore {
+  /** Whether the record store is durable. False means the room must be warned. */
+  readonly durable: boolean;
+  list(): Promise<IStoredGameRecord[]>;
+  get(id: string): Promise<IStoredGameRecord | null>;
+  findByIdentity(identity: string): Promise<IStoredGameRecord[]>;
+  /** The game in progress, if there is one. */
+  active(): Promise<IStoredGameRecord | null>;
+  create(input: ICreateGameInput): Promise<IStoredGameRecord>;
+  update(id: string, change: Partial<IStoredGameRecord>): Promise<IStoredGameRecord | null>;
+  /**
+   * Record the event history for a game.
+   *
+   * @returns whether the synchronous journal accepted the write. That, not the IndexedDB result, is
+   * what the scoresheet may claim about the room's data being safe.
+   */
+  saveEvents(id: string, events: ScoreEvent[]): boolean;
+  remove(id: string): Promise<void>;
+  /** Drop finished games past the retention window. Never touches an unfinished one. */
+  prune(now?: Date): Promise<number>;
+}
+
+export interface ICreateGameInput {
+  package: IGamePackage;
+  setup: IGameSetup;
+  connected: boolean;
+  /** Supplied by the connected path so the scorer's key matches the server's session. */
+  gameKey?: string;
+  attempt?: number;
+  now?: Date;
+}
+
+/** A record for a game that is still being scored. */
+export function isActive(record: IStoredGameRecord): boolean {
+  return record.completedAt === undefined;
+}
+
+/**
+ * Whether this device still owes somebody a copy of this result.
+ *
+ * Server delivery does not discharge it. The two copies are independent by design — that is the
+ * whole point of asking for both — so "the server got it" says nothing about whether the file
+ * reached the folder it was supposed to reach.
+ */
+export function needsHandoff(record: IStoredGameRecord): boolean {
+  if (isActive(record)) return false;
+  return record.qbjDownloadedAt === undefined || record.handoffAcknowledgedAt === undefined;
+}
+
+function recordId(identity: string, attempt: number): string {
+  return attempt <= 1 ? identity : `${identity}#${attempt}`;
+}
+
+/**
+ * The scorer's storage key for a game.
+ *
+ * Distinct from the record id because the journal is keyed by whatever identity the *game* has —
+ * for a connected game that is the server's session id, so a browser that reloads mid-round finds
+ * the same history the server would recover.
+ */
+function defaultGameKey(identity: string, attempt: number): string {
+  return recordId(identity, attempt).replace(/[^\w.:#-]+/g, '_');
+}
+
+export class GameStore implements IGameStore {
+  constructor(private records: IRecordStore<IStoredGameRecord>) {}
+
+  get durable(): boolean {
+    return this.records.durable;
+  }
+
+  async list(): Promise<IStoredGameRecord[]> {
+    const all = await this.records.list();
+    return all
+      .filter((record) => record?.version === gameRecordVersion)
+      .map((record) => this.withJournal(record))
+      .sort((first, second) => second.updatedAt.localeCompare(first.updatedAt));
+  }
+
+  async get(id: string): Promise<IStoredGameRecord | null> {
+    const record = await this.records.get(id);
+    if (!record || record.version !== gameRecordVersion) return null;
+    return this.withJournal(record);
+  }
+
+  async findByIdentity(identity: string): Promise<IStoredGameRecord[]> {
+    return (await this.list()).filter((record) => record.identity === identity);
+  }
+
+  async active(): Promise<IStoredGameRecord | null> {
+    return (await this.list()).find(isActive) ?? null;
+  }
+
+  async create(input: ICreateGameInput): Promise<IStoredGameRecord> {
+    const now = input.now ?? new Date();
+    const identity = gamePackageIdentity(input.package);
+    const attempt = input.attempt ?? 1;
+    const id = recordId(identity, attempt);
+    const record: IStoredGameRecord = {
+      version: gameRecordVersion,
+      id,
+      identity,
+      attempt,
+      gameKey: input.gameKey ?? defaultGameKey(identity, attempt),
+      package: input.package,
+      setup: input.setup,
+      events: [],
+      connected: input.connected,
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+      serverDelivery: input.connected ? 'pending' : 'none',
+    };
+    await this.records.put(record);
+    return record;
+  }
+
+  async update(id: string, change: Partial<IStoredGameRecord>): Promise<IStoredGameRecord | null> {
+    const existing = await this.records.get(id);
+    if (!existing) return null;
+    const next: IStoredGameRecord = {
+      ...existing,
+      ...change,
+      id: existing.id,
+      version: gameRecordVersion,
+      updatedAt: (change.updatedAt ?? new Date().toISOString()) as string,
+    };
+    await this.records.put(next);
+    return next;
+  }
+
+  saveEvents(id: string, events: ScoreEvent[]): boolean {
+    // Written synchronously first. The durable mirror follows and is allowed to be slower; it is
+    // never allowed to be the thing the room is told about.
+    const cached = this.journalKeys.get(id);
+    if (!cached) return false;
+    const written = saveGame(cached.gameKey, cached.setup, events);
+    void this.records.get(id).then((existing) => {
+      if (!existing) return;
+      void this.records.put({ ...existing, events, updatedAt: new Date().toISOString() });
+    });
+    return written;
+  }
+
+  async remove(id: string): Promise<void> {
+    const existing = await this.records.get(id);
+    if (existing) clearGame(existing.gameKey);
+    this.journalKeys.delete(id);
+    await this.records.delete(id);
+  }
+
+  async prune(now: Date = new Date()): Promise<number> {
+    const all = await this.list();
+    let removed = 0;
+    for (const record of all) {
+      if (isActive(record)) continue;
+      const completed = new Date(record.completedAt!).getTime();
+      if (!Number.isFinite(completed)) continue;
+      if (now.getTime() - completed <= completedGameRetentionMs) continue;
+      await this.remove(record.id);
+      removed += 1;
+    }
+    return removed;
+  }
+
+  /**
+   * Where `saveEvents` writes, per record.
+   *
+   * Populated by `withJournal`, which every read goes through, so a record read at any point in the
+   * session can have its events journalled synchronously afterwards without another await.
+   */
+  private journalKeys = new Map<string, { gameKey: string; setup: IGameSetup }>();
+
+  private withJournal(record: IStoredGameRecord): IStoredGameRecord {
+    this.journalKeys.set(record.id, { gameKey: record.gameKey, setup: record.setup });
+    if (record.completedAt !== undefined) return record;
+    const journalled = loadGame(record.gameKey);
+    if (!journalled) return record;
+    return { ...record, setup: journalled.setup, events: journalled.events };
+  }
+}
+
+/** A store backed by nothing, for tests and for a browser that gave us no database. */
+export function memoryGameStore(): GameStore {
+  return new GameStore(new MemoryRecordStore<IStoredGameRecord>());
+}

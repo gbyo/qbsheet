@@ -1,0 +1,7 @@
+// Production type check: application sources only, so a test-only type error cannot be smuggled
+// into a deployed build and a build cannot be blocked by test tooling that is not shipped.
+{
+  "extends": "./tsconfig.json",
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"]
+}
