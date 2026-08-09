@@ -30,11 +30,13 @@ import ConnectedSetup, { IConnectedStart } from './ConnectedSetup';
 import ScoringScreen from './ScoringScreen';
 import CompletionScreen from './CompletionScreen';
 import DuplicateTabNotice from './DuplicateTabNotice';
+import DeviceReadiness from './DeviceReadiness';
 
 type Screen =
   | { kind: 'loading' }
   | { kind: 'home' }
   | { kind: 'connect' }
+  | { kind: 'readiness' }
   | { kind: 'scoring'; recordId: string }
   | { kind: 'completed'; recordId: string }
   /** Another live tab on this device is already scoring the game that was asked for. */
@@ -230,6 +232,16 @@ export default function App() {
     );
   }
 
+  if (screen.kind === 'readiness') {
+    return (
+      <DeviceReadiness
+        durable={store.durable}
+        rememberedServer={connection?.baseUrl}
+        onBack={() => setScreen({ kind: 'home' })}
+      />
+    );
+  }
+
   if (screen.kind === 'duplicate' && current) {
     return <DuplicateTabNotice record={current} onHome={goHome} />;
   }
@@ -260,6 +272,7 @@ export default function App() {
       notice={notice}
       durable={store.durable}
       rememberedRoom={connection?.roomName}
+      onReadiness={() => setScreen({ kind: 'readiness' })}
       onConnect={(baseUrl) => {
         setPendingBaseUrl(baseUrl);
         setScreen({ kind: 'connect' });

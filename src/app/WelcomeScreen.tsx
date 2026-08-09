@@ -40,13 +40,23 @@ export default function WelcomeScreen(props: {
   notice: string;
   durable: boolean;
   rememberedRoom?: string;
+  onReadiness: () => void;
   onConnect: (baseUrl: string) => void;
   onOpenPackage: (packageValue: IGamePackage, attempt?: number) => void | Promise<void>;
   onOpenRecord: (record: IStoredGameRecord) => void | Promise<void>;
   onFindExisting: (identity: string) => Promise<IStoredGameRecord[]>;
 }) {
-  const { records, notice, durable, rememberedRoom, onConnect, onOpenPackage, onOpenRecord, onFindExisting } =
-    props;
+  const {
+    records,
+    notice,
+    durable,
+    rememberedRoom,
+    onReadiness,
+    onConnect,
+    onOpenPackage,
+    onOpenRecord,
+    onFindExisting,
+  } = props;
   const [address, setAddress] = useState('');
   const [alreadyPlayed, setAlreadyPlayed] = useState<{ record: IStoredGameRecord; opened: IGamePackage } | null>(
     null,
@@ -80,8 +90,11 @@ export default function WelcomeScreen(props: {
 
   return (
     <main className="shell">
-      <header className="shell-header">
+      <header className="shell-header shell-header-row">
         <h1 className="shell-title">QBSheet</h1>
+        <button type="button" className="shell-button shell-button-quiet" onClick={onReadiness}>
+          Check this device
+        </button>
       </header>
 
       {!durable && (
