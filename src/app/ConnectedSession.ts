@@ -20,7 +20,9 @@
  * nothing; the tokens are the sensitive part and they are the same tokens the room already had.
  */
 
-export const connectionStorageKey = 'standalone-scorekeeper.connection.v1';
+export const connectionStorageKey = 'qbsheet.connection.v1';
+/** Read-only compatibility for a connection saved by the temporary pre-QBSheet build. */
+const legacyConnectionStorageKey = 'standalone-scorekeeper.connection.v1';
 export const connectionVersion = 1;
 
 /**
@@ -72,7 +74,7 @@ export function readConnection(
 ): IConnectedSession | null {
   if (!storage) return null;
   try {
-    const raw = storage.getItem(connectionStorageKey);
+    const raw = storage.getItem(connectionStorageKey) ?? storage.getItem(legacyConnectionStorageKey);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<IConnectedSession>;
     if (parsed?.version !== connectionVersion) return null;
@@ -123,6 +125,7 @@ export function writeConnection(
 export function clearConnection(storage: IStorageLike | null = browserStorage()): void {
   try {
     storage?.removeItem(connectionStorageKey);
+    storage?.removeItem(legacyConnectionStorageKey);
   } catch {
     // The age check is the backstop.
   }

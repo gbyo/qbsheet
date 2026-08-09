@@ -23,7 +23,7 @@
  * that opens a game it could have opened anyway.
  */
 
-export const claimChannelName = 'standalone-scorekeeper.game-claims';
+export const claimChannelName = 'qbsheet.game-claims';
 
 /** How long a new tab waits for an existing holder to answer before deciding there is none. */
 export const claimResponseTimeoutMs = 300;

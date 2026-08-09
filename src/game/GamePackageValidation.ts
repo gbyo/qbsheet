@@ -29,6 +29,7 @@ import {
   IGamePackage,
   IGamePackageTeam,
   gamePackageFormat,
+  gamePackageProducer,
   gamePackageVersion,
 } from './GamePackage';
 import { playerNameMaxLength } from './Roster';
@@ -208,6 +209,13 @@ export function validateGamePackage(value: unknown): GamePackageValidation {
     };
   }
 
+  if (raw.producer !== undefined && raw.producer !== gamePackageProducer) {
+    return {
+      ok: false,
+      errors: [`This game file was produced by ${String(raw.producer)}, which this scoresheet cannot verify.`],
+    };
+  }
+
   const errors: string[] = [];
 
   if (!isPlainObject(raw.tournament) || !nonBlankString(raw.tournament.name)) {
@@ -290,6 +298,7 @@ export function validateGamePackage(value: unknown): GamePackageValidation {
     value: {
       format: gamePackageFormat,
       version: gamePackageVersion,
+      ...(raw.producer ? { producer: gamePackageProducer } : {}),
       tournament: {
         ...(raw.tournament!.key ? { key: raw.tournament!.key } : {}),
         name: raw.tournament!.name,

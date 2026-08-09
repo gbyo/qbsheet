@@ -47,6 +47,9 @@ export default function CompletionScreen(props: {
   const score = record.finalScore;
   const connected = record.serverDelivery !== 'none';
   const requiresHandoffAcknowledgement = connected || Boolean(record.package.handoffInstruction);
+  const backupDownloaded = record.qbjDownloadedAt !== undefined;
+  const handoffComplete = !requiresHandoffAcknowledgement || record.handoffAcknowledgedAt !== undefined;
+  const canLeave = backupDownloaded && handoffComplete;
 
   const download = () => {
     if (!record.finalQbj) return;
@@ -140,7 +143,10 @@ export default function CompletionScreen(props: {
       </section>
 
       <div className="shell-actions">
-        <button type="button" className="shell-button" onClick={() => void onHome()}>
+        {!canLeave && (
+          <p className="shell-hint">Download the QBJ{requiresHandoffAcknowledgement ? ' and confirm the handoff' : ''} before finishing.</p>
+        )}
+        <button type="button" className="shell-button" disabled={!canLeave} onClick={() => void onHome()}>
           Done
         </button>
       </div>

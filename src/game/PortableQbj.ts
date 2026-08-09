@@ -32,13 +32,16 @@
  * device or a person, and a tool that has never heard of it reads the statistical result exactly as
  * it would have anyway.
  */
-import { IGamePackage, gamePackageVersion } from './GamePackage';
+import { IGamePackage, gamePackageProducer, gamePackageVersion } from './GamePackage';
 import { scorerRecoveryKey } from '../scorer/ScorerRecovery';
 
 /** The extension namespace a downloaded result carries. Deliberately one key, deliberately inert. */
-export const sourceExtensionKey = '_scoresheet_source';
+export const sourceExtensionKey = '_qbsheet_source';
+/** Read-only compatibility for results downloaded before QBSheet was named. */
+const legacySourceExtensionKey = '_scoresheet_source';
 
 export interface IQbjSourceMetadata {
+  producer?: typeof gamePackageProducer;
   /** Which package schema produced this result. */
   gamePackageVersion: number;
   /** The tournament's stable identifier, when the package had one. */
@@ -106,6 +109,7 @@ export function stripInternalState(value: unknown): unknown {
 
 export function sourceMetadata(packageValue: IGamePackage): IQbjSourceMetadata {
   return {
+    producer: gamePackageProducer,
     gamePackageVersion,
     ...(packageValue.tournament.key ? { tournamentId: packageValue.tournament.key } : {}),
     tournamentName: packageValue.tournament.name,
@@ -122,7 +126,7 @@ function canonicalPortableJson(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map((entry) => canonicalPortableJson(entry)).join(',')}]`;
   return `{${Object.entries(value as Record<string, unknown>)
-    .filter(([key]) => key !== sourceExtensionKey)
+    .filter(([key]) => key !== sourceExtensionKey && key !== legacySourceExtensionKey)
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([key, entry]) => `${JSON.stringify(key)}:${canonicalPortableJson(entry)}`)
     .join(',')}}`;
@@ -177,11 +181,13 @@ export function portableQbj(qbj: object, packageValue: IGamePackage): object {
 /** Read the source block back, for a tool that wants to know where a result came from. */
 export function readSourceMetadata(qbj: unknown): IQbjSourceMetadata | null {
   if (typeof qbj !== 'object' || qbj === null) return null;
-  const block = (qbj as Record<string, unknown>)[sourceExtensionKey];
+  const record = qbj as Record<string, unknown>;
+  const block = record[sourceExtensionKey] ?? record[legacySourceExtensionKey];
   if (typeof block !== 'object' || block === null) return null;
   const candidate = block as Partial<IQbjSourceMetadata>;
   if (typeof candidate.tournamentName !== 'string') return null;
   if (!Number.isFinite(candidate.roundNumber) || !Number.isInteger(candidate.roundRevision)) return null;
   if (candidate.resultFingerprint !== undefined && typeof candidate.resultFingerprint !== 'string') return null;
+  if (candidate.producer !== undefined && candidate.producer !== gamePackageProducer) return null;
   return candidate as IQbjSourceMetadata;
 }

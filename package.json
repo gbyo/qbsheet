@@ -7,16 +7,27 @@
     "type": "git",
     "url": "https://github.com/gbyo/qbsheet.git"
   },
+  "main": "./dist/core/index.js",
+  "types": "./dist/core/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/core/index.d.ts",
+      "import": "./dist/core/index.js"
+    }
+  },
+  "files": ["dist"],
   "license": "AGPL-3.0-or-later",
   "type": "module",
   "scripts": {
     "start": "vite",
     "dev": "vite",
     "build": "tsc -p tsconfig.build.json && vite build",
+    "build:core": "tsc -p tsconfig.core.json",
     "preview": "vite preview",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest"
+    "test": "vitest",
+    "prepare": "npm run build:core"
   },
   "dependencies": {
     "react": "^18.3.1",

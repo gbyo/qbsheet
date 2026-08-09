@@ -125,7 +125,7 @@ describe('scoring, and getting the result out', () => {
     expect(payload.match_teams[0].points).toBe(35);
     expect(payload.match_teams[1].points).toBe(20);
     expect(payload).not.toHaveProperty('_yf_scorekeeper_recovery');
-    expect(payload._scoresheet_source).toMatchObject({ scheduledMatchId: 'sched-101', roundRevision: 1 });
+    expect(payload._qbsheet_source).toMatchObject({ producer: 'QBSheet', scheduledMatchId: 'sched-101', roundRevision: 1 });
   });
 });
 

@@ -23,7 +23,7 @@
  * reason, and everything else the assignment response carries for the room *page*. A package
  * describes one game.
  */
-import { IGamePackage, gamePackageFormat, gamePackageVersion } from '../../game/GamePackage';
+import { IGamePackage, gamePackageFormat, gamePackageProducer, gamePackageVersion } from '../../game/GamePackage';
 import { validateGamePackage } from '../../game/GamePackageValidation';
 import { GameSourceResult } from '../../game/GameSource';
 import { IAssignmentResponse, IAssignedMatchup } from './FruityServerClient';
@@ -63,6 +63,7 @@ export function assignmentToGamePackage({ assignment, matchup }: IAssignmentConv
   const draft: IGamePackage = {
     format: gamePackageFormat,
     version: gamePackageVersion,
+    producer: gamePackageProducer,
     tournament: {
       ...(assignment.tournamentKey ? { key: assignment.tournamentKey } : {}),
       name: assignment.tournamentName,

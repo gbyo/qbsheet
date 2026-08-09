@@ -16,7 +16,9 @@
  * front of the room; it does not keep it safe, and it does not claim to.
  */
 
-export const databaseName = 'standalone-scorekeeper';
+export const databaseName = 'qbsheet';
+/** The old database is read once so a deployed rename cannot strand an in-progress game. */
+const legacyDatabaseName = 'standalone-scorekeeper';
 export const databaseVersion = 1;
 export const gameStoreName = 'games';
 
@@ -56,7 +58,7 @@ export class MemoryRecordStore<T extends { id: string }> implements IRecordStore
   }
 }
 
-function openDatabase(): Promise<IDBDatabase | null> {
+function openDatabaseNamed(name: string): Promise<IDBDatabase | null> {
   return new Promise((resolve) => {
     if (typeof indexedDB === 'undefined') {
       resolve(null);
@@ -64,7 +66,7 @@ function openDatabase(): Promise<IDBDatabase | null> {
     }
     let request: IDBOpenDBRequest;
     try {
-      request = indexedDB.open(databaseName, databaseVersion);
+      request = indexedDB.open(name, databaseVersion);
     } catch {
       resolve(null);
       return;
@@ -75,7 +77,10 @@ function openDatabase(): Promise<IDBDatabase | null> {
         database.createObjectStore(gameStoreName, { keyPath: 'id' });
       }
     };
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      request.result.onversionchange = () => request.result.close();
+      resolve(request.result);
+    };
     request.onerror = () => resolve(null);
     request.onblocked = () => resolve(null);
   });
@@ -137,7 +142,21 @@ class IndexedDbRecordStore<T extends { id: string }> implements IRecordStore<T> 
 export async function openRecordStore<T extends { id: string }>(
   storeName: string = gameStoreName,
 ): Promise<IRecordStore<T>> {
-  const database = await openDatabase();
+  const database = await openDatabaseNamed(databaseName);
   if (!database) return new MemoryRecordStore<T>();
-  return new IndexedDbRecordStore<T>(database, storeName);
+  const store = new IndexedDbRecordStore<T>(database, storeName);
+
+  // The product was renamed after the first public build. Copy the old game records into the new
+  // database before the app starts looking for an unfinished game, and never delete the old copy:
+  // it is a recoverable fallback if a browser interrupts this one-time migration.
+  if (storeName === gameStoreName && (await store.list()).length === 0) {
+    const legacy = await openDatabaseNamed(legacyDatabaseName);
+    if (legacy) {
+      const legacyStore = new IndexedDbRecordStore<T>(legacy, gameStoreName);
+      const records = await legacyStore.list();
+      for (const record of records) await store.put(record);
+      legacy.close();
+    }
+  }
+  return store;
 }

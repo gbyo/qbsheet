@@ -4,8 +4,9 @@ QBSheet is a standalone, offline-first browser scoresheet for quiz bowl games. I
 a static site, installed as a PWA, or opened from a local build. A room can score from a single
 `.qbg` game package without an account, a database, or a network connection.
 
-QBSheet's package format remains provisional (`quizbowl-game`, version 1) and may be moved to a
-shared package once the standalone and tournament applications have settled their ownership boundary.
+QBSheet owns the browser-safe scorer core and the versioned `quizbowl-game` package contract. Fruity
+consumes that same core through the package entry point, so the desktop and browser applications do
+not maintain separate scoring engines.
 
 ## Workflows
 
@@ -60,18 +61,18 @@ assignment revision, room, both rosters, scoring format, procedure, and optional
 instructions. It contains no room token, session token, device secret, server address, standings, or
 other rooms' games.
 
-Finished results are downloaded as portable QBJs. The `_scoresheet_source` extension identifies the
-source tournament, scheduled match, round, revision, and room so tournament control can reconcile a
-result without trusting a filename. The scorer's private recovery journal is intentionally omitted
-from that portable file.
+Finished results are downloaded as portable QBJs. The `_qbsheet_source` extension identifies the
+QBSheet producer, source tournament, scheduled match, round, revision, and room so tournament
+control can reconcile a result without trusting a filename. The scorer's private recovery journal
+is intentionally omitted from that portable file. Older `_scoresheet_source` files remain readable.
 
 ## Development boundary
 
 The first-party scorer and browser application were extracted from YellowFruit/Fruity at source
-commit `970ac055`. QBSheet is now the canonical home for the standalone scorer and its game package
-workflow. Fruity retains its transitional in-tree copy until a later shared-package change can
-remove duplication safely; changes to the portable package contract should therefore be kept
-compatible and documented in both locations.
+commit `970ac055`. QBSheet is the canonical home for the scorer and game package contract. The root
+package entry point is intentionally browser-independent; Fruity pins this repository as a Git
+dependency while the shared package is stabilized for a registry release. Its room host remains
+desktop-specific, but its scoring engine and portable result projection come from QBSheet.
 
 ## License and attribution
 
