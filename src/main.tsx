@@ -10,6 +10,7 @@ import { createRoot } from 'react-dom/client';
 import App from './app/App';
 import { registerServiceWorker } from './pwa/registerServiceWorker';
 import './app/app-shell.css';
+import './app/readiness.css';
 import './scorer/scorer.css';
 
 const container = document.getElementById('root');
