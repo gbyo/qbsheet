@@ -17,6 +17,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -37,7 +38,7 @@ jobs:
           npm test -- --run
 
       - name: Build
-        run: BASE_PATH=/${{ github.event.repository.name }}/ npm run build
+        run: BASE_PATH=/ npm run build
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
@@ -47,9 +48,11 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+
     steps:
       - name: Deploy Pages artifact
         id: deployment
