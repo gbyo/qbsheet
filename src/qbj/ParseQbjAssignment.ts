@@ -105,6 +105,14 @@ export type DefineGameResult =
       needsScoringRules?: boolean;
       /** Teams are known but at least one has no roster. Answerable by manual player entry. */
       needsRoster?: boolean;
+      /**
+       * The teams that need one, by the name the document gave them.
+       *
+       * Only the teams actually missing a roster. A document that lists one side's players and not
+       * the other's should produce one question, not two, and asking again for a roster already in
+       * the file is how a scorekeeper ends up retyping names that were right.
+       */
+      missingRosters?: string[];
     };
 
 /** What the scorekeeper supplied for the parts a generic QBJ left out. */
@@ -158,6 +166,34 @@ function readRoster(team: QbjObject | null): { players: IRosterPlayer[]; ids: Re
     if (id) ids[name] = id;
   }
   return { players, ids, problems };
+}
+
+/**
+ * Clean a roster typed in the room, using the same rules a roster read from a file gets.
+ *
+ * This is the only place a supplied roster is normalized. The form in front of it shows problems as
+ * they are typed, but it does not decide anything: a caller reaching `defineGame` some other way —
+ * a test, a future host, the connected path — must get the same names and the same refusals, and a
+ * second cleaning step somewhere else is how those drift.
+ */
+function normalizeSuppliedRoster(supplied: IRosterPlayer[], teamName_: string, errors: string[]): IRosterPlayer[] {
+  if (supplied.length > maxPlayersPerTeam) {
+    errors.push(`The roster for ${teamName_} lists an implausible number of players.`);
+    return [];
+  }
+  const players: IRosterPlayer[] = [];
+  const seen = new Set<string>();
+  for (const entry of supplied) {
+    const name = typeof entry?.name === 'string' ? entry.name.trim() : '';
+    if (name === '' || name.length > playerNameMaxLength) continue;
+    if (seen.has(name)) {
+      errors.push(`The roster for ${teamName_} lists "${name}" more than once.`);
+      continue;
+    }
+    seen.add(name);
+    players.push({ name });
+  }
+  return players;
 }
 
 /** The two sides of a match, resolved through whichever indirection the producer chose. */
@@ -387,28 +423,37 @@ export function defineGame(
 
   const rosters: ITeamRoster[] = [];
   const playerIds: Record<string, string> = {};
-  let missingRoster = false;
+  const missingRosters: string[] = [];
 
   sides.forEach((side, position) => {
     const name = names[position] as string;
+
+    // Ids are read from the document whether or not the roster is being supplied by hand, so a
+    // player the file already knew about keeps their identity even when the other side was typed
+    // in. Identity is the document's to give; only the names are the scorekeeper's.
+    const fromDocument = readRoster(side.team);
+    errors.push(...fromDocument.problems);
+
     const supplied = overrides.rosters?.[name];
-    if (supplied && supplied.length > 0) {
-      rosters.push({ name, players: supplied.map((player) => ({ name: player.name })) });
-      return;
+    const players = supplied && supplied.length > 0 ? normalizeSuppliedRoster(supplied, name, errors) : fromDocument.players;
+
+    for (const player of players) {
+      const id = fromDocument.ids[player.name];
+      if (id) playerIds[playerIdentityKey(name, player.name)] = id;
     }
-    const { players, ids, problems } = readRoster(side.team);
-    errors.push(...problems);
-    for (const [playerName, id] of Object.entries(ids)) playerIds[playerIdentityKey(name, playerName)] = id;
-    if (players.length === 0) missingRoster = true;
+
+    if (players.length === 0) missingRosters.push(name);
     rosters.push({ name, players });
   });
 
   if (errors.length > 0) return { ok: false, errors };
-  if (missingRoster) {
+  if (missingRosters.length > 0) {
+    const which = missingRosters.length === 2 ? 'either team' : `${missingRosters[0]}`;
     return {
       ok: false,
-      errors: ['This QBJ does not list the players on both teams.'],
+      errors: [`This QBJ does not list the players on ${which}.`],
       needsRoster: true,
+      missingRosters,
     };
   }
 

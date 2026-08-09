@@ -183,6 +183,11 @@ export function assignmentDocument(options: IAssignmentOptions = {}): object {
   };
 }
 
+/** The same team with its roster stripped, for the documents that name a team and list nobody. */
+export function withoutRoster(team: IQbjTeamFixture): IQbjTeamFixture {
+  return { ...team, players: [] };
+}
+
 /** A whole-tournament document: two rounds, four matches, one already played. */
 export function tournamentDocument(): object {
   const teams = [ninetySix, greenwood, clinton, emerald];

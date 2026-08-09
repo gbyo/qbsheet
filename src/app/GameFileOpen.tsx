@@ -12,9 +12,11 @@ import { DragEvent, useRef, useState } from 'react';
 import { FileGameSource, fileFromDrop, gameFileAccept } from '../integrations/file/FileGameSource';
 import { IGameDefinition } from '../game/GameDefinition';
 import { chooseGame } from '../game/OpenGameDefinition';
-import { IQbjMatchCandidate, IQbjSource, orderCandidates } from '../qbj/ParseQbjAssignment';
+import { IGameDefinitionOverrides, IQbjMatchCandidate, IQbjSource, orderCandidates } from '../qbj/ParseQbjAssignment';
+import { IRosterPlayer } from '../game/Roster';
 import { IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
 import ScoringRulesSetup from './ScoringRulesSetup';
+import RosterSetup from './RosterSetup';
 
 /** A document holding several games, waiting for one to be chosen. */
 interface IPendingChoice {
@@ -22,11 +24,20 @@ interface IPendingChoice {
   candidates: IQbjMatchCandidate[];
 }
 
-/** A game the scoresheet could read but not score, waiting on rules the document did not carry. */
-interface IPendingRules {
+/**
+ * A game the scoresheet could read but not yet score.
+ *
+ * Carries the overrides gathered so far, because the questions chain: a document with neither rules
+ * nor rosters asks for rules, then asks for players, and the answer to the first must survive the
+ * second. Losing it would send the scorekeeper back to the rules form after typing six names.
+ */
+interface IPendingSetup {
   source: IQbjSource;
   index: number;
   reason: string[];
+  overrides: IGameDefinitionOverrides;
+  /** Which teams still need a roster. Empty for the rules question. */
+  teams: string[];
 }
 
 export default function GameFileOpen(props: {
@@ -39,7 +50,8 @@ export default function GameFileOpen(props: {
   const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState(false);
   const [choice, setChoice] = useState<IPendingChoice | null>(null);
-  const [needsRules, setNeedsRules] = useState<IPendingRules | null>(null);
+  const [needsRules, setNeedsRules] = useState<IPendingSetup | null>(null);
+  const [needsRoster, setNeedsRoster] = useState<IPendingSetup | null>(null);
 
   /*
    * Provenance notices are deliberately not shown here. Opening a game replaces this screen, so
@@ -57,13 +69,14 @@ export default function GameFileOpen(props: {
     setErrors([]);
     setChoice(null);
     setNeedsRules(null);
+    setNeedsRoster(null);
     const result = await new FileGameSource(file).open();
     setBusy(false);
     if (!result.ok) {
-      // Missing rules are answerable, so they get a form rather than an error. Everything else is
-      // something upstream has to fix, and saying so is the most useful thing this can do.
-      if (result.needsScoringRules && result.source) {
-        setNeedsRules({ source: result.source, index: result.index ?? 0, reason: result.errors });
+      // A gap the room can answer gets a form; anything else is something upstream has to fix, and
+      // saying so plainly is the most useful thing this can do.
+      if (result.source && (result.needsScoringRules || result.needsRoster)) {
+        await resolve(result.source, result.index ?? 0, {});
         return;
       }
       setErrors(result.errors);
@@ -76,31 +89,58 @@ export default function GameFileOpen(props: {
     await accept(result.definition);
   };
 
-  const pick = async (candidate: IQbjMatchCandidate) => {
-    if (!choice) return;
-    const defined = chooseGame(choice.source, candidate.index);
-    if (!defined.ok) {
-      if (defined.needsScoringRules) {
-        setChoice(null);
-        setNeedsRules({ source: choice.source, index: candidate.index, reason: defined.errors });
-        return;
-      }
-      setErrors(defined.errors);
+  /**
+   * Define a game, or ask the one question standing in the way of it.
+   *
+   * Every route into a game goes through here — opening a file, picking from the list, answering
+   * the rules form, answering the roster form — so an answerable gap is asked about the same way
+   * whichever route uncovered it, and the accumulated answers are carried forward.
+   */
+  const resolve = async (source: IQbjSource, index: number, overrides: IGameDefinitionOverrides) => {
+    const defined = chooseGame(source, index, overrides);
+    if (defined.ok) {
+      setChoice(null);
+      setNeedsRules(null);
+      setNeedsRoster(null);
+      await accept(defined.definition);
       return;
     }
-    setChoice(null);
-    await accept(defined.definition);
+    const pending: IPendingSetup = { source, index, reason: defined.errors, overrides, teams: [] };
+    if (defined.needsScoringRules) {
+      setChoice(null);
+      setNeedsRoster(null);
+      setNeedsRules(pending);
+      return;
+    }
+    if (defined.needsRoster) {
+      setChoice(null);
+      setNeedsRules(null);
+      setNeedsRoster({ ...pending, teams: defined.missingRosters ?? [] });
+      return;
+    }
+    setErrors(defined.errors);
+  };
+
+  const pick = async (candidate: IQbjMatchCandidate) => {
+    if (!choice) return;
+    await resolve(choice.source, candidate.index, {});
   };
 
   const applyRules = async (format: IScorekeeperFormat) => {
     if (!needsRules) return;
-    const defined = chooseGame(needsRules.source, needsRules.index, { scorekeeperFormat: format });
-    if (!defined.ok) {
-      setErrors(defined.errors);
-      return;
-    }
-    setNeedsRules(null);
-    await accept(defined.definition);
+    await resolve(needsRules.source, needsRules.index, {
+      ...needsRules.overrides,
+      scorekeeperFormat: format,
+      timed: format.regulation.timed,
+    });
+  };
+
+  const applyRosters = async (rosters: Record<string, IRosterPlayer[]>) => {
+    if (!needsRoster) return;
+    await resolve(needsRoster.source, needsRoster.index, {
+      ...needsRoster.overrides,
+      rosters: { ...needsRoster.overrides.rosters, ...rosters },
+    });
   };
 
   const onDrop = (event: DragEvent<HTMLDivElement>) => {
@@ -139,6 +179,14 @@ export default function GameFileOpen(props: {
           reason={needsRules.reason}
           onUse={(format) => void applyRules(format)}
           onCancel={() => setNeedsRules(null)}
+        />
+      )}
+      {needsRoster && (
+        <RosterSetup
+          teams={needsRoster.teams}
+          reason={needsRoster.reason}
+          onUse={(rosters) => void applyRosters(rosters)}
+          onCancel={() => setNeedsRoster(null)}
         />
       )}
       {errors.length > 0 && (

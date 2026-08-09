@@ -576,3 +576,70 @@ body {
   gap: 8px;
   margin-top: 10px;
 }
+
+/*
+ * Typing in players a document did not list.
+ *
+ * Side-by-side on a 1366x768 screen, stacked when there is not room. One textarea per team rather
+ * than a grid of inputs: a scorekeeper with a paper roster types names and presses Tab.
+ */
+.roster-setup {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--room-border);
+  background: var(--room-surface);
+  text-align: left;
+}
+
+.roster-setup-title {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.roster-setup-reason {
+  margin: 0 0 6px;
+  font-size: 13px;
+  color: var(--room-muted);
+}
+
+.roster-setup-teams {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  margin: 8px 0;
+}
+
+.roster-setup-team {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.roster-setup-team-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--room-text);
+}
+
+.roster-setup-team textarea {
+  padding: 5px 6px;
+  border: 1px solid var(--room-border-strong);
+  background: var(--room-surface);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--room-text);
+  resize: vertical;
+}
+
+.roster-setup-count {
+  font-size: 12px;
+  color: var(--room-faint);
+}
+
+.roster-setup-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
