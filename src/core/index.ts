@@ -5,10 +5,18 @@
  * of these modules; it is not a second implementation. Keep this barrel free of React, DOM and
  * persistence imports so a desktop host can use the exact same engine.
  */
+export * from '../game/GameDefinition';
 export * from '../game/GamePackage';
 export * from '../game/GamePackageValidation';
+export * from '../game/OpenGameDefinition';
 export * from '../game/PortableQbj';
 export * from '../game/Roster';
+
+export * from '../qbj/ParseQbjAssignment';
+export * from '../qbj/QbjResult';
+export * from '../qbj/QbjScoringRules';
+export * from '../qbj/QbjSerialization';
+export * from '../qbj/QbtcpExtension';
 
 export * from '../scoring/RoomProcedure';
 export * from '../scoring/ScoreEvents';
