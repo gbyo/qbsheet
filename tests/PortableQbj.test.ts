@@ -121,6 +121,19 @@ describe('the source block', () => {
     expect(readSourceMetadata({ match_teams: [] })).toBeNull();
     expect(readSourceMetadata(null)).toBeNull();
   });
+
+  test('rejects incomplete or unsafe source metadata', () => {
+    const valid = {
+      producer: 'QBSheet',
+      gamePackageVersion: 1,
+      tournamentName: 'Spring Invitational',
+      roundNumber: 7,
+      roundRevision: 3,
+    };
+    expect(readSourceMetadata({ [sourceExtensionKey]: { ...valid, gamePackageVersion: '1' } })).toBeNull();
+    expect(readSourceMetadata({ [sourceExtensionKey]: { ...valid, roundRevision: 0 } })).toBeNull();
+    expect(readSourceMetadata({ [sourceExtensionKey]: { ...valid, producer: 'Other Scorer' } })).toBeNull();
+  });
 });
 
 describe('the file itself', () => {

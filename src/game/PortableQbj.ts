@@ -185,9 +185,20 @@ export function readSourceMetadata(qbj: unknown): IQbjSourceMetadata | null {
   const block = record[sourceExtensionKey] ?? record[legacySourceExtensionKey];
   if (typeof block !== 'object' || block === null) return null;
   const candidate = block as Partial<IQbjSourceMetadata>;
-  if (typeof candidate.tournamentName !== 'string') return null;
-  if (!Number.isFinite(candidate.roundNumber) || !Number.isInteger(candidate.roundRevision)) return null;
-  if (candidate.resultFingerprint !== undefined && typeof candidate.resultFingerprint !== 'string') return null;
   if (candidate.producer !== undefined && candidate.producer !== gamePackageProducer) return null;
+  if (typeof candidate.gamePackageVersion !== 'number' || !Number.isInteger(candidate.gamePackageVersion)) return null;
+  if (typeof candidate.tournamentName !== 'string' || candidate.tournamentName.trim() === '') return null;
+  if (typeof candidate.roundNumber !== 'number' || !Number.isInteger(candidate.roundNumber) || candidate.roundNumber < 1)
+    return null;
+  if (
+    typeof candidate.roundRevision !== 'number' ||
+    !Number.isInteger(candidate.roundRevision) ||
+    candidate.roundRevision < 1
+  )
+    return null;
+  if (candidate.tournamentId !== undefined && typeof candidate.tournamentId !== 'string') return null;
+  if (candidate.scheduledMatchId !== undefined && typeof candidate.scheduledMatchId !== 'string') return null;
+  if (candidate.roomName !== undefined && typeof candidate.roomName !== 'string') return null;
+  if (candidate.resultFingerprint !== undefined && typeof candidate.resultFingerprint !== 'string') return null;
   return candidate as IQbjSourceMetadata;
 }
