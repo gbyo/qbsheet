@@ -97,6 +97,14 @@ function statusMark(state: CheckState): string {
   return '○';
 }
 
+interface IOptionalPersistenceStorage {
+  persist?: () => Promise<boolean>;
+}
+
+function persistenceStorage(): IOptionalPersistenceStorage | undefined {
+  return (navigator as unknown as { storage?: IOptionalPersistenceStorage }).storage;
+}
+
 export default function DeviceReadiness(props: {
   durable: boolean;
   rememberedServer?: string;
@@ -154,10 +162,11 @@ export default function DeviceReadiness(props: {
   }, [runChecks]);
 
   const requestPersistence = async () => {
-    if (!navigator.storage?.persist) return;
+    const storage = persistenceStorage();
+    if (typeof storage?.persist !== 'function') return;
     setRequestingPersistence(true);
     try {
-      await navigator.storage.persist();
+      await storage.persist();
     } finally {
       setRequestingPersistence(false);
       await runChecks();
@@ -432,16 +441,18 @@ export default function DeviceReadiness(props: {
                     <div>
                       <p className="readiness-name">{check.title}</p>
                       <p className="readiness-detail">{check.detail}</p>
-                      {check.id === 'persistent-storage' && snapshot.persistentStorage === false && (
-                        <button
-                          type="button"
-                          className="shell-button readiness-inline-action"
-                          disabled={requestingPersistence}
-                          onClick={() => void requestPersistence()}
-                        >
-                          {requestingPersistence ? 'Requesting…' : 'Protect storage'}
-                        </button>
-                      )}
+                      {check.id === 'persistent-storage' &&
+                        snapshot.persistentStorage === false &&
+                        typeof persistenceStorage()?.persist === 'function' && (
+                          <button
+                            type="button"
+                            className="shell-button readiness-inline-action"
+                            disabled={requestingPersistence}
+                            onClick={() => void requestPersistence()}
+                          >
+                            {requestingPersistence ? 'Requesting…' : 'Protect storage'}
+                          </button>
+                        )}
                       {check.id === 'downloads' && downloadState === 'untested' && (
                         <button type="button" className="shell-button readiness-inline-action" onClick={startDownloadTest}>
                           Test download
