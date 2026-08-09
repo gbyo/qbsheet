@@ -1,5 +1,6 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import FruityServerClient, { normalizeBaseUrl } from '../integrations/fruity/FruityServerClient';
+import { isSafariBrowser } from './browserCompatibility';
 
 type CheckState = 'pass' | 'warn' | 'fail' | 'info';
 type CheckKind = 'required' | 'recommended' | 'connected';
@@ -25,6 +26,7 @@ interface IReadinessSnapshot {
   storageQuota?: number;
   localNetworkPermission: LocalNetworkPermissionState;
   online: boolean;
+  safari: boolean;
 }
 
 interface IReadinessCheck {
@@ -153,6 +155,7 @@ export default function DeviceReadiness(props: {
       storageQuota,
       localNetworkPermission: permission,
       online: navigator.onLine,
+      safari: isSafariBrowser(),
     });
     setChecking(false);
   }, []);
@@ -178,6 +181,15 @@ export default function DeviceReadiness(props: {
     const normalized = normalizeBaseUrl(serverAddress);
     if (!normalized.ok) {
       setServerTest({ kind: 'failed', message: normalized.error });
+      return;
+    }
+    if (isSafariBrowser()) {
+      setServerAddress(normalized.value);
+      setServerTest({
+        kind: 'failed',
+        message:
+          'Safari cannot use QBSheet connected scoring with the current plain-HTTP LAN Tournament Control server. Use Chrome or Edge on this device, or score from a game file instead.',
+      });
       return;
     }
 
@@ -244,8 +256,16 @@ export default function DeviceReadiness(props: {
     })();
 
     const permission = snapshot.localNetworkPermission;
-    const permissionCheck: IReadinessCheck =
-      permission === 'granted'
+    const permissionCheck: IReadinessCheck = snapshot.safari
+      ? {
+          id: 'local-network',
+          title: 'Local network access',
+          detail:
+            'Safari cannot use QBSheet connected scoring with the current HTTPS-to-HTTP LAN Tournament Control connection. Use Chrome or Edge for connected scoring.',
+          state: 'fail',
+          kind: 'connected',
+        }
+      : permission === 'granted'
         ? {
             id: 'local-network',
             title: 'Local network access',
@@ -376,8 +396,11 @@ export default function DeviceReadiness(props: {
   }, [durable, downloadState, snapshot]);
 
   const requiredFailures = checks.filter((check) => check.kind === 'required' && check.state === 'fail').length;
+  const connectedFailures = checks.filter((check) => check.kind === 'connected' && check.state === 'fail').length;
+  const connectedIntent = serverAddress.trim() !== '' || serverTest.kind !== 'untested';
   const recommendations = checks.filter((check) => check.kind === 'recommended' && check.state === 'warn').length;
   const requiredUntested = checks.some((check) => check.kind === 'required' && check.state === 'info');
+  const connectedBlocked = connectedIntent && connectedFailures > 0;
 
   const sections: Array<{ kind: CheckKind; title: string }> = [
     { kind: 'required', title: 'Required for a safe game' },
@@ -402,24 +425,30 @@ export default function DeviceReadiness(props: {
 
       {snapshot && (
         <section
-          className={`readiness-summary ${requiredFailures > 0 ? 'is-failed' : requiredUntested ? 'is-pending' : 'is-ready'}`}
+          className={`readiness-summary ${requiredFailures > 0 || connectedBlocked ? 'is-failed' : requiredUntested ? 'is-pending' : 'is-ready'}`}
           aria-live="polite"
         >
           <strong>
             {requiredFailures > 0
               ? 'Fix before scoring'
-              : requiredUntested
-                ? 'One check still needs you'
-                : 'This device is ready'}
+              : connectedBlocked
+                ? 'Not ready for connected scoring'
+                : requiredUntested
+                  ? 'One check still needs you'
+                  : 'This device is ready'}
           </strong>
           <span>
             {requiredFailures > 0
               ? `${requiredFailures} required ${requiredFailures === 1 ? 'check needs' : 'checks need'} attention.`
-              : requiredUntested
-                ? 'Run the backup download test below.'
-                : recommendations > 0
-                  ? `${recommendations} ${recommendations === 1 ? 'recommendation' : 'recommendations'} remain.`
-                  : 'All device checks passed.'}
+              : connectedBlocked
+                ? `${connectedFailures} connected-scoring ${connectedFailures === 1 ? 'check needs' : 'checks need'} attention. File scoring can still be used.`
+                : requiredUntested
+                  ? 'Run the backup download test below.'
+                  : connectedFailures > 0
+                    ? 'Ready for file scoring. Connected scoring needs attention below.'
+                    : recommendations > 0
+                      ? `${recommendations} ${recommendations === 1 ? 'recommendation' : 'recommendations'} remain.`
+                      : 'All device checks passed.'}
           </span>
         </section>
       )}
