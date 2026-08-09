@@ -26,12 +26,14 @@ const legacyConnectionStorageKey = 'standalone-scorekeeper.connection.v1';
 export const connectionVersion = 1;
 
 /**
- * How stale a remembered connection may be.
+ * Remembered room credentials do not expire on the client.
  *
- * A tournament is a day. A token from last weekend is not going to work, and offering it is worse
- * than asking again: it produces an authorization failure at the moment a room is trying to start.
+ * Tournament control remains the authority: a revoked or stale token is rejected by the server and
+ * the room is offered connection repair. An arbitrary browser-side timeout is worse because it can
+ * discard otherwise-valid credentials during a long tournament or after a device has been offline.
+ * Keep this exported value for compatibility with consumers that used it as a policy hint.
  */
-export const connectionMaxAgeMs = 36 * 60 * 60 * 1000;
+export const connectionMaxAgeMs = Number.POSITIVE_INFINITY;
 
 export interface IConnectedSession {
   version: number;
