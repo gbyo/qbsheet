@@ -129,7 +129,7 @@ export function clearConnection(storage: IStorageLike | null = browserStorage())
     storage?.removeItem(connectionStorageKey);
     storage?.removeItem(legacyConnectionStorageKey);
   } catch {
-    // The age check is the backstop.
+    // If storage itself is unavailable there is nothing else to clear locally.
   }
 }
 
