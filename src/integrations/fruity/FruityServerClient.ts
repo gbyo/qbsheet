@@ -29,6 +29,14 @@ import { IScorekeeperFormat } from '../../scoring/ScorekeeperFormat';
 import { IRoomProcedure } from '../../scoring/RoomProcedure';
 import { ITeamRoster } from '../../game/Roster';
 import { HelpRequestCategory } from '../../app/HelpRequests';
+import {
+  IQbtcpDiscovery,
+  IQbtcpRoutes,
+  legacyRoutes,
+  readDiscovery,
+  routesFor,
+  qbtcpRoutes,
+} from '../../qbtcp/QbtcpRoutes';
 
 export const apiPrefix = '/api/v1';
 export const sessionTokenHeader = 'x-yf-session-token';
@@ -214,10 +222,50 @@ export function localNetworkFetchInit(baseUrl: string): { targetAddressSpace?: '
 }
 
 export default class FruityServerClient {
+  /**
+   * Which protocol surface this client is using.
+   *
+   * Starts on the legacy table, because a server that has never heard of QBTCP must keep working
+   * without a round trip to find out. `discover` upgrades it. Nothing else in the class reads a
+   * path directly.
+   */
+  private routes: IQbtcpRoutes = legacyRoutes;
+
+  private discovery: IQbtcpDiscovery | null = null;
+
   constructor(
     readonly baseUrl: string,
     private fetchImpl: typeof fetch = (...args) => fetch(...args),
   ) {}
+
+  /** What protocol this client settled on. For the connection detail; never a brand. */
+  get protocol(): string {
+    return this.routes.protocol;
+  }
+
+  /** Whether the assignment body will be a QBJ document rather than the legacy shape. */
+  get assignmentIsQbj(): boolean {
+    return this.routes.assignmentIsQbj;
+  }
+
+  get capabilities(): string[] {
+    return this.discovery?.capabilities ?? [];
+  }
+
+  /**
+   * Ask the server what it speaks, and adopt the matching routes.
+   *
+   * Unauthenticated and cheap, and it never fails in a way that stops a room: a server that does not
+   * answer, answers with something else, or announces a version this client does not know simply
+   * leaves the legacy table in place. Degrading to the older protocol is safe; guessing at a newer
+   * one is not.
+   */
+  async discover(): Promise<IQbtcpDiscovery | null> {
+    const result = await this.request<unknown>(qbtcpRoutes.discovery);
+    this.discovery = result.ok ? readDiscovery(result.value) : null;
+    this.routes = routesFor(this.discovery);
+    return this.discovery;
+  }
 
   private async request<T>(path: string, init: IRequestOptions = {}): Promise<ApiResult<T>> {
     const controller = new AbortController();
@@ -272,21 +320,21 @@ export default class FruityServerClient {
 
   /** Is anything there, and is it speaking this protocol? */
   verify(): Promise<ApiResult<{ status: string }>> {
-    return this.request(`${apiPrefix}/status`);
+    return this.request(this.routes.status);
   }
 
   /** What tournament is open, and can its rules be scored here? */
   identify(): Promise<ApiResult<IServerIdentity>> {
-    return this.request(`${apiPrefix}/tournament`);
+    return this.request(this.routes.tournament);
   }
 
   listRooms(): Promise<ApiResult<{ rooms: IRoomListEntry[]; roomScoringMode: string }>> {
-    return this.request(`${apiPrefix}/join/rooms`);
+    return this.request(this.routes.rooms);
   }
 
   /** Exchange the human pairing code for this room's token. */
   join(code: string, roomId?: string): Promise<ApiResult<IJoinResult>> {
-    return this.request(`${apiPrefix}/join`, {
+    return this.request(this.routes.pair, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(roomId ? { code, roomId } : { code }),
@@ -295,13 +343,13 @@ export default class FruityServerClient {
 
   /** What this room should be playing right now, and any session it already has open. */
   assignment(identity: IRoomIdentity): Promise<ApiResult<IAssignmentResponse>> {
-    return this.request(`${apiPrefix}/rooms/${encodeURIComponent(identity.roomId)}/assignment`, {
+    return this.request(this.routes.assignment(identity.roomId), {
       headers: this.roomHeaders(identity),
     });
   }
 
   startAssignedMatch(identity: IRoomIdentity, scheduledMatchId: string): Promise<ApiResult<ISessionCreated>> {
-    return this.request(`${apiPrefix}/rooms/${encodeURIComponent(identity.roomId)}/sessions`, {
+    return this.request(this.routes.openSession(identity.roomId), {
       method: 'POST',
       headers: this.roomHeaders(identity, true),
       body: JSON.stringify({ scheduledMatchId, scorer: 'first-party' }),
@@ -309,7 +357,7 @@ export default class FruityServerClient {
   }
 
   updatePresence(identity: IRoomIdentity, update: { ready?: boolean }): Promise<ApiResult<unknown>> {
-    return this.request(`${apiPrefix}/rooms/${encodeURIComponent(identity.roomId)}/presence`, {
+    return this.request(this.routes.presence(identity.roomId), {
       method: 'POST',
       headers: this.roomHeaders(identity, true),
       body: JSON.stringify(update),
@@ -321,7 +369,7 @@ export default class FruityServerClient {
     category: HelpRequestCategory,
     message: string,
   ): Promise<ApiResult<unknown>> {
-    return this.request(`${apiPrefix}/rooms/${encodeURIComponent(identity.roomId)}/help`, {
+    return this.request(this.routes.help(identity.roomId), {
       method: 'POST',
       headers: this.roomHeaders(identity, true),
       body: JSON.stringify({ category, message }),
@@ -334,7 +382,7 @@ export default class FruityServerClient {
     teamName: string,
     playerName: string,
   ): Promise<ApiResult<unknown>> {
-    return this.request(`${apiPrefix}/rooms/${encodeURIComponent(identity.roomId)}/players`, {
+    return this.request(this.routes.addPlayer(identity.roomId), {
       method: 'POST',
       headers: { ...this.roomHeaders(identity, true), [sessionTokenHeader]: credentials.token },
       body: JSON.stringify({ sessionId: credentials.sessionId, teamName, playerName }),
@@ -348,7 +396,7 @@ export default class FruityServerClient {
    * and a coalesced update is not a lost one.
    */
   putSnapshot(credentials: ISessionCredentials, qbj: object): Promise<ApiResult<unknown>> {
-    return this.request(`${apiPrefix}/sessions/${encodeURIComponent(credentials.sessionId)}/snapshot`, {
+    return this.request(this.routes.progress(credentials.sessionId), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', [sessionTokenHeader]: credentials.token },
       body: JSON.stringify(qbj),
@@ -357,7 +405,7 @@ export default class FruityServerClient {
 
   /** Submit the final. Idempotent server-side, so a retry after a network failure is not a second game. */
   postFinal(credentials: ISessionCredentials, qbj: object): Promise<ApiResult<unknown>> {
-    return this.request(`${apiPrefix}/sessions/${encodeURIComponent(credentials.sessionId)}/final`, {
+    return this.request(this.routes.result(credentials.sessionId), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', [sessionTokenHeader]: credentials.token },
       body: JSON.stringify(qbj),
@@ -366,7 +414,7 @@ export default class FruityServerClient {
 
   /** This session's own latest snapshot, for a device that has lost its local copy. */
   recover(credentials: ISessionCredentials): Promise<ApiResult<ISessionRecovery>> {
-    return this.request(`${apiPrefix}/sessions/${encodeURIComponent(credentials.sessionId)}/recovery`, {
+    return this.request(this.routes.recovery(credentials.sessionId), {
       headers: { [sessionTokenHeader]: credentials.token },
     });
   }

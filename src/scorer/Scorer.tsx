@@ -30,7 +30,12 @@ import {
   protestCheckpointPolicy,
   substitutionPolicy,
 } from '../scoring/RoomProcedure';
-import deriveGame, { IGameSetup, lastPlayedQuestion, lineupChangeEffectiveQuestion } from '../scoring/deriveGame';
+import deriveGame, {
+  IDerivedGame,
+  IGameSetup,
+  lastPlayedQuestion,
+  lineupChangeEffectiveQuestion,
+} from '../scoring/deriveGame';
 import { IBonusPartResult, ScoreEvent } from '../scoring/ScoreEvents';
 import validateScoresheet from '../scoring/validateScoresheet';
 import toQbjMatch, { IQbjMatchMeta } from '../scoring/toQbjMatch';
@@ -102,6 +107,15 @@ export interface IScorerProps {
   onSubmit: (qbj: object) => Promise<IScorerSubmitResult>;
   /** Writes the current game out as a file, at any point. */
   onDownload: (qbj: object) => void;
+  /**
+   * Save the game as portable QBJ in a named form.
+   *
+   * Separate from `onDownload` because these need the derived game rather than the payload: a
+   * serialized document carries lineups, which are a property of how personnel moved through the
+   * game and not something the aggregate payload retains. Optional, so a host that offers no file
+   * system simply does not get the menu entries.
+   */
+  onDownloadForm?: (game: IDerivedGame, form: 'partial' | 'legacy-match') => void;
   /** Called as the game changes, so tournament control can watch progress. */
   onProgress?: (qbj: object, questionsPlayed: number) => void;
   /** Round number and the rest of the non-scoring metadata for the exported match. */
@@ -171,6 +185,7 @@ export default function Scorer(props: IScorerProps) {
     saved,
     onSubmit,
     onDownload,
+    onDownloadForm,
     onProgress,
     qbjMeta,
     onRequestControl,
@@ -667,6 +682,15 @@ export default function Scorer(props: IScorerProps) {
    */
   const downloadQbj = () => onDownload(qbj);
   menuItems.push({ label: 'Download QBJ backup', onSelect: downloadQbj });
+  if (onDownloadForm) {
+    // The mid-game portable copy. Not a substitute for local recovery, which keeps the event
+    // history this cannot represent; see `docs/QBJ_ASSIGNMENT_PROFILE.md`.
+    menuItems.push({ label: 'Download current QBJ', onSelect: () => onDownloadForm(game, 'partial') });
+    menuItems.push({
+      label: 'Download legacy match-only QBJ',
+      onSelect: () => onDownloadForm(game, 'legacy-match'),
+    });
+  }
   menuItems.push({ label: 'Recover from QBJ', onSelect: () => setDialog('recovery') });
   menuItems.push({ label: 'Adjust score', onSelect: () => setDialog('adjust') });
   if (phase.kind !== 'complete') {

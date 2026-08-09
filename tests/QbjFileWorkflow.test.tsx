@@ -8,7 +8,7 @@
  */
 import { afterEach, describe, expect, test } from 'vitest';
 import { act, cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
-import { openApp } from './appHarness';
+import { openApp, pressControl, score, startLineups } from './appHarness';
 import { claimResponseTimeoutMs } from '../src/persistence/TabClaim';
 import { assignmentDocument, tournamentDocument } from './qbjDocuments';
 import { packageText } from './packages';
@@ -122,5 +122,187 @@ describe('opening QBJ from the welcome screen', () => {
     // Nothing was invented on the way past.
     expect(screen.queryByText(/NAQT/)).not.toBeInTheDocument();
     expect(screen.queryByText(/ACF/)).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * The portable copies a room can take mid-game.
+ *
+ * These prove the menu entries write what they claim: the default is an official serialized
+ * document, the compatibility entry is still a bare Match, and neither carries anything private.
+ */
+describe('downloading QBJ during a game', () => {
+  /** Capture what a download would have written, instead of writing it. */
+  function captureDownloads(): { files: { name: string; contents: string }[] } {
+    const files: { name: string; contents: string }[] = [];
+    const originalCreate = URL.createObjectURL;
+    const originalRevoke = URL.revokeObjectURL;
+    const OriginalBlob = globalThis.Blob;
+    const originalClick = HTMLAnchorElement.prototype.click;
+    let pending = '';
+
+    class RecordingBlob extends OriginalBlob {
+      readonly recordedText: string;
+
+      constructor(parts: BlobPart[], options?: BlobPropertyBag) {
+        super(parts, options);
+        this.recordedText = parts.map((part) => String(part)).join('');
+      }
+    }
+    globalThis.Blob = RecordingBlob as unknown as typeof Blob;
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      value: (blob: Blob) => {
+        pending = (blob as RecordingBlob).recordedText ?? '';
+        return 'blob:captured';
+      },
+    });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: () => undefined });
+    HTMLAnchorElement.prototype.click = function click(this: HTMLAnchorElement) {
+      files.push({ name: this.download, contents: pending });
+    };
+
+    afterEach(() => {
+      Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: originalCreate });
+      Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: originalRevoke });
+      globalThis.Blob = OriginalBlob;
+      HTMLAnchorElement.prototype.click = originalClick;
+    });
+
+    return { files };
+  }
+
+  async function openAssignmentAndStart(): Promise<void> {
+    await openApp();
+    await choose(fileOf(assignmentDocument(), 'R04.assignment.qbj'));
+    await startLineups();
+  }
+
+  test('"Download current QBJ" writes an official serialized document', async () => {
+    const downloads = captureDownloads();
+    await openAssignmentAndStart();
+
+    await pressControl('Download current QBJ');
+
+    expect(downloads.files).toHaveLength(1);
+    const written = JSON.parse(downloads.files[0].contents);
+    expect(written.version).toBe('2.1.1');
+    expect(Array.isArray(written.objects)).toBe(true);
+    expect(written.objects.some((entry: { type?: string }) => entry.type === 'Tournament')).toBe(true);
+    // The identity from the assignment is preserved, so this reconciles like any other result.
+    expect(written.objects.some((entry: { id?: string }) => entry.id === 'Match_sm-4471')).toBe(true);
+  });
+
+  test('the partial filename says what it is, without being identity', async () => {
+    const downloads = captureDownloads();
+    await openAssignmentAndStart();
+
+    await pressControl('Download current QBJ');
+
+    expect(downloads.files[0].name).toBe('R04_Room-204_Ninety-Six_vs_Greenwood.partial.qbj');
+  });
+
+  test('the compatibility entry still writes a bare match', async () => {
+    const downloads = captureDownloads();
+    await openAssignmentAndStart();
+
+    await pressControl('Download legacy match-only QBJ');
+
+    const written = JSON.parse(downloads.files[0].contents);
+    expect(written.objects).toBeUndefined();
+    expect(Array.isArray(written.match_teams)).toBe(true);
+  });
+
+  test('neither download carries credentials or the private recovery journal', async () => {
+    const downloads = captureDownloads();
+    await openAssignmentAndStart();
+
+    await pressControl('Download current QBJ');
+
+    const contents = downloads.files[0].contents.toLowerCase();
+    for (const forbidden of ['token', 'pairing', 'deviceid', 'authorization', '_yf_scorekeeper_recovery']) {
+      expect(contents).not.toContain(forbidden);
+    }
+  });
+});
+
+/**
+ * Supplying rules a document did not carry.
+ *
+ * The point of these is the negative assertion as much as the positive one: the scoresheet must not
+ * name a rule set it was never told about, and must not score anything until somebody answers.
+ */
+describe('a QBJ with no scoring rules', () => {
+  test('offers a form rather than an error', async () => {
+    await openApp();
+
+    await choose(fileOf(assignmentDocument({ scoringRules: null }), 'no-rules.qbj'));
+
+    await waitFor(() => {
+      expect(screen.getByText('Scoring rules needed')).toBeInTheDocument();
+    });
+    expect(screen.getByLabelText('Tossup')).toBeInTheDocument();
+    expect(screen.getByLabelText('Tossups in regulation')).toBeInTheDocument();
+  });
+
+  test('scores the game once rules are given', async () => {
+    await openApp();
+    await choose(fileOf(assignmentDocument({ scoringRules: null }), 'no-rules.qbj'));
+    await waitFor(() => expect(screen.getByText('Scoring rules needed')).toBeInTheDocument());
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Use these rules' }));
+    });
+    await act(async () => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, claimResponseTimeoutMs + 50);
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText('Scoring rules needed')).not.toBeInTheDocument();
+    });
+    expect(screen.getByText(/Ninety Six/)).toBeInTheDocument();
+  });
+
+  test('rules entered in the room are read by the same mapper a file goes through', async () => {
+    await openApp();
+    await choose(fileOf(assignmentDocument({ scoringRules: null }), 'no-rules.qbj'));
+    await waitFor(() => expect(screen.getByText('Scoring rules needed')).toBeInTheDocument());
+
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText('Tossup'), { target: { value: '12' } });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Use these rules' }));
+    });
+    await act(async () => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, claimResponseTimeoutMs + 50);
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText('Scoring rules needed')).not.toBeInTheDocument();
+    });
+    // A real game begins at the starting-lineup prompt; the scoring buttons are behind it.
+    await startLineups();
+    await score('Sarah', 'C');
+
+    // A converted tossup is worth what was typed in, which means the entered rules went through the
+    // same mapping an imported ScoringRules object does.
+    await waitFor(() => {
+      expect(screen.getByLabelText('Ninety Six score')).toHaveTextContent('12');
+    });
+  });
+
+  test('no rule set is named anywhere on the way past', async () => {
+    await openApp();
+
+    await choose(fileOf(assignmentDocument({ scoringRules: null }), 'no-rules.qbj'));
+
+    await waitFor(() => expect(screen.getByText('Scoring rules needed')).toBeInTheDocument());
+    expect(document.body.textContent).not.toContain('NAQT');
+    expect(document.body.textContent).not.toContain('ACF');
   });
 });

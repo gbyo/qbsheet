@@ -12,11 +12,18 @@ export * from '../game/OpenGameDefinition';
 export * from '../game/PortableQbj';
 export * from '../game/Roster';
 
+export * from '../qbj/BasicScoringRules';
 export * from '../qbj/ParseQbjAssignment';
 export * from '../qbj/QbjResult';
 export * from '../qbj/QbjScoringRules';
 export * from '../qbj/QbjSerialization';
 export * from '../qbj/QbtcpExtension';
+
+/**
+ * The protocol surface, exported so a tournament-control implementation can route on the same
+ * table this scoresheet calls rather than hand-copying path strings into a server.
+ */
+export * from '../qbtcp/QbtcpRoutes';
 
 export * from '../scoring/RoomProcedure';
 export * from '../scoring/ScoreEvents';

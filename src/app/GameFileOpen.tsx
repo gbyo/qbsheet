@@ -13,11 +13,20 @@ import { FileGameSource, fileFromDrop, gameFileAccept } from '../integrations/fi
 import { IGameDefinition } from '../game/GameDefinition';
 import { chooseGame } from '../game/OpenGameDefinition';
 import { IQbjMatchCandidate, IQbjSource, orderCandidates } from '../qbj/ParseQbjAssignment';
+import { IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
+import ScoringRulesSetup from './ScoringRulesSetup';
 
 /** A document holding several games, waiting for one to be chosen. */
 interface IPendingChoice {
   source: IQbjSource;
   candidates: IQbjMatchCandidate[];
+}
+
+/** A game the scoresheet could read but not score, waiting on rules the document did not carry. */
+interface IPendingRules {
+  source: IQbjSource;
+  index: number;
+  reason: string[];
 }
 
 export default function GameFileOpen(props: {
@@ -30,6 +39,7 @@ export default function GameFileOpen(props: {
   const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState(false);
   const [choice, setChoice] = useState<IPendingChoice | null>(null);
+  const [needsRules, setNeedsRules] = useState<IPendingRules | null>(null);
 
   /*
    * Provenance notices are deliberately not shown here. Opening a game replaces this screen, so
@@ -46,9 +56,16 @@ export default function GameFileOpen(props: {
     setBusy(true);
     setErrors([]);
     setChoice(null);
+    setNeedsRules(null);
     const result = await new FileGameSource(file).open();
     setBusy(false);
     if (!result.ok) {
+      // Missing rules are answerable, so they get a form rather than an error. Everything else is
+      // something upstream has to fix, and saying so is the most useful thing this can do.
+      if (result.needsScoringRules && result.source) {
+        setNeedsRules({ source: result.source, index: result.index ?? 0, reason: result.errors });
+        return;
+      }
       setErrors(result.errors);
       return;
     }
@@ -63,10 +80,26 @@ export default function GameFileOpen(props: {
     if (!choice) return;
     const defined = chooseGame(choice.source, candidate.index);
     if (!defined.ok) {
+      if (defined.needsScoringRules) {
+        setChoice(null);
+        setNeedsRules({ source: choice.source, index: candidate.index, reason: defined.errors });
+        return;
+      }
       setErrors(defined.errors);
       return;
     }
     setChoice(null);
+    await accept(defined.definition);
+  };
+
+  const applyRules = async (format: IScorekeeperFormat) => {
+    if (!needsRules) return;
+    const defined = chooseGame(needsRules.source, needsRules.index, { scorekeeperFormat: format });
+    if (!defined.ok) {
+      setErrors(defined.errors);
+      return;
+    }
+    setNeedsRules(null);
     await accept(defined.definition);
   };
 
@@ -101,6 +134,13 @@ export default function GameFileOpen(props: {
         {busy ? 'Opening…' : label}
       </button>
       {choice && <GamePicker choice={choice} onPick={(candidate) => void pick(candidate)} />}
+      {needsRules && (
+        <ScoringRulesSetup
+          reason={needsRules.reason}
+          onUse={(format) => void applyRules(format)}
+          onCancel={() => setNeedsRules(null)}
+        />
+      )}
       {errors.length > 0 && (
         <div className="shell-errors" role="alert">
           <strong>That game file cannot be used.</strong>

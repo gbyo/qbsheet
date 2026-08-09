@@ -511,3 +511,68 @@ body {
 .game-origin-notice p {
   margin: 2px 0;
 }
+
+/*
+ * Asking for scoring rules a document did not carry.
+ *
+ * Same flat, dense treatment as the picker: a short form, not a wizard. It appears in place under
+ * the open button rather than as a modal, so the reason it is asking stays on screen next to it.
+ */
+.rules-setup {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--room-border);
+  background: var(--room-surface);
+  text-align: left;
+}
+
+.rules-setup-title {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.rules-setup-reason {
+  margin: 0 0 6px;
+  font-size: 13px;
+  color: var(--room-muted);
+}
+
+.rules-setup-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px 12px;
+  margin: 8px 0;
+}
+
+.rules-setup-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 13px;
+  color: var(--room-muted);
+}
+
+.rules-setup-grid input {
+  padding: 4px 6px;
+  border: 1px solid var(--room-border-strong);
+  background: var(--room-surface);
+  font: inherit;
+  font-size: 14px;
+  color: var(--room-text);
+}
+
+.rules-setup-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0;
+  font-size: 13px;
+  color: var(--room-text);
+}
+
+.rules-setup-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}

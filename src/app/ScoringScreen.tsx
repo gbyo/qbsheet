@@ -26,7 +26,10 @@ import { IStoredGameRecord, GameStore } from '../game/GameStore';
 import { ScoreEvent } from '../scoring/ScoreEvents';
 import { IGameSetup } from '../scoring/deriveGame';
 import { portableQbj, qbjWithSourceMetadata } from '../game/PortableQbj';
-import { downloadQbj } from '../integrations/file/QbjDownload';
+import { downloadQbj, downloadLegacyMatchOnly, downloadQbjDocument } from '../integrations/file/QbjDownload';
+import { IGameDefinition } from '../game/GameDefinition';
+import { buildLegacyMatchOnly, buildResultDocument } from '../qbj/QbjResult';
+import { IDerivedGame } from '../scoring/deriveGame';
 import { RoomConnectionState } from './ConnectionState';
 import { IConnectedSession } from './ConnectedSession';
 import FruityServerClient from '../integrations/fruity/FruityServerClient';
@@ -113,6 +116,30 @@ export default function ScoringScreen(props: {
     [record.id, record.package, store],
   );
 
+  /**
+   * The portable copies offered from the game menu.
+   *
+   * Deliberately not recorded as "the QBJ was downloaded": a mid-game partial is a lifeboat, not the
+   * backup a finished game still has to produce, and marking it as one would let a room finish
+   * without ever writing the result out. Only `write` sets that.
+   */
+  const downloadForm = useCallback(
+    (game: IDerivedGame, form: 'partial' | 'legacy-match') => {
+      const definition = record.package as IGameDefinition;
+      const format = record.package.scorekeeperFormat;
+      const meta = { round: record.package.round.number, location: record.package.room?.name };
+      if (form === 'legacy-match') {
+        return downloadLegacyMatchOnly(buildLegacyMatchOnly({ definition, format, game, meta }), definition);
+      }
+      return downloadQbjDocument(
+        buildResultDocument({ definition, format, game, meta, partial: true }),
+        definition,
+        'partial',
+      );
+    },
+    [record.package],
+  );
+
   const submit = useCallback(
     async (qbj: object): Promise<IScorerSubmitResult> => {
       const portable = portableQbj(qbj, record.package);
@@ -160,6 +187,7 @@ export default function ScoringScreen(props: {
       degradedMessage={live ? runtime.degradedMessage : undefined}
       onSubmit={submit}
       onDownload={write}
+      onDownloadForm={(game, form) => downloadForm(game, form)}
       onProgress={live ? (qbj) => runtime.reportProgress(qbjWithSourceMetadata(qbj, record.package)) : undefined}
       onEventsChanged={mirror}
       qbjMeta={{
