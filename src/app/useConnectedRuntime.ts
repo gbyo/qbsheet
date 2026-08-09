@@ -116,6 +116,9 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
   const writesAllowedRef = useRef(writesAllowed);
   writesAllowedRef.current = writesAllowed;
 
+  /** The newest complete game state, retained so a later successful poll can re-offer it. */
+  const latestSnapshotRef = useRef<object | null>(null);
+
   const sender = useMemo(
     () =>
       new ProgressSender(async (qbj) => {
@@ -164,6 +167,12 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
       ) {
         setReassigned(true);
       }
+
+      // A successful poll proves the room can reach and authenticate to control again. Re-offer the
+      // newest complete state even when nobody has scored since the outage, so reconnecting always
+      // converges the server snapshot instead of waiting for the next tossup.
+      const latestSnapshot = latestSnapshotRef.current;
+      if (latestSnapshot !== null) sender.offer(latestSnapshot);
     };
     void poll();
     const timer = setInterval(() => void poll(), assignmentPollIntervalMs);
@@ -171,7 +180,7 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
       cancelled = true;
       clearInterval(timer);
     };
-  }, [client, identity, scheduledMatchId, tournamentKey, enabled]);
+  }, [client, identity, scheduledMatchId, tournamentKey, enabled, sender]);
 
   const alerts = useMemo<IScorerAlert[]>(() => {
     const list: IScorerAlert[] = [];
@@ -206,7 +215,13 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     return list;
   }, [credentialProblem, tournamentSwitched, reassigned, onRepairConnection]);
 
-  const reportProgress = useCallback((qbj: object) => sender.offer(qbj), [sender]);
+  const reportProgress = useCallback(
+    (qbj: object) => {
+      latestSnapshotRef.current = qbj;
+      sender.offer(qbj);
+    },
+    [sender],
+  );
 
   const submitFinal = useCallback(
     async (qbj: object) => {
