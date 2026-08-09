@@ -31,12 +31,11 @@ function serviceWorkerPlugin(): Plugin {
     apply: 'build',
     enforce: 'post',
     generateBundle(_options, bundle) {
-      const assets = Object.keys(bundle)
-        .filter((name) => !name.endsWith('.map'))
-        .sort();
-      // Everything the shell needs to open with no network at all. `index.html` is listed
-      // explicitly because it is the navigation fallback and is not content-hashed.
-      const precache = ['index.html', 'manifest.webmanifest', 'icon.svg', ...assets];
+      const emitted = Object.keys(bundle).filter((name) => !name.endsWith('.map'));
+      // Files copied straight from `public/` are not part of the bundle and have to be named. They
+      // are also not content-hashed, which is why the cache name is derived from the whole list.
+      const staticFiles = ['index.html', 'manifest.webmanifest', 'icon.svg', 'icon-maskable.svg'];
+      const precache = [...new Set([...staticFiles, ...emitted])].sort();
       const buildId = createHash('sha256').update(precache.join('\n')).digest('hex').slice(0, 16);
       this.emitFile({
         type: 'asset',

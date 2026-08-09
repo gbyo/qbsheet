@@ -528,7 +528,7 @@ export function ScoresheetReviewDialog(props: {
                                   type="button"
                                   className="scorer-text-action is-destructive"
                                   onClick={() => {
-                                    // eslint-disable-next-line no-alert
+
                                     if (window.confirm('Remove this event from the scoresheet?')) onRemove(event.id);
                                   }}
                                 >

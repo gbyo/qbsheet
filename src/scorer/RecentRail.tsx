@@ -102,7 +102,7 @@ export default function RecentRail(props: IRecentRailProps) {
                 <span className="scorer-rail-lines">
                   {questionLines(question, teamNames).map((line, index) => (
                     // Position is the identity: identical activity lines may legitimately repeat.
-                    // eslint-disable-next-line react/no-array-index-key
+
                     <span key={index} className="scorer-rail-line">
                       <span className="scorer-rail-what">{line.what}</span>
                       <span className="scorer-rail-points">{line.points}</span>

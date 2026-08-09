@@ -237,7 +237,7 @@ export default function QuestionEditor(props: {
         <ol className="scorer-question-attempts">
           {model.attempts.map((attempt, index) => (
             // Attempts have no persisted identity until they are written; position is identity.
-            // eslint-disable-next-line react/no-array-index-key
+
             <li key={attempt.id ?? `attempt-${index}`} className="scorer-question-attempt">
               <span className="scorer-question-attempt-number">{index + 1}</span>
               <select
@@ -444,7 +444,7 @@ export default function QuestionEditor(props: {
               <div className="scorer-question-parts">
                 {model.bonus.parts.map((part, index) => (
                   // Parts have no persisted identity in QBJ; their position is their identity.
-                  // eslint-disable-next-line react/no-array-index-key
+
                   <div key={`part-${index}`} className="scorer-question-part">
                     <span>Part {index + 1}</span>
                     <input

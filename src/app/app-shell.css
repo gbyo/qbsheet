@@ -1,0 +1,419 @@
+/* The shell around the scoresheet: welcome, connection, completion, recent games.
+ *
+ * The palette and the rhythm are the scorer's, because they are the same application and a
+ * scorekeeper moves between them in the middle of a round. Flat surfaces, 1px rules, small radii on
+ * things you press and nothing else. No gradients, no drop shadows standing in for hierarchy, no
+ * cards floating in padding, no icon wall, no pills. A room is looking at this for ten seconds at a
+ * time and needs to find one button.
+ *
+ * Blue is reserved for the primary action on a screen — Connect, Resume, Download QBJ — and is not
+ * spent on anything else, so it always means "this is the thing to press".
+ *
+ * Spacing follows a 4 / 8 / 12 / 16 / 24 / 32 rhythm. Sized for the 1366x768 Chromebook a school
+ * actually owns.
+ *
+ * Derived from YellowFruit's room stylesheet, which is where the tokens below come from.
+ */
+
+:root {
+  --room-text: #1c1d20;
+  --room-muted: #5c6066;
+  --room-faint: #8a8f96;
+  --room-border: #d8dade;
+  --room-border-strong: #c2c5ca;
+  --room-surface: #ffffff;
+  --room-surface-sunken: #f6f7f8;
+  --room-accent: #1565c0;
+  --room-accent-hover: #10529c;
+  --room-success: #1e6b32;
+  --room-success-bg: #e8f3ea;
+  --room-warning: #8a5300;
+  --room-warning-bg: #fdf3e3;
+  --room-warning-border: #e0a33c;
+  --room-error: #a8231b;
+  --room-error-bg: #fceceb;
+  --room-error-border: #d9534f;
+  --room-info-bg: #eaf3fb;
+  --room-info-border: #6aa9dd;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  color: var(--room-text);
+  background: var(--room-surface);
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* #region Shell */
+
+.shell {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 32px 16px 48px;
+}
+
+.shell-centered {
+  min-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.shell-header {
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--room-border);
+  margin-bottom: 24px;
+}
+
+.shell-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.shell-subtitle,
+.shell-loading {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--room-muted);
+}
+
+.shell-section {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--room-border);
+}
+
+.shell-section:last-of-type {
+  border-bottom: none;
+}
+
+/* Sections read as a list of headings, so they are small and quiet rather than large and loud. */
+.shell-heading {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--room-muted);
+}
+
+.shell-hint {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--room-muted);
+}
+
+.shell-notice {
+  margin: 0 0 16px;
+  padding: 8px 12px;
+  background: var(--room-info-bg);
+  border-left: 3px solid var(--room-info-border);
+  font-size: 13px;
+}
+
+.shell-warning {
+  margin: 0 0 16px;
+  padding: 8px 12px;
+  background: var(--room-warning-bg);
+  border-left: 3px solid var(--room-warning-border);
+  color: var(--room-warning);
+  font-size: 13px;
+}
+
+.shell-errors {
+  margin: 16px 0 0;
+  padding: 8px 12px;
+  background: var(--room-error-bg);
+  border-left: 3px solid var(--room-error-border);
+  color: var(--room-error);
+  font-size: 13px;
+}
+
+.shell-errors ul {
+  margin: 4px 0 0;
+  padding-left: 20px;
+}
+
+/* #endregion */
+
+/* #region Controls */
+
+.shell-label {
+  display: block;
+  font-size: 13px;
+  color: var(--room-muted);
+  margin-bottom: 4px;
+}
+
+.shell-input {
+  width: 100%;
+  padding: 8px 10px;
+  font: inherit;
+  color: inherit;
+  background: var(--room-surface);
+  border: 1px solid var(--room-border-strong);
+  border-radius: 3px;
+}
+
+.shell-input:focus-visible {
+  outline: 2px solid var(--room-accent);
+  outline-offset: -1px;
+}
+
+.shell-button {
+  padding: 8px 14px;
+  font: inherit;
+  font-weight: 500;
+  color: var(--room-text);
+  background: var(--room-surface);
+  border: 1px solid var(--room-border-strong);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.shell-button:hover:not(:disabled) {
+  background: var(--room-surface-sunken);
+}
+
+.shell-button:disabled {
+  color: var(--room-faint);
+  cursor: default;
+}
+
+.shell-button.is-primary {
+  color: #fff;
+  background: var(--room-accent);
+  border-color: var(--room-accent);
+}
+
+.shell-button.is-primary:hover:not(:disabled) {
+  background: var(--room-accent-hover);
+  border-color: var(--room-accent-hover);
+}
+
+.shell-button.is-primary:disabled {
+  background: var(--room-faint);
+  border-color: var(--room-faint);
+}
+
+.shell-button.is-destructive {
+  color: var(--room-error);
+  border-color: var(--room-error-border);
+}
+
+.shell-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.connect-form {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 420px;
+}
+
+.connect-form .shell-button {
+  align-self: flex-start;
+  margin-top: 8px;
+}
+
+.file-open-input {
+  display: none;
+}
+
+.file-open.is-dragging {
+  outline: 2px dashed var(--room-accent);
+  outline-offset: 4px;
+}
+
+/* #endregion */
+
+/* #region Resume, recent, final */
+
+.resume-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px;
+  border: 1px solid var(--room-border-strong);
+  border-radius: 3px;
+  background: var(--room-surface-sunken);
+}
+
+.resume-context,
+.recent-context {
+  margin: 0;
+  font-size: 12px;
+  color: var(--room-muted);
+}
+
+.resume-matchup {
+  margin: 2px 0 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.resume-progress {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: var(--room-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.recent-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.recent-item {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 0;
+  border-top: 1px solid var(--room-border);
+}
+
+.recent-score {
+  margin: 2px 0 0;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+.recent-when {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--room-muted);
+}
+
+.recent-status {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.recent-status div {
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.recent-status dt {
+  color: var(--room-muted);
+}
+
+.recent-status dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.final-score {
+  border-bottom: 1px solid var(--room-border);
+}
+
+.final-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 4px 0;
+}
+
+.final-team {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+/* The two totals share a baseline and a width so they can be compared without being read. */
+.final-points {
+  font-size: 28px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  min-width: 3ch;
+  text-align: right;
+}
+
+.final-ok {
+  margin: 0;
+  color: var(--room-success);
+  font-weight: 500;
+}
+
+.final-pending {
+  margin: 0;
+  color: var(--room-warning);
+}
+
+.final-steps {
+  margin: 0 0 12px;
+  padding-left: 20px;
+}
+
+.final-instruction {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  background: var(--room-surface-sunken);
+  border-left: 3px solid var(--room-border-strong);
+  white-space: pre-wrap;
+}
+
+.final-handoff {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--room-border);
+}
+
+.assignment-matchup {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+/* #endregion */
+
+/* #region Modal */
+
+.shell-modal {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgb(0 0 0 / 40%);
+}
+
+.shell-modal-body {
+  max-width: 480px;
+  padding: 20px;
+  background: var(--room-surface);
+  border: 1px solid var(--room-border-strong);
+  border-radius: 4px;
+}
+
+.shell-modal-body h2 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+
+.shell-modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+/* #endregion */

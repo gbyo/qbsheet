@@ -464,7 +464,7 @@ function TeamLineup(props: {
             <input
               id={`scorer-add-player-${side}`}
               value={newPlayer}
-              maxLength={roomPlayerNameMaxLength}
+              maxLength={playerNameMaxLength}
               placeholder="Player name"
               onChange={(changeEvent) => setNewPlayer(changeEvent.target.value)}
             />

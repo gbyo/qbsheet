@@ -78,7 +78,7 @@ function PartEntry(props: {
       <ol className="scorer-part-list">
         {outcomes.map((outcome, index) => (
           // Position is the identity of a bonus part; there is nothing else to key on.
-          // eslint-disable-next-line react/no-array-index-key
+
           <li key={index} className="scorer-part-row">
             <span className="scorer-part-label">Part {index + 1}</span>
             <span className="scorer-choices">

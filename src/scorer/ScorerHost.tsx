@@ -39,8 +39,8 @@ export interface IScorerHostProps {
   /** The session or emergency game id. Also what the saved game is filed under. */
   gameKey: string;
   format: IScorekeeperFormat;
-  leftTeam: IRoomTeam;
-  rightTeam: IRoomTeam;
+  leftTeam: ITeamRoster;
+  rightTeam: ITeamRoster;
   tournamentName: string;
   roundName: string;
   roomName?: string;
@@ -59,8 +59,8 @@ export interface IScorerHostProps {
   onRequestControl?: (category: HelpRequestCategory, message: string) => Promise<void>;
   controlRequestPending?: boolean;
   /** Latest assignment rosters, used only to confirm roster synchronization. */
-  authoritativeLeftTeam?: IRoomTeam;
-  authoritativeRightTeam?: IRoomTeam;
+  authoritativeLeftTeam?: ITeamRoster;
+  authoritativeRightTeam?: ITeamRoster;
   onSyncRosterPlayer?: (
     teamName: string,
     playerName: string,
@@ -79,8 +79,8 @@ export interface IScorerHostProps {
   recovery?: Omit<IScorerRecoveryStatus, 'localSaveOk' | 'localSavedAt'>;
 }
 
-function toSetup(left: IRoomTeam, right: IRoomTeam): IGameSetup {
-  const roster = (team: IRoomTeam) => ({
+function toSetup(left: ITeamRoster, right: ITeamRoster): IGameSetup {
+  const roster = (team: ITeamRoster) => ({
     name: team.name,
     players: team.players.map((player) => player.name).filter((name) => name !== ''),
   });
@@ -117,8 +117,7 @@ export default function ScorerHost(props: IScorerHostProps) {
 
   const initialGameKey = useRef(gameKey);
   useEffect(() => {
-    if (process.env.NODE_ENV !== 'production' && initialGameKey.current !== gameKey) {
-      // eslint-disable-next-line no-console
+    if (import.meta.env?.DEV && initialGameKey.current !== gameKey) {
       console.warn('ScorerHost gameKey changed without a remount. Render it with key={gameKey} to isolate each game.');
     }
   }, [gameKey]);
