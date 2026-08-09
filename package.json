@@ -22,7 +22,7 @@
     "start": "vite",
     "dev": "vite",
     "build": "tsc -p tsconfig.build.json && vite build",
-    "build:core": "tsc -p tsconfig.core.json",
+    "build:core": "tsc -p tsconfig.core.json && node scripts/write-core-package.mjs",
     "preview": "vite preview",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
