@@ -166,6 +166,11 @@ export default function TeamPanel(props: ITeamPanelProps) {
               sits beside the buttons that get pressed while a reader is talking, and a fifth target
               of the same weight would be a fifth thing to hit by mistake mid-tossup. It stays out of
               the ruling block so that block keeps its own alignment down the sheet.
+
+              The swap arrows rather than the word, because the word was repeated down every row of
+              both teams — eight copies of "Sub" on a full sheet, competing for the eye with the one
+              thing on the line that has to be read at a glance, which is the name. The arrows say
+              the same thing in the same box; the accessible name and the tooltip still spell it out.
             */}
             {onSubstitute && (
               <button
@@ -177,7 +182,7 @@ export default function TeamPanel(props: ITeamPanelProps) {
                 title={substitutionAllowed ? `Substitute for ${player.name}` : substitutionBlockedReason}
                 onClick={() => setSubstituting((current) => (current === player.name ? null : player.name))}
               >
-                Sub
+                &#8644;
               </button>
             )}
             <span className="scorer-answers">
