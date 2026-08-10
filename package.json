@@ -30,6 +30,7 @@
     "test": "vitest",
     "test:state-space": "vitest --run tests/RoomGameStateSpace.test.ts",
     "test:stress": "QBSHEET_DEEP_STRESS=1 vitest --run tests/RoomGameStateSpace.test.ts",
+    "test:property": "vitest --run tests/RoomGameProperty.test.ts",
     "prepare": "npm run build:core"
   },
   "dependencies": {
@@ -50,6 +51,7 @@
     "eslint-plugin-react": "^7.37.3",
     "eslint-plugin-react-hooks": "^5.1.0",
     "fake-indexeddb": "^6.2.5",
+    "fast-check": "^4.9.0",
     "globals": "^15.14.0",
     "jsdom": "^25.0.1",
     "typescript": "^5.7.2",
