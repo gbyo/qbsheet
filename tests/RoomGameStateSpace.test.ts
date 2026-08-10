@@ -624,7 +624,7 @@ describe('bounded exhaustive scoring state space', () => {
     }),
     compactFormat('irregular bonuses and custom values', CommonRuleSets.Acf, (rules) => {
       rules.answerTypes = [new AnswerType(7), new AnswerType(-3)];
-      rules.pointsPerBonus = undefined;
+      rules.pointsPerBonusPart = undefined;
       rules.minimumPartsPerBonus = 1;
       rules.maximumPartsPerBonus = 4;
       rules.maximumBonusScore = 20;
