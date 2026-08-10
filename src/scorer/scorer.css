@@ -337,13 +337,18 @@ div.scorer-banner .scorer-text-action {
  * The substitution the row can make on its own.
  *
  * Deliberately the quietest control on the line. It is next to the buttons that score a tossup, and
- * anything that looks as pressable as +10 is something a thumb finds by accident mid-question.
+ * anything that looks as pressable as +10 is something a thumb finds by accident mid-question. So the
+ * swap glyph inside it is larger than the word it replaced while the box stays exactly as quiet: same
+ * muted colour, same hairline border, and a width held steady so the names below still line up when
+ * one row's control is open and the next one's is not.
  */
 .scorer-sub-action {
   flex: none;
+  min-width: 34px;
   padding: 4px 8px;
   font: inherit;
-  font-size: 12px;
+  font-size: 15px;
+  line-height: 1;
   color: var(--room-muted);
   background: transparent;
   border: 1px solid var(--room-border);

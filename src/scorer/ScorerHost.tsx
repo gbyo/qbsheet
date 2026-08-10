@@ -55,6 +55,8 @@ export interface IScorerHostProps {
   /** Whoever is signed in to this room browser, recorded on the result as the scorekeeper. */
   operatorName?: string;
   connection: RoomConnectionState;
+  /** Overrides the word in the header when the game's standing is not a network fact. See `Scorer`. */
+  statusLabel?: string;
   degradedMessage?: string;
   onSubmit: (qbj: object) => Promise<IScorerSubmitResult>;
   onDownload: (qbj: object) => void;
@@ -118,6 +120,7 @@ export default function ScorerHost(props: IScorerHostProps) {
     procedure,
     operatorName,
     connection,
+    statusLabel,
     degradedMessage,
     onSubmit,
     onDownload,
@@ -219,6 +222,7 @@ export default function ScorerHost(props: IScorerHostProps) {
       procedure={procedure}
       operatorName={operatorName}
       connection={connection}
+      statusLabel={statusLabel}
       degradedMessage={degradedMessage}
       saved={events.saved}
       onSubmit={onSubmit}

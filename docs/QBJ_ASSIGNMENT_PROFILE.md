@@ -1,16 +1,20 @@
 # QBJ Assignment Profile
 
-**This is a profile of QBJ, not a new file format.** Every document described here is ordinary QBJ
-that any QBJ-aware tool can read. This document says which parts of QBJ QBSheet uses, what it does
-when optional parts are missing, and the one small extension it adds for information QBJ cannot
-represent.
+This document is a profile of QBJ. It does not define a new file format. Every document that it
+describes is ordinary QBJ, and any QBJ-aware tool can read it.
 
-There is no `.qbs` format. There will not be one.
+The document states which parts of QBJ QBSheet uses, what QBSheet does when an optional part is
+absent, and the one extension that QBSheet adds for information that QBJ cannot represent.
+
+QBSheet defines no `.qbs` format, and it will not define one.
+
+This document uses the key words MUST, MUST NOT, SHOULD, SHOULD NOT, and MAY in their ordinary
+specification sense.
 
 ## The shape of a document
 
-All new files QBSheet writes, and all assignments it prefers to receive, use the official QBJ
-serialization envelope:
+QBSheet writes every new file in the official QBJ serialization envelope. QBSheet also prefers to
+receive an assignment in that envelope.
 
 ```json
 {
@@ -19,27 +23,27 @@ serialization envelope:
 }
 ```
 
-`2.1.1` is the QBJ serialization version currently supported by the reference tournament-control
-implementation (`validQbjVersions` in Fruity's `QbjUtils.ts`). QBSheet writes this version and
-refuses an unrecognized one with a plain message rather than guessing at the differences.
+`2.1.1` is the QBJ serialization version that the reference tournament-control implementation
+supports. See `validQbjVersions` in Fruity's `QbjUtils.ts`. QBSheet writes this version. QBSheet
+refuses an unrecognised version with a plain message, and it does not guess at the differences.
 
-The MIME type for these documents is:
+The media type for these documents is:
 
     application/vnd.quizbowl.qbj+json
 
-The file extension is `.qbj` for every public file. Not `.qbg`, not `.qbs`.
+The file extension is `.qbj` for every public file. It is not `.qbg`, and it is not `.qbs`.
 
-## The three inputs QBSheet accepts
+## The three inputs that QBSheet accepts
 
 | Input | Status | Notes |
 | --- | --- | --- |
-| **A.** Official serialized QBJ (`{version, objects}`) | Preferred | Both one-game assignments and whole tournaments |
-| **B.** Match-only QBJ (a bare `Match` object) | Supported for compatibility | The de-facto form produced and consumed by MODAQ and by legacy workflows |
+| **A.** Official serialized QBJ (`{version, objects}`) | Preferred | One-game assignments and whole tournaments |
+| **B.** Match-only QBJ (a bare `Match` object) | Supported for compatibility | The form that MODAQ and legacy workflows produce and consume |
 | **C.** Legacy `.qbg` game package | Import only, deprecated | See [`QBG_MIGRATION.md`](QBG_MIGRATION.md) |
 
-B and C are read. Neither is preferred, and neither is written as the default output.
+QBSheet reads B and C. It prefers neither, and it writes neither as its default output.
 
-All three converge on **one** normalization pipeline:
+All three inputs converge on one normalization pipeline:
 
 ```
      official serialized QBJ ─┐
@@ -49,46 +53,49 @@ All three converge on **one** normalization pipeline:
              legacy .qbg ─────┘   (via a compatibility converter, same validation)
 ```
 
-`GameDefinition` is **internal**. It replaces `IGamePackage`'s role as a public specification and
-takes on none of it: it is not written to disk, not sent over the network, and not versioned as a
-public contract. Its only job is to be the single thing the scorer is built against, so that a file
-assignment and a QBTCP assignment cannot drift apart. QBTCP delivers document form A over HTTP and
-it goes through this same parser — that is the point.
+`GameDefinition` is internal. It replaces the role of `IGamePackage` as a public specification, and it
+takes on none of that role. QBSheet does not write `GameDefinition` to disk and does not send it over
+the network, and it carries no public version contract.
+
+`GameDefinition` gives the scorer one thing to build against, so that a file assignment and a QBTCP
+assignment cannot drift apart. QBTCP delivers document form A over HTTP, and that document goes
+through this same parser.
 
 ## A one-game assignment
 
-A QBJ assignment is a normal QBJ serialization containing **one unplayed scheduled Match**. It is
-not a distinct format and needs no distinct parser.
+A QBJ assignment is a normal QBJ serialization that contains one unplayed scheduled `Match`. It is not
+a distinct format, and it needs no distinct parser.
 
 For a single game, include only what that game needs:
 
-- exactly one `Tournament` (required by the serialization format)
+- Exactly one `Tournament`, which the serialization format requires
 - `ScoringRules`
-- the `Registration` / `Team` / `Player` objects for the two teams playing
-- the relevant `Phase`
-- the relevant `Round`
-- exactly one `Match`
-- packet identity, if known
+- The `Registration`, `Team`, and `Player` objects for the two teams that play
+- The relevant `Phase`
+- The relevant `Round`
+- Exactly one `Match`
+- The packet identity, when it is known
 
-Deliberately **excluded**, and a producer MUST NOT include them:
+A producer MUST NOT include any of these:
 
-- standings and rankings
-- other rooms' games
-- future or unreleased pairings
-- tournament-control credentials, pairing codes, room or session tokens
-- device identifiers, server URLs
-- browser recovery state
+- Standings and rankings
+- The games of other rooms
+- Future pairings or unreleased pairings
+- Tournament-control credentials, pairing codes, room tokens, or session tokens
+- Device identifiers or server URLs
+- Browser recovery state
 
-A room needs the game in front of it. Everything else on that list is either information that will
-be wrong by the end of the round, information the room has no business holding, or a capability
-that should never travel in a file.
+A room needs the game in front of it. Each item on the second list falls into one of three
+categories. It is information that the end of the round will make wrong, it is information that the
+room has no reason to hold, or it is a capability that must never travel in a file.
 
-### Unplayed means unplayed
+### Represent an unplayed match as unplayed
 
-A scheduled-but-unplayed `Match` uses standard QBJ semantics for an unplayed game. A producer MUST
-NOT fabricate zero scores, empty `match_teams` totals, or a `tossups_read` of 0 in order to make an
-assignment look like a result. An importer distinguishes an assignment from a result by the absence
-of scoring content, not by a flag, and inventing zeroes destroys exactly that signal.
+A scheduled match that nobody has played uses the standard QBJ semantics for an unplayed game.
+
+A producer MUST NOT write zero scores, empty `match_teams` totals, or a `tossups_read` of `0` to make
+an assignment resemble a result. An importer separates an assignment from a result by the absence of
+scoring content, and a fabricated zero removes that signal.
 
 ### Identity comes from QBJ, not from an extension
 
@@ -96,23 +103,25 @@ of scoring content, not by a flag, and inventing zeroes destroys exactly that si
 | --- | --- |
 | Tournament | `Tournament.id` |
 | Scheduled match | `Match.id` |
-| Team | `Team.id` (and its `Registration`) |
+| Team | `Team.id`, and its `Registration` |
 | Player | `Player.id` |
 | Phase | `Phase.id` |
-| Round | `Round.id` / `Round.name` |
+| Round | `Round.id` and `Round.name` |
 | Room | `Match.location` |
 
-These are the identities. The `_qbtcp` extension MUST NOT restate any of them — no
-`scheduled_match_id`, no `tournament_id`, no team names, no room display name where
-`Match.location` already carries it. Duplicating an identity creates two places for it to disagree,
-and the extension is the one a generic consumer will ignore.
+These fields are the identities. The `_qbtcp` extension MUST NOT restate any of them. It carries no
+`scheduled_match_id`, no `tournament_id`, no team name, and no room display name where
+`Match.location` already carries one.
 
-Filenames are never identity. See "Filenames".
+A duplicated identity creates two fields that can disagree. A generic consumer ignores the extension
+and reads the standard field, so the two copies do not stay in step.
+
+A filename is never an identity. See "Filenames".
 
 ## The `_qbtcp` extension
 
-A small, optional, ignorable, non-secret block carrying **only** operational information that
-standard QBJ cannot express. It attaches to the `Match`.
+The extension is a small optional block that a consumer can ignore. It holds no secret. It carries
+only the operational information that standard QBJ cannot express, and it attaches to the `Match`.
 
 ```json
 {
@@ -130,64 +139,64 @@ standard QBJ cannot express. It attaches to the `Match`.
 }
 ```
 
-Every field is optional except `version`. A consumer that has never heard of `_qbtcp` reads the
-match exactly as it would have anyway.
+Every field is optional except `version`. A consumer that does not recognise `_qbtcp` reads the match
+as it would read a match without the block.
 
-### Why each field is here and not in QBJ
+### Why each field is outside QBJ
 
-| Field | Why QBJ cannot carry it |
+| Field | Reason |
 | --- | --- |
-| `round_revision` | QBJ has no concept of a pairing being redrawn. Without this, a result scored against a superseded bracket is indistinguishable from a current one. |
-| `room_id` | `Match.location` is a display string. A stable room id survives renaming "Room 204" to "Library". Included only when it differs in kind from `location`. |
-| `procedure` | Halves, clock, and timeout policy are tournament operations, not scoring rules. QBJ models scoring, not how a room runs a game. |
-| `handoff_instruction` | Free text telling the room what to do with the finished file. Deliberately opaque to the application. |
+| `round_revision` | QBJ has no concept of a redrawn pairing. Without this field, a result scored against a superseded bracket looks the same as a current one. |
+| `room_id` | `Match.location` is a display string. A stable room identifier survives a rename from "Room 204" to "Library". Include it only when it differs in kind from `location`. |
+| `procedure` | Halves, the clock, and the timeout policy are tournament operations. QBJ models scoring, not the way a room runs a game. |
+| `handoff_instruction` | Free text that tells the room what to do with the finished file. The application does not interpret it. |
 | `scorekeeper.timed` | See below. |
 
-### `scorekeeper.timed`, and why it is the only scoring field permitted here
+### `scorekeeper.timed`
 
-`IQbjScoringRules` has no field for whether a round is timed. In the reference implementation the
-flag lives outside QBJ entirely, in a file-format extension (`IYftFileScoringRules.YfData.timed`).
-It is a genuine gap: a timed round ends when the moderator calls time, not after a fixed tossup
-count, and a scorer that guesses wrong either cuts a game short or runs past the end of it.
+`IQbjScoringRules` has no field for a timed round. In the reference implementation the flag lives
+outside QBJ, in a file-format extension at `IYftFileScoringRules.YfData.timed`.
 
-So `timed` travels here, and it is the **only** scoring semantic permitted in `_qbtcp`. Anything
-QBJ can express MUST be expressed in `ScoringRules`. If a future need arises for another such
-value, it goes in this table with the same justification or it does not go in at all.
+The gap has a practical effect. A timed round ends when the moderator calls time, and it does not end
+after a fixed tossup count. A scorer with the wrong assumption either cuts a game short or runs past
+the end of it.
 
-When `timed` is absent, QBSheet does not assume either way — see "Graceful degradation".
+`timed` therefore travels in this extension, and it is the only scoring semantic that `_qbtcp`
+permits. A producer MUST express anything that QBJ can express in `ScoringRules`. Add another scoring
+value to this extension only with an entry in the table above and a reason of the same kind.
 
-### Extension placement, and a real compatibility constraint
+### Extension placement
 
-The extension attaches to the `Match` because the assignment metadata is about this game. Attaching
-it to `Tournament` would imply it describes the whole event, which `round_revision` and `room_id`
-plainly do not.
+The extension attaches to the `Match`, because the assignment metadata describes this game. Attachment
+to `Tournament` would imply that the block describes the whole event, which `round_revision` and
+`room_id` do not.
 
-Two things were verified before settling on this:
+Two compatibility facts apply to the reference parser:
 
-1. **Unknown keys survive the reference parser.** Fruity's `snakeCaseToCamelCase` converts only an
-   explicit table of known QBJ key names and deletes the snake-case originals. A key it has never
-   heard of is left untouched, so `_qbtcp` arrives intact.
+1. **Unknown keys survive it.** Fruity's `snakeCaseToCamelCase` converts only an explicit table of
+   known QBJ key names, and it deletes the snake-case originals. It leaves a key that it does not
+   recognise untouched, so `_qbtcp` arrives intact.
 
-2. **But that conversion recurses into every nested object.** `snakeCaseToCamelCase` walks all
-   nested objects, including inside `_qbtcp`. Any key *inside* the extension whose name collides
-   with that table would be silently rewritten to camelCase and the original deleted.
+2. **That conversion recurses into every nested object,** which includes the inside of `_qbtcp`. The
+   parser silently rewrites any key inside the extension whose name collides with that table, and it
+   deletes the original.
 
-   Therefore: **keys inside `_qbtcp` MUST NOT collide with QBJ's snake_case key names.** The current
-   fields are safe (`round_revision`, `room_id`, `procedure`, `handoff_instruction`, `timed` are
-   none of them in the conversion table). Any field added later must be checked against it. This is
-   a documented compatibility compromise with a deployed parser, not a design preference.
+Therefore a key inside `_qbtcp` MUST NOT collide with a QBJ snake-case key name. The current fields
+are safe, because the conversion table holds none of `round_revision`, `room_id`, `procedure`,
+`handoff_instruction`, or `timed`. Check any later field against that table. This constraint comes
+from a deployed parser rather than from a preference.
 
-The QBJ schema does not define a formal extension mechanism, so an underscore-prefixed key is the
-convention in use — the same convention as the existing `_qbsheet_source` and YellowFruit's
-`YfData`. Standard fields are never overloaded to smuggle non-standard meaning.
+The QBJ schema defines no formal extension mechanism, so an underscore-prefixed key is the convention
+in use. `_qbsheet_source` and YellowFruit's `YfData` follow the same convention. A producer never
+overloads a standard field to carry non-standard meaning.
 
 ## Whole-tournament input
 
-QBSheet accepts a whole-tournament QBJ, so that it is a useful generic scoresheet rather than a
-client of one product.
+QBSheet accepts a QBJ document for a whole tournament, so that it serves as a generic scoresheet
+rather than the client of one product.
 
-- **Exactly one scoreable match** → open it directly, no prompt.
-- **More than one** → show a restrained game picker, grouped by round:
+- **Exactly one scoreable match:** QBSheet opens it directly, with no prompt.
+- **More than one:** QBSheet shows a game picker, grouped by round.
 
 ```
 Choose a game
@@ -198,173 +207,174 @@ Round 4
   Room 102    Emerald vs Greenwood
 ```
 
-Dense, flat, and consistent with the existing non-scorer shell. It is a list, not a gallery.
+The picker is a dense flat list, and it matches the existing non-scorer shell.
 
 Selection rules:
 
-- Unplayed scheduled matches are preferred and listed first.
-- A match that already carries score data is visually distinguished from a clearly unplayed one and
-  is never opened silently. Overwriting somebody's completed result because it was in the same file
-  is not an acceptable failure mode.
-- A **partially** scored match MAY be offered as a resume/recovery source, but only when QBSheet can
-  faithfully reconstruct it from standard QBJ. When it cannot, it says so instead of half-restoring.
+- QBSheet prefers unplayed scheduled matches, and lists them first.
+- QBSheet distinguishes a match that already carries score data from a match that is clearly
+  unplayed. QBSheet never opens a match that carries score data without an explicit instruction,
+  because that action can overwrite a completed result that another person entered.
+- QBSheet MAY offer a partially scored match as a resume source or a recovery source. It offers one
+  only when it can reconstruct the match faithfully from standard QBJ. Otherwise it reports the limit
+  instead of a partial restore.
 
-Fruity's normal workflow still exports **one assignment file per game**. Whole-tournament support is
-for interoperability, not a recommendation to hand every room the entire schedule.
+The normal Fruity workflow still exports one assignment file per game. Whole-tournament support serves
+interoperability. It is not a recommendation to give every room the entire schedule.
 
 ## Graceful degradation
 
-Generic QBJ will be missing things Fruity always provides. Each gap has a defined behavior, and
-none of them is a guess.
+Generic QBJ will lack things that Fruity always provides. Each gap has a defined behaviour, and none
+of the behaviours is a guess.
 
-| Missing | Behavior |
+| Missing | Behaviour |
 | --- | --- |
-| **Scoring rules** (absent or insufficient) | Stop and say *"This QBJ does not specify enough scoring information."* Let the scorekeeper choose or configure a format. **Never** assume NAQT, ACF, or any other named rule set. |
-| **Rosters** (teams present, players absent) | Allow manual player entry; scoring proceeds normally. |
-| **Procedure** | Scoring works. QBSheet states that tournament procedure was not included and that it will not enforce procedural rules it does not know. It does not pretend to know substitution, timeout, or clock policy. |
-| **Room** | Scoring works; no room is displayed. |
-| **Round** | Scoring works; a neutral fallback label is displayed. |
-| **`timed`** | Not assumed in either direction. If the distinction affects scoring for the chosen format, QBSheet asks. |
+| **Scoring rules**, absent or insufficient | Stop, and state *"This QBJ does not specify enough scoring information."* Let the scorekeeper choose or configure a format. Never assume NAQT, ACF, or any other named rule set. |
+| **Rosters**, with teams present and players absent | Allow manual player entry. Scoring proceeds normally. |
+| **Procedure** | Scoring works. QBSheet states that the document included no tournament procedure, and that it will not enforce a procedural rule that it does not know. It does not model substitution, timeout, or clock policy. |
+| **Room** | Scoring works. QBSheet displays no room. |
+| **Round** | Scoring works. QBSheet displays a neutral fallback label. |
+| **`timed`** | QBSheet assumes neither value. When the distinction affects scoring for the chosen format, QBSheet asks. |
 
-The rule behind the table: **QBSheet asks rather than guesses.** A silently repaired ambiguity is a
-mis-scored game that nobody knows to look for.
+The rule behind the table is that QBSheet asks instead of guesses. A repaired ambiguity that QBSheet
+does not report produces a mis-scored game that nobody knows to examine.
 
-### Never branch on a rule-set name
+### Never branch on the name of a rule set
 
-Scoring behavior derives from structural `ScoringRules` fields — `answer_types`, `awards_bonus`,
+Scoring behaviour derives from the structural `ScoringRules` fields: `answer_types`, `awards_bonus`,
 `maximum_players_per_team`, `regulation_tossup_count`, `maximum_regulation_tossup_count`,
 `minimum_overtime_question_count`, `overtime_includes_bonuses`, `maximum_bonus_score`,
 `bonus_divisor`, `minimum_parts_per_bonus`, `maximum_parts_per_bonus`, `points_per_bonus_part`,
 `bonuses_bounce_back`, the lightning fields, and `total_divisor`.
 
-`ScoringRules.name` is a label. No code path may branch on `"NAQT"`, `"ACF"`, or any other string in
-it.
+`ScoringRules.name` is a label. No code path branches on `"NAQT"`, on `"ACF"`, or on any other
+string in that field.
 
 ## Validation of untrusted input
 
-Every imported document is untrusted, including one that arrived over an authenticated QBTCP
-connection. QBSheet enforces:
+Every imported document is untrusted. This includes a document that arrived over an authenticated
+QBTCP connection. QBSheet enforces all of the following:
 
-- a file-size bound before parsing
-- JSON shape checks on every object it reads
-- finite numbers only — no `NaN`, no `Infinity`
-- positive, in-range format values
-- non-blank team and player names
-- no duplicate player identity within a team
-- lineups that are subsets of their roster, without repeats, within the format's active limit
-- safe id strings
-- rejection of prototype-pollution shapes (`__proto__`, `constructor`, `prototype` as keys)
-- a supported-version check, with a plain unsupported-version message rather than a guess
+- A file-size bound before the parse
+- JSON shape checks on every object that it reads
+- Finite numbers only, with no `NaN` and no `Infinity`
+- Format values that are positive and in range
+- Team names and player names that are not blank
+- No duplicate player identity within one team
+- Lineups that are subsets of their roster, without a repeat, and within the active limit of the format
+- Safe identifier strings
+- Rejection of prototype-pollution shapes, which are `__proto__`, `constructor`, and `prototype` as keys
+- A supported-version check, with a plain unsupported-version message rather than a guess
 
 ## Output: what QBSheet writes
 
-**QBSheet writes `.qbj`. It does not write `.qbg`.**
+QBSheet writes `.qbj`. It does not write `.qbg`.
 
-The default portable download is an official serialized QBJ document (`{version, objects}`). A bare
-`Match` object is no longer presented as the canonical QBJ file.
+The default portable download is an official serialized QBJ document, `{version, objects}`. QBSheet no
+longer presents a bare `Match` object as the canonical QBJ file.
 
-For ecosystem compatibility a secondary export remains available, placed under a **More…** menu and
-deliberately not visually dominant:
+A secondary export remains available for ecosystem compatibility. It sits under a **More…** menu, and
+it is not visually dominant:
 
     More…
       Download legacy match-only QBJ
 
 ### A result is the assignment, filled in
 
-When QBSheet starts from an official QBJ assignment, the completed result preserves the same
-document identity:
+When QBSheet starts from an official QBJ assignment, the completed result preserves the identity of
+that document:
 
-- same `Tournament.id`, `Phase.id`, `Round.id`, `Match.id`
-- same team ids, same player ids
-- same scoring rules
+- The same `Tournament.id`, `Phase.id`, `Round.id`, and `Match.id`
+- The same team identifiers and the same player identifiers
+- The same scoring rules
 
-and then fills the `Match` with what actually happened: `tossups_read`, `overtime_tossups_read`,
-team and player performance, points and bonus points, lineups, `match_questions`, notes,
-moderator/scorekeeper where known, `location`, packet information, and protests or corrections in
-standard QBJ representation where one exists.
+QBSheet then fills the `Match` with what happened: `tossups_read`, `overtime_tossups_read`, team and
+player performance, points and bonus points, lineups, `match_questions`, notes, the moderator and
+scorekeeper where known, `location`, packet information, and protests or corrections in the standard
+QBJ representation where one exists.
 
-The result is not a newly-minted match that happens to resemble the assignment. Because identity is
-preserved, reconciliation on the tournament-control side is deterministic — a lookup, not a fuzzy
-filename match.
+Because the result preserves the identity, reconciliation on the tournament-control side is
+deterministic. It is a lookup rather than a match against a filename.
 
-For a Match-only import with no `Tournament` wrapper, export creates the minimum valid serialized
-document and preserves whatever identities were available.
+For a Match-only import with no `Tournament` wrapper, the export creates the minimum valid serialized
+document, and it preserves whatever identities were available.
 
-## Partial download, and how it differs from real recovery
+## Partial download
 
 During an active game, **Game → More… → Download current QBJ** writes a portable partial:
 
     R04_Room-204_Ninety-Six_vs_Greenwood.partial.qbj
 
-It contains as much standard QBJ state as can be faithfully represented: current team and player
-statistics, lineups, `match_questions`, notes, `location`, and stable identities. QBSheet can reopen
-one and reconstruct the game to the extent standard QBJ supports.
+It contains as much standard QBJ state as QBSheet can represent faithfully: the current team and
+player statistics, the lineups, `match_questions`, the notes, `location`, and the stable identities.
+QBSheet can reopen one and reconstruct the game to the extent that standard QBJ supports.
 
-**This is not QBSheet's recovery mechanism, and it must not be described as one.**
+A portable partial is not the recovery mechanism of QBSheet. Do not describe it as one.
 
 | | Portable partial QBJ | Local browser recovery |
 | --- | --- | --- |
-| Lives in | A file the scorekeeper holds | IndexedDB + `localStorage` journal |
-| Contains | Standard QBJ statistical state | Full `ScoreEvent` history and frozen setup |
+| Lives in | A file that the scorekeeper holds | IndexedDB and the `localStorage` journal |
+| Contains | Standard QBJ statistical state | The full `ScoreEvent` history and the frozen setup |
 | Restores | The game as QBJ can describe it | The game exactly as it was |
-| Undo/redo history | No | Yes |
+| Undo and redo history | No | Yes |
 | Exact clock internals | No | Yes |
-| Connection state, outbox | No | Yes |
+| Connection state and outbox | No | Yes |
 | Leaves the device | Yes | Never |
 
-Local `ScoreEvents` remain the authoritative exact-recovery mechanism. A portable QBJ is a lifeboat
-for a dead Chromebook, not a substitute for the journal.
+The local `ScoreEvents` remain the authoritative exact-recovery mechanism. A portable partial serves a
+device that is no longer available, and it does not replace the journal.
 
 ## Privacy boundary
 
-A single sanitization boundary applies to **everything** that leaves the device — download, QBTCP
-progress, QBTCP result. Portable QBJ MUST NEVER contain:
+One sanitization boundary applies to everything that leaves the device: a download, a QBTCP progress
+snapshot, and a QBTCP result.
 
-room tokens · session tokens · pairing codes · `Authorization` header data · device ids · browser
-identifiers · server URLs · credentials or secrets of any kind · the private recovery journal ·
-private `ScoreEvents` included for implementation convenience
+Portable QBJ MUST NEVER contain any of the following:
 
-The existing legacy key `_yf_scorekeeper_recovery` continues to be **stripped** from portable
-downloads.
+room tokens · session tokens · pairing codes · `Authorization` header data · device identifiers ·
+browser identifiers · server URLs · credentials or secrets of any kind · the private recovery journal ·
+private `ScoreEvents` that an implementation included for convenience
+
+QBSheet continues to strip the legacy key `_yf_scorekeeper_recovery` from a portable download.
 
 ### Source metadata
 
 | Key | Status |
 | --- | --- |
 | `_qbtcp` | Written. The documented home for new operational metadata. |
-| `_qbsheet_source` | **Read** for compatibility. No longer written as the preferred form. |
-| `_scoresheet_source` | **Read** for compatibility with pre-QBSheet files. Never written. |
+| `_qbsheet_source` | Read for compatibility. No longer written as the preferred form. |
+| `_scoresheet_source` | Read for compatibility with files that predate QBSheet. Never written. |
 
 ## Result identity and deduplication
 
-The same result can arrive twice — once automatically over QBTCP, once as a QBJ the scorekeeper
-downloaded and uploaded by hand. That must not create two matches.
+The same result can arrive twice. It can arrive automatically over QBTCP, and then again as a QBJ file
+that the scorekeeper downloaded and uploaded. Two arrivals must not create two matches.
 
 Matching order:
 
-1. `Tournament.id` and `Match.id` — the strongest identity, and the reason assignments preserve ids.
-2. Failing that, the **portable statistical result fingerprint**.
+1. `Tournament.id` and `Match.id`. This is the strongest identity, and it is the reason that an
+   assignment preserves its identifiers.
+2. The portable statistical result fingerprint, when the identifiers do not match.
 
-The fingerprint is computed over the statistical content only. It **ignores**:
+A consumer computes the fingerprint over the statistical content only. It ignores all of the
+following:
 
-- `_qbtcp` transport and source metadata
-- legacy source extensions (`_qbsheet_source`, `_scoresheet_source`)
-- private recovery data
-- object key ordering
+- `_qbtcp` transport metadata and source metadata
+- The legacy source extensions `_qbsheet_source` and `_scoresheet_source`
+- Private recovery data
+- The ordering of object keys
 
-so that the same game scored once produces one fingerprint regardless of how it travelled.
+One game scored once therefore produces one fingerprint, whatever route the document took.
 
-Outcomes:
-
-| Situation | Behavior |
+| Situation | Behaviour |
 | --- | --- |
-| Automatic and manual copies agree | *"Backup copy matches existing result."* No duplicate. |
-| Same `Match.id`, different statistics | Explicit conflict for human review. **Never** silently overwritten. |
-| Result carries an older `round_revision` | Flagged as stale/superseded. Not silently accepted as current. |
+| The automatic copy and the manual copy agree | Report *"Backup copy matches existing result."* Record no duplicate. |
+| The same `Match.id`, with different statistics | Raise an explicit conflict for human review. Never overwrite it silently. |
+| The result carries an older `round_revision` | Flag the result as stale or superseded. Do not accept it as current. |
 
 ## Filenames
 
-`.qbj` for every new public file, with a descriptive suffix:
+Every new public file uses `.qbj`, with a descriptive suffix:
 
 | Purpose | Example |
 | --- | --- |
@@ -372,11 +382,11 @@ Outcomes:
 | Completed result | `R04_Room-204_Ninety-Six_vs_Greenwood.result.qbj` |
 | Mid-game backup | `R04_Room-204_Ninety-Six_vs_Greenwood.partial.qbj` |
 
-The suffix is **human guidance only**. No implementation may treat a filename as authoritative
-identity, or decide how to parse a document from its name. Two rooms will rename these files and one
-of them will not.
+The suffix is guidance for a person. No implementation treats a filename as authoritative identity,
+and none decides how to parse a document from its name. A room can rename any of these files at any
+time.
 
 ## See also
 
-- [`QBTCP.md`](QBTCP.md) — the live protocol, including how an assignment is delivered over HTTP
-- [`QBG_MIGRATION.md`](QBG_MIGRATION.md) — retiring the legacy `.qbg` package
+- [`QBTCP.md`](QBTCP.md) — the live protocol, and the delivery of an assignment over HTTP
+- [`QBG_MIGRATION.md`](QBG_MIGRATION.md) — the retirement of the legacy `.qbg` package
