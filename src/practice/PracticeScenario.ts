@@ -345,9 +345,9 @@ export const practiceSteps: IPracticeStep[] = [
     id: 'substitution',
     title: 'Substitution before Tossup 7',
     call: 'Ninety Six substitutes Olivia in for Owen.',
-    instruction: 'Press Sub on Owen’s row, then choose Olivia.',
+    instruction: 'Press ⇄ on Owen’s row, then choose Olivia.',
     hint:
-      'Every player on the floor has a Sub button beside their rulings: it already knows who is coming off, so it only asks who comes on. Players in the bottom toolbar does the same thing and more — adding somebody to the roster, reordering the seats, or changing several players at once at halftime.',
+      'Every player on the floor has a ⇄ button beside their rulings: it already knows who is coming off, so it only asks who comes on. Players in the bottom toolbar does the same thing and more — adding somebody to the roster, reordering the seats, or changing several players at once at halftime.',
     success: 'Correct — Olivia will receive tossups heard starting with Tossup 7.',
     section: 'Fix mistakes',
     expectation: { kind: 'event', matches: substitution(7, 'left', 'Olivia', 'Owen') },

@@ -29,7 +29,7 @@ const helpTopics = [
   {
     title: 'A player is missing or substitutes',
     answer:
-      'For a straight one-for-one swap, press Sub on the outgoing player’s row on the scoresheet and choose who comes on. Players in the bottom toolbar handles everything else: adding somebody to the roster, changing several players at once, or reordering the seats. Either way the change starts at the next tossup, so tossups heard stay honest.',
+      'For a straight one-for-one swap, press ⇄ on the outgoing player’s row on the scoresheet and choose who comes on. Players in the bottom toolbar handles everything else: adding somebody to the roster, changing several players at once, or reordering the seats. Either way the change starts at the next tossup, so tossups heard stay honest.',
   },
   {
     title: 'Wrong answer, neg, or no buzz?',

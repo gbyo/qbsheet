@@ -318,7 +318,6 @@ export default function PracticeScreen({ onHome }: { onHome: () => void }) {
 
   return (
     <div className="practice-mode">
-      <div className="practice-banner">Practice game · Local only — not sent or added to Recent Games.</div>
       <ScorerHost
         key={`${practiceGameKey}-${run}`}
         gameKey={practiceGameKey}
@@ -331,6 +330,15 @@ export default function PracticeScreen({ onHome }: { onHome: () => void }) {
         roundName="Guided game"
         roomName="Practice room"
         connection={RoomConnectionState.Connected}
+        /*
+         * The header says Practice, not Connected. There is no tournament control behind a practice
+         * game, so "Connected" was a claim about a server nobody asked — and the one word the
+         * scoring screen spends on status is better spent saying which kind of game this is. It also
+         * replaces the strip that used to sit above the scorer saying the same thing at length: the
+         * title already reads QBSheet Practice, and a banner repeating it cost a line of a 768px
+         * screen on every question.
+         */
+        statusLabel="Practice"
         onSubmit={finish}
         onDownload={() => undefined}
         onEventsChanged={observe}

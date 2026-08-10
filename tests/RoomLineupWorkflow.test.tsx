@@ -426,6 +426,18 @@ describe('the Sub button on a player row', () => {
     return row;
   }
 
+  test('the control is the swap glyph, not the word repeated down every row', () => {
+    renderScorer(formatFor(2));
+    chooseStarters(['Sarah Jones', 'Michael Smith']);
+
+    const panel = screen.getByLabelText('Ninety Six');
+    const row = within(panel).getByText('Sarah Jones').closest('li') as HTMLElement;
+    const control = within(row).getByRole('button', { name: 'Substitute for Sarah Jones' });
+    // The name is what has to be read at a glance on this line; the control says its job with arrows.
+    expect(control.textContent).toBe('\u21c4');
+    expect(within(panel).queryAllByText('Sub')).toEqual([]);
+  });
+
   test('two presses record the complete lineup, effective at the next question', () => {
     renderScorer(formatFor(2));
     chooseStarters(['Sarah Jones', 'Michael Smith']);
