@@ -1,0 +1,137 @@
+.practice-mode {
+  position: relative;
+  min-height: 100vh;
+}
+
+.practice-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 30;
+  padding: 7px 16px;
+  border-bottom: 1px solid var(--line, #d7d7d7);
+  background: var(--surface, #fff);
+  color: var(--muted, #666);
+  font-size: 13px;
+  text-align: center;
+}
+
+.practice-coach {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 40;
+  width: min(360px, calc(100vw - 36px));
+  max-height: calc(100vh - 70px);
+  overflow: auto;
+  padding: 16px;
+  border: 1px solid var(--line, #d7d7d7);
+  border-radius: 8px;
+  background: var(--surface, #fff);
+  box-shadow: 0 8px 30px rgb(0 0 0 / 12%);
+}
+
+.practice-coach-topline,
+.practice-actions,
+.practice-complete-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.practice-coach-topline {
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.practice-label,
+.practice-progress {
+  margin: 0;
+  color: var(--muted, #666);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.practice-coach h2 {
+  margin: 0 0 10px;
+  font-size: 19px;
+}
+
+.practice-call,
+.practice-instruction,
+.practice-feedback,
+.practice-hint p {
+  margin: 8px 0;
+  line-height: 1.45;
+}
+
+.practice-call {
+  color: var(--muted, #555);
+}
+
+.practice-instruction {
+  font-weight: 650;
+}
+
+.practice-feedback {
+  padding-top: 8px;
+  border-top: 1px solid var(--line, #e2e2e2);
+  font-size: 14px;
+}
+
+.practice-feedback.is-error {
+  color: var(--danger, #9f1d1d);
+}
+
+.practice-feedback.is-success {
+  color: var(--success, #226b3a);
+}
+
+.practice-hint {
+  margin-top: 10px;
+  font-size: 14px;
+}
+
+.practice-hint summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.practice-actions {
+  flex-wrap: wrap;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line, #e2e2e2);
+}
+
+.practice-complete {
+  max-width: 680px;
+  padding-top: 80px;
+}
+
+.practice-complete p:not(.practice-label) {
+  max-width: 58ch;
+  line-height: 1.55;
+}
+
+.practice-complete-actions {
+  flex-wrap: wrap;
+  margin-top: 24px;
+}
+
+@media (max-width: 700px) {
+  .practice-banner {
+    position: sticky;
+  }
+
+  .practice-coach {
+    right: 10px;
+    bottom: 10px;
+    width: calc(100vw - 20px);
+    max-height: 42vh;
+    padding: 14px;
+  }
+}

@@ -23,6 +23,8 @@ import { IGamePackage, gamePackageIdentity } from '../game/GamePackage';
 import { openRecordStore } from '../persistence/GameDatabase';
 import { claimGame, IGameClaim, newTabId } from '../persistence/TabClaim';
 import { IGameSetup } from '../scoring/deriveGame';
+import { clearGame } from '../scorer/GameSession';
+import PracticeScreen, { practiceGameKey } from '../practice/PracticeScreen';
 import { IConnectedSession, clearConnection, readConnection, writeConnection } from './ConnectedSession';
 import useLeaveWarning from './useLeaveWarning';
 import WelcomeScreen from './WelcomeScreen';
@@ -38,6 +40,7 @@ type Screen =
   | { kind: 'home' }
   | { kind: 'connect' }
   | { kind: 'readiness' }
+  | { kind: 'practice' }
   | { kind: 'scoring'; recordId: string }
   | { kind: 'completed'; recordId: string }
   /** Another live tab on this device is already scoring the game that was asked for. */
@@ -243,6 +246,10 @@ export default function App() {
     );
   }
 
+  if (screen.kind === 'practice') {
+    return <PracticeScreen onHome={goHome} />;
+  }
+
   if (screen.kind === 'duplicate' && current) {
     return <DuplicateTabNotice record={current} onHome={goHome} />;
   }
@@ -277,13 +284,15 @@ export default function App() {
       durable={store.durable}
       rememberedRoom={connection?.roomName}
       onReadiness={() => setScreen({ kind: 'readiness' })}
+      onPractice={() => {
+        clearGame(practiceGameKey);
+        setScreen({ kind: 'practice' });
+      }}
       onConnect={(baseUrl) => {
         setPendingBaseUrl(baseUrl);
         setScreen({ kind: 'connect' });
       }}
-      onOpenPackage={(packageValue, attempt) =>
-        startFromPackage(packageValue, { connected: false, attempt })
-      }
+      onOpenPackage={(packageValue, attempt) => startFromPackage(packageValue, { connected: false, attempt })}
       onOpenRecord={openRecord}
       onFindExisting={(identity) => store.findByIdentity(identity)}
     />

@@ -7,7 +7,8 @@
  * software is arranged rather than about what the room is doing. A room at a connected tournament
  * has an address on the projector and types it in; a room at any other tournament has a file. Both
  * are offered, one after the other, in the order they are likely, and neither requires understanding
- * that the other exists.
+ * that the other exists. Practice is separate from both: it is a self-contained training game that
+ * never needs tournament data.
  *
  * # An unfinished game comes before either
  *
@@ -41,6 +42,7 @@ export default function WelcomeScreen(props: {
   durable: boolean;
   rememberedRoom?: string;
   onReadiness: () => void;
+  onPractice: () => void;
   onConnect: (baseUrl: string) => void;
   onOpenPackage: (packageValue: IGamePackage, attempt?: number) => void | Promise<void>;
   onOpenRecord: (record: IStoredGameRecord) => void | Promise<void>;
@@ -52,6 +54,7 @@ export default function WelcomeScreen(props: {
     durable,
     rememberedRoom,
     onReadiness,
+    onPractice,
     onConnect,
     onOpenPackage,
     onOpenRecord,
@@ -122,6 +125,16 @@ export default function WelcomeScreen(props: {
           ))}
         </section>
       )}
+
+      <section className="shell-section">
+        <h2 className="shell-heading">New to QBSheet?</h2>
+        <p className="shell-hint">
+          Score a guided practice game with the real scoresheet. No game file or tournament-control server is needed.
+        </p>
+        <button type="button" className="shell-button is-primary" onClick={onPractice}>
+          Practice scoring
+        </button>
+      </section>
 
       <section className="shell-section">
         <h2 className="shell-heading">Connect to tournament control</h2>

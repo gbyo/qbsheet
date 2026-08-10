@@ -1,0 +1,315 @@
+import { IScorekeeperFormat, scorekeeperFormatVersion } from '../scoring/ScorekeeperFormat';
+import { bonusEventPoints, ScoreEvent } from '../scoring/ScoreEvents';
+import { IGameSetup } from '../scoring/deriveGame';
+import { ITeamRoster } from '../game/Roster';
+
+export type PracticeExpectation =
+  | { kind: 'lineup' }
+  | { kind: 'event'; matches: (event: ScoreEvent) => boolean }
+  | { kind: 'undo' }
+  | { kind: 'submit' };
+
+export interface IPracticeStep {
+  id: string;
+  title: string;
+  call: string;
+  instruction: string;
+  hint: string;
+  success: string;
+  expectation: PracticeExpectation;
+}
+
+const answerTypes = [
+  {
+    index: 0,
+    value: 15,
+    label: 'Power',
+    shortLabel: 'P',
+    isPower: true,
+    isNeg: false,
+    awardsBonus: true,
+    qbjId: 'AnswerType_Power',
+  },
+  {
+    index: 1,
+    value: 10,
+    label: 'Correct',
+    shortLabel: '10',
+    isPower: false,
+    isNeg: false,
+    awardsBonus: true,
+    qbjId: 'AnswerType_10',
+  },
+  {
+    index: 2,
+    value: -5,
+    label: 'Neg',
+    shortLabel: 'N',
+    isPower: false,
+    isNeg: true,
+    awardsBonus: false,
+    qbjId: 'AnswerType_Neg',
+  },
+];
+
+export const practiceFormat: IScorekeeperFormat = {
+  version: scorekeeperFormatVersion,
+  name: 'Practice rules',
+  answerTypes,
+  regulation: { timed: false, tossupCount: 8, maximumTossupCount: 8 },
+  bonus: {
+    enabled: true,
+    bounceBack: false,
+    regular: true,
+    divisor: 10,
+    minimumParts: 3,
+    maximumParts: 3,
+    pointsPerPart: 10,
+    maximumScore: 30,
+  },
+  overtime: { minimumQuestionCount: 3, suddenDeath: false, includesBonuses: false },
+  lightning: { enabled: false, countPerTeam: 0, divisor: 10 },
+  players: { maximumActive: 4 },
+  totalDivisor: 5,
+};
+
+export const practiceLeftTeam: ITeamRoster & { startingLineup: string[] } = {
+  name: 'Ninety Six A',
+  players: ['Jordan', 'Alex', 'Sam', 'Taylor', 'Casey'].map((name) => ({ name })),
+  startingLineup: ['Jordan', 'Alex', 'Sam', 'Taylor'],
+};
+
+export const practiceRightTeam: ITeamRoster & { startingLineup: string[] } = {
+  name: 'Greenwood A',
+  players: ['Maya', 'Chris', 'Riley', 'Evan', 'Morgan'].map((name) => ({ name })),
+  startingLineup: ['Maya', 'Chris', 'Riley', 'Evan'],
+};
+
+function tossup(questionNumber: number, team: 'left' | 'right', playerName: string, answerTypeIndex: number) {
+  return (event: ScoreEvent) =>
+    event.type === 'tossup-buzz' &&
+    event.questionNumber === questionNumber &&
+    event.team === team &&
+    event.playerName === playerName &&
+    event.answerTypeIndex === answerTypeIndex;
+}
+
+function bonus(questionNumber: number, team: 'left' | 'right', points: number) {
+  return (event: ScoreEvent) => {
+    if (event.type !== 'bonus' || event.questionNumber !== questionNumber || event.team !== team) return false;
+    return bonusEventPoints(event)[0] === points;
+  };
+}
+
+function dead(questionNumber: number) {
+  return (event: ScoreEvent) => event.type === 'tossup-dead' && event.questionNumber === questionNumber;
+}
+
+function substitution(questionNumber: number, team: 'left' | 'right', incoming: string, outgoing: string) {
+  return (event: ScoreEvent) =>
+    event.type === 'substitution' &&
+    event.questionNumber === questionNumber &&
+    event.team === team &&
+    event.activePlayers.includes(incoming) &&
+    !event.activePlayers.includes(outgoing);
+}
+
+export const practiceSteps: IPracticeStep[] = [
+  {
+    id: 'lineup',
+    title: 'Set the starting lineups',
+    call: 'Before the game starts, each team has five players available.',
+    instruction: 'Choose Jordan, Alex, Sam and Taylor for Ninety Six, and Maya, Chris, Riley and Evan for Greenwood.',
+    hint: 'Select exactly four starters for each team, leaving Casey and Morgan on the bench.',
+    success: 'Good. The scorer now knows who should receive tossups heard from question 1.',
+    expectation: { kind: 'lineup' },
+  },
+  {
+    id: 'q1-power',
+    title: 'Tossup 1',
+    call: 'Reader: “Power, Jordan on Ninety Six.”',
+    instruction: 'Record Jordan’s power.',
+    hint: 'Choose Jordan on the Ninety Six side, then record the 15-point answer.',
+    success: 'Correct — a power is worth 15 in this practice format.',
+    expectation: { kind: 'event', matches: tossup(1, 'left', 'Jordan', 0) },
+  },
+  {
+    id: 'q1-bonus',
+    title: 'Bonus 1',
+    call: 'Ninety Six gets 20 points on the bonus.',
+    instruction: 'Record 20 bonus points.',
+    hint: 'Enter two correct bonus parts and one miss, or use the equivalent total if the scorer offers it.',
+    success: 'Right — the bonus adds 20 to Ninety Six.',
+    expectation: { kind: 'event', matches: bonus(1, 'left', 20) },
+  },
+  {
+    id: 'q2-ten',
+    title: 'Tossup 2',
+    call: 'Reader: “Maya, Greenwood — correct for 10.”',
+    instruction: 'Record Maya for 10.',
+    hint: 'Choose Maya, then the normal 10-point correct answer.',
+    success: 'Exactly.',
+    expectation: { kind: 'event', matches: tossup(2, 'right', 'Maya', 1) },
+  },
+  {
+    id: 'q2-bonus',
+    title: 'Bonus 2',
+    call: 'Greenwood gets 10 on the bonus.',
+    instruction: 'Record a 10-point bonus.',
+    hint: 'One bonus part correct, two missed.',
+    success: 'Good.',
+    expectation: { kind: 'event', matches: bonus(2, 'right', 10) },
+  },
+  {
+    id: 'q3-neg',
+    title: 'Tossup 3',
+    call: 'Alex on Ninety Six interrupts and negs.',
+    instruction: 'Record Alex’s neg.',
+    hint: 'Choose Alex and the −5 answer. The tossup should remain live for Greenwood.',
+    success: 'Correct — Ninety Six loses 5, and Greenwood can still answer.',
+    expectation: { kind: 'event', matches: tossup(3, 'left', 'Alex', 2) },
+  },
+  {
+    id: 'q3-rebound',
+    title: 'Tossup 3 continues',
+    call: 'Maya answers correctly for Greenwood after the neg.',
+    instruction: 'Record Maya for 10 on the same tossup.',
+    hint: 'Do not advance the question; score Greenwood’s conversion on Tossup 3.',
+    success: 'That is the common neg-and-rebound sequence.',
+    expectation: { kind: 'event', matches: tossup(3, 'right', 'Maya', 1) },
+  },
+  {
+    id: 'q3-bonus',
+    title: 'Bonus 3',
+    call: 'Greenwood sweeps the bonus for 30.',
+    instruction: 'Record all 30 bonus points.',
+    hint: 'All three bonus parts are correct.',
+    success: 'Correct.',
+    expectation: { kind: 'event', matches: bonus(3, 'right', 30) },
+  },
+  {
+    id: 'q4-dead',
+    title: 'Tossup 4',
+    call: 'Nobody buzzes before the question is finished.',
+    instruction: 'Record the tossup as dead and move on.',
+    hint: 'Use the no-answer/dead-tossup action rather than assigning it to a player.',
+    success: 'Right — no player or team receives tossup points.',
+    expectation: { kind: 'event', matches: dead(4) },
+  },
+  {
+    id: 'q5-ten',
+    title: 'Tossup 5',
+    call: 'Jordan answers correctly for 10.',
+    instruction: 'Record Jordan for 10.',
+    hint: 'This one is a normal correct answer, not a power.',
+    success: 'Correct.',
+    expectation: { kind: 'event', matches: tossup(5, 'left', 'Jordan', 1) },
+  },
+  {
+    id: 'q5-bonus',
+    title: 'Bonus 5',
+    call: 'Ninety Six gets 20 on the bonus.',
+    instruction: 'Record 20.',
+    hint: 'Two parts correct, one missed.',
+    success: 'Good.',
+    expectation: { kind: 'event', matches: bonus(5, 'left', 20) },
+  },
+  {
+    id: 'q6-ten',
+    title: 'Tossup 6',
+    call: 'Reader initially reports Alex as correct for 10.',
+    instruction: 'Record Alex for 10.',
+    hint: 'Score the call exactly as you heard it. We will correct it next.',
+    success: 'Recorded. Now the moderator corrects the call.',
+    expectation: { kind: 'event', matches: tossup(6, 'left', 'Alex', 1) },
+  },
+  {
+    id: 'q6-undo',
+    title: 'Correct a scoring mistake',
+    call: 'Correction: Alex’s answer was actually a power, not a 10.',
+    instruction: 'Use Undo to remove the answer you just recorded.',
+    hint: 'Use the scorer’s Undo action. Do not patch the team total by hand.',
+    success: 'Good — undo removes the event instead of making you reverse the arithmetic yourself.',
+    expectation: { kind: 'undo' },
+  },
+  {
+    id: 'q6-power',
+    title: 'Tossup 6, corrected',
+    call: 'Alex’s corrected ruling is a power.',
+    instruction: 'Record Alex for 15.',
+    hint: 'Choose Alex and the power answer.',
+    success: 'Correct. The history now contains the right ruling.',
+    expectation: { kind: 'event', matches: tossup(6, 'left', 'Alex', 0) },
+  },
+  {
+    id: 'q6-bonus',
+    title: 'Bonus 6',
+    call: 'Ninety Six gets 10 on the bonus.',
+    instruction: 'Record 10.',
+    hint: 'One part correct.',
+    success: 'Good.',
+    expectation: { kind: 'event', matches: bonus(6, 'left', 10) },
+  },
+  {
+    id: 'substitution',
+    title: 'Substitution before Tossup 7',
+    call: 'Ninety Six substitutes Casey in for Sam.',
+    instruction: 'Change the Ninety Six lineup so Casey is playing and Sam is on the bench.',
+    hint: 'Open Players, choose Sam to sub out, then put Casey in.',
+    success: 'Correct — Casey will receive tossups heard starting with Tossup 7.',
+    expectation: { kind: 'event', matches: substitution(7, 'left', 'Casey', 'Sam') },
+  },
+  {
+    id: 'q7-ten',
+    title: 'Tossup 7',
+    call: 'Casey answers correctly for 10 immediately after entering.',
+    instruction: 'Record Casey for 10.',
+    hint: 'Casey should now appear as an active Ninety Six player.',
+    success: 'Exactly. The substitution and tossups-heard history stay consistent.',
+    expectation: { kind: 'event', matches: tossup(7, 'left', 'Casey', 1) },
+  },
+  {
+    id: 'q7-bonus',
+    title: 'Bonus 7',
+    call: 'Ninety Six gets 30.',
+    instruction: 'Record 30.',
+    hint: 'All three parts correct.',
+    success: 'Good.',
+    expectation: { kind: 'event', matches: bonus(7, 'left', 30) },
+  },
+  {
+    id: 'q8-ten',
+    title: 'Tossup 8',
+    call: 'Chris answers correctly for Greenwood for 10.',
+    instruction: 'Record Chris for 10.',
+    hint: 'This is the final regulation tossup.',
+    success: 'Correct.',
+    expectation: { kind: 'event', matches: tossup(8, 'right', 'Chris', 1) },
+  },
+  {
+    id: 'q8-bonus',
+    title: 'Bonus 8',
+    call: 'Greenwood gets 20 on the final bonus.',
+    instruction: 'Record 20.',
+    hint: 'Two parts correct.',
+    success: 'The practice game is now fully scored.',
+    expectation: { kind: 'event', matches: bonus(8, 'right', 20) },
+  },
+  {
+    id: 'submit',
+    title: 'Finish the game',
+    call: 'The round is over and the scoresheet is complete.',
+    instruction: 'Finish/submit the game the same way you would in a real room.',
+    hint: 'Use the scorer’s finish or submit action. Practice mode will not upload or save a result anywhere.',
+    success: 'Practice complete.',
+    expectation: { kind: 'submit' },
+  },
+];
+
+export function practiceLineupReady(setup: IGameSetup): boolean {
+  const left = setup.left.startingLineup ?? [];
+  const right = setup.right.startingLineup ?? [];
+  const same = (actual: string[], expected: string[]) =>
+    actual.length === expected.length && expected.every((player) => actual.includes(player));
+  return same(left, practiceLeftTeam.startingLineup) && same(right, practiceRightTeam.startingLineup);
+}
