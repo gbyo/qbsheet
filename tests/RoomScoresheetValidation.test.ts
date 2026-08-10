@@ -34,7 +34,7 @@ describe('whole-scoresheet validation', () => {
     expect(validation.blockers).toEqual([]);
   });
 
-  test('duplicate opportunities and dead-plus-attempts are blockers', () => {
+  test('duplicate opportunities and a conversion marked dead are blockers', () => {
     const format = formatFor();
     const validation = validateScoresheet(format, setup, [
       event({ type: 'tossup-buzz', questionNumber: 1, team: 'left', playerName: 'Sarah', answerTypeIndex: 1 }),
@@ -43,8 +43,20 @@ describe('whole-scoresheet validation', () => {
     ]);
 
     expect(validation.blockers.map((problem) => problem.code)).toEqual(
-      expect.arrayContaining(['integrity', 'dead-attempt']),
+      expect.arrayContaining(['integrity', 'duplicate-opportunity', 'dead-conversion']),
     );
+  });
+
+  test('a non-converting attempt may be followed by the question going dead', () => {
+    const events: ScoreEvent[] = [
+      event({ type: 'tossup-no-penalty', questionNumber: 1, team: 'left', playerName: 'Sarah' }),
+      event({ type: 'tossup-dead', questionNumber: 1 }),
+      ...Array.from({ length: 19 }, (_, index) => event({ type: 'tossup-dead', questionNumber: index + 2 })),
+    ];
+    const validation = validateCorrectedHistory(formatFor(), setup, events);
+
+    expect(validation.valid).toBe(true);
+    expect(validation.blockers).toEqual([]);
   });
 
   test('a missing bonus blocks submission but is allowed while correcting the current question', () => {

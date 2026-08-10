@@ -103,7 +103,8 @@ export function replayPracticeProgress(events: ScoreEvent[], furthestStepIndex =
   let acceptedEventCount = boundary;
   let stepIndex = 1;
   while (stepIndex < practiceSteps.length) {
-    const expectation = practiceSteps[stepIndex].expectation;
+    const step = practiceSteps[stepIndex];
+    const expectation = step.expectation;
     if (expectation.kind === 'event') {
       const nextExpectation = practiceSteps[stepIndex + 1]?.expectation;
       // The deliberately wrong Q6 ruling is removed by the following Undo lesson. Once that lesson
@@ -113,7 +114,19 @@ export function replayPracticeProgress(events: ScoreEvent[], furthestStepIndex =
         continue;
       }
       const candidate = events[acceptedEventCount];
-      if (!candidate || !expectation.matches(candidate)) break;
+      if (!candidate || !expectation.matches(candidate)) {
+        // An explicit history-correction lesson can replace an event that an earlier lesson
+        // originally recorded. Once that correction has been reached and is present, consume the
+        // corrected event in the same position instead of rewinding to the obsolete instruction.
+        const superseded = practiceSteps.some(
+          (laterStep, laterIndex) =>
+            laterIndex <= furthestStepIndex &&
+            laterStep.expectation.kind === 'history' &&
+            laterStep.expectation.supersedes?.includes(step.id) === true &&
+            laterStep.expectation.matches(events),
+        );
+        if (!candidate || !superseded) break;
+      }
       acceptedEventCount += 1;
       stepIndex += 1;
       continue;

@@ -126,15 +126,23 @@ describe('question-level corrections', () => {
     });
   });
 
-  test('a dead question cannot also contain a zero-point answer', () => {
+  test('a question that ends without a conversion keeps its zero-point answer', () => {
     const format = formatFor();
-    const game = deriveGame(format, setup, [event({ type: 'tossup-dead', questionNumber: 1 })]);
-    const errors = validateEditableQuestion(format, game, {
+    const events = [
+      event({ type: 'tossup-no-penalty', questionNumber: 1, team: 'left', playerName: 'Sarah' }),
+      event({ type: 'tossup-dead', questionNumber: 1 }),
+    ];
+    const game = deriveGame(format, setup, events);
+    const model = {
       questionNumber: 1,
       attempts: [{ kind: 'no-penalty', team: 'left', playerName: 'Sarah' }],
       dead: true,
-    });
+    } as const;
 
-    expect(errors[0]).toContain('answer and No buzz');
+    expect(validateEditableQuestion(format, game, model)).toEqual([]);
+    expect(eventsFromEditableQuestion(model, () => 'replacement-dead').map((candidate) => candidate.type)).toEqual([
+      'tossup-no-penalty',
+      'tossup-dead',
+    ]);
   });
 });

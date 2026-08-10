@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { practiceLineupsRecorded, replayPracticeProgress } from '../src/practice/PracticeScreen';
-import { practiceFormat, practiceSteps } from '../src/practice/PracticeScenario';
+import {
+  practiceFormat,
+  practiceLeftTeam,
+  practiceRightTeam,
+  practiceSteps,
+} from '../src/practice/PracticeScenario';
 import { ScoreEvent } from '../src/scoring/ScoreEvents';
+import { validateCorrectedHistory } from '../src/scoring/validateScoresheet';
 
 function lineupEvents(left: string[], right: string[]): ScoreEvent[] {
   return [
@@ -58,5 +64,33 @@ describe('guided practice scenario', () => {
 
     events[2] = { ...events[2], answerTypeIndex: 1 } as ScoreEvent;
     expect(replayPracticeProgress(events)).toEqual({ stepIndex: 1, acceptedEventCount: 2 });
+  });
+
+  it('allows the Question 5 correction after Question 4 ends without a conversion', () => {
+    const events: ScoreEvent[] = [
+      ...lineupEvents(
+        ['Gibson', 'Jeremy', 'Owen', 'Lachlan'],
+        ['Tucker', 'Sam', 'Efren', 'Valerie'],
+      ),
+      { id: 'q1-tu', type: 'tossup-buzz', questionNumber: 1, team: 'left', playerName: 'Gibson', answerTypeIndex: 0 },
+      { id: 'q1-bonus', type: 'bonus', questionNumber: 1, team: 'left', controlledPoints: 20 },
+      { id: 'q2-tu', type: 'tossup-buzz', questionNumber: 2, team: 'right', playerName: 'Tucker', answerTypeIndex: 1 },
+      { id: 'q2-bonus', type: 'bonus', questionNumber: 2, team: 'right', controlledPoints: 10 },
+      { id: 'q3-neg', type: 'tossup-buzz', questionNumber: 3, team: 'left', playerName: 'Jeremy', answerTypeIndex: 2 },
+      { id: 'q3-tu', type: 'tossup-buzz', questionNumber: 3, team: 'right', playerName: 'Tucker', answerTypeIndex: 1 },
+      { id: 'q3-bonus', type: 'bonus', questionNumber: 3, team: 'right', controlledPoints: 30 },
+      { id: 'q4-wrong', type: 'tossup-no-penalty', questionNumber: 4, team: 'left', playerName: 'Owen' },
+      { id: 'q4-dead', type: 'tossup-dead', questionNumber: 4 },
+      { id: 'q5-tu', type: 'tossup-buzz', questionNumber: 5, team: 'left', playerName: 'Lachlan', answerTypeIndex: 1 },
+      { id: 'q5-bonus', type: 'bonus', questionNumber: 5, team: 'left', controlledPoints: 20 },
+    ];
+    const validation = validateCorrectedHistory(
+      practiceFormat,
+      { left: practiceLeftTeam, right: practiceRightTeam },
+      events,
+    );
+
+    expect(validation.blockers).toEqual([]);
+    expect(replayPracticeProgress(events, 12)).toEqual({ stepIndex: 13, acceptedEventCount: 13 });
   });
 });

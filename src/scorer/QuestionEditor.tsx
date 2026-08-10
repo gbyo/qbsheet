@@ -177,7 +177,15 @@ export default function QuestionEditor(props: {
       updateAttempt(index, { kind: 'no-penalty', answerTypeIndex: undefined });
       return;
     }
-    updateAttempt(index, { kind: 'buzz', answerTypeIndex: Number(value) });
+    const answerTypeIndex = Number(value);
+    const converts = (format.answerTypes[answerTypeIndex]?.value ?? 0) > 0;
+    setModel((current) => ({
+      ...current,
+      dead: converts ? false : current.dead,
+      attempts: current.attempts.map((attempt, attemptIndex) =>
+        attemptIndex === index ? { ...attempt, kind: 'buzz', answerTypeIndex } : attempt,
+      ),
+    }));
   };
 
   const addAttempt = () => {
@@ -276,7 +284,9 @@ export default function QuestionEditor(props: {
           <h4 className="scorer-question-heading">Tossup</h4>
           <span className="scorer-question-status">
             {model.dead
-              ? 'No buzz'
+              ? model.attempts.length === 0
+                ? 'No buzz'
+                : 'No conversion'
               : `${model.attempts.length} ${model.attempts.length === 1 ? 'attempt' : 'attempts'}`}
           </span>
         </div>
@@ -363,7 +373,13 @@ export default function QuestionEditor(props: {
         {model.attempts.length === 0 && !model.dead && (
           <p className="scorer-question-empty">No tossup ruling recorded.</p>
         )}
-        {model.dead && <p className="scorer-question-empty">This tossup was recorded with no buzz.</p>}
+        {model.dead && (
+          <p className="scorer-question-empty">
+            {model.attempts.length === 0
+              ? 'This tossup was recorded with no buzz.'
+              : 'No team converted this tossup.'}
+          </p>
+        )}
         <div className="scorer-question-actions">
           {model.attempts.length < 2 && converted === undefined && (
             <button type="button" className="scorer-action" onClick={addAttempt}>
@@ -395,12 +411,12 @@ export default function QuestionEditor(props: {
                 setModel((current) => ({
                   ...current,
                   dead: event.target.checked,
-                  attempts: event.target.checked ? [] : current.attempts,
+                  attempts: event.target.checked && conversion(current, format) ? [] : current.attempts,
                   bonus: event.target.checked ? undefined : current.bonus,
                 }))
               }
             />
-            No buzz
+            {model.attempts.length === 0 ? 'No buzz' : 'End without conversion'}
           </label>
         </div>
       </section>
