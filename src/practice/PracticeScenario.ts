@@ -96,9 +96,9 @@ export const practiceLeftTeam: ITeamRoster & { startingLineup: string[] } = {
 };
 
 export const practiceRightTeam: ITeamRoster & { startingLineup: string[] } = {
-  name: 'Riverton Prep',
-  players: ['Tucker', 'Sam', 'Efren', 'Valerie', 'Bella'].map((name) => ({ name })),
-  startingLineup: ['Tucker', 'Sam', 'Efren', 'Valerie'],
+  name: 'Greenwood',
+  players: ['Tucker', 'Phillip', 'Efren', 'Valerie', 'Bella'].map((name) => ({ name })),
+  startingLineup: ['Tucker', 'Phillip', 'Efren', 'Valerie'],
 };
 
 function tossup(questionNumber: number, team: 'left' | 'right', playerName: string, answerTypeIndex: number) {
@@ -160,7 +160,7 @@ export const practiceSteps: IPracticeStep[] = [
     title: 'Set the starting lineups',
     call: 'Before the game starts, each team has five players available.',
     instruction:
-      'Tick Gibson, Jeremy, Owen and Lachlan for Ninety Six, and Tucker, Sam, Efren and Valerie for Riverton Prep, then choose Start game.',
+      'Tick Gibson, Jeremy, Owen and Lachlan for Ninety Six, and Tucker, Phillip, Efren and Valerie for Greenwood, then choose Start game.',
     hint:
       'Only four of each five may be on the floor, so leave Olivia and Bella unticked. Start game stays disabled until both teams have exactly four.',
     success: 'Good. The scorer now knows who should receive tossups heard from question 1.',
@@ -192,9 +192,9 @@ export const practiceSteps: IPracticeStep[] = [
   {
     id: 'q2-ten',
     title: 'Tossup 2',
-    call: 'Reader: “Tucker, Riverton Prep — correct for 10.”',
-    instruction: 'Press +10 on Tucker’s row, on the Riverton Prep side.',
-    hint: '+10 is the ordinary correct answer, as opposed to P for a power. Riverton Prep is the right-hand team.',
+    call: 'Reader: “Tucker, Greenwood — correct for 10.”',
+    instruction: 'Press +10 on Tucker’s row, on the Greenwood side.',
+    hint: '+10 is the ordinary correct answer, as opposed to P for a power. Greenwood is the right-hand team.',
     success: 'Exactly.',
     section: 'Score the game',
     expectation: { kind: 'event', matches: tossup(2, 'right', 'Tucker', 1) },
@@ -202,7 +202,7 @@ export const practiceSteps: IPracticeStep[] = [
   {
     id: 'q2-bonus',
     title: 'Bonus 2',
-    call: 'Riverton Prep gets 10 on the bonus.',
+    call: 'Greenwood gets 10 on the bonus.',
     instruction: 'Press 10 in the bonus prompt.',
     hint: 'One part correct out of three. The prompt names the team the bonus belongs to, so there is nothing to choose.',
     success: 'Good.',
@@ -215,8 +215,8 @@ export const practiceSteps: IPracticeStep[] = [
     call: 'Jeremy on Ninety Six interrupts and negs.',
     instruction: 'Press N on Jeremy’s row.',
     hint:
-      'N is the neg, worth −5 here. Watch what happens afterwards: Ninety Six’s buttons go quiet because they have had their answer, and Riverton Prep’s stay live because the tossup is not over.',
-    success: 'Correct — Ninety Six loses 5, and Riverton Prep can still answer.',
+      'N is the neg, worth −5 here. Watch what happens afterwards: Ninety Six’s buttons go quiet because they have had their answer, and Greenwood’s stay live because the tossup is not over.',
+    success: 'Correct — Ninety Six loses 5, and Greenwood can still answer.',
     section: 'Score the game',
     expectation: { kind: 'event', matches: tossup(3, 'left', 'Jeremy', 2) },
   },
@@ -224,10 +224,10 @@ export const practiceSteps: IPracticeStep[] = [
     id: 'q3-rebound',
     title: 'Tossup 3 continues',
     call:
-      'Still on Tossup 3. The question is read out to the end, and Tucker answers it correctly for Riverton Prep.',
+      'Still on Tossup 3. The question is read out to the end, and Tucker answers it correctly for Greenwood.',
     instruction: 'Press +10 on Tucker’s row. Stay on Tossup 3 — do not use No buzz and do not advance the question.',
     hint:
-      'Nothing needs advancing: the header still says Tossup 3 and it stays there until the tossup is settled. Ninety Six’s rulings are greyed out because they have used their answer, and Riverton Prep no longer shows N — a team that has heard the whole question cannot be negged. No buzz would mean Riverton Prep never answered, which is not what happened.',
+      'Nothing needs advancing: the header still says Tossup 3 and it stays there until the tossup is settled. Ninety Six’s rulings are greyed out because they have used their answer, and Greenwood no longer shows N — a team that has heard the whole question cannot be negged. No buzz would mean Greenwood never answered, which is not what happened.',
     success: 'That is the common neg-and-rebound sequence.',
     section: 'Score the game',
     expectation: { kind: 'event', matches: tossup(3, 'right', 'Tucker', 1) },
@@ -235,9 +235,9 @@ export const practiceSteps: IPracticeStep[] = [
   {
     id: 'q3-bonus',
     title: 'Bonus 3',
-    call: 'Riverton Prep sweeps the bonus for 30.',
+    call: 'Greenwood sweeps the bonus for 30.',
     instruction: 'Press 30 in the bonus prompt.',
-    hint: 'All three parts correct. The bonus belongs to Riverton Prep because they converted the tossup, not because they negged nothing.',
+    hint: 'All three parts correct. The bonus belongs to Greenwood because they converted the tossup, not because they negged nothing.',
     success: 'Correct.',
     section: 'Score the game',
     expectation: { kind: 'event', matches: bonus(3, 'right', 30) },
@@ -256,10 +256,10 @@ export const practiceSteps: IPracticeStep[] = [
   {
     id: 'q4-dead',
     title: 'Tossup 4 continues',
-    call: 'Riverton Prep does not buzz after Owen’s answer.',
+    call: 'Greenwood does not buzz after Owen’s answer.',
     instruction: 'Press the No buzz button below the two teams.',
     hint:
-      'It now reads “Riverton Prep has no answer”, because they are the only team left who could have buzzed. Owen’s 0 stays on the scoresheet; this only closes the tossup with nobody converting it, so there is no bonus.',
+      'It now reads “Greenwood has no answer”, because they are the only team left who could have buzzed. Owen’s 0 stays on the scoresheet; this only closes the tossup with nobody converting it, so there is no bonus.',
     success: 'Right — the scoresheet now distinguishes the wrong answer from the team that never buzzed.',
     section: 'Score the game',
     expectation: { kind: 'event', matches: dead(4) },
@@ -375,17 +375,17 @@ export const practiceSteps: IPracticeStep[] = [
   {
     id: 'q8-ten',
     title: 'Tossup 8',
-    call: 'Sam answers correctly for Riverton Prep for 10.',
-    instruction: 'Press +10 on Sam’s row, on the Riverton Prep side.',
+    call: 'Phillip answers correctly for Greenwood for 10.',
+    instruction: 'Press +10 on Phillip’s row, on the Greenwood side.',
     hint: 'This is the last of the eight tossups in this practice format.',
     success: 'Correct.',
     section: 'Finish safely',
-    expectation: { kind: 'event', matches: tossup(8, 'right', 'Sam', 1) },
+    expectation: { kind: 'event', matches: tossup(8, 'right', 'Phillip', 1) },
   },
   {
     id: 'q8-bonus',
     title: 'Bonus 8',
-    call: 'Riverton Prep gets 20 on the final bonus.',
+    call: 'Greenwood gets 20 on the final bonus.',
     instruction: 'Press 20 in the bonus prompt.',
     hint: 'Two parts correct. Once this is in, the game is over and the finish review replaces the tossup controls.',
     success: 'The practice game is now fully scored.',

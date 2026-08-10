@@ -27,12 +27,12 @@ describe('guided practice scenario', () => {
   it('recognizes the real substitution events emitted by the starting-lineup prompt', () => {
     expect(
       practiceLineupsRecorded(
-        lineupEvents(['Gibson', 'Jeremy', 'Owen', 'Lachlan'], ['Tucker', 'Sam', 'Efren', 'Valerie']),
+        lineupEvents(['Gibson', 'Jeremy', 'Owen', 'Lachlan'], ['Tucker', 'Phillip', 'Efren', 'Valerie']),
       ),
     ).toBe(true);
     expect(
       practiceLineupsRecorded(
-        lineupEvents(['Gibson', 'Jeremy', 'Owen', 'Olivia'], ['Tucker', 'Sam', 'Efren', 'Valerie']),
+        lineupEvents(['Gibson', 'Jeremy', 'Owen', 'Olivia'], ['Tucker', 'Phillip', 'Efren', 'Valerie']),
       ),
     ).toBe(false);
   });
@@ -48,7 +48,7 @@ describe('guided practice scenario', () => {
   it('replays the current scoresheet to a safe guide checkpoint', () => {
     const events = lineupEvents(
       ['Gibson', 'Jeremy', 'Owen', 'Lachlan'],
-      ['Tucker', 'Sam', 'Efren', 'Valerie'],
+      ['Tucker', 'Phillip', 'Efren', 'Valerie'],
     );
     expect(replayPracticeProgress(events)).toEqual({ stepIndex: 1, acceptedEventCount: 2 });
 
@@ -70,7 +70,7 @@ describe('guided practice scenario', () => {
     const events: ScoreEvent[] = [
       ...lineupEvents(
         ['Gibson', 'Jeremy', 'Owen', 'Lachlan'],
-        ['Tucker', 'Sam', 'Efren', 'Valerie'],
+        ['Tucker', 'Phillip', 'Efren', 'Valerie'],
       ),
       { id: 'q1-tu', type: 'tossup-buzz', questionNumber: 1, team: 'left', playerName: 'Gibson', answerTypeIndex: 0 },
       { id: 'q1-bonus', type: 'bonus', questionNumber: 1, team: 'left', controlledPoints: 20 },
