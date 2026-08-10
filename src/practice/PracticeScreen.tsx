@@ -103,7 +103,8 @@ export function replayPracticeProgress(events: ScoreEvent[], furthestStepIndex =
   let acceptedEventCount = boundary;
   let stepIndex = 1;
   while (stepIndex < practiceSteps.length) {
-    const expectation = practiceSteps[stepIndex].expectation;
+    const step = practiceSteps[stepIndex];
+    const expectation = step.expectation;
     if (expectation.kind === 'event') {
       const nextExpectation = practiceSteps[stepIndex + 1]?.expectation;
       // The deliberately wrong Q6 ruling is removed by the following Undo lesson. Once that lesson
@@ -113,7 +114,19 @@ export function replayPracticeProgress(events: ScoreEvent[], furthestStepIndex =
         continue;
       }
       const candidate = events[acceptedEventCount];
-      if (!candidate || !expectation.matches(candidate)) break;
+      if (!candidate || !expectation.matches(candidate)) {
+        // An explicit history-correction lesson can replace an event that an earlier lesson
+        // originally recorded. Once that correction has been reached and is present, consume the
+        // corrected event in the same position instead of rewinding to the obsolete instruction.
+        const superseded = practiceSteps.some(
+          (laterStep, laterIndex) =>
+            laterIndex <= furthestStepIndex &&
+            laterStep.expectation.kind === 'history' &&
+            laterStep.expectation.supersedes?.includes(step.id) === true &&
+            laterStep.expectation.matches(events),
+        );
+        if (!candidate || !superseded) break;
+      }
       acceptedEventCount += 1;
       stepIndex += 1;
       continue;
@@ -144,12 +157,12 @@ function practiceStartingLineupProblem(lineups: Partial<Record<LeftOrRight, stri
   ) {
     return undefined;
   }
-  return 'Choose the four starters named in the practice instruction before starting the game.';
+  return 'The starting lineup does not match the scenario. Adjust the lineup or open Get a hint, then try again.';
 }
 
 function unexpectedMessage(step: IPracticeStep): string {
   if (step.expectation.kind === 'event') {
-    return 'That recorded something different from the call. Use Undo to remove it, then try the instruction again.';
+    return 'That recorded something different from the call. Use Undo to remove it, then try the situation again.';
   }
   if (step.expectation.kind === 'undo') {
     return 'The correction should remove the last scoring action. Use Undo before recording the corrected ruling.';
@@ -157,7 +170,7 @@ function unexpectedMessage(step: IPracticeStep): string {
   if (step.expectation.kind === 'history') {
     return 'That question still does not match the correction. Open it from Recent, update the player, and save.';
   }
-  return 'Follow the practice instruction shown here, then try again.';
+  return 'Review the situation or open Get a hint, then try again.';
 }
 
 export default function PracticeScreen({ onHome }: { onHome: () => void }) {

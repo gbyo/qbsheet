@@ -1,37 +1,16 @@
 .practice-mode {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 376px;
-  grid-template-rows: auto 1fr;
+  position: relative;
   min-height: 100vh;
-  background: var(--room-surface-sunken, #f7f7f6);
 }
 
 .practice-mode > .scorer {
-  grid-row: 2;
-  min-width: 0;
   min-height: calc(100vh - 31px);
   background: var(--room-surface, #fff);
-  border-right: 1px solid var(--room-border-strong, #c9c9c7);
-}
-
-/* The guide narrows the scoresheet enough that its Recent rail must move below the team columns.
- * Otherwise four ruling buttons leave no room for player names even on a 1280px laptop. */
-.practice-mode .scorer-body {
-  flex-direction: column;
-}
-
-.practice-mode .scorer-rail {
-  width: auto;
-  max-height: 150px;
-  border-top: 1px solid var(--room-border, #d7d7d7);
-  border-left: 0;
 }
 
 .practice-banner {
   position: sticky;
   top: 0;
-  grid-column: 1 / -1;
-  grid-row: 1;
   z-index: 50;
   min-height: 31px;
   padding: 6px 16px;
@@ -45,13 +24,13 @@
 
 .practice-coach,
 .practice-coach-collapsed {
-  position: sticky;
-  top: 47px;
-  grid-row: 2;
-  align-self: start;
-  width: calc(100% - 24px);
-  max-height: calc(100vh - 63px);
-  margin: 16px 12px;
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 24;
+  width: min(360px, calc(100vw - 32px));
+  max-height: calc(100vh - 78px);
+  margin: 0;
   overflow: hidden;
   color: var(--room-text, #242424);
   background: var(--room-surface, #fff);
@@ -165,21 +144,14 @@
   line-height: 1.25;
 }
 
-.practice-call,
-.practice-instruction {
+.practice-call {
   margin: 10px 0 0;
   padding: 11px 12px;
   border-left: 3px solid var(--room-border-strong, #b9b9b6);
   background: var(--room-surface-sunken, #f7f7f6);
 }
 
-.practice-instruction {
-  border-left-color: var(--room-accent, #2868b2);
-  background: var(--room-info-bg, #eef5ff);
-}
-
-.practice-call > span,
-.practice-instruction > span {
+.practice-call > span {
   display: block;
   margin-bottom: 3px;
   color: var(--room-muted, #666);
@@ -190,17 +162,12 @@
 }
 
 .practice-call p,
-.practice-instruction p,
 .practice-feedback p,
 .practice-hint p,
 .practice-help p,
 .practice-confirm p {
   margin: 0;
   line-height: 1.45;
-}
-
-.practice-instruction p {
-  font-weight: 650;
 }
 
 .practice-feedback {
@@ -348,21 +315,14 @@
 }
 
 @media (max-width: 1050px) {
-  .practice-mode {
-    display: block;
-  }
-
   .practice-mode > .scorer {
     min-height: calc(100vh - 31px);
     padding-bottom: 126px;
-    border-right: 0;
   }
 
   .practice-coach,
   .practice-coach-collapsed {
-    position: fixed;
     inset: auto 12px 12px auto;
-    z-index: 24;
     width: min(376px, calc(100vw - 24px));
     max-height: min(68vh, 620px);
     margin: 0;

@@ -166,11 +166,22 @@ describe('what the editor leads with', () => {
     fireEvent.click(screen.getByText('20'));
     openEditor();
 
-    fireEvent.click(screen.getByLabelText('No buzz'));
+    fireEvent.click(screen.getByLabelText('End without conversion'));
 
     expect(screen.queryByLabelText('Ruling')).toBeNull();
     expect(screen.queryByRole('group', { name: 'Bonus points' })).toBeNull();
     expect(screen.getByText('This tossup was recorded with no buzz.')).toBeTruthy();
+  });
+
+  test('a zero-point answer remains editable when the other team never converts', () => {
+    renderScorer(formatFor());
+    fireEvent.click(screen.getByLabelText('Sarah Mitchell 0 after readout wrong, no penalty'));
+    fireEvent.click(screen.getByText('Greenwood has no answer'));
+    openEditor();
+
+    expect(screen.getByLabelText('Ruling')).toBeTruthy();
+    expect(screen.getByLabelText('End without conversion')).toBeTruthy();
+    expect(screen.getByText('No team converted this tossup.')).toBeTruthy();
   });
 });
 

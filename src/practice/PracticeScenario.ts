@@ -6,7 +6,7 @@ import { ITeamRoster } from '../game/Roster';
 export type PracticeExpectation =
   | { kind: 'lineup' }
   | { kind: 'event'; matches: (event: ScoreEvent) => boolean }
-  | { kind: 'history'; matches: (events: ScoreEvent[]) => boolean }
+  | { kind: 'history'; matches: (events: ScoreEvent[]) => boolean; supersedes?: string[] }
   | { kind: 'undo' }
   | { kind: 'submit' };
 
@@ -270,7 +270,11 @@ export const practiceSteps: IPracticeStep[] = [
     hint: 'Select Q5 in the Recent column, choose Lachlan in the question editor, then save the correction.',
     success: 'Fixed. QBSheet recalculated the player stats without changing the team score or later questions.',
     section: 'Fix mistakes',
-    expectation: { kind: 'history', matches: correctedTossup(5, 'left', 'Lachlan', 1) },
+    expectation: {
+      kind: 'history',
+      matches: correctedTossup(5, 'left', 'Lachlan', 1),
+      supersedes: ['q5-ten'],
+    },
   },
   {
     id: 'q6-ten',

@@ -335,18 +335,6 @@ function validateQuestion(
       ),
     );
   }
-  if (deadEvents.length > 0 && attempts.length > 0) {
-    addUnique(
-      blockers,
-      problem(
-        'blocker',
-        'dead-attempt',
-        `Question ${questionNumber} has an answer recorded as well as No buzz.`,
-        questionNumber,
-      ),
-    );
-  }
-
   const usedTeams = new Set<string>();
   for (const attempt of attempts) {
     if (usedTeams.has(attempt.team)) {

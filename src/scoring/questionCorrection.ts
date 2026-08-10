@@ -96,8 +96,6 @@ export function validateEditableQuestion(
   const question = game.questions.find((candidate) => candidate.questionNumber === model.questionNumber);
   const activePlayers = question?.activePlayers ?? { left: [], right: [] };
   if (model.attempts.length === 0 && !model.dead) errors.push(`Question ${model.questionNumber} needs a ruling.`);
-  if (model.dead && model.attempts.length > 0)
-    errors.push(`Question ${model.questionNumber} cannot have an answer and No buzz.`);
 
   const used = new Set<'left' | 'right'>();
   let previousAttempt = false;
@@ -125,6 +123,8 @@ export function validateEditableQuestion(
   }
 
   const converted = conversion(model, format);
+  if (model.dead && converted)
+    errors.push(`Question ${model.questionNumber} cannot have both a correct answer and no conversion.`);
   const convertedType =
     converted?.answerTypeIndex === undefined ? undefined : format.answerTypes[converted.answerTypeIndex];
   const expectsBonus =
