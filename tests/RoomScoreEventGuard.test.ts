@@ -187,6 +187,41 @@ describe('the starting lineup comes first', () => {
         .ok,
     ).toBe(true);
   });
+
+  test('a future substitute cannot answer the tossup that is still in progress', () => {
+    const startedSetup: IGameSetup = {
+      left: {
+        name: 'Ninety Six',
+        players: ['Sarah', 'James', 'Alex'],
+        startingLineup: ['Sarah', 'James'],
+      },
+      right: {
+        name: 'Greenwood',
+        players: ['Emma', 'Jordan', 'Morgan'],
+        startingLineup: ['Emma', 'Jordan'],
+      },
+    };
+    const startedContext = { format, setup: startedSetup };
+    const events: ScoreEvent[] = [
+      buzz(1, 'right', 'Emma', typeIndex(format, -5)),
+      event({ type: 'substitution', questionNumber: 2, team: 'left', activePlayers: ['James', 'Alex'] }),
+    ];
+
+    const futurePlayer = canApplyScoreEvent(
+      startedContext,
+      events,
+      buzz(1, 'left', 'Alex', typeIndex(format, 10)),
+    );
+    const currentPlayer = canApplyScoreEvent(
+      startedContext,
+      events,
+      buzz(1, 'left', 'Sarah', typeIndex(format, 10)),
+    );
+
+    expect(futurePlayer.ok).toBe(false);
+    expect(futurePlayer.ok === false && futurePlayer.reason).toContain('not active');
+    expect(currentPlayer.ok).toBe(true);
+  });
 });
 
 describe('procedure actions', () => {

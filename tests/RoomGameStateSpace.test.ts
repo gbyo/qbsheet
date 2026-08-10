@@ -4,7 +4,12 @@ import { EventInput } from './events';
 import scoringRulesToScorekeeperFormat, { CommonRuleSets, ScoringRules } from './rules';
 import { IScorekeeperFormat } from '../src/scoring/ScorekeeperFormat';
 import canApplyScoreEvent, { applyScoreEvents, IScoreEventContext } from '../src/scoring/canApplyScoreEvent';
-import deriveGame, { IGameSetup, ScoringPhase } from '../src/scoring/deriveGame';
+import deriveGame, {
+  IGameSetup,
+  lineupChangeEffectiveQuestion,
+  ScoringPhase,
+} from '../src/scoring/deriveGame';
+import { IRoomProcedure } from '../src/scoring/RoomProcedure';
 import {
   bonusEventPoints,
   IBonusPartResult,
@@ -93,8 +98,12 @@ function bonusEvents(format: IScorekeeperFormat, questionNumber: number, team: '
   );
 }
 
-function scoringCandidates(format: IScorekeeperFormat, events: ScoreEvent[]): ScoreEvent[] {
-  const game = deriveGame(format, setup, events);
+function scoringCandidates(
+  format: IScorekeeperFormat,
+  events: ScoreEvent[],
+  gameSetup: IGameSetup = setup,
+): ScoreEvent[] {
+  const game = deriveGame(format, gameSetup, events);
   const { phase } = game;
   if (phase.kind === 'bonus') {
     const candidates = bonusEvents(format, phase.questionNumber, phase.team);
@@ -246,6 +255,227 @@ function normalizedTossupCandidates(format: IScorekeeperFormat, game: ReturnType
     );
   }
   return candidates;
+}
+
+function seededRandom(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let value = state;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 0x1_0000_0000;
+  };
+}
+
+function pick<T>(values: T[], random: () => number): T {
+  return values[Math.floor(random() * values.length)];
+}
+
+function legalHistoryInvariants(
+  format: IScorekeeperFormat,
+  gameSetup: IGameSetup,
+  events: ScoreEvent[],
+  procedure: IRoomProcedure,
+): void {
+  const game = deriveGame(format, gameSetup, events);
+  expect(new Set(events.map((event) => event.id)).size).toBe(events.length);
+  expect(game.integrityProblems).toEqual([]);
+  expect(game.personnelProblems).toEqual([]);
+  expect(game.tossupsRead).toBe(game.questions.filter((question) => question.resolved).length);
+  expect(game.overtimeTossupsRead).toBe(
+    game.questions.filter((question) => question.resolved && question.period === 'overtime').length,
+  );
+  expect(new Set(game.questions.map((question) => question.questionNumber)).size).toBe(game.questions.length);
+
+  for (const side of ['left', 'right'] as const) {
+    const team = game[side];
+    const components = [
+      team.tossupPoints,
+      team.bonusPoints,
+      team.bonusBouncebackPoints,
+      team.lightningPoints,
+      team.adjustmentPoints,
+    ];
+    expect(components.every(Number.isFinite)).toBe(true);
+    expect(team.points).toBe(components.reduce((sum, points) => sum + points, 0));
+    expect(Number.isFinite(team.points)).toBe(true);
+    expect(new Set(team.activePlayers).size).toBe(team.activePlayers.length);
+    expect(team.activePlayers.length).toBeLessThanOrEqual(format.players.maximumActive);
+    expect(team.activePlayers.every((name) => team.players.some((player) => player.name === name))).toBe(true);
+
+    for (const player of team.players) {
+      const calculatedPoints = Array.from(player.answerCounts.entries()).reduce((sum, [index, count]) => {
+        const answerType = format.answerTypes.find((candidate) => candidate.index === index);
+        expect(answerType).toBeDefined();
+        expect(Number.isInteger(count) && count >= 0).toBe(true);
+        return sum + (answerType?.value ?? 0) * count;
+      }, 0);
+      expect(player.points).toBe(calculatedPoints);
+      expect(Number.isInteger(player.tossupsHeard)).toBe(true);
+      expect(player.tossupsHeard).toBeGreaterThanOrEqual(0);
+      expect(player.tossupsHeard).toBeLessThanOrEqual(game.tossupsRead);
+    }
+  }
+
+  for (const question of game.questions) {
+    const attempts = question.buzzes.map((buzz) => buzz.team).concat(question.noPenalty.map((attempt) => attempt.team));
+    expect(new Set(attempts).size).toBe(attempts.length);
+    expect(Object.values(question.scoreAfter).every(Number.isFinite)).toBe(true);
+    for (const side of ['left', 'right'] as const) {
+      expect(question.activePlayers[side].length).toBeLessThanOrEqual(format.players.maximumActive);
+      expect(
+        question.activePlayers[side].every((name) => game[side].players.some((player) => player.name === name)),
+      ).toBe(true);
+    }
+    const conversion = question.buzzes.find((buzz) => buzz.answerType.value > 0);
+    if (question.bonus) {
+      expect(conversion).toBeDefined();
+      expect(question.bonus.team).toBe(conversion?.team);
+    }
+    if (question.dead) expect(conversion).toBeUndefined();
+  }
+
+  expect(game.timeouts.left).toBeLessThanOrEqual(procedure.timeoutsPerTeam);
+  expect(game.timeouts.right).toBeLessThanOrEqual(procedure.timeoutsPerTeam);
+  const validation = validateScoresheet(format, gameSetup, events, procedure);
+  const acceptableWhileInProgress = new Set([
+    'game-not-complete',
+    'unfinished-cycle',
+    'missing-bonus',
+    'missing-derived-bonus',
+  ]);
+  expect(validation.blockers.filter((problem) => !acceptableWhileInProgress.has(problem.code))).toEqual([]);
+}
+
+interface IStateMachineActions {
+  progress: ScoreEvent[];
+  interruptions: ScoreEvent[];
+}
+
+function stateMachineActions(
+  format: IScorekeeperFormat,
+  gameSetup: IGameSetup,
+  events: ScoreEvent[],
+  procedure: IRoomProcedure,
+  random: () => number,
+  step: number,
+): IStateMachineActions {
+  const game = deriveGame(format, gameSetup, events);
+  const progress: ScoreEvent[] = [];
+  const phase = game.phase;
+  const attachment =
+    phase.kind === 'tossup' || phase.kind === 'bonus' || phase.kind === 'timeout'
+      ? phase.questionNumber
+      : phase.kind === 'checkpoint'
+        ? Math.max(1, phase.afterQuestion)
+        : Math.max(1, (game.questions.at(-1)?.questionNumber ?? 0) + 1);
+
+  if (phase.kind === 'tossup' || phase.kind === 'bonus') {
+    progress.push(...scoringCandidates(format, events, gameSetup));
+  } else if (phase.kind === 'checkpoint') {
+    progress.push(
+      nextEvent({
+        type: phase.checkpoint === 'overtime' ? 'begin-overtime' : 'begin-sudden-death',
+        questionNumber: attachment,
+      }),
+    );
+  } else if (phase.kind === 'timeout') {
+    progress.push(nextEvent({ type: 'timeout-resume', questionNumber: phase.questionNumber }));
+  } else if (phase.kind === 'score-check') {
+    progress.push(nextEvent({ type: 'half-resume', questionNumber: attachment }));
+  }
+
+  if (phase.kind === 'complete') return { progress, interruptions: [] };
+
+  const side = random() < 0.5 ? 'left' : 'right';
+  const activeBoundary = lineupChangeEffectiveQuestion(game, events);
+  const availablePlayers = game[side].players.map((player) => player.name);
+  const lineupSize = Math.min(format.players.maximumActive, random() < 0.2 ? 1 : availablePlayers.length);
+  const lineupOffset = Math.floor(random() * availablePlayers.length);
+  const activePlayers = Array.from(
+    { length: lineupSize },
+    (_, index) => availablePlayers[(lineupOffset + index) % availablePlayers.length],
+  );
+  const interruptions: ScoreEvent[] = [
+    nextEvent({ type: 'note', questionNumber: attachment, text: `Seeded room note ${step}`, flagged: step % 7 === 0 }),
+    nextEvent({
+      type: 'protest',
+      questionNumber: attachment,
+      team: side,
+      subject: 'procedure',
+      description: `Seeded ruling ${step}`,
+      status: 'declined',
+      resolution: 'Play continues',
+    }),
+    nextEvent({
+      type: 'adjustment',
+      questionNumber: attachment,
+      team: side,
+      points: random() < 0.5 ? -5 : 5,
+      reason: 'Seeded control ruling',
+    }),
+    nextEvent({ type: 'roster-add', questionNumber: attachment, team: side, playerName: `${side} reserve` }),
+    nextEvent({ type: 'substitution', questionNumber: activeBoundary, team: side, activePlayers }),
+    nextEvent({ type: 'timeout', questionNumber: attachment, team: side }),
+  ];
+
+  if (phase.kind === 'tossup') {
+    interruptions.push(
+      nextEvent({
+        type: 'timeout-start',
+        questionNumber: phase.questionNumber,
+        team: side,
+        startedAt: step * 1_000,
+      }),
+    );
+  }
+  if (procedure.halves && game.tossupsRead > 0 && phase.kind === 'tossup') {
+    interruptions.push(
+      nextEvent({
+        type: 'half-break',
+        questionNumber: phase.questionNumber,
+        lastQuestion: game.questions.at(-1)?.questionNumber ?? 0,
+      }),
+    );
+  }
+  const lastQuestion = game.questions.at(-1);
+  if (lastQuestion) {
+    interruptions.push(
+      nextEvent({
+        type: 'question-void',
+        questionNumber: lastQuestion.questionNumber,
+        scope: lastQuestion.bonus && random() < 0.5 ? 'bonus' : 'tossup',
+        reason: 'Seeded replacement',
+      }),
+    );
+  }
+  if (format.lightning.enabled) {
+    interruptions.push(
+      nextEvent({ type: 'lightning', questionNumber: attachment, team: side, points: random() < 0.5 ? 0 : 20 }),
+    );
+  }
+  if (format.regulation.timed && !game.regulationComplete) {
+    interruptions.push(
+      nextEvent({
+        type: 'end-regulation',
+        questionNumber: attachment,
+        lastRegulationQuestion: game.questions.at(-1)?.questionNumber ?? 0,
+      }),
+    );
+  }
+  if (step >= 8) {
+    interruptions.push(
+      nextEvent({
+        type: 'end-game-early',
+        questionNumber: attachment,
+        reason: 'Seeded early ending',
+        tossupsRead: game.tossupsRead,
+      }),
+      nextEvent({ type: 'forfeit', questionNumber: attachment, teams: [side] }),
+    );
+  }
+  return { progress, interruptions };
 }
 
 describe('bounded exhaustive scoring state space', () => {
@@ -452,6 +682,180 @@ describe('bounded exhaustive scoring state space', () => {
         'complete:overtime',
       ]),
     );
+  });
+});
+
+describe('seeded state-machine stress coverage', () => {
+  const gameSetup: IGameSetup = {
+    left: {
+      name: 'Ninety Six',
+      players: ['Sarah', 'James', 'Avery'],
+      startingLineup: ['Sarah', 'James'],
+    },
+    right: {
+      name: 'Greenwood',
+      players: ['Emma', 'Jordan', 'Riley'],
+      startingLineup: ['Emma', 'Jordan'],
+    },
+  };
+  const procedure: IRoomProcedure = {
+    version: 2,
+    halves: true,
+    timeoutsPerTeam: 2,
+    protestCheckpoints: 'none',
+    substitutionPolicy: 'any-boundary',
+  };
+  const formats = [
+    compactFormat('seeded powers and bonuses', CommonRuleSets.AcfPowers),
+    compactFormat('seeded timed lightning', CommonRuleSets.NaqtTimed, (rules) => {
+      rules.timed = true;
+      rules.lightningCountPerTeam = 10;
+    }),
+  ];
+
+  test('checks invariants after every transition in many reproducible mixed-event games', () => {
+    const acceptedTypes = new Set<ScoreEvent['type']>();
+    let acceptedTransitions = 0;
+    let rejectedCandidates = 0;
+    let completedGames = 0;
+
+    for (let seed = 1; seed <= 64; seed += 1) {
+      const random = seededRandom(seed);
+      const format = formats[seed % formats.length];
+      const context: IScoreEventContext = { format, setup: gameSetup, procedure };
+      let events: ScoreEvent[] = [];
+
+      for (let step = 0; step < 24; step += 1) {
+        const before = deriveGame(format, gameSetup, events);
+        if (before.phase.kind === 'complete') {
+          completedGames += 1;
+          const rejected = applyScoreEvents(context, events, [
+            nextEvent({
+              type: 'tossup-dead',
+              questionNumber: (before.questions.at(-1)?.questionNumber ?? 0) + 1,
+            }),
+          ]);
+          expect(rejected.ok).toBe(false);
+          break;
+        }
+
+        const actions = stateMachineActions(format, gameSetup, events, procedure, random, step);
+        const preferInterruption = actions.interruptions.length > 0 && random() < 0.35;
+        const preferred = preferInterruption ? actions.interruptions : actions.progress;
+        const fallback = preferInterruption ? actions.progress : actions.interruptions;
+        const candidates = preferred.concat(fallback);
+        const offset = candidates.length === 0 ? 0 : Math.floor(random() * candidates.length);
+        let accepted: ScoreEvent | undefined;
+
+        for (let index = 0; index < candidates.length; index += 1) {
+          const candidate = candidates[(offset + index) % candidates.length];
+          const result = applyScoreEvents(context, events, [candidate]);
+          if (!result.ok) {
+            rejectedCandidates += 1;
+            continue;
+          }
+          events = result.events;
+          accepted = candidate;
+          break;
+        }
+
+        if (!accepted) break;
+        acceptedTypes.add(accepted.type);
+        acceptedTransitions += 1;
+        legalHistoryInvariants(format, gameSetup, events, procedure);
+      }
+    }
+
+    expect(acceptedTransitions).toBeGreaterThan(500);
+    expect(rejectedCandidates).toBeGreaterThan(0);
+    expect(completedGames).toBeGreaterThan(0);
+    expect(Array.from(acceptedTypes)).toEqual(
+      expect.arrayContaining([
+        'tossup-buzz',
+        'tossup-no-penalty',
+        'tossup-dead',
+        'bonus',
+        'substitution',
+        'timeout-start',
+        'timeout-resume',
+        'protest',
+        'question-void',
+        'adjustment',
+        'end-regulation',
+      ]),
+    );
+  });
+
+  test('rejects seeded malformed recovery histories without throwing or producing non-finite totals', () => {
+    const format = formats[0];
+    const malformed: unknown[] = [
+      null,
+      17,
+      {},
+      { type: 'unknown', id: 'bad-type', questionNumber: 1 },
+      { type: 'tossup-dead', id: '', questionNumber: 1 },
+      { type: 'tossup-dead', id: 'bad-question', questionNumber: 0 },
+      {
+        type: 'tossup-buzz',
+        id: 'bad-team',
+        questionNumber: 1,
+        team: 'banana',
+        playerName: 'Sarah',
+        answerTypeIndex: 0,
+      },
+      {
+        type: 'tossup-buzz',
+        id: 'bad-player',
+        questionNumber: 1,
+        team: 'left',
+        playerName: '',
+        answerTypeIndex: 0,
+      },
+      {
+        type: 'tossup-buzz',
+        id: 'bad-ruling',
+        questionNumber: 1,
+        team: 'left',
+        playerName: 'Sarah',
+        answerTypeIndex: 999,
+      },
+      { type: 'bonus', id: 'bad-bonus', questionNumber: 1, team: 'left', parts: [null] },
+      { type: 'substitution', id: 'bad-lineup', questionNumber: 1, team: 'left', activePlayers: [] },
+      { type: 'timeout-start', id: 'bad-clock', questionNumber: 1, team: 'left', startedAt: Number.NaN },
+      { type: 'adjustment', id: 'bad-adjustment', questionNumber: 1, team: 'left', points: Number.POSITIVE_INFINITY },
+      {
+        type: 'protest',
+        id: 'bad-protest',
+        questionNumber: 1,
+        team: 'left',
+        subject: 'weather',
+        description: 'Invalid subject',
+        status: 'open',
+      },
+      { type: 'question-void', id: 'bad-void', questionNumber: 1, scope: 'tossup', reason: '' },
+      { type: 'forfeit', id: 'bad-forfeit', questionNumber: 1, teams: 'left' },
+      { type: 'note', id: 'bad-note', questionNumber: 1, text: ['not', 'text'] },
+      { type: 'roster-add', id: 'bad-roster', questionNumber: 1, team: 'left', playerName: '' },
+      { type: 'end-regulation', id: 'bad-boundary', questionNumber: 1, lastRegulationQuestion: -1 },
+      { type: 'end-game-early', id: 'bad-ending', questionNumber: 1, reason: 'Invalid', tossupsRead: -1 },
+    ];
+
+    for (let seed = 101; seed <= 164; seed += 1) {
+      const random = seededRandom(seed);
+      const history = Array.from({ length: 1 + Math.floor(random() * 6) }, () => pick(malformed, random));
+      let validation: ReturnType<typeof validateScoresheet> | undefined;
+      expect(() => {
+        validation = validateScoresheet(format, gameSetup, history as ScoreEvent[], procedure);
+      }).not.toThrow();
+      expect(
+        validation?.blockers.some(
+          (problem) => problem.code === 'malformed-event' || problem.code === 'malformed-event-id',
+        ),
+      ).toBe(true);
+      for (const side of ['left', 'right'] as const) {
+        expect(Number.isFinite(validation?.game[side].points)).toBe(true);
+      }
+    }
   });
 });
 

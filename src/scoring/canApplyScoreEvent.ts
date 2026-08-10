@@ -111,6 +111,17 @@ export default function canApplyScoreEvent(
         return refuse(`That answer belongs to Tossup ${phase.questionNumber}.`);
       }
 
+      const recordedQuestion = game.questions.find(
+        (question) => question.questionNumber === candidate.questionNumber,
+      );
+      const activePlayers = recordedQuestion?.activePlayers[candidate.team] ?? game[candidate.team].activePlayers;
+      if (candidate.playerName !== undefined) {
+        if (candidate.playerName.trim() === '') return refuse('Choose who answered the tossup.');
+        if (!activePlayers.includes(candidate.playerName)) {
+          return refuse(`${candidate.playerName} was not active for Tossup ${candidate.questionNumber}.`);
+        }
+      }
+
       const answered = teamsThatAnswered(events, candidate.questionNumber);
       if (answered.has(candidate.team)) {
         return refuse(`${game[candidate.team].name} has already answered this tossup.`);
