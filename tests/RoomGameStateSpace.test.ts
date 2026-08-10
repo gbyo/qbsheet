@@ -31,6 +31,10 @@ const setup: IGameSetup = {
   right: { name: 'Greenwood', players: ['Emma', 'Jordan'] },
 };
 
+// These two bounded traversals are intentionally CPU-heavy. They normally finish in a few seconds,
+// but need headroom when Vitest runs every test file concurrently on a shared CI runner.
+const exhaustiveTraversalTimeoutMs = 15_000;
+
 let eventId = 0;
 
 function nextEvent(partial: EventInput): ScoreEvent {
@@ -722,7 +726,7 @@ describe('bounded exhaustive scoring state space', () => {
         'complete:overtime',
       ]),
     );
-  });
+  }, exhaustiveTraversalTimeoutMs);
 
   test('composes every normalized timed-regulation stopping point and its overtime paths', () => {
     const untimed = compactFormat('timed transition matrix', CommonRuleSets.Acf, (rules) => {
@@ -809,7 +813,7 @@ describe('bounded exhaustive scoring state space', () => {
         'complete:overtime',
       ]),
     );
-  });
+  }, exhaustiveTraversalTimeoutMs);
 });
 
 describe('seeded state-machine stress coverage', () => {
