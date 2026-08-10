@@ -82,7 +82,7 @@ export default function PracticeCoach(props: IPracticeCoachProps) {
       >
         <span>
           <strong>Practice {stepIndex + 1}/{stepCount}</strong>
-          <span>{step.instruction}</span>
+          <span>{step.call}</span>
         </span>
         <span className="practice-coach-expand" aria-hidden="true">
           Open guide
@@ -152,12 +152,8 @@ export default function PracticeCoach(props: IPracticeCoachProps) {
               <span>Situation</span>
               <p>{step.call}</p>
             </div>
-            <div className="practice-instruction">
-              <span>Do this now</span>
-              <p>{step.instruction}</p>
-            </div>
             <details key={step.id} className="practice-hint">
-              <summary>Show me how</summary>
+              <summary>Get a hint</summary>
               <p>{step.hint}</p>
             </details>
           </>

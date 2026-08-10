@@ -53,7 +53,7 @@ test('practice requires its named starters, keeps mistakes editable, and advance
   fireEvent.click(start);
 
   expect(screen.getByLabelText('Starting lineups')).toBeTruthy();
-  expect(screen.getByRole('alert').textContent).toContain('four starters named in the practice instruction');
+  expect(screen.getByRole('alert').textContent).toContain('open Get a hint');
 
   fireEvent.click(within(left).getByLabelText('Olivia'));
   fireEvent.click(within(left).getByLabelText('Lachlan'));
@@ -61,7 +61,10 @@ test('practice requires its named starters, keeps mistakes editable, and advance
   fireEvent.click(within(right).getByLabelText('Valerie'));
   fireEvent.click(start);
 
-  await vi.waitFor(() => expect(screen.getByText('Record Gibson’s power.')).toBeTruthy());
+  await vi.waitFor(() => expect(screen.getByText('Reader: “Power, Gibson on Ninety Six.”')).toBeTruthy());
+  expect(screen.queryByText('Record Gibson’s power.')).toBeNull();
+  fireEvent.click(screen.getByText('Get a hint'));
+  expect(screen.getByText('Choose Gibson on the Ninety Six side, then record the 15-point answer.')).toBeTruthy();
   expect(screen.queryByLabelText('Starting lineups')).toBeNull();
 });
 
@@ -74,12 +77,14 @@ test('practice restores the guide checkpoint after the screen is remounted', asy
   for (const name of ['Tucker', 'Sam', 'Efren', 'Valerie']) fireEvent.click(within(right).getByLabelText(name));
   fireEvent.click(within(prompt).getByText('Start game'));
 
-  await vi.waitFor(() => expect(screen.getByText('Record Gibson’s power.')).toBeTruthy());
+  await vi.waitFor(() => expect(screen.getByText('Reader: “Power, Gibson on Ninety Six.”')).toBeTruthy());
   first.unmount();
   render(<PracticeScreen onHome={vi.fn()} />);
 
   expect(screen.queryByLabelText('Starting lineups')).toBeNull();
-  expect(screen.getByText('Record Gibson’s power.')).toBeTruthy();
+  expect(screen.getByText('Reader: “Power, Gibson on Ninety Six.”')).toBeTruthy();
+  expect(screen.queryByText('Record Gibson’s power.')).toBeNull();
+  expect(screen.getByText('Get a hint')).toBeTruthy();
 });
 
 test('restart and leave are protected from an accidental single click', () => {
