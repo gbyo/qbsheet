@@ -1,0 +1,90 @@
+name: Protocol or format change
+description: Propose a change to QBTCP, the QBJ assignment profile, or the core export surface. 📐
+labels: ['enhancement', 'documentation']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        These documents are normative: other people implement them, and Fruity is only one of those
+        implementations. Proposals get read against a few fixed rules, so the form asks about them
+        directly. Background is in
+        [CONTRIBUTING.md](https://github.com/gbyo/qbsheet/blob/main/CONTRIBUTING.md#changing-the-specifications).
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Which surface
+      options:
+        - QBTCP — docs/QBTCP.md
+        - QBJ assignment profile — docs/QBJ_ASSIGNMENT_PROFILE.md
+        - The `_qbtcp` Match extension
+        - The core package export surface (src/core/index.ts)
+        - Legacy `.qbg` or `/api/v1` compatibility
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What cannot be expressed today
+      description: >
+        The operational or interchange problem, not the proposed field. What does an implementation
+        currently have to guess, duplicate, or work around?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: The concrete shape — endpoint, field, or exported type — and where it would live.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: compatibility
+    attributes:
+      label: Compatibility
+      description: >
+        The protocol version is a single integer in the path and is incremented only for a change a
+        version-1 client cannot tolerate. Optional additions stay in v1.
+      options:
+        - Additive — an existing v1 client keeps working and can ignore it
+        - Breaking — a v1 client cannot tolerate it, so it needs a new protocol version
+        - Not sure
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: rules
+    attributes:
+      label: Rules this proposal is checked against
+      description: Tick what you have confirmed. An unticked box is fine — it just tells the reviewer where to look.
+      options:
+        - label: It does not restate QBJ. Tournament, Phase, Round, Team, Player, Match, ScoringRules, and statistics stay QBJ's; where the protocol needs them it carries a QBJ document.
+          required: false
+        - label: It is implementable from the spec alone, without reading the QBSheet or Fruity source.
+          required: false
+        - label: It renames no existing wire field. Legacy names are opaque strings that deployed clients still read.
+          required: false
+        - label: It puts no room token, session token, pairing code, device id, or server address into a portable file.
+          required: false
+        - label: It does not require a backend, an account, or a network connection for file-only scoring.
+          required: false
+
+  - type: textarea
+    id: implementations
+    attributes:
+      label: Effect on existing implementations
+      description: >
+        What QBSheet would have to change, what a tournament-control implementation like Fruity would
+        have to change, and what happens when only one of the two has shipped it.
+    validations:
+      required: true
+
+  - type: input
+    id: fruity
+    attributes:
+      label: Related Fruity issue or PR
+      description: Optional. Wire-surface changes usually need a matching change in gbyo/fruity.
