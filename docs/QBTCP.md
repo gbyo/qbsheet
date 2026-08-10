@@ -1,6 +1,6 @@
 # QBTCP — Quiz Bowl Tournament Control Protocol
 
-**Version 1 (draft).** An application-layer HTTP/JSON protocol for communication between electronic
+**Version 1** An application-layer HTTP/JSON protocol for communication between electronic
 quiz bowl scoresheets and tournament-control software.
 
 ## What QBTCP is not
