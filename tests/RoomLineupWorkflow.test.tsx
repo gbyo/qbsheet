@@ -41,7 +41,14 @@ function formatFor(maximumActive: number): IScorekeeperFormat {
 let gameCounter = 0;
 let gameKey = '';
 
-function renderScorer(format: IScorekeeperFormat, procedure?: IRoomProcedure) {
+function renderScorer(
+  format: IScorekeeperFormat,
+  procedure?: IRoomProcedure,
+  rosterOptions: {
+    authoritative?: boolean;
+    onSyncRosterPlayer?: (teamName: string, playerName: string) => Promise<{ ok: boolean }>;
+  } = {},
+) {
   gameCounter += 1;
   gameKey = `lineup-game-${gameCounter}`;
   render(
@@ -55,6 +62,9 @@ function renderScorer(format: IScorekeeperFormat, procedure?: IRoomProcedure) {
       roomName="Room 204"
       procedure={procedure}
       connection={RoomConnectionState.Connected}
+      authoritativeLeftTeam={rosterOptions.authoritative ? leftTeam : undefined}
+      authoritativeRightTeam={rosterOptions.authoritative ? rightTeam : undefined}
+      onSyncRosterPlayer={rosterOptions.onSyncRosterPlayer}
       onDownload={() => undefined}
       onSubmit={vi.fn().mockResolvedValue({ ok: true, message: 'Sent' })}
     />,
@@ -168,6 +178,85 @@ describe('who is starting', () => {
     expect(within(lineup).getByText('Sarah Jones').closest('li')?.textContent).toContain('0 TUH');
     expect(within(lineup).getByText('Michael Smith').closest('li')?.textContent).toContain('1 TUH');
   });
+
+  test('a newly added player appears immediately, stays unselected, and can then be chosen to start', () => {
+    renderScorer(formatFor(2));
+    const team = screen.getByLabelText('Ninety Six starters');
+
+    fireEvent.click(within(team).getByText('+ Add player'));
+    const input = within(team).getByLabelText('Player name');
+    expect(document.activeElement).toBe(input);
+    fireEvent.change(input, { target: { value: 'Alex Brown' } });
+    fireEvent.click(within(team).getByText('Add'));
+
+    const added = within(team).getByLabelText('Alex Brown') as HTMLInputElement;
+    expect(added.checked).toBe(false);
+    expect(savedEvents().filter((event) => event.type === 'roster-add').map((event) => event.playerName)).toEqual([
+      'Alex Brown',
+    ]);
+
+    fireEvent.click(within(team).getByLabelText('Michael Smith'));
+    fireEvent.click(added);
+    fireEvent.click(within(screen.getByLabelText('Starting lineups')).getByText('Start game'));
+
+    expect(substitutions().find((event) => event.team === 'left')?.activePlayers).toEqual([
+      'Michael Smith',
+      'Alex Brown',
+    ]);
+  });
+
+  test('adding to a settled team leaves its existing starters unchanged', () => {
+    renderScorer(formatFor(2));
+    const settledTeam = screen.getByLabelText('Greenwood starters');
+
+    expect((within(settledTeam).getByLabelText('Emma Turner') as HTMLInputElement).checked).toBe(true);
+    expect((within(settledTeam).getByLabelText('Taylor Adams') as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(within(settledTeam).getByText('+ Add player'));
+    fireEvent.change(within(settledTeam).getByLabelText('Player name'), { target: { value: 'Casey Reed' } });
+    fireEvent.click(within(settledTeam).getByText('Add'));
+
+    const added = within(settledTeam).getByLabelText(/Casey Reed/) as HTMLInputElement;
+    expect(added.checked).toBe(false);
+    expect(added.disabled).toBe(true);
+    chooseStarters(['Sarah Jones', 'Michael Smith']);
+
+    expect(substitutions().some((event) => event.team === 'right')).toBe(false);
+    openPlayers();
+    const lineup = screen.getByLabelText('Greenwood lineup');
+    expect(within(lineup).getByText('Emma Turner').closest('li')?.parentElement?.previousElementSibling?.textContent).toBe(
+      'Playing',
+    );
+    expect(within(lineup).getByText('Casey Reed').closest('li')?.parentElement?.previousElementSibling?.textContent).toBe(
+      'Bench',
+    );
+  });
+
+  test('blank and duplicate names are rejected by the shared roster validation', () => {
+    renderScorer(formatFor(2));
+    const team = screen.getByLabelText('Ninety Six starters');
+    fireEvent.click(within(team).getByText('+ Add player'));
+    const input = within(team).getByLabelText('Player name');
+    const add = within(team).getByText('Add');
+
+    fireEvent.change(input, { target: { value: '   ' } });
+    expect(add.hasAttribute('disabled')).toBe(true);
+    expect(within(team).getByText('Enter a player name.')).toBeTruthy();
+    fireEvent.change(input, { target: { value: '  SARAH JONES  ' } });
+    expect(add.hasAttribute('disabled')).toBe(true);
+    expect(within(team).getByText(/already on this roster/)).toBeTruthy();
+    expect(savedEvents().some((event) => event.type === 'roster-add')).toBe(false);
+  });
+
+  test('a connected starting-lineup addition uses the ordinary authoritative roster sync', async () => {
+    const sync = vi.fn().mockResolvedValue({ ok: true });
+    renderScorer(formatFor(2), undefined, { authoritative: true, onSyncRosterPlayer: sync });
+    const team = screen.getByLabelText('Ninety Six starters');
+    fireEvent.click(within(team).getByText('+ Add player'));
+    fireEvent.change(within(team).getByLabelText('Player name'), { target: { value: 'Alex Brown' } });
+    fireEvent.click(within(team).getByText('Add'));
+
+    await vi.waitFor(() => expect(sync).toHaveBeenCalledWith('Ninety Six', 'Alex Brown'));
+  });
 });
 
 describe('what the starting prompt promises about the bench', () => {
@@ -210,8 +299,8 @@ describe('one player for another', () => {
     openPlayers();
     const lineup = screen.getByLabelText('Ninety Six lineup');
     const sarahRow = within(lineup).getByText('Sarah Jones').closest('li') as HTMLElement;
-    fireEvent.click(within(sarahRow).getByText('Sub out'));
-    fireEvent.click(within(lineup).getByText('Put in'));
+    fireEvent.click(within(sarahRow).getByText('Replace'));
+    fireEvent.click(within(lineup).getByText('Jordan Hall'));
     expect(within(lineup).getByText('Effective starting Tossup 2')).toBeTruthy();
     fireEvent.click(within(lineup).getByText('Confirm'));
 
@@ -230,8 +319,8 @@ describe('one player for another', () => {
 
     openPlayers();
     let lineup = screen.getByLabelText('Ninety Six lineup');
-    fireEvent.click(within(within(lineup).getByText('Sarah Jones').closest('li') as HTMLElement).getByText('Sub out'));
-    fireEvent.click(within(lineup).getByText('Put in'));
+    fireEvent.click(within(within(lineup).getByText('Sarah Jones').closest('li') as HTMLElement).getByText('Replace'));
+    fireEvent.click(within(lineup).getByText('Jordan Hall'));
     fireEvent.click(within(lineup).getByText('Confirm'));
 
     // Tossup two, played by the new lineup.
@@ -245,15 +334,23 @@ describe('one player for another', () => {
     expect(within(lineup).getByText('Jordan Hall').closest('li')?.textContent).toContain('1 TUH');
   });
 
-  test('a full seat offers Sub out rather than an unusable Put in', () => {
+  test('a full team lets a bench player start a replacement flow', () => {
     renderScorer(formatFor(2));
     chooseStarters(['Sarah Jones', 'Michael Smith']);
 
     openPlayers();
     const lineup = screen.getByLabelText('Ninety Six lineup');
     const benchRow = within(lineup).getByText('Jordan Hall').closest('li') as HTMLElement;
-    expect(within(benchRow).getByText('Put in').hasAttribute('disabled')).toBe(true);
-    expect(within(lineup).getAllByText('Sub out').length).toBe(2);
+    fireEvent.click(within(benchRow).getByText('Replace…'));
+    expect(within(lineup).getByText('Put Jordan Hall in')).toBeTruthy();
+    expect(within(lineup).getByText('Replace:')).toBeTruthy();
+    fireEvent.click(within(lineup).getByText('Sarah Jones'));
+    fireEvent.click(within(lineup).getByText('Confirm'));
+
+    expect(substitutions().filter((event) => event.team === 'left').at(-1)?.activePlayers).toEqual([
+      'Jordan Hall',
+      'Michael Smith',
+    ]);
   });
 
   test('the full lineup editor is still there for a multi-player change', () => {
@@ -262,7 +359,7 @@ describe('one player for another', () => {
 
     openPlayers();
     const lineup = screen.getByLabelText('Ninety Six lineup');
-    fireEvent.click(within(lineup).getByText('Edit full lineup…'));
+    fireEvent.click(within(lineup).getByText('Change lineup'));
     fireEvent.click(within(lineup).getByLabelText(/Sarah Jones/));
     fireEvent.click(within(lineup).getByLabelText(/Michael Smith/));
     fireEvent.click(within(lineup).getByLabelText(/Jordan Hall/));
@@ -272,6 +369,23 @@ describe('one player for another', () => {
       .filter((event) => event.team === 'left')
       .at(-1);
     expect(change?.activePlayers).toEqual(['Jordan Hall']);
+  });
+
+  test('a bench player can still go directly into an open seat', () => {
+    renderScorer(formatFor(2));
+    chooseStarters(['Sarah Jones']);
+
+    openPlayers();
+    const lineup = screen.getByLabelText('Ninety Six lineup');
+    const michaelRow = within(lineup).getByText('Michael Smith').closest('li') as HTMLElement;
+    fireEvent.click(within(michaelRow).getByText('Put in'));
+    expect(within(lineup).getByText('Michael Smith comes on')).toBeTruthy();
+    fireEvent.click(within(lineup).getByText('Confirm'));
+
+    expect(substitutions().filter((event) => event.team === 'left').at(-1)?.activePlayers).toEqual([
+      'Sarah Jones',
+      'Michael Smith',
+    ]);
   });
 });
 
@@ -294,7 +408,7 @@ describe('a procedure that does not allow substitutions right now', () => {
     expect(within(lineup).getByText('Sarah Jones')).toBeTruthy();
     expect(
       within(lineup)
-        .getAllByText('Sub out')
+        .getAllByText('Replace')
         .every((button) => button.hasAttribute('disabled')),
     ).toBe(true);
     expect(screen.getByText(/halftime, timeouts, and phase checkpoints/)).toBeTruthy();
@@ -308,14 +422,16 @@ describe('somebody who turned up late', () => {
 
     openPlayers();
     const lineup = screen.getByLabelText('Ninety Six lineup');
-    fireEvent.click(within(lineup).getByText('Add missing player…'));
+    fireEvent.click(within(lineup).getByText('+ Add player'));
+    expect(within(lineup).getByText('Sarah Jones')).toBeTruthy();
     // The team is full, so the panel says where they are going rather than silently benching them.
     expect(within(lineup).getByText(/join the bench/)).toBeTruthy();
     fireEvent.change(within(lineup).getByLabelText('Player name'), { target: { value: 'Alex Brown' } });
-    fireEvent.click(within(lineup).getByText('Add to roster'));
+    fireEvent.click(within(lineup).getByText('Add'));
 
     const events = savedEvents();
     expect(events.some((event) => event.type === 'roster-add' && event.playerName === 'Alex Brown')).toBe(true);
+    expect(screen.getByText('Added Alex Brown to the bench.')).toBeTruthy();
     // No lineup change was made, so none was recorded: a substitution nobody made would corrupt TUH.
     expect(substitutions().filter((event) => event.team === 'left').length).toBe(1);
   });
@@ -328,14 +444,15 @@ describe('somebody who turned up late', () => {
 
     openPlayers();
     const lineup = screen.getByLabelText('Ninety Six lineup');
-    fireEvent.click(within(lineup).getByText('Add missing player…'));
+    fireEvent.click(within(lineup).getByText('+ Add player'));
     expect(within(lineup).getByText(/from Tossup 2/)).toBeTruthy();
     fireEvent.change(within(lineup).getByLabelText('Player name'), { target: { value: 'Alex Brown' } });
-    fireEvent.click(within(lineup).getByText('Add to roster'));
+    fireEvent.click(within(lineup).getByText('Add'));
 
     const change = substitutions()
       .filter((event) => event.team === 'left')
       .at(-1);
+    expect(screen.getByText('Added Alex Brown and put them in starting Tossup 2.')).toBeTruthy();
     expect(change?.questionNumber).toBe(2);
     expect(change?.activePlayers).toContain('Alex Brown');
   });

@@ -16,10 +16,11 @@
  * It is deliberately fast: two columns of names, tap the starters, one button. A room that has to
  * fight this before question one will learn to guess, which is where we came in.
  */
-import { useState } from 'react';
+import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from 'react';
 import { LeftOrRight } from '../scoring/types';
 import { IDerivedTeam } from '../scoring/deriveGame';
 import { IRoomProcedure, substitutionPolicy } from '../scoring/RoomProcedure';
+import { playerNameMaxLength, validatePlayerName } from '../game/Roster';
 
 export interface IStartingLineupPromptProps {
   left: IDerivedTeam;
@@ -29,6 +30,8 @@ export interface IStartingLineupPromptProps {
   needed: LeftOrRight[];
   /** How this room runs a game, which decides when the bench can come on. */
   procedure?: IRoomProcedure;
+  /** Add somebody through the scorer's ordinary roster-add and synchronization path. */
+  onAddPlayer: (team: LeftOrRight, playerName: string) => void;
   onConfirm: (lineups: Partial<Record<LeftOrRight, string[]>>) => void;
 }
 
@@ -47,57 +50,113 @@ export function substitutionSentence(procedure: IRoomProcedure | undefined): str
 
 function TeamStarters(props: {
   team: IDerivedTeam;
+  side: LeftOrRight;
   maximumActive: number;
   selected: string[];
   onToggle: (name: string) => void;
   settled: boolean;
+  onAddPlayer: (playerName: string) => void;
 }) {
-  const { team, maximumActive, selected, onToggle, settled } = props;
-  const atCapacity = selected.length >= maximumActive;
+  const { team, side, maximumActive, selected, onToggle, settled, onAddPlayer } = props;
+  const [adding, setAdding] = useState(false);
+  const [newPlayer, setNewPlayer] = useState('');
+  const input = useRef<HTMLInputElement>(null);
+  const displayedSelection = settled ? team.activePlayers : selected;
+  const atCapacity = displayedSelection.length >= maximumActive;
+  const validation = validatePlayerName(
+    newPlayer,
+    team.players.map((player) => player.name),
+  );
+
+  useEffect(() => {
+    if (adding) input.current?.focus();
+  }, [adding]);
+
+  const cancelAdd = () => {
+    setAdding(false);
+    setNewPlayer('');
+  };
+
+  const submitAdd = (event: FormEvent) => {
+    event.preventDefault();
+    if (validation.problem) return;
+    onAddPlayer(validation.name);
+    cancelAdd();
+  };
+
+  const handleAddKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    event.stopPropagation();
+    cancelAdd();
+  };
 
   return (
     <section className="scorer-starters-team" aria-label={`${team.name} starters`}>
       <h3 className="scorer-lineup-team">{team.name}</h3>
-      {settled ? (
-        <p className="scorer-dialog-note">Starting: {team.activePlayers.join(', ')}</p>
+      <ul className="scorer-lineup-list scorer-starters-list">
+        {team.players.map((player, index) => {
+          const checked = displayedSelection.includes(player.name);
+          const id = `scorer-start-${side}-${index}`;
+          return (
+            <li key={player.name}>
+              <label className="scorer-lineup-row" htmlFor={id}>
+                <input
+                  id={id}
+                  type="checkbox"
+                  aria-label={player.name}
+                  checked={checked}
+                  disabled={settled || (!checked && atCapacity)}
+                  onChange={() => onToggle(player.name)}
+                />
+                <span className="scorer-lineup-name">{player.name}</span>
+                {!checked && atCapacity && <span className="scorer-lineup-tuh">Bench</span>}
+              </label>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="scorer-lineup-count">
+        {settled ? 'Starting lineup set' : `${selected.length} of ${maximumActive} selected`}
+      </p>
+
+      {!adding ? (
+        <button type="button" className="scorer-text-action" onClick={() => setAdding(true)}>
+          + Add player
+        </button>
       ) : (
-        <>
-          <ul className="scorer-lineup-list">
-            {team.players.map((player) => {
-              const checked = selected.includes(player.name);
-              return (
-                <li key={player.name}>
-                  <label className="scorer-lineup-row" htmlFor={`scorer-start-${team.name}-${player.name}`}>
-                    <input
-                      id={`scorer-start-${team.name}-${player.name}`}
-                      type="checkbox"
-                      checked={checked}
-                      disabled={!checked && atCapacity}
-                      onChange={() => onToggle(player.name)}
-                    />
-                    <span className="scorer-lineup-name">{player.name}</span>
-                    {/*
-                      Only once the seats are full, and only on the names that did not get one. Said
-                      earlier it would be labelling every unticked name "Bench" before the
-                      scorekeeper has decided anything.
-                    */}
-                    {!checked && atCapacity && <span className="scorer-lineup-tuh">Bench</span>}
-                  </label>
-                </li>
-              );
-            })}
-          </ul>
-          <p className="scorer-lineup-count">
-            {selected.length} of {maximumActive} selected
-          </p>
-        </>
+        <form className="scorer-inline-add" onSubmit={submitAdd}>
+          <label htmlFor={`scorer-start-add-${side}`}>Player name</label>
+          <div className="scorer-inline-add-fields">
+            <input
+              ref={input}
+              id={`scorer-start-add-${side}`}
+              value={newPlayer}
+              maxLength={playerNameMaxLength}
+              onChange={(event) => setNewPlayer(event.target.value)}
+              onKeyDown={handleAddKeyDown}
+              aria-describedby={newPlayer !== '' && validation.problem ? `scorer-start-add-error-${side}` : undefined}
+            />
+            <button type="submit" className="scorer-choice" disabled={validation.problem !== undefined}>
+              Add
+            </button>
+            <button type="button" className="scorer-text-action" onClick={cancelAdd}>
+              Cancel
+            </button>
+          </div>
+          {newPlayer !== '' && validation.problem && (
+            <span id={`scorer-start-add-error-${side}`} className="scorer-field-error" role="alert">
+              {validation.problem}
+            </span>
+          )}
+        </form>
       )}
     </section>
   );
 }
 
 export default function StartingLineupPrompt(props: IStartingLineupPromptProps) {
-  const { left, right, maximumActive, needed, procedure, onConfirm } = props;
+  const { left, right, maximumActive, needed, procedure, onAddPlayer, onConfirm } = props;
   const [chosen, setChosen] = useState<Record<LeftOrRight, string[]>>({ left: [], right: [] });
 
   const toggle = (side: LeftOrRight, name: string) => {
@@ -121,17 +180,21 @@ export default function StartingLineupPrompt(props: IStartingLineupPromptProps) 
       <div className="scorer-lineups">
         <TeamStarters
           team={left}
+          side="left"
           maximumActive={maximumActive}
           selected={chosen.left}
           settled={!needed.includes('left')}
           onToggle={(name) => toggle('left', name)}
+          onAddPlayer={(name) => onAddPlayer('left', name)}
         />
         <TeamStarters
           team={right}
+          side="right"
           maximumActive={maximumActive}
           selected={chosen.right}
           settled={!needed.includes('right')}
           onToggle={(name) => toggle('right', name)}
+          onAddPlayer={(name) => onAddPlayer('right', name)}
         />
       </div>
       <button

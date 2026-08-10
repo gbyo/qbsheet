@@ -26,3 +26,29 @@ export interface ITeamRoster {
  * will accept rather than one it silently truncates.
  */
 export const playerNameMaxLength = 200;
+
+export interface IPlayerNameValidation {
+  /** The value that may be written to the roster. */
+  name: string;
+  /** A short, user-facing reason the value cannot be written. */
+  problem?: string;
+}
+
+/**
+ * Validate a player name typed anywhere in the scorer.
+ *
+ * Roster additions are available both before question one and during the game. Keeping the trim,
+ * length and duplicate rules here prevents those two screens from developing subtly different
+ * definitions of the same roster name.
+ */
+export function validatePlayerName(value: string, existingNames: readonly string[]): IPlayerNameValidation {
+  const name = value.trim();
+  if (name === '') return { name, problem: 'Enter a player name.' };
+  if (name.length > playerNameMaxLength) {
+    return { name, problem: `Player names can be at most ${playerNameMaxLength} characters.` };
+  }
+  if (existingNames.some((existing) => existing.trim().toLocaleLowerCase() === name.toLocaleLowerCase())) {
+    return { name, problem: `${name} is already on this roster.` };
+  }
+  return { name };
+}

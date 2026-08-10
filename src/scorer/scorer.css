@@ -430,9 +430,12 @@ div.scorer-banner .scorer-text-action {
 .scorer-action:focus-visible,
 .scorer-menu-item:focus-visible,
 .scorer-text-action:focus-visible,
+.scorer-replacement-choice:focus-visible,
+.scorer-sync-action:focus-visible,
 .scorer-submit:focus-visible,
 .scorer-danger:focus-visible,
-.scorer-inline-form input:focus-visible {
+.scorer-inline-form input:focus-visible,
+.scorer-inline-add input:focus-visible {
   outline: 2px solid var(--room-accent);
   outline-offset: 1px;
 }
@@ -816,6 +819,18 @@ div.scorer-banner .scorer-text-action {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 20px;
+  align-items: start;
+}
+
+.scorer-lineup {
+  min-width: 0;
+}
+
+.scorer-lineup-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .scorer-lineup-team {
@@ -845,6 +860,35 @@ div.scorer-banner .scorer-text-action {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.scorer-lineup-player {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.scorer-lineup-player .scorer-lineup-name {
+  width: 100%;
+}
+
+.scorer-lineup-sync,
+.scorer-inline-add-note {
+  font-size: 11px;
+  color: var(--room-faint);
+}
+
+.scorer-sync-action {
+  margin: 1px 0 0;
+  padding: 0;
+  font: inherit;
+  font-size: 11px;
+  color: var(--room-accent);
+  background: none;
+  border: 0;
+  cursor: pointer;
 }
 
 .scorer-lineup-tuh {
@@ -880,6 +924,10 @@ div.scorer-banner .scorer-text-action {
   border-bottom: 1px solid var(--room-border);
 }
 
+.scorer-lineup-entry > .scorer-text-action {
+  flex: none;
+}
+
 .scorer-lineup-seat {
   flex: none;
   width: 16px;
@@ -906,6 +954,30 @@ div.scorer-banner .scorer-text-action {
   margin-top: 8px;
 }
 
+.scorer-lineup-primary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  min-height: 24px;
+  margin: 0 0 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--room-border);
+}
+
+.scorer-lineup-roster {
+  max-height: min(48vh, 420px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+}
+
+.scorer-reorder-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .scorer-lineup-step {
   margin-top: 8px;
 }
@@ -914,6 +986,80 @@ div.scorer-banner .scorer-text-action {
   margin: 0 0 4px;
   font-size: 14px;
   font-weight: 600;
+}
+
+.scorer-replacement-list {
+  max-height: min(42vh, 360px);
+  overflow-y: auto;
+  border-top: 1px solid var(--room-border);
+}
+
+.scorer-replacement-choice {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 0;
+  font: inherit;
+  font-size: 13px;
+  color: var(--room-text);
+  text-align: left;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--room-border);
+  cursor: pointer;
+}
+
+.scorer-replacement-choice:hover {
+  color: var(--room-accent);
+}
+
+.scorer-inline-add {
+  margin: 8px 0 10px;
+  padding: 8px 0 10px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--room-border);
+}
+
+.scorer-inline-add > label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--room-muted);
+}
+
+.scorer-inline-add-fields {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.scorer-inline-add-fields input {
+  min-width: 0;
+  flex: 1;
+  padding: 7px 8px;
+  font: inherit;
+  color: var(--room-text);
+  background: var(--room-surface);
+  border: 1px solid var(--room-border-strong);
+  border-radius: 4px;
+}
+
+.scorer-inline-add .scorer-choice {
+  min-width: 48px;
+  padding: 7px 12px;
+  font-size: 13px;
+}
+
+.scorer-inline-add-note,
+.scorer-field-error {
+  display: block;
+  margin-top: 4px;
+}
+
+.scorer-field-error {
+  font-size: 12px;
+  color: var(--room-error);
 }
 
 .scorer-add-player {
@@ -1382,6 +1528,17 @@ div.scorer-banner .scorer-text-action {
 
 .scorer-starters {
   padding: 24px;
+}
+
+.scorer-starters-team {
+  min-width: 0;
+}
+
+.scorer-starters-list {
+  max-height: min(42vh, 360px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
 }
 
 .scorer-starters-title {
