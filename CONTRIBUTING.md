@@ -56,8 +56,8 @@ file with no server. Open a game file and score.
 
 To exercise the connected path, run Fruity's Local Tournament Server, add the Vite origin to its
 QBSheet origin setting, then enter the local network address of the server in the scoresheet. The
-origin allowlist covers CORS only. Room and session credentials still authenticate every room
-operation.
+origin allowlist covers CORS only. Every operation on a paired room still needs a valid room or
+session credential.
 
 ## Repository layout
 
