@@ -129,6 +129,14 @@ export interface IAssignmentOptions {
   matches?: QbjObject[];
   teams?: IQbjTeamFixture[];
   version?: string;
+  /**
+   * Leave the non-standard `number` field off the Round.
+   *
+   * Standard QBJ has no such field; the reference implementation keeps its round number in a file
+   * extension and writes the bare number as `Round.name`. Omitting it here is what a strictly
+   * standard producer looks like.
+   */
+  omitRoundNumber?: boolean;
 }
 
 /**
@@ -158,7 +166,7 @@ export function assignmentDocument(options: IAssignmentOptions = {}): object {
     // Numeric, as the reference implementation writes it. "Round 4" is a display string and lives
     // elsewhere; putting it here makes the round unresolvable on import.
     name: options.roundName ?? String(options.roundNumber ?? 4),
-    number: options.roundNumber ?? 4,
+    ...(options.omitRoundNumber ? {} : { number: options.roundNumber ?? 4 }),
     matches: matches.map((match) => ({ $ref: match.id as string })),
   };
 
