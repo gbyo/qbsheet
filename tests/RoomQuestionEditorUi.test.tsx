@@ -125,8 +125,52 @@ describe('what the editor leads with', () => {
     openEditor();
 
     expect(screen.queryByText(/On the floor/)).toBeNull();
-    fireEvent.click(screen.getByText('More…'));
+    fireEvent.click(screen.getByText('Question details'));
     expect(screen.getByText(/On the floor/)).toBeTruthy();
+  });
+
+  test('the score after previews the correction before it is saved', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]); // +10
+    fireEvent.click(screen.getByText('20'));
+    openEditor();
+
+    const score = screen.getByRole('table', { name: 'Question 1 score change' });
+    expect(within(score).getByRole('row', { name: 'Ninety Six 0 30' })).toBeTruthy();
+
+    const ruling = screen.getByLabelText('Ruling') as HTMLSelectElement;
+    const power = Array.from(ruling.options).find((option) => option.textContent === '+15');
+    fireEvent.change(ruling, { target: { value: power?.value } });
+
+    expect(within(score).getByRole('row', { name: 'Ninety Six 0 35' })).toBeTruthy();
+  });
+
+  test('a completed tossup does not offer an impossible second attempt', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+    fireEvent.click(screen.getByText('20'));
+    openEditor();
+
+    expect(screen.queryByText('+ Add attempt')).toBeNull();
+
+    const ruling = screen.getByLabelText('Ruling') as HTMLSelectElement;
+    const neg = Array.from(ruling.options).find((option) => option.textContent === '-5');
+    fireEvent.change(ruling, { target: { value: neg?.value } });
+
+    expect(screen.getByText('+ Add attempt')).toBeTruthy();
+  });
+
+  test('No buzz clears outcomes that cannot coexist with it', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+    fireEvent.click(screen.getByText('20'));
+    openEditor();
+
+    fireEvent.click(screen.getByLabelText('No buzz'));
+
+    expect(screen.queryByLabelText('Ruling')).toBeNull();
+    expect(screen.queryByRole('group', { name: 'Bonus points' })).toBeNull();
+    expect(screen.getByText('This tossup was recorded with no buzz.')).toBeTruthy();
   });
 });
 
