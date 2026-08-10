@@ -13,8 +13,8 @@ test('practice control row stays on the viewport bottom edge', async ({ page }) 
   await page.getByRole('button', { name: 'Start game' }).click();
 
   const scorer = page.locator('.practice-mode > .scorer');
-  const body = scorer.locator('> .scorer-body');
-  const footer = scorer.locator('> .scorer-footer');
+  const body = page.locator('.practice-mode > .scorer > .scorer-body');
+  const footer = page.locator('.practice-mode > .scorer > .scorer-footer');
   await expect(footer).toBeVisible();
 
   expect(await scorer.evaluate((element) => getComputedStyle(element).paddingBottom)).toBe('0px');
