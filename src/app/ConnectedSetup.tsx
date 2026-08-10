@@ -22,6 +22,7 @@
  * attempt leaves nothing behind for the next one to trip over.
  */
 import { FormEvent, useCallback, useEffect, useState } from 'react';
+import BrandLogo from '../BrandLogo';
 import FruityServerClient, {
   IJoinResult,
   IRoomIdentity,
@@ -194,7 +195,9 @@ export default function ConnectedSetup(props: {
   return (
     <main className="shell">
       <header className="shell-header">
-        <h1 className="shell-title">QBSheet</h1>
+        <h1 className="shell-title shell-brand-title">
+          <BrandLogo className="shell-brand-logo" />
+        </h1>
       </header>
 
       {stage.kind === 'address' && (
