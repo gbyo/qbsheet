@@ -7,7 +7,7 @@ async function startPracticeGame(page: import('@playwright/test').Page): Promise
   await page.getByRole('button', { name: 'Practice scoring' }).click();
 
   await expect(page.getByRole('heading', { name: 'Who is starting?' })).toBeVisible();
-  for (const player of ['Gibson', 'Jeremy', 'Owen', 'Lachlan', 'Tucker', 'Sam', 'Efren', 'Valerie']) {
+  for (const player of ['Gibson', 'Jeremy', 'Owen', 'Lachlan', 'Tucker', 'Phillip', 'Efren', 'Valerie']) {
     await page.getByLabel(player, { exact: true }).check();
   }
   // The minimized guide quotes the step it is on, and step 1 tells you to choose Start game, so
