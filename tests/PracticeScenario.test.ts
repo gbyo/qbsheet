@@ -1,22 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { IGameSetup } from '../src/scoring/deriveGame';
-import {
-  practiceFormat,
-  practiceLeftTeam,
-  practiceLineupReady,
-  practiceRightTeam,
-  practiceSteps,
-} from '../src/practice/PracticeScenario';
+import { practiceLineupsRecorded } from '../src/practice/PracticeScreen';
+import { practiceFormat, practiceSteps } from '../src/practice/PracticeScenario';
+import { ScoreEvent } from '../src/scoring/ScoreEvents';
 
-function setup(left: string[], right: string[]): IGameSetup {
-  return {
-    left: { name: practiceLeftTeam.name, players: practiceLeftTeam.players.map((player) => player.name), startingLineup: left },
-    right: {
-      name: practiceRightTeam.name,
-      players: practiceRightTeam.players.map((player) => player.name),
-      startingLineup: right,
-    },
-  };
+function lineupEvents(left: string[], right: string[]): ScoreEvent[] {
+  return [
+    { id: 'left-lineup', type: 'substitution', questionNumber: 1, team: 'left', activePlayers: left },
+    { id: 'right-lineup', type: 'substitution', questionNumber: 1, team: 'right', activePlayers: right },
+  ];
 }
 
 describe('guided practice scenario', () => {
@@ -27,9 +18,17 @@ describe('guided practice scenario', () => {
     expect(practiceFormat.players.maximumActive).toBe(4);
   });
 
-  it('requires the intended four starters before advancing', () => {
-    expect(practiceLineupReady(setup(['Jordan', 'Alex', 'Sam', 'Taylor'], ['Maya', 'Chris', 'Riley', 'Evan']))).toBe(true);
-    expect(practiceLineupReady(setup(['Jordan', 'Alex', 'Sam', 'Casey'], ['Maya', 'Chris', 'Riley', 'Evan']))).toBe(false);
+  it('recognizes the real substitution events emitted by the starting-lineup prompt', () => {
+    expect(
+      practiceLineupsRecorded(
+        lineupEvents(['Jordan', 'Alex', 'Sam', 'Taylor'], ['Maya', 'Chris', 'Riley', 'Evan']),
+      ),
+    ).toBe(true);
+    expect(
+      practiceLineupsRecorded(
+        lineupEvents(['Jordan', 'Alex', 'Sam', 'Casey'], ['Maya', 'Chris', 'Riley', 'Evan']),
+      ),
+    ).toBe(false);
   });
 
   it('includes correction, substitution and submission lessons', () => {
