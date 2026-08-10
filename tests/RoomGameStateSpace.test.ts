@@ -159,6 +159,9 @@ function expectedPoints(format: IScorekeeperFormat, events: ScoreEvent[]): { lef
       points[entry.team] += controlled;
       points[otherTeam(entry.team)] += bounceback;
     } else if (entry.type === 'adjustment') points[entry.team] += entry.points;
+    else if (entry.type === 'lightning' || entry.type === 'question-void') {
+      throw new Error(`expectedPoints does not model ${entry.type}; extend the oracle before generating it.`);
+    }
   }
   return points;
 }
@@ -907,7 +910,12 @@ describe('seeded state-machine stress coverage', () => {
           break;
         }
 
-        if (!accepted) break;
+        if (!accepted) {
+          withReplayDiagnostics(seed, step, format, events, () => {
+            throw new Error(`No legal action from ${JSON.stringify(before.phase)}.`);
+          });
+          break;
+        }
         acceptedTypes.add(accepted.type);
         acceptedTransitions += 1;
         const beforePhase =
