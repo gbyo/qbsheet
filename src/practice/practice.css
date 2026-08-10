@@ -13,18 +13,26 @@
  * Which way out of that depends entirely on how much screen there is. Wide enough and the scoresheet
  * can simply be given a column back (see the 1500px query below, and the matching default in
  * `PracticeCoach`); narrower than that, taking 392px off two team panels would squeeze the player
- * names into ellipses, so the guide starts minimized instead and the space it needs is at the bottom.
+ * names into ellipses, so the guide starts minimized instead and its clearance belongs inside the
+ * flexible scorer body. Keeping that clearance off the scorer itself leaves the control row on the
+ * true bottom edge of the page.
  */
 /* The full viewport: there is no banner above the scoresheet any more to subtract. */
 .practice-mode > .scorer {
   min-height: 100vh;
-  padding-bottom: 126px;
   background: var(--room-surface, #fff);
+}
+
+.practice-mode > .scorer > .scorer-body {
+  padding-bottom: 126px;
 }
 
 @media (min-width: 1500px) {
   .practice-mode > .scorer {
     padding-inline-end: 392px;
+  }
+
+  .practice-mode > .scorer > .scorer-body {
     padding-bottom: 0;
   }
 }
