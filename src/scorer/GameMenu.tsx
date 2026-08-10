@@ -9,6 +9,7 @@
  * without lightning rounds, no "End regulation" for an untimed game that ends on a tossup count.
  */
 import { useEffect, useRef, useState } from 'react';
+import ControlIcon from './ControlIcon';
 
 export interface IGameMenuItem {
   label: string;
@@ -72,6 +73,7 @@ export default function GameMenu(props: { items: IGameMenuItem[] }) {
           }
         }}
       >
+        <ControlIcon name="game" />
         Game
       </button>
       {open && (
