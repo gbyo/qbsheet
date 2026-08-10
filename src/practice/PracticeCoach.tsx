@@ -22,9 +22,14 @@ const helpTopics = [
       'Select that question in Recent, or open Game → Full scoresheet review. Edit the whole question and save; QBSheet recalculates the totals and player stats.',
   },
   {
+    title: 'What is the question editor showing me?',
+    answer:
+      'The whole of one question: every buzz on it, in order, and the bonus it earned — not just the action you selected. Team, Player and Ruling are the three things a scoresheet line records, and Ruling carries the points, so “+10” is one choice rather than two. The score table at the top previews what saving would do. Nothing changes until you choose Save correction, and Close at the top right (or Escape) leaves the question exactly as it was.',
+  },
+  {
     title: 'A player is missing or substitutes',
     answer:
-      'Open Players. Add a missing player to the roster, or move an active player to the bench and bring the substitute in. The change starts at the next tossup.',
+      'For a straight one-for-one swap, press Sub on the outgoing player’s row on the scoresheet and choose who comes on. Players in the bottom toolbar handles everything else: adding somebody to the roster, changing several players at once, or reordering the seats. Either way the change starts at the next tossup, so tossups heard stay honest.',
   },
   {
     title: 'Wrong answer, neg, or no buzz?',
@@ -60,8 +65,14 @@ const helpTopics = [
 
 export default function PracticeCoach(props: IPracticeCoachProps) {
   const { step, stepIndex, stepCount, feedback, mistake, onRestart, onLeave } = props;
+  /*
+   * Open only where the scoresheet can spare the column the panel sits in — the same 1500px the
+   * stylesheet reserves that column at. Below it the panel would cover the Recent list and the lower
+   * rulings of the right-hand team, so it waits behind Open guide rather than sitting on top of the
+   * buttons it is describing.
+   */
   const [open, setOpen] = useState(() =>
-    typeof window.matchMedia === 'function' ? window.matchMedia('(min-width: 1051px)').matches : true,
+    typeof window.matchMedia === 'function' ? window.matchMedia('(min-width: 1500px)').matches : true,
   );
   const [view, setView] = useState<'guide' | 'help'>('guide');
   const [confirming, setConfirming] = useState<'restart' | 'leave' | null>(null);
@@ -81,8 +92,11 @@ export default function PracticeCoach(props: IPracticeCoachProps) {
         onClick={() => setOpen(true)}
       >
         <span>
-          <strong>Practice {stepIndex + 1}/{stepCount}</strong>
-          <span>{step.call}</span>
+          <strong>
+            Practice {stepIndex + 1}/{stepCount}
+          </strong>
+          {/* Collapsed, one line is all there is room for, and the instruction is the useful half. */}
+          <span>{step.instruction}</span>
         </span>
         <span className="practice-coach-expand" aria-hidden="true">
           Open guide
@@ -97,7 +111,7 @@ export default function PracticeCoach(props: IPracticeCoachProps) {
         <div>
           <p className="practice-label">Guided practice</p>
           <p className="practice-progress">
-            {step.section} · {stepIndex + 1} of {stepCount}
+            Step {stepIndex + 1} of {stepCount} · {step.section}
           </p>
         </div>
         <button
@@ -152,8 +166,22 @@ export default function PracticeCoach(props: IPracticeCoachProps) {
               <span>Situation</span>
               <p>{step.call}</p>
             </div>
+            {/*
+              What to do, said outright.
+
+              This used to be hidden behind Get a hint, on the theory that working out which control a
+              reader's call maps to is the exercise. In use it was not: a step whose situation is
+              "Tucker answers correctly after the neg" leaves a first-time scorekeeper unsure whether
+              they are meant to score the same tossup or advance it, and guessing wrong in a tutorial
+              teaches nothing except that the tutorial is unclear. The instruction says what to
+              record; the hint still says where the control is and why the ruling is what it is.
+            */}
+            <div className="practice-call is-instruction">
+              <span>Do this</span>
+              <p>{step.instruction}</p>
+            </div>
             <details key={step.id} className="practice-hint">
-              <summary>Get a hint</summary>
+              <summary>Show me where</summary>
               <p>{step.hint}</p>
             </details>
           </>

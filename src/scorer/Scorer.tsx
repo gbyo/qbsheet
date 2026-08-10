@@ -550,6 +550,38 @@ export default function Scorer(props: IScorerProps) {
     [record, phase],
   );
 
+  /**
+   * A one-for-one substitution made from the player's own row on the scoresheet.
+   *
+   * The same two writes the Players dialog makes, in the same order: the seat so the replacement
+   * takes the outgoing player's column, then the complete lineup effective at the next question
+   * boundary. Nothing here is a shortcut around the engine — it is the same event, asked for in one
+   * place instead of four.
+   */
+  const substituteFromRow = useCallback(
+    (team: LeftOrRight, outgoing: string, incoming: string) => {
+      const derivedTeam = team === 'left' ? game.left : game.right;
+      const roster = derivedTeam.players.map((player) => player.name);
+      const activePlayers = derivedTeam.activePlayers.slice();
+      const seat = activePlayers.indexOf(outgoing);
+      if (seat < 0) activePlayers.push(incoming);
+      else activePlayers.splice(seat, 1, incoming);
+      seating.substitute(team, roster, outgoing, incoming);
+      record({ id: newEventId(), type: 'substitution', questionNumber: lineupQuestion, team, activePlayers });
+      setOperationNotice(
+        `${incoming} came on for ${outgoing} (${derivedTeam.name}), starting Tossup ${lineupQuestion}.`,
+      );
+    },
+    [game.left, game.right, lineupQuestion, record, seating],
+  );
+
+  const benchFor = (team: LeftOrRight): string[] => {
+    const derivedTeam = team === 'left' ? game.left : game.right;
+    return derivedTeam.players
+      .filter((player) => !derivedTeam.activePlayers.includes(player.name))
+      .map((player) => player.name);
+  };
+
   const openReviewAt = useCallback((questionNumber?: number, edit = false) => {
     setReviewFocus(questionNumber);
     setReviewEditQuestion(edit ? questionNumber : undefined);
@@ -579,8 +611,12 @@ export default function Scorer(props: IScorerProps) {
   // thing. Ctrl/Cmd+Z is undo, which is the one shortcut every scorekeeper already expects.
   useEffect(() => {
     const onKeyDown = (keyEvent: KeyboardEvent) => {
-      const target = keyEvent.target as HTMLElement | null;
-      const inControl = !!target?.closest('button, input, select, textarea, [role="dialog"]');
+      // A keydown can be dispatched at something that is not an element — the document itself, for
+      // one — and reaching straight for closest() on that throws out of a listener the whole scoring
+      // screen depends on. Ask whether there is an element before asking it anything.
+      const target = keyEvent.target;
+      const inControl =
+        target instanceof Element && target.closest('button, input, select, textarea, [role="dialog"]') !== null;
 
       if (
         (keyEvent.metaKey || keyEvent.ctrlKey) &&
@@ -913,6 +949,11 @@ export default function Scorer(props: IScorerProps) {
                 timeoutsUsed={(procedure?.timeoutsPerTeam ?? 0) > 0 ? game.timeouts.left : undefined}
                 onBuzz={(playerName, answerType) => recordBuzz('left', playerName, answerType)}
                 onWrongNoPenalty={(playerName) => recordWrongNoPenalty('left', playerName)}
+                onSubstitute={(outgoing, incoming) => substituteFromRow('left', outgoing, incoming)}
+                benchPlayers={benchFor('left')}
+                substitutionAllowed={lineupChangeAllowed}
+                substitutionBlockedReason={lineupChangeReason}
+                substitutionQuestionNumber={lineupQuestion}
               />
               <TeamPanel
                 format={format}
@@ -924,6 +965,11 @@ export default function Scorer(props: IScorerProps) {
                 timeoutsUsed={(procedure?.timeoutsPerTeam ?? 0) > 0 ? game.timeouts.right : undefined}
                 onBuzz={(playerName, answerType) => recordBuzz('right', playerName, answerType)}
                 onWrongNoPenalty={(playerName) => recordWrongNoPenalty('right', playerName)}
+                onSubstitute={(outgoing, incoming) => substituteFromRow('right', outgoing, incoming)}
+                benchPlayers={benchFor('right')}
+                substitutionAllowed={lineupChangeAllowed}
+                substitutionBlockedReason={lineupChangeReason}
+                substitutionQuestionNumber={lineupQuestion}
               />
             </div>
 

@@ -410,6 +410,86 @@ describe('one player for another', () => {
   });
 });
 
+/**
+ * The substitution made without leaving the scoresheet.
+ *
+ * The same event as the dialog's, written from the row of the player coming off. What matters here is
+ * that it really is the same event — the complete lineup at the right question boundary, with the
+ * replacement in the outgoing player's seat — because a shortcut that stored anything less would put
+ * tossups heard wrong for the rest of the game.
+ */
+describe('the Sub button on a player row', () => {
+  function subRow(team: string, player: string) {
+    const panel = screen.getByLabelText(team);
+    const row = within(panel).getByText(player).closest('li') as HTMLElement;
+    fireEvent.click(within(row).getByRole('button', { name: `Substitute for ${player}` }));
+    return row;
+  }
+
+  test('two presses record the complete lineup, effective at the next question', () => {
+    renderScorer(formatFor(2));
+    chooseStarters(['Sarah Jones', 'Michael Smith']);
+    buzz('Sarah Jones', 1); // a power on tossup 1, so the change lands on tossup 2
+
+    const row = subRow('Ninety Six', 'Sarah Jones');
+    expect(within(row).getByText(/Effective starting Tossup 2/)).toBeTruthy();
+    fireEvent.click(within(row).getByRole('button', { name: 'Jordan Hall' }));
+
+    const change = substitutions()
+      .filter((event) => event.team === 'left')
+      .at(-1);
+    expect(change?.questionNumber).toBe(2);
+    // The replacement takes the outgoing player's seat rather than being appended.
+    expect(change?.activePlayers).toEqual(['Jordan Hall', 'Michael Smith']);
+    expect(screen.getByText('Jordan Hall came on for Sarah Jones (Ninety Six), starting Tossup 2.')).toBeTruthy();
+  });
+
+  test('it only offers the bench, and says so when the bench is empty', () => {
+    renderScorer(formatFor(2));
+    chooseStarters(['Sarah Jones', 'Michael Smith']);
+
+    const row = subRow('Ninety Six', 'Sarah Jones');
+    expect(within(row).getByRole('button', { name: 'Jordan Hall' })).toBeTruthy();
+    // Somebody already on the floor is not a replacement for somebody else on the floor.
+    expect(within(row).queryByRole('button', { name: 'Michael Smith' })).toBeNull();
+
+    // Greenwood's roster is exactly the size of the floor, so it has nobody to bring on.
+    const full = subRow('Greenwood', 'Emma Turner');
+    expect(within(full).getByText(/Everybody on this roster is already playing/)).toBeTruthy();
+  });
+
+  test('cancelling leaves the lineup alone', () => {
+    renderScorer(formatFor(2));
+    chooseStarters(['Sarah Jones', 'Michael Smith']);
+    const before = substitutions().length;
+
+    const row = subRow('Ninety Six', 'Sarah Jones');
+    fireEvent.click(within(row).getByRole('button', { name: 'Cancel' }));
+
+    expect(within(row).queryByText(/Who comes on for/)).toBeNull();
+    expect(substitutions().length).toBe(before);
+  });
+
+  test('tossups heard still split at the substitution', () => {
+    renderScorer(formatFor(2));
+    chooseStarters(['Sarah Jones', 'Michael Smith']);
+    buzz('Sarah Jones', 1);
+    fireEvent.click(screen.getByText('20'));
+
+    const row = subRow('Ninety Six', 'Sarah Jones');
+    fireEvent.click(within(row).getByRole('button', { name: 'Jordan Hall' }));
+
+    buzz('Michael Smith', 1);
+    fireEvent.click(screen.getByText('20'));
+
+    openPlayers();
+    const lineup = screen.getByLabelText('Ninety Six lineup');
+    expect(within(lineup).getByText('Sarah Jones').closest('li')?.textContent).toContain('1 TUH');
+    expect(within(lineup).getByText('Michael Smith').closest('li')?.textContent).toContain('2 TUH');
+    expect(within(lineup).getByText('Jordan Hall').closest('li')?.textContent).toContain('1 TUH');
+  });
+});
+
 describe('a procedure that does not allow substitutions right now', () => {
   const restrictive: IRoomProcedure = {
     version: roomProcedureVersion,
@@ -417,6 +497,19 @@ describe('a procedure that does not allow substitutions right now', () => {
     timeoutsPerTeam: 1,
     substitutionPolicy: 'breaks-timeouts-overtime',
   };
+
+  test('the row cannot start a substitution the procedure forbids', () => {
+    renderScorer(formatFor(2), restrictive);
+    chooseStarters(['Sarah Jones', 'Michael Smith']);
+    buzz('Sarah Jones', 1);
+    fireEvent.click(screen.getByText('20'));
+
+    const panel = screen.getByLabelText('Ninety Six');
+    const row = within(panel).getByText('Sarah Jones').closest('li') as HTMLElement;
+    const sub = within(row).getByRole('button', { name: 'Substitute for Sarah Jones' });
+    expect(sub.hasAttribute('disabled')).toBe(true);
+    expect(sub.getAttribute('title')).toContain('halftime, timeouts, and phase checkpoints');
+  });
 
   test('the roster can be read, but nothing can be changed, and the reason is given', () => {
     renderScorer(formatFor(2), restrictive);

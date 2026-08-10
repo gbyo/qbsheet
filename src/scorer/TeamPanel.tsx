@@ -15,7 +15,7 @@
  * them (see `PlayerSeating`). It is positional and not an identity — a substitute takes the seat of
  * the player they came on for — which is what keeps the third column the third column all game.
  */
-import { CSSProperties, useEffect, useRef } from 'react';
+import { CSSProperties, useEffect, useRef, useState } from 'react';
 import { IScorekeeperAnswerType, IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
 import { IDerivedTeam } from '../scoring/deriveGame';
 import { orderBySeating } from './PlayerSeating';
@@ -47,6 +47,27 @@ export interface ITeamPanelProps {
    * `PlayerSeating`.
    */
   seatOrder?: readonly string[];
+  /**
+   * One-for-one substitution from the player's own row.
+   *
+   * A substitution is the most frequent thing that happens to a lineup, and routing every one of
+   * them through the Players dialog meant leaving the scoresheet, finding the right team, finding the
+   * right row, and coming back — for a change the reader announces in four words. The row already
+   * knows who is coming off, so the only question left is who comes on, and it is asked here.
+   *
+   * The dialog is not going anywhere: adding somebody to the roster, reordering seats and anything
+   * that is not one-for-one still live there. Absent means the host offers no quick path, and no Sub
+   * button is drawn.
+   */
+  onSubstitute?: (outgoing: string, incoming: string) => void;
+  /** Who is available to come on. Empty means everybody on the roster is already playing. */
+  benchPlayers?: readonly string[];
+  /** False when the procedure does not allow a lineup change at this point in the game. */
+  substitutionAllowed?: boolean;
+  /** Why not, when it is not allowed. Shown in place of the bench list. */
+  substitutionBlockedReason?: string;
+  /** The question the change takes effect from, so the row can say so before it is written. */
+  substitutionQuestionNumber?: number;
 }
 
 /** "+15" / "-5". The sign is the fastest thing to read, so it is always shown. */
@@ -63,8 +84,24 @@ function answerButtonClass(answerType: IScorekeeperAnswerType): string {
 }
 
 export default function TeamPanel(props: ITeamPanelProps) {
-  const { format, team, scoringEnabled, eligible, negsAvailable, timeoutsUsed, onBuzz, onWrongNoPenalty, seatOrder } =
-    props;
+  const {
+    format,
+    team,
+    scoringEnabled,
+    eligible,
+    negsAvailable,
+    timeoutsUsed,
+    onBuzz,
+    onWrongNoPenalty,
+    seatOrder,
+    onSubstitute,
+    benchPlayers = [],
+    substitutionAllowed = true,
+    substitutionBlockedReason,
+    substitutionQuestionNumber,
+  } = props;
+  /** Which row, if any, has its replacement list open. One at a time, by name. */
+  const [substituting, setSubstituting] = useState<string | null>(null);
   const active = orderBySeating(
     team.players.filter((player) => team.activePlayers.includes(player.name)),
     seatOrder ?? [],
@@ -86,6 +123,12 @@ export default function TeamPanel(props: ITeamPanelProps) {
     previousPoints.current = team.points;
     hasRendered.current = true;
   }, [team.points]);
+
+  // The row the picker belongs to can leave the floor — by the substitution itself, or by a change
+  // made in the Players dialog — and an open picker attached to nobody must not stay on screen.
+  useEffect(() => {
+    if (substituting !== null && !team.activePlayers.includes(substituting)) setSubstituting(null);
+  }, [substituting, team.activePlayers]);
 
   return (
     <section className="scorer-team" aria-label={team.name}>
@@ -118,6 +161,25 @@ export default function TeamPanel(props: ITeamPanelProps) {
               {seat + 1}
             </span>
             <span className="scorer-player-name">{player.name}</span>
+            {/*
+              Between the name and the rulings, and deliberately the quietest thing on the line. It
+              sits beside the buttons that get pressed while a reader is talking, and a fifth target
+              of the same weight would be a fifth thing to hit by mistake mid-tossup. It stays out of
+              the ruling block so that block keeps its own alignment down the sheet.
+            */}
+            {onSubstitute && (
+              <button
+                type="button"
+                className={substituting === player.name ? 'scorer-sub-action is-open' : 'scorer-sub-action'}
+                aria-expanded={substituting === player.name}
+                aria-label={`Substitute for ${player.name}`}
+                disabled={!substitutionAllowed}
+                title={substitutionAllowed ? `Substitute for ${player.name}` : substitutionBlockedReason}
+                onClick={() => setSubstituting((current) => (current === player.name ? null : player.name))}
+              >
+                Sub
+              </button>
+            )}
             <span className="scorer-answers">
               {answerTypes.map((answerType) => (
                 <button
@@ -147,6 +209,45 @@ export default function TeamPanel(props: ITeamPanelProps) {
                 {negsAvailable ? '0 after readout' : '0'}
               </button>
             </span>
+            {/*
+              The second half of the sentence, and the only question the row cannot answer for
+              itself. Names rather than a select: a bench of one or two is the normal case, and
+              choosing from a list of names is one press where a dropdown is three.
+            */}
+            {onSubstitute && substituting === player.name && (
+              <div className="scorer-sub-picker" aria-label={`Replace ${player.name}`}>
+                <p className="scorer-sub-picker-title">
+                  Who comes on for {player.name}?
+                  {substitutionQuestionNumber !== undefined && (
+                    <span> Effective starting Tossup {substitutionQuestionNumber}.</span>
+                  )}
+                </p>
+                {benchPlayers.length === 0 ? (
+                  <p className="scorer-sub-picker-empty">
+                    Everybody on this roster is already playing. Use Players to add somebody first.
+                  </p>
+                ) : (
+                  <div className="scorer-sub-picker-choices">
+                    {benchPlayers.map((name) => (
+                      <button
+                        key={name}
+                        type="button"
+                        className="scorer-choice"
+                        onClick={() => {
+                          setSubstituting(null);
+                          onSubstitute(player.name, name);
+                        }}
+                      >
+                        {name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <button type="button" className="scorer-text-action" onClick={() => setSubstituting(null)}>
+                  Cancel
+                </button>
+              </div>
+            )}
           </li>
         ))}
         {active.length === 0 && <li className="scorer-empty-roster">Nobody is on the floor for this team.</li>}

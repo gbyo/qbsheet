@@ -92,7 +92,11 @@ function buttonsFor(playerName: string): HTMLElement[] {
     (candidate) => candidate.querySelector('.scorer-player-name')?.textContent === playerName,
   );
   if (!row) throw new Error(`No roster row for ${playerName}`);
-  return within(row as HTMLElement).getAllByRole('button');
+  // The rulings, in format order, and nothing else. The row also carries the Sub button, which is a
+  // personnel control rather than a scoring one and is not disabled by a team having answered.
+  const answers = row.querySelector('.scorer-answers');
+  if (!answers) throw new Error(`No ruling buttons for ${playerName}`);
+  return within(answers as HTMLElement).getAllByRole('button');
 }
 
 /**

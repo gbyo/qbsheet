@@ -19,6 +19,27 @@ export default function ScorerDialog(props: IScorerDialogProps) {
   const { title, onClose, children, wide = false } = props;
   const panel = useRef<HTMLDialogElement>(null);
 
+  /**
+   * Escape closes it, said rather than assumed.
+   *
+   * A modal `<dialog>` gets this from the platform, and where showModal exists this handler simply
+   * agrees with it. Where it does not — the non-modal fallback below, and the jsdom the tests run in
+   * — Escape did nothing at all, so a dialog documented as escapable was not one. Closing through the
+   * element keeps every exit on the same path: `close()` fires `close`, which is what calls `onClose`.
+   */
+  useEffect(() => {
+    const onKeyDown = (keyEvent: KeyboardEvent) => {
+      if (keyEvent.key !== 'Escape' || keyEvent.defaultPrevented) return;
+      const dialog = panel.current;
+      if (!dialog?.open) return;
+      keyEvent.preventDefault();
+      if (typeof dialog.close === 'function') dialog.close();
+      else onClose();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
+
   useEffect(() => {
     const dialog = panel.current;
     if (!dialog) return undefined;
@@ -48,14 +69,23 @@ export default function ScorerDialog(props: IScorerDialogProps) {
     >
       <div className="scorer-dialog-head">
         <h2 className="scorer-dialog-title">{title}</h2>
+        {/*
+          The way out, and it says so twice. A dialog tall enough to scroll — the question editor is —
+          used to carry its only close control at the top of a scrolling box, so a scorekeeper who had
+          scrolled down to the bonus had no exit anywhere on screen. The head is now pinned, and the
+          control carries the ✕ that people look for as well as the word.
+        */}
         <button
           type="button"
-          className="scorer-action"
+          className="scorer-action scorer-dialog-close"
           // close() fires the native close event, which is what calls onClose. Where the element is
           // only a styled box rather than a real dialog, call it directly instead.
           onClick={() => (typeof panel.current?.close === 'function' ? panel.current.close() : onClose())}
         >
-          Close
+          <span className="scorer-dialog-close-glyph" aria-hidden="true">
+            ✕
+          </span>
+          <span>Close</span>
         </button>
       </div>
       <div className="scorer-dialog-body">{children}</div>

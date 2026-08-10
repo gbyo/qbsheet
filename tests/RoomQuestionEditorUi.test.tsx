@@ -58,11 +58,16 @@ function scoreOf(team: string): string {
   return screen.getByLabelText(`${team} score`).textContent ?? '';
 }
 
-/** Open the editor for the question the Recent rail is showing. */
+/** Open the editor the long way: the Game menu, the review list, then one question. */
 function openEditor() {
   fireEvent.click(screen.getByText('Game'));
   fireEvent.click(screen.getByText('Full scoresheet review'));
   fireEvent.click(screen.getByText('Edit question'));
+}
+
+/** Open the editor the way a scorekeeper does: one press on the question in Recent. */
+function openEditorFromRecent(questionNumber: number) {
+  fireEvent.click(screen.getByRole('button', { name: `Review question ${questionNumber}` }));
 }
 
 function installLocalStorage() {
@@ -182,6 +187,100 @@ describe('what the editor leads with', () => {
     expect(screen.getByLabelText('Ruling')).toBeTruthy();
     expect(screen.getByLabelText('End without conversion')).toBeTruthy();
     expect(screen.getByText('No team converted this tossup.')).toBeTruthy();
+  });
+});
+
+/**
+ * Getting out again.
+ *
+ * A correction dialog somebody cannot leave is a correction dialog they will save something wrong
+ * from rather than abandon. Every exit is checked, and each one has to land where the scorekeeper
+ * came from: Recent goes back to the scoresheet, the review list goes back to the review list.
+ */
+describe('leaving the editor', () => {
+  test('Recent opens one question, and leaving it returns to the scoresheet', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+    fireEvent.click(screen.getByText('20'));
+    openEditorFromRecent(1);
+
+    // The exit says where it goes, because "Cancel" gave no clue that it led to an event list.
+    fireEvent.click(screen.getByRole('button', { name: 'Close without saving' }));
+
+    expect(screen.queryByText('Question 1')).toBeNull();
+    // Not the review list, which is somewhere this scorekeeper never asked to be.
+    expect(screen.queryByText('Full scoresheet review')).toBeNull();
+    expect(screen.getByLabelText('Ninety Six score')).toBeTruthy();
+  });
+
+  test('the review list opens one question, and leaving it returns to the list', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+    openEditor();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to review' }));
+
+    expect(screen.getByText('Full scoresheet review')).toBeTruthy();
+    expect(screen.getByText('Edit question')).toBeTruthy();
+  });
+
+  test('the dialog head keeps a Close whatever the editor was opened from', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+    openEditorFromRecent(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+
+    expect(screen.queryByText('Question 1')).toBeNull();
+    expect(screen.getByLabelText('Ninety Six score')).toBeTruthy();
+  });
+
+  test('Escape is one of the ways out', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+    openEditorFromRecent(1);
+
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+
+    expect(screen.queryByText('Question 1')).toBeNull();
+    expect(screen.getByLabelText('Ninety Six score')).toBeTruthy();
+  });
+
+  test('leaving without saving changes nothing', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]); // +10
+    fireEvent.click(screen.getByText('20'));
+    expect(scoreOf('Ninety Six')).toBe('30');
+    openEditorFromRecent(1);
+
+    const ruling = screen.getByLabelText('Ruling') as HTMLSelectElement;
+    const power = Array.from(ruling.options).find((option) => option.textContent === '+15');
+    fireEvent.change(ruling, { target: { value: power?.value } });
+    fireEvent.click(screen.getByRole('button', { name: 'Close without saving' }));
+
+    expect(scoreOf('Ninety Six')).toBe('30');
+  });
+});
+
+describe('the first time somebody opens a correction', () => {
+  test('the screen explains itself, once, and then stops', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+    openEditorFromRecent(1);
+
+    expect(screen.getByLabelText('About the question editor')).toBeTruthy();
+    // The three things nothing else on screen says: what the scope is, that saving is the commit, and
+    // how to get out.
+    expect(screen.getByText(/every buzz on it and its bonus/)).toBeTruthy();
+    expect(screen.getByText(/Nothing changes until you choose Save correction/)).toBeTruthy();
+    expect(screen.getByText(/To leave it exactly as it is/)).toBeTruthy();
+
+    fireEvent.click(screen.getByText('Got it — don’t show this again'));
+    expect(screen.queryByLabelText('About the question editor')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close without saving' }));
+    openEditorFromRecent(1);
+    expect(screen.queryByLabelText('About the question editor')).toBeNull();
   });
 });
 
