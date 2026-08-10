@@ -15,7 +15,7 @@
  * them (see `PlayerSeating`). It is positional and not an identity — a substitute takes the seat of
  * the player they came on for — which is what keeps the third column the third column all game.
  */
-import { CSSProperties } from 'react';
+import { CSSProperties, useEffect, useRef } from 'react';
 import { IScorekeeperAnswerType, IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
 import { IDerivedTeam } from '../scoring/deriveGame';
 import { orderBySeating } from './PlayerSeating';
@@ -78,13 +78,26 @@ export default function TeamPanel(props: ITeamPanelProps) {
   const answerTypes = negsAvailable ? format.answerTypes : format.answerTypes.filter((type) => !type.isNeg);
   // One extra column for the zero, so the values stay in the same place down every row.
   const columns = answerTypes.length + 1;
+  const previousPoints = useRef(team.points);
+  const hasRendered = useRef(false);
+  const scoreDirection = team.points < previousPoints.current ? 'is-down' : 'is-up';
+
+  useEffect(() => {
+    previousPoints.current = team.points;
+    hasRendered.current = true;
+  }, [team.points]);
 
   return (
     <section className="scorer-team" aria-label={team.name}>
       <header className="scorer-team-head">
         <h2 className="scorer-team-name">{team.name}</h2>
         <p className="scorer-team-score" aria-label={`${team.name} score`}>
-          {team.points}
+          <span
+            key={team.points}
+            className={`scorer-team-score-value${hasRendered.current ? ` ${scoreDirection}` : ''}`}
+          >
+            {team.points}
+          </span>
         </p>
       </header>
       {timeoutsUsed !== undefined && timeoutsUsed > 0 && (
