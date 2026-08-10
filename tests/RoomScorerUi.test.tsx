@@ -143,9 +143,9 @@ function editReviewEvent(description: string) {
 /** Add somebody who turned up late, through the panel that keeps that separate from the lineup. */
 function addMissingPlayer(teamLabel: string, name: string) {
   const lineup = screen.getByLabelText(teamLabel);
-  fireEvent.click(within(lineup).getByText('Add missing player\u2026'));
+  fireEvent.click(within(lineup).getByText('+ Add player'));
   fireEvent.change(within(lineup).getByLabelText('Player name'), { target: { value: name } });
-  fireEvent.click(within(lineup).getByText('Add to roster'));
+  fireEvent.click(within(lineup).getByText('Add'));
 }
 
 function chooseStarters(names: string[]) {
@@ -546,7 +546,7 @@ describe('the game menu', () => {
     expect(screen.getByText('End regulation')).toBeTruthy();
   });
 
-  test('one Sub out, one Put in, one Confirm changes who is on the floor', () => {
+  test('one Replace, one replacement choice, and one Confirm changes who is on the floor', () => {
     renderScorer(
       formatFor((rules) => {
         rules.maximumPlayersPerTeam = 1;
@@ -556,10 +556,10 @@ describe('the game menu', () => {
     pressControl('Players');
 
     const lineup = screen.getByLabelText('Ninety Six lineup');
-    fireEvent.click(within(lineup).getByText('Sub out'));
+    fireEvent.click(within(lineup).getByText('Replace'));
     // The bench is offered as the answer to "replace Sarah with", rather than as a grid to audit.
-    expect(within(lineup).getByText('Replace Sarah Mitchell with:')).toBeTruthy();
-    fireEvent.click(within(lineup).getByText('Put in'));
+    expect(within(lineup).getByText('Replace Sarah Mitchell')).toBeTruthy();
+    fireEvent.click(within(lineup).getByText('James Robinson'));
     expect(within(lineup).getByText('Sarah Mitchell \u2192 James Robinson')).toBeTruthy();
     fireEvent.click(within(lineup).getByText('Confirm'));
 
@@ -577,7 +577,7 @@ describe('the game menu', () => {
     pressControl('Players');
 
     const lineup = screen.getByLabelText('Ninety Six lineup');
-    fireEvent.click(within(lineup).getByText('Edit full lineup\u2026'));
+    fireEvent.click(within(lineup).getByText('Change lineup'));
     fireEvent.click(within(lineup).getByLabelText(/Sarah Mitchell/));
     fireEvent.click(within(lineup).getByLabelText(/James Robinson/));
     fireEvent.click(within(lineup).getByText('Apply lineup'));
@@ -652,11 +652,11 @@ describe('the game menu', () => {
     );
     pressControl('Players');
     const panel = screen.getByLabelText('Ninety Six lineup');
-    fireEvent.click(within(panel).getByText('Add missing player\u2026'));
+    fireEvent.click(within(panel).getByText('+ Add player'));
     // The panel says where they are going before anything is written.
     expect(within(panel).getByText(/come on at the next allowed substitution/)).toBeTruthy();
     fireEvent.change(within(panel).getByLabelText('Player name'), { target: { value: 'Taylor Brooks' } });
-    fireEvent.click(within(panel).getByText('Add to roster'));
+    fireEvent.click(within(panel).getByText('Add'));
 
     pressControl('Players');
     const lineup = screen.getByLabelText('Ninety Six lineup');

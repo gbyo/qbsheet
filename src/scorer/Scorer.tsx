@@ -406,6 +406,73 @@ export default function Scorer(props: IScorerProps) {
 
   const record = useCallback((...added: ScoreEvent[]) => events.append(...added), [events]);
 
+  /**
+   * Add a player through one event and one synchronization path, wherever the name was entered.
+   *
+   * `activePlayers` is intentionally absent on the starting-lineup screen. That screen may grow
+   * the roster, but its existing Start game action remains the only thing that writes question-1
+   * lineup events.
+   */
+  const addRosterPlayer = useCallback(
+    (team: LeftOrRight, playerName: string, activePlayers?: string[]) => {
+      const derivedTeam = team === 'left' ? game.left : game.right;
+      const current = derivedTeam.activePlayers;
+      const lineupChanged =
+        activePlayers !== undefined &&
+        (activePlayers.length !== current.length || activePlayers.some((name) => !current.includes(name)));
+      const added: ScoreEvent[] = [
+        { id: newEventId(), type: 'roster-add', questionNumber: lineupQuestion, team, playerName },
+      ];
+      if (lineupChanged) {
+        added.push({
+          id: newEventId(),
+          type: 'substitution',
+          questionNumber: lineupQuestion,
+          team,
+          activePlayers,
+        });
+      }
+      record(...added);
+
+      let resultNotice: string;
+      if (lineupChanged) {
+        resultNotice = `Added ${playerName} and put them in starting Tossup ${lineupQuestion}.`;
+      } else if (phase.kind === 'lineup' && phase.teams.includes(team)) {
+        resultNotice = `Added ${playerName} to the roster. They are not selected as a starter.`;
+      } else {
+        resultNotice = `Added ${playerName} to the bench.`;
+      }
+
+      if (onSyncRosterPlayer && authoritativeRosters) {
+        setOperationNotice(`${resultNotice} Syncing with tournament control.`);
+        return;
+      }
+      if (!onRequestControl) {
+        setOperationNotice(resultNotice);
+        return;
+      }
+
+      setOperationNotice(`${resultNotice} Requesting tournament control.`);
+      Promise.resolve()
+        .then(() => onRequestControl('roster-change', `Please add ${playerName} to ${derivedTeam.name}.`))
+        .then(
+          () => setOperationNotice(`${resultNotice} Tournament control was notified.`),
+          () => setOperationNotice(`${resultNotice} Tournament control could not be reached.`),
+        )
+        .catch(() => undefined);
+    },
+    [
+      authoritativeRosters,
+      game.left,
+      game.right,
+      lineupQuestion,
+      onRequestControl,
+      onSyncRosterPlayer,
+      phase,
+      record,
+    ],
+  );
+
   const recordBuzz = useCallback(
     (team: LeftOrRight, playerName: string, answerType: IScorekeeperAnswerType) => {
       if (phase.kind !== 'tossup') return;
@@ -794,6 +861,7 @@ export default function Scorer(props: IScorerProps) {
           maximumActive={format.players.maximumActive}
           needed={phase.teams}
           procedure={procedure}
+          onAddPlayer={(team, playerName) => addRosterPlayer(team, playerName)}
           onConfirm={(lineups) => {
             const chosen = (Object.keys(lineups) as LeftOrRight[]).map((side) => ({
               id: newEventId(),
@@ -1061,73 +1129,8 @@ export default function Scorer(props: IScorerProps) {
             setDialog(null);
           }}
           onAddPlayer={(team, playerName, activePlayers) => {
-            const teamName = team === 'left' ? game.left.name : game.right.name;
-            const current = team === 'left' ? game.left.activePlayers : game.right.activePlayers;
-            /*
-             * Joining the roster and going on the floor are two different things, and a player
-             * added to a full team does only the first. Writing a substitution event that changes
-             * nothing would be a lineup change in the history that nobody made — and lineup events
-             * are what tossups heard are computed from.
-             *
-             * Compared as a set rather than position by position, because the order of a lineup is
-             * a seating preference and not a fact about the game: two arrangements of the same four
-             * players are the same lineup, and rearranging the rows must not write an event.
-             */
-            const lineupChanged =
-              activePlayers.length !== current.length || activePlayers.some((name) => !current.includes(name));
-            const added: ScoreEvent[] = [
-              { id: newEventId(), type: 'roster-add', questionNumber: lineupQuestion, team, playerName },
-            ];
-            if (lineupChanged) {
-              added.push({
-                id: newEventId(),
-                type: 'substitution',
-                questionNumber: lineupQuestion,
-                team,
-                activePlayers,
-              });
-            }
-            record(...added);
+            addRosterPlayer(team, playerName, activePlayers);
             setDialog(null);
-            /*
-             * A player who joined the bench and one who walked onto the floor need different
-             * sentences: the first is waiting for a substitution window, the second is already
-             * hearing tossups, and telling a scorekeeper the wrong one leaves them either watching
-             * for a change that already happened or expecting one that has not.
-             */
-            if (!lineupChanged) {
-              if (onRequestControl) {
-                setOperationNotice(`Added ${playerName} to the bench; requesting tournament control.`);
-                Promise.resolve()
-                  .then(() => onRequestControl('roster-change', `Please add ${playerName} to ${teamName}.`))
-                  .then(
-                    () => setOperationNotice(`Added ${playerName} to the bench; tournament control was notified.`),
-                    () =>
-                      setOperationNotice(
-                        `Added ${playerName} to the bench for this game. Tournament control could not be reached.`,
-                      ),
-                  )
-                  .catch(() => undefined);
-              } else {
-                setOperationNotice(`Added ${playerName} to the bench; available at the next substitution window.`);
-              }
-            } else if (onSyncRosterPlayer && authoritativeRosters) {
-              setOperationNotice(`Added ${playerName} to ${teamName}; syncing with tournament control.`);
-            } else if (onRequestControl) {
-              setOperationNotice(`Added ${playerName} to ${teamName}; requesting tournament control.`);
-              Promise.resolve()
-                .then(() => onRequestControl('roster-change', `Please add ${playerName} to ${teamName}.`))
-                .then(
-                  () => setOperationNotice(`Added ${playerName} to ${teamName}; tournament control was notified.`),
-                  () =>
-                    setOperationNotice(
-                      `Added ${playerName} to ${teamName} for this game. Tournament control could not be reached.`,
-                    ),
-                )
-                .catch(() => undefined);
-            } else {
-              setOperationNotice(`Added ${playerName} to ${teamName} for this game.`);
-            }
           }}
           onRequestControl={
             onRequestControl

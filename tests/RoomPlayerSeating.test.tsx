@@ -151,8 +151,8 @@ describe('the numbers beside the names', () => {
 
     const lineup = screen.getByLabelText('Ninety Six lineup');
     const secondSeat = within(lineup).getByText('Michael Smith').closest('li') as HTMLElement;
-    fireEvent.click(within(secondSeat).getByText('Sub out'));
-    fireEvent.click(within(lineup).getByText('Put in')); // Jordan Hall, the only bench player
+    fireEvent.click(within(secondSeat).getByText('Replace'));
+    fireEvent.click(within(lineup).getByText('Jordan Hall')); // the only bench player
     fireEvent.click(within(lineup).getByText('Confirm'));
 
     // The replacement sits down where the outgoing player stood up: still the second row.
@@ -167,6 +167,7 @@ describe('rearranging the rows', () => {
     openPlayers();
 
     const lineup = screen.getByLabelText('Ninety Six lineup');
+    fireEvent.click(within(lineup).getByText('Reorder'));
     fireEvent.click(within(lineup).getByLabelText('Move Alex Brown up'));
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
 
@@ -178,6 +179,7 @@ describe('rearranging the rows', () => {
     openPlayers();
 
     const lineup = screen.getByLabelText('Ninety Six lineup');
+    fireEvent.click(within(lineup).getByText('Reorder'));
     expect(within(lineup).getByLabelText('Move Sarah Jones up').hasAttribute('disabled')).toBe(true);
     expect(within(lineup).getByLabelText('Move Alex Brown down').hasAttribute('disabled')).toBe(true);
   });
@@ -185,7 +187,9 @@ describe('rearranging the rows', () => {
   test('the arrangement survives a reload of the same game', () => {
     renderScorer();
     openPlayers();
-    fireEvent.click(within(screen.getByLabelText('Ninety Six lineup')).getByLabelText('Move Alex Brown up'));
+    const lineup = screen.getByLabelText('Ninety Six lineup');
+    fireEvent.click(within(lineup).getByText('Reorder'));
+    fireEvent.click(within(lineup).getByLabelText('Move Alex Brown up'));
 
     const reopened = gameKey;
     cleanup();
@@ -211,6 +215,7 @@ describe('rearranging the rows', () => {
     renderScorer(1, ['Sarah Jones', 'Emma Turner']);
     openPlayers();
 
+    expect(screen.queryByText('Reorder')).toBeNull();
     expect(screen.queryByLabelText('Move Sarah Jones up')).toBeNull();
   });
 });
@@ -227,7 +232,9 @@ describe('what rearranging must not touch', () => {
     const before = savedEvents();
 
     openPlayers();
-    fireEvent.click(within(screen.getByLabelText('Ninety Six lineup')).getByLabelText('Move Alex Brown up'));
+    const lineup = screen.getByLabelText('Ninety Six lineup');
+    fireEvent.click(within(lineup).getByText('Reorder'));
+    fireEvent.click(within(lineup).getByLabelText('Move Alex Brown up'));
 
     // Byte for byte the same history. The starting lineup is a substitution event and stays the
     // only one; rearranging the rows adds nothing beside it.
@@ -247,6 +254,7 @@ describe('what rearranging must not touch', () => {
 
     openPlayers();
     let lineup = screen.getByLabelText('Ninety Six lineup');
+    fireEvent.click(within(lineup).getByText('Reorder'));
     fireEvent.click(within(lineup).getByLabelText('Move Alex Brown up'));
     lineup = screen.getByLabelText('Ninety Six lineup');
 
