@@ -66,13 +66,12 @@ const helpTopics = [
 export default function PracticeCoach(props: IPracticeCoachProps) {
   const { step, stepIndex, stepCount, feedback, mistake, onRestart, onLeave } = props;
   /*
-   * Open only where the scoresheet can spare the column the panel sits in — the same 1500px the
-   * stylesheet reserves that column at. Below it the panel would cover the Recent list and the lower
-   * rulings of the right-hand team, so it waits behind Open guide rather than sitting on top of the
-   * buttons it is describing.
+   * Open where the panel gets its full two-column width — the same 1050px the stylesheet gives up the
+   * second column below. Narrower than that it reads down the page like the old panel did, tall enough
+   * to reach the rulings a step is describing, so it waits behind Open guide instead.
    */
   const [open, setOpen] = useState(() =>
-    typeof window.matchMedia === 'function' ? window.matchMedia('(min-width: 1500px)').matches : true,
+    typeof window.matchMedia === 'function' ? window.matchMedia('(min-width: 1051px)').matches : true,
   );
   const [view, setView] = useState<'guide' | 'help'>('guide');
   const [confirming, setConfirming] = useState<'restart' | 'leave' | null>(null);
@@ -107,12 +106,21 @@ export default function PracticeCoach(props: IPracticeCoachProps) {
 
   return (
     <aside id="practice-coach-panel" className="practice-coach" aria-label="Practice guide">
+      {/* Wide enough to carry the name, the section tabs and the way out on one line. */}
       <header className="practice-coach-header">
-        <div>
+        <div className="practice-coach-heading">
           <p className="practice-label">Guided practice</p>
           <p className="practice-progress">
             Step {stepIndex + 1} of {stepCount} · {step.section}
           </p>
+        </div>
+        <div className="practice-coach-tabs" aria-label="Practice guide sections">
+          <button type="button" aria-pressed={view === 'guide'} onClick={() => setView('guide')}>
+            Current step
+          </button>
+          <button type="button" aria-pressed={view === 'help'} onClick={() => setView('help')}>
+            Common situations
+          </button>
         </div>
         <button
           type="button"
@@ -137,18 +145,9 @@ export default function PracticeCoach(props: IPracticeCoachProps) {
         <span style={{ width: `${progress}%` }} />
       </div>
 
-      <div className="practice-coach-tabs" aria-label="Practice guide sections">
-        <button type="button" aria-pressed={view === 'guide'} onClick={() => setView('guide')}>
-          Current step
-        </button>
-        <button type="button" aria-pressed={view === 'help'} onClick={() => setView('help')}>
-          Common situations
-        </button>
-      </div>
-
       <div className="practice-coach-content">
         {view === 'guide' ? (
-          <>
+          <div className="practice-coach-step">
             {feedback && (
               <p className="practice-feedback is-success" role="status">
                 <span aria-hidden="true">✓</span> {feedback}
@@ -162,12 +161,13 @@ export default function PracticeCoach(props: IPracticeCoachProps) {
             )}
 
             <h2>{step.title}</h2>
+            {/* Left of the pair: what the room did. */}
             <div className="practice-call">
               <span>Situation</span>
               <p>{step.call}</p>
             </div>
             {/*
-              What to do, said outright.
+              Right of the pair: what to do, said outright.
 
               This used to be hidden behind Get a hint, on the theory that working out which control a
               reader's call maps to is the exercise. In use it was not: a step whose situation is
@@ -184,19 +184,21 @@ export default function PracticeCoach(props: IPracticeCoachProps) {
               <summary>Show me where</summary>
               <p>{step.hint}</p>
             </details>
-          </>
+          </div>
         ) : (
           <div className="practice-help">
             <h2>Quick answers for the room</h2>
             <p className="practice-help-intro">
               These apply to the real scoresheet too. Tournament-specific procedure always wins.
             </p>
-            {helpTopics.map((topic) => (
-              <details key={topic.title}>
-                <summary>{topic.title}</summary>
-                <p>{topic.answer}</p>
-              </details>
-            ))}
+            <div className="practice-help-topics">
+              {helpTopics.map((topic) => (
+                <details key={topic.title}>
+                  <summary>{topic.title}</summary>
+                  <p>{topic.answer}</p>
+                </details>
+              ))}
+            </div>
           </div>
         )}
       </div>

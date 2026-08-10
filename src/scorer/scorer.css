@@ -635,6 +635,24 @@ div.scorer-banner .scorer-text-action {
   background: var(--room-surface-sunken);
 }
 
+/*
+ * Pinned above the control bar, because this row and the control bar are one cluster: the row says
+ * what the game is asking for and the bar says what you can always do about it, and a scorekeeper
+ * looks to the bottom of the screen for both. On a sheet that fits the viewport this changes
+ * nothing — the row already ends where the control bar begins. It earns its keep on a tall roster
+ * or a short window, where the sheet scrolls and an unpinned row would take No buzz off screen
+ * mid-question.
+ *
+ * Not applied while the game is complete: that phase fills this row with the whole pre-submit
+ * review, and pinning the bottom edge of a block taller than the window puts its top out of reach
+ * above the viewport, where no amount of scrolling brings it back.
+ */
+.scorer-stage.is-pinned {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+}
+
 .scorer-tossup-actions {
   display: flex;
   align-items: center;
@@ -883,6 +901,17 @@ div.scorer-banner .scorer-text-action {
 
   .scorer-brand-logo {
     width: 92px;
+  }
+
+  /*
+   * Not pinned at phone width, for two reasons. The control bar leaves the flow here, and its height
+   * is not a constant to offset against — 41px on its own, 65px once a warning wraps onto a second
+   * row — so a pinned row would either float above it or slide under it depending on the state of the
+   * game. And 121px of contextual row on top of 65px of control bar is a quarter of a phone screen
+   * spent on two bars, which is a worse trade than a scroll.
+   */
+  .scorer-stage.is-pinned {
+    position: static;
   }
 
   .scorer-footer {
