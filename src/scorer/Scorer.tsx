@@ -982,7 +982,12 @@ export default function Scorer(props: IScorerProps) {
               />
             </div>
 
-            <div className="scorer-stage">
+            {/*
+              Pinned to the control bar for every phase but the last. See `.scorer-stage.is-pinned`:
+              the completion review is the one thing put in here that can outgrow the window, and a
+              pinned block taller than the window loses its top edge off the top of the screen.
+            */}
+            <div className={phase.kind === 'complete' ? 'scorer-stage' : 'scorer-stage is-pinned'}>
               {phase.kind === 'score-check' && (
                 <HalftimeCheck
                   game={game}

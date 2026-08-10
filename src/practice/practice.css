@@ -4,18 +4,20 @@
 }
 
 /*
- * Room for the guide.
+ * Room for the guide — which now means: none.
  *
- * The panel is fixed to the bottom-right corner, and the bottom-right corner of this screen is the
- * Recent column and the lower rows of the right-hand team — including the rulings a step is telling
- * somebody to press. A guide that covers the button it is pointing at is worse than no guide.
+ * The guide used to be a tall, narrow column, and a tall narrow thing in the bottom-right corner
+ * lands on the Recent list and the lower rulings of the right-hand team, so the scoresheet had to be
+ * given something back: a 392px column above 1500px, and 126px of clearance inside the scorer body
+ * below it. That clearance was the reason the contextual row floated 126px clear of the control bar
+ * instead of sitting on it.
  *
- * Which way out of that depends entirely on how much screen there is. Wide enough and the scoresheet
- * can simply be given a column back (see the 1500px query below, and the matching default in
- * `PracticeCoach`); narrower than that, taking 392px off two team panels would squeeze the player
- * names into ellipses, so the guide starts minimized instead and its clearance belongs inside the
- * flexible scorer body. Keeping that clearance off the scorer itself leaves the control row on the
- * true bottom edge of the page.
+ * A wide, shallow panel needs neither. What it covers is the right end of the two bottom rows, and
+ * the right end of both is empty by design: Undo through Game are left-aligned on the control bar,
+ * and No buzz and the bonus buttons are left-aligned on the contextual row. So the panel is allowed
+ * to sit over them, the scoresheet keeps the whole viewport, and the contextual row goes back where
+ * it belongs. The one thing the panel must not do is reach the controls themselves, which is what
+ * the 320px floor in its width below is for.
  */
 /* The full viewport: there is no banner above the scoresheet any more to subtract. */
 .practice-mode > .scorer {
@@ -23,48 +25,68 @@
   background: var(--room-surface, #fff);
 }
 
-.practice-mode > .scorer > .scorer-body {
-  padding-bottom: 126px;
-}
-
-@media (min-width: 1500px) {
-  .practice-mode > .scorer {
-    padding-inline-end: 392px;
-  }
-
-  .practice-mode > .scorer > .scorer-body {
-    padding-bottom: 0;
-  }
-}
-
+/*
+ * Docked into the corner rather than floating 16px clear of it. Two borders, not four: the panel is
+ * ruled off from the sheet along the edges it meets and simply ends at the ones the window owns.
+ */
 .practice-coach,
 .practice-coach-collapsed {
   position: fixed;
-  right: 16px;
-  bottom: 16px;
+  right: 0;
+  bottom: 0;
   z-index: 24;
-  width: min(360px, calc(100vw - 32px));
-  max-height: calc(100vh - 78px);
   margin: 0;
   overflow: hidden;
   color: var(--room-text, #242424);
   background: var(--room-surface, #fff);
   border: 1px solid var(--room-border-strong, #c9c9c7);
-  border-radius: 10px;
-  box-shadow: 0 10px 28px rgb(26 30 36 / 10%);
+  border-right: 0;
+  border-bottom: 0;
+  border-radius: 10px 0 0;
+  box-shadow: 0 -2px 18px rgb(26 30 36 / 10%);
 }
 
+/*
+ * Wide and shallow, which is the shape the content wants: a situation and the action it calls for are
+ * two short paragraphs, and side by side they are read in one glance instead of scrolled past each
+ * other. It is also the shape that can share the bottom of the screen with the scoresheet — see the
+ * note at the top of this file. Subtracting 320px is what keeps the left edge clear of the contextual
+ * row's own controls, which end 264px in.
+ */
+/*
+ * The vertical half of the same bargain, measured against the 768px screen the scoresheet is laid out
+ * for. 328px leaves the panel stopping below the fourth seat's rulings on the right-hand team even in
+ * the worst case — a recovery notice pushing the sheet down a line and a wrong-ruling banner making
+ * the panel as tall as it gets — and anything longer than that scrolls inside the panel instead. One
+ * fewer line of help on screen is the better trade, because those rulings are what the steps spend
+ * their time telling somebody to press.
+ *
+ * It is a clearance for that screen, not a guarantee for every screen: rows are anchored to the top of
+ * the sheet and this panel to the bottom of the window, so a window short enough will always bring the
+ * two together, and Minimize is the way out of it.
+ */
 .practice-coach {
   display: flex;
   flex-direction: column;
+  width: min(860px, calc(100vw - 320px));
+  max-height: min(46vh, 328px);
 }
 
+.practice-coach-collapsed {
+  width: min(360px, calc(100vw - 320px));
+}
+
+/* Identity, section tabs and the way out, on one line — the horizontal panel has room for all three. */
 .practice-coach-header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 15px 16px 11px;
+  gap: 16px;
+  padding: 11px 16px 10px;
+}
+
+.practice-coach-heading {
+  min-width: 0;
 }
 
 .practice-label,
@@ -103,12 +125,12 @@
   text-decoration: underline;
 }
 
+/* Full-bleed under the header: at this width a 4px line inset on both sides reads as a stray rule. */
 .practice-progress-track {
-  height: 4px;
-  margin: 0 16px 12px;
+  height: 3px;
+  flex: none;
   overflow: hidden;
   background: var(--room-border, #dededc);
-  border-radius: 999px;
 }
 
 .practice-progress-track span {
@@ -121,8 +143,9 @@
 
 .practice-coach-tabs {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  margin: 0 16px;
+  flex: none;
+  grid-template-columns: auto auto;
+  margin-inline-start: auto;
   padding: 3px;
   background: var(--room-surface-sunken, #f3f3f2);
   border-radius: 6px;
@@ -148,19 +171,39 @@
 
 .practice-coach-content {
   min-height: 0;
-  padding: 14px 16px 16px;
+  padding: 13px 16px 14px;
   overflow-y: auto;
+}
+
+/*
+ * The step, across rather than down: what happened on the left, what to do about it on the right.
+ * Two 400px columns also stop the prose from running to a 830px measure, which is well past the
+ * point where the eye loses the start of the next line.
+ */
+.practice-coach-step {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: start;
+  gap: 8px 16px;
+}
+
+.practice-coach-step > h2 {
+  grid-column: 1 / -1;
 }
 
 .practice-coach h2,
 .practice-help h2 {
-  margin: 0 0 12px;
-  font-size: 20px;
-  line-height: 1.25;
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.3;
+}
+
+.practice-help h2 {
+  margin-bottom: 10px;
 }
 
 .practice-call {
-  margin: 10px 0 0;
+  margin: 0;
   padding: 11px 12px;
   border-left: 3px solid var(--room-border-strong, #b9b9b6);
   background: var(--room-surface-sunken, #f7f7f6);
@@ -196,10 +239,17 @@
 }
 
 .practice-feedback {
-  margin: 0 0 12px;
+  margin: 0;
   padding: 9px 11px;
   font-size: 13px;
   border-radius: 5px;
+}
+
+/* Verdict, heading and hint read across the whole panel; only the two calls share the line. */
+.practice-coach-step > .practice-feedback,
+.practice-coach-step > h2,
+.practice-coach-step > .practice-hint {
+  grid-column: 1 / -1;
 }
 
 .practice-feedback.is-error {
@@ -220,7 +270,7 @@
 }
 
 .practice-hint {
-  margin-top: 12px;
+  margin-top: 2px;
   font-size: 13px;
   border-top: 1px solid var(--room-border, #e2e2e2);
 }
@@ -238,18 +288,27 @@
 }
 
 .practice-help-intro {
-  margin: -5px 0 8px !important;
+  margin: 0 0 8px !important;
   color: var(--room-muted, #666);
   font-size: 13px;
+}
+
+/*
+ * Eleven topics down a single column is a long scroll in a 360px-tall panel, so they run in as many
+ * columns as fit. Each topic carries the rule above it and the list carries the one that closes it,
+ * which keeps a single 1px line between neighbours instead of two abutting borders.
+ */
+.practice-help-topics {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  align-content: start;
+  column-gap: 24px;
+  border-bottom: 1px solid var(--room-border, #e2e2e2);
 }
 
 .practice-help details {
   border-top: 1px solid var(--room-border, #e2e2e2);
   font-size: 13px;
-}
-
-.practice-help details:last-child {
-  border-bottom: 1px solid var(--room-border, #e2e2e2);
 }
 
 .practice-help details p {
@@ -339,40 +398,58 @@
   margin-top: 24px;
 }
 
+/*
+ * Two columns of 400px need 860px of panel, and 860px of panel needs a window the scoresheet can
+ * spare it from. Below that the guide goes back to reading down the page: one column of content, and
+ * the tabs on their own line under the heading rather than squeezed beside it.
+ */
 @media (max-width: 1050px) {
-  .practice-coach,
+  .practice-coach {
+    width: min(420px, calc(100vw - 24px));
+    max-height: min(62vh, 520px);
+  }
+
   .practice-coach-collapsed {
-    inset: auto 12px 12px auto;
     width: min(376px, calc(100vw - 24px));
-    max-height: min(68vh, 620px);
-    margin: 0;
+  }
+
+  .practice-coach-header {
+    flex-wrap: wrap;
+  }
+
+  .practice-coach-tabs {
+    order: 3;
+    width: 100%;
+    grid-template-columns: 1fr 1fr;
+    margin-inline-start: 0;
+  }
+
+  .practice-coach-step,
+  .practice-help-topics {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
 @media (max-width: 520px) {
+  /*
+   * The control bar is fixed and spends the whole width on its five buttons at this size, so the panel
+   * has to stop above it — there is no empty end to sit on any more. 58px clears the bar as it usually
+   * stands; a wrapped warning row makes it taller than that, and the panel's own bottom rule is then
+   * the thing partly covered rather than any control.
+   */
   .practice-coach,
   .practice-coach-collapsed {
     inset: auto 8px 58px;
     width: auto;
     max-height: min(62vh, 520px);
+    /* Floating clear of all four edges again, so it is ruled on all four. */
+    border: 1px solid var(--room-border-strong, #c9c9c7);
+    border-radius: 10px;
   }
 
   .practice-coach-header,
   .practice-coach-content {
     padding-inline: 14px;
-  }
-
-  .practice-coach-tabs {
-    margin-inline: 14px;
-  }
-
-  .practice-progress-track {
-    margin-inline: 14px;
-  }
-
-  .practice-coach h2,
-  .practice-help h2 {
-    font-size: 18px;
   }
 }
 
