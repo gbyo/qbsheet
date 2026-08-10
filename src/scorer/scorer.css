@@ -1527,6 +1527,9 @@ div.scorer-banner .scorer-text-action {
 /* #region Starting lineups and the halftime score check */
 
 .scorer-starters {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   padding: 24px;
 }
 
