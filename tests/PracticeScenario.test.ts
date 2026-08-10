@@ -86,7 +86,10 @@ describe('guided practice scenario', () => {
     ];
     const validation = validateCorrectedHistory(
       practiceFormat,
-      { left: practiceLeftTeam, right: practiceRightTeam },
+      {
+        left: { name: practiceLeftTeam.name, players: practiceLeftTeam.players.map((player) => player.name) },
+        right: { name: practiceRightTeam.name, players: practiceRightTeam.players.map((player) => player.name) },
+      },
       events,
     );
 

@@ -7,6 +7,7 @@ import toQbjMatch from '../src/scoring/toQbjMatch';
 import {
   editableQuestionFromEvents,
   eventsFromEditableQuestion,
+  IEditableQuestion,
   replaceQuestionEvents,
   validateEditableQuestion,
 } from '../src/scoring/questionCorrection';
@@ -133,11 +134,11 @@ describe('question-level corrections', () => {
       event({ type: 'tossup-dead', questionNumber: 1 }),
     ];
     const game = deriveGame(format, setup, events);
-    const model = {
+    const model: IEditableQuestion = {
       questionNumber: 1,
       attempts: [{ kind: 'no-penalty', team: 'left', playerName: 'Sarah' }],
       dead: true,
-    } as const;
+    };
 
     expect(validateEditableQuestion(format, game, model)).toEqual([]);
     expect(eventsFromEditableQuestion(model, () => 'replacement-dead').map((candidate) => candidate.type)).toEqual([
