@@ -385,6 +385,31 @@ describe('substitutions', () => {
     expect(game.left.activePlayers).toEqual(['Alex']);
   });
 
+  test('voiding a started tossup moves the lineup boundary back to its replacement', () => {
+    const format = formatFor((rules) => {
+      rules.maximumPlayersPerTeam = 1;
+    });
+    const lineupSetup: IGameSetup = {
+      left: { name: 'Ninety Six', players: ['Sarah', 'Alex'], startingLineup: ['Sarah'] },
+      right: { name: 'Greenwood', players: ['Emma', 'Morgan'], startingLineup: ['Emma'] },
+    };
+    const replaced: ScoreEvent[] = [
+      event({ type: 'tossup-no-penalty', questionNumber: 1, team: 'left', playerName: 'Sarah' }),
+      event({ type: 'question-void', questionNumber: 1, scope: 'tossup', reason: 'Wrong packet' }),
+    ];
+    const futureLineup = event({
+      type: 'substitution',
+      questionNumber: 2,
+      team: 'right',
+      activePlayers: ['Morgan'],
+    });
+    const game = deriveGame(format, lineupSetup, replaced.concat(futureLineup));
+
+    expect(game.phase).toMatchObject({ kind: 'tossup', questionNumber: 1 });
+    expect(lineupChangeEffectiveQuestion(game, replaced)).toBe(1);
+    expect(game.right.activePlayers).toEqual(['Emma']);
+  });
+
   test('moving a lineup boundary recalculates TUH from the corrected tossup', () => {
     const format = formatFor((rules) => {
       rules.maximumPlayersPerTeam = 1;

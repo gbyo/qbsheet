@@ -222,6 +222,36 @@ describe('the starting lineup comes first', () => {
     expect(futurePlayer.ok === false && futurePlayer.reason).toContain('not active');
     expect(currentPlayer.ok).toBe(true);
   });
+
+  test('a voided tossup accepts a lineup for its replacement, not the following tossup', () => {
+    const startedSetup: IGameSetup = {
+      left: {
+        name: 'Ninety Six',
+        players: ['Sarah', 'James', 'Alex'],
+        startingLineup: ['Sarah', 'James'],
+      },
+      right: {
+        name: 'Greenwood',
+        players: ['Emma', 'Jordan', 'Morgan'],
+        startingLineup: ['Emma', 'Jordan'],
+      },
+    };
+    const startedContext = { format, setup: startedSetup };
+    const events: ScoreEvent[] = [
+      event({ type: 'tossup-no-penalty', questionNumber: 1, team: 'left', playerName: 'Sarah' }),
+      event({ type: 'question-void', questionNumber: 1, scope: 'tossup', reason: 'Wrong packet' }),
+    ];
+    const replacementLineup = event({
+      type: 'substitution',
+      questionNumber: 1,
+      team: 'right',
+      activePlayers: ['Jordan', 'Morgan'],
+    });
+    const followingLineup = { ...replacementLineup, id: `${replacementLineup.id}-later`, questionNumber: 2 };
+
+    expect(canApplyScoreEvent(startedContext, events, replacementLineup).ok).toBe(true);
+    expect(canApplyScoreEvent(startedContext, events, followingLineup).ok).toBe(false);
+  });
 });
 
 describe('procedure actions', () => {
