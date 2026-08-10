@@ -71,8 +71,9 @@ test('the guide is a wide panel that keeps clear of the contextual row controls'
 });
 
 test('the phone guide stays above the control bar when a warning adds a row', async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
   await startPracticeGame(page);
+  await page.getByRole('button', { name: 'Minimize practice guide' }).click();
+  await page.setViewportSize({ width: 390, height: 844 });
 
   const footer = page.locator('.practice-mode > .scorer > .scorer-footer');
   const collapsedCoach = page.locator('.practice-coach-collapsed');
