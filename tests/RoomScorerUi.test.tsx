@@ -787,7 +787,7 @@ describe('the game menu', () => {
     pressControl('Full scoresheet review');
     fireEvent.click(screen.getByText('Edit question'));
     // The replacement workflow is secondary information, so it lives behind the disclosure.
-    fireEvent.click(screen.getByText('More\u2026'));
+    fireEvent.click(screen.getByText('Question details'));
     fireEvent.click(screen.getByText('Replace question\u2026'));
 
     const replacementDialog = screen.getByRole('dialog', { name: 'Replace question 1' });

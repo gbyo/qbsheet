@@ -25,7 +25,7 @@
  * attempts a cycle may hold is the engine's, checked by `validateEditableQuestion`. There is no
  * +15, no −5, no 0/10/20/30 and no notion of which rule set this is.
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
 import { IDerivedGame } from '../scoring/deriveGame';
 import {
@@ -101,6 +101,22 @@ function conversionTeam(model: IEditableQuestion, format: IScorekeeperFormat): '
   return conversion(model, format)?.team;
 }
 
+/** The points this question contributes, independent of the running score around it. */
+function questionPoints(model: IEditableQuestion, format: IScorekeeperFormat): { left: number; right: number } {
+  const points = { left: 0, right: 0 };
+  for (const attempt of model.attempts) {
+    if (attempt.kind === 'buzz' && attempt.answerTypeIndex !== undefined) {
+      points[attempt.team] += format.answerTypes[attempt.answerTypeIndex]?.value ?? 0;
+    }
+  }
+  if (model.bonus) {
+    const opponent = model.bonus.team === 'left' ? 'right' : 'left';
+    points[model.bonus.team] += model.bonus.controlledPoints;
+    points[opponent] += model.bonus.bouncebackPoints;
+  }
+  return points;
+}
+
 export default function QuestionEditor(props: {
   game: IDerivedGame;
   format: IScorekeeperFormat;
@@ -120,6 +136,9 @@ export default function QuestionEditor(props: {
   const [showMore, setShowMore] = useState(false);
   const [showParts, setShowParts] = useState(() => initial.bonus?.parts !== undefined);
 
+  // A correction makes an old validation message stale. Clear it as soon as the scorekeeper edits.
+  useEffect(() => setErrors([]), [model]);
+
   const question = game.questions.find((candidate) => candidate.questionNumber === model.questionNumber);
   const scoreAfter = question?.scoreAfter ?? { left: game.left.points, right: game.right.points };
   const previous = game.questions.find((candidate) => candidate.questionNumber === model.questionNumber - 1);
@@ -131,6 +150,12 @@ export default function QuestionEditor(props: {
   const teamPlayers = useMemo(() => ({ left: active.left, right: active.right }), [active.left, active.right]);
   const teamName = (team: 'left' | 'right') => (team === 'left' ? game.left.name : game.right.name);
   const quickTotals = regularBonusTotals(format.bonus);
+  const initialPoints = useMemo(() => questionPoints(initial, format), [format, initial]);
+  const proposedPoints = useMemo(() => questionPoints(model, format), [format, model]);
+  const proposedScoreAfter = {
+    left: scoreAfter.left - initialPoints.left + proposedPoints.left,
+    right: scoreAfter.right - initialPoints.right + proposedPoints.right,
+  };
 
   const updateAttempt = (index: number, next: Partial<IEditableAttempt>) => {
     setModel((current) => ({
@@ -159,6 +184,7 @@ export default function QuestionEditor(props: {
     const team = model.attempts.some((attempt) => attempt.team === 'left') ? 'right' : 'left';
     setModel((current) => ({
       ...current,
+      dead: false,
       attempts: current.attempts.concat({
         kind: 'buzz',
         team,
@@ -215,72 +241,110 @@ export default function QuestionEditor(props: {
   const bonusTeam = model.bonus?.team ?? converted;
 
   return (
-    <div className="scorer-question-editor">
+    <form
+      className="scorer-question-editor"
+      onSubmit={(event) => {
+        event.preventDefault();
+        save();
+      }}
+    >
       <h3 className="scorer-question-title">Question {model.questionNumber}</h3>
-      <div className="scorer-detail-rows">
-        <div className="scorer-detail-row">
-          <span className="scorer-detail-label">Score before</span>
-          <span className="scorer-detail-value">
-            {game.left.name} {scoreBefore.left} · {game.right.name} {scoreBefore.right}
-          </span>
-        </div>
-        <div className="scorer-detail-row">
-          <span className="scorer-detail-label">Score after</span>
-          <span className="scorer-detail-value">
-            {game.left.name} {scoreAfter.left} · {game.right.name} {scoreAfter.right}
-          </span>
-        </div>
-      </div>
+      <table className="scorer-question-score" aria-label={`Question ${model.questionNumber} score change`}>
+        <thead>
+          <tr>
+            <th scope="col">Team</th>
+            <th scope="col">Score before</th>
+            <th scope="col">Score after</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row">{game.left.name}</th>
+            <td>{scoreBefore.left}</td>
+            <td>{proposedScoreAfter.left}</td>
+          </tr>
+          <tr>
+            <th scope="row">{game.right.name}</th>
+            <td>{scoreBefore.right}</td>
+            <td>{proposedScoreAfter.right}</td>
+          </tr>
+        </tbody>
+      </table>
 
       <section className="scorer-question-section" aria-label="Tossup attempts">
-        <h4 className="scorer-question-heading">Tossup</h4>
+        <div className="scorer-question-section-head">
+          <h4 className="scorer-question-heading">Tossup</h4>
+          <span className="scorer-question-status">
+            {model.dead
+              ? 'No buzz'
+              : `${model.attempts.length} ${model.attempts.length === 1 ? 'attempt' : 'attempts'}`}
+          </span>
+        </div>
+        {model.attempts.length > 0 && (
+          <div className="scorer-question-attempt-head" aria-hidden="true">
+            <span />
+            <span>Team</span>
+            <span>Player</span>
+            <span>Ruling</span>
+            <span />
+          </div>
+        )}
         <ol className="scorer-question-attempts">
           {model.attempts.map((attempt, index) => (
             // Attempts have no persisted identity until they are written; position is identity.
 
             <li key={attempt.id ?? `attempt-${index}`} className="scorer-question-attempt">
               <span className="scorer-question-attempt-number">{index + 1}</span>
-              <select
-                aria-label={`Question ${model.questionNumber} attempt ${index + 1} team`}
-                value={attempt.team}
-                onChange={(event) => updateAttempt(index, { team: event.target.value as 'left' | 'right' })}
-              >
-                <option value="left">{game.left.name}</option>
-                <option value="right">{game.right.name}</option>
-              </select>
-              <select
-                aria-label={
-                  model.attempts.length === 1
-                    ? 'Player'
-                    : `Question ${model.questionNumber} attempt ${index + 1} player`
-                }
-                value={attempt.playerName ?? ''}
-                onChange={(event) => updateAttempt(index, { playerName: event.target.value })}
-              >
-                {attempt.kind === 'no-penalty' && <option value="">No player recorded</option>}
-                {teamPlayers[attempt.team].map((name) => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-              <select
-                aria-label={
-                  model.attempts.length === 1
-                    ? 'Ruling'
-                    : `Question ${model.questionNumber} attempt ${index + 1} ruling`
-                }
-                value={rulingValue(attempt)}
-                onChange={(event) => setRuling(index, event.target.value)}
-              >
-                {format.answerTypes.map((answerType) => (
-                  <option key={answerType.index} value={answerType.index}>
-                    {rulingLabel(format, answerType.index)}
-                  </option>
-                ))}
-                {/* An answer that was simply wrong: it spends the team's chance and scores nothing. */}
-                <option value={noPenaltyValue}>Wrong · 0</option>
-              </select>
+              <label className="scorer-question-field">
+                <span>Team</span>
+                <select
+                  aria-label={`Question ${model.questionNumber} attempt ${index + 1} team`}
+                  value={attempt.team}
+                  onChange={(event) => updateAttempt(index, { team: event.target.value as 'left' | 'right' })}
+                >
+                  <option value="left">{game.left.name}</option>
+                  <option value="right">{game.right.name}</option>
+                </select>
+              </label>
+              <label className="scorer-question-field">
+                <span>Player</span>
+                <select
+                  aria-label={
+                    model.attempts.length === 1
+                      ? 'Player'
+                      : `Question ${model.questionNumber} attempt ${index + 1} player`
+                  }
+                  value={attempt.playerName ?? ''}
+                  onChange={(event) => updateAttempt(index, { playerName: event.target.value })}
+                >
+                  {attempt.kind === 'no-penalty' && <option value="">No player recorded</option>}
+                  {teamPlayers[attempt.team].map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="scorer-question-field">
+                <span>Ruling</span>
+                <select
+                  aria-label={
+                    model.attempts.length === 1
+                      ? 'Ruling'
+                      : `Question ${model.questionNumber} attempt ${index + 1} ruling`
+                  }
+                  value={rulingValue(attempt)}
+                  onChange={(event) => setRuling(index, event.target.value)}
+                >
+                  {format.answerTypes.map((answerType) => (
+                    <option key={answerType.index} value={answerType.index}>
+                      {rulingLabel(format, answerType.index)}
+                    </option>
+                  ))}
+                  {/* An answer that was simply wrong: it spends the team's chance and scores nothing. */}
+                  <option value={noPenaltyValue}>Wrong · 0</option>
+                </select>
+              </label>
               <button
                 type="button"
                 className="scorer-text-action is-destructive"
@@ -296,10 +360,16 @@ export default function QuestionEditor(props: {
             </li>
           ))}
         </ol>
+        {model.attempts.length === 0 && !model.dead && (
+          <p className="scorer-question-empty">No tossup ruling recorded.</p>
+        )}
+        {model.dead && <p className="scorer-question-empty">This tossup was recorded with no buzz.</p>}
         <div className="scorer-question-actions">
-          <button type="button" className="scorer-action" onClick={addAttempt} disabled={model.attempts.length >= 2}>
-            + Add attempt
-          </button>
+          {model.attempts.length < 2 && converted === undefined && (
+            <button type="button" className="scorer-action" onClick={addAttempt}>
+              + Add attempt
+            </button>
+          )}
           {/*
             One control instead of an Up and a Down on every row. Order matters — it decides which
             team negged and which one answered afterwards — but with two attempts there is exactly
@@ -321,7 +391,14 @@ export default function QuestionEditor(props: {
               id={`question-${model.questionNumber}-dead`}
               type="checkbox"
               checked={model.dead}
-              onChange={(event) => setModel((current) => ({ ...current, dead: event.target.checked }))}
+              onChange={(event) =>
+                setModel((current) => ({
+                  ...current,
+                  dead: event.target.checked,
+                  attempts: event.target.checked ? [] : current.attempts,
+                  bonus: event.target.checked ? undefined : current.bonus,
+                }))
+              }
             />
             No buzz
           </label>
@@ -473,11 +550,22 @@ export default function QuestionEditor(props: {
         The margin of the scoresheet. Real, kept, and not what a scorekeeper correcting a buzz is
         looking for — so it waits to be opened rather than taking the top half of the dialog.
       */}
-      <button type="button" className="scorer-text-action" onClick={() => setShowMore((current) => !current)}>
-        {showMore ? 'Less…' : 'More…'}
+      <button
+        type="button"
+        className="scorer-question-disclosure"
+        aria-expanded={showMore}
+        aria-controls={`question-${model.questionNumber}-details`}
+        onClick={() => setShowMore((current) => !current)}
+      >
+        <span>Question details</span>
+        <span aria-hidden="true">{showMore ? '−' : '+'}</span>
       </button>
       {showMore && (
-        <section className="scorer-question-more" aria-label="Question detail">
+        <section
+          id={`question-${model.questionNumber}-details`}
+          className="scorer-question-more"
+          aria-label="Question detail"
+        >
           <p className="scorer-dialog-note">
             On the floor — {game.left.name}: {active.left.length > 0 ? active.left.join(', ') : 'none'};{' '}
             {game.right.name}: {active.right.length > 0 ? active.right.join(', ') : 'none'}.
@@ -504,19 +592,24 @@ export default function QuestionEditor(props: {
         </section>
       )}
 
-      {errors.map((error) => (
-        <p key={error} className="scorer-problem">
-          {error}
-        </p>
-      ))}
-      <div className="scorer-complete-actions">
+      {errors.length > 0 && (
+        <div className="scorer-question-errors" role="alert">
+          <strong>Check this question</strong>
+          <ul>
+            {errors.map((error) => (
+              <li key={error}>{error}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <div className="scorer-question-footer">
         <button type="button" className="scorer-action" onClick={onCancel}>
           Cancel
         </button>
-        <button type="button" className="scorer-submit" onClick={save}>
+        <button type="submit" className="scorer-submit">
           Save correction
         </button>
       </div>
-    </div>
+    </form>
   );
 }
