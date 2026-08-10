@@ -157,7 +157,7 @@ function practiceStartingLineupProblem(lineups: Partial<Record<LeftOrRight, stri
   ) {
     return undefined;
   }
-  return 'The starting lineup does not match the scenario. Adjust the lineup or open Get a hint, then try again.';
+  return 'The starting lineup does not match the scenario. Adjust the lineup or open Show me where, then try again.';
 }
 
 function unexpectedMessage(step: IPracticeStep): string {
@@ -170,7 +170,7 @@ function unexpectedMessage(step: IPracticeStep): string {
   if (step.expectation.kind === 'history') {
     return 'That question still does not match the correction. Open it from Recent, update the player, and save.';
   }
-  return 'Review the situation or open Get a hint, then try again.';
+  return 'Review the situation or open Show me where, then try again.';
 }
 
 export default function PracticeScreen({ onHome }: { onHome: () => void }) {

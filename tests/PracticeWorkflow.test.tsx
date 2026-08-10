@@ -53,7 +53,7 @@ test('practice requires its named starters, keeps mistakes editable, and advance
   fireEvent.click(start);
 
   expect(screen.getByLabelText('Starting lineups')).toBeTruthy();
-  expect(screen.getByRole('alert').textContent).toContain('open Get a hint');
+  expect(screen.getByRole('alert').textContent).toContain('open Show me where');
 
   fireEvent.click(within(left).getByLabelText('Olivia'));
   fireEvent.click(within(left).getByLabelText('Lachlan'));
@@ -62,9 +62,14 @@ test('practice requires its named starters, keeps mistakes editable, and advance
   fireEvent.click(start);
 
   await vi.waitFor(() => expect(screen.getByText('Reader: “Power, Gibson on Ninety Six.”')).toBeTruthy());
-  expect(screen.queryByText('Record Gibson’s power.')).toBeNull();
-  fireEvent.click(screen.getByText('Get a hint'));
-  expect(screen.getByText('Choose Gibson on the Ninety Six side, then record the 15-point answer.')).toBeTruthy();
+  // The situation is what the room did; the instruction is what to record. Both are on screen — a
+  // guided step whose action has to be guessed at was the whole complaint about the old overlay.
+  expect(screen.getByText('Press P on Gibson’s row, on the Ninety Six side.')).toBeTruthy();
+  // The hint is the extra — which control, and what the neighbouring ones would have meant instead —
+  // and it stays folded away until somebody asks for it.
+  const hint = screen.getByText('Show me where').closest('details') as HTMLDetailsElement;
+  expect(hint.open).toBe(false);
+  expect(within(hint).getByText(/P is the power/)).toBeTruthy();
   expect(screen.queryByLabelText('Starting lineups')).toBeNull();
 });
 
@@ -83,8 +88,8 @@ test('practice restores the guide checkpoint after the screen is remounted', asy
 
   expect(screen.queryByLabelText('Starting lineups')).toBeNull();
   expect(screen.getByText('Reader: “Power, Gibson on Ninety Six.”')).toBeTruthy();
-  expect(screen.queryByText('Record Gibson’s power.')).toBeNull();
-  expect(screen.getByText('Get a hint')).toBeTruthy();
+  expect(screen.getByText('Press P on Gibson’s row, on the Ninety Six side.')).toBeTruthy();
+  expect(screen.getByText('Show me where')).toBeTruthy();
 });
 
 test('restart and leave are protected from an accidental single click', () => {

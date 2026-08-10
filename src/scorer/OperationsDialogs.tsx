@@ -446,7 +446,19 @@ export function ScoresheetReviewDialog(props: {
   } = props;
   const [editing, setEditing] = useState<string | null>(null);
   const [editingQuestion, setEditingQuestion] = useState<number | null>(editQuestion ?? null);
+  /**
+   * Whether leaving the editor should land on the review list or back on the scoresheet.
+   *
+   * Recent opens one question directly, and a scorekeeper who came that way never asked to see the
+   * event list: sending them to it on Cancel is why leaving the editor felt like there was no way
+   * out. Somebody who chose Edit question *from* the list is going back to the list.
+   */
+  const [cameFromList, setCameFromList] = useState(editQuestion === undefined);
   const questionNumbers = Array.from(new Set(events.map((event) => event.questionNumber))).sort((a, b) => a - b);
+  const leaveEditor = () => {
+    if (cameFromList) setEditingQuestion(null);
+    else onClose();
+  };
   return (
     <ScorerDialog
       title={editingQuestion === null ? 'Full scoresheet review' : `Question ${editingQuestion} editor`}
@@ -459,7 +471,8 @@ export function ScoresheetReviewDialog(props: {
           format={format}
           initial={editableQuestionFromEvents(events, editingQuestion)}
           onSave={(question) => onReplaceQuestion(editingQuestion, question)}
-          onCancel={() => setEditingQuestion(null)}
+          onCancel={leaveEditor}
+          cancelLabel={cameFromList ? 'Back to review' : 'Close without saving'}
           onOpenReplacement={onOpenReplacement ? () => onOpenReplacement(editingQuestion) : undefined}
         />
       ) : (
@@ -499,7 +512,14 @@ export function ScoresheetReviewDialog(props: {
                 >
                   <div className="scorer-review-question-head">
                     <strong>Q{questionNumber}</strong>
-                    <button type="button" className="scorer-choice" onClick={() => setEditingQuestion(questionNumber)}>
+                    <button
+                      type="button"
+                      className="scorer-choice"
+                      onClick={() => {
+                        setCameFromList(true);
+                        setEditingQuestion(questionNumber);
+                      }}
+                    >
                       Edit question
                     </button>
                   </div>
