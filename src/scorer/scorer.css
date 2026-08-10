@@ -741,6 +741,67 @@ div.scorer-banner .scorer-text-action {
   }
 }
 
+/* Keep the five always-available controls inside a phone-width viewport. The previous intrinsic
+ * button widths made the entire scoresheet 80–100px wider than the screen and also pushed the Game
+ * menu off the right edge. */
+@media (max-width: 520px) {
+  .scorer {
+    padding-bottom: 52px;
+  }
+
+  .scorer-header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .scorer-header-side {
+    width: 100%;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .scorer-footer {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 25;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 4px;
+    padding: 6px 8px;
+    box-shadow: 0 -3px 12px rgb(25 28 32 / 8%);
+  }
+
+  .scorer-footer > .scorer-action,
+  .scorer-footer > .scorer-menu,
+  .scorer-footer > .scorer-menu > .scorer-action {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .scorer-footer .scorer-action {
+    gap: 4px;
+    padding: 6px 3px;
+    font-size: 11px;
+  }
+
+  .scorer-footer .scorer-control-icon {
+    width: 14px;
+    height: 14px;
+  }
+
+  .scorer-footer .scorer-menu-list {
+    right: 0;
+    left: auto;
+  }
+
+  .scorer-footer-warning {
+    grid-column: 1 / -1;
+    margin-left: 0;
+  }
+}
+
 /* #endregion */
 
 /* #region Menu, dialogs and completion
@@ -759,8 +820,11 @@ div.scorer-banner .scorer-text-action {
   left: 0;
   z-index: 20;
   min-width: 200px;
+  max-height: calc(100vh - 120px);
   margin: 0;
   padding: 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   list-style: none;
   background: var(--room-surface);
   border: 1px solid var(--room-border-strong);

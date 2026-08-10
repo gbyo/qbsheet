@@ -1,9 +1,10 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { RoomConnectionState } from '../app/ConnectionState';
 import ScorerHost from '../scorer/ScorerHost';
 import { clearGame } from '../scorer/GameSession';
 import { ScoreEvent } from '../scoring/ScoreEvents';
 import { LeftOrRight } from '../scoring/types';
+import PracticeCoach from './PracticeCoach';
 import {
   IPracticeStep,
   practiceFormat,
@@ -14,6 +15,40 @@ import {
 
 export const practiceGameKey = 'qbsheet-guided-practice-v1';
 const practiceCompletedKey = 'qbsheet.practice.completed.v1';
+const practiceProgressKey = 'qbsheet.practice.progress.v2';
+
+interface IPracticeProgress {
+  stepIndex: number;
+  acceptedEventCount: number;
+}
+
+const initialProgress: IPracticeProgress = { stepIndex: 0, acceptedEventCount: 0 };
+
+export function clearPracticeProgress(): void {
+  try {
+    window.localStorage.removeItem(practiceProgressKey);
+  } catch {
+    // Practice still works without persistence.
+  }
+}
+
+function readPracticeProgress(): IPracticeProgress {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(practiceProgressKey) ?? '') as Partial<IPracticeProgress>;
+    if (
+      Number.isInteger(parsed.stepIndex) &&
+      Number.isInteger(parsed.acceptedEventCount) &&
+      (parsed.stepIndex as number) >= 0 &&
+      (parsed.stepIndex as number) < practiceSteps.length &&
+      (parsed.acceptedEventCount as number) >= 0
+    ) {
+      return { stepIndex: parsed.stepIndex as number, acceptedEventCount: parsed.acceptedEventCount as number };
+    }
+  } catch {
+    // A stale or unavailable marker should never stop practice from opening.
+  }
+  return initialProgress;
+}
 
 function rememberCompletion(): void {
   try {
@@ -33,14 +68,69 @@ export function practiceLineupsRecorded(events: ScoreEvent[]): boolean {
     (event): event is Extract<ScoreEvent, { type: 'substitution' }> =>
       event.type === 'substitution' && event.questionNumber === 1,
   );
-  const left = lineups.find((event) => event.team === 'left');
-  const right = lineups.find((event) => event.team === 'right');
   return (
-    left !== undefined &&
-    right !== undefined &&
-    samePlayers(left.activePlayers, practiceLeftTeam.startingLineup) &&
-    samePlayers(right.activePlayers, practiceRightTeam.startingLineup)
+    lineups.some(
+      (event) => event.team === 'left' && samePlayers(event.activePlayers, practiceLeftTeam.startingLineup),
+    ) &&
+    lineups.some(
+      (event) => event.team === 'right' && samePlayers(event.activePlayers, practiceRightTeam.startingLineup),
+    )
   );
+}
+
+function practiceLineupBoundary(events: ScoreEvent[]): number | undefined {
+  let left = -1;
+  let right = -1;
+  events.forEach((event, index) => {
+    if (event.type !== 'substitution' || event.questionNumber !== 1) return;
+    if (event.team === 'left' && samePlayers(event.activePlayers, practiceLeftTeam.startingLineup)) left = index;
+    if (event.team === 'right' && samePlayers(event.activePlayers, practiceRightTeam.startingLineup)) right = index;
+  });
+  return left >= 0 && right >= 0 ? Math.max(left, right) + 1 : undefined;
+}
+
+/**
+ * Find the last guided checkpoint the current event history still proves.
+ *
+ * This is what lets the coach survive reloads and recover when an older action is undone. The undo
+ * lesson itself leaves no event behind, so a previously reached step may be used to remember that
+ * one lesson; every scoring and correction step is re-proved from the current scoresheet.
+ */
+export function replayPracticeProgress(events: ScoreEvent[], furthestStepIndex = 0): IPracticeProgress {
+  const boundary = practiceLineupBoundary(events);
+  if (boundary === undefined) return initialProgress;
+
+  let acceptedEventCount = boundary;
+  let stepIndex = 1;
+  while (stepIndex < practiceSteps.length) {
+    const expectation = practiceSteps[stepIndex].expectation;
+    if (expectation.kind === 'event') {
+      const nextExpectation = practiceSteps[stepIndex + 1]?.expectation;
+      // The deliberately wrong Q6 ruling is removed by the following Undo lesson. Once that lesson
+      // has been reached, its absence is evidence of success rather than a reason to rewind.
+      if (nextExpectation?.kind === 'undo' && furthestStepIndex > stepIndex + 1) {
+        stepIndex += 2;
+        continue;
+      }
+      const candidate = events[acceptedEventCount];
+      if (!candidate || !expectation.matches(candidate)) break;
+      acceptedEventCount += 1;
+      stepIndex += 1;
+      continue;
+    }
+    if (expectation.kind === 'history') {
+      if (!expectation.matches(events)) break;
+      stepIndex += 1;
+      continue;
+    }
+    if (expectation.kind === 'undo') {
+      if (furthestStepIndex <= stepIndex) break;
+      stepIndex += 1;
+      continue;
+    }
+    break;
+  }
+  return { stepIndex, acceptedEventCount };
 }
 
 function practiceStartingLineupProblem(lineups: Partial<Record<LeftOrRight, string[]>>): string | undefined {
@@ -64,24 +154,41 @@ function unexpectedMessage(step: IPracticeStep): string {
   if (step.expectation.kind === 'undo') {
     return 'The correction should remove the last scoring action. Use Undo before recording the corrected ruling.';
   }
+  if (step.expectation.kind === 'history') {
+    return 'That question still does not match the correction. Open it from Recent, update the player, and save.';
+  }
   return 'Follow the practice instruction shown here, then try again.';
 }
 
 export default function PracticeScreen({ onHome }: { onHome: () => void }) {
   const [run, setRun] = useState(0);
-  const [stepIndex, setStepIndex] = useState(0);
-  const [acceptedEventCount, setAcceptedEventCount] = useState(0);
+  const [progress, setProgress] = useState(readPracticeProgress);
+  const { stepIndex, acceptedEventCount } = progress;
   const [feedback, setFeedback] = useState('');
   const [mistake, setMistake] = useState('');
   const [complete, setComplete] = useState(false);
   const step = practiceSteps[stepIndex];
 
+  useEffect(() => {
+    if (complete) {
+      clearPracticeProgress();
+      return;
+    }
+    try {
+      window.localStorage.setItem(practiceProgressKey, JSON.stringify(progress));
+    } catch {
+      // The live coach remains authoritative when persistence is unavailable.
+    }
+  }, [complete, progress]);
+
   const advance = useCallback(
     (nextAcceptedCount: number) => {
       setFeedback(step.success);
       setMistake('');
-      setAcceptedEventCount(nextAcceptedCount);
-      setStepIndex((current) => Math.min(current + 1, practiceSteps.length - 1));
+      setProgress((current) => ({
+        acceptedEventCount: nextAcceptedCount,
+        stepIndex: Math.min(current.stepIndex + 1, practiceSteps.length - 1),
+      }));
     },
     [step.success],
   );
@@ -90,16 +197,23 @@ export default function PracticeScreen({ onHome }: { onHome: () => void }) {
     (events: ScoreEvent[]) => {
       if (complete) return;
 
+      const replayed = replayPracticeProgress(events, stepIndex);
+      if (replayed.stepIndex < stepIndex && step.expectation.kind !== 'undo') {
+        setProgress(replayed);
+        setFeedback('The guide moved back to the first step affected by that change.');
+        setMistake('');
+        return;
+      }
+
       if (step.expectation.kind === 'lineup') {
-        if (practiceLineupsRecorded(events)) advance(events.length);
+        const boundary = practiceLineupBoundary(events);
+        if (boundary !== undefined) advance(boundary);
         return;
       }
 
       if (step.expectation.kind === 'event') {
         if (events.length <= acceptedEventCount) {
-          if (events.length < acceptedEventCount) {
-            setMistake('You undid an earlier completed practice step. Use Practice again to restart the guided sequence.');
-          }
+          if (events.length === acceptedEventCount) setMistake('');
           return;
         }
         const candidate = events[acceptedEventCount];
@@ -111,6 +225,11 @@ export default function PracticeScreen({ onHome }: { onHome: () => void }) {
         return;
       }
 
+      if (step.expectation.kind === 'history') {
+        if (step.expectation.matches(events)) advance(acceptedEventCount);
+        return;
+      }
+
       if (step.expectation.kind === 'undo') {
         if (events.length === acceptedEventCount - 1) {
           advance(events.length);
@@ -119,14 +238,14 @@ export default function PracticeScreen({ onHome }: { onHome: () => void }) {
         }
       }
     },
-    [acceptedEventCount, advance, complete, step],
+    [acceptedEventCount, advance, complete, step, stepIndex],
   );
 
   const restart = useCallback(() => {
     clearGame(practiceGameKey);
+    clearPracticeProgress();
     setRun((current) => current + 1);
-    setStepIndex(0);
-    setAcceptedEventCount(0);
+    setProgress(initialProgress);
     setFeedback('');
     setMistake('');
     setComplete(false);
@@ -137,6 +256,7 @@ export default function PracticeScreen({ onHome }: { onHome: () => void }) {
       return { ok: false, message: 'Finish the guided steps before submitting the practice game.' };
     }
     clearGame(practiceGameKey);
+    clearPracticeProgress();
     rememberCompletion();
     setFeedback(step.success);
     setMistake('');
@@ -145,38 +265,20 @@ export default function PracticeScreen({ onHome }: { onHome: () => void }) {
   }, [step]);
 
   const coach = useMemo(() => {
-    const progress = `${Math.min(stepIndex + 1, practiceSteps.length)} of ${practiceSteps.length}`;
     return (
-      <aside className="practice-coach" aria-live="polite">
-        <div className="practice-coach-topline">
-          <span className="practice-label">Practice</span>
-          <span className="practice-progress">{progress}</span>
-        </div>
-        <h2>{step.title}</h2>
-        <p className="practice-call">{step.call}</p>
-        <p className="practice-instruction">{step.instruction}</p>
-        {feedback && <p className="practice-feedback is-success">✓ {feedback}</p>}
-        {mistake && <p className="practice-feedback is-error">{mistake}</p>}
-        <details className="practice-hint">
-          <summary>Need a hint?</summary>
-          <p>{step.hint}</p>
-        </details>
-        <div className="practice-actions">
-          <button type="button" className="shell-button" onClick={restart}>
-            Restart practice
-          </button>
-          <button
-            type="button"
-            className="shell-button shell-button-quiet"
-            onClick={() => {
-              clearGame(practiceGameKey);
-              onHome();
-            }}
-          >
-            Leave practice
-          </button>
-        </div>
-      </aside>
+      <PracticeCoach
+        step={step}
+        stepIndex={stepIndex}
+        stepCount={practiceSteps.length}
+        feedback={feedback}
+        mistake={mistake}
+        onRestart={restart}
+        onLeave={() => {
+          clearGame(practiceGameKey);
+          clearPracticeProgress();
+          onHome();
+        }}
+      />
     );
   }, [feedback, mistake, onHome, restart, step, stepIndex]);
 
@@ -186,8 +288,8 @@ export default function PracticeScreen({ onHome }: { onHome: () => void }) {
         <p className="practice-label">Practice</p>
         <h1 className="shell-title">You scored a complete practice game.</h1>
         <p>
-          You handled powers, normal tossups, a neg and rebound, bonuses, a dead tossup, Undo, a substitution and the
-          final submission using the same scorer used in a real room.
+          You handled powers, normal and zero-point wrong answers, a neg and rebound, bonuses, no buzz, an earlier
+          question correction, Undo, a substitution and final review using the same scorer used in a real room.
         </p>
         <div className="practice-complete-actions">
           <button type="button" className="shell-button is-primary" onClick={restart}>
@@ -203,7 +305,7 @@ export default function PracticeScreen({ onHome }: { onHome: () => void }) {
 
   return (
     <div className="practice-mode">
-      <div className="practice-banner">Practice game · Nothing here is sent to tournament control or added to Recent Games.</div>
+      <div className="practice-banner">Practice game · Local only — not sent or added to Recent Games.</div>
       <ScorerHost
         key={`${practiceGameKey}-${run}`}
         gameKey={practiceGameKey}

@@ -23,7 +23,7 @@ import { IGamePackage, gamePackageIdentity } from '../game/GamePackage';
 import { openRecordStore } from '../persistence/GameDatabase';
 import { claimGame, IGameClaim, newTabId } from '../persistence/TabClaim';
 import { IGameSetup } from '../scoring/deriveGame';
-import { clearGame } from '../scorer/GameSession';
+import { loadGame } from '../scorer/GameSession';
 import PracticeScreen, { practiceGameKey } from '../practice/PracticeScreen';
 import { IConnectedSession, clearConnection, readConnection, writeConnection } from './ConnectedSession';
 import useLeaveWarning from './useLeaveWarning';
@@ -283,9 +283,9 @@ export default function App() {
       notice={notice}
       durable={store.durable}
       rememberedRoom={connection?.roomName}
+      practiceInProgress={(loadGame(practiceGameKey)?.events.length ?? 0) > 0}
       onReadiness={() => setScreen({ kind: 'readiness' })}
       onPractice={() => {
-        clearGame(practiceGameKey);
         setScreen({ kind: 'practice' });
       }}
       onConnect={(baseUrl) => {
