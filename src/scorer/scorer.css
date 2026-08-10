@@ -1527,11 +1527,30 @@ div.scorer-banner .scorer-text-action {
 /* #region Starting lineups and the halftime score check */
 
 .scorer-starters {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   padding: 24px;
 }
 
 .scorer-starters-team {
   min-width: 0;
+}
+
+.scorer-starters-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.scorer-starters-reorder {
+  margin-bottom: 8px;
+}
+
+.scorer-lineup-problem {
+  margin: 8px 0;
+  font-size: 13px;
+  color: var(--room-error);
 }
 
 .scorer-starters-list {

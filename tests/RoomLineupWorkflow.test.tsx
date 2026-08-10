@@ -257,6 +257,27 @@ describe('who is starting', () => {
 
     await vi.waitFor(() => expect(sync).toHaveBeenCalledWith('Ninety Six', 'Alex Brown'));
   });
+
+  test('starters can be reordered into seat order without writing another score event', () => {
+    renderScorer(formatFor(2));
+    const prompt = screen.getByLabelText('Starting lineups');
+    const team = within(prompt).getByLabelText('Ninety Six starters');
+    fireEvent.click(within(team).getByLabelText('Sarah Jones'));
+    fireEvent.click(within(team).getByLabelText('Michael Smith'));
+
+    expect(within(team).getByText('Seat 1')).toBeTruthy();
+    expect(within(team).getByText('Seat 2')).toBeTruthy();
+    fireEvent.click(within(team).getByText('Reorder starters'));
+    fireEvent.click(within(team).getByLabelText('Move Michael Smith up in starting lineup'));
+    fireEvent.click(within(team).getByText('Done'));
+    fireEvent.click(within(prompt).getByText('Start game'));
+
+    const names = Array.from(screen.getByLabelText('Ninety Six').querySelectorAll('.scorer-player-name'), (node) =>
+      (node.textContent ?? '').trim(),
+    );
+    expect(names).toEqual(['Michael Smith', 'Sarah Jones']);
+    expect(savedEvents().filter((event) => event.type === 'substitution')).toHaveLength(1);
+  });
 });
 
 describe('what the starting prompt promises about the bench', () => {

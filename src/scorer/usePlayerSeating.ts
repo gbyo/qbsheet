@@ -29,6 +29,8 @@ export interface IPlayerSeatingApi {
     name: string,
     direction: -1 | 1,
   ) => void;
+  /** Set the visible seat order for one or both teams in a single view-only update. */
+  arrange: (rosterNames: PlayerSeating, visibleOrders: Partial<PlayerSeating>) => void;
   /** Seat the incoming player where the outgoing one was. */
   substitute: (side: LeftOrRight, rosterNames: readonly string[], outgoing: string, incoming: string) => void;
 }
@@ -64,6 +66,18 @@ export default function usePlayerSeating(gameKey: string): IPlayerSeatingApi {
     [commit, seating],
   );
 
+  const arrange = useCallback(
+    (rosterNames: PlayerSeating, visibleOrders: Partial<PlayerSeating>) => {
+      const next = { ...seating };
+      for (const side of ['left', 'right'] as LeftOrRight[]) {
+        const visible = visibleOrders[side];
+        if (visible) next[side] = applyOrder(seating[side], rosterNames[side], visible);
+      }
+      commit(next);
+    },
+    [commit, seating],
+  );
+
   const substitute = useCallback(
     (side: LeftOrRight, rosterNames: readonly string[], outgoing: string, incoming: string) => {
       commit({ ...seating, [side]: takeSeat(seating[side], rosterNames, outgoing, incoming) });
@@ -71,5 +85,8 @@ export default function usePlayerSeating(gameKey: string): IPlayerSeatingApi {
     [commit, seating],
   );
 
-  return useMemo(() => ({ seating, order, move, substitute }), [seating, order, move, substitute]);
+  return useMemo(
+    () => ({ seating, order, move, arrange, substitute }),
+    [seating, order, move, arrange, substitute],
+  );
 }

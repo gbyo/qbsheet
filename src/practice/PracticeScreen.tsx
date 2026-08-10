@@ -3,6 +3,7 @@ import { RoomConnectionState } from '../app/ConnectionState';
 import ScorerHost from '../scorer/ScorerHost';
 import { clearGame } from '../scorer/GameSession';
 import { ScoreEvent } from '../scoring/ScoreEvents';
+import { LeftOrRight } from '../scoring/types';
 import {
   IPracticeStep,
   practiceFormat,
@@ -40,6 +41,20 @@ export function practiceLineupsRecorded(events: ScoreEvent[]): boolean {
     samePlayers(left.activePlayers, practiceLeftTeam.startingLineup) &&
     samePlayers(right.activePlayers, practiceRightTeam.startingLineup)
   );
+}
+
+function practiceStartingLineupProblem(lineups: Partial<Record<LeftOrRight, string[]>>): string | undefined {
+  const left = lineups.left;
+  const right = lineups.right;
+  if (
+    left &&
+    right &&
+    samePlayers(left, practiceLeftTeam.startingLineup) &&
+    samePlayers(right, practiceRightTeam.startingLineup)
+  ) {
+    return undefined;
+  }
+  return 'Choose the four starters named in the practice instruction before starting the game.';
 }
 
 function unexpectedMessage(step: IPracticeStep): string {
@@ -193,6 +208,8 @@ export default function PracticeScreen({ onHome }: { onHome: () => void }) {
         key={`${practiceGameKey}-${run}`}
         gameKey={practiceGameKey}
         format={practiceFormat}
+        requiredStarterCount={{ left: 4, right: 4 }}
+        validateStartingLineups={practiceStartingLineupProblem}
         leftTeam={practiceLeftTeam}
         rightTeam={practiceRightTeam}
         tournamentName="QBSheet Practice"
