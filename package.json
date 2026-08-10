@@ -28,6 +28,7 @@
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest",
+    "test:state-space": "vitest --run tests/RoomGameStateSpace.test.ts",
     "prepare": "npm run build:core"
   },
   "dependencies": {

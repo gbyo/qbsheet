@@ -111,6 +111,17 @@ export default function canApplyScoreEvent(
         return refuse(`That answer belongs to Tossup ${phase.questionNumber}.`);
       }
 
+      const recordedQuestion = game.questions.find(
+        (question) => question.questionNumber === candidate.questionNumber,
+      );
+      const activePlayers = recordedQuestion?.activePlayers[candidate.team] ?? game[candidate.team].activePlayers;
+      if (candidate.playerName !== undefined) {
+        if (candidate.playerName.trim() === '') return refuse('Choose who answered the tossup.');
+        if (!activePlayers.includes(candidate.playerName)) {
+          return refuse(`${candidate.playerName} was not active for Tossup ${candidate.questionNumber}.`);
+        }
+      }
+
       const answered = teamsThatAnswered(events, candidate.questionNumber);
       if (answered.has(candidate.team)) {
         return refuse(`${game[candidate.team].name} has already answered this tossup.`);
@@ -214,8 +225,13 @@ export default function canApplyScoreEvent(
       if (phase.kind !== 'checkpoint' || phase.checkpoint !== expected) {
         return refuse(`The game is not at the ${expected} checkpoint.`);
       }
-      if (candidate.questionNumber !== phase.afterQuestion) {
-        return refuse(`That checkpoint belongs after Tossup ${phase.afterQuestion}.`);
+      const checkpointQuestion = Math.max(1, phase.afterQuestion);
+      if (candidate.questionNumber !== checkpointQuestion) {
+        return refuse(
+          phase.afterQuestion === 0
+            ? 'That checkpoint belongs before Tossup 1.'
+            : `That checkpoint belongs after Tossup ${phase.afterQuestion}.`,
+        );
       }
       const openProtests = game.protests.filter((protest) => protest.status === 'open');
       const policy = protestCheckpointPolicy(procedure);

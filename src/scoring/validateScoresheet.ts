@@ -550,7 +550,7 @@ function validateProcedureTransitions(
       if (
         before.phase.kind !== 'checkpoint' ||
         before.phase.checkpoint !== expected ||
-        event.questionNumber !== before.phase.afterQuestion
+        event.questionNumber !== Math.max(1, before.phase.afterQuestion)
       ) {
         addUnique(
           blockers,
