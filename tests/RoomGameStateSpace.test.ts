@@ -23,6 +23,7 @@ import {
 } from '../src/scoring/questionCorrection';
 import validateScoresheet, { validateCorrectedHistory } from '../src/scoring/validateScoresheet';
 import { bouncebackOptions, regularBonusTotals } from '../src/scorer/bonusOptions';
+import { loadGame, saveGame } from '../src/scorer/GameSession';
 import toQbjMatch from '../src/scoring/toQbjMatch';
 
 const setup: IGameSetup = {
@@ -270,6 +271,132 @@ function seededRandom(seed: number): () => number {
 
 function pick<T>(values: T[], random: () => number): T {
   return values[Math.floor(random() * values.length)];
+}
+
+function memoryStorage() {
+  const values = new Map<string, string>();
+  return {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value),
+    removeItem: (key: string) => values.delete(key),
+  };
+}
+
+function sortedEntries(values: Map<number, number>): [number, number][] {
+  return Array.from(values.entries()).sort(([left], [right]) => left - right);
+}
+
+function gameSemantics(game: ReturnType<typeof deriveGame>) {
+  const team = (side: 'left' | 'right') => ({
+    name: game[side].name,
+    points: game[side].points,
+    tossupPoints: game[side].tossupPoints,
+    bonusPoints: game[side].bonusPoints,
+    bonusBouncebackPoints: game[side].bonusBouncebackPoints,
+    lightningPoints: game[side].lightningPoints,
+    adjustmentPoints: game[side].adjustmentPoints,
+    bonusesHeard: game[side].bonusesHeard,
+    activePlayers: game[side].activePlayers,
+    forfeited: game[side].forfeited,
+    overtimeBuzzes: sortedEntries(game[side].overtimeBuzzes),
+    players: game[side].players.map((player) => ({
+      name: player.name,
+      tossupsHeard: player.tossupsHeard,
+      points: player.points,
+      answerCounts: sortedEntries(player.answerCounts),
+    })),
+  });
+  return {
+    left: team('left'),
+    right: team('right'),
+    phase: game.phase,
+    tossupsRead: game.tossupsRead,
+    overtimeTossupsRead: game.overtimeTossupsRead,
+    regulationComplete: game.regulationComplete,
+    regulationBoundary: game.regulationBoundary,
+    overtimeStarted: game.overtimeStarted,
+    suddenDeathStarted: game.suddenDeathStarted,
+    timeouts: game.timeouts,
+    activeTimeout: game.activeTimeout,
+    halfBreaks: game.halfBreaks,
+    awaitingScoreCheck: game.awaitingScoreCheck,
+    endedEarly: game.endedEarly,
+    needsStartingLineup: game.needsStartingLineup,
+    notes: game.notes,
+    protests: game.protests.map(({ eventId: _eventId, ...protest }) => protest),
+    voids: game.voids.map(({ eventId: _eventId, ...voided }) => voided),
+    questions: game.questions.map((question) => ({
+      questionNumber: question.questionNumber,
+      period: question.period,
+      buzzes: question.buzzes.map((buzz) => ({
+        team: buzz.team,
+        playerName: buzz.playerName,
+        answerTypeIndex: buzz.answerType.index,
+      })),
+      noPenalty: question.noPenalty,
+      dead: question.dead,
+      bonus: question.bonus,
+      resolved: question.resolved,
+      awaitingBonus: question.awaitingBonus,
+      activePlayers: question.activePlayers,
+      scoreAfter: question.scoreAfter,
+      openProtests: question.openProtests,
+      replaced: question.replaced,
+    })),
+  };
+}
+
+function gameSemanticsWithoutNotes(game: ReturnType<typeof deriveGame>) {
+  return { ...gameSemantics(game), notes: undefined };
+}
+
+function describeEvent(format: IScorekeeperFormat, event: ScoreEvent): string {
+  const side = 'team' in event ? ` ${event.team === 'left' ? 'L' : 'R'}` : '';
+  switch (event.type) {
+    case 'tossup-buzz':
+      return `Q${event.questionNumber} buzz${side} ${format.answerTypes[event.answerTypeIndex]?.value ?? '?'} ${event.playerName}`;
+    case 'tossup-no-penalty':
+      return `Q${event.questionNumber} no-penalty${side}${event.playerName ? ` ${event.playerName}` : ''}`;
+    case 'tossup-dead':
+      return `Q${event.questionNumber} no-buzz`;
+    case 'bonus': {
+      const [controlled, bounceback] = bonusEventPoints(event);
+      return `Q${event.questionNumber} bonus${side} ${controlled}${bounceback ? ` / bounceback ${bounceback}` : ''}`;
+    }
+    case 'substitution':
+      return `Q${event.questionNumber} substitution${side} [${event.activePlayers.join(', ')}]`;
+    case 'timeout-start':
+      return `Q${event.questionNumber} timeout-start${side}`;
+    case 'protest':
+      return `Q${event.questionNumber} protest${side} ${event.status}`;
+    case 'question-void':
+      return `Q${event.questionNumber} void-${event.scope}`;
+    case 'adjustment':
+      return `Q${event.questionNumber} adjustment${side} ${event.points > 0 ? '+' : ''}${event.points}`;
+    default:
+      return `Q${event.questionNumber} ${event.type}${side}`;
+  }
+}
+
+function describeHistory(format: IScorekeeperFormat, events: ScoreEvent[]): string {
+  return events.map((event, index) => `${index + 1}. ${describeEvent(format, event)}`).join('\n');
+}
+
+function withReplayDiagnostics(
+  seed: number,
+  step: number,
+  format: IScorekeeperFormat,
+  events: ScoreEvent[],
+  verify: () => void,
+): void {
+  try {
+    verify();
+  } catch (error) {
+    const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+    throw new Error(
+      `Seeded state-machine failure\nseed=${seed}\nstep=${step}\nformat=${format.name}\n\n${describeHistory(format, events)}\n\n${detail}`,
+    );
+  }
 }
 
 function legalHistoryInvariants(
@@ -715,18 +842,35 @@ describe('seeded state-machine stress coverage', () => {
 
   test('checks invariants after every transition in many reproducible mixed-event games', () => {
     const acceptedTypes = new Set<ScoreEvent['type']>();
+    const recoveredAfterTypes = new Set<ScoreEvent['type']>();
+    const recoveredPhases = new Set<string>();
+    const phaseActions = new Set<string>();
+    const alwaysRecoverAfter = new Set<ScoreEvent['type']>([
+      'tossup-buzz',
+      'bonus',
+      'timeout-start',
+      'half-break',
+      'substitution',
+      'question-void',
+    ]);
     let acceptedTransitions = 0;
     let rejectedCandidates = 0;
     let completedGames = 0;
+    let recoveryCycles = 0;
 
     for (let seed = 1; seed <= 64; seed += 1) {
       const random = seededRandom(seed);
       const format = formats[seed % formats.length];
-      const context: IScoreEventContext = { format, setup: gameSetup, procedure };
+      const storage = memoryStorage();
+      const gameKey = `state-space-seed-${seed}`;
+      const now = new Date('2026-08-10T12:00:00.000Z');
+      let activeSetup = gameSetup;
       let events: ScoreEvent[] = [];
 
       for (let step = 0; step < 24; step += 1) {
-        const before = deriveGame(format, gameSetup, events);
+        const context: IScoreEventContext = { format, setup: activeSetup, procedure };
+        const before = deriveGame(format, activeSetup, events);
+        const beforeSemantics = gameSemantics(before);
         if (before.phase.kind === 'complete') {
           completedGames += 1;
           const rejected = applyScoreEvents(context, events, [
@@ -735,11 +879,11 @@ describe('seeded state-machine stress coverage', () => {
               questionNumber: (before.questions.at(-1)?.questionNumber ?? 0) + 1,
             }),
           ]);
-          expect(rejected.ok).toBe(false);
+          withReplayDiagnostics(seed, step, format, events, () => expect(rejected.ok).toBe(false));
           break;
         }
 
-        const actions = stateMachineActions(format, gameSetup, events, procedure, random, step);
+        const actions = stateMachineActions(format, activeSetup, events, procedure, random, step);
         const preferInterruption = actions.interruptions.length > 0 && random() < 0.35;
         const preferred = preferInterruption ? actions.interruptions : actions.progress;
         const fallback = preferInterruption ? actions.progress : actions.interruptions;
@@ -762,13 +906,84 @@ describe('seeded state-machine stress coverage', () => {
         if (!accepted) break;
         acceptedTypes.add(accepted.type);
         acceptedTransitions += 1;
-        legalHistoryInvariants(format, gameSetup, events, procedure);
+        const beforePhase =
+          before.phase.kind === 'checkpoint'
+            ? `${before.phase.kind}:${before.phase.checkpoint}`
+            : before.phase.kind === 'tossup'
+              ? `${before.phase.kind}:${before.phase.period}`
+              : before.phase.kind;
+        phaseActions.add(`${beforePhase} -> ${accepted.type}`);
+
+        withReplayDiagnostics(seed, step, format, events, () => {
+          legalHistoryInvariants(format, activeSetup, events, procedure);
+
+          // Removing the event just accepted must recover the exact prior semantic state.
+          expect(gameSemantics(deriveGame(format, activeSetup, events.slice(0, -1)))).toEqual(beforeSemantics);
+
+          // JSON cloning is the serialization boundary used by local recovery.
+          const clonedEvents = JSON.parse(JSON.stringify(events)) as ScoreEvent[];
+          expect(gameSemantics(deriveGame(format, activeSetup, clonedEvents))).toEqual(
+            gameSemantics(deriveGame(format, activeSetup, events)),
+          );
+
+          // Audit-only notes must not alter scoring, personnel, or game flow.
+          if ((seed + step) % 4 === 0) {
+            const game = deriveGame(format, activeSetup, events);
+            const questionNumber =
+              game.phase.kind === 'tossup' || game.phase.kind === 'bonus' || game.phase.kind === 'timeout'
+                ? game.phase.questionNumber
+                : Math.max(1, game.questions.at(-1)?.questionNumber ?? 1);
+            const withNote = events.concat({
+              id: `metamorphic-note-${seed}-${step}`,
+              type: 'note',
+              questionNumber,
+              text: 'Metamorphic note',
+            });
+            expect(gameSemanticsWithoutNotes(deriveGame(format, activeSetup, withNote))).toEqual(
+              gameSemanticsWithoutNotes(game),
+            );
+          }
+        });
+
+        const after = deriveGame(format, activeSetup, events);
+        const afterPhase =
+          after.phase.kind === 'checkpoint' ? `${after.phase.kind}:${after.phase.checkpoint}` : after.phase.kind;
+        const shouldRecover =
+          alwaysRecoverAfter.has(accepted.type) || after.phase.kind === 'checkpoint' || random() < 0.2;
+        if (shouldRecover) {
+          withReplayDiagnostics(seed, step, format, events, () => {
+            const beforeRecovery = gameSemantics(after);
+            expect(saveGame(gameKey, activeSetup, events, now, storage)).toBe(true);
+            const recovered = loadGame(gameKey, now, storage);
+            expect(recovered).not.toBeNull();
+            if (!recovered) return;
+
+            const restored = deriveGame(format, recovered.setup, recovered.events);
+            expect(gameSemantics(restored)).toEqual(beforeRecovery);
+
+            // Unique identifiers are identity for editing, not part of scoring semantics.
+            const remappedIds = recovered.events.map((event, index) => ({
+              ...event,
+              id: `remapped-${seed}-${step}-${index}`,
+            }));
+            expect(gameSemantics(deriveGame(format, recovered.setup, remappedIds))).toEqual(beforeRecovery);
+
+            // Continue the next generated action from the deserialized setup and history.
+            activeSetup = recovered.setup;
+            events = recovered.events;
+          });
+          recoveredAfterTypes.add(accepted.type);
+          recoveredPhases.add(afterPhase);
+          recoveryCycles += 1;
+        }
       }
     }
 
     expect(acceptedTransitions).toBeGreaterThan(500);
     expect(rejectedCandidates).toBeGreaterThan(0);
     expect(completedGames).toBeGreaterThan(0);
+    expect(recoveryCycles).toBeGreaterThan(200);
+    expect(phaseActions.size).toBeGreaterThan(25);
     expect(Array.from(acceptedTypes)).toEqual(
       expect.arrayContaining([
         'tossup-buzz',
@@ -783,6 +998,19 @@ describe('seeded state-machine stress coverage', () => {
         'adjustment',
         'end-regulation',
       ]),
+    );
+    expect(Array.from(recoveredAfterTypes)).toEqual(
+      expect.arrayContaining([
+        'tossup-buzz',
+        'bonus',
+        'timeout-start',
+        'half-break',
+        'substitution',
+        'question-void',
+      ]),
+    );
+    expect(Array.from(recoveredPhases)).toEqual(
+      expect.arrayContaining(['bonus', 'timeout', 'score-check', 'checkpoint:overtime']),
     );
   });
 
