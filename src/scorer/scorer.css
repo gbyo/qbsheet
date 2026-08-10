@@ -336,34 +336,37 @@ div.scorer-banner .scorer-text-action {
 /*
  * The substitution the row can make on its own.
  *
- * Deliberately the quietest control on the line. It is next to the buttons that score a tossup, and
- * anything that looks as pressable as +10 is something a thumb finds by accident mid-question. So the
- * swap glyph inside it is larger than the word it replaced while the box stays exactly as quiet: same
- * muted colour, same hairline border, and a width held steady so the names below still line up when
- * one row's control is open and the next one's is not.
+ * It belongs to the name, so it sits against the name rather than against the rulings — see
+ * `.scorer-player-name`, which no longer stretches to push the two apart. That is also what keeps it
+ * safe: the thing this control must never be is a fifth target beside +10 that a thumb finds while a
+ * reader is still talking, and the surest way to miss it by accident is for it not to be there.
+ *
+ * Which is why it carries no border. The rulings are bordered boxes; this is a glyph in the accent
+ * colour, the same thing every other quiet action on the sheet is, and it reads as belonging to the
+ * name it follows instead of to the block it used to sit beside. The padding is larger than the glyph
+ * so the target stays a target on a touchscreen, which costs nothing when there is no box to draw.
  */
 .scorer-sub-action {
   flex: none;
-  min-width: 34px;
-  padding: 4px 8px;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0 4px;
   font: inherit;
-  font-size: 15px;
+  font-size: 17px;
   line-height: 1;
-  color: var(--room-muted);
+  color: var(--room-accent);
   background: transparent;
-  border: 1px solid var(--room-border);
+  border: 0;
   border-radius: 4px;
   cursor: pointer;
 }
 
 .scorer-sub-action:hover:not(:disabled) {
-  color: var(--room-accent);
-  border-color: var(--room-accent);
+  background: var(--room-info-bg);
 }
 
+/* Open is the one state that needs a shape, since there is no border to recolour. */
 .scorer-sub-action.is-open {
-  color: var(--room-accent);
-  border-color: var(--room-accent);
   background: var(--room-info-bg);
 }
 
@@ -428,9 +431,14 @@ div.scorer-banner .scorer-text-action {
  * ellipsis. A scorekeeper cannot use a row they cannot read, and the buttons already have the right
  * answer for a row that will not fit — `.scorer-answers` scrolls. So the name keeps enough width for
  * a first name, and the pressure goes where it was designed to go.
+ *
+ * It no longer grows, either. Stretching the name to fill the row put the whole of that empty space
+ * between the name and the substitution control that belongs to it, which left the control parked
+ * against the rulings instead. Taking the growth away closes that gap; `.scorer-answers` takes over
+ * holding the ruling block on the right, so the columns still line up down the sheet.
  */
 .scorer-player-name {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 5.5em;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -451,6 +459,8 @@ div.scorer-banner .scorer-text-action {
    * of buttons keeps the same shape whether the format defines two values or six.
    */
   grid-template-columns: repeat(var(--scorer-answer-columns, 3), minmax(46px, 62px));
+  /* Held to the right edge now that the name no longer grows into the space ahead of it. */
+  margin-left: auto;
   justify-content: end;
   gap: 4px;
   overflow-x: auto;

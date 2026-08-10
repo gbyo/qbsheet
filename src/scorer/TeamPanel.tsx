@@ -162,15 +162,14 @@ export default function TeamPanel(props: ITeamPanelProps) {
             </span>
             <span className="scorer-player-name">{player.name}</span>
             {/*
-              Between the name and the rulings, and deliberately the quietest thing on the line. It
-              sits beside the buttons that get pressed while a reader is talking, and a fifth target
-              of the same weight would be a fifth thing to hit by mistake mid-tossup. It stays out of
-              the ruling block so that block keeps its own alignment down the sheet.
+              Against the name, because that is whose substitution it is — not against the rulings,
+              where it spent its time being a fifth target beside +10 for a thumb to find while a
+              reader was still talking. Distance from that block is the safety here.
 
               The swap arrows rather than the word, because the word was repeated down every row of
               both teams — eight copies of "Sub" on a full sheet, competing for the eye with the one
-              thing on the line that has to be read at a glance, which is the name. The arrows say
-              the same thing in the same box; the accessible name and the tooltip still spell it out.
+              thing on the line that has to be read at a glance, which is the name. The accessible
+              name and the tooltip still spell it out for anyone the glyph does not reach.
             */}
             {onSubstitute && (
               <button
