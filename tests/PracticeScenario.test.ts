@@ -21,12 +21,12 @@ describe('guided practice scenario', () => {
   it('recognizes the real substitution events emitted by the starting-lineup prompt', () => {
     expect(
       practiceLineupsRecorded(
-        lineupEvents(['Jordan', 'Alex', 'Sam', 'Taylor'], ['Maya', 'Chris', 'Riley', 'Evan']),
+        lineupEvents(['Gibson', 'Jeremy', 'Owen', 'Lachlan'], ['Tucker', 'Sam', 'Efren', 'Valerie']),
       ),
     ).toBe(true);
     expect(
       practiceLineupsRecorded(
-        lineupEvents(['Jordan', 'Alex', 'Sam', 'Casey'], ['Maya', 'Chris', 'Riley', 'Evan']),
+        lineupEvents(['Gibson', 'Jeremy', 'Owen', 'Olivia'], ['Tucker', 'Sam', 'Efren', 'Valerie']),
       ),
     ).toBe(false);
   });
