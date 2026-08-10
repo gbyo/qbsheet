@@ -10,7 +10,9 @@ test('practice control row stays on the viewport bottom edge', async ({ page }) 
   for (const player of ['Gibson', 'Jeremy', 'Owen', 'Lachlan', 'Tucker', 'Sam', 'Efren', 'Valerie']) {
     await page.getByLabel(player, { exact: true }).check();
   }
-  await page.getByRole('button', { name: 'Start game' }).click();
+  // The minimized guide quotes the step it is on, and step 1 tells you to choose Start game, so
+  // the accessible name has to match exactly to pick the scoresheet's own button out of the two.
+  await page.getByRole('button', { name: 'Start game', exact: true }).click();
 
   const scorer = page.locator('.practice-mode > .scorer');
   const body = page.locator('.practice-mode > .scorer > .scorer-body');
