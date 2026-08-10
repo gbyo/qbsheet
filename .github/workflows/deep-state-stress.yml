@@ -1,0 +1,47 @@
+name: Deep state stress
+
+on:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+    inputs:
+      seeds:
+        description: Generated game seeds (minimum 64)
+        required: true
+        default: '5000'
+        type: string
+      actions:
+        description: Maximum actions per generated game (minimum 24)
+        required: true
+        default: '120'
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deep-state-stress
+  cancel-in-progress: false
+
+jobs:
+  stress:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      QBSHEET_STRESS_SEEDS: ${{ inputs.seeds || '5000' }}
+      QBSHEET_STRESS_ACTIONS: ${{ inputs.actions || '120' }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run deep state stress suite
+        run: npm run test:stress

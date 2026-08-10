@@ -29,6 +29,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest",
     "test:state-space": "vitest --run tests/RoomGameStateSpace.test.ts",
+    "test:stress": "QBSHEET_DEEP_STRESS=1 vitest --run tests/RoomGameStateSpace.test.ts",
     "prepare": "npm run build:core"
   },
   "dependencies": {
