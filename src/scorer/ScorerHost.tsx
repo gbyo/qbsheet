@@ -30,6 +30,7 @@ import { HelpRequestCategory } from '../app/HelpRequests';
 import { IDerivedGame, IGameSetup } from '../scoring/deriveGame';
 import { ScoreEvent } from '../scoring/ScoreEvents';
 import { RoomConnectionState } from '../app/ConnectionState';
+import { LeftOrRight } from '../scoring/types';
 import { IQbjMatchMeta } from '../scoring/toQbjMatch';
 import Scorer, { IScorerAlert, IScorerRecoveryStatus, IScorerSubmitResult } from './Scorer';
 import useGameEvents from './useGameEvents';
@@ -40,6 +41,8 @@ export interface IScorerHostProps {
   /** The session or emergency game id. Also what the saved game is filed under. */
   gameKey: string;
   format: IScorekeeperFormat;
+  requiredStarterCount?: Partial<Record<LeftOrRight, number>>;
+  validateStartingLineups?: (lineups: Partial<Record<LeftOrRight, string[]>>) => string | undefined;
   leftTeam: ITeamRoster;
   rightTeam: ITeamRoster;
   tournamentName: string;
@@ -104,6 +107,8 @@ export default function ScorerHost(props: IScorerHostProps) {
   const {
     gameKey,
     format,
+    requiredStarterCount,
+    validateStartingLineups,
     leftTeam,
     rightTeam,
     tournamentName,
@@ -203,6 +208,8 @@ export default function ScorerHost(props: IScorerHostProps) {
     <Scorer
       gameKey={gameKey}
       format={format}
+      requiredStarterCount={requiredStarterCount}
+      validateStartingLineups={validateStartingLineups}
       setup={activeSetup}
       events={events}
       tournamentName={tournamentName}

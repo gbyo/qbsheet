@@ -1537,6 +1537,22 @@ div.scorer-banner .scorer-text-action {
   min-width: 0;
 }
 
+.scorer-starters-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.scorer-starters-reorder {
+  margin-bottom: 8px;
+}
+
+.scorer-lineup-problem {
+  margin: 8px 0;
+  font-size: 13px;
+  color: var(--room-error);
+}
+
 .scorer-starters-list {
   max-height: min(42vh, 360px);
   overflow-y: auto;

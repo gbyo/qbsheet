@@ -81,6 +81,10 @@ export interface IScorerProps {
   /** Stable per-game key used for local recovery state such as the room clock. */
   gameKey: string;
   format: IScorekeeperFormat;
+  /** Optional workflow-specific minimums for the pregame lineup prompt. */
+  requiredStarterCount?: Partial<Record<LeftOrRight, number>>;
+  /** Refuse a pregame lineup without writing events, leaving it available for correction. */
+  validateStartingLineups?: (lineups: Partial<Record<LeftOrRight, string[]>>) => string | undefined;
   setup: IGameSetup;
   events: IGameEventsApi;
   /** Shown as the page's identity. The tournament, not the software. */
@@ -172,6 +176,8 @@ export default function Scorer(props: IScorerProps) {
   const {
     gameKey,
     format,
+    requiredStarterCount,
+    validateStartingLineups,
     setup,
     events,
     tournamentName,
@@ -861,8 +867,18 @@ export default function Scorer(props: IScorerProps) {
           maximumActive={format.players.maximumActive}
           needed={phase.teams}
           procedure={procedure}
+          requiredStarterCount={requiredStarterCount}
           onAddPlayer={(team, playerName) => addRosterPlayer(team, playerName)}
           onConfirm={(lineups) => {
+            const problem = validateStartingLineups?.(lineups);
+            if (problem) return problem;
+            seating.arrange(
+              {
+                left: game.left.players.map((player) => player.name),
+                right: game.right.players.map((player) => player.name),
+              },
+              lineups,
+            );
             const chosen = (Object.keys(lineups) as LeftOrRight[]).map((side) => ({
               id: newEventId(),
               type: 'substitution' as const,
@@ -871,6 +887,7 @@ export default function Scorer(props: IScorerProps) {
               activePlayers: lineups[side] as string[],
             }));
             record(...chosen);
+            return undefined;
           }}
         />
       )}
