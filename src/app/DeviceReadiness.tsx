@@ -507,11 +507,7 @@ export default function DeviceReadiness(props: {
       )}
 
       <section className="shell-section">
-        <h2 className="shell-heading">Test tournament control</h2>
-        <p className="readiness-copy">
-          Use the LAN address tournament control will actually give rooms. This makes a real QBSheet status request and is
-          the best test of browser Local Network Access, mixed-content rules, CORS, and the server being reachable.
-        </p>
+        <h2 className="shell-heading">Tournament control</h2>
         <form className="connect-form readiness-server-test" onSubmit={(event) => void testServer(event)}>
           <label className="shell-label" htmlFor="readiness-server-address">
             Tournament control address
@@ -537,11 +533,6 @@ export default function DeviceReadiness(props: {
         {serverTest.kind === 'passed' && <p className="readiness-test-result is-pass">✓ {serverTest.message}</p>}
         {serverTest.kind === 'failed' && <p className="readiness-test-result is-fail">× {serverTest.message}</p>}
       </section>
-
-      <p className="readiness-footnote">
-        File-only scoring does not require tournament control or Local Network Access. A connected-scoring failure should
-        not stop a room from opening a .qbg file.
-      </p>
     </main>
   );
 }

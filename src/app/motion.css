@@ -1,0 +1,193 @@
+/*
+ * A restrained motion layer for QBSheet. Motion is limited to entrances and direct interaction
+ * feedback so the scoresheet itself stays fixed under the scorekeeper's hands.
+ */
+
+:root {
+  --room-motion-fast: 110ms;
+  --room-motion-standard: 180ms;
+  --room-motion-slow: 240ms;
+  --room-ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --room-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+}
+
+@keyframes qbsheet-fade-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes qbsheet-rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes qbsheet-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Screen changes should register without feeling like page navigation. */
+.shell,
+.scorer {
+  animation: qbsheet-fade-in var(--room-motion-slow) var(--room-ease-out) both;
+}
+
+/* Controls respond quickly; no long movement is used on scoring actions. */
+:where(
+    .shell-button,
+    .game-picker-entry,
+    .scorer-answer,
+    .scorer-nobuzz,
+    .scorer-choice,
+    .scorer-action,
+    .scorer-clock-button,
+    .scorer-menu-item,
+    .scorer-replacement-choice,
+    .scorer-submit,
+    .scorer-danger
+  ) {
+  transition:
+    color var(--room-motion-fast) var(--room-ease-standard),
+    background-color var(--room-motion-fast) var(--room-ease-standard),
+    border-color var(--room-motion-fast) var(--room-ease-standard),
+    opacity var(--room-motion-fast) var(--room-ease-standard),
+    transform var(--room-motion-fast) var(--room-ease-out);
+}
+
+:where(
+    .shell-button,
+    .game-picker-entry,
+    .scorer-answer,
+    .scorer-nobuzz,
+    .scorer-choice,
+    .scorer-action,
+    .scorer-clock-button,
+    .scorer-menu-item,
+    .scorer-replacement-choice,
+    .scorer-submit,
+    .scorer-danger
+  ):active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+:where(.shell-input, .rules-setup-grid input, .roster-setup-team textarea, .scorer-inline-form input, .scorer-inline-add input) {
+  transition:
+    border-color var(--room-motion-fast) var(--room-ease-standard),
+    background-color var(--room-motion-fast) var(--room-ease-standard),
+    box-shadow var(--room-motion-fast) var(--room-ease-standard);
+}
+
+:where(.shell-back, .scorer-text-action, .scorer-sync-action) {
+  transition:
+    color var(--room-motion-fast) var(--room-ease-standard),
+    opacity var(--room-motion-fast) var(--room-ease-standard);
+}
+
+:where(.shell-back, .scorer-text-action, .scorer-sync-action):hover {
+  opacity: 0.78;
+}
+
+/* Content that appears in response to an action enters from only a few pixels away. */
+:where(
+    .shell-notice,
+    .shell-warning,
+    .shell-errors,
+    .readiness-summary,
+    .readiness-confirm,
+    .readiness-test-result,
+    .game-origin-notice,
+    .game-picker,
+    .rules-setup,
+    .roster-setup,
+    .scorer-banner,
+    .scorer-prompt,
+    .scorer-tossup-actions,
+    .scorer-score-check,
+    .scorer-lineup-step,
+    .scorer-inline-add,
+    .scorer-event-edit,
+    .practice-feedback
+  ) {
+  animation: qbsheet-rise-in var(--room-motion-standard) var(--room-ease-out) both;
+}
+
+.readiness-mark,
+.scorer-dot {
+  transition:
+    color var(--room-motion-standard) var(--room-ease-standard),
+    background-color var(--room-motion-standard) var(--room-ease-standard),
+    border-color var(--room-motion-standard) var(--room-ease-standard);
+}
+
+/* New activity is acknowledged without animating the score totals themselves. */
+.scorer-rail-item:first-child {
+  animation: qbsheet-rise-in var(--room-motion-standard) var(--room-ease-out) both;
+}
+
+.scorer-menu-list,
+.practice-coach {
+  transform-origin: bottom left;
+  animation: qbsheet-pop-in var(--room-motion-standard) var(--room-ease-out) both;
+}
+
+.practice-coach {
+  transform-origin: bottom right;
+}
+
+/* Native and shell dialogs use the same calm entrance. */
+.scorer-dialog[open],
+.shell-modal-body {
+  animation: qbsheet-pop-in var(--room-motion-standard) var(--room-ease-out) both;
+}
+
+.scorer-dialog::backdrop,
+.shell-modal {
+  animation: qbsheet-fade-in var(--room-motion-standard) var(--room-ease-standard) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+  }
+
+  :where(
+      .shell-button,
+      .game-picker-entry,
+      .scorer-answer,
+      .scorer-nobuzz,
+      .scorer-choice,
+      .scorer-action,
+      .scorer-clock-button,
+      .scorer-menu-item,
+      .scorer-replacement-choice,
+      .scorer-submit,
+      .scorer-danger
+    ):active:not(:disabled) {
+    transform: none;
+  }
+}

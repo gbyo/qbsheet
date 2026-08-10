@@ -272,7 +272,7 @@ export default function StartingLineupPrompt(props: IStartingLineupPromptProps) 
       )}
       <button
         type="button"
-        className="scorer-submit"
+        className="scorer-submit scorer-starters-submit"
         disabled={!ready}
         onClick={() => {
           const lineups: Partial<Record<LeftOrRight, string[]>> = {};

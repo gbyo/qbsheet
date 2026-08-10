@@ -1543,6 +1543,10 @@ div.scorer-banner .scorer-text-action {
   gap: 12px;
 }
 
+.scorer-starters-submit {
+  margin-top: 24px;
+}
+
 .scorer-starters-reorder {
   margin-bottom: 8px;
 }

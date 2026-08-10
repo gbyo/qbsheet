@@ -13,6 +13,7 @@ import './app/app-shell.css';
 import './app/readiness.css';
 import './scorer/scorer.css';
 import './practice/practice.css';
+import './app/motion.css';
 
 const container = document.getElementById('root');
 if (container) createRoot(container).render(<App />);
