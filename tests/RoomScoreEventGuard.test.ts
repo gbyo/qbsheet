@@ -315,3 +315,143 @@ describe('an action lands whole or not at all', () => {
     expect(result.ok).toBe(false);
   });
 });
+
+describe('malformed and out-of-phase administrative events fail closed', () => {
+  function expectRefused(
+    candidateContext: typeof context,
+    events: ScoreEvent[],
+    candidate: ScoreEvent,
+    reason: string,
+  ): void {
+    const verdict = canApplyScoreEvent(candidateContext, events, candidate);
+    expect(verdict.ok).toBe(false);
+    expect(verdict.ok === false && verdict.reason).toContain(reason);
+  }
+
+  test('identity, question, player, and ruling fields are validated', () => {
+    const existing = buzz(1, 'left', 'Sarah', typeIndex(format, -5));
+    expectRefused(context, [existing], { ...existing }, 'already recorded');
+    expectRefused(context, [], buzz(0, 'left', 'Sarah', typeIndex(format, 10)), 'no question');
+    expectRefused(context, [], buzz(2, 'left', 'Sarah', typeIndex(format, 10)), 'Tossup 1');
+    expectRefused(context, [], buzz(1, 'left', '', typeIndex(format, 10)), 'Choose who');
+    expectRefused(context, [], buzz(1, 'left', 'Sarah', 99), 'not a ruling');
+    expectRefused(
+      context,
+      [],
+      event({ type: 'tossup-dead', questionNumber: 2 }),
+      'Tossup 1',
+    );
+  });
+
+  test('substitutions validate the complete next lineup and boundary', () => {
+    expectRefused(
+      context,
+      [],
+      event({ type: 'substitution', questionNumber: 1, team: 'left', activePlayers: [] }),
+      'somebody',
+    );
+    expectRefused(
+      context,
+      [],
+      event({ type: 'substitution', questionNumber: 1, team: 'left', activePlayers: ['Sarah', 'James', 'Alex'] }),
+      'at most 2',
+    );
+    expectRefused(
+      context,
+      [],
+      event({ type: 'substitution', questionNumber: 1, team: 'left', activePlayers: ['Sarah', 'Sarah'] }),
+      'listed twice',
+    );
+    expectRefused(
+      context,
+      [],
+      event({ type: 'substitution', questionNumber: 1, team: 'left', activePlayers: ['Sarah', 'Alex'] }),
+      'team roster',
+    );
+    expectRefused(
+      context,
+      [event({ type: 'tossup-dead', questionNumber: 1 })],
+      event({ type: 'substitution', questionNumber: 1, team: 'left', activePlayers: ['Sarah', 'James'] }),
+      'Tossup 2',
+    );
+  });
+
+  test('timeouts and breaks reject impossible state transitions', () => {
+    const procedureContext = {
+      ...context,
+      procedure: { version: 2 as const, halves: true, timeoutsPerTeam: 1, substitutionPolicy: 'any-boundary' as const },
+    };
+    expectRefused(
+      procedureContext,
+      [],
+      event({ type: 'half-resume', questionNumber: 1 }),
+      'no break',
+    );
+    expectRefused(
+      procedureContext,
+      [],
+      event({ type: 'timeout-start', questionNumber: 2, team: 'left', startedAt: 0 }),
+      'Tossup 1',
+    );
+    expectRefused(
+      procedureContext,
+      [],
+      event({ type: 'timeout-start', questionNumber: 1, team: 'left', startedAt: -1 }),
+      'valid timestamp',
+    );
+    const activeTimeout = [event({ type: 'timeout-start', questionNumber: 1, team: 'left', startedAt: 0 })];
+    expectRefused(
+      procedureContext,
+      activeTimeout,
+      event({ type: 'adjustment', questionNumber: 1, team: 'left', points: 5, reason: 'Control ruling' }),
+      'timeout is active',
+    );
+    expectRefused(
+      procedureContext,
+      activeTimeout,
+      event({ type: 'timeout-resume', questionNumber: 2 }),
+      'Tossup 1',
+    );
+  });
+
+  test('rare record types validate the values that make them meaningful', () => {
+    expectRefused(
+      context,
+      [],
+      event({ type: 'end-game-early', questionNumber: 1, reason: ' ', tossupsRead: 0 }),
+      'Say why',
+    );
+    expectRefused(
+      context,
+      [],
+      event({ type: 'question-void', questionNumber: 1, scope: 'tossup', reason: ' ' }),
+      'Say what went wrong',
+    );
+    expectRefused(
+      context,
+      [event({ type: 'tossup-dead', questionNumber: 1 })],
+      event({ type: 'question-void', questionNumber: 1, scope: 'bonus', reason: 'Reader correction' }),
+      'no bonus',
+    );
+    expectRefused(
+      context,
+      [],
+      event({ type: 'protest', questionNumber: 1, team: 'left', subject: 'procedure', description: ' ', status: 'open' }),
+      'being protested',
+    );
+    expectRefused(context, [], event({ type: 'forfeit', questionNumber: 1, teams: [] }), 'who forfeited');
+    expectRefused(
+      context,
+      [],
+      event({ type: 'lightning', questionNumber: 1, team: 'left', points: 20 }),
+      'does not play lightning',
+    );
+    expectRefused(
+      context,
+      [],
+      event({ type: 'adjustment', questionNumber: 1, team: 'left', points: 0, reason: 'Control ruling' }),
+      'non-zero whole number',
+    );
+    expectRefused(context, [], event({ type: 'note', questionNumber: 1, text: ' ', flagged: false }), 'some text');
+  });
+});

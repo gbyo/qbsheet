@@ -32,6 +32,8 @@
     "test:stress": "QBSHEET_DEEP_STRESS=1 vitest --run tests/RoomGameStateSpace.test.ts",
     "test:property": "vitest --run tests/RoomGameProperty.test.ts",
     "test:browser": "playwright test",
+    "test:mutation": "stryker run",
+    "test:mutation:dry": "stryker run --dryRunOnly",
     "prepare": "npm run build:core"
   },
   "dependencies": {
@@ -41,6 +43,8 @@
   "devDependencies": {
     "@eslint/js": "^9.17.0",
     "@playwright/test": "^1.62.1",
+    "@stryker-mutator/core": "^9.6.1",
+    "@stryker-mutator/vitest-runner": "^9.6.1",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.1.0",
     "@testing-library/user-event": "^14.5.2",

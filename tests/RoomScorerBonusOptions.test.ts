@@ -202,6 +202,21 @@ describe('validating a typed bonus total', () => {
     expect(bonusPartProblem(bonusFor(), 10, 0)).toBeNull();
     expect(bonusPartProblem(bonusFor(), 7, 0)).toContain('0 or 10');
   });
+
+  test('non-finite totals and forbidden bouncebacks are refused explicitly', () => {
+    expect(bonusTotalProblem(bonusFor(), Number.NaN)).toContain('whole number');
+    expect(bonusTotalProblem(bonusFor(), Number.POSITIVE_INFINITY)).toContain('whole number');
+    expect(bonusScoreProblem(bonusFor(), 20, 10)).toContain('does not allow bounceback');
+  });
+
+  test('one part cannot award both teams or contain a non-finite value', () => {
+    const bonus = bonusFor((rules) => {
+      rules.bonusesBounceBack = true;
+    });
+
+    expect(bonusPartProblem(bonus, 10, 10)).toContain('both teams');
+    expect(bonusPartProblem(bonus, Number.NaN, 0)).toContain('whole number');
+  });
 });
 
 describe('validating a lightning total', () => {
@@ -215,5 +230,10 @@ describe('validating a lightning total', () => {
 
   test('a negative total is refused', () => {
     expect(lightningTotalProblem(5, -5)).toContain('negative');
+  });
+
+  test('fractional and non-finite totals are refused', () => {
+    expect(lightningTotalProblem(5, 12.5)).toContain('whole number');
+    expect(lightningTotalProblem(5, Number.NaN)).toContain('whole number');
   });
 });

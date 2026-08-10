@@ -1,0 +1,29 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "mutate": [
+    "src/scoring/canApplyScoreEvent.ts",
+    "src/scoring/questionCorrection.ts",
+    "src/scorer/bonusOptions.ts"
+  ],
+  "testRunner": "vitest",
+  "vitest": {
+    "configFile": "vitest.config.ts",
+    "related": true
+  },
+  "incremental": true,
+  "incrementalFile": "reports/mutation/incremental.json",
+  "concurrency": 4,
+  "reporters": ["clear-text", "progress", "html", "json"],
+  "htmlReporter": {
+    "fileName": "reports/mutation/index.html"
+  },
+  "jsonReporter": {
+    "fileName": "reports/mutation/mutation.json"
+  },
+  "thresholds": {
+    "high": 80,
+    "low": 75,
+    "break": 75
+  },
+  "tempDirName": ".stryker-tmp"
+}
