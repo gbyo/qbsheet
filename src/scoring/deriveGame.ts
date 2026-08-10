@@ -259,6 +259,30 @@ function bonusFollows(format: IScorekeeperFormat, answerType: IScorekeeperAnswer
   return true;
 }
 
+/** Whether the effective replacement history has started this tossup. */
+function effectiveCycleHasBegun(events: ScoreEvent[], questionNumber: number): boolean {
+  let tossupBegun = false;
+  let bonusBegun = false;
+  for (const event of events) {
+    if (event.questionNumber !== questionNumber) continue;
+    if (event.type === 'question-void') {
+      if (event.scope === 'tossup') {
+        tossupBegun = false;
+        bonusBegun = false;
+      } else bonusBegun = false;
+      continue;
+    }
+    if (
+      event.type === 'tossup-buzz' ||
+      event.type === 'tossup-no-penalty' ||
+      event.type === 'tossup-dead'
+    ) {
+      tossupBegun = true;
+    } else if (event.type === 'bonus') bonusBegun = true;
+  }
+  return tossupBegun || bonusBegun;
+}
+
 /**
  * Which period a cycle belongs to.
  *
@@ -674,14 +698,7 @@ export default function deriveGame(format: IScorekeeperFormat, setup: IGameSetup
   // the following boundary.
   let upcomingBoundary = (questions.at(-1)?.questionNumber ?? 0) + 1;
   if (phase.kind === 'tossup') {
-    const begun = events.some(
-      (event) =>
-        event.questionNumber === phase.questionNumber &&
-        (event.type === 'tossup-buzz' ||
-          event.type === 'tossup-no-penalty' ||
-          event.type === 'tossup-dead' ||
-          event.type === 'bonus'),
-    );
+    const begun = effectiveCycleHasBegun(events, phase.questionNumber);
     upcomingBoundary = begun ? phase.questionNumber + 1 : phase.questionNumber;
   } else if (phase.kind === 'bonus') upcomingBoundary = phase.questionNumber + 1;
   applyPersonnelThrough(upcomingBoundary);
@@ -743,14 +760,7 @@ export function lineupChangeEffectiveQuestion(game: IDerivedGame, events: ScoreE
     return (game.questions.at(-1)?.questionNumber ?? 0) + 1;
   }
   const { questionNumber } = game.phase;
-  const begun = events.some(
-    (event) =>
-      event.questionNumber === questionNumber &&
-      (event.type === 'tossup-buzz' ||
-        event.type === 'tossup-no-penalty' ||
-        event.type === 'tossup-dead' ||
-        event.type === 'bonus'),
-  );
+  const begun = effectiveCycleHasBegun(events, questionNumber);
   return begun ? questionNumber + 1 : questionNumber;
 }
 

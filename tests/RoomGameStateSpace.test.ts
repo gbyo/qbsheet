@@ -35,6 +35,21 @@ const setup: IGameSetup = {
 // but need headroom when Vitest runs every test file concurrently on a shared CI runner.
 const exhaustiveTraversalTimeoutMs = 15_000;
 
+const deepStressEnabled = process.env.QBSHEET_DEEP_STRESS === '1';
+
+function positiveEnvironmentInteger(name: string, fallback: number): number {
+  const value = Number(process.env[name]);
+  return Number.isSafeInteger(value) && value > 0 ? value : fallback;
+}
+
+const generatedSeedCount = deepStressEnabled
+  ? Math.max(64, positiveEnvironmentInteger('QBSHEET_STRESS_SEEDS', 5_000))
+  : 64;
+const generatedActionLimit = deepStressEnabled
+  ? Math.max(24, positiveEnvironmentInteger('QBSHEET_STRESS_ACTIONS', 120))
+  : 24;
+const generatedStateMachineTimeoutMs = deepStressEnabled ? 40 * 60_000 : 5_000;
+
 let eventId = 0;
 
 function nextEvent(partial: EventInput): ScoreEvent {
@@ -55,6 +70,17 @@ function compactFormat(
   rules.maximumPlayersPerTeam = 2;
   configure(rules);
   return scoringRulesToScorekeeperFormat(rules);
+}
+
+function withRegulationLength(format: IScorekeeperFormat, tossupCount: number): IScorekeeperFormat {
+  return {
+    ...format,
+    regulation: {
+      ...format.regulation,
+      tossupCount,
+      maximumTossupCount: tossupCount,
+    },
+  };
 }
 
 function totalBonusEvents(format: IScorekeeperFormat, questionNumber: number, team: 'left' | 'right'): ScoreEvent[] {
@@ -598,7 +624,8 @@ function stateMachineActions(
       }),
     );
   }
-  if (step >= 8) {
+  const firstTerminalStep = deepStressEnabled ? Math.floor(generatedActionLimit * 0.75) : 8;
+  if (step >= firstTerminalStep) {
     interruptions.push(
       nextEvent({
         type: 'end-game-early',
@@ -839,19 +866,39 @@ describe('seeded state-machine stress coverage', () => {
     protestCheckpoints: 'none',
     substitutionPolicy: 'any-boundary',
   };
-  const formats = [
+  const ordinaryFormats = [
     compactFormat('seeded powers and bonuses', CommonRuleSets.AcfPowers),
     compactFormat('seeded timed lightning', CommonRuleSets.NaqtTimed, (rules) => {
       rules.timed = true;
       rules.lightningCountPerTeam = 10;
     }),
   ];
+  const deepFormats = ordinaryFormats.concat([
+    compactFormat('seeded no bonuses', CommonRuleSets.Acf, (rules) => rules.setUseBonuses(false)),
+    compactFormat('seeded regular bouncebacks', CommonRuleSets.AcfPowers, (rules) => {
+      rules.bonusesBounceBack = true;
+      rules.minimumPartsPerBonus = 2;
+      rules.maximumPartsPerBonus = 2;
+      rules.maximumBonusScore = 20;
+    }),
+    compactFormat('seeded irregular custom values', CommonRuleSets.Acf, (rules) => {
+      rules.answerTypes = [new AnswerType(7), new AnswerType(-3)];
+      rules.pointsPerBonusPart = undefined;
+      rules.minimumPartsPerBonus = 1;
+      rules.maximumPartsPerBonus = 4;
+      rules.maximumBonusScore = 20;
+      rules.bonusDivisor = 5;
+    }),
+  ]).map((format) => withRegulationLength(format, 12));
+  const formats = deepStressEnabled ? deepFormats : ordinaryFormats;
 
   test('checks invariants after every transition in many reproducible mixed-event games', () => {
     const acceptedTypes = new Set<ScoreEvent['type']>();
     const recoveredAfterTypes = new Set<ScoreEvent['type']>();
     const recoveredPhases = new Set<string>();
     const phaseActions = new Set<string>();
+    const formatActions = new Set<string>();
+    const adjacentActions = new Set<string>();
     const alwaysRecoverAfter = new Set<ScoreEvent['type']>([
       'tossup-buzz',
       'bonus',
@@ -865,7 +912,7 @@ describe('seeded state-machine stress coverage', () => {
     let completedGames = 0;
     let recoveryCycles = 0;
 
-    for (let seed = 1; seed <= 64; seed += 1) {
+    for (let seed = 1; seed <= generatedSeedCount; seed += 1) {
       const random = seededRandom(seed);
       const format = formats[seed % formats.length];
       const storage = memoryStorage();
@@ -873,8 +920,9 @@ describe('seeded state-machine stress coverage', () => {
       const now = new Date('2026-08-10T12:00:00.000Z');
       let activeSetup = gameSetup;
       let events: ScoreEvent[] = [];
+      let previousAction: ScoreEvent['type'] | undefined;
 
-      for (let step = 0; step < 24; step += 1) {
+      for (let step = 0; step < generatedActionLimit; step += 1) {
         const context: IScoreEventContext = { format, setup: activeSetup, procedure };
         const before = deriveGame(format, activeSetup, events);
         const beforeSemantics = gameSemantics(before);
@@ -925,6 +973,9 @@ describe('seeded state-machine stress coverage', () => {
               ? `${before.phase.kind}:${before.phase.period}`
               : before.phase.kind;
         phaseActions.add(`${beforePhase} -> ${accepted.type}`);
+        formatActions.add(`${format.name} -> ${accepted.type}`);
+        if (previousAction) adjacentActions.add(`${previousAction} -> ${accepted.type}`);
+        previousAction = accepted.type;
 
         withReplayDiagnostics(seed, step, format, events, () => {
           legalHistoryInvariants(format, activeSetup, events, procedure);
@@ -991,10 +1042,10 @@ describe('seeded state-machine stress coverage', () => {
       }
     }
 
-    expect(acceptedTransitions).toBeGreaterThan(500);
+    expect(acceptedTransitions).toBeGreaterThan(generatedSeedCount * 8);
     expect(rejectedCandidates).toBeGreaterThan(0);
     expect(completedGames).toBeGreaterThan(0);
-    expect(recoveryCycles).toBeGreaterThan(200);
+    expect(recoveryCycles).toBeGreaterThan(generatedSeedCount * 3);
     expect(phaseActions.size).toBeGreaterThan(25);
     expect(Array.from(acceptedTypes)).toEqual(
       expect.arrayContaining([
@@ -1024,7 +1075,23 @@ describe('seeded state-machine stress coverage', () => {
     expect(Array.from(recoveredPhases)).toEqual(
       expect.arrayContaining(['bonus', 'timeout', 'score-check', 'checkpoint:overtime']),
     );
-  });
+    if (deepStressEnabled) {
+      console.info(
+        [
+          'Deep state-machine coverage',
+          `seeds=${generatedSeedCount}`,
+          `actionLimit=${generatedActionLimit}`,
+          `acceptedTransitions=${acceptedTransitions}`,
+          `recoveryCycles=${recoveryCycles}`,
+          `phaseActions=${phaseActions.size}`,
+          `formatActions=${formatActions.size}`,
+          `adjacentActions=${adjacentActions.size}`,
+          '',
+          ...Array.from(phaseActions).sort(),
+        ].join('\n'),
+      );
+    }
+  }, generatedStateMachineTimeoutMs);
 
   test('rejects seeded malformed recovery histories without throwing or producing non-finite totals', () => {
     const format = formats[0];

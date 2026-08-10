@@ -146,4 +146,144 @@ describe('question-level corrections', () => {
       'tossup-dead',
     ]);
   });
+
+  test('rejects every incompatible part of an atomic question correction', () => {
+    const format = formatFor();
+    const events: ScoreEvent[] = [
+      event({ type: 'tossup-buzz', questionNumber: 1, team: 'left', playerName: 'Sarah', answerTypeIndex: 1 }),
+      event({ type: 'bonus', questionNumber: 1, team: 'left', controlledPoints: 20 }),
+      event({ type: 'tossup-dead', questionNumber: 2 }),
+    ];
+    const game = deriveGame(format, setup, events);
+    const conversion: IEditableQuestion = {
+      questionNumber: 1,
+      attempts: [{ kind: 'buzz', team: 'left', playerName: 'Sarah', answerTypeIndex: 1 }],
+      dead: false,
+      bonus: { team: 'left', controlledPoints: 20, bouncebackPoints: 0 },
+    };
+    const problems = (model: IEditableQuestion) => validateEditableQuestion(format, game, model).join('\n');
+
+    expect(problems({ questionNumber: 1, attempts: [], dead: false })).toContain('needs a ruling');
+    expect(
+      problems({
+        questionNumber: 1,
+        attempts: [
+          { kind: 'buzz', team: 'left', playerName: 'Sarah', answerTypeIndex: 2 },
+          { kind: 'buzz', team: 'left', playerName: 'James', answerTypeIndex: 1 },
+        ],
+        dead: false,
+      }),
+    ).toContain('more than once');
+    expect(
+      problems({
+        questionNumber: 1,
+        attempts: [{ kind: 'buzz', team: 'left', playerName: 'Not Playing', answerTypeIndex: 1 }],
+        dead: false,
+      }),
+    ).toContain('not active');
+    expect(
+      problems({
+        questionNumber: 1,
+        attempts: [{ kind: 'buzz', team: 'left', playerName: 'Sarah', answerTypeIndex: 99 }],
+        dead: false,
+      }),
+    ).toContain('valid ruling');
+    expect(
+      problems({
+        questionNumber: 1,
+        attempts: [
+          { kind: 'buzz', team: 'left', playerName: 'Sarah', answerTypeIndex: 2 },
+          { kind: 'buzz', team: 'right', playerName: 'Emma', answerTypeIndex: 2 },
+        ],
+        dead: false,
+      }),
+    ).toContain('second-team neg');
+    expect(problems({ ...conversion, dead: true })).toContain('both a correct answer and no conversion');
+    expect(problems({ ...conversion, bonus: undefined })).toContain('needs a bonus');
+    expect(
+      problems({
+        questionNumber: 1,
+        attempts: [],
+        dead: true,
+        bonus: { team: 'left', controlledPoints: 20, bouncebackPoints: 0 },
+      }),
+    ).toContain('does not have a valid bonus conversion');
+    expect(problems({ ...conversion, bonus: { ...conversion.bonus!, team: 'right' } })).toContain(
+      'belongs to the converting team',
+    );
+    expect(
+      problems({
+        ...conversion,
+        bonus: {
+          team: 'left',
+          controlledPoints: 10,
+          bouncebackPoints: 0,
+          parts: [{ controlledPoints: 10 }],
+        },
+      }),
+    ).toContain('wrong number of bonus parts');
+    expect(
+      problems({
+        ...conversion,
+        bonus: {
+          team: 'left',
+          controlledPoints: 30,
+          bouncebackPoints: 0,
+          parts: [{ controlledPoints: 10 }, { controlledPoints: 10 }, { controlledPoints: 0 }],
+        },
+      }),
+    ).toContain("bonus parts do not match its totals");
+    expect(
+      problems({
+        ...conversion,
+        bonus: {
+          team: 'left',
+          controlledPoints: 20,
+          bouncebackPoints: 0,
+          parts: [{ controlledPoints: 7 }, { controlledPoints: 10 }, { controlledPoints: 3 }],
+        },
+      }),
+    ).toContain('Each regular bonus part');
+  });
+
+  test('preserves existing event ids and creates ids only for new correction events', () => {
+    let next = 0;
+    const corrected = eventsFromEditableQuestion(
+      {
+        questionNumber: 4,
+        attempts: [
+          { id: 'kept-zero', kind: 'no-penalty', team: 'left', playerName: 'Sarah' },
+          { kind: 'buzz', team: 'right', playerName: 'Emma', answerTypeIndex: 1 },
+        ],
+        dead: false,
+        bonus: { id: 'kept-bonus', team: 'right', controlledPoints: 20, bouncebackPoints: 0 },
+      },
+      () => `new-${++next}`,
+    );
+
+    expect(corrected.map((candidate) => candidate.id)).toEqual(['kept-zero', 'new-1', 'kept-bonus']);
+  });
+
+  test('places a correction after the latest replacement marker and before later audit events', () => {
+    const events: ScoreEvent[] = [
+      event({ type: 'tossup-dead', questionNumber: 7 }),
+      event({ type: 'question-void', questionNumber: 7, scope: 'tossup', reason: 'First bad question' }),
+      event({ type: 'tossup-dead', questionNumber: 7 }),
+      event({ type: 'question-void', questionNumber: 7, scope: 'tossup', reason: 'Second bad question' }),
+      event({ type: 'note', questionNumber: 7, text: 'Use the third question.' }),
+      event({ type: 'tossup-dead', questionNumber: 8 }),
+    ];
+    const replacement = [event({ type: 'tossup-dead', questionNumber: 7 })];
+    const next = replaceQuestionEvents(events, 7, replacement);
+    const voids = next
+      .map((candidate, index) => (candidate.type === 'question-void' ? index : -1))
+      .filter((index) => index >= 0);
+    const correction = next.findIndex((candidate) => candidate.id === replacement[0].id);
+    const note = next.findIndex((candidate) => candidate.type === 'note');
+
+    expect(voids).toHaveLength(2);
+    expect(correction).toBe(Math.max(...voids) + 1);
+    expect(note).toBe(correction + 1);
+    expect(next.at(-1)?.questionNumber).toBe(8);
+  });
 });

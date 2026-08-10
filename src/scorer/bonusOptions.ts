@@ -96,6 +96,9 @@ export function bonusPartProblem(
       }
     }
   }
+  if (controlledPoints > 0 && bouncebackPoints > 0) {
+    return 'A bonus part cannot be scored by both teams.';
+  }
   const pairProblem = bonusScoreProblem(bonus, controlledPoints, bouncebackPoints);
   if (pairProblem) return pairProblem;
   return null;
