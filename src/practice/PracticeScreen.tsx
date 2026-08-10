@@ -1,14 +1,12 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { RoomConnectionState } from '../app/ConnectionState';
 import ScorerHost from '../scorer/ScorerHost';
 import { clearGame } from '../scorer/GameSession';
-import { IGameSetup } from '../scoring/deriveGame';
 import { ScoreEvent } from '../scoring/ScoreEvents';
 import {
   IPracticeStep,
   practiceFormat,
   practiceLeftTeam,
-  practiceLineupReady,
   practiceRightTeam,
   practiceSteps,
 } from './PracticeScenario';
@@ -22,6 +20,26 @@ function rememberCompletion(): void {
   } catch {
     // Completion is only a convenience marker. Practice itself does not depend on it.
   }
+}
+
+function samePlayers(actual: string[], expected: string[]): boolean {
+  return actual.length === expected.length && expected.every((player) => actual.includes(player));
+}
+
+/** The real scorer records initial lineups as Q1 substitution events, one per team. */
+export function practiceLineupsRecorded(events: ScoreEvent[]): boolean {
+  const lineups = events.filter(
+    (event): event is Extract<ScoreEvent, { type: 'substitution' }> =>
+      event.type === 'substitution' && event.questionNumber === 1,
+  );
+  const left = lineups.find((event) => event.team === 'left');
+  const right = lineups.find((event) => event.team === 'right');
+  return (
+    left !== undefined &&
+    right !== undefined &&
+    samePlayers(left.activePlayers, practiceLeftTeam.startingLineup) &&
+    samePlayers(right.activePlayers, practiceRightTeam.startingLineup)
+  );
 }
 
 function unexpectedMessage(step: IPracticeStep): string {
@@ -41,8 +59,6 @@ export default function PracticeScreen({ onHome }: { onHome: () => void }) {
   const [feedback, setFeedback] = useState('');
   const [mistake, setMistake] = useState('');
   const [complete, setComplete] = useState(false);
-  const lastEventsRef = useRef<ScoreEvent[]>([]);
-  const lastSetupRef = useRef<IGameSetup | null>(null);
   const step = practiceSteps[stepIndex];
 
   const advance = useCallback(
@@ -56,13 +72,11 @@ export default function PracticeScreen({ onHome }: { onHome: () => void }) {
   );
 
   const observe = useCallback(
-    (events: ScoreEvent[], setup: IGameSetup) => {
-      lastEventsRef.current = events;
-      lastSetupRef.current = setup;
+    (events: ScoreEvent[]) => {
       if (complete) return;
 
       if (step.expectation.kind === 'lineup') {
-        if (practiceLineupReady(setup)) advance(events.length);
+        if (practiceLineupsRecorded(events)) advance(events.length);
         return;
       }
 
@@ -101,8 +115,6 @@ export default function PracticeScreen({ onHome }: { onHome: () => void }) {
     setFeedback('');
     setMistake('');
     setComplete(false);
-    lastEventsRef.current = [];
-    lastSetupRef.current = null;
   }, []);
 
   const finish = useCallback(async () => {
