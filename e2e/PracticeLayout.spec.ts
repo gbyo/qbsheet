@@ -69,3 +69,35 @@ test('the guide is a wide panel that keeps clear of the contextual row controls'
   // Overlapping the empty end of the bottom rows is allowed; reaching their controls is not.
   expect(coachBox?.x ?? 0).toBeGreaterThan((noBuzzBox?.x ?? 0) + (noBuzzBox?.width ?? 0));
 });
+
+test('the phone guide stays above the control bar when a warning adds a row', async ({ page }) => {
+  await startPracticeGame(page);
+  await page.getByRole('button', { name: 'Minimize practice guide' }).click();
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  const footer = page.locator('.practice-mode > .scorer > .scorer-footer');
+  const collapsedCoach = page.locator('.practice-coach-collapsed');
+  await expect(collapsedCoach).toBeVisible();
+  const compactFooterHeight = await footer.evaluate((element) => element.getBoundingClientRect().height);
+
+  // A converted tossup is unfinished until its bonus is recorded, which puts the real scorer warning
+  // onto the footer's second grid row at phone width.
+  await page.getByRole('button', { name: 'Gibson Power' }).click();
+  await expect(page.locator('.scorer-footer-warning')).toHaveText('Question 1 is not finished.');
+  await expect
+    .poll(async () => footer.evaluate((element) => element.getBoundingClientRect().height))
+    .toBeGreaterThan(compactFooterHeight);
+
+  const footerBox = await footer.boundingBox();
+  const collapsedBox = await collapsedCoach.boundingBox();
+  expect(footerBox).not.toBeNull();
+  expect(collapsedBox).not.toBeNull();
+  expect((collapsedBox?.y ?? 0) + (collapsedBox?.height ?? 0)).toBeLessThanOrEqual(footerBox?.y ?? 0);
+
+  await collapsedCoach.click();
+  const coach = page.locator('.practice-coach');
+  await expect(coach).toBeVisible();
+  const coachBox = await coach.boundingBox();
+  expect(coachBox).not.toBeNull();
+  expect((coachBox?.y ?? 0) + (coachBox?.height ?? 0)).toBeLessThanOrEqual(footerBox?.y ?? 0);
+});

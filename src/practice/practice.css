@@ -433,13 +433,13 @@
 @media (max-width: 520px) {
   /*
    * The control bar is fixed and spends the whole width on its five buttons at this size, so the panel
-   * has to stop above it — there is no empty end to sit on any more. 58px clears the bar as it usually
-   * stands; a wrapped warning row makes it taller than that, and the panel's own bottom rule is then
-   * the thing partly covered rather than any control.
+   * has to stop above it — there is no empty end to sit on any more. The bar grows when a warning gets
+   * its own row, so PracticeCoach measures its current block size and exposes it here. Keep the same
+   * 16px air the old 58px offset left above the usual roughly 42px bar.
    */
   .practice-coach,
   .practice-coach-collapsed {
-    inset: auto 8px 58px;
+    inset: auto 8px calc(var(--practice-control-bar-block-size, 42px) + 16px);
     width: auto;
     max-height: min(62vh, 520px);
     /* Floating clear of all four edges again, so it is ruled on all four. */

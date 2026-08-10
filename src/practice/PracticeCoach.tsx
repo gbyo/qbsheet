@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { CSSProperties, useEffect, useState } from 'react';
 import { IPracticeStep } from './PracticeScenario';
 
 interface IPracticeCoachProps {
@@ -75,17 +75,36 @@ export default function PracticeCoach(props: IPracticeCoachProps) {
   );
   const [view, setView] = useState<'guide' | 'help'>('guide');
   const [confirming, setConfirming] = useState<'restart' | 'leave' | null>(null);
+  const [controlBarBlockSize, setControlBarBlockSize] = useState<number | null>(null);
   const progress = Math.round(((stepIndex + 1) / stepCount) * 100);
+  const placementStyle =
+    controlBarBlockSize === null
+      ? undefined
+      : ({ '--practice-control-bar-block-size': `${controlBarBlockSize}px` } as CSSProperties);
 
   useEffect(() => {
     setConfirming(null);
   }, [step.id]);
+
+  useEffect(() => {
+    const controlBar = document.querySelector<HTMLElement>('.practice-mode > .scorer > .scorer-footer');
+    if (!controlBar) return undefined;
+
+    const measure = () => setControlBarBlockSize(controlBar.getBoundingClientRect().height);
+    measure();
+
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(measure);
+    observer.observe(controlBar);
+    return () => observer.disconnect();
+  }, []);
 
   if (!open) {
     return (
       <button
         type="button"
         className="practice-coach-collapsed"
+        style={placementStyle}
         aria-expanded="false"
         aria-controls="practice-coach-panel"
         onClick={() => setOpen(true)}
@@ -105,7 +124,7 @@ export default function PracticeCoach(props: IPracticeCoachProps) {
   }
 
   return (
-    <aside id="practice-coach-panel" className="practice-coach" aria-label="Practice guide">
+    <aside id="practice-coach-panel" className="practice-coach" style={placementStyle} aria-label="Practice guide">
       {/* Wide enough to carry the name, the section tabs and the way out on one line. */}
       <header className="practice-coach-header">
         <div className="practice-coach-heading">
