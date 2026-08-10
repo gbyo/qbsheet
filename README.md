@@ -31,6 +31,7 @@ Specifications:
 | [`docs/QBTCP.md`](docs/QBTCP.md) | The protocol: discovery, pairing, assignment, progress, result, recovery, help, writer ownership, CORS/LAN, security |
 | [`docs/QBJ_ASSIGNMENT_PROFILE.md`](docs/QBJ_ASSIGNMENT_PROFILE.md) | Which QBJ fields are used, graceful degradation, the `_qbtcp` extension, privacy rules, filenames |
 | [`docs/QBG_MIGRATION.md`](docs/QBG_MIGRATION.md) | Retiring `.qbg`, and the `/api/v1` → `/qbtcp/v1` route mapping |
+| [`docs/TEST_FILE_GENERATION.md`](docs/TEST_FILE_GENERATION.md) | How developers and coding agents generate realistic QBJ, YFT, SQBS, QBG, recovery, and report fixtures |
 
 Legacy `.qbg` game files and the older `/api/v1` server surface both still work; neither is written
 or preferred any more.
