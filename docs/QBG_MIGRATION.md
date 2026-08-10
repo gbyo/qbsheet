@@ -159,8 +159,7 @@ Tournament Scoring/
 The workflow does not change. Fruity still writes one file per scheduled match, still writes only the
 released round, still pre-generates no match that depends on a rebracket, and still groups by room.
 
-The file is now a document that any QBJ tool can open, and it holds the same bytes that the room would
-receive over QBTCP.
+The file is now the same QBJ document that the room receives over QBTCP, and any QBJ tool can open it.
 
 ## See also
 
