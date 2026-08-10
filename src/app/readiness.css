@@ -123,9 +123,7 @@
   font-weight: 600;
 }
 
-.readiness-detail,
-.readiness-copy,
-.readiness-footnote {
+.readiness-detail {
   margin: 2px 0 0;
   color: var(--room-muted);
   font-size: 13px;
@@ -168,10 +166,6 @@
 .readiness-test-result.is-fail {
   color: var(--room-error);
   background: var(--room-error-bg);
-}
-
-.readiness-footnote {
-  margin-top: 16px;
 }
 
 @media (max-width: 520px) {
