@@ -34,7 +34,15 @@ export default tseslint.config(
   },
   {
     // Build and test tooling runs in Node.
-    files: ['vite.config.ts', 'vitest.config.ts', 'eslint.config.js', 'tests/**/*.{ts,tsx}', 'scripts/**/*.ts'],
+    files: [
+      'vite.config.ts',
+      'vitest.config.ts',
+      'playwright.config.ts',
+      'eslint.config.js',
+      'tests/**/*.{ts,tsx}',
+      'e2e/**/*.{ts,tsx}',
+      'scripts/**/*.ts',
+    ],
     languageOptions: { globals: { ...globals.node } },
   },
   {

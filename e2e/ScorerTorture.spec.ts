@@ -1,0 +1,150 @@
+import { readFile } from 'node:fs/promises';
+import { expect, test, type Page } from '@playwright/test';
+import { validPackage } from '../tests/packages';
+
+interface IQbjAnswerCount {
+  number: number;
+  answer_type: { value: number };
+}
+
+interface IQbjMatchPlayer {
+  player: { name: string };
+  tossups_heard: number;
+  answer_counts: IQbjAnswerCount[];
+}
+
+interface IQbjMatchTeam {
+  team: { name: string };
+  points: number;
+  match_players: IQbjMatchPlayer[];
+}
+
+interface IQbjMatchQuestion {
+  question_number: number;
+  buzzes: Array<{ player?: { name: string }; result: { value: number } }>;
+  bonus_points?: number;
+}
+
+interface IQbjResult {
+  tossups_read: number;
+  notes?: string;
+  match_teams: IQbjMatchTeam[];
+  match_questions: IQbjMatchQuestion[];
+}
+
+async function openGeneratedGame(page: Page): Promise<void> {
+  const packageValue = validPackage();
+  packageValue.scorekeeperFormat.players.maximumActive = 2;
+  await page.locator('.file-open-input').setInputFiles({
+    name: 'browser-torture.qbg',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(packageValue)),
+  });
+
+  await expect(page.getByRole('heading', { name: 'Who is starting?' })).toBeVisible();
+  for (const player of ['Sarah Mitchell', 'James Okafor', 'Emma Chen', 'Jordan Blake']) {
+    await page.getByLabel(player, { exact: true }).check();
+  }
+  await page.getByRole('button', { name: 'Start game' }).click();
+  await expect(page.getByText('Tossup 1 of 20', { exact: true })).toBeVisible();
+}
+
+async function chooseBonus(page: Page, points: number): Promise<void> {
+  await page
+    .getByLabel('Bonus')
+    .getByRole('button', { name: String(points), exact: true })
+    .click();
+}
+
+async function openReviewWithKeyboard(page: Page): Promise<void> {
+  const gameMenu = page.getByRole('button', { name: 'Game', exact: true });
+  await gameMenu.focus();
+  await gameMenu.press('ArrowDown');
+  const review = page.getByRole('menuitem', { name: 'Full scoresheet review' });
+  for (let move = 0; move < 4; move += 1) await page.keyboard.press('ArrowDown');
+  await expect(review).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('dialog', { name: 'Full scoresheet review' })).toBeVisible();
+}
+
+test('a real scorer session survives fast input, reload, correction, completion, and export', async ({ page }) => {
+  const browserErrors: string[] = [];
+  page.on('pageerror', (error) => browserErrors.push(error.message));
+  page.on('console', (message) => {
+    if (message.type() === 'error') browserErrors.push(message.text());
+  });
+
+  await page.goto('/');
+  await openGeneratedGame(page);
+
+  // A hurried double-click must still record one tossup, not two events or two questions.
+  await page.getByRole('button', { name: 'Sarah Mitchell 15', exact: true }).dblclick();
+  await expect(page.getByLabel('Ninety Six A score')).toHaveText('15');
+  await expect(page.getByLabel('Bonus')).toBeVisible();
+  await chooseBonus(page, 20);
+  await expect(page.getByText('Tossup 2 of 20', { exact: true })).toBeVisible();
+
+  // The primary scoring path also has to work without a pointer.
+  await page.getByRole('button', { name: 'Emma Chen 10', exact: true }).press('Enter');
+  await chooseBonus(page, 10);
+  await page.locator('body').click({ position: { x: 8, y: 8 } });
+  await page.keyboard.press('Space');
+  await expect(page.getByText('Tossup 4 of 20', { exact: true })).toBeVisible();
+
+  await expect(page.getByLabel('Ninety Six A score')).toHaveText('35');
+  await expect(page.getByLabel('Greenwood score')).toHaveText('20');
+
+  // This is a full document reload, not a React remount: IndexedDB and the recovery journal must win.
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Unfinished game' })).toBeVisible();
+  await expect(page.getByText('Q3', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Resume' }).click();
+  await expect(page.getByText('Tossup 4 of 20', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Ninety Six A score')).toHaveText('35');
+  await expect(page.getByLabel('Greenwood score')).toHaveText('20');
+
+  // Walk the actual ARIA menu with the keyboard, then correct a historical player, ruling, and bonus atomically.
+  await openReviewWithKeyboard(page);
+  const questionTwo = page.locator('.scorer-review-list > li').filter({ hasText: 'Q2' });
+  await questionTwo.getByRole('button', { name: 'Edit question' }).click();
+  await page.getByLabel('Player', { exact: true }).selectOption({ label: 'Jordan Blake' });
+  await page.getByLabel('Ruling', { exact: true }).selectOption({ label: '+15' });
+  await page.getByRole('group', { name: 'Bonus points' }).getByRole('button', { name: '20' }).click();
+  await page.getByRole('button', { name: 'Save correction' }).click();
+  await page.getByRole('dialog', { name: 'Full scoresheet review' }).getByRole('button', { name: 'Close' }).click();
+
+  await expect(page.getByLabel('Greenwood score')).toHaveText('35');
+  await page.getByRole('button', { name: 'Game', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'End game early…' }).click();
+  await page.getByLabel('Why is the game ending early?').fill('Browser torture test completed');
+  await page.getByRole('button', { name: 'End the game now' }).click();
+
+  await expect(page.locator('.scorer-complete-title')).toHaveText('Final score — game ended early');
+  await expect(page.getByLabel('Final score confirmed with both teams')).not.toBeChecked();
+  await page.getByLabel('Final score confirmed with both teams').check();
+  await page.getByRole('button', { name: 'Submit result' }).click();
+  await expect(page.getByRole('heading', { name: 'Final' })).toBeVisible();
+
+  const downloadStarted = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download QBJ' }).click();
+  const download = await downloadStarted;
+  expect(download.suggestedFilename()).toBe('R07_Room-204_Ninety-Six-A_vs_Greenwood.qbj');
+  const downloadedPath = await download.path();
+  if (!downloadedPath) throw new Error('Chromium did not expose the downloaded QBJ path.');
+  const qbj = JSON.parse(await readFile(downloadedPath, 'utf8')) as IQbjResult;
+
+  expect(qbj.tossups_read).toBe(3);
+  expect(qbj.match_teams.map((team) => team.points)).toEqual([35, 35]);
+  expect(qbj.notes).toContain('Browser torture test completed');
+  const secondQuestion = qbj.match_questions.find((question) => question.question_number === 2);
+  expect(secondQuestion).toMatchObject({
+    buzzes: [{ player: { name: 'Jordan Blake' }, result: { value: 15 } }],
+    bonus_points: 20,
+  });
+  expect(qbj.match_questions[0].buzzes).toHaveLength(1);
+  const greenwood = qbj.match_teams.find((team) => team.team.name === 'Greenwood');
+  const jordan = greenwood?.match_players.find((player) => player.player.name === 'Jordan Blake');
+  expect(jordan?.answer_counts).toContainEqual({ number: 1, answer_type: { value: 15 } });
+  await expect(page.getByRole('button', { name: 'Done' })).toBeEnabled();
+  expect(browserErrors).toEqual([]);
+});
