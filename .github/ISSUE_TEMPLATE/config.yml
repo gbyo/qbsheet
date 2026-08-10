@@ -3,9 +3,6 @@ contact_links:
   - name: Desktop statkeeping, Match Plan, Tournament Control, or reports
     url: https://github.com/gbyo/fruity/issues
     about: Those live in Fruity, the tournament-control application. File there instead.
-  - name: Security vulnerability
-    url: https://github.com/gbyo/qbsheet/security/advisories/new
-    about: Report privately through GitHub security advisories. Do not open a public issue.
   - name: Code of Conduct
     url: https://github.com/gbyo/qbsheet/blob/main/CODE_OF_CONDUCT.md
     about: How we expect people to behave here, and how to report a problem.
