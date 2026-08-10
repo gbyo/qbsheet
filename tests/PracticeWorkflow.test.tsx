@@ -64,3 +64,36 @@ test('practice requires its named starters, keeps mistakes editable, and advance
   await vi.waitFor(() => expect(screen.getByText('Record Gibson’s power.')).toBeTruthy());
   expect(screen.queryByLabelText('Starting lineups')).toBeNull();
 });
+
+test('practice restores the guide checkpoint after the screen is remounted', async () => {
+  const first = render(<PracticeScreen onHome={vi.fn()} />);
+  const prompt = screen.getByLabelText('Starting lineups');
+  const left = within(prompt).getByLabelText('Ninety Six starters');
+  const right = within(prompt).getByLabelText('Riverton Prep starters');
+  for (const name of ['Gibson', 'Jeremy', 'Owen', 'Lachlan']) fireEvent.click(within(left).getByLabelText(name));
+  for (const name of ['Tucker', 'Sam', 'Efren', 'Valerie']) fireEvent.click(within(right).getByLabelText(name));
+  fireEvent.click(within(prompt).getByText('Start game'));
+
+  await vi.waitFor(() => expect(screen.getByText('Record Gibson’s power.')).toBeTruthy());
+  first.unmount();
+  render(<PracticeScreen onHome={vi.fn()} />);
+
+  expect(screen.queryByLabelText('Starting lineups')).toBeNull();
+  expect(screen.getByText('Record Gibson’s power.')).toBeTruthy();
+});
+
+test('restart and leave are protected from an accidental single click', () => {
+  const onHome = vi.fn();
+  render(<PracticeScreen onHome={onHome} />);
+
+  fireEvent.click(screen.getByText('Restart'));
+  expect(screen.getByText('Restart from the lineup? This practice run will be cleared.')).toBeTruthy();
+  expect(screen.getByText('Keep practicing')).toBeTruthy();
+  expect(screen.getByLabelText('Starting lineups')).toBeTruthy();
+
+  fireEvent.click(screen.getByText('Keep practicing'));
+  fireEvent.click(screen.getByText('Leave practice'));
+  expect(onHome).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByText('Leave now'));
+  expect(onHome).toHaveBeenCalledOnce();
+});

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { practiceLineupsRecorded } from '../src/practice/PracticeScreen';
+import { practiceLineupsRecorded, replayPracticeProgress } from '../src/practice/PracticeScreen';
 import { practiceFormat, practiceSteps } from '../src/practice/PracticeScenario';
 import { ScoreEvent } from '../src/scoring/ScoreEvents';
 
@@ -33,7 +33,30 @@ describe('guided practice scenario', () => {
 
   it('includes correction, substitution and submission lessons', () => {
     expect(practiceSteps.some((step) => step.expectation.kind === 'undo')).toBe(true);
+    expect(practiceSteps.some((step) => step.expectation.kind === 'history')).toBe(true);
+    expect(practiceSteps.some((step) => step.id === 'q4-wrong-no-penalty')).toBe(true);
     expect(practiceSteps.some((step) => step.id === 'substitution')).toBe(true);
     expect(practiceSteps.at(-1)?.expectation.kind).toBe('submit');
+  });
+
+  it('replays the current scoresheet to a safe guide checkpoint', () => {
+    const events = lineupEvents(
+      ['Gibson', 'Jeremy', 'Owen', 'Lachlan'],
+      ['Tucker', 'Sam', 'Efren', 'Valerie'],
+    );
+    expect(replayPracticeProgress(events)).toEqual({ stepIndex: 1, acceptedEventCount: 2 });
+
+    events.push({
+      id: 'q1',
+      type: 'tossup-buzz',
+      questionNumber: 1,
+      team: 'left',
+      playerName: 'Gibson',
+      answerTypeIndex: 0,
+    });
+    expect(replayPracticeProgress(events)).toEqual({ stepIndex: 2, acceptedEventCount: 3 });
+
+    events[2] = { ...events[2], answerTypeIndex: 1 } as ScoreEvent;
+    expect(replayPracticeProgress(events)).toEqual({ stepIndex: 1, acceptedEventCount: 2 });
   });
 });

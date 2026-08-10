@@ -41,6 +41,7 @@ export default function WelcomeScreen(props: {
   notice: string;
   durable: boolean;
   rememberedRoom?: string;
+  practiceInProgress: boolean;
   onReadiness: () => void;
   onPractice: () => void;
   onConnect: (baseUrl: string) => void;
@@ -53,6 +54,7 @@ export default function WelcomeScreen(props: {
     notice,
     durable,
     rememberedRoom,
+    practiceInProgress,
     onReadiness,
     onPractice,
     onConnect,
@@ -173,13 +175,15 @@ export default function WelcomeScreen(props: {
 
       <section className="shell-section welcome-practice">
         <div>
-          <h2 className="shell-heading">New to QBSheet?</h2>
+          <h2 className="shell-heading">{practiceInProgress ? 'Practice game in progress' : 'New to QBSheet?'}</h2>
           <p className="welcome-practice-copy">
-            Learn the workflow with a guided game using the real scoresheet. No setup needed.
+            {practiceInProgress
+              ? 'Continue where you left off. Your practice scoresheet and guide position are saved on this device.'
+              : 'Learn the workflow with a guided game using the real scoresheet. No setup needed.'}
           </p>
         </div>
         <button type="button" className="shell-button" onClick={onPractice}>
-          Practice scoring
+          {practiceInProgress ? 'Resume practice' : 'Practice scoring'}
         </button>
       </section>
 
