@@ -84,8 +84,8 @@ repository secret. Set the repository Pages setting to **GitHub Actions**.
 
 For local development, run `npm start`. Then configure Fruity's Local Tournament Server to allow the
 origin that Vite prints, normally `http://localhost:5173`. Enter the local network address of the
-server in the scoresheet. The origin allowlist of the local server is separate from room pairing, and
-every room operation still needs a valid room or session credential.
+server in the scoresheet. The origin allowlist of the local server is separate from room pairing.
+Every operation on a paired room still needs a valid room or session credential.
 
 ## Files
 
