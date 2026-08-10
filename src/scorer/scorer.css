@@ -404,6 +404,10 @@ div.scorer-banner .scorer-text-action {
 }
 
 .scorer-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
   padding: 6px 14px;
   font: inherit;
   font-size: 13px;
@@ -412,6 +416,12 @@ div.scorer-banner .scorer-text-action {
   border: 1px solid var(--room-border-strong);
   border-radius: 4px;
   cursor: pointer;
+}
+
+.scorer-control-icon {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
 }
 
 .scorer-action:hover:not(:disabled) {

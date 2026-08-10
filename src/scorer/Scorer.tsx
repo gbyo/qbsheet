@@ -44,6 +44,7 @@ import TeamPanel from './TeamPanel';
 import BonusPrompt from './BonusPrompt';
 import RecentRail from './RecentRail';
 import GameMenu, { IGameMenuItem } from './GameMenu';
+import ControlIcon from './ControlIcon';
 import PlayersDialog, { rosterSyncKey } from './PlayersDialog';
 import StartingLineupPrompt from './StartingLineupPrompt';
 import PreSubmitReview, { HalftimeCheck } from './PreSubmitReview';
@@ -1094,15 +1095,19 @@ export default function Scorer(props: IScorerProps) {
 
       <footer className="scorer-footer">
         <button type="button" className="scorer-action" onClick={events.undo} disabled={!events.canUndo}>
+          <ControlIcon name="undo" />
           Undo
         </button>
         <button type="button" className="scorer-action" onClick={events.redo} disabled={!events.canRedo}>
+          <ControlIcon name="redo" />
           Redo
         </button>
         <button type="button" className="scorer-action" onClick={() => setDialog('players')}>
+          <ControlIcon name="players" />
           Players
         </button>
         <button type="button" className="scorer-action" onClick={() => setDialog('flag')}>
+          <ControlIcon name="flag" />
           Flag
         </button>
         <GameMenu items={menuItems} />
