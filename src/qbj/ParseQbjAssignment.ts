@@ -226,6 +226,26 @@ function playState(match: QbjObject): MatchPlayState {
   return tossupsRead > 0 || hasQuestions || hasPoints ? 'partial' : 'unplayed';
 }
 
+/**
+ * The round's number, which standard QBJ does not have a field for.
+ *
+ * `Round` carries a `name` and nothing else numeric — the reference implementation keeps its own
+ * round number in a file extension, and writes `name` as the bare number ("4") for an ordinary
+ * round. Its importer resolves rounds by running `parseInt` over exactly this field, so doing the
+ * same here reads what it writes, and reads any other producer that names rounds numerically.
+ *
+ * A non-numeric name ("Playoff 2", "Finals") yields nothing rather than a wrong number. A round
+ * that cannot be numbered is not an error; it is a game scored without a round number.
+ */
+function roundNumberOf(round: QbjObject | null | undefined): number | undefined {
+  if (!round) return undefined;
+  // An explicit numeric field wins where a producer supplies one, standard or not.
+  if (finiteNumber(round.number)) return round.number;
+  if (typeof round.name !== 'string') return undefined;
+  const parsed = Number.parseInt(round.name, 10);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
 /** Where a match sits in the schedule: the round that holds it, and the phase that holds the round. */
 export interface IRoundContext {
   round: QbjObject;
@@ -333,7 +353,7 @@ export function readQbjSource(value: unknown): QbjReadResult<IQbjSource> {
       matchId: stringField(entry.id),
       phaseName: stringField(context?.phase?.name),
       roundName: stringField(context?.round?.name),
-      roundNumber: finiteNumber(context?.round?.number) ? (context?.round?.number as number) : undefined,
+      roundNumber: roundNumberOf(context?.round),
       location: stringField(entry.location),
       leftName: left,
       rightName: right,
@@ -461,11 +481,7 @@ export function defineGame(
   // The same index the read built, so a candidate's round and its definition's round cannot differ.
   const context = source.document ? (buildRoundIndex(source.document, byId).get(match) ?? null) : null;
 
-  const roundNumber = finiteNumber(context?.round?.number)
-    ? (context?.round?.number as number)
-    : finiteNumber(match._round)
-      ? (match._round as number)
-      : 0;
+  const roundNumber = roundNumberOf(context?.round) ?? (finiteNumber(match._round) ? (match._round as number) : 0);
   const roundName = stringField(context?.round?.name) ?? (roundNumber > 0 ? `Round ${roundNumber}` : 'Game');
   if (!context && !finiteNumber(match._round)) {
     assumptions.push('This QBJ does not say which round this game is. It is being scored without one.');

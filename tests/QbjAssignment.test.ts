@@ -559,3 +559,31 @@ describe('one parser for file and network', () => {
     expect(isPlainObject(definition.scorekeeperFormat)).toBe(true);
   });
 });
+
+describe('round numbers', () => {
+  test('a numeric Round.name is the round number, because QBJ has no field for one', () => {
+    // Standard QBJ Round carries only a name; the reference implementation writes the bare number
+    // there and resolves rounds by parsing it. Reading it the same way reads what it writes.
+    const { definition } = openOne(assignmentDocument({ roundName: '7', omitRoundNumber: true }));
+
+    expect(definition.round.number).toBe(7);
+  });
+
+  test('a non-numeric round name is not turned into a wrong number', () => {
+    const { definition } = openOne(
+      assignmentDocument({ roundName: 'Playoff 2', omitRoundNumber: true }),
+    );
+
+    // Scoring still works; the round simply has no number.
+    expect(definition.round.number).toBe(0);
+    expect(definition.round.name).toBe('Playoff 2');
+  });
+
+  test('an explicit numeric field still wins where a producer supplies one', () => {
+    const source = readQbjSource(assignmentDocument({ roundNumber: 9, roundName: 'Finals' }));
+    if (!source.ok) throw new Error('Expected a readable document');
+
+    // `assignmentDocument` writes `number` alongside the name.
+    expect(source.value.candidates[0].roundNumber).toBe(9);
+  });
+});
