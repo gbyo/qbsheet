@@ -40,7 +40,7 @@ test('practice requires its named starters, keeps mistakes editable, and advance
   render(<PracticeScreen onHome={vi.fn()} />);
   const prompt = screen.getByLabelText('Starting lineups');
   const left = within(prompt).getByLabelText('Ninety Six starters');
-  const right = within(prompt).getByLabelText('Riverton Prep starters');
+  const right = within(prompt).getByLabelText('Greenwood starters');
   const start = within(prompt).getByText('Start game');
 
   fireEvent.click(within(left).getByLabelText('Gibson'));
@@ -48,7 +48,7 @@ test('practice requires its named starters, keeps mistakes editable, and advance
   expect(start.hasAttribute('disabled')).toBe(true);
 
   for (const name of ['Jeremy', 'Owen', 'Olivia']) fireEvent.click(within(left).getByLabelText(name));
-  for (const name of ['Sam', 'Efren', 'Bella']) fireEvent.click(within(right).getByLabelText(name));
+  for (const name of ['Phillip', 'Efren', 'Bella']) fireEvent.click(within(right).getByLabelText(name));
   expect(start.hasAttribute('disabled')).toBe(false);
   fireEvent.click(start);
 
@@ -77,9 +77,9 @@ test('practice restores the guide checkpoint after the screen is remounted', asy
   const first = render(<PracticeScreen onHome={vi.fn()} />);
   const prompt = screen.getByLabelText('Starting lineups');
   const left = within(prompt).getByLabelText('Ninety Six starters');
-  const right = within(prompt).getByLabelText('Riverton Prep starters');
+  const right = within(prompt).getByLabelText('Greenwood starters');
   for (const name of ['Gibson', 'Jeremy', 'Owen', 'Lachlan']) fireEvent.click(within(left).getByLabelText(name));
-  for (const name of ['Tucker', 'Sam', 'Efren', 'Valerie']) fireEvent.click(within(right).getByLabelText(name));
+  for (const name of ['Tucker', 'Phillip', 'Efren', 'Valerie']) fireEvent.click(within(right).getByLabelText(name));
   fireEvent.click(within(prompt).getByText('Start game'));
 
   await vi.waitFor(() => expect(screen.getByText('Reader: “Power, Gibson on Ninety Six.”')).toBeTruthy());
