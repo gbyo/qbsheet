@@ -1,9 +1,9 @@
 /**
  * The scorekeeping screen.
  *
- * It shows a tournament, a round, a room and two teams. It does not show a product name, a packet, a
- * question, or a reader control, because the scorekeeper is sitting next to somebody reading from
- * paper and none of those things exist for them.
+ * It shows the product mark, tournament, round, room and two teams. It does not show a question or a
+ * reader control, because the scorekeeper is sitting next to somebody reading from paper and none
+ * of those things exist for them.
  *
  * # It is never asked what it is scoring
  *
@@ -19,6 +19,7 @@
  * reaching tournament control.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import BrandLogo from '../BrandLogo';
 import { LeftOrRight } from '../scoring/types';
 import { HelpRequestCategory } from '../app/HelpRequests';
 import { IScorekeeperAnswerType, IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
@@ -786,13 +787,18 @@ export default function Scorer(props: IScorerProps) {
   return (
     <div className="scorer">
       <header className="scorer-header">
-        <div className="scorer-header-main">
-          <h1 className="scorer-tournament">{tournamentName}</h1>
-          <p className="scorer-context">
-            {roundName}
-            {roomName && <> · {roomName}</>}
-            {packetName && <> · {packetName}</>}
-          </p>
+        <div className="scorer-header-brand">
+          <div className="scorer-brand" aria-label="QBSheet">
+            <BrandLogo className="scorer-brand-logo" />
+          </div>
+          <div className="scorer-header-main">
+            <h1 className="scorer-tournament">{tournamentName}</h1>
+            <p className="scorer-context">
+              {roundName}
+              {roomName && <> · {roomName}</>}
+              {packetName && <> · {packetName}</>}
+            </p>
+          </div>
         </div>
         <div className="scorer-header-side">
           <span className="scorer-progress">{progress}</span>

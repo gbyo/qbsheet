@@ -39,6 +39,32 @@
   border-bottom: 1px solid var(--room-border);
 }
 
+.scorer-header-brand {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 12px;
+}
+
+.scorer-brand {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  padding-right: 12px;
+  border-right: 1px solid var(--room-border);
+  line-height: 0;
+}
+
+.scorer-brand-logo {
+  display: block;
+  width: 104px;
+  height: auto;
+}
+
+.scorer-header-main {
+  min-width: 0;
+}
+
 .scorer-tournament {
   margin: 0;
   font-size: 16px;
@@ -758,6 +784,14 @@ div.scorer-banner .scorer-text-action {
     width: 100%;
     justify-content: space-between;
     gap: 8px;
+  }
+
+  .scorer-header-brand {
+    width: 100%;
+  }
+
+  .scorer-brand-logo {
+    width: 92px;
   }
 
   .scorer-footer {

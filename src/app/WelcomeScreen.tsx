@@ -18,6 +18,7 @@
  * involves the network, and it is offered whether or not anything is reachable.
  */
 import { FormEvent, useState } from 'react';
+import BrandLogo from '../BrandLogo';
 import { IStoredGameRecord, isActive } from '../game/GameStore';
 import { IGamePackage, gamePackageIdentity, gamePackageLabel, gamePackageMatchup } from '../game/GamePackage';
 import deriveGame from '../scoring/deriveGame';
@@ -97,7 +98,9 @@ export default function WelcomeScreen(props: {
     <main className="shell welcome-shell">
       <header className="shell-header shell-header-row">
         <div>
-          <h1 className="shell-title">QBSheet</h1>
+          <h1 className="shell-title shell-brand-title">
+            <BrandLogo className="shell-brand-logo" />
+          </h1>
           <p className="shell-subtitle">A focused, offline-ready scoresheet for quiz bowl.</p>
         </div>
         <button type="button" className="shell-button shell-button-quiet" onClick={onReadiness}>
