@@ -59,6 +59,10 @@ body {
   padding: 32px 16px 48px;
 }
 
+.welcome-shell {
+  max-width: 760px;
+}
+
 .shell-centered {
   min-height: 60vh;
   display: flex;
@@ -227,6 +231,82 @@ body {
   margin-top: 8px;
 }
 
+/* The home screen gives the two ordinary ways into a game equal, explicit names. The shared
+ * border reads as one compact choice rather than a pair of promotional cards. */
+.welcome-start-options {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(210px, 2fr);
+  border: 1px solid var(--room-border-strong);
+  background: var(--room-surface);
+}
+
+.welcome-start-option {
+  min-width: 0;
+  padding: 14px 16px 16px;
+}
+
+.welcome-start-option + .welcome-start-option {
+  border-left: 1px solid var(--room-border);
+}
+
+.welcome-option-heading {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.welcome-option-copy,
+.welcome-option-note,
+.welcome-practice-copy {
+  margin: 4px 0 12px;
+  font-size: 13px;
+  color: var(--room-muted);
+}
+
+.welcome-option-note {
+  margin: 8px 0 0;
+}
+
+.welcome-connect-form {
+  max-width: none;
+  gap: 4px;
+}
+
+.welcome-connect-fields {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.welcome-connect-fields .shell-input {
+  min-width: 0;
+}
+
+.welcome-connect-fields .shell-button {
+  flex: 0 0 auto;
+  align-self: stretch;
+  margin-top: 0;
+}
+
+.welcome-practice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.welcome-practice .shell-heading {
+  margin-bottom: 4px;
+}
+
+.welcome-practice-copy {
+  margin: 0;
+}
+
+.welcome-practice .shell-button {
+  flex: 0 0 auto;
+}
+
 .file-open-input {
   display: none;
 }
@@ -234,6 +314,34 @@ body {
 .file-open.is-dragging {
   outline: 2px dashed var(--room-accent);
   outline-offset: 4px;
+}
+
+@media (max-width: 620px) {
+  .welcome-start-options {
+    grid-template-columns: 1fr;
+  }
+
+  .welcome-start-option + .welcome-start-option {
+    border-top: 1px solid var(--room-border);
+    border-left: 0;
+  }
+
+  .welcome-practice {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
+}
+
+@media (max-width: 420px) {
+  .welcome-connect-fields {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .welcome-connect-fields .shell-button {
+    align-self: flex-start;
+  }
 }
 
 /* #endregion */

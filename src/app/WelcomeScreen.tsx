@@ -92,9 +92,12 @@ export default function WelcomeScreen(props: {
   };
 
   return (
-    <main className="shell">
+    <main className="shell welcome-shell">
       <header className="shell-header shell-header-row">
-        <h1 className="shell-title">QBSheet</h1>
+        <div>
+          <h1 className="shell-title">QBSheet</h1>
+          <p className="shell-subtitle">A focused, offline-ready scoresheet for quiz bowl.</p>
+        </div>
         <button type="button" className="shell-button shell-button-quiet" onClick={onReadiness}>
           Check this device
         </button>
@@ -126,43 +129,58 @@ export default function WelcomeScreen(props: {
         </section>
       )}
 
-      <section className="shell-section">
-        <h2 className="shell-heading">New to QBSheet?</h2>
-        <p className="shell-hint">
-          Score a guided practice game with the real scoresheet. No game file or tournament-control server is needed.
-        </p>
-        <button type="button" className="shell-button is-primary" onClick={onPractice}>
+      <section className="shell-section welcome-start">
+        <h2 className="shell-heading">Start scoring</h2>
+        <div className="welcome-start-options">
+          <section className="welcome-start-option" aria-labelledby="welcome-control-heading">
+            <h3 id="welcome-control-heading" className="welcome-option-heading">
+              Connect to tournament control
+            </h3>
+            <p className="welcome-option-copy">Connect this room to receive its game and send back the result.</p>
+            <form className="connect-form welcome-connect-form" onSubmit={submitAddress}>
+              <label className="shell-label" htmlFor="control-address">
+                Tournament control address
+              </label>
+              <div className="welcome-connect-fields">
+                <input
+                  id="control-address"
+                  className="shell-input"
+                  type="text"
+                  inputMode="url"
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder="http://"
+                  value={address}
+                  onChange={(event) => setAddress(event.target.value)}
+                />
+                <button type="submit" className="shell-button is-primary">
+                  Connect
+                </button>
+              </div>
+            </form>
+            {rememberedRoom && <p className="welcome-option-note">Last paired as {rememberedRoom}.</p>}
+          </section>
+
+          <section className="welcome-start-option" aria-labelledby="welcome-file-heading">
+            <h3 id="welcome-file-heading" className="welcome-option-heading">
+              Open a game file
+            </h3>
+            <p className="welcome-option-copy">Open a QBJ or QBG file provided by tournament staff.</p>
+            <GameFileOpen onOpen={openPackage} />
+          </section>
+        </div>
+      </section>
+
+      <section className="shell-section welcome-practice">
+        <div>
+          <h2 className="shell-heading">New to QBSheet?</h2>
+          <p className="welcome-practice-copy">
+            Learn the workflow with a guided game using the real scoresheet. No setup needed.
+          </p>
+        </div>
+        <button type="button" className="shell-button" onClick={onPractice}>
           Practice scoring
         </button>
-      </section>
-
-      <section className="shell-section">
-        <h2 className="shell-heading">Connect to tournament control</h2>
-        <form className="connect-form" onSubmit={submitAddress}>
-          <label className="shell-label" htmlFor="control-address">
-            Tournament control address
-          </label>
-          <input
-            id="control-address"
-            className="shell-input"
-            type="text"
-            inputMode="url"
-            autoComplete="off"
-            spellCheck={false}
-            placeholder="http://"
-            value={address}
-            onChange={(event) => setAddress(event.target.value)}
-          />
-          <button type="submit" className="shell-button is-primary">
-            Connect
-          </button>
-        </form>
-        {rememberedRoom && <p className="shell-hint">This device last paired as {rememberedRoom}.</p>}
-      </section>
-
-      <section className="shell-section">
-        <h2 className="shell-heading">Have a game file instead?</h2>
-        <GameFileOpen onOpen={openPackage} />
       </section>
 
       <RecentGames records={completed} onOpen={(record) => void onOpenRecord(record)} />
