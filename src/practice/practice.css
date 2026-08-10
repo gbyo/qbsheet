@@ -3,9 +3,29 @@
   min-height: 100vh;
 }
 
+/*
+ * Room for the guide.
+ *
+ * The panel is fixed to the bottom-right corner, and the bottom-right corner of this screen is the
+ * Recent column and the lower rows of the right-hand team — including the rulings a step is telling
+ * somebody to press. A guide that covers the button it is pointing at is worse than no guide.
+ *
+ * Which way out of that depends entirely on how much screen there is. Wide enough and the scoresheet
+ * can simply be given a column back (see the 1500px query below, and the matching default in
+ * `PracticeCoach`); narrower than that, taking 392px off two team panels would squeeze the player
+ * names into ellipses, so the guide starts minimized instead and the space it needs is at the bottom.
+ */
 .practice-mode > .scorer {
   min-height: calc(100vh - 31px);
+  padding-bottom: 126px;
   background: var(--room-surface, #fff);
+}
+
+@media (min-width: 1500px) {
+  .practice-mode > .scorer {
+    padding-inline-end: 392px;
+    padding-bottom: 0;
+  }
 }
 
 .practice-banner {
@@ -149,6 +169,16 @@
   padding: 11px 12px;
   border-left: 3px solid var(--room-border-strong, #b9b9b6);
   background: var(--room-surface-sunken, #f7f7f6);
+}
+
+/* The half of the step that is an instruction rather than a report, marked as such. */
+.practice-call.is-instruction {
+  border-left-color: var(--room-accent, #2868b2);
+  background: var(--room-info-bg, #eef5ff);
+}
+
+.practice-call.is-instruction p {
+  font-weight: 600;
 }
 
 .practice-call > span {
@@ -315,11 +345,6 @@
 }
 
 @media (max-width: 1050px) {
-  .practice-mode > .scorer {
-    min-height: calc(100vh - 31px);
-    padding-bottom: 126px;
-  }
-
   .practice-coach,
   .practice-coach-collapsed {
     inset: auto 12px 12px auto;

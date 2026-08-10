@@ -96,6 +96,34 @@ function syncBonus(bonus: IEditableBonus, parts: IEditableBonus['parts']): IEdit
   };
 }
 
+/**
+ * Whether this browser has ever had the editor explained to it.
+ *
+ * Somebody opening a question for the first time has no way to know that this screen is the whole
+ * cycle rather than the one buzz they clicked, that the score column is a preview and not a change
+ * already made, or that leaving costs them nothing. Everybody after the first time knows, and a
+ * permanent paragraph at the top of a correction is a paragraph a scorekeeper reads past. So: said
+ * once, dismissible, remembered.
+ */
+const editorIntroSeenKey = 'qbsheet.questionEditor.introSeen.v1';
+
+function readIntroSeen(): boolean {
+  try {
+    return window.localStorage.getItem(editorIntroSeenKey) === 'true';
+  } catch {
+    // Without storage the note simply shows again. That is the harmless direction to fail in.
+    return false;
+  }
+}
+
+function rememberIntroSeen(): void {
+  try {
+    window.localStorage.setItem(editorIntroSeenKey, 'true');
+  } catch {
+    // The note is a courtesy; failing to remember it must never stop a correction.
+  }
+}
+
 /** Which team, if any, this proposed cycle says converted the tossup. */
 function conversionTeam(model: IEditableQuestion, format: IScorekeeperFormat): 'left' | 'right' | undefined {
   return conversion(model, format)?.team;
@@ -123,9 +151,11 @@ export default function QuestionEditor(props: {
   initial: IEditableQuestion;
   onSave: (question: IEditableQuestion) => boolean;
   onCancel: () => void;
+  /** What leaving without saving actually does, which depends on where the editor was opened from. */
+  cancelLabel?: string;
   onOpenReplacement?: () => void;
 }) {
-  const { game, format, initial, onSave, onCancel, onOpenReplacement } = props;
+  const { game, format, initial, onSave, onCancel, cancelLabel = 'Cancel', onOpenReplacement } = props;
   const [model, setModel] = useState<IEditableQuestion>(() => ({
     ...initial,
     attempts: initial.attempts.map((attempt) => ({ ...attempt })),
@@ -135,6 +165,7 @@ export default function QuestionEditor(props: {
   const [bonusDrafts, setBonusDrafts] = useState<IBonusDrafts>({ parts: {} });
   const [showMore, setShowMore] = useState(false);
   const [showParts, setShowParts] = useState(() => initial.bonus?.parts !== undefined);
+  const [showIntro, setShowIntro] = useState(() => !readIntroSeen());
 
   // A correction makes an old validation message stale. Clear it as soon as the scorekeeper edits.
   useEffect(() => setErrors([]), [model]);
@@ -257,6 +288,32 @@ export default function QuestionEditor(props: {
       }}
     >
       <h3 className="scorer-question-title">Question {model.questionNumber}</h3>
+      {showIntro && (
+        <aside className="scorer-question-intro" aria-label="About the question editor">
+          <p className="scorer-question-intro-title">First time here?</p>
+          <ul>
+            <li>
+              This is the whole of Question {model.questionNumber} — every buzz on it and its bonus — not just the one
+              action you selected.
+            </li>
+            <li>Nothing changes until you choose Save correction. Every later question is then worked out again.</li>
+            <li>
+              To leave it exactly as it is, use <strong>{cancelLabel}</strong> below or <strong>Close</strong> at the top
+              right. Escape works too.
+            </li>
+          </ul>
+          <button
+            type="button"
+            className="scorer-text-action"
+            onClick={() => {
+              rememberIntroSeen();
+              setShowIntro(false);
+            }}
+          >
+            Got it — don’t show this again
+          </button>
+        </aside>
+      )}
       <table className="scorer-question-score" aria-label={`Question ${model.questionNumber} score change`}>
         <thead>
           <tr>
@@ -620,7 +677,7 @@ export default function QuestionEditor(props: {
       )}
       <div className="scorer-question-footer">
         <button type="button" className="scorer-action" onClick={onCancel}>
-          Cancel
+          {cancelLabel}
         </button>
         <button type="submit" className="scorer-submit">
           Save correction

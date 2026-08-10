@@ -327,9 +327,76 @@ div.scorer-banner .scorer-text-action {
 .scorer-player {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
   padding: 7px 0;
   border-bottom: 1px solid var(--room-border);
+}
+
+/*
+ * The substitution the row can make on its own.
+ *
+ * Deliberately the quietest control on the line. It is next to the buttons that score a tossup, and
+ * anything that looks as pressable as +10 is something a thumb finds by accident mid-question.
+ */
+.scorer-sub-action {
+  flex: none;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--room-muted);
+  background: transparent;
+  border: 1px solid var(--room-border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.scorer-sub-action:hover:not(:disabled) {
+  color: var(--room-accent);
+  border-color: var(--room-accent);
+}
+
+.scorer-sub-action.is-open {
+  color: var(--room-accent);
+  border-color: var(--room-accent);
+  background: var(--room-info-bg);
+}
+
+.scorer-sub-action:disabled {
+  color: var(--room-faint);
+  cursor: not-allowed;
+}
+
+.scorer-sub-picker {
+  flex-basis: 100%;
+  padding: 9px 10px;
+  background: var(--room-surface-sunken);
+  border: 1px solid var(--room-border);
+  border-radius: 5px;
+}
+
+.scorer-sub-picker-title {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.scorer-sub-picker-title span {
+  font-weight: 400;
+  color: var(--room-muted);
+}
+
+.scorer-sub-picker-empty {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--room-muted);
+}
+
+.scorer-sub-picker-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
 }
 
 .scorer-player:last-child {
@@ -348,9 +415,18 @@ div.scorer-banner .scorer-text-action {
   text-align: right;
 }
 
+/*
+ * The name, with a floor under it.
+ *
+ * This used to be `flex: 1; min-width: 0`, which made it the only thing in the row that would give
+ * ground: the ruling buttons held their 62px columns and the name shrank to two characters and an
+ * ellipsis. A scorekeeper cannot use a row they cannot read, and the buttons already have the right
+ * answer for a row that will not fit — `.scorer-answers` scrolls. So the name keeps enough width for
+ * a first name, and the pressure goes where it was designed to go.
+ */
 .scorer-player-name {
-  flex: 1;
-  min-width: 0;
+  flex: 1 1 auto;
+  min-width: 5.5em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -944,13 +1020,32 @@ div.scorer-banner .scorer-text-action {
   max-width: 820px;
 }
 
+/*
+ * Pinned, because it holds the way out. The panel scrolls as one box, and a Close that scrolls away
+ * with the title leaves a scorekeeper halfway down a long correction with no exit on screen.
+ */
 .scorer-dialog-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
   padding: 12px 16px;
+  background: var(--room-surface);
   border-bottom: 1px solid var(--room-border);
+}
+
+.scorer-dialog-close {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.scorer-dialog-close-glyph {
+  font-size: 13px;
+  line-height: 1;
 }
 
 .scorer-dialog-title {
@@ -1510,6 +1605,35 @@ div.scorer-banner .scorer-text-action {
   margin: 0;
   font-size: 16px;
   font-weight: 600;
+}
+
+/* Said once to somebody who has never opened a correction before, then dismissed for good. */
+.scorer-question-intro {
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--room-text);
+  background: var(--room-info-bg);
+  border: 1px solid var(--room-border);
+  border-radius: 5px;
+}
+
+.scorer-question-intro-title {
+  margin: 0 0 6px;
+  font-weight: 650;
+}
+
+.scorer-question-intro ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.scorer-question-intro li + li {
+  margin-top: 4px;
+}
+
+.scorer-question-intro .scorer-text-action {
+  margin-top: 9px;
 }
 
 .scorer-question-score {
