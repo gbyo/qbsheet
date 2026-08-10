@@ -15,8 +15,9 @@
  * `PracticeCoach`); narrower than that, taking 392px off two team panels would squeeze the player
  * names into ellipses, so the guide starts minimized instead and the space it needs is at the bottom.
  */
+/* The full viewport: there is no banner above the scoresheet any more to subtract. */
 .practice-mode > .scorer {
-  min-height: calc(100vh - 31px);
+  min-height: 100vh;
   padding-bottom: 126px;
   background: var(--room-surface, #fff);
 }
@@ -26,20 +27,6 @@
     padding-inline-end: 392px;
     padding-bottom: 0;
   }
-}
-
-.practice-banner {
-  position: sticky;
-  top: 0;
-  z-index: 50;
-  min-height: 31px;
-  padding: 6px 16px;
-  border-bottom: 1px solid var(--room-border, #d7d7d7);
-  background: var(--room-info-bg, #eef5ff);
-  color: var(--room-muted, #5f6368);
-  font-size: 12px;
-  font-weight: 500;
-  text-align: center;
 }
 
 .practice-coach,
@@ -355,10 +342,6 @@
 }
 
 @media (max-width: 520px) {
-  .practice-banner {
-    padding-inline: 10px;
-  }
-
   .practice-coach,
   .practice-coach-collapsed {
     inset: auto 8px 58px;

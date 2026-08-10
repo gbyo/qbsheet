@@ -107,3 +107,14 @@ test('restart and leave are protected from an accidental single click', () => {
   fireEvent.click(screen.getByText('Leave now'));
   expect(onHome).toHaveBeenCalledOnce();
 });
+
+test('the one word of status says Practice, and no banner repeats what the title says', () => {
+  render(<PracticeScreen onHome={vi.fn()} />);
+
+  // "Connected" would be a claim about a server nobody asked — practice has no tournament control.
+  const status = screen.getByLabelText('Practice. Show connection detail');
+  expect(status.textContent).toBe('Practice');
+  expect(screen.queryByText('Connected')).toBeNull();
+  // The header already reads QBSheet Practice, so the strip that used to say it again is gone.
+  expect(screen.queryByText(/Local only — not sent or added to Recent Games/)).toBeNull();
+});

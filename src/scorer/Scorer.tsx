@@ -105,6 +105,14 @@ export interface IScorerProps {
   /** Whoever is signed in to this room browser. Recorded on the result as the scorekeeper. */
   operatorName?: string;
   connection: RoomConnectionState;
+  /**
+   * What the status pill says, when the game's standing is not a network fact.
+   *
+   * Practice has no tournament control behind it, so "Connected" would be a claim about a server
+   * nobody asked. `connection` still drives the banners, the roster sync and the detail dialog —
+   * a practice game really is saving locally — and only the word in the header changes.
+   */
+  statusLabel?: string;
   /** Set when the room is degraded: the game is real, the room state behind it is stale. */
   degradedMessage?: string;
   /** False when this browser could not save the game locally. */
@@ -189,6 +197,7 @@ export default function Scorer(props: IScorerProps) {
     procedure,
     operatorName,
     connection,
+    statusLabel,
     degradedMessage,
     saved,
     onSubmit,
@@ -868,14 +877,14 @@ export default function Scorer(props: IScorerProps) {
           <button
             type="button"
             className={connectionClass(connection)}
-            aria-label={`Connection: ${connectionLabel(connection)}. Show connection detail`}
+            aria-label={`${statusLabel ?? `Connection: ${connectionLabel(connection)}`}. Show connection detail`}
             onClick={() => {
               setDetailNow(Date.now());
               setDialog('connection');
             }}
           >
             <span className="scorer-dot" aria-hidden="true" />
-            {connectionLabel(connection)}
+            {statusLabel ?? connectionLabel(connection)}
           </button>
         </div>
       </header>
