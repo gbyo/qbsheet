@@ -127,6 +127,14 @@ package entry point is intentionally browser-independent; Fruity pins this repos
 dependency while the shared package is stabilized for a registry release. Its room host remains
 desktop-specific, but its scoring engine and portable result projection come from QBSheet.
 
+## Contributing
+
+Bug reports, testing on real tournaments, and code are all welcome. See
+[`CONTRIBUTING.md`](CONTRIBUTING.md) for setup, the checks to run before a pull request, the test
+layout, the offline-first constraints, and the rules for changing the specifications in `docs/`.
+Participation is governed by the [Code of Conduct](CODE_OF_CONDUCT.md); vulnerabilities go through
+[`SECURITY.md`](SECURITY.md) rather than a public issue.
+
 ## License and attribution
 
 This project remains available under the GNU Affero General Public License, version 3 or later; see

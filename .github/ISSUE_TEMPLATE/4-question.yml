@@ -1,0 +1,39 @@
+name: Question
+description: Ask how QBSheet, QBTCP, or the QBJ profile works. ❓
+labels: ['question']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Worth checking first: the [README](https://github.com/gbyo/qbsheet/blob/main/README.md) for the
+        architecture and hosting, [CONTRIBUTING.md](https://github.com/gbyo/qbsheet/blob/main/CONTRIBUTING.md)
+        for setup and tests, and `docs/` for the protocol and file formats. Ask here for anything they
+        do not answer — including "is this the intended behavior?" before filing it as a bug.
+
+        **Do not paste room access tokens, session tokens, or pairing codes.** This issue is public.
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: What you have already read or tried, and what you are ultimately trying to accomplish.
+
+  - type: dropdown
+    id: role
+    attributes:
+      label: What are you doing with QBSheet?
+      description: Optional. It changes what a useful answer looks like.
+      options:
+        - Running or preparing a tournament
+        - Scoring games as a moderator or scorekeeper
+        - Hosting or deploying the scoresheet
+        - Implementing QBTCP or QBJ in other software
+        - Working on QBSheet itself
+        - Something else

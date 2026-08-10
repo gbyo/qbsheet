@@ -1,0 +1,79 @@
+name: Feature request
+description: Suggest something the scoresheet should do. 🎉
+labels: ['enhancement']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The most useful requests describe what a scorekeeper was trying to do in a room and what got in
+        the way, rather than a specific control to add.
+
+        Two things to check first: a change to the **QBTCP protocol or the QBJ profile** should use the
+        *Protocol or format change* form instead, and desktop statkeeping, Match Plan, Tournament
+        Control, and reports belong in [`gbyo/fruity`](https://github.com/gbyo/fruity/issues).
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Opening a QBJ or game file
+        - Scoring a game (buzzes, bonuses, lineups, clock)
+        - Connected tournament-control workflow
+        - Recovery and offline persistence
+        - Practice mode
+        - PWA install and static hosting
+        - Accessibility
+        - Something else / not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do, and what makes it slow, awkward, or error-prone today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like QBSheet to do
+    validations:
+      required: true
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: How you handle it now
+
+  - type: input
+    id: context
+    attributes:
+      label: Room context
+      description: Optional, but helps. The devices your rooms use, and whether they score connected or from files.
+      placeholder: 12 rooms of school Chromebooks, connected, one moderator scoring alone.
+
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Does this fit the offline-first design?
+      description: >
+        QBSheet ships as a static site with no backend, and scores with no network. A request that needs
+        a server, an account, or an external service is not automatically out of scope, but say so here.
+      options:
+        - label: This works with no backend and no network connection.
+          required: false
+        - label: This would need a server, an account, or an external service.
+          required: false
+
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Would you like to help?
+      options:
+        - label: I would be willing to test this before release.
+          required: false
+        - label: I would be willing to work on this.
+          required: false

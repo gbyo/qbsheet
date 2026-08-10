@@ -1,0 +1,123 @@
+name: Bug report
+description: The scoresheet is broken or scores something incorrectly. 🐞
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Do not paste room access tokens, session tokens, or pairing codes into this issue.** It is public.
+        Scrub rosters and team names too if the tournament data is not already public.
+
+        If this is a security vulnerability, close this form and follow
+        [SECURITY.md](https://github.com/gbyo/qbsheet/blob/main/SECURITY.md) instead.
+
+  - type: checkboxes
+    id: prerequisites
+    attributes:
+      label: Before you file
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: I have removed any tokens, pairing codes, or private tournament data from this report.
+          required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Opening a QBJ or game file
+        - Scoring a game (buzzes, bonuses, lineups, clock)
+        - Scoring math or the QBJ that gets written
+        - Connected to tournament control (QBTCP)
+        - Recovery, offline persistence, or a reload losing work
+        - Practice mode
+        - PWA install, service worker, or static hosting
+        - Something else / not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: mode
+    attributes:
+      label: How was the game being scored?
+      options:
+        - File-only — opened a QBJ, no server
+        - Connected — paired to tournament control
+        - Practice mode
+        - Not applicable
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What went wrong, including anything the scoresheet displayed.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: >
+        Number them. For a scoring bug, the exact sequence matters — buzzes, neg, bonus parts,
+        substitutions, question corrections, undo.
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and device
+      description: The device that was actually in the room, if that is where it happened.
+      placeholder: Chromebook, Chrome 132 / iPad, Safari 18 / Windows 11, Edge 131
+    validations:
+      required: true
+
+  - type: input
+    id: deployment
+    attributes:
+      label: Where QBSheet was running from
+      description: The deployed URL, "local `npm start`", or the commit you built from. No credentials.
+      placeholder: https://example.github.io/qbsheet/, or local npm start at commit 112db21
+    validations:
+      required: true
+
+  - type: textarea
+    id: files
+    attributes:
+      label: The QBJ involved
+      description: >
+        If a file is part of it, attach the assignment or result QBJ — but only if the roster data can
+        be public. Otherwise say you have one and a maintainer will arrange a private copy. A partial
+        QBJ from **Game → Download current QBJ** is often the fastest way to reproduce a scoring bug.
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Console output
+      description: Anything in the browser devtools console, if you were able to check.
+      render: text
+
+  - type: checkboxes
+    id: impact
+    attributes:
+      label: Impact
+      options:
+        - label: This happened during a live tournament.
+          required: false
+        - label: Scored data was lost or could not be recovered.
+          required: false
