@@ -23,9 +23,8 @@ receive an assignment in that envelope.
 }
 ```
 
-`2.1.1` is the QBJ serialization version that the reference tournament-control implementation
-supports. See `validQbjVersions` in Fruity's `QbjUtils.ts`. QBSheet writes this version. QBSheet
-refuses an unrecognised version with a plain message, and it does not guess at the differences.
+This profile supports QBJ serialization version `2.1.1`. QBSheet writes this version. QBSheet refuses
+an unrecognised version with a plain message, and it does not guess at the differences.
 
 The media type for these documents is:
 

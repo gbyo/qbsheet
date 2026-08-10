@@ -135,9 +135,7 @@ model".
 This endpoint exchanges a short code that a person typed for a room token. `roomId` is optional, and
 it disambiguates a code that is not globally unique.
 
-```json
-{ "roomId": "room-204", "roomName": "Room 204", "token": "<opaque room token>" }
-```
+    { "roomId": "room-204", "roomName": "Room 204", "token": "<opaque room token>" }
 
 Pairing is the only endpoint that turns a memorable secret into a capability. Implementations MUST do
 all of the following:
@@ -228,9 +226,7 @@ One session has one writer. The device that holds writer status can write snapsh
 result. Another device with the same session token can read, and the server refuses its write with
 `409`:
 
-```json
-{ "error": "Another device is scoring this game.", "writer_device": "…", "can_take_over": true }
-```
+    { "error": "Another device is scoring this game.", "writer_device": "…", "can_take_over": true }
 
 A takeover is explicit, and a person starts it:
 
@@ -247,20 +243,25 @@ devices leaves both of them with the belief that they are authoritative.
 
     PUT /qbtcp/v1/sessions/{id}/progress   (session token, writer)
 
-The body is the current game state as a QBJ `Match` document. See the profile document.
+The request body is a progress envelope with content type:
+
+    application/json
+
+Its `match` member is the current game state as a QBJ `Match` document. Its `sequence` member is
+transport metadata and is not part of the QBJ `Match`:
+
+    { "sequence": 41, "match": { ... } }
 
 Progress is a **snapshot**, not a delta. Each write replaces the last one. A client that was offline
 sends its current state, and it does not replay what it missed.
 
 Snapshots are therefore idempotent, and a client can coalesce them freely. A client SHOULD collapse a
 queue of snapshots to the newest one. A client MUST NOT let a stale queued snapshot overwrite a newer
-accepted one. Servers SHOULD accept an out-of-order arrival by preference for the higher sequence:
-
-    { "sequence": 41, "match": { ... } }
+accepted one. Servers SHOULD accept an out-of-order arrival by preference for the higher sequence.
 
 `sequence` is an integer that the client assigns. It increases monotonically inside one session. A
-server that receives a sequence lower than the one it holds MUST discard the body and respond `200`.
-The client is late rather than wrong, and an error response would cause a pointless retry.
+server that receives a sequence lower than the one it holds MUST discard that snapshot and respond
+`200`. The client is late rather than wrong, and an error response would cause a pointless retry.
 
 Progress delivery is best-effort. A failed snapshot MUST NOT block the scoring, surface as a scoring
 error, or discard local state.
@@ -273,16 +274,16 @@ The body is the completed game as a QBJ document, with content type
 `application/vnd.quizbowl.qbj+json`. It is the same document that the scoresheet would download as
 `*.result.qbj`, with nothing added and nothing removed.
 
-```json
-{ "accepted": true, "match_id": "sm-4471", "fingerprint": "…", "duplicate": false }
-```
+    { "accepted": true, "match_id": "sm-4471", "fingerprint": "…", "duplicate": false }
 
 `duplicate: true` means that this exact statistical result is already on record. It is the correct
 response to a retry, and it is not an error.
 
-Result submission MUST be idempotent on the pair of `Match.id` and `fingerprint`. A client that
-retries after a timeout must not create a second match. See "Result identity and deduplication" in
-the profile document.
+Result submission MUST use the pair of `Tournament.id` and `Match.id` as the game identity, together
+with the statistical fingerprint. The tournament identifier scopes the match identifier, so identical
+`Match.id` values in different tournaments MUST NOT collide. The fingerprint distinguishes an
+identical retry from a conflicting result for the same game. A client that retries after a timeout
+must not create a second match. See "Result identity and deduplication" in the profile document.
 
 A scoresheet MUST NOT treat acceptance over QBTCP as a reason to delete its local copy, or as a reason
 to stop offering the result for manual download.
@@ -321,7 +322,7 @@ display that string without a change.
 | Status | Meaning | Client obligation |
 | --- | --- | --- |
 | `400` | Malformed request | Do not retry unchanged |
-| `401` | Missing or invalid credential | Pair again. **MUST NOT discard the game in progress.** |
+| `401` | Missing or invalid credential | For a room-token failure, pair again. For a session-token failure, reopen or resume the existing session. In both cases, keep the in-progress game and continue local scoring. |
 | `403` | Valid credential without permission, including a disallowed origin | Surface it. Do not retry in a loop. |
 | `404` | No such endpoint, session, or room | Do not retry |
 | `405` | Method not allowed | A programming error |

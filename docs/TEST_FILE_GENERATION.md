@@ -281,7 +281,7 @@ Build the valid control first, clone it, then change only the field in the secon
 | Played-game warning | Add `tossups_read`, points, or `match_questions` to one Match |
 | Partial recovery | Build a result after a few score events, before the game completes |
 | Stale assignment | Lower `_qbtcp.round_revision`, and preserve the Match identity |
-| Unknown extension | Add an unrelated underscore-prefixed object. Standard QBJ still parses. |
+| Unknown extension | Append `{ "type": "_custom", "data": {} }` as an independent entry in top-level `objects`. The QBJ shape and assignment parser still accept the document. This differs from an underscore-prefixed extension field on `Match`. |
 | Legacy package failure | Override one field on `validPackage()`, for example `version: 2` |
 | Fruity duplicate backup | Import the identical result twice, with an unchanged Match identifier and fingerprint |
 | Fruity result conflict | Keep the Match identity, and change a score-bearing field |
