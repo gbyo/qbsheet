@@ -151,4 +151,18 @@ describe('whole-scoresheet validation', () => {
 
     expect(validation.blockers.map((problem) => problem.code)).toContain('invalid-procedure-transition');
   });
+
+  test('a timed 0–0 regulation can enter overtime on the first valid event boundary', () => {
+    const rules = new ScoringRules(CommonRuleSets.NaqtTimed);
+    rules.maximumPlayersPerTeam = 2;
+    const format = scoringRulesToScorekeeperFormat(rules);
+    const events: ScoreEvent[] = [
+      event({ type: 'end-regulation', questionNumber: 1, lastRegulationQuestion: 0 }),
+      event({ type: 'begin-overtime', questionNumber: 1 }),
+    ];
+    const validation = validateCorrectedHistory(format, setup, events);
+
+    expect(validation.blockers).toEqual([]);
+    expect(validation.game.phase).toMatchObject({ kind: 'tossup', period: 'overtime', questionNumber: 1 });
+  });
 });

@@ -214,8 +214,13 @@ export default function canApplyScoreEvent(
       if (phase.kind !== 'checkpoint' || phase.checkpoint !== expected) {
         return refuse(`The game is not at the ${expected} checkpoint.`);
       }
-      if (candidate.questionNumber !== phase.afterQuestion) {
-        return refuse(`That checkpoint belongs after Tossup ${phase.afterQuestion}.`);
+      const checkpointQuestion = Math.max(1, phase.afterQuestion);
+      if (candidate.questionNumber !== checkpointQuestion) {
+        return refuse(
+          phase.afterQuestion === 0
+            ? 'That checkpoint belongs before Tossup 1.'
+            : `That checkpoint belongs after Tossup ${phase.afterQuestion}.`,
+        );
       }
       const openProtests = game.protests.filter((protest) => protest.status === 'open');
       const policy = protestCheckpointPolicy(procedure);
