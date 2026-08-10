@@ -1,79 +1,84 @@
 # QBTCP — Quiz Bowl Tournament Control Protocol
 
-**Version 1** An application-layer HTTP/JSON protocol for communication between electronic
-quiz bowl scoresheets and tournament-control software.
+**Version 1.** An application-layer HTTP/JSON protocol for communication between electronic quiz bowl
+scoresheets and tournament-control software.
 
-## What QBTCP is not
+This document uses the key words MUST, MUST NOT, SHOULD, SHOULD NOT, and MAY in their ordinary
+specification sense.
 
-QBTCP is **not** a transport protocol. It is not a replacement for, an alternative to, or a layer
-beneath TCP/IP. The name describes what it controls — a quiz bowl tournament — not where it sits in
-the network stack. QBTCP runs over ordinary HTTP, which runs over TCP/IP like everything else. A
-QBTCP implementation opens no sockets of its own and defines no framing, no retransmission, and no
-congestion control.
+## Position in the network stack
 
-QBTCP is also not "the Fruity API". Fruity is one tournament-control implementation of QBTCP;
-QBSheet is one scoresheet implementation. Another tournament manager must be able to implement this
-specification without reading or importing either codebase, and this document is written to make
-that possible.
+QBTCP is an application-layer protocol. It runs over HTTP. HTTP runs over TCP/IP.
 
-## Scope, and the one rule that defines it
+QBTCP is not a transport protocol, and it does not replace TCP/IP. The name states what the protocol
+controls, which is a quiz bowl tournament. A QBTCP implementation opens no socket of its own. It
+defines no framing, no retransmission, and no congestion control.
 
-    QBJ is the game and tournament data.
+## Product neutrality
+
+Fruity is one tournament-control implementation of QBTCP. QBSheet is one scoresheet implementation.
+Neither product owns the protocol.
+
+Another tournament manager must be able to implement this specification without a read of either
+codebase. Report any rule that needs one of those codebases as a defect in this document.
+
+## Scope
+
+    QBJ is the game data and the tournament data.
     QBTCP is the live conversation around that data.
 
-QBTCP owns operational behavior that only exists while a tournament is running:
+QBTCP owns the operational behaviour that exists only while a tournament runs:
 
-- protocol discovery and version negotiation
-- room pairing and authentication
-- delivery of the current assignment
-- presence
-- active-writer ownership and takeover
-- in-progress snapshots
-- final result delivery
-- reconnection and server-assisted recovery
-- help requests
-- assignment lifecycle and revision handling
+- Protocol discovery and version negotiation
+- Room pairing and authentication
+- Delivery of the current assignment
+- Presence
+- Active-writer ownership and takeover
+- In-progress snapshots
+- Final result delivery
+- Reconnection and server-assisted recovery
+- Help requests
+- The assignment lifecycle and the revision of a round
 
-QBTCP does **not** define, redefine, or restate:
+QBTCP does not define, redefine, or restate any of these:
 
-- Tournament, Phase, Round, Registration, Team, Player
-- Match, MatchTeam, MatchPlayer, MatchQuestion
-- ScoringRules
-- result statistics of any kind
+- `Tournament`, `Phase`, `Round`, `Registration`, `Team`, `Player`
+- `Match`, `MatchTeam`, `MatchPlayer`, `MatchQuestion`
+- `ScoringRules`
+- Result statistics of any kind
 
-Those are QBJ. Where QBTCP needs to carry any of them, it carries a QBJ document and says so. A
-QBTCP implementation that invents a parallel team or match schema has misread this specification.
+QBJ defines them. Where QBTCP must carry one of them, it carries a QBJ document and names it as a QBJ
+document. A QBTCP implementation that defines a parallel team schema or a parallel match schema has
+misread this specification.
 
 ## Terminology
 
 | Term | Meaning |
 | --- | --- |
-| **Tournament control** | The software that owns the schedule and collects results. Fruity is one. |
+| **Tournament control** | The software that owns the schedule and collects the results. Fruity is one. |
 | **Scoresheet** | The client that scores one game at a time. QBSheet is one. |
-| **Room** | A scoring position in the tournament. The unit that pairs and authenticates. |
-| **Session** | One scoresheet's work on one assigned game. The unit that writes snapshots and a result. |
-| **Assignment** | The game a room should be scoring now, expressed as a QBJ document. |
-| **Round revision** | A monotonically increasing integer identifying which issue of a round's pairings an assignment came from. |
-| **Active writer** | The one device currently authorized to write to a session. |
-
-The key words MUST, MUST NOT, SHOULD, SHOULD NOT, and MAY are used in their ordinary
-specification sense.
+| **Room** | A scoring position in the tournament. The room is the unit that pairs and authenticates. |
+| **Session** | The work of one scoresheet on one assigned game. The session is the unit that writes snapshots and a result. |
+| **Assignment** | The game that a room must score now, expressed as a QBJ document. |
+| **Round revision** | An integer that increases monotonically. It identifies which issue of a round's pairings an assignment came from. |
+| **Active writer** | The one device that holds authorisation to write to a session. |
 
 ## Versioning
 
-The protocol version is a single integer in the path: `/qbtcp/v1/...`. It is incremented only for
-changes that a version-1 client cannot tolerate. Adding an optional response field, an optional
-request field, or a new capability is not such a change, and clients MUST ignore response fields
-they do not recognize rather than failing.
+The protocol version is a single integer in the path: `/qbtcp/v1/...`.
+
+Increment the integer only for a change that a version-1 client cannot tolerate. A new optional
+response field, a new optional request field, and a new capability are not such changes. A client MUST
+ignore a response field that it does not recognise, rather than fail on it.
 
 Version negotiation is discovery, not a handshake. A client fetches the discovery document, reads
-`version` and `capabilities`, and decides what it can do. There is no in-band upgrade.
+`version` and `capabilities`, and then decides what it can do. There is no in-band upgrade.
 
 ## Discovery
 
     GET /qbtcp/v1
 
-Unauthenticated. Response:
+This endpoint takes no credential. Response:
 
 ```json
 {
@@ -86,16 +91,18 @@ Unauthenticated. Response:
 ```
 
 `capabilities` is the authoritative statement of what this server supports. A client MUST NOT infer
-support from the absence of an error, and MUST NOT require a capability it did not see advertised.
-`qbj_version` is the QBJ serialization version this server produces and accepts.
+support from the absence of an error. A client MUST NOT require a capability that discovery did not
+advertise.
 
-Discovery carries no credential and MUST NOT reveal the schedule, room list, team list, or any
+`qbj_version` is the QBJ serialization version that this server produces and accepts.
+
+Discovery carries no credential. It MUST NOT reveal the schedule, the room list, the team list, or any
 pairing code.
 
 ## Authentication
 
-QBTCP uses **capability tokens**. A token is an opaque bearer string that grants exactly one scope,
-and there are two:
+QBTCP uses **capability tokens**. A token is an opaque bearer string. Each token grants exactly one
+scope, and there are two scopes.
 
 | Token | Scope | Header |
 | --- | --- | --- |
@@ -103,48 +110,50 @@ and there are two:
 | Session token | One session: read it, write snapshots, submit the final result, read recovery | `x-yf-session-token` |
 
 There is no user account, no password, and no server-wide read. A session token reaches exactly one
-session; changing the id in the path does not reach another room's game.
+session. A change to the identifier in the path does not reach the game of another room.
 
-Two further headers are informational, never authorizing:
+Two further headers carry information only. They never authorise an operation.
 
 | Header | Meaning |
 | --- | --- |
-| `x-yf-device-id` | Opaque per-browser identity, used for active-writer arbitration |
-| `x-yf-operator-name` | Human name of the scorekeeper, for the director's presence view |
+| `x-yf-device-id` | An opaque per-browser identity, used for active-writer arbitration |
+| `x-yf-operator-name` | The name of the scorekeeper, for the presence view of the director |
 
-> **Header naming.** The `x-yf-` prefix is retained from the pre-QBTCP implementation for
-> compatibility with deployed clients. It is historical, not a claim of ownership; a future protocol
-> version is expected to rename these. Implementations MUST treat the names as opaque strings.
+The `x-yf-` prefix comes from the implementation that this protocol replaces. The prefix is
+historical, and it is not a claim of ownership. A future protocol version is expected to rename these
+headers. Implementations MUST treat the names as opaque strings.
 
-Credentials MUST be sent as headers. They MUST NOT appear in a URL, a query string, a log line, a
-rendered UI, an error message, or any QBJ document. See "Security model".
+A client MUST send every credential as a header. A credential MUST NOT appear in a URL, a query
+string, a log line, a rendered user interface, an error message, or any QBJ document. See "Security
+model".
 
 ## Pairing
 
     POST /qbtcp/v1/pair
     { "code": "48213906", "roomId": "room-204" }
 
-Exchanges a short human-typed code for a room token. `roomId` is optional and only disambiguates
-when a code is not globally unique.
+This endpoint exchanges a short code that a person typed for a room token. `roomId` is optional, and
+it disambiguates a code that is not globally unique.
 
 ```json
 { "roomId": "room-204", "roomName": "Room 204", "token": "<opaque room token>" }
 ```
 
-Pairing is the only endpoint that turns a human-memorable secret into a capability, so it is the
-one that gets attacked. Implementations MUST:
+Pairing is the only endpoint that turns a memorable secret into a capability. Implementations MUST do
+all of the following:
 
-- rate-limit attempts per client source and return `429` when exceeded
-- return an **identical** failure for a malformed code, an unknown code, a disabled room, and a
-  code/room mismatch — a distinguishable error is an oracle for enumerating rooms
-- never include the code in a response or a log
+- Rate-limit attempts per client source, and return `429` above the limit.
+- Return an **identical** failure for a malformed code, an unknown code, a disabled room, and a
+  mismatch between the code and the room. A distinguishable error is an oracle for room enumeration.
+- Keep the code out of every response and every log.
 
-A supporting listing endpoint MAY be offered for a room picker:
+A server MAY offer a listing endpoint for a room picker:
 
     GET /qbtcp/v1/rooms
 
-It returns room ids, display names, and descriptions only. It MUST NOT return tokens or pairing
-codes, and it exists so a scorekeeper can pick "Room 204" from a list instead of typing an id.
+The response contains room identifiers, display names, and descriptions only. It MUST NOT contain a
+token or a pairing code. The endpoint exists so that a scorekeeper can choose "Room 204" from a list
+instead of a typed identifier.
 
 ## Assignment
 
@@ -154,15 +163,14 @@ codes, and it exists so a scorekeeper can pick "Room 204" from a list instead of
 
     application/vnd.quizbowl.qbj+json
 
-This is the central architectural commitment of QBTCP v1. The assignment a scoresheet receives over
-the network is semantically the same document tournament control could have written to disk as
-`*.assignment.qbj`, and both are parsed by the same parser on the client. There is no
-`NetworkAssignmentModel` and no `FileAssignmentModel`. See
-[`QBJ_ASSIGNMENT_PROFILE.md`](QBJ_ASSIGNMENT_PROFILE.md) for the document's contents.
+This is the central architectural commitment of QBTCP version 1. The assignment that a scoresheet
+receives over the network is semantically the same document that tournament control could write to
+disk as `*.assignment.qbj`. One parser on the client reads both. There is no `NetworkAssignmentModel`
+and no `FileAssignmentModel`. See [`QBJ_ASSIGNMENT_PROFILE.md`](QBJ_ASSIGNMENT_PROFILE.md) for the
+contents of the document.
 
-Operational state that is not part of the game — whether the room is blocked, what it played last,
-whether a session is already open — is **not** in the QBJ body. It travels in response headers or in
-a sibling endpoint, because putting it in the QBJ would mean inventing QBJ fields for it:
+Operational state is not part of the game, so it is not in the QBJ body. It travels in response
+headers or in a sibling endpoint, because a QBJ body would need invented QBJ fields for it.
 
     GET /qbtcp/v1/assignment/status     (room token)
 
@@ -179,15 +187,16 @@ a sibling endpoint, because putting it in the QBJ would mean inventing QBJ field
 }
 ```
 
-`state` is one of `assigned`, `none`, `blocked`, or `held`. When it is not `assigned`, the
-assignment endpoint returns `204 No Content` rather than an empty QBJ document.
+`state` is one of `assigned`, `none`, `blocked`, or `held`. When `state` is not `assigned`, the
+assignment endpoint returns `204 No Content`. It does not return an empty QBJ document.
 
 A scoresheet MUST persist the normalized assignment locally **before** any scoring depends on a
-further network call. After that point the network is optional: see "Durability expectations".
+further network call. After that point the network is optional. See "Durability requirements for a
+scoresheet".
 
-### Session resumption
+### Open a session
 
-A session token is obtained by opening a session against the current assignment:
+A client obtains a session token when it opens a session against the current assignment:
 
     POST /qbtcp/v1/sessions             (room token)
     { "match_id": "sm-4471", "device_id": "..." }
@@ -196,89 +205,98 @@ A session token is obtained by opening a session against the current assignment:
 { "session_id": "sess-9f13", "token": "<opaque session token>", "writer": true }
 ```
 
-If a session for that assignment is already open, the server returns the existing one rather than
-creating a second. Two devices scoring the same game is a real event — a Chromebook dies and a
-phone takes over — and it is resolved by writer ownership, not by refusing.
+When a session for that assignment is already open, the server returns the open session. It does not
+create a second one.
+
+Two devices on one game occurs in a real tournament, because a Chromebook can die and a phone can
+take over. Writer ownership resolves that case. A refusal does not.
 
 ## Presence
 
     GET  /qbtcp/v1/presence             (room token)
     POST /qbtcp/v1/presence             (room token)
 
-A heartbeat and a view of it. `POST` records that this device and operator are alive; `GET` returns
-what tournament control believes about the room. Presence is advisory. Losing it MUST NOT end a
-session, invalidate a token, or affect scoring.
+`POST` records that this device and this operator are alive. `GET` returns what tournament control
+believes about the room.
+
+Presence is advisory. A lost heartbeat MUST NOT end a session, invalidate a token, or affect the
+scoring.
 
 ## Writer ownership and takeover
 
-One session, one writer. The device holding writer status may write snapshots and the final result;
-another device holding the same session token may read but is refused on write with `409`:
+One session has one writer. The device that holds writer status can write snapshots and the final
+result. Another device with the same session token can read, and the server refuses its write with
+`409`:
 
 ```json
 { "error": "Another device is scoring this game.", "writer_device": "…", "can_take_over": true }
 ```
 
-Takeover is explicit and human-initiated:
+A takeover is explicit, and a person starts it:
 
     POST /qbtcp/v1/sessions/{id}/writer  (session token)
     { "device_id": "...", "take_over": true }
 
-The server transfers writer status and the previous writer learns it lost the role on its next
-write, which it MUST surface rather than silently discarding the scorekeeper's work. A client MUST
-NOT take over automatically on a failed write; automatic takeover between two live devices is how
-both of them end up believing they are authoritative.
+The server transfers writer status. The previous writer learns of the loss at its next write, and it
+MUST surface that loss rather than discard the work of the scorekeeper.
+
+A client MUST NOT take over automatically after a failed write. Automatic takeover between two live
+devices leaves both of them with the belief that they are authoritative.
 
 ## Progress
 
     PUT /qbtcp/v1/sessions/{id}/progress   (session token, writer)
 
-Body is the current game state as a QBJ Match document (see the profile). Progress is a **snapshot**,
-not a delta: each write replaces the last, and a client that has been offline sends its current
-state rather than replaying what it missed.
+The body is the current game state as a QBJ `Match` document. See the profile document.
 
-Snapshots are therefore idempotent and freely coalescable. A client SHOULD collapse queued snapshots
-to the newest and MUST NOT allow a stale queued snapshot to overwrite a newer accepted one. Servers
-SHOULD accept out-of-order arrivals by preferring the higher sequence:
+Progress is a **snapshot**, not a delta. Each write replaces the last one. A client that was offline
+sends its current state, and it does not replay what it missed.
+
+Snapshots are therefore idempotent, and a client can coalesce them freely. A client SHOULD collapse a
+queue of snapshots to the newest one. A client MUST NOT let a stale queued snapshot overwrite a newer
+accepted one. Servers SHOULD accept an out-of-order arrival by preference for the higher sequence:
 
     { "sequence": 41, "match": { ... } }
 
-`sequence` is a client-assigned monotonically increasing integer within a session. A server
-receiving a lower sequence than it already holds MUST discard it and respond `200` — the client is
-not wrong, only late, and an error would trigger a pointless retry.
+`sequence` is an integer that the client assigns. It increases monotonically inside one session. A
+server that receives a sequence lower than the one it holds MUST discard the body and respond `200`.
+The client is late rather than wrong, and an error response would cause a pointless retry.
 
-Progress delivery is best-effort by design. A failed snapshot MUST NOT block scoring, surface as a
-scoring error, or discard local state.
+Progress delivery is best-effort. A failed snapshot MUST NOT block the scoring, surface as a scoring
+error, or discard local state.
 
 ## Result
 
     POST /qbtcp/v1/sessions/{id}/result   (session token, writer)
 
-Body is the completed game as a QBJ document, content type
-`application/vnd.quizbowl.qbj+json`. This is the same document the scoresheet would download as
-`*.result.qbj`, minus nothing and plus nothing.
+The body is the completed game as a QBJ document, with content type
+`application/vnd.quizbowl.qbj+json`. It is the same document that the scoresheet would download as
+`*.result.qbj`, with nothing added and nothing removed.
 
 ```json
 { "accepted": true, "match_id": "sm-4471", "fingerprint": "…", "duplicate": false }
 ```
 
-`duplicate: true` means this exact statistical result was already recorded — the correct response to
-a retry, and not an error. Result submission MUST be idempotent on `(Match.id, fingerprint)`; a
-client that retries after a timeout must not create a second match. See "Result identity" below.
+`duplicate: true` means that this exact statistical result is already on record. It is the correct
+response to a retry, and it is not an error.
 
-Acceptance over QBTCP MUST NOT be treated by the scoresheet as a reason to delete its local copy or
+Result submission MUST be idempotent on the pair of `Match.id` and `fingerprint`. A client that
+retries after a timeout must not create a second match. See "Result identity and deduplication" in
+the profile document.
+
+A scoresheet MUST NOT treat acceptance over QBTCP as a reason to delete its local copy, or as a reason
 to stop offering the result for manual download.
 
 ## Recovery
 
     GET /qbtcp/v1/sessions/{id}/recovery   (session token)
 
-The second recovery source, for a device whose own local copy is missing or unreadable. It returns
-whatever private state the server was given, authorized by the same session capability as every
-other operation on that session. There is no room-wide or server-wide recovery read.
+This is the second recovery source. It serves a device whose own local copy is absent or unreadable.
+It returns the private state that the server received. The same session capability authorises it as
+every other operation on that session. There is no room-wide read and no server-wide read.
 
-Server-assisted recovery is a **fallback**, not the mechanism. A scoresheet's own local journal is
-the authoritative exact recovery path; QBTCP recovery exists for the case where that journal is
-gone. The two are described together in the profile document.
+Server-assisted recovery is a fallback. The local journal of a scoresheet is the authoritative exact
+recovery path. The profile document describes both paths together.
 
 ## Help requests
 
@@ -286,13 +304,15 @@ gone. The two are described together in the profile document.
     POST   /qbtcp/v1/help                (room token)
     DELETE /qbtcp/v1/help/{id}           (room token)
 
-A room asks for a person: a protest to adjudicate, a missing player, a broken buzzer. Categories are
-implementation-defined and advertised in discovery. Help is orthogonal to scoring and MUST NOT
-affect a session's state.
+A room asks for a person: a protest to adjudicate, an absent player, a broken buzzer. Categories are
+implementation-defined, and discovery advertises them.
+
+Help is orthogonal to scoring. It MUST NOT affect the state of a session.
 
 ## Errors and status semantics
 
-Errors are JSON with a human-safe `error` string that a client MAY display verbatim:
+An error response is JSON with an `error` string that is safe for a person to read. A client MAY
+display that string without a change.
 
 ```json
 { "error": "This browser origin is not approved.", "code": "origin_not_allowed" }
@@ -301,98 +321,98 @@ Errors are JSON with a human-safe `error` string that a client MAY display verba
 | Status | Meaning | Client obligation |
 | --- | --- | --- |
 | `400` | Malformed request | Do not retry unchanged |
-| `401` | Missing or invalid credential | Re-pair. **MUST NOT discard the in-progress game.** |
-| `403` | Valid credential, not permitted (including disallowed origin) | Surface; do not retry in a loop |
+| `401` | Missing or invalid credential | Pair again. **MUST NOT discard the game in progress.** |
+| `403` | Valid credential without permission, including a disallowed origin | Surface it. Do not retry in a loop. |
 | `404` | No such endpoint, session, or room | Do not retry |
-| `405` | Method not allowed | Programming error |
-| `409` | Writer conflict, or result conflicts with a recorded one | Explicit human resolution |
-| `410` | Assignment superseded by a newer revision | Fetch the new assignment; do not discard scored work |
+| `405` | Method not allowed | A programming error |
+| `409` | Writer conflict, or a conflict with a recorded result | A person must resolve it |
+| `410` | A newer revision superseded the assignment | Fetch the new assignment. Do not discard scored work. |
 | `413` | Body too large | Do not retry unchanged |
-| `429` | Rate limited (pairing) | Back off |
-| `5xx` | Server fault | Retry with backoff |
+| `429` | Rate limited at pairing | Back off |
+| `5xx` | Server fault | Retry with a backoff |
 
-The two that matter most are `401` and `410`, because both describe a server that has changed its
-mind about a room that is in the middle of a game. Neither is permitted to destroy that game. A
-scoresheet MUST keep scoring locally and MUST keep the result downloadable.
+`401` and `410` need the most care. Each one describes a server that changed its mind about a room in
+the middle of a game. Neither status permits the destruction of that game. A scoresheet MUST continue
+to score locally, and MUST keep the result available for download.
 
-## Durability expectations for scoresheets
+## Durability requirements for a scoresheet
 
-QBTCP is designed so that a scoresheet can be **disconnected at any moment without losing a game**.
-An implementation claiming QBTCP conformance MUST hold to the following:
+QBTCP is designed so that a scoresheet can lose its connection at any moment without the loss of a
+game. An implementation that claims QBTCP conformance MUST hold to all of the following:
 
-- The normalized assignment is persisted locally before scoring depends on any later network call.
-- A locally accepted scoring event is durable before it is delivered anywhere.
+- It persists the normalized assignment locally before scoring depends on any later network call.
+- It makes a locally accepted scoring event durable before it delivers that event anywhere.
 - Loss of the server never unmounts, blocks, or resets the scorer.
 - `401`, `403`, and `410` do not destroy the game.
-- A tournament identity change does not destroy the game.
-- Reload restores from local state, not from the network.
-- Snapshots retry and coalesce; current state always wins over a stale queued one.
-- A connected final still offers a manual QBJ download, because "the server said yes" is not a
-  backup.
+- A change of tournament identity does not destroy the game.
+- A reload restores from local state, not from the network.
+- Snapshots retry and coalesce. The current state always takes precedence over a stale queued one.
+- A connected final still offers a manual QBJ download.
 
 ## CORS and local network access
 
-A scoresheet is typically a static site on a public origin talking to tournament-control software on
-a laptop on the same LAN. That is a cross-origin request to a private address, and both halves need
-handling.
+A scoresheet is typically a static site on a public origin. Tournament-control software typically runs
+on a laptop on the same local network. A request between them is cross-origin and reaches a private
+address, and both halves need handling.
 
-Servers MUST:
+Servers MUST do all of the following:
 
-- maintain a configurable **allowlist** of scoresheet origins, e.g. `https://qbsheet.com` plus
-  development origins
-- echo the specific approved origin in `Access-Control-Allow-Origin` and send `Vary: Origin`
-- **never** send `Access-Control-Allow-Origin: *` on any authenticated endpoint — a wildcard on a
-  capability-token API means any page on the internet can drive a tournament from a scorekeeper's
-  browser
-- answer preflight (`OPTIONS`) for every QBTCP path, allowing the credential headers above
-- reject a preflight from a non-allowlisted origin with `403`
+- Maintain a configurable **allowlist** of scoresheet origins, for example `https://qbsheet.com` plus
+  development origins.
+- Echo the one approved origin in `Access-Control-Allow-Origin`, and send `Vary: Origin`.
+- Never send `Access-Control-Allow-Origin: *` on an authenticated endpoint. A wildcard on a
+  capability-token API lets any page on the internet drive a tournament from the browser of a
+  scorekeeper.
+- Answer the preflight `OPTIONS` request for every QBTCP path, and allow the credential headers above.
+- Reject a preflight from an origin outside the allowlist with `403`.
 
-For Chrome's Private Network Access / Local Network Access, a server on a private address MUST
-answer a preflight carrying `Access-Control-Request-Private-Network: true` with
-`Access-Control-Allow-Private-Network: true`, and MUST list
-`Access-Control-Request-Private-Network` among its allowed headers. Without this, a public-origin
-scoresheet cannot reach a LAN server at all in current Chrome.
+Chrome implements Private Network Access, also called Local Network Access. A server on a private
+address MUST answer a preflight that carries `Access-Control-Request-Private-Network: true` with
+`Access-Control-Allow-Private-Network: true`. That server MUST also list
+`Access-Control-Request-Private-Network` among its allowed headers. Without these two responses, a
+scoresheet on a public origin cannot reach a local network server in current Chrome.
 
-Clients that install a service worker MUST NOT let it cache QBTCP responses as authoritative data. A
-cached assignment or a cached result acknowledgement is worse than an error, because it is a
-confident wrong answer.
+A client that installs a service worker MUST NOT let that worker cache a QBTCP response as
+authoritative data. A cached assignment or a cached result acknowledgement is worse than an error,
+because the client then holds a wrong answer and treats it as correct.
 
 ## Security model
 
-1. **Capability tokens, not identities.** A token names what it may do, not who holds it. There is
-   no account to compromise.
+1. **Capability tokens, not identities.** A token names what the holder can do, not who the holder is.
+   There is no account to compromise.
 2. **Least scope.** A room token cannot read another room. A session token cannot read another
-   session. Neither can read the tournament.
-3. **Credentials never enter QBJ.** No token, pairing code, device id, operator name, server URL, or
-   `Authorization` header value may appear in any QBJ document produced or consumed by QBTCP. This
-   is an absolute rule; the file formats travel by USB stick and email, and a capability that
-   travels with them ends up somewhere nobody intended.
-4. **Credentials never enter logs or UI.** Including error text.
+   session. Neither token can read the tournament.
+3. **Credentials never enter QBJ.** No token, pairing code, device identifier, operator name, server
+   URL, or `Authorization` header value appears in any QBJ document that QBTCP produces or consumes.
+   This rule is absolute. The file formats travel by memory stick and by email, and a capability that
+   travels with them reaches a place that nobody intended.
+4. **Credentials never enter a log or the user interface.** This includes error text.
 5. **Uniform pairing failure.** See "Pairing".
-6. **Origin allowlist over wildcard.** See "CORS".
-7. **Bounded input.** Servers MUST bound request body size and URL length, and MUST validate all
-   received JSON as untrusted: finite numbers, well-formed shapes, no prototype-pollution keys.
+6. **An origin allowlist, never a wildcard.** See "CORS and local network access".
+7. **Bounded input.** Servers MUST bound the request body size and the URL length. Servers MUST
+   validate all received JSON as untrusted: finite numbers, well-formed shapes, and no
+   prototype-pollution keys.
 
-## Relationship to QBJ, restated
+## Ownership of each concern
 
-| Concern | Owned by |
+| Concern | Owner |
 | --- | --- |
-| What a match, team, player, round or scoring rule *is* | QBJ |
-| What the result of a game *was* | QBJ |
-| Which game a room should score now | QBTCP delivering a QBJ document |
-| Whether the room may score it, and who is writing | QBTCP |
-| How a result gets back, and whether it is a duplicate | QBTCP |
+| What a match, team, player, round, or scoring rule is | QBJ |
+| What the result of a game was | QBJ |
+| Which game a room must score now | QBTCP, which delivers a QBJ document |
+| Whether the room can score it, and which device writes | QBTCP |
+| How a result returns, and whether it is a duplicate | QBTCP |
 
-If a change to this specification would require adding a field that describes the game rather than
-the conversation, it belongs in QBJ or in the documented `_qbtcp` extension — not here.
+A change to this specification that needs a field describing the game belongs in QBJ, or in the
+documented `_qbtcp` extension. It does not belong in the protocol.
 
 ## Legacy `/api/v1` compatibility
 
-Version 1 of this protocol was deployed as an unversioned-in-name `/api/v1` surface. Tournament
-control implementations migrating to QBTCP SHOULD retain their existing `/api/v1` routes as
-**aliases** that dispatch to the identical handlers, so that deployed scoresheets keep working. The
-aliases are deprecated on introduction and carry no independent behavior. New scoresheets MUST use
-the canonical `/qbtcp/v1` paths.
+Version 1 of this protocol was deployed on an `/api/v1` surface, whose name did not carry a version of
+the protocol itself. Tournament-control implementations that migrate to QBTCP SHOULD retain their
+existing `/api/v1` routes as **aliases that dispatch to the identical handler**. Deployed scoresheets
+then keep working. An alias holds no duplicated logic and no behaviour of its own. Every alias is
+deprecated from its introduction. A new scoresheet MUST use the canonical `/qbtcp/v1`
+paths.
 
-A mapping table for the reference implementation lives in
-[`QBG_MIGRATION.md`](QBG_MIGRATION.md).
+[`QBG_MIGRATION.md`](QBG_MIGRATION.md) holds the route mapping for the reference implementation.
