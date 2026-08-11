@@ -39,6 +39,94 @@ export function formatControlRequestTime(value: string, source: 'server' | 'devi
   return source === 'device' ? `${time} · time from this device` : time;
 }
 
+export function ControlRequestControl(props: {
+  controlRequest: ControlRequestState;
+  checkboxId: string;
+  checkboxLabel: string;
+  unsupportedMessageNoun: string;
+  disabled: boolean;
+  requestControl: boolean;
+  setRequestControl: (value: boolean) => void;
+  onRetryControl?: () => Promise<HelpRequestResult | null>;
+  onCancelControl?: () => Promise<HelpClearResult | null>;
+}) {
+  const {
+    controlRequest,
+    checkboxId,
+    checkboxLabel,
+    unsupportedMessageNoun,
+    disabled,
+    requestControl,
+    setRequestControl,
+    onRetryControl,
+    onCancelControl,
+  } = props;
+
+  return (
+    <div className="scorer-checkbox">
+      {controlRequest.kind === 'idle' || controlRequest.kind === 'unavailable' ? (
+        <label htmlFor={checkboxId}>
+          <input
+            id={checkboxId}
+            type="checkbox"
+            checked={requestControl}
+            disabled={disabled}
+            onChange={(e) => setRequestControl(e.target.checked)}
+          />
+          {checkboxLabel}
+        </label>
+      ) : controlRequest.kind === 'sending' ? (
+        <span>Tournament control request is being sent…</span>
+      ) : controlRequest.kind === 'outstanding' ? (
+        <span>
+          Tournament control has already been requested.
+          <br />
+          {helpRequestCategoryLabels[controlRequest.request.category]} ·{' '}
+          {formatControlRequestTime(controlRequest.requestedAt, controlRequest.requestedAtSource)}
+          {onCancelControl && controlRequest.request.id && controlRequest.canCancel !== false && (
+            <>
+              <br />
+              <button type="button" className="scorer-text-action" onClick={() => void onCancelControl()}>
+                Cancel request for control
+              </button>
+            </>
+          )}
+        </span>
+      ) : controlRequest.kind === 'failed' ? (
+        <span>
+          Tournament control was not reached.
+          {onRetryControl && controlRequest.retryable && (
+            <>
+              <br />
+              <button type="button" className="scorer-text-action" onClick={() => void onRetryControl()}>
+                Try request again
+              </button>
+            </>
+          )}
+        </span>
+      ) : controlRequest.kind === 'refused' ? (
+        <span>
+          Tournament control refused this request.
+          {onRetryControl && controlRequest.retryable && (
+            <>
+              <br />
+              <button type="button" className="scorer-text-action" onClick={() => void onRetryControl()}>
+                Try request again
+              </button>
+            </>
+          )}
+        </span>
+      ) : (
+        <span>
+          This tournament connection does not support remote control requests; the {unsupportedMessageNoun} will still
+          be saved on the scoresheet.
+        </span>
+      )}
+    </div>
+  );
+}
+
+
 export function IssueDialog(props: {
   questionNumber: number;
   controlRequest: ControlRequestState;
@@ -116,66 +204,17 @@ export function IssueDialog(props: {
             onChange={(e) => setDetails(e.target.value)}
           />
         </label>
-        <div className="scorer-checkbox">
-          {controlRequest.kind === 'idle' || controlRequest.kind === 'unavailable' ? (
-            <label htmlFor="scorer-request-control">
-              <input
-                id="scorer-request-control"
-                type="checkbox"
-                checked={requestControl}
-                disabled={sending}
-                onChange={(e) => setRequestControl(e.target.checked)}
-              />
-              Ask tournament control to come
-            </label>
-          ) : controlRequest.kind === 'sending' ? (
-            <span>Tournament control request is being sent…</span>
-          ) : controlRequest.kind === 'outstanding' ? (
-            <span>
-              Tournament control has already been requested.
-              <br />
-              {helpRequestCategoryLabels[controlRequest.request.category]} ·{' '}
-              {formatControlRequestTime(controlRequest.requestedAt, controlRequest.requestedAtSource)}
-              {onCancelControl && controlRequest.request.id && controlRequest.canCancel !== false && (
-                <>
-                  <br />
-                  <button type="button" className="scorer-text-action" onClick={() => void onCancelControl()}>
-                    Cancel request for control
-                  </button>
-                </>
-              )}
-            </span>
-          ) : controlRequest.kind === 'failed' ? (
-            <span>
-              Tournament control was not reached.
-              {onRetryControl && controlRequest.retryable && (
-                <>
-                  <br />
-                  <button type="button" className="scorer-text-action" onClick={() => void onRetryControl()}>
-                    Try request again
-                  </button>
-                </>
-              )}
-            </span>
-          ) : controlRequest.kind === 'refused' ? (
-            <span>
-              Tournament control refused this request.
-              {onRetryControl && controlRequest.retryable && (
-                <>
-                  <br />
-                  <button type="button" className="scorer-text-action" onClick={() => void onRetryControl()}>
-                    Try request again
-                  </button>
-                </>
-              )}
-            </span>
-          ) : (
-            <span>
-              This tournament connection does not support remote control requests; the issue will still be saved on
-              the scoresheet.
-            </span>
-          )}
-        </div>
+        <ControlRequestControl
+          controlRequest={controlRequest}
+          checkboxId="scorer-request-control"
+          checkboxLabel="Ask tournament control to come"
+          unsupportedMessageNoun="issue"
+          disabled={sending}
+          requestControl={requestControl}
+          setRequestControl={setRequestControl}
+          onRetryControl={onRetryControl}
+          onCancelControl={onCancelControl}
+        />
         {error && <p className="scorer-problem">{error}</p>}
         <button type="button" className="scorer-choice" disabled={sending || !details.trim()} onClick={submit}>
           {submitLabel}

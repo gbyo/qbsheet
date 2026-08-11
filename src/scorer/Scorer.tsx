@@ -1094,14 +1094,14 @@ export default function Scorer(props: IScorerProps) {
         </div>
       )}
       {controlRequest.kind === 'refused' && (
-        <p className="scorer-banner is-warning" role="alert">
-          Tournament control refused this request.
+        <div className="scorer-banner is-warning" role="alert">
+          <span>Tournament control refused this request.</span>
           {onRetryControlRequest && controlRequest.retryable && (
             <button type="button" className="scorer-text-action" onClick={() => void onRetryControlRequest()}>
               Try request again
             </button>
           )}
-        </p>
+        </div>
       )}
 
       {phase.kind === 'lineup' && (

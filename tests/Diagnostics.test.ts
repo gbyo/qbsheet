@@ -7,6 +7,7 @@
  * scores into a live event. So most of what is below is an attempt to get a credential into the bundle by
  * every route somebody plausibly would, and to confirm the download refuses rather than produces one.
  */
+import { act, renderHook } from '@testing-library/react';
 import { describe, expect, test } from 'vitest';
 import {
   buildDiagnostics,
@@ -18,6 +19,9 @@ import {
 } from '../src/app/Diagnostics';
 import { ConnectionTimeline } from '../src/app/ConnectionTimeline';
 import { ErrorLog } from '../src/app/ErrorLog';
+import { HelpRequestCategory } from '../src/app/HelpRequests';
+import useConnectedRuntime from '../src/app/useConnectedRuntime';
+import FruityServerClient from '../src/integrations/fruity/FruityServerClient';
 
 const at = new Date('2026-04-11T14:32:07.000Z');
 
@@ -117,17 +121,46 @@ describe('what the bundle contains', () => {
     expect(bundle.connectionEntries).toHaveLength(4);
   });
 
-  test('a help message is not copied into the connection timeline or diagnostics', () => {
+  test('a help message is not copied into the connection timeline or diagnostics', async () => {
     const timeline = new ConnectionTimeline();
     const privateMessage = 'Call the director at 555-0199; this must stay out of diagnostics.';
-    timeline.record('control-requested', 'question-packet');
-    timeline.record('control-request-failed', 'question-packet');
+    let sentMessage = '';
+    const client = {
+      baseUrl: 'http://control.test',
+      assignment: async () => ({ ok: false as const, status: 503, error: 'Test poll failure' }),
+      requestHelp: async (_identity: unknown, category: HelpRequestCategory, message: string) => {
+        sentMessage = message;
+        return {
+          kind: 'accepted' as const,
+          request: { id: 'help-privacy', category, message },
+        };
+      },
+    } as unknown as FruityServerClient;
+    const hook = renderHook(() =>
+      useConnectedRuntime({
+        client,
+        identity: { roomId: 'room-204', token: 'room-token' },
+        credentials: { sessionId: 'session-1', token: 'session-token' },
+        enabled: true,
+        timeline,
+      }),
+    );
+
+    await act(async () => {
+      await hook.result.current.requestControl('question-packet', privateMessage);
+    });
 
     const bundle = buildDiagnostics({ now: at, timeline: timeline.entries() });
+    const controlRequestDetails = timeline
+      .entries()
+      .filter((entry) => entry.kind === 'control-requested')
+      .map((entry) => entry.detail);
 
-    expect(timeline.entries().map((entry) => entry.detail)).toEqual(['question-packet', 'question-packet']);
+    expect(sentMessage).toBe(privateMessage);
+    expect(controlRequestDetails).toEqual(['question-packet']);
     expect(JSON.stringify(bundle)).not.toContain(privateMessage);
     expect(JSON.stringify(bundle)).not.toContain('555-0199');
+    hook.unmount();
   });
 
   test('recent errors', () => {

@@ -225,7 +225,7 @@ test.describe('a server that speaks only QBTCP', () => {
       category: 'question-packet',
       message: 'The buzzers cut out in room 204.',
     });
-    expect(page.getByText('Tossup 3 of 20', { exact: true })).toBeVisible();
+    await expect(page.getByText('Tossup 3 of 20', { exact: true })).toBeVisible();
     expect(await page.getByLabel('Ninety Six score').textContent()).toBe('35');
   });
 
