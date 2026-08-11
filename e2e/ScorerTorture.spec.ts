@@ -42,8 +42,14 @@ async function openGeneratedGame(page: Page): Promise<void> {
   });
 
   await expect(page.getByRole('heading', { name: 'Who is starting?' })).toBeVisible();
-  for (const player of ['Sarah Mitchell', 'James Okafor', 'Emma Chen', 'Jordan Blake']) {
-    await page.getByLabel(player, { exact: true }).check();
+  const prompt = page.getByLabel('Starting lineups');
+  const left = prompt.getByLabel('Ninety Six A starters');
+  const right = prompt.getByLabel('Greenwood starters');
+  for (const player of ['Sarah Mitchell', 'James Okafor']) {
+    await left.getByRole('button', { name: `Start ${player}` }).click();
+  }
+  for (const player of ['Emma Chen', 'Jordan Blake']) {
+    await right.getByRole('button', { name: `Start ${player}` }).click();
   }
   await page.getByRole('button', { name: 'Start game' }).click();
   await expect(page.getByText('Tossup 1 of 20', { exact: true })).toBeVisible();

@@ -60,7 +60,29 @@ export async function startLineups(): Promise<void> {
   const start = screen.queryByRole('button', { name: 'Start game' });
   if (!start) return;
   await act(async () => {
-    fireEvent.click(start);
+    const prompt = screen.queryByLabelText('Starting lineups');
+    if (prompt) {
+      const chosen = new Set<string>();
+      let changed = true;
+      while (changed) {
+        const currentStart = screen.queryByRole('button', { name: 'Start game' });
+        if (!currentStart || !currentStart.hasAttribute('disabled')) break;
+        changed = false;
+        for (const team of Array.from(prompt.querySelectorAll('section[aria-label$=" starters"]'))) {
+          const button = Array.from(team.querySelectorAll('button[aria-label^="Start "]')).find((candidate) => {
+            const key = `${team.getAttribute('aria-label')}\u0000${candidate.getAttribute('aria-label')}`;
+            return !candidate.hasAttribute('disabled') && !chosen.has(key);
+          });
+          if (!button) continue;
+          const key = `${team.getAttribute('aria-label')}\u0000${button.getAttribute('aria-label')}`;
+          chosen.add(key);
+          fireEvent.click(button);
+          changed = true;
+        }
+      }
+    }
+    const ready = screen.queryByRole('button', { name: 'Start game' });
+    if (ready && !ready.hasAttribute('disabled')) fireEvent.click(ready);
   });
 }
 

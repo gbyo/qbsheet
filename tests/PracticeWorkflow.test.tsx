@@ -43,12 +43,14 @@ test('practice requires its named starters, keeps mistakes editable, and advance
   const right = within(prompt).getByLabelText('Greenwood starters');
   const start = within(prompt).getByText('Start game');
 
-  fireEvent.click(within(left).getByLabelText('Gibson'));
-  fireEvent.click(within(right).getByLabelText('Tucker'));
+  fireEvent.click(within(left).getByRole('button', { name: 'Start Gibson' }));
+  fireEvent.click(within(right).getByRole('button', { name: 'Start Tucker' }));
   expect(start.hasAttribute('disabled')).toBe(true);
 
-  for (const name of ['Jeremy', 'Owen', 'Olivia']) fireEvent.click(within(left).getByLabelText(name));
-  for (const name of ['Phillip', 'Efren', 'Bella']) fireEvent.click(within(right).getByLabelText(name));
+  for (const name of ['Jeremy', 'Owen', 'Olivia'])
+    fireEvent.click(within(left).getByRole('button', { name: `Start ${name}` }));
+  for (const name of ['Phillip', 'Efren', 'Bella'])
+    fireEvent.click(within(right).getByRole('button', { name: `Start ${name}` }));
   expect(start.hasAttribute('disabled')).toBe(false);
   fireEvent.click(start);
 
@@ -57,10 +59,10 @@ test('practice requires its named starters, keeps mistakes editable, and advance
   expect(screen.getByRole('alert').textContent).toContain('Olivia starts on the bench in this scenario');
   expect(screen.getByRole('alert').textContent).toContain('Lachlan is missing from the floor');
 
-  fireEvent.click(within(left).getByLabelText('Olivia'));
-  fireEvent.click(within(left).getByLabelText('Lachlan'));
-  fireEvent.click(within(right).getByLabelText('Bella'));
-  fireEvent.click(within(right).getByLabelText('Valerie'));
+  fireEvent.click(within(left).getByRole('button', { name: 'Bench Olivia' }));
+  fireEvent.click(within(left).getByRole('button', { name: 'Start Lachlan' }));
+  fireEvent.click(within(right).getByRole('button', { name: 'Bench Bella' }));
+  fireEvent.click(within(right).getByRole('button', { name: 'Start Valerie' }));
   fireEvent.click(start);
 
   await vi.waitFor(() => expect(screen.getByText('Reader: “Power, Gibson on Ninety Six.”')).toBeTruthy());
@@ -86,8 +88,10 @@ test('the right four in the wrong seats names the seat, the player in it, and wh
   // Practice needs its own order — a seat is a keyboard number and a tossups-heard row — but it has to
   // say which seat is wrong, because four identical names in two orders is not a difference anybody can
   // see by looking.
-  for (const name of ['Lachlan', 'Owen', 'Jeremy', 'Gibson']) fireEvent.click(within(left).getByLabelText(name));
-  for (const name of ['Tucker', 'Phillip', 'Efren', 'Valerie']) fireEvent.click(within(right).getByLabelText(name));
+  for (const name of ['Lachlan', 'Owen', 'Jeremy', 'Gibson'])
+    fireEvent.click(within(left).getByRole('button', { name: `Start ${name}` }));
+  for (const name of ['Tucker', 'Phillip', 'Efren', 'Valerie'])
+    fireEvent.click(within(right).getByRole('button', { name: `Start ${name}` }));
   fireEvent.click(start);
 
   const alert = screen.getByRole('alert');
@@ -97,8 +101,10 @@ test('the right four in the wrong seats names the seat, the player in it, and wh
   expect(screen.getByLabelText('Starting lineups')).toBeTruthy();
 
   // Ticked again in the order the guide lists, the same four names are accepted.
-  for (const name of ['Lachlan', 'Owen', 'Jeremy', 'Gibson']) fireEvent.click(within(left).getByLabelText(name));
-  for (const name of ['Gibson', 'Jeremy', 'Owen', 'Lachlan']) fireEvent.click(within(left).getByLabelText(name));
+  for (const name of ['Lachlan', 'Owen', 'Jeremy', 'Gibson'])
+    fireEvent.click(within(left).getByRole('button', { name: `Bench ${name}` }));
+  for (const name of ['Gibson', 'Jeremy', 'Owen', 'Lachlan'])
+    fireEvent.click(within(left).getByRole('button', { name: `Start ${name}` }));
   fireEvent.click(start);
 
   await vi.waitFor(() => expect(screen.getByText('Reader: “Power, Gibson on Ninety Six.”')).toBeTruthy());
@@ -112,8 +118,10 @@ test('practice restores the guide checkpoint after the screen is remounted', asy
   const prompt = screen.getByLabelText('Starting lineups');
   const left = within(prompt).getByLabelText('Ninety Six starters');
   const right = within(prompt).getByLabelText('Greenwood starters');
-  for (const name of ['Gibson', 'Jeremy', 'Owen', 'Lachlan']) fireEvent.click(within(left).getByLabelText(name));
-  for (const name of ['Tucker', 'Phillip', 'Efren', 'Valerie']) fireEvent.click(within(right).getByLabelText(name));
+  for (const name of ['Gibson', 'Jeremy', 'Owen', 'Lachlan'])
+    fireEvent.click(within(left).getByRole('button', { name: `Start ${name}` }));
+  for (const name of ['Tucker', 'Phillip', 'Efren', 'Valerie'])
+    fireEvent.click(within(right).getByRole('button', { name: `Start ${name}` }));
   fireEvent.click(within(prompt).getByText('Start game'));
 
   await vi.waitFor(() => expect(screen.getByText('Reader: “Power, Gibson on Ninety Six.”')).toBeTruthy());

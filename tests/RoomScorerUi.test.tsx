@@ -154,7 +154,11 @@ function addMissingPlayer(teamLabel: string, name: string) {
 
 function chooseStarters(names: string[]) {
   const prompt = screen.getByLabelText('Starting lineups');
-  for (const name of names) fireEvent.click(within(prompt).getByLabelText(name));
+  for (const name of names) {
+    const teamName = ['Sarah Mitchell', 'James Robinson'].includes(name) ? 'Ninety Six' : 'Greenwood';
+    const team = within(prompt).getByLabelText(`${teamName} starters`);
+    fireEvent.click(within(team).getByRole('button', { name: `Start ${name}` }));
+  }
   fireEvent.click(within(prompt).getByText('Start game'));
 }
 

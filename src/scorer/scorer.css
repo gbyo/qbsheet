@@ -2080,25 +2080,19 @@ div.scorer-banner .scorer-text-action {
   gap: 12px;
 }
 
-.scorer-starters-submit {
-  margin-top: 24px;
+.scorer-starters-team .scorer-text-action:disabled {
+  color: var(--room-faint);
+  cursor: default;
 }
 
-.scorer-starters-reorder {
-  margin-bottom: 8px;
+.scorer-starters-submit {
+  margin-top: 24px;
 }
 
 .scorer-lineup-problem {
   margin: 8px 0;
   font-size: 13px;
   color: var(--room-error);
-}
-
-.scorer-starters-list {
-  max-height: min(42vh, 360px);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding-right: 4px;
 }
 
 .scorer-starters-title {

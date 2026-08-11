@@ -66,7 +66,15 @@ async function startAssignedGame(page: Page, round: 4 | 5): Promise<void> {
 
   await expect(lineup.or(scoresheet).first()).toBeVisible();
   if (await lineup.count()) {
-    for (const player of spec.starters) await page.getByLabel(player, { exact: true }).check();
+    const prompt = page.getByLabel('Starting lineups');
+    const left = prompt.getByLabel(`${spec.left.name} starters`);
+    const right = prompt.getByLabel(`${spec.right.name} starters`);
+    for (const player of spec.left.players) {
+      await left.getByRole('button', { name: `Start ${player.name}` }).click();
+    }
+    for (const player of spec.right.players) {
+      await right.getByRole('button', { name: `Start ${player.name}` }).click();
+    }
     await page.getByRole('button', { name: 'Start game', exact: true }).click();
   }
   await expect(page.getByText('Tossup 1 of 20', { exact: true })).toBeVisible();

@@ -67,7 +67,11 @@ function renderScorer(maximumActive = 3, starters: string[] = ['Sarah Jones', 'M
   );
   const prompt = screen.queryByLabelText('Starting lineups');
   if (prompt) {
-    for (const name of starters) fireEvent.click(within(prompt).getByLabelText(name));
+    for (const name of starters) {
+      const teamName = name === 'Emma Turner' ? 'Greenwood' : 'Ninety Six';
+      const team = within(prompt).getByLabelText(`${teamName} starters`);
+      fireEvent.click(within(team).getByRole('button', { name: `Start ${name}` }));
+    }
     fireEvent.click(within(prompt).getByText('Start game'));
   }
 }

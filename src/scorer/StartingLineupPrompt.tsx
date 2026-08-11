@@ -13,8 +13,9 @@
  * It is asked only when there is genuinely something to ask. A roster that fits inside the format's
  * cap has one possible lineup and this never appears.
  *
- * It is deliberately fast: two columns of names, tap the starters, one button. A room that has to
- * fight this before question one will learn to guess, which is where we came in.
+ * It is deliberately fast: a compact scoresheet, with the starting order visible and the bench
+ * directly underneath it. A room that has to fight this before question one will learn to guess,
+ * which is where we came in.
  */
 import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from 'react';
 import { LeftOrRight } from '../scoring/types';
@@ -57,18 +58,19 @@ function TeamStarters(props: {
   side: LeftOrRight;
   maximumActive: number;
   selected: string[];
-  onToggle: (name: string) => void;
+  onStart: (name: string) => void;
+  onBench: (name: string) => void;
   onMove: (name: string, direction: -1 | 1) => void;
   settled: boolean;
   onAddPlayer: (playerName: string) => void;
 }) {
-  const { team, side, maximumActive, selected, onToggle, onMove, settled, onAddPlayer } = props;
+  const { team, side, maximumActive, selected, onStart, onBench, onMove, settled, onAddPlayer } = props;
   const [adding, setAdding] = useState(false);
-  const [reordering, setReordering] = useState(false);
   const [newPlayer, setNewPlayer] = useState('');
   const input = useRef<HTMLInputElement>(null);
-  const displayedSelection = settled ? team.activePlayers : selected;
-  const atCapacity = displayedSelection.length >= maximumActive;
+  const starters = settled ? team.activePlayers : selected;
+  const bench = team.players.filter((player) => !starters.includes(player.name));
+  const atCapacity = starters.length >= maximumActive;
   const validation = validatePlayerName(
     newPlayer,
     team.players.map((player) => player.name),
@@ -99,91 +101,99 @@ function TeamStarters(props: {
 
   return (
     <section className="scorer-starters-team" aria-label={`${team.name} starters`}>
-      <h3 className="scorer-lineup-team">{team.name}</h3>
-      {reordering ? (
-        <div className="scorer-starters-reorder">
-          <div className="scorer-reorder-head">
-            <p className="scorer-lineup-step-title">Reorder starters</p>
-            <button type="button" className="scorer-text-action" onClick={() => setReordering(false)}>
-              Done
-            </button>
-          </div>
+      <div className="scorer-lineup-head">
+        <h3 className="scorer-lineup-team">{team.name}</h3>
+        <p className="scorer-lineup-count">
+          {settled ? 'Lineup set automatically' : `${selected.length} starting`}
+        </p>
+      </div>
+
+      <div className="scorer-lineup-roster">
+        <h4 className="scorer-lineup-group">Starting</h4>
+        {starters.length > 0 ? (
           <ul className="scorer-lineup-list">
-            {selected.map((name, seat) => (
+            {starters.map((name, seat) => (
               <li key={name} className="scorer-lineup-entry">
                 <span className="scorer-lineup-seat" aria-hidden="true">
                   {seat + 1}
                 </span>
                 <span className="scorer-lineup-name">{name}</span>
-                <span className="scorer-lineup-move">
+                {!settled && starters.length > 1 && (
+                  <span className="scorer-lineup-move">
+                    <button
+                      type="button"
+                      className="scorer-text-action"
+                      aria-label={`Move ${name} up in starting lineup`}
+                      disabled={seat === 0}
+                      onClick={() => onMove(name, -1)}
+                    >
+                      &uarr;
+                    </button>
+                    <button
+                      type="button"
+                      className="scorer-text-action"
+                      aria-label={`Move ${name} down in starting lineup`}
+                      disabled={seat === starters.length - 1}
+                      onClick={() => onMove(name, 1)}
+                    >
+                      &darr;
+                    </button>
+                  </span>
+                )}
+                {!settled && (
                   <button
                     type="button"
                     className="scorer-text-action"
-                    aria-label={`Move ${name} up in starting lineup`}
-                    disabled={seat === 0}
-                    onClick={() => onMove(name, -1)}
+                    aria-label={`Bench ${name}`}
+                    onClick={() => onBench(name)}
                   >
-                    &uarr;
+                    Bench
                   </button>
-                  <button
-                    type="button"
-                    className="scorer-text-action"
-                    aria-label={`Move ${name} down in starting lineup`}
-                    disabled={seat === selected.length - 1}
-                    onClick={() => onMove(name, 1)}
-                  >
-                    &darr;
-                  </button>
-                </span>
+                )}
               </li>
             ))}
           </ul>
-        </div>
-      ) : (
-        <>
-          <ul className="scorer-lineup-list scorer-starters-list">
-            {team.players.map((player, index) => {
-              const checked = displayedSelection.includes(player.name);
-              const seat = displayedSelection.indexOf(player.name);
-              const id = `scorer-start-${side}-${index}`;
-              return (
-                <li key={player.name}>
-                  <label className="scorer-lineup-row" htmlFor={id}>
-                    <input
-                      id={id}
-                      type="checkbox"
-                      aria-label={player.name}
-                      checked={checked}
-                      disabled={settled || (!checked && atCapacity)}
-                      onChange={() => onToggle(player.name)}
-                    />
-                    <span className="scorer-lineup-name">{player.name}</span>
-                    {checked && <span className="scorer-lineup-tuh">Seat {seat + 1}</span>}
-                    {!checked && atCapacity && <span className="scorer-lineup-tuh">Bench</span>}
-                  </label>
-                </li>
-              );
-            })}
-          </ul>
-          <p className="scorer-lineup-count">
-            {settled ? 'Starting lineup set' : `${selected.length} of ${maximumActive} selected`}
-          </p>
-          <div className="scorer-starters-actions">
-            {!adding && (
-              <button type="button" className="scorer-text-action" onClick={() => setAdding(true)}>
-                + Add player
-              </button>
-            )}
-            {!settled && selected.length > 1 && (
-              <button type="button" className="scorer-text-action" onClick={() => setReordering(true)}>
-                Reorder starters
-              </button>
-            )}
-          </div>
-        </>
-      )}
+        ) : (
+          <p className="scorer-lineup-count scorer-lineup-empty">No starters selected</p>
+        )}
 
-      {adding && !reordering && (
+        {bench.length > 0 && (
+          <>
+            <h4 className="scorer-lineup-group">Bench</h4>
+            <ul className="scorer-lineup-list">
+              {bench.map((player) => (
+                <li key={player.name} className="scorer-lineup-entry">
+                  <span className="scorer-lineup-seat" aria-hidden="true">
+                    &mdash;
+                  </span>
+                  <span className="scorer-lineup-name">{player.name}</span>
+                  {!settled && (
+                    <button
+                      type="button"
+                      className="scorer-text-action"
+                      aria-label={`Start ${player.name}`}
+                      disabled={atCapacity}
+                      onClick={() => onStart(player.name)}
+                    >
+                      Start
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </div>
+
+      <div className="scorer-starters-actions">
+        {!adding && (
+          <button type="button" className="scorer-text-action" onClick={() => setAdding(true)}>
+            + Add player
+          </button>
+        )}
+      </div>
+
+      {adding && (
         <form className="scorer-inline-add" onSubmit={submitAdd}>
           <label htmlFor={`scorer-start-add-${side}`}>Player name</label>
           <div className="scorer-inline-add-fields">
@@ -219,14 +229,22 @@ export default function StartingLineupPrompt(props: IStartingLineupPromptProps) 
   const [chosen, setChosen] = useState<Record<LeftOrRight, string[]>>({ left: [], right: [] });
   const [confirmationProblem, setConfirmationProblem] = useState('');
 
-  const toggle = (side: LeftOrRight, name: string) => {
+  const start = (side: LeftOrRight, name: string) => {
     setConfirmationProblem('');
     setChosen((current) => {
       const existing = current[side];
-      if (existing.includes(name)) return { ...current, [side]: existing.filter((other) => other !== name) };
+      if (existing.includes(name)) return current;
       if (existing.length >= maximumActive) return current;
       return { ...current, [side]: existing.concat(name) };
     });
+  };
+
+  const bench = (side: LeftOrRight, name: string) => {
+    setConfirmationProblem('');
+    setChosen((current) => ({
+      ...current,
+      [side]: current[side].filter((other) => other !== name),
+    }));
   };
 
   const move = (side: LeftOrRight, name: string, direction: -1 | 1) => {
@@ -240,7 +258,7 @@ export default function StartingLineupPrompt(props: IStartingLineupPromptProps) 
     <section className="scorer-starters" aria-label="Starting lineups">
       <h2 className="scorer-starters-title">Who is starting?</h2>
       <p className="scorer-dialog-note">
-        These rosters have more players than the {maximumActive} who can be on the floor.{' '}
+        Choose who will play Tossup 1. Up to {maximumActive} players may start for each team.{' '}
         {substitutionSentence(procedure)}
       </p>
       <div className="scorer-lineups">
@@ -250,7 +268,8 @@ export default function StartingLineupPrompt(props: IStartingLineupPromptProps) 
           maximumActive={maximumActive}
           selected={chosen.left}
           settled={!needed.includes('left')}
-          onToggle={(name) => toggle('left', name)}
+          onStart={(name) => start('left', name)}
+          onBench={(name) => bench('left', name)}
           onMove={(name, direction) => move('left', name, direction)}
           onAddPlayer={(name) => onAddPlayer('left', name)}
         />
@@ -260,7 +279,8 @@ export default function StartingLineupPrompt(props: IStartingLineupPromptProps) 
           maximumActive={maximumActive}
           selected={chosen.right}
           settled={!needed.includes('right')}
-          onToggle={(name) => toggle('right', name)}
+          onStart={(name) => start('right', name)}
+          onBench={(name) => bench('right', name)}
           onMove={(name, direction) => move('right', name, direction)}
           onAddPlayer={(name) => onAddPlayer('right', name)}
         />

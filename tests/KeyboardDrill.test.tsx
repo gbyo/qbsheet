@@ -19,7 +19,6 @@ beforeEach(() => {
   saveKeyboardEnabled(false);
   resetKeyboardPreference();
 });
-
 afterEach(() => {
   // Unmounted first: the preference is module state with live subscribers, and resetting it while a
   // screen is still mounted pushes a React update from outside the test's own act().
@@ -256,8 +255,10 @@ describe('the way in', () => {
     const prompt = screen.getByLabelText('Starting lineups');
     const left = within(prompt).getByLabelText('Ninety Six starters');
     const right = within(prompt).getByLabelText('Greenwood starters');
-    for (const name of ['Gibson', 'Jeremy', 'Owen', 'Lachlan']) fireEvent.click(within(left).getByLabelText(name));
-    for (const name of ['Tucker', 'Phillip', 'Efren', 'Valerie']) fireEvent.click(within(right).getByLabelText(name));
+    for (const name of ['Gibson', 'Jeremy', 'Owen', 'Lachlan'])
+      fireEvent.click(within(left).getByRole('button', { name: `Start ${name}` }));
+    for (const name of ['Tucker', 'Phillip', 'Efren', 'Valerie'])
+      fireEvent.click(within(right).getByRole('button', { name: `Start ${name}` }));
     fireEvent.click(within(prompt).getByText('Start game'));
     await vi.waitFor(() => expect(screen.getByText('Reader: “Power, Gibson on Ninety Six.”')).toBeTruthy());
 
