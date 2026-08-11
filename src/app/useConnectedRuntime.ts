@@ -14,6 +14,23 @@
  * with actions attached, and a set of callbacks. Every network problem becomes something the room
  * is *told*, next to a scoresheet that still works.
  *
+ * # Repair happens here, in place, with the game still running
+ *
+ * QBTCP distinguishes three failures that look identical from a distance and need opposite
+ * responses, so this file keeps them apart:
+ *
+ *   - The **room token** was refused. The pairing is gone; a person types a new code. Only this one
+ *     needs a code, and offering one for either of the others is how a scorekeeper ends up hunting
+ *     for a slip of paper to fix something that was not broken.
+ *   - The **session token** was refused. The pairing is fine, so the room reopens the same session
+ *     with the capability it still holds. Both surfaces return the open session rather than making
+ *     a second one, so this is a repair and not a new game.
+ *   - Another device holds the **writer** lock. Nothing here resolves that, because two live devices
+ *     that both decided they were authoritative is worse than one that is waiting. A person presses
+ *     Take over, or does not.
+ *
+ * None of the three stops the scorekeeper scoring, and none of them unmounts anything.
+ *
  * # Local first, always
  *
  * Scoring is local. This hook watches the game and offers the latest state to control on a trailing
@@ -30,18 +47,49 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RoomConnectionState } from './ConnectionState';
 import { IScorerAlert } from '../scorer/ConnectionStatus';
-import FruityServerClient, { ApiResult, IRoomIdentity, ISessionCredentials } from '../integrations/fruity/FruityServerClient';
+import FruityServerClient, {
+  ApiResult,
+  IRoomIdentity,
+  ISessionCredentials,
+  IWriterConflict,
+  readWriterConflict,
+} from '../integrations/fruity/FruityServerClient';
+import { ServerDeliveryState } from '../game/GameStore';
 import { ProgressSender } from '../integrations/fruity/FruityResultDestination';
 import { HelpRequestCategory } from './HelpRequests';
 
 /** How often a room asks control what it should be playing. */
 export const assignmentPollIntervalMs = 10_000;
 
+/**
+ * What became of a final.
+ *
+ * Classified here rather than by the caller, because the facts it depends on are here. The
+ * difference between `pending` and `rejected` is the difference between "wait, something is
+ * retrying" and "a person has to act", and the caller would have to reconstruct it from a rendered
+ * copy of state this hook holds live — which is wrong in the one case that matters, a snapshot
+ * refused in the instant somebody was pressing Submit.
+ */
+export interface IFinalDelivery {
+  /** Never `none`: this path only runs for a game that has tournament control behind it. */
+  delivery: Exclude<ServerDeliveryState, 'none'>;
+  /** Whatever control said, when it said anything. Safe to show. */
+  detail?: string;
+  /** Control already had this exact statistical result. The right answer to a retry, not a problem. */
+  duplicate?: boolean;
+}
+
+/** New credentials a repair produced, for the caller to persist. */
+export interface ICredentialRepair {
+  sessionId?: string;
+  sessionToken?: string;
+}
+
 export interface IConnectedRuntimeInput {
   client: FruityServerClient;
   identity: IRoomIdentity;
   credentials: ISessionCredentials;
-  /** The scheduled game this room is scoring, so a reassignment is detectable. */
+  /** The scheduled game this room is scoring, so a reassignment is detectable and a reopen is possible. */
   scheduledMatchId?: string;
   /** The tournament this game belongs to, so a server that has opened another one is detectable. */
   tournamentKey?: string;
@@ -52,8 +100,10 @@ export interface IConnectedRuntimeInput {
    * polled and nothing is sent. Everything it reports is inert.
    */
   enabled: boolean;
-  /** Offer to repair the room's credentials in place. Never navigates. */
+  /** Offer to pair this room again, in place. Never navigates. */
   onRepairConnection?: () => void;
+  /** A repair produced new session credentials. Persist them; the game does not change. */
+  onCredentialsRepaired?: (repair: ICredentialRepair) => void;
 }
 
 export interface IConnectedRuntime {
@@ -68,7 +118,7 @@ export interface IConnectedRuntime {
   automaticDelivery: boolean;
   /** Offer the latest scoresheet for the next trailing snapshot. Safe to call every render. */
   reportProgress: (qbj: object) => void;
-  submitFinal: (qbj: object) => Promise<ApiResult<unknown>>;
+  submitFinal: (qbj: object) => Promise<IFinalDelivery>;
   recoverFromServer: () => Promise<object | null>;
   syncRosterPlayer: (teamName: string, playerName: string) => Promise<{ ok: boolean; error?: string; rejected?: boolean }>;
   requestControl: (category: HelpRequestCategory, message: string) => Promise<void>;
@@ -92,12 +142,40 @@ export function classifyPoll(result: ApiResult<unknown>): {
   return { connection: RoomConnectionState.Degraded, credentialProblem: false };
 }
 
+/**
+ * What a refused write means, in the vocabulary of the three repairs.
+ *
+ * `401` on a session token is the session's problem alone: the room capability that opened it is
+ * untouched, which is exactly why reopening works. `409` is a person's problem.
+ */
+export function classifyWrite(result: ApiResult<unknown>): {
+  sessionProblem: boolean;
+  conflict: IWriterConflict | null;
+} {
+  if (result.ok || result.status === undefined) return { sessionProblem: false, conflict: null };
+  if (result.status === 401) return { sessionProblem: true, conflict: null };
+  if (result.status === 409) return { sessionProblem: false, conflict: readWriterConflict(result.payload) };
+  return { sessionProblem: false, conflict: null };
+}
+
 export default function useConnectedRuntime(input: IConnectedRuntimeInput): IConnectedRuntime {
-  const { client, identity, credentials, scheduledMatchId, tournamentKey, enabled, onRepairConnection } = input;
+  const {
+    client,
+    identity,
+    credentials,
+    scheduledMatchId,
+    tournamentKey,
+    enabled,
+    onRepairConnection,
+    onCredentialsRepaired,
+  } = input;
 
   const [connection, setConnection] = useState(RoomConnectionState.Connected);
   const [degradedMessage, setDegradedMessage] = useState<string | undefined>(undefined);
-  const [credentialProblem, setCredentialProblem] = useState(false);
+  const [roomCredentialProblem, setRoomCredentialProblem] = useState(false);
+  const [sessionCredentialProblem, setSessionCredentialProblem] = useState(false);
+  const [repairMessage, setRepairMessage] = useState<string | undefined>(undefined);
+  const [writerConflict, setWriterConflict] = useState<IWriterConflict | null>(null);
   const [reassigned, setReassigned] = useState(false);
   const [tournamentSwitched, setTournamentSwitched] = useState(false);
   const [serverSnapshotAt, setServerSnapshotAt] = useState<number | null>(null);
@@ -107,17 +185,90 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
   /**
    * Whether it is still safe to write to this session.
    *
-   * Turned off by a credential failure or by control having opened a different tournament, and
-   * never turned back on by anything except a successful repair. The point is to stop filing
-   * snapshots against the wrong event or with credentials control has withdrawn — not to stop the
-   * room, which keeps scoring either way.
+   * Turned off by a credential failure, a writer conflict, or by control having opened a different
+   * tournament, and never turned back on by anything except a successful repair. The point is to
+   * stop filing snapshots against the wrong event, with credentials control has withdrawn, or over
+   * another device's work — not to stop the room, which keeps scoring either way.
    */
-  const writesAllowed = enabled && !credentialProblem && !tournamentSwitched;
+  const writesAllowed =
+    enabled && !roomCredentialProblem && !sessionCredentialProblem && !tournamentSwitched && writerConflict === null;
   const writesAllowedRef = useRef(writesAllowed);
   writesAllowedRef.current = writesAllowed;
 
   /** The newest complete game state, retained so a later successful poll can re-offer it. */
   const latestSnapshotRef = useRef<object | null>(null);
+
+  /**
+   * Whether the one unattended reopen has already been spent on the current problem.
+   *
+   * Declared here rather than beside the effect that reads it, because the repair itself re-arms it.
+   */
+  const autoRepairAttempted = useRef(false);
+
+  /**
+   * Reopen this room's session with the room capability it still holds.
+   *
+   * Not a takeover and not a new game: both surfaces answer an open request for an assignment that
+   * already has a session with that same session, so this either returns what the room had or tells
+   * it that control has moved on.
+   */
+  const repairSession = useCallback(async (): Promise<boolean> => {
+    if (!scheduledMatchId) {
+      setRepairMessage('This game has no scheduled match to reopen. Finish it and hand the QBJ over.');
+      return false;
+    }
+    const opened = await client.openSession(identity, scheduledMatchId);
+    if (!opened.ok) {
+      setRepairMessage(opened.error);
+      return false;
+    }
+    setRepairMessage(undefined);
+    setSessionCredentialProblem(false);
+    setWriterConflict(opened.value.writer ? null : { canTakeOver: true });
+    // Re-armed here rather than left to the credentials effect, because reopening usually returns
+    // the same token — the session did not change, only the server's memory of it — and a token
+    // that did not change means that effect never runs. Without this, a session refused twice in
+    // one game would silently stop repairing itself after the first.
+    autoRepairAttempted.current = false;
+    onCredentialsRepaired?.({ sessionId: opened.value.sessionId, sessionToken: opened.value.token });
+    return true;
+  }, [client, identity, scheduledMatchId, onCredentialsRepaired]);
+
+  const takeOverWriter = useCallback(async () => {
+    const result = await client.takeWriter(identity, credentials);
+    if (!result.ok) {
+      setRepairMessage(result.error);
+      return;
+    }
+    setRepairMessage(undefined);
+    setWriterConflict(null);
+    onCredentialsRepaired?.({ sessionId: result.value.sessionId, sessionToken: result.value.token });
+  }, [client, identity, credentials, onCredentialsRepaired]);
+
+  /**
+   * One unattended reopen per session problem, and no more.
+   *
+   * A session token that stopped working is almost always a restarted server rather than a decision
+   * about this room, and making a scorekeeper press a button for that is noise. Repeating it is
+   * not: a server that refuses the reopen is saying something, and a loop would keep asking.
+   */
+  const noteWrite = useCallback((result: ApiResult<unknown>) => {
+    const classified = classifyWrite(result);
+    if (classified.sessionProblem) setSessionCredentialProblem(true);
+    if (classified.conflict) setWriterConflict(classified.conflict);
+  }, []);
+
+  useEffect(() => {
+    if (!sessionCredentialProblem || autoRepairAttempted.current) return;
+    autoRepairAttempted.current = true;
+    void repairSession();
+  }, [sessionCredentialProblem, repairSession]);
+
+  // New credentials arrived, so whatever was wrong with the old ones is not a live problem.
+  useEffect(() => {
+    autoRepairAttempted.current = false;
+    setSessionCredentialProblem(false);
+  }, [credentials.token]);
 
   const sender = useMemo(
     () =>
@@ -129,9 +280,10 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
           setSnapshotError(undefined);
         } else {
           setSnapshotError(result.detail);
+          noteWrite(result);
         }
       }),
-    [client, credentials],
+    [client, credentials, noteWrite],
   );
   useEffect(() => () => sender.stop(), [sender]);
 
@@ -144,7 +296,7 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
       if (cancelled) return;
       const classified = classifyPoll(result);
       setConnection(classified.connection);
-      if (classified.credentialProblem) setCredentialProblem(true);
+      if (classified.credentialProblem) setRoomCredentialProblem(true);
       if (!result.ok) {
         setDegradedMessage(
           classified.connection === RoomConnectionState.Degraded
@@ -154,7 +306,7 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
         return;
       }
       setDegradedMessage(undefined);
-      setCredentialProblem(false);
+      setRoomCredentialProblem(false);
       const assignment = result.value;
       if (tournamentKey && assignment.tournamentKey && assignment.tournamentKey !== tournamentKey) {
         setTournamentSwitched(true);
@@ -162,8 +314,9 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
       }
       if (
         scheduledMatchId &&
-        assignment.current !== null &&
-        assignment.current.scheduledMatchId !== scheduledMatchId
+        assignment.state === 'assigned' &&
+        assignment.scheduledMatchId !== undefined &&
+        assignment.scheduledMatchId !== scheduledMatchId
       ) {
         setReassigned(true);
       }
@@ -184,13 +337,35 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
 
   const alerts = useMemo<IScorerAlert[]>(() => {
     const list: IScorerAlert[] = [];
-    if (credentialProblem) {
+    if (roomCredentialProblem) {
       list.push({
         id: 'credentials',
         tone: 'warning',
         title: 'Tournament connection changed — keep scoring',
         body: 'Tournament control no longer recognizes this room, so results will not be sent automatically until the connection is repaired. The game is saved on this device and can be handed over as a file.',
         actions: onRepairConnection ? [{ label: 'Repair connection…', onSelect: onRepairConnection }] : undefined,
+        offerDownload: true,
+      });
+    }
+    if (sessionCredentialProblem) {
+      list.push({
+        id: 'session-credentials',
+        tone: 'warning',
+        title: 'This game lost its place with tournament control — keep scoring',
+        body: `${repairMessage ?? 'Tournament control did not accept this game’s credentials.'} The room is still paired, so reconnecting reopens the same game rather than starting a new one. Nothing scored is affected.`,
+        actions: [{ label: 'Reconnect this game', onSelect: () => void repairSession() }],
+        offerDownload: true,
+      });
+    }
+    if (writerConflict) {
+      list.push({
+        id: 'writer-conflict',
+        tone: 'warning',
+        title: 'Another device is scoring this game',
+        body: `${repairMessage ?? 'Tournament control is accepting writes from a different device, so nothing from here is being sent.'} Keep scoring — this scoresheet is complete and can be handed over as a file. Take over only if the other device has stopped.`,
+        actions: writerConflict.canTakeOver
+          ? [{ label: 'Take over scoring', onSelect: () => void takeOverWriter() }]
+          : undefined,
         offerDownload: true,
       });
     }
@@ -213,7 +388,17 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
       });
     }
     return list;
-  }, [credentialProblem, tournamentSwitched, reassigned, onRepairConnection]);
+  }, [
+    roomCredentialProblem,
+    sessionCredentialProblem,
+    writerConflict,
+    repairMessage,
+    tournamentSwitched,
+    reassigned,
+    onRepairConnection,
+    repairSession,
+    takeOverWriter,
+  ]);
 
   const reportProgress = useCallback(
     (qbj: object) => {
@@ -224,13 +409,21 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
   );
 
   const submitFinal = useCallback(
-    async (qbj: object) => {
+    async (qbj: object): Promise<IFinalDelivery> => {
+      // Read at the moment the write would happen. A room already barred from writing has nothing
+      // retrying on its behalf, so calling that pending would be telling a scorekeeper to wait for
+      // something that is never coming.
       if (!writesAllowedRef.current) {
-        return { ok: false as const, error: 'This room is not currently authorized to send results.' };
+        return { delivery: 'rejected', detail: 'This room is not currently authorized to send results.' };
       }
-      return client.postFinal(credentials, qbj);
+      const result = await client.postFinal(credentials, qbj);
+      if (result.ok) return { delivery: 'sent', duplicate: result.value.duplicate };
+      noteWrite(result);
+      // Nothing answered, so nothing refused it: worth retrying, and the room can be told to wait.
+      if (result.status === undefined) return { delivery: 'pending', detail: result.error };
+      return { delivery: 'rejected', detail: result.detail ?? result.error };
     },
-    [client, credentials],
+    [client, credentials, noteWrite],
   );
 
   const recoverFromServer = useCallback(async () => {

@@ -6,7 +6,18 @@ import reactHooks from 'eslint-plugin-react-hooks';
 import jsxA11y from 'eslint-plugin-jsx-a11y';
 
 export default tseslint.config(
-  { ignores: ['dist/**', 'node_modules/**', 'coverage/**'] },
+  // The last three are generated: a lint run after a browser-test run would otherwise spend its
+  // time reporting on Playwright's own bundled report viewer.
+  {
+    ignores: [
+      'dist/**',
+      'node_modules/**',
+      'coverage/**',
+      'playwright-report/**',
+      'test-results/**',
+      '.stryker-tmp/**',
+    ],
+  },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

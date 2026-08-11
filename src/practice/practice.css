@@ -61,15 +61,29 @@
  * fewer line of help on screen is the better trade, because those rulings are what the steps spend
  * their time telling somebody to press.
  *
- * It is a clearance for that screen, not a guarantee for every screen: rows are anchored to the top of
- * the sheet and this panel to the bottom of the window, so a window short enough will always bring the
- * two together, and Minimize is the way out of it.
+ * The rulings are anchored to the top of the sheet and this panel to the bottom of the window, so the
+ * clearance is not a height — it is the distance between them, and on a shorter window the panel is
+ * what has to give. `--practice-sheet-clearance` is that distance stated once: 440px, which is the
+ * 768px screen minus the 328px the panel was allowed there, so a full-height window behaves exactly
+ * as it did. Below about 710px tall the panel shortens instead of climbing over the sheet, which is
+ * the whole point — a 1366×600 Chromebook lid is an ordinary tournament device and Minimize should
+ * be a preference rather than the only way to see what you are pressing.
+ *
+ * The floor is the last resort. Under roughly 590px there is no arrangement that fits both, so the
+ * panel keeps enough height to be worth having and Minimize goes back to being the way out.
  */
 .practice-coach {
+  --practice-sheet-clearance: 440px;
+  --practice-coach-floor: 148px;
+
   display: flex;
   flex-direction: column;
   width: min(860px, calc(100vw - 320px));
-  max-height: min(46vh, 328px);
+  max-height: clamp(
+    var(--practice-coach-floor),
+    calc(100vh - var(--practice-sheet-clearance)),
+    min(46vh, 328px)
+  );
 }
 
 .practice-coach-collapsed {
@@ -404,9 +418,19 @@
  * the tabs on their own line under the heading rather than squeezed beside it.
  */
 @media (max-width: 1050px) {
+  /*
+   * The narrow panel is taller, but it is not exempt from the clearance: it still sits over the right
+   * of the sheet, which is where the right-hand team's rulings are, and 520px of it on a laptop lid
+   * covered them. The same distance applies, so this reads as a taller panel wherever the window has
+   * the room for one and as the base height wherever it does not.
+   */
   .practice-coach {
     width: min(420px, calc(100vw - 24px));
-    max-height: min(62vh, 520px);
+    max-height: clamp(
+      var(--practice-coach-floor),
+      calc(100vh - var(--practice-sheet-clearance)),
+      min(62vh, 520px)
+    );
   }
 
   .practice-coach-collapsed {

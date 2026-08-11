@@ -1,16 +1,20 @@
 /**
  * What happens after the last question.
  *
- * # Two copies, and the server one does not excuse the other
+ * # Two copies, and which one the room is made to produce
  *
  * A connected game has two independent result paths: the submission tournament control received,
  * and the file somebody carries. They fail independently — a server can accept a result and then be
  * restored from a backup, a laptop can be reimaged, a submission can be filed against the wrong
- * game — and the entire value of asking for both is that neither is trusted to cover for the other.
+ * game — so the backup is always offered, always available, and never deleted.
  *
- * So "Result sent ✓" does not end the screen. The backup step is still there, still required, and
- * the game stays in this device's list with the backup marked outstanding until somebody says they
- * have handed it over.
+ * What changed is when it is *demanded*. A result tournament control has accepted has arrived, and
+ * requiring a download, a manual upload and a confirmation on top of that is asking a room to
+ * deliver the same game twice, eleven times a day. The predictable result is a scorekeeper who
+ * presses "I uploaded the result" without uploading anything, which costs the acknowledgement the
+ * only thing it was worth. So the handoff is required exactly where delivery did not happen or the
+ * tournament asked for the file by name: a pending or refused submission, a game with no
+ * tournament control behind it, or an assignment carrying its own handoff instruction.
  *
  * # And the acknowledgement is not proof
  *
@@ -26,7 +30,7 @@
  * that somebody cleared it.
  */
 import { useState } from 'react';
-import { IStoredGameRecord } from '../game/GameStore';
+import { IStoredGameRecord, isDelivered, needsHandoff } from '../game/GameStore';
 import { gamePackageLabel } from '../game/GamePackage';
 import { downloadFile, qbjFileContents, qbjFileName } from '../integrations/file/QbjDownload';
 
@@ -40,16 +44,20 @@ function timeOfDay(iso: string | undefined): string {
 export default function CompletionScreen(props: {
   record: IStoredGameRecord;
   onUpdate: (recordId: string, change: Partial<IStoredGameRecord>) => void | Promise<void>;
+  /** What leaving this screen is called. A connected room is going back to its room, not home. */
+  continueLabel?: string;
   onHome: () => void | Promise<void>;
 }) {
-  const { record, onUpdate, onHome } = props;
+  const { record, onUpdate, continueLabel = 'Done', onHome } = props;
   const [writeFailed, setWriteFailed] = useState(false);
   const score = record.finalScore;
   const connected = record.serverDelivery !== 'none';
-  const requiresHandoffAcknowledgement = connected || Boolean(record.package.handoffInstruction);
+  /** Tournament control has it, and did not ask for anything else. */
+  const delivered = isDelivered(record);
+  const requiresHandoffAcknowledgement =
+    !delivered && (connected || Boolean(record.package.handoffInstruction));
   const backupDownloaded = record.qbjDownloadedAt !== undefined;
-  const handoffComplete = !requiresHandoffAcknowledgement || record.handoffAcknowledgedAt !== undefined;
-  const canLeave = backupDownloaded && handoffComplete;
+  const canLeave = !needsHandoff(record);
 
   const download = () => {
     if (!record.finalQbj) return;
@@ -96,12 +104,19 @@ export default function CompletionScreen(props: {
       )}
 
       <section className="shell-section">
-        <h2 className="shell-heading">{connected ? 'Back up this result' : 'Hand this result over'}</h2>
-        {connected && (
-          <ol className="final-steps">
-            <li>Download the QBJ.</li>
-            <li>Upload it using the instructions provided for this room.</li>
-          </ol>
+        <h2 className="shell-heading">{delivered ? 'Back up this result' : 'Hand this result over'}</h2>
+        {delivered ? (
+          <p className="shell-hint">
+            Tournament control has this game. A copy stays on this device, and downloading one is always
+            worth doing when there is a moment for it.
+          </p>
+        ) : (
+          connected && (
+            <ol className="final-steps">
+              <li>Download the QBJ.</li>
+              <li>Upload it using the instructions provided for this room.</li>
+            </ol>
+          )
         )}
         {record.package.handoffInstruction && (
           <p className="final-instruction">{record.package.handoffInstruction}</p>
@@ -109,7 +124,7 @@ export default function CompletionScreen(props: {
 
         <div className="shell-actions">
           <button type="button" className="shell-button is-primary" onClick={download}>
-            {record.qbjDownloadedAt ? 'Download QBJ again' : 'Download QBJ'}
+            {record.qbjDownloadedAt ? 'Download QBJ again' : delivered ? 'Download QBJ backup' : 'Download QBJ'}
           </button>
         </div>
 
@@ -144,10 +159,19 @@ export default function CompletionScreen(props: {
 
       <div className="shell-actions">
         {!canLeave && (
-          <p className="shell-hint">Download the QBJ{requiresHandoffAcknowledgement ? ' and confirm the handoff' : ''} before finishing.</p>
+          <p className="shell-hint">
+            {backupDownloaded
+              ? 'Confirm the handoff before finishing.'
+              : `Download the QBJ${requiresHandoffAcknowledgement ? ' and confirm the handoff' : ''} before finishing.`}
+          </p>
         )}
-        <button type="button" className="shell-button" disabled={!canLeave} onClick={() => void onHome()}>
-          Done
+        <button
+          type="button"
+          className={`shell-button${canLeave ? ' is-primary' : ''}`}
+          disabled={!canLeave}
+          onClick={() => void onHome()}
+        >
+          {continueLabel}
         </button>
       </div>
     </main>

@@ -64,39 +64,49 @@ export type OpenGameResult =
  */
 export function openGameText(text: string): OpenGameResult {
   const parsed = parseQbjText(text);
+  if (!parsed.ok) return { ok: false, errors: parsed.errors };
+  return openGameValue(parsed.value);
+}
 
-  if (parsed.ok) {
-    const legacyPackage = validateGamePackage(parsed.value);
-    if (legacyPackage.ok) {
-      // A legacy package describes an assignment; it has no scoring in it by construction.
-      return {
-        ok: true,
-        kind: 'game',
-        definition: gamePackageToDefinition(legacyPackage.value),
-        legacy: true,
-        state: 'unplayed',
-      };
-    }
-
-    const source = readQbjSource(parsed.value);
-    if (source.ok) {
-      const single = scoreableWithoutChoice(source.value);
-      if (!single) return { ok: true, kind: 'choice', source: source.value };
-      const defined = defineGame(source.value, single.index);
-      if (defined.ok) {
-        return { ok: true, kind: 'game', definition: defined.definition, legacy: false, state: single.state };
-      }
-      return { ...defined, source: source.value, index: single.index };
-    }
-
-    // Neither reader recognized it. A document that looks like a legacy package but failed
-    // validation deserves that reader's specific complaints rather than QBJ's generic one.
-    const looksLikePackage =
-      typeof parsed.value === 'object' && parsed.value !== null && 'format' in (parsed.value as object);
-    return { ok: false, errors: looksLikePackage ? legacyPackage.errors : source.errors };
+/**
+ * Read an already-parsed document as a game.
+ *
+ * The same function as `openGameText` with the JSON step removed, and it exists so that a response
+ * body which the network layer has already parsed does not have to be turned back into a string in
+ * order to be read. Splitting it this way is the only reason the QBTCP path can promise it uses the
+ * file parser: a second entry point that re-implemented any of this would be the drift the whole
+ * migration exists to avoid.
+ *
+ * @param value untrusted parsed JSON — from a file, from a drop, or from a QBTCP response body
+ */
+export function openGameValue(value: unknown): OpenGameResult {
+  const legacyPackage = validateGamePackage(value);
+  if (legacyPackage.ok) {
+    // A legacy package describes an assignment; it has no scoring in it by construction.
+    return {
+      ok: true,
+      kind: 'game',
+      definition: gamePackageToDefinition(legacyPackage.value),
+      legacy: true,
+      state: 'unplayed',
+    };
   }
 
-  return { ok: false, errors: parsed.errors };
+  const source = readQbjSource(value);
+  if (source.ok) {
+    const single = scoreableWithoutChoice(source.value);
+    if (!single) return { ok: true, kind: 'choice', source: source.value };
+    const defined = defineGame(source.value, single.index);
+    if (defined.ok) {
+      return { ok: true, kind: 'game', definition: defined.definition, legacy: false, state: single.state };
+    }
+    return { ...defined, source: source.value, index: single.index };
+  }
+
+  // Neither reader recognized it. A document that looks like a legacy package but failed
+  // validation deserves that reader's specific complaints rather than QBJ's generic one.
+  const looksLikePackage = typeof value === 'object' && value !== null && 'format' in (value as object);
+  return { ok: false, errors: looksLikePackage ? legacyPackage.errors : source.errors };
 }
 
 /** Define one game from a document the caller has shown a picker for. */

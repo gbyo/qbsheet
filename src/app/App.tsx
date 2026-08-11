@@ -16,6 +16,14 @@
  *
  * Every transition in this file is caused by somebody pressing something. The connected runtime
  * produces connection state and alerts; it cannot cause a screen change. See `useConnectedRuntime`.
+ *
+ * # A paired room outlives the game it was paired for
+ *
+ * The connection in storage is two things joined: a room capability, which is good for the whole
+ * tournament, and a session, which is good for one game. This file keeps them at their own
+ * lifetimes. Pairing writes the room half immediately, starting a game adds the session half, and
+ * finishing a game returns to the room rather than to the front door — because a Chromebook that
+ * spent the morning as Room 204 is still Room 204 after the buzzer.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GameStore, IStoredGameRecord, isActive, needsHandoff } from '../game/GameStore';
@@ -25,7 +33,15 @@ import { claimGame, IGameClaim, newTabId } from '../persistence/TabClaim';
 import { IGameSetup } from '../scoring/deriveGame';
 import { loadGame } from '../scorer/GameSession';
 import PracticeScreen, { practiceGameKey } from '../practice/PracticeScreen';
-import { IConnectedSession, clearConnection, readConnection, writeConnection } from './ConnectedSession';
+import {
+  IConnectedSession,
+  IPairedRoom,
+  clearConnection,
+  connectionVersion,
+  pairedRoomOf,
+  readConnection,
+  writeConnection,
+} from './ConnectedSession';
 import useLeaveWarning from './useLeaveWarning';
 import WelcomeScreen from './WelcomeScreen';
 import ConnectedSetup, { IConnectedStart } from './ConnectedSetup';
@@ -38,7 +54,14 @@ import DeviceReadiness from './DeviceReadiness';
 type Screen =
   | { kind: 'loading' }
   | { kind: 'home' }
-  | { kind: 'connect' }
+  /**
+   * The connected room.
+   *
+   * `fresh` means start at the address box even though a pairing is stored — the scorekeeper is
+   * moving this device to a different tournament, which is the one case where the remembered room
+   * is the wrong answer.
+   */
+  | { kind: 'connect'; fresh: boolean }
   | { kind: 'readiness' }
   | { kind: 'practice' }
   | { kind: 'scoring'; recordId: string }
@@ -139,20 +162,31 @@ export default function App() {
    * with half the questions in it.
    */
   const startFromPackage = useCallback(
-    async (packageValue: IGamePackage, options: { connected: boolean; gameKey?: string; attempt?: number }) => {
-      if (!store) return;
+    async (
+      packageValue: IGamePackage,
+      options: { connected: boolean; gameKey?: string; attempt?: number; resumeExisting?: boolean },
+    ): Promise<IStoredGameRecord | null> => {
+      if (!store) return null;
       const identity = gamePackageIdentity(packageValue);
       if (options.attempt === undefined) {
         const existing = (await store.findByIdentity(identity)).find(isActive);
         if (existing) {
-          // Offered rather than opened. A scorekeeper who picked the wrong file, or who is checking
-          // they have the right one, must not find themselves inside a half-scored game; and the
-          // saved copy must not be quietly replaced by a fresh one either. So the unfinished game
-          // is named and Resume is one press away.
+          // The connected path asked for this game by name and tournament control confirmed the
+          // session, so the unfinished copy *is* the answer and opening it is the resume.
+          if (options.resumeExisting) {
+            await refresh(store);
+            setNotice('');
+            await openRecord(existing);
+            return existing;
+          }
+          // Otherwise it is offered rather than opened. A scorekeeper who picked the wrong file, or
+          // who is checking they have the right one, must not find themselves inside a half-scored
+          // game; and the saved copy must not be quietly replaced by a fresh one either. So the
+          // unfinished game is named and Resume is one press away.
           await refresh(store);
           setNotice('This game is already saved on this device. Resume it rather than starting again.');
           setScreen({ kind: 'home' });
-          return;
+          return null;
         }
       }
       const created = await store.create({
@@ -165,31 +199,80 @@ export default function App() {
       await refresh(store);
       setNotice('');
       await openRecord(created);
+      return created;
     },
     [store, openRecord, refresh],
   );
 
+  /**
+   * Persist a change to the live connection, keeping the two halves in one record.
+   *
+   * The ref rather than a state updater because writing to storage is a side effect and a state
+   * updater is not a place to have one. It is also updated first, so two repairs arriving in the
+   * same tick — a reopened session and a re-paired room — do not lose the earlier of the two.
+   */
+  const connectionRef = useRef<IConnectedSession | null>(null);
+  connectionRef.current = connection;
+
+  const mergeConnection = useCallback((change: Partial<IConnectedSession>) => {
+    const previous = connectionRef.current;
+    if (!previous) return;
+    const next: IConnectedSession = { ...previous, ...change, updatedAt: new Date().toISOString() };
+    // The version and the timestamp are the writer's to set, so they are not passed back to it.
+    writeConnection({
+      baseUrl: next.baseUrl,
+      roomId: next.roomId,
+      roomName: next.roomName,
+      roomToken: next.roomToken,
+      deviceId: next.deviceId,
+      sessionId: next.sessionId,
+      sessionToken: next.sessionToken,
+      gameRecordId: next.gameRecordId,
+      tournamentKey: next.tournamentKey,
+    });
+    connectionRef.current = next;
+    setConnection(next);
+  }, []);
+
+  /**
+   * A room paired.
+   *
+   * Written before any game exists, and that is the point: the capability is what makes this device
+   * Room 204 for the rest of the day, and a tab that closed between pairing and kickoff must not
+   * cost somebody the code again.
+   */
+  const onPaired = useCallback((room: IPairedRoom) => {
+    const stored: Omit<IConnectedSession, 'version' | 'updatedAt'> = { ...room };
+    writeConnection(stored);
+    setConnection({ ...stored, version: connectionVersion, updatedAt: new Date().toISOString() });
+  }, []);
+
   const onConnected = useCallback(
     async (start: IConnectedStart) => {
       if (!store) return;
-      const session: Omit<IConnectedSession, 'version' | 'updatedAt'> = {
-        baseUrl: start.baseUrl,
-        roomId: start.identity.roomId,
-        roomName: start.roomName,
-        roomToken: start.identity.token,
-        deviceId: start.identity.deviceId ?? '',
+      // The session id is the game key for a new game, so a browser that reloads finds the same
+      // history the server would recover, and so two devices in one room cannot collide on a key.
+      const record = await startFromPackage(start.definition, {
+        connected: true,
+        gameKey: start.credentials.sessionId,
+        resumeExisting: true,
+      });
+      if (!record) return;
+      const stored: Omit<IConnectedSession, 'version' | 'updatedAt'> = {
+        ...start.room,
         sessionId: start.credentials.sessionId,
         sessionToken: start.credentials.token,
+        gameRecordId: record.id,
         tournamentKey: start.tournamentKey,
       };
-      writeConnection(session);
-      setConnection({ ...session, version: 1, updatedAt: new Date().toISOString() });
-      // The session id is the game key, so a browser that reloads finds the same history the server
-      // would recover, and so two devices in one room cannot collide on a key.
-      await startFromPackage(start.package, { connected: true, gameKey: start.credentials.sessionId });
+      writeConnection(stored);
+      setConnection({ ...stored, version: connectionVersion, updatedAt: new Date().toISOString() });
     },
     [store, startFromPackage],
   );
+
+  /** The room this device is paired with, if the pairing is still held. */
+  const pairedRoom = useMemo(() => pairedRoomOf(connection), [connection]);
 
   const onComplete = useCallback(
     async (recordId: string) => {
@@ -230,7 +313,13 @@ export default function App() {
     return (
       <ConnectedSetup
         initialBaseUrl={pendingBaseUrl || (connection?.baseUrl ?? '')}
+        pairedRoom={screen.fresh ? null : pairedRoom}
+        onPaired={onPaired}
         onStart={onConnected}
+        onRoomLost={() => {
+          clearConnection();
+          setConnection(null);
+        }}
         onCancel={() => setScreen({ kind: 'home' })}
       />
     );
@@ -264,6 +353,7 @@ export default function App() {
           connection={connection}
           durable={store.durable}
           onComplete={onComplete}
+          onConnectionRepaired={mergeConnection}
           onConnectionLost={() => {
             clearConnection();
             setConnection(null);
@@ -274,7 +364,22 @@ export default function App() {
   }
 
   if (screen.kind === 'completed' && current) {
-    return <CompletionScreen record={current} onUpdate={updateRecord} onHome={goHome} />;
+    // A connected room goes back to its room, not to the front door. The next assignment appears
+    // there on its own, and nobody has to find an address or a pairing code between rounds.
+    const backToRoom = current.connected && pairedRoom !== null;
+    return (
+      <CompletionScreen
+        record={current}
+        onUpdate={updateRecord}
+        continueLabel={backToRoom ? `Next game in ${pairedRoom.roomName}` : 'Done'}
+        onHome={async () => {
+          claim.current?.release();
+          claim.current = null;
+          await refresh(store);
+          setScreen(backToRoom ? { kind: 'connect', fresh: false } : { kind: 'home' });
+        }}
+      />
+    );
   }
 
   return (
@@ -282,17 +387,20 @@ export default function App() {
       records={records}
       notice={notice}
       durable={store.durable}
-      rememberedRoom={connection?.roomName}
+      pairedRoom={pairedRoom}
       practiceInProgress={(loadGame(practiceGameKey)?.events.length ?? 0) > 0}
       onReadiness={() => setScreen({ kind: 'readiness' })}
       onPractice={() => {
         setScreen({ kind: 'practice' });
       }}
+      onOpenRoom={() => setScreen({ kind: 'connect', fresh: false })}
       onConnect={(baseUrl) => {
         setPendingBaseUrl(baseUrl);
-        setScreen({ kind: 'connect' });
+        setScreen({ kind: 'connect', fresh: true });
       }}
-      onOpenPackage={(packageValue, attempt) => startFromPackage(packageValue, { connected: false, attempt })}
+      onOpenPackage={async (packageValue, attempt) => {
+        await startFromPackage(packageValue, { connected: false, attempt });
+      }}
       onOpenRecord={openRecord}
       onFindExisting={(identity) => store.findByIdentity(identity)}
     />
