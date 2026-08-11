@@ -70,6 +70,47 @@ test('the guide is a wide panel that keeps clear of the contextual row controls'
   expect(coachBox?.x ?? 0).toBeGreaterThan((noBuzzBox?.x ?? 0) + (noBuzzBox?.width ?? 0));
 });
 
+/**
+ * A short screen is an ordinary tournament device, not an edge case.
+ *
+ * A 1366×600 or 1024×600 laptop lid is what a school hands a scorekeeper, and on one of those the
+ * guide used to sit on top of the right-hand team's rulings — the exact controls the steps spend
+ * their time telling somebody to press. The panel shortening is the fix; Minimize is a preference,
+ * and a layout that depends on it is a layout that is wrong until somebody notices.
+ */
+for (const size of [
+  { width: 1366, height: 600 },
+  { width: 1024, height: 600 },
+]) {
+  test(`the guide keeps clear of the rulings on a ${size.width}×${size.height} screen`, async ({ page }) => {
+    await page.setViewportSize(size);
+    await startPracticeGame(page);
+
+    // Below 1051px the guide opens minimized, which is a preference and not the clearance.
+    const collapsed = page.locator('.practice-coach-collapsed');
+    if (await collapsed.count()) await collapsed.click();
+
+    const coach = page.locator('.practice-coach');
+    await expect(coach).toBeVisible();
+
+    const coachBox = await coach.boundingBox();
+    const rulings = page.locator('.scorer-team').last().locator('.scorer-player').last().locator('.scorer-answers');
+    const rulingsBox = await rulings.boundingBox();
+    expect(coachBox).not.toBeNull();
+    expect(rulingsBox).not.toBeNull();
+
+    const overlapsHorizontally =
+      (coachBox?.x ?? 0) < (rulingsBox?.x ?? 0) + (rulingsBox?.width ?? 0) &&
+      (rulingsBox?.x ?? 0) < (coachBox?.x ?? 0) + (coachBox?.width ?? 0);
+    if (overlapsHorizontally) {
+      expect((rulingsBox?.y ?? 0) + (rulingsBox?.height ?? 0)).toBeLessThanOrEqual(coachBox?.y ?? 0);
+    }
+
+    // Shortened, not shrunk to nothing: the step it is on still has to be readable.
+    expect(coachBox?.height ?? 0).toBeGreaterThanOrEqual(120);
+  });
+}
+
 test('the phone guide stays above the control bar when a warning adds a row', async ({ page }) => {
   await startPracticeGame(page);
   await page.getByRole('button', { name: 'Minimize practice guide' }).click();
