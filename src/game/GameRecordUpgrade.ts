@@ -92,6 +92,10 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
+function isInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value);
+}
+
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === 'string' && item.trim() !== '');
 }
@@ -123,13 +127,13 @@ function isScorekeeperFormat(value: unknown): boolean {
   const lightning = value.lightning;
   const players = value.players;
   return (
-    Number.isInteger(value.version) &&
+    isInteger(value.version) &&
     typeof value.name === 'string' &&
     Array.isArray(value.answerTypes) &&
     value.answerTypes.every(
       (answerType) =>
         isObject(answerType) &&
-        Number.isInteger(answerType.index) &&
+        isInteger(answerType.index) &&
         isFiniteNumber(answerType.value) &&
         typeof answerType.label === 'string' &&
         typeof answerType.shortLabel === 'string' &&
@@ -140,27 +144,27 @@ function isScorekeeperFormat(value: unknown): boolean {
     ) &&
     isObject(regulation) &&
     typeof regulation.timed === 'boolean' &&
-    Number.isInteger(regulation.tossupCount) &&
-    Number.isInteger(regulation.maximumTossupCount) &&
+    isInteger(regulation.tossupCount) &&
+    isInteger(regulation.maximumTossupCount) &&
     isObject(bonus) &&
     typeof bonus.enabled === 'boolean' &&
     typeof bonus.bounceBack === 'boolean' &&
     typeof bonus.regular === 'boolean' &&
     isFiniteNumber(bonus.divisor) &&
-    Number.isInteger(bonus.minimumParts) &&
-    Number.isInteger(bonus.maximumParts) &&
+    isInteger(bonus.minimumParts) &&
+    isInteger(bonus.maximumParts) &&
     (bonus.pointsPerPart === undefined || isFiniteNumber(bonus.pointsPerPart)) &&
     isFiniteNumber(bonus.maximumScore) &&
     isObject(overtime) &&
-    Number.isInteger(overtime.minimumQuestionCount) &&
+    isInteger(overtime.minimumQuestionCount) &&
     typeof overtime.suddenDeath === 'boolean' &&
     typeof overtime.includesBonuses === 'boolean' &&
     isObject(lightning) &&
     typeof lightning.enabled === 'boolean' &&
-    Number.isInteger(lightning.countPerTeam) &&
+    isInteger(lightning.countPerTeam) &&
     isFiniteNumber(lightning.divisor) &&
     isObject(players) &&
-    Number.isInteger(players.maximumActive) &&
+    isInteger(players.maximumActive) &&
     isFiniteNumber(value.totalDivisor)
   );
 }
@@ -171,13 +175,13 @@ function isPackage(value: unknown): boolean {
   const round = value.round;
   return (
     typeof value.format === 'string' &&
-    Number.isInteger(value.version) &&
+    isInteger(value.version) &&
     isObject(tournament) &&
     typeof tournament.name === 'string' &&
     isObject(round) &&
-    Number.isInteger(round.number) &&
+    isInteger(round.number) &&
     typeof round.name === 'string' &&
-    Number.isInteger(round.revision) &&
+    isInteger(round.revision) &&
     isRosterTeam(value.left) &&
     isRosterTeam(value.right) &&
     isScorekeeperFormat(value.scorekeeperFormat)
@@ -193,11 +197,11 @@ function isPackage(value: unknown): boolean {
  */
 function isGameRecord(value: RawRecord): value is RawRecord & IStoredGameRecord {
   return (
-    Number.isInteger(value.version) &&
+    isInteger(value.version) &&
     typeof value.id === 'string' &&
     typeof value.identity === 'string' &&
-    Number.isInteger(value.attempt) &&
-    (value.attempt as number) >= 1 &&
+    isInteger(value.attempt) &&
+    value.attempt >= 1 &&
     typeof value.gameKey === 'string' &&
     isPackage(value.package) &&
     isSetup(value.setup) &&
