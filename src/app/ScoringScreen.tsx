@@ -207,24 +207,13 @@ export default function ScoringScreen(props: {
 
       if (live) {
         const delivered = await runtime.submitFinal(qbjWithSourceMetadata(qbj, record.package));
-        // `pending` is a promise that something will keep trying. A room whose writes were already
-        // barred — a writer conflict, a refused session, a server that opened another tournament —
-        // has nothing retrying on its behalf, so telling it to wait would be telling it to wait
-        // forever. Only a server nobody could reach is pending.
-        const blocked = !runtime.automaticDelivery;
         await store.update(record.id, {
-          serverDelivery: delivered.ok
-            ? 'sent'
-            : blocked || delivered.status !== undefined
-              ? 'rejected'
-              : 'pending',
-          serverDeliveryDetail: delivered.ok
-            ? // A duplicate is the correct answer to a retry, not a problem, but a room that sees
-              // nothing about it has no way to know its earlier attempt had already landed.
-              delivered.value.duplicate
-              ? 'Tournament control already had this result on record.'
-              : undefined
-            : delivered.detail ?? delivered.error,
+          serverDelivery: delivered.delivery,
+          // A duplicate is the correct answer to a retry, not a problem, but a room that sees
+          // nothing about it has no way to know its earlier attempt had already landed.
+          serverDeliveryDetail: delivered.duplicate
+            ? 'Tournament control already had this result on record.'
+            : delivered.detail,
         });
       }
 

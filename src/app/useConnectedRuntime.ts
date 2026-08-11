@@ -49,17 +49,35 @@ import { RoomConnectionState } from './ConnectionState';
 import { IScorerAlert } from '../scorer/ConnectionStatus';
 import FruityServerClient, {
   ApiResult,
-  IResultReceipt,
   IRoomIdentity,
   ISessionCredentials,
   IWriterConflict,
   readWriterConflict,
 } from '../integrations/fruity/FruityServerClient';
+import { ServerDeliveryState } from '../game/GameStore';
 import { ProgressSender } from '../integrations/fruity/FruityResultDestination';
 import { HelpRequestCategory } from './HelpRequests';
 
 /** How often a room asks control what it should be playing. */
 export const assignmentPollIntervalMs = 10_000;
+
+/**
+ * What became of a final.
+ *
+ * Classified here rather than by the caller, because the facts it depends on are here. The
+ * difference between `pending` and `rejected` is the difference between "wait, something is
+ * retrying" and "a person has to act", and the caller would have to reconstruct it from a rendered
+ * copy of state this hook holds live — which is wrong in the one case that matters, a snapshot
+ * refused in the instant somebody was pressing Submit.
+ */
+export interface IFinalDelivery {
+  /** Never `none`: this path only runs for a game that has tournament control behind it. */
+  delivery: Exclude<ServerDeliveryState, 'none'>;
+  /** Whatever control said, when it said anything. Safe to show. */
+  detail?: string;
+  /** Control already had this exact statistical result. The right answer to a retry, not a problem. */
+  duplicate?: boolean;
+}
 
 /** New credentials a repair produced, for the caller to persist. */
 export interface ICredentialRepair {
@@ -100,7 +118,7 @@ export interface IConnectedRuntime {
   automaticDelivery: boolean;
   /** Offer the latest scoresheet for the next trailing snapshot. Safe to call every render. */
   reportProgress: (qbj: object) => void;
-  submitFinal: (qbj: object) => Promise<ApiResult<IResultReceipt>>;
+  submitFinal: (qbj: object) => Promise<IFinalDelivery>;
   recoverFromServer: () => Promise<object | null>;
   syncRosterPlayer: (teamName: string, playerName: string) => Promise<{ ok: boolean; error?: string; rejected?: boolean }>;
   requestControl: (category: HelpRequestCategory, message: string) => Promise<void>;
@@ -391,13 +409,19 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
   );
 
   const submitFinal = useCallback(
-    async (qbj: object) => {
+    async (qbj: object): Promise<IFinalDelivery> => {
+      // Read at the moment the write would happen. A room already barred from writing has nothing
+      // retrying on its behalf, so calling that pending would be telling a scorekeeper to wait for
+      // something that is never coming.
       if (!writesAllowedRef.current) {
-        return { ok: false as const, error: 'This room is not currently authorized to send results.' };
+        return { delivery: 'rejected', detail: 'This room is not currently authorized to send results.' };
       }
       const result = await client.postFinal(credentials, qbj);
-      if (!result.ok) noteWrite(result);
-      return result;
+      if (result.ok) return { delivery: 'sent', duplicate: result.value.duplicate };
+      noteWrite(result);
+      // Nothing answered, so nothing refused it: worth retrying, and the room can be told to wait.
+      if (result.status === undefined) return { delivery: 'pending', detail: result.error };
+      return { delivery: 'rejected', detail: result.detail ?? result.error };
     },
     [client, credentials, noteWrite],
   );
