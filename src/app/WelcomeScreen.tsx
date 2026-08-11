@@ -59,10 +59,14 @@ export function unreadableNotice(unreadable: IUnreadableRecord[]): string | null
   if (unreadable.length === 0) return null;
   const count = unreadable.length;
   const games = count === 1 ? 'A game' : `${count} games`;
-  const tooNew = unreadable.some((record) => record.readability === 'too-new');
-  return tooNew
-    ? `${games} on this device ${count === 1 ? 'was' : 'were'} saved by a newer version of QBSheet than the one running now. Nothing has been deleted. Update this device, or open it on the device that saved it.`
-    : `${games} on this device ${count === 1 ? 'is' : 'are'} in a format this version of QBSheet cannot read. Nothing has been deleted. Ask tournament control before scoring on this device.`;
+  const tooNew = unreadable.filter((record) => record.readability === 'too-new').length;
+  if (tooNew === count) {
+    return `${games} on this device ${count === 1 ? 'was' : 'were'} saved by a newer version of QBSheet than the one running now. Nothing has been deleted. Update this device, or open it on the device that saved it.`;
+  }
+  if (tooNew === 0) {
+    return `${games} on this device ${count === 1 ? 'is' : 'are'} in a format this version of QBSheet cannot read. Nothing has been deleted. Ask tournament control before scoring on this device.`;
+  }
+  return `${games} on this device cannot be opened by this version of QBSheet. Nothing has been deleted. Update this device or ask tournament control before scoring on it.`;
 }
 
 export default function WelcomeScreen(props: {
