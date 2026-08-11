@@ -32,6 +32,10 @@ describe('describing what was thrown', () => {
     expect(describeThrown({ status: 500 })).toBe('{"status":500}');
   });
 
+  test('a value JSON.stringify cannot represent is still described', () => {
+    expect(describeThrown(Symbol('broken'))).toBe('An unserializable value was thrown');
+  });
+
   test('a thrown nothing is still a line', () => {
     expect(describeThrown(undefined)).toContain('Nothing was thrown');
     expect(describeThrown(null)).toContain('Nothing was thrown');
