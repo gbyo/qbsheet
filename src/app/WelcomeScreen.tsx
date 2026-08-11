@@ -112,7 +112,6 @@ export default function WelcomeScreen(props: {
           <h1 className="shell-title shell-brand-title">
             <BrandLogo className="shell-brand-logo" />
           </h1>
-          <p className="shell-subtitle">A focused, offline-ready scoresheet for quiz bowl.</p>
         </div>
         <button type="button" className="shell-button shell-button-quiet" onClick={onReadiness}>
           Check this device
