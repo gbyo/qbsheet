@@ -482,3 +482,25 @@
     transition: none;
   }
 }
+
+/*
+ * The keystroke beside a practice instruction.
+ *
+ * Quiet, and only present when keyboard scoring is on. It sits under the instruction rather than beside
+ * it so the sentence a first-time scorekeeper reads is unchanged in shape whether or not they are using
+ * the keyboard.
+ */
+.practice-keystroke {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--room-muted);
+}
+
+.practice-keystroke kbd {
+  padding: 1px 5px;
+  border: 1px solid var(--room-border-strong);
+  border-radius: 3px;
+  background: var(--room-surface);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+}

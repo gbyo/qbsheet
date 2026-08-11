@@ -63,8 +63,15 @@ import { FlagDialog, IssueDialog, RecoveryDialog, ScoresheetReviewDialog } from 
 import { attachScorerRecovery } from './ScorerRecovery';
 import useRoomClock from './useRoomClock';
 import usePlayerSeating from './usePlayerSeating';
+import { orderBySeating } from './PlayerSeating';
 import useScreenWakeLock from './useScreenWakeLock';
 import { formatClock, roomClockSegment } from './RoomClock';
+import useScorerKeyboard from './useScorerKeyboard';
+import KeyboardMap, { KeyboardMapContext } from './KeyboardMap';
+import { modifierLegend, bonusKeyLegend } from './KeyboardScoring';
+import { rulingLabel, unreachableAnswerTypes } from './tossupRulings';
+import { setKeyboardEnabled } from './keyboardPreference';
+import useKeyboardEnabled from './useKeyboardEnabled';
 import ScorerBanners, {
   ConnectionDetailDialog,
   IScorerAlert,
@@ -219,6 +226,24 @@ export default function Scorer(props: IScorerProps) {
   const recoveryStatus: IScorerRecoveryStatus = recovery ?? { localSaveOk: saved !== false };
 
   const [dialog, setDialog] = useState<OpenDialog>(null);
+  /**
+   * Whether the seat layer is on.
+   *
+   * This device's stored preference, and never defaulted to true. See `keyboardPreference`: turning this
+   * on for somebody who did not ask would make an ordinary browser shortcut record a tossup.
+   */
+  const keyboardEnabled = useKeyboardEnabled();
+  /**
+   * Which set of choices the bonus is currently asking for, reported up by `BonusPrompt`.
+   *
+   * The legend has to change when the bonus does — showing seat keys while a bounceback is on screen
+   * would be showing bindings that do nothing — and the choices live in that component with its own
+   * state. Reporting the stage upward is smaller than lifting the state, and keeps the shortcut in the
+   * same file as the buttons it stands in for.
+   */
+  const [bonusStage, setBonusStage] = useState<{ title: string; options: number[]; cancellable: boolean } | null>(
+    null,
+  );
   const [submitting, setSubmitting] = useState(false);
   const [submitResult, setSubmitResult] = useState<IScorerSubmitResult | null>(null);
   const [operationNotice, setOperationNotice] = useState(
@@ -616,37 +641,6 @@ export default function Scorer(props: IScorerProps) {
   const checkpointProtestBlocks = (checkpoint: 'overtime' | 'sudden-death') =>
     openProtests.length > 0 && protestBlocksCheckpoint(protestCheckpointPolicy(procedure), checkpoint);
 
-  // Space records an unanswered tossup, but only when the keyboard is not already aimed at
-  // something: with focus on a button, Space is that button, and stealing it would score the wrong
-  // thing. Ctrl/Cmd+Z is undo, which is the one shortcut every scorekeeper already expects.
-  useEffect(() => {
-    const onKeyDown = (keyEvent: KeyboardEvent) => {
-      // A keydown can be dispatched at something that is not an element — the document itself, for
-      // one — and reaching straight for closest() on that throws out of a listener the whole scoring
-      // screen depends on. Ask whether there is an element before asking it anything.
-      const target = keyEvent.target;
-      const inControl =
-        target instanceof Element && target.closest('button, input, select, textarea, [role="dialog"]') !== null;
-
-      if (
-        (keyEvent.metaKey || keyEvent.ctrlKey) &&
-        keyEvent.key.toLowerCase() === 'z' &&
-        !inControl &&
-        dialog === null
-      ) {
-        keyEvent.preventDefault();
-        if (keyEvent.shiftKey) events.redo();
-        else events.undo();
-        return;
-      }
-      if (keyEvent.key === ' ' && !inControl && dialog === null && phase.kind === 'tossup' && !playBlockedByProtest) {
-        keyEvent.preventDefault();
-        recordNoBuzz();
-      }
-    };
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [events, recordNoBuzz, dialog, phase.kind, playBlockedByProtest]);
 
   const scoringEnabled = phase.kind === 'tossup' && !playBlockedByProtest;
   const eligible = (side: LeftOrRight) =>
@@ -664,6 +658,87 @@ export default function Scorer(props: IScorerProps) {
   } else if (phase.kind === 'tossup' && phase.eligibleTeams.length === 1) {
     noBuzzLabel = `${phase.eligibleTeams[0] === 'left' ? game.left.name : game.right.name} has no answer`;
   }
+
+  /**
+   * Who is in each seat, per side, in the order the room arranged them.
+   *
+   * The same derivation `TeamPanel` renders from, so the key for seat three addresses whoever is in the
+   * third row on screen. That is also the whole substitution story: `PlayerSeating.takeSeat` puts an
+   * incoming player in the outgoing one's place, so the name behind `D` changes and the binding does
+   * not.
+   */
+  const seatedPlayers = useMemo(
+    () => ({
+      left: orderBySeating(
+        game.left.players.filter((player) => game.left.activePlayers.includes(player.name)),
+        seating.seating.left,
+        (player) => player.name,
+      ).map((player) => player.name),
+      right: orderBySeating(
+        game.right.players.filter((player) => game.right.activePlayers.includes(player.name)),
+        seating.seating.right,
+        (player) => player.name,
+      ).map((player) => player.name),
+    }),
+    [game.left, game.right, seating.seating],
+  );
+
+  /** The seat a keystroke just scored into, flashed briefly and then forgotten. */
+  const [keyEcho, setKeyEcho] = useState<{ side: LeftOrRight; seat: number } | null>(null);
+  useEffect(() => {
+    if (keyEcho === null) return undefined;
+    // Long enough to register in peripheral vision, short enough that consecutive tossups do not queue
+    // up behind each other. Nothing waits on it and nothing is announced.
+    const timer = window.setTimeout(() => setKeyEcho(null), 450);
+    return () => window.clearTimeout(timer);
+  }, [keyEcho]);
+
+  useScorerKeyboard({
+    keyboardEnabled,
+    format,
+    scoringEnabled,
+    negsAvailable,
+    eligible,
+    seatedPlayers,
+    dialogOpen: dialog !== null,
+    noBuzzAllowed: phase.kind === 'tossup' && !playBlockedByProtest,
+    // The same callbacks the buttons are given. A keystroke cannot reach a code path a tap cannot.
+    onBuzz: recordBuzz,
+    onWrongNoPenalty: recordWrongNoPenalty,
+    onNoBuzz: recordNoBuzz,
+    onUndo: events.undo,
+    onRedo: events.redo,
+    onEcho: ({ side, seat }) => setKeyEcho({ side, seat }),
+  });
+
+  /**
+   * What the legend says right now.
+   *
+   * Derived rather than stored, so it cannot fall out of step with the screen. Ordered by what actually
+   * has the keyboard: a dialog takes everything, then the bonus, then the tossup.
+   */
+  const keyboardContext = useMemo<KeyboardMapContext>(() => {
+    if (dialog !== null) return { kind: 'inactive', reason: 'Finish what is open first.' };
+    if (bonusStage !== null) {
+      return {
+        kind: 'choices',
+        title: bonusStage.title,
+        choices: bonusKeyLegend(bonusStage.options),
+        cancellable: bonusStage.cancellable,
+      };
+    }
+    if (phase.kind === 'bonus') {
+      // A bonus whose total is typed rather than chosen. Its digits belong to the number field.
+      return { kind: 'inactive', reason: 'Type the bonus total.' };
+    }
+    if (phase.kind !== 'tossup') return { kind: 'inactive', reason: 'No tossup is live.' };
+    if (playBlockedByProtest) return { kind: 'inactive', reason: 'Resolve the protest first.' };
+    return {
+      kind: 'tossup',
+      modifiers: modifierLegend(format, negsAvailable),
+      unreachable: unreachableAnswerTypes(format).map(rulingLabel),
+    };
+  }, [dialog, bonusStage, phase.kind, playBlockedByProtest, format, negsAvailable]);
 
   const lineupChangeAllowed = lineupChangeAllowedAtPhase(substitutionPolicy(procedure), phase.kind);
   const rosterAdditionAllowed = phase.kind !== 'complete';
@@ -736,6 +811,12 @@ export default function Scorer(props: IScorerProps) {
   })();
 
   const menuItems: IGameMenuItem[] = [
+    {
+      // Named for what it does rather than for the state it is in, and stating the current state after
+      // it, because a menu entry that reads "Keyboard scoring" tells nobody whether it is on.
+      label: keyboardEnabled ? 'Keyboard scoring: on' : 'Keyboard scoring: off',
+      onSelect: () => setKeyboardEnabled(!keyboardEnabled),
+    },
     { label: 'Notes', onSelect: () => setDialog('notes') },
     { label: 'Protests', onSelect: () => setDialog('protests') },
     { label: 'Issue / tournament control', onSelect: () => setDialog('issue') },
@@ -953,6 +1034,7 @@ export default function Scorer(props: IScorerProps) {
                 format={format}
                 team={game.left}
                 seatOrder={seating.seating.left}
+                flashSeat={keyEcho?.side === 'left' ? keyEcho.seat : undefined}
                 scoringEnabled={scoringEnabled}
                 eligible={eligible('left')}
                 negsAvailable={negsAvailable}
@@ -969,6 +1051,7 @@ export default function Scorer(props: IScorerProps) {
                 format={format}
                 team={game.right}
                 seatOrder={seating.seating.right}
+                flashSeat={keyEcho?.side === 'right' ? keyEcho.seat : undefined}
                 scoringEnabled={scoringEnabled}
                 eligible={eligible('right')}
                 negsAvailable={negsAvailable}
@@ -982,6 +1065,10 @@ export default function Scorer(props: IScorerProps) {
                 substitutionQuestionNumber={lineupQuestion}
               />
             </div>
+
+            {/* After the teams and before the control bar, so it sits beside the rulings it describes
+                without joining the two-column grid they are laid out in. */}
+            {keyboardEnabled && <KeyboardMap context={keyboardContext} />}
 
             {/*
               Pinned to the control bar for every phase but the last. See `.scorer-stage.is-pinned`:
@@ -1116,6 +1203,8 @@ export default function Scorer(props: IScorerProps) {
                   questionNumber={phase.questionNumber}
                   onRecord={recordBonus}
                   onRecordParts={recordBonusParts}
+                  keyboardEnabled={keyboardEnabled && dialog === null}
+                  onStageChange={setBonusStage}
                 />
               )}
 

@@ -2,6 +2,8 @@ import { IScorekeeperFormat, scorekeeperFormatVersion } from '../scoring/Scoreke
 import { bonusEventPoints, ScoreEvent } from '../scoring/ScoreEvents';
 import { IGameSetup } from '../scoring/deriveGame';
 import { ITeamRoster } from '../game/Roster';
+import { LeftOrRight } from '../scoring/types';
+import { seatKeyLabels } from '../scorer/KeyboardScoring';
 
 export type PracticeExpectation =
   | { kind: 'lineup' }
@@ -411,4 +413,46 @@ export function practiceLineupReady(setup: IGameSetup): boolean {
   const same = (actual: string[], expected: string[]) =>
     actual.length === expected.length && expected.every((player) => actual.includes(player));
   return same(left, practiceLeftTeam.startingLineup) && same(right, practiceRightTeam.startingLineup);
+}
+
+/**
+ * The keystroke that records a step, for a scorekeeper practising with the keyboard layer on.
+ *
+ * Derived from the practice lineups and the shared layout rather than written out, so a hint cannot
+ * drift from what the keys actually do — moving a name in `practiceLeftTeam.startingLineup` moves the
+ * key here too. Steps with no keyboard equivalent, and the ones that are deliberately mouse work
+ * (choosing a substitute, correcting an earlier question), return null and are not annotated.
+ */
+const stepKeystrokes: Record<string, { side: LeftOrRight; player: string; modifier?: 'Shift' | 'Alt' | 'Ctrl' } | { literal: string }> = {
+  'q1-power': { side: 'left', player: 'Gibson', modifier: 'Shift' },
+  'q1-bonus': { literal: '3' },
+  'q2-ten': { side: 'right', player: 'Tucker' },
+  'q2-bonus': { literal: '2' },
+  'q3-neg': { side: 'left', player: 'Jeremy', modifier: 'Alt' },
+  'q3-rebound': { side: 'right', player: 'Tucker' },
+  'q3-bonus': { literal: '4' },
+  'q4-wrong-no-penalty': { side: 'left', player: 'Owen', modifier: 'Ctrl' },
+  'q4-dead': { literal: 'Space' },
+  'q5-ten': { side: 'left', player: 'Gibson' },
+  'q5-bonus': { literal: '3' },
+  'q6-ten': { side: 'right', player: 'Tucker' },
+  'q6-undo': { literal: 'Ctrl/\u2318 + Z' },
+  'q6-power': { side: 'left', player: 'Gibson', modifier: 'Shift' },
+  'q6-bonus': { literal: '3' },
+};
+
+/** Which key sits under a starting seat on one side of the practice game. */
+function practiceSeatKey(side: LeftOrRight, playerName: string): string | null {
+  const lineup = side === 'left' ? practiceLeftTeam.startingLineup : practiceRightTeam.startingLineup;
+  const seat = lineup.indexOf(playerName);
+  return seat >= 0 && seat < seatKeyLabels[side].length ? seatKeyLabels[side][seat] : null;
+}
+
+export function practiceKeystroke(stepId: string): string | null {
+  const entry = stepKeystrokes[stepId];
+  if (!entry) return null;
+  if ('literal' in entry) return entry.literal;
+  const key = practiceSeatKey(entry.side, entry.player);
+  if (key === null) return null;
+  return entry.modifier ? `${entry.modifier} + ${key}` : key;
 }
