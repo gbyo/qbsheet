@@ -105,10 +105,10 @@ describe('which role a keystroke asks for', () => {
     expect(held({})).toBe('normal');
   });
 
-  test('Shift is the power, Alt is the penalty, Ctrl is the zero', () => {
+  test('Shift is the power, Alt is the penalty, and Ctrl is not a seat modifier', () => {
     expect(held({ shiftKey: true })).toBe('power');
     expect(held({ altKey: true })).toBe('neg');
-    expect(held({ ctrlKey: true })).toBe('no-penalty');
+    expect(held({ ctrlKey: true })).toBeNull();
   });
 
   test('two modifiers at once is a fumble, and a fumble records nothing', () => {
@@ -161,11 +161,6 @@ describe('what a role means, according to the format', () => {
     expect(rulingForRole(noNegs, 'neg', true)).toBeNull();
   });
 
-  test('Ctrl is the zero, which every format has because it is not a format question', () => {
-    expect(rulingForRole(powersFormat, 'no-penalty', true)).toEqual({ kind: 'no-penalty' });
-    expect(rulingForRole(flatFormat, 'no-penalty', false)).toEqual({ kind: 'no-penalty' });
-  });
-
   test('a format with no positive answer cannot be scored, and says so rather than guessing', () => {
     const broken = formatWith([answerType({ index: 0, value: -5 })]);
 
@@ -176,7 +171,7 @@ describe('what a role means, according to the format', () => {
 
 describe('rulings this layout cannot reach', () => {
   test('a middle tier is left to the buttons and reported', () => {
-    // Four rulings per seat is the layout. Inventing Ctrl+Alt+Shift+D for a third positive tier would
+    // Three seat rulings is the layout. Inventing Ctrl+Alt+Shift+D for a third positive tier would
     // produce something nobody can use at speed.
     expect(unreachableAnswerTypes(oddFormat).map((type) => type.value)).toEqual([25]);
   });
@@ -195,8 +190,8 @@ describe('the legend', () => {
       '+20',
       'S',
       '−10',
-      '0, wrong with no penalty',
     ]);
+    expect(rows.some((row) => row.keys === 'Ctrl + seat')).toBe(false);
   });
 
   test('marks a modifier unavailable rather than hiding it', () => {

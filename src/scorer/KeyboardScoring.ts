@@ -33,9 +33,10 @@
  *
  * # And no new chords
  *
- * Four rulings per seat is the whole layout. A format with more answer types than that leaves the
- * extras on the buttons, and the legend says so. Inventing `Ctrl+Alt+Shift+D` for a third positive
- * tier would produce something nobody can use at speed, which is the only thing this feature is for.
+ * Three seat rulings is the whole keyboard layout. A format with more answer types than that leaves the
+ * extras on the buttons, and the legend says so. Inventing `Ctrl+Alt+Shift+D` for a third positive tier
+ * would produce something nobody can use at speed, which is the only thing this feature is for. Ctrl is
+ * deliberately not a seat modifier: on ChromeOS it belongs to the browser and operating system.
  */
 import { LeftOrRight } from '../scoring/types';
 import { IScorekeeperAnswerType, IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
@@ -71,14 +72,14 @@ export function seatForCode(code: string): ISeatKey | null {
   return null;
 }
 
-/** The four roles a seat key can play. */
-export type RulingRole = 'normal' | 'power' | 'neg' | 'no-penalty';
+/** The three roles a seat key can play. */
+export type RulingRole = 'normal' | 'power' | 'neg';
 
 /**
  * Which role a keystroke is asking for, or null when the combination is not part of the layout.
  *
- * Exactly one modifier, and never two. `Shift+Alt+A` is not a third ruling, it is a scorekeeper
- * fumbling, and the safe response to a fumble is to record nothing.
+ * At most one supported modifier, and never two. `Shift+Alt+A` is not a third ruling, it is a
+ * scorekeeper fumbling, and the safe response to a fumble is to record nothing.
  */
 export function roleForModifiers(event: {
   shiftKey: boolean;
@@ -89,19 +90,18 @@ export function roleForModifiers(event: {
   // Meta is never part of this layout: it belongs to the browser and the operating system, and
   // Cmd+A is Select All in every room in the country.
   if (event.metaKey) return null;
-  const held = [event.shiftKey, event.altKey, event.ctrlKey].filter(Boolean).length;
-  if (held > 1) return null;
-  if (held === 0) return 'normal';
+  // Ctrl is intentionally not a scoring modifier. The canonical seat keys overlap with Chrome and
+  // ChromeOS shortcuts such as Ctrl+A, Ctrl+S, and Ctrl+D; leave those keystrokes to the platform
+  // instead of trying to turn browser-reserved shortcuts into controls.
+  if (event.ctrlKey) return null;
+  if (event.shiftKey && event.altKey) return null;
+  if (!event.shiftKey && !event.altKey) return 'normal';
   if (event.shiftKey) return 'power';
-  if (event.altKey) return 'neg';
-  return 'no-penalty';
+  return 'neg';
 }
 
 /** What a role resolves to against a live format and the state of the current tossup. */
-export type SeatRuling =
-  | { kind: 'buzz'; answerType: IScorekeeperAnswerType }
-  /** A wrong answer that costs nothing. The zero button beside the values. */
-  | { kind: 'no-penalty' };
+export type SeatRuling = { kind: 'buzz'; answerType: IScorekeeperAnswerType };
 
 /**
  * What this role means right now, or null when it means nothing.
@@ -114,7 +114,6 @@ export function rulingForRole(
   role: RulingRole,
   negsAvailable: boolean,
 ): SeatRuling | null {
-  if (role === 'no-penalty') return { kind: 'no-penalty' };
   if (role === 'normal') {
     const answerType = normalCorrect(format);
     return answerType ? { kind: 'buzz', answerType } : null;
@@ -140,7 +139,7 @@ export interface IKeyLegendEntry {
 /**
  * The modifier legend for one seat, in a fixed order so the shape is the same on every screen.
  *
- * Built for one representative key rather than all eight, because eight copies of the same four lines
+ * Built for one representative key rather than all eight, because eight copies of the same three lines
  * is not a legend, it is a wall. The map names the seat keys once and the modifiers once.
  */
 export function modifierLegend(format: IScorekeeperFormat, negsAvailable: boolean): IKeyLegendEntry[] {
@@ -163,7 +162,6 @@ export function modifierLegend(format: IScorekeeperFormat, negsAvailable: boolea
       meaning: neg ? rulingLabel(neg) : 'no penalty in this format',
       available: neg !== null && negsAvailable,
     },
-    { keys: 'Ctrl + seat', meaning: '0, wrong with no penalty', available: true },
   ];
 }
 

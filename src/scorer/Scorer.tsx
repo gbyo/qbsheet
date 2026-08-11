@@ -704,7 +704,6 @@ export default function Scorer(props: IScorerProps) {
     noBuzzAllowed: phase.kind === 'tossup' && !playBlockedByProtest,
     // The same callbacks the buttons are given. A keystroke cannot reach a code path a tap cannot.
     onBuzz: recordBuzz,
-    onWrongNoPenalty: recordWrongNoPenalty,
     onNoBuzz: recordNoBuzz,
     onUndo: events.undo,
     onRedo: events.redo,

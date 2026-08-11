@@ -50,7 +50,6 @@ export interface IScorerKeyboardInput {
   /** True when a tossup may be recorded as unanswered. Preserves the existing Space behaviour. */
   noBuzzAllowed: boolean;
   onBuzz: (side: LeftOrRight, playerName: string, answerType: IScorekeeperAnswerType) => void;
-  onWrongNoPenalty: (side: LeftOrRight, playerName: string) => void;
   onNoBuzz: () => void;
   onUndo: () => void;
   onRedo: () => void;
@@ -114,15 +113,10 @@ export default function useScorerKeyboard(input: IScorerKeyboardInput): void {
       if (playerName === undefined) return;
 
       // Claimed only once everything above has agreed. Until this point the keystroke may still belong
-      // to the browser — Ctrl+D is a bookmark — and preventing it early would break shortcuts for a
-      // ruling this format does not have.
+      // to the browser — Ctrl+D is a bookmark, and Ctrl+A is Select All — so Ctrl+seat was rejected by
+      // roleForModifiers before reaching this point.
       event.preventDefault();
 
-      if (ruling.kind === 'no-penalty') {
-        current.onWrongNoPenalty(seatKey.side, playerName);
-        current.onEcho?.({ ...seatKey, playerName, label: '0' });
-        return;
-      }
       current.onBuzz(seatKey.side, playerName, ruling.answerType);
       current.onEcho?.({ ...seatKey, playerName, label: ruling.answerType.shortLabel });
     };

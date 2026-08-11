@@ -149,14 +149,24 @@ describe('the modifiers', () => {
     await waitFor(() => expect(leftScore()).toContain('-5'));
   });
 
-  test('Ctrl records a wrong answer that costs nothing', async () => {
+  test('Ctrl plus a seat key is left to Chrome or ChromeOS', async () => {
     await openScoringWithKeyboard();
 
-    await pressKey('KeyA', { ctrl: true });
+    const event = new KeyboardEvent('keydown', {
+      bubbles: true,
+      cancelable: true,
+      code: 'KeyA',
+      key: 'a',
+      ctrlKey: true,
+    });
+    await act(async () => {
+      document.dispatchEvent(event);
+    });
 
-    // No points either way, and the team has spent its chance — which is what makes it different from
-    // both a neg and No buzz.
-    await waitFor(() => expect(screen.getByText(/Greenwood may still answer/)).toBeInTheDocument());
+    // Ctrl+A is a browser/operating-system shortcut, not a keyboard ruling. It must not spend the
+    // team's chance or be turned into a no-penalty score by this listener.
+    expect(event.defaultPrevented).toBe(false);
+    expect(screen.getByText('Tossup 1 of 20')).toBeInTheDocument();
     expect(leftScore()).toContain('0');
   });
 
@@ -176,11 +186,21 @@ describe('the modifiers', () => {
     expect(leftScore()).toContain('0');
   });
 
+  test('the map keeps Wrong zero on the buttons and does not teach Ctrl plus a seat', async () => {
+    await openScoringWithKeyboard();
+
+    const map = screen.getByLabelText('Keyboard scoring');
+    expect(within(map).queryByText('Ctrl + seat')).toBeNull();
+    expect(within(map).getByText('Wrong (0): use the buttons.')).toBeInTheDocument();
+  });
+
   test('Alt does nothing once the other team has already answered', async () => {
     await openScoringWithKeyboard();
 
     // Greenwood answers wrong with no penalty, so the question has been read out.
-    await pressKey('KeyJ', { ctrl: true });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Emma Chen 0 after readout wrong, no penalty' }));
+    });
     await pressKey('KeyA', { alt: true });
 
     // No neg was recorded, because a neg is not a legal ruling any more.
@@ -190,7 +210,9 @@ describe('the modifiers', () => {
   test('a key aimed at a team that has already answered does nothing', async () => {
     await openScoringWithKeyboard();
 
-    await pressKey('KeyA', { ctrl: true });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Sarah Mitchell 0 after readout wrong, no penalty' }));
+    });
     await pressKey('KeyA');
 
     expect(leftScore()).toContain('0');

@@ -35,7 +35,7 @@ const helpTopics = [
   {
     title: 'Wrong answer, neg, or no buzz?',
     answer:
-      'Use a negative ruling only when the rules assess a penalty. Use Wrong (0) for an answer with no penalty. Use No buzz only when the remaining eligible team never answers.',
+      'Use a negative ruling only when the rules assess a penalty. Use Wrong (0) for an answer with no penalty; it stays a pointer/touch button in keyboard mode because Ctrl-letter shortcuts belong to Chrome and ChromeOS. Use No buzz only when the remaining eligible team never answers.',
   },
   {
     title: 'The question or ruling is disputed',

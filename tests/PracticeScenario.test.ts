@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { practiceLineupsRecorded, replayPracticeProgress } from '../src/practice/PracticeScreen';
 import {
   practiceFormat,
+  practiceKeystroke,
   practiceLeftTeam,
   practiceRightTeam,
   practiceSteps,
@@ -43,6 +44,14 @@ describe('guided practice scenario', () => {
     expect(practiceSteps.some((step) => step.id === 'q4-wrong-no-penalty')).toBe(true);
     expect(practiceSteps.some((step) => step.id === 'substitution')).toBe(true);
     expect(practiceSteps.at(-1)?.expectation.kind).toBe('submit');
+  });
+
+  it('teaches only the keyboard rulings the scoresheet actually supports', () => {
+    expect(practiceKeystroke('q1-power')).toBe('Shift + A');
+    expect(practiceKeystroke('q3-neg')).toBe('Alt + S');
+    expect(practiceKeystroke('q4-wrong-no-penalty')).toBeNull();
+    expect(practiceKeystroke('q4-dead')).toBe('Space');
+    expect(practiceKeystroke('q6-undo')).toBe('Ctrl/⌘ + Z');
   });
 
   it('replays the current scoresheet to a safe guide checkpoint', () => {

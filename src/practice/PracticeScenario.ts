@@ -423,7 +423,7 @@ export function practiceLineupReady(setup: IGameSetup): boolean {
  * key here too. Steps with no keyboard equivalent, and the ones that are deliberately mouse work
  * (choosing a substitute, correcting an earlier question), return null and are not annotated.
  */
-const stepKeystrokes: Record<string, { side: LeftOrRight; player: string; modifier?: 'Shift' | 'Alt' | 'Ctrl' } | { literal: string }> = {
+const stepKeystrokes: Record<string, { side: LeftOrRight; player: string; modifier?: 'Shift' | 'Alt' } | { literal: string }> = {
   'q1-power': { side: 'left', player: 'Gibson', modifier: 'Shift' },
   'q1-bonus': { literal: '3' },
   'q2-ten': { side: 'right', player: 'Tucker' },
@@ -431,7 +431,6 @@ const stepKeystrokes: Record<string, { side: LeftOrRight; player: string; modifi
   'q3-neg': { side: 'left', player: 'Jeremy', modifier: 'Alt' },
   'q3-rebound': { side: 'right', player: 'Tucker' },
   'q3-bonus': { literal: '4' },
-  'q4-wrong-no-penalty': { side: 'left', player: 'Owen', modifier: 'Ctrl' },
   'q4-dead': { literal: 'Space' },
   'q5-ten': { side: 'left', player: 'Gibson' },
   'q5-bonus': { literal: '3' },

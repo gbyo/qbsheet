@@ -88,6 +88,7 @@ export default function KeyboardMap(props: { context: KeyboardMapContext }) {
         <Row entry={{ keys: 'Space', meaning: 'no buzz', available: true }} />
         <Row entry={{ keys: 'Ctrl/⌘ + Z', meaning: 'undo', available: true }} />
       </ul>
+      <p className="scorer-keymap-note">Wrong (0): use the buttons.</p>
       {context.unreachable.length > 0 && (
         // Said plainly rather than papered over with a new chord. A scorekeeper who knows the middle
         // tier is mouse-only will reach for the mouse; one who does not will hunt for a shortcut that
