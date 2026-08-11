@@ -77,7 +77,6 @@ async function openReviewWithKeyboard(page: Page): Promise<void> {
   const labels = await menuItems.allTextContents();
   const reviewIndex = labels.findIndex((label) => label.trim() === 'Full scoresheet review');
   expect(reviewIndex).toBeGreaterThanOrEqual(0);
-  await page.keyboard.press('Home');
   for (let move = 0; move < reviewIndex; move += 1) await page.keyboard.press('ArrowDown');
   await expect(review).toBeFocused();
   await page.keyboard.press('Enter');
