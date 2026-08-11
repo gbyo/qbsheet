@@ -23,6 +23,7 @@ import { IDerivedTeam } from '../scoring/deriveGame';
 import { IRoomProcedure, substitutionPolicy } from '../scoring/RoomProcedure';
 import { playerNameMaxLength, validatePlayerName } from '../game/Roster';
 import { moveWithin } from './PlayerSeating';
+import { useLineupMotion } from './LineupMotion';
 
 export interface IStartingLineupPromptProps {
   left: IDerivedTeam;
@@ -68,6 +69,8 @@ function TeamStarters(props: {
   const [adding, setAdding] = useState(false);
   const [newPlayer, setNewPlayer] = useState('');
   const input = useRef<HTMLInputElement>(null);
+  // Each team's rows animate against their own list. One side's reorder is not the other side's news.
+  const motion = useLineupMotion();
   const starters = settled ? team.activePlayers : selected;
   const bench = team.players.filter((player) => !starters.includes(player.name));
   const atCapacity = starters.length >= maximumActive;
@@ -113,7 +116,8 @@ function TeamStarters(props: {
         {starters.length > 0 ? (
           <ul className="scorer-lineup-list">
             {starters.map((name, seat) => (
-              <li key={name} className="scorer-lineup-entry">
+              <li key={name} ref={motion.rowRef(name)} className={motion.rowClassName(name, 'scorer-lineup-entry')}>
+                {/* Inside the row rather than beside it, so the number travels with the player. */}
                 <span className="scorer-lineup-seat" aria-hidden="true">
                   {seat + 1}
                 </span>
@@ -125,7 +129,10 @@ function TeamStarters(props: {
                       className="scorer-text-action"
                       aria-label={`Move ${name} up in starting lineup`}
                       disabled={seat === 0}
-                      onClick={() => onMove(name, -1)}
+                      onClick={() => {
+                        motion.beginMove(name);
+                        onMove(name, -1);
+                      }}
                     >
                       &uarr;
                     </button>
@@ -134,7 +141,10 @@ function TeamStarters(props: {
                       className="scorer-text-action"
                       aria-label={`Move ${name} down in starting lineup`}
                       disabled={seat === starters.length - 1}
-                      onClick={() => onMove(name, 1)}
+                      onClick={() => {
+                        motion.beginMove(name);
+                        onMove(name, 1);
+                      }}
                     >
                       &darr;
                     </button>
@@ -145,7 +155,10 @@ function TeamStarters(props: {
                     type="button"
                     className="scorer-text-action"
                     aria-label={`Bench ${name}`}
-                    onClick={() => onBench(name)}
+                    onClick={() => {
+                      motion.beginMove(name);
+                      onBench(name);
+                    }}
                   >
                     Bench
                   </button>
@@ -162,7 +175,11 @@ function TeamStarters(props: {
             <h4 className="scorer-lineup-group">Bench</h4>
             <ul className="scorer-lineup-list">
               {bench.map((player) => (
-                <li key={player.name} className="scorer-lineup-entry">
+                <li
+                  key={player.name}
+                  ref={motion.rowRef(player.name)}
+                  className={motion.rowClassName(player.name, 'scorer-lineup-entry')}
+                >
                   <span className="scorer-lineup-seat" aria-hidden="true">
                     &mdash;
                   </span>
@@ -173,7 +190,10 @@ function TeamStarters(props: {
                       className="scorer-text-action"
                       aria-label={`Start ${player.name}`}
                       disabled={atCapacity}
-                      onClick={() => onStart(player.name)}
+                      onClick={() => {
+                        motion.beginMove(player.name);
+                        onStart(player.name);
+                      }}
                     >
                       Start
                     </button>

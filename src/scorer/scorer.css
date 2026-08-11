@@ -2085,6 +2085,36 @@ div.scorer-banner .scorer-text-action {
   cursor: default;
 }
 
+/*
+ * A lineup change, shown.
+ *
+ * Scoped to the starting prompt, because this is the one place the room reorders rows by hand. The
+ * geometry is worked out in LineupMotion; all this contributes is how long the travel takes and what
+ * the moved row looks like while it happens.
+ *
+ * The row stays the ruled row it already is. It is not lifted, outlined, rounded or shadowed, because
+ * a row that turns into a card while it moves is saying "you are dragging this", and nobody is: they
+ * pressed an arrow, and the row is on its way to a seat it has already been given. So the whole
+ * treatment is the sunken wash the rest of the scoresheet uses for "this line, the one you just
+ * touched" — arriving at once so it is legible during the travel, and taking its time leaving so the
+ * eye has somewhere to land after the movement stops.
+ */
+.scorer-starters-team .scorer-lineup-entry.is-moved {
+  background: var(--room-surface-sunken);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .scorer-starters-team .scorer-lineup-entry {
+    transition: background-color 220ms ease-out;
+  }
+
+  /* Ease-out only. A seat is a fixed thing and a row that overshoots one has to be read twice. */
+  .scorer-starters-team .scorer-lineup-entry.is-moving {
+    transition: transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    will-change: transform;
+  }
+}
+
 .scorer-starters-submit {
   margin-top: 24px;
 }

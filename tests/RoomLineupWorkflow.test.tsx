@@ -15,7 +15,7 @@
  * second half is the one that matters to the standings.
  */
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { IScorekeeperFormat } from '../src/scoring/ScorekeeperFormat';
 import scoringRulesToScorekeeperFormat from './rules';
 import { CommonRuleSets, ScoringRules } from './rules';
@@ -49,6 +49,8 @@ function renderScorer(
     onSyncRosterPlayer?: (teamName: string, playerName: string) => Promise<{ ok: boolean }>;
   } = {},
   requiredStarterCount?: Partial<Record<'left' | 'right', number>>,
+  /** Overridden where a test needs a roster of a particular size against the format's seat count. */
+  left: typeof leftTeam = leftTeam,
 ) {
   gameCounter += 1;
   gameKey = `lineup-game-${gameCounter}`;
@@ -57,14 +59,14 @@ function renderScorer(
       gameKey={gameKey}
       format={format}
       requiredStarterCount={requiredStarterCount}
-      leftTeam={leftTeam}
+      leftTeam={left}
       rightTeam={rightTeam}
       tournamentName="Ninety Six Invitational"
       roundName="Round 4"
       roomName="Room 204"
       procedure={procedure}
       connection={RoomConnectionState.Connected}
-      authoritativeLeftTeam={rosterOptions.authoritative ? leftTeam : undefined}
+      authoritativeLeftTeam={rosterOptions.authoritative ? left : undefined}
       authoritativeRightTeam={rosterOptions.authoritative ? rightTeam : undefined}
       onSyncRosterPlayer={rosterOptions.onSyncRosterPlayer}
       onDownload={() => undefined}
@@ -93,6 +95,21 @@ function chooseStarters(names: string[]) {
     fireEvent.click(within(team).getByRole('button', { name: `Start ${name}` }));
   }
   fireEvent.click(within(prompt).getByText('Start game'));
+}
+
+/** The Starting rows of one team, in the order they are on screen. */
+function starterRows(team: HTMLElement): HTMLElement[] {
+  const list = within(team).getByText('Starting').nextElementSibling;
+  return list?.tagName === 'UL' ? Array.from(list.querySelectorAll('li')) : [];
+}
+
+function starterNames(team: HTMLElement): string[] {
+  return starterRows(team).map((row) => row.querySelector('.scorer-lineup-name')?.textContent ?? '');
+}
+
+/** The seat each Starting row is showing, read off the row itself rather than off its position. */
+function starterSeats(team: HTMLElement): string[] {
+  return starterRows(team).map((row) => row.querySelector('.scorer-lineup-seat')?.textContent ?? '');
 }
 
 function openPlayers() {
@@ -335,6 +352,125 @@ describe('who is starting', () => {
       'Sarah Jones',
     ]);
     expect(savedEvents().filter((event) => event.type === 'substitution')).toHaveLength(1);
+  });
+});
+
+/**
+ * The reorder, watched the way the scorekeeper watches it.
+ *
+ * The rows now slide between seats rather than swapping in a frame, and the whole point of how that is
+ * built is that it changes nothing here: the lineup state is updated on the press and the animation is
+ * only the interpolation afterwards. So these assert the order immediately after the click, with no
+ * waiting of any kind. If any of them ever needs a timer to pass, the animation has been allowed to
+ * become the source of truth and that is the bug.
+ */
+describe('reordering the starting lineup', () => {
+  function twoStarters() {
+    renderScorer(formatFor(2));
+    const prompt = screen.getByLabelText('Starting lineups');
+    const team = within(prompt).getByLabelText('Ninety Six starters');
+    fireEvent.click(within(team).getByRole('button', { name: 'Start Sarah Jones' }));
+    fireEvent.click(within(team).getByRole('button', { name: 'Start Michael Smith' }));
+    return { prompt, team };
+  }
+
+  test('Move up changes the order on the press, not when anything finishes', () => {
+    const { team } = twoStarters();
+    expect(starterNames(team)).toEqual(['Sarah Jones', 'Michael Smith']);
+
+    fireEvent.click(within(team).getByLabelText('Move Michael Smith up in starting lineup'));
+
+    expect(starterNames(team)).toEqual(['Michael Smith', 'Sarah Jones']);
+    // The number belongs to the seat, so seat one is still seat one whoever is sitting in it.
+    expect(starterSeats(team)).toEqual(['1', '2']);
+  });
+
+  test('Move down moves the other way', () => {
+    const { team } = twoStarters();
+
+    fireEvent.click(within(team).getByLabelText('Move Sarah Jones down in starting lineup'));
+
+    expect(starterNames(team)).toEqual(['Michael Smith', 'Sarah Jones']);
+  });
+
+  test('an arrow pressed faster than any animation still lands on the right order', () => {
+    // Four on the roster and three seats, so the prompt appears and there is a middle seat to pass
+    // through.
+    renderScorer(formatFor(3), undefined, {}, undefined, {
+      ...leftTeam,
+      players: leftTeam.players.concat({ name: 'Alex Brown' }),
+    });
+    const team = screen.getByLabelText('Ninety Six starters');
+    for (const name of ['Sarah Jones', 'Michael Smith', 'Jordan Hall'])
+      fireEvent.click(within(team).getByRole('button', { name: `Start ${name}` }));
+
+    // Three presses with nothing in between them, which is what a scorekeeper correcting a lineup
+    // thirty seconds before question one actually does.
+    fireEvent.click(within(team).getByLabelText('Move Jordan Hall up in starting lineup'));
+    fireEvent.click(within(team).getByLabelText('Move Jordan Hall up in starting lineup'));
+    fireEvent.click(within(team).getByLabelText('Move Michael Smith up in starting lineup'));
+
+    expect(starterNames(team)).toEqual(['Jordan Hall', 'Michael Smith', 'Sarah Jones']);
+    expect(starterSeats(team)).toEqual(['1', '2', '3']);
+    // Reordering is a seating preference, not scoring history, and nothing has been scored yet.
+    expect(savedEvents().filter((event) => event.type === 'substitution')).toHaveLength(0);
+  });
+
+  test('a reorder is presentation, and writes nothing', () => {
+    const { team } = twoStarters();
+    const before = savedEvents().length;
+
+    fireEvent.click(within(team).getByLabelText('Move Michael Smith up in starting lineup'));
+    fireEvent.click(within(team).getByLabelText('Move Michael Smith down in starting lineup'));
+
+    expect(savedEvents().length).toBe(before);
+  });
+
+  test('the row the scorekeeper moved is the one marked, and only for a moment', () => {
+    vi.useFakeTimers();
+    try {
+      const { team } = twoStarters();
+
+      fireEvent.click(within(team).getByLabelText('Move Michael Smith up in starting lineup'));
+      const [first, second] = starterRows(team);
+      expect(first.className).toContain('is-moved');
+      // The displaced starter travels, but it was not the scorekeeper's decision and does not claim
+      // the emphasis.
+      expect(second.className).not.toContain('is-moved');
+
+      // Long enough for any settling to be over. The exact figure is a design decision and is
+      // deliberately not what is asserted; that it goes away is.
+      act(() => {
+        vi.advanceTimersByTime(2000);
+      });
+      expect(starterRows(team)[0].className).not.toContain('is-moved');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test('Start and Bench mark the destination row the same way', () => {
+    vi.useFakeTimers();
+    try {
+      renderScorer(formatFor(2));
+      const team = screen.getByLabelText('Ninety Six starters');
+
+      fireEvent.click(within(team).getByRole('button', { name: 'Start Michael Smith' }));
+      expect(starterRows(team)[0].className).toContain('is-moved');
+
+      fireEvent.click(within(team).getByRole('button', { name: 'Bench Michael Smith' }));
+      // Back on the bench, and it is the bench row that is now marked.
+      expect(starterRows(team)).toEqual([]);
+      const benched = within(team).getByText('Michael Smith').closest('li') as HTMLElement;
+      expect(benched.className).toContain('is-moved');
+      expect(within(team).getByRole('button', { name: 'Start Michael Smith' })).toBeTruthy();
+
+      act(() => {
+        vi.advanceTimersByTime(2000);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
