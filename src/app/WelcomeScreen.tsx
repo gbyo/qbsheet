@@ -28,7 +28,9 @@ import BrandLogo from '../BrandLogo';
 import { IStoredGameRecord, isActive } from '../game/GameStore';
 import { IGamePackage, gamePackageIdentity, gamePackageLabel, gamePackageMatchup } from '../game/GamePackage';
 import deriveGame from '../scoring/deriveGame';
+import { IUnreadableRecord } from '../game/GameRecordUpgrade';
 import { IPairedRoom } from './ConnectedSession';
+import UpdateNotice from '../pwa/UpdateNotice';
 import GameFileOpen from './GameFileOpen';
 import RecentGames from './RecentGames';
 
@@ -44,8 +46,29 @@ export function progressLabel(record: IStoredGameRecord): string {
   }
 }
 
+/**
+ * What to say about a saved game this build will not open.
+ *
+ * Said out loud, and specifically, because the alternative is a scorekeeper who reloaded mid-round and
+ * is looking at a screen with no unfinished game on it. That is the same picture as data loss and it
+ * would send somebody hunting for a paper scoresheet. The game is still in storage and the fix is
+ * ordinary — get this device onto the build the rest of the venue is running — so the message names the
+ * cause and stops there rather than offering a repair that would risk the record.
+ */
+export function unreadableNotice(unreadable: IUnreadableRecord[]): string | null {
+  if (unreadable.length === 0) return null;
+  const count = unreadable.length;
+  const games = count === 1 ? 'A game' : `${count} games`;
+  const tooNew = unreadable.some((record) => record.readability === 'too-new');
+  return tooNew
+    ? `${games} on this device ${count === 1 ? 'was' : 'were'} saved by a newer version of QBSheet than the one running now. Nothing has been deleted. Update this device, or open it on the device that saved it.`
+    : `${games} on this device ${count === 1 ? 'is' : 'are'} in a format this version of QBSheet cannot read. Nothing has been deleted. Ask tournament control before scoring on this device.`;
+}
+
 export default function WelcomeScreen(props: {
   records: IStoredGameRecord[];
+  /** Games found in storage that this build declined to open. Never empty silently. */
+  unreadable: IUnreadableRecord[];
   notice: string;
   durable: boolean;
   /** The room this device is paired with, when a pairing is held. */
@@ -62,6 +85,7 @@ export default function WelcomeScreen(props: {
 }) {
   const {
     records,
+    unreadable,
     notice,
     durable,
     pairedRoom,
@@ -124,7 +148,14 @@ export default function WelcomeScreen(props: {
           closes. Download a QBJ backup as soon as the game starts and again when it ends.
         </p>
       )}
+      {unreadableNotice(unreadable) !== null && (
+        <p className="shell-warning" role="alert">
+          {unreadableNotice(unreadable)}
+        </p>
+      )}
       {notice !== '' && <p className="shell-notice">{notice}</p>}
+
+      <UpdateNotice />
 
       {pairedRoom && (
         <section className="shell-section resume-card welcome-room">

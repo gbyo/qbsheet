@@ -48,6 +48,8 @@ import FruityServerClient, {
 import { IGameDefinition } from '../game/GameDefinition';
 import { gamePackageMatchup } from '../game/GamePackage';
 import { IPairedRoom, newDeviceId } from './ConnectedSession';
+import { connectionTimeline } from './ConnectionTimeline';
+import UpdateNotice from '../pwa/UpdateNotice';
 import { assignmentPollIntervalMs, forbiddenIn } from './useConnectedRuntime';
 
 export interface IConnectedStart {
@@ -187,6 +189,8 @@ export default function ConnectedSetup(props: {
     // Written before anything else can fail. A room that paired and then lost the tab must not have
     // to find the code again.
     onPaired(room);
+    // The room name, never the code or the token. See `ConnectionTimeline`.
+    connectionTimeline.record('room-repaired', room.roomName);
     setCode('');
     setAssignment(null);
     setStage({ kind: 'room', client: stage.client, room });
@@ -436,6 +440,10 @@ export default function ConnectedSetup(props: {
           </div>
         </section>
       )}
+
+      {/* The room screen between rounds is the one place a scorekeeper is idle and connected, which
+          makes it the right place to be offered an update. Renders nothing when none is waiting. */}
+      {stage.kind === 'room' && <UpdateNotice />}
 
       {error !== '' && (
         <div className="shell-errors" role="alert">

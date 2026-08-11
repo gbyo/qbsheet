@@ -29,8 +29,17 @@ import { IGameSetup } from '../scoring/deriveGame';
 import { IGamePackage, gamePackageIdentity } from './GamePackage';
 import { IRecordStore, MemoryRecordStore } from '../persistence/GameDatabase';
 import { clearGame, loadGame, saveGame } from '../scorer/GameSession';
+import {
+  IUnreadableRecord,
+  UpgradeStep,
+  gameRecordVersion,
+  readStoredRecord,
+  upgradeSteps,
+} from './GameRecordUpgrade';
 
-export const gameRecordVersion = 1;
+// Re-exported from where it has always been imported from. The constant moved next to the migration
+// steps it is only meaningful alongside; see `GameRecordUpgrade`.
+export { gameRecordVersion };
 
 /**
  * How long a finished game is kept.
@@ -185,25 +194,104 @@ function defaultGameKey(identity: string, attempt: number): string {
   return recordId(identity, attempt).replace(/[^\w.:#-]+/g, '_');
 }
 
+/**
+ * The record shape a store reads and writes.
+ *
+ * Injectable, and not only for tidiness: the whole point of a version number is what happens when it
+ * changes, and that is not observable in a test unless the version a store believes in can be moved.
+ * Without this seam the migration path could only ever be exercised on the Saturday it was deployed.
+ * Application code passes nothing and gets the shipping schema.
+ */
+export interface IRecordSchema {
+  version: number;
+  steps: Readonly<Record<number, UpgradeStep>>;
+}
+
+export const shippingSchema: IRecordSchema = { version: gameRecordVersion, steps: upgradeSteps };
+
 export class GameStore implements IGameStore {
-  constructor(private records: IRecordStore<IStoredGameRecord>) {}
+  constructor(
+    private records: IRecordStore<IStoredGameRecord>,
+    private schema: IRecordSchema = shippingSchema,
+  ) {}
 
   get durable(): boolean {
     return this.records.durable;
   }
 
+  /**
+   * The schema, in the vocabulary the reader uses.
+   *
+   * Spelled out rather than passed straight through: the store's `version` is the version it *writes*
+   * and the reader's `target` is the version it migrates *to*. They are the same number, and relying
+   * on that by passing one object where the other was expected is a silent no-op — `target` falls back
+   * to its default, every record reads as current, and nothing is ever migrated. Which is exactly what
+   * happened the first time this was written.
+   */
+  private get readerOptions(): { target: number; steps: Readonly<Record<number, UpgradeStep>> } {
+    return { target: this.schema.version, steps: this.schema.steps };
+  }
+
+  /**
+   * Every game this build can read, newest first.
+   *
+   * Records written by an older build are migrated on the way through and written back, so the
+   * migration is paid once rather than on every load. Records this build cannot read are not returned
+   * and are not touched: see `GameRecordUpgrade` for why deleting them was the old behaviour and why
+   * it was wrong.
+   */
   async list(): Promise<IStoredGameRecord[]> {
     const all = await this.records.list();
-    return all
-      .filter((record) => record?.version === gameRecordVersion)
-      .map((record) => this.withJournal(record))
-      .sort((first, second) => second.updatedAt.localeCompare(first.updatedAt));
+    const readable: IStoredGameRecord[] = [];
+    const unreadable: IUnreadableRecord[] = [];
+    for (const stored of all) {
+      const read = readStoredRecord(stored, this.readerOptions);
+      if (read.record === null) {
+        if (typeof (stored as { id?: unknown })?.id === 'string') {
+          unreadable.push({
+            id: stored.id,
+            readability: read.readability as IUnreadableRecord['readability'],
+            storedVersion: read.storedVersion,
+          });
+        }
+        continue;
+      }
+      if (read.readability === 'upgraded') this.writeBack(read.record);
+      readable.push(this.withJournal(read.record));
+    }
+    this.unreadableRecords = unreadable;
+    return readable.sort((first, second) => second.updatedAt.localeCompare(first.updatedAt));
   }
 
   async get(id: string): Promise<IStoredGameRecord | null> {
-    const record = await this.records.get(id);
-    if (!record || record.version !== gameRecordVersion) return null;
-    return this.withJournal(record);
+    const read = readStoredRecord(await this.records.get(id), this.readerOptions);
+    if (read.record === null) return null;
+    if (read.readability === 'upgraded') this.writeBack(read.record);
+    return this.withJournal(read.record);
+  }
+
+  /**
+   * What this build found in storage and could not read, as of the last `list()`.
+   *
+   * Reported rather than silently skipped so the front door can say that a game is on this device
+   * which this version of QBSheet will not open — which is a recoverable situation with an obvious
+   * fix, and is indistinguishable from data loss if nobody mentions it.
+   */
+  get unreadable(): IUnreadableRecord[] {
+    return this.unreadableRecords;
+  }
+
+  private unreadableRecords: IUnreadableRecord[] = [];
+
+  /**
+   * Persist a migrated record.
+   *
+   * Not awaited. A migration that does not stick costs a few microseconds on the next load; a welcome
+   * screen that waits on a write before it can offer the unfinished game costs a room time it does not
+   * have. The read has already succeeded either way.
+   */
+  private writeBack(record: IStoredGameRecord): void {
+    void this.records.put(record);
   }
 
   async findByIdentity(identity: string): Promise<IStoredGameRecord[]> {
@@ -220,7 +308,7 @@ export class GameStore implements IGameStore {
     const attempt = input.attempt ?? 1;
     const id = recordId(identity, attempt);
     const record: IStoredGameRecord = {
-      version: gameRecordVersion,
+      version: this.schema.version,
       id,
       identity,
       attempt,
@@ -244,7 +332,7 @@ export class GameStore implements IGameStore {
       ...existing,
       ...change,
       id: existing.id,
-      version: gameRecordVersion,
+      version: this.schema.version,
       updatedAt: (change.updatedAt ?? new Date().toISOString()) as string,
     };
     const written = await this.records.put(next);

@@ -1,5 +1,15 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import FruityServerClient, { normalizeBaseUrl } from '../integrations/fruity/FruityServerClient';
+import { buildLabel } from '../pwa/BuildVersion';
+import { IWorkerBuild, serviceWorkerBuild } from '../pwa/AppUpdate';
+import { useAppUpdate } from '../pwa/useAppUpdate';
+import { IUnreadableRecord } from '../game/GameRecordUpgrade';
+import {
+  DiagnosticsOutcome,
+  IDiagnosticServer,
+  downloadDiagnostics,
+  safeAddress,
+} from './Diagnostics';
 import { isSafariBrowser } from './browserCompatibility';
 
 type CheckState = 'pass' | 'warn' | 'fail' | 'info';
@@ -13,7 +23,7 @@ type ServerTestState =
   | { kind: 'untested' }
   | { kind: 'testing' }
   /** `protocol` is what this device would actually speak to that address, not what it hopes for. */
-  | { kind: 'passed'; message: string; protocol: string; canonical: boolean }
+  | { kind: 'passed'; message: string; protocol: string; canonical: boolean; server: IDiagnosticServer }
   | { kind: 'failed'; message: string };
 
 /**
@@ -64,7 +74,12 @@ function localStorageWorks(): boolean {
 
 function installedAsApp(): boolean {
   const iosNavigator = navigator as Navigator & { standalone?: boolean };
-  return window.matchMedia('(display-mode: standalone)').matches || iosNavigator.standalone === true;
+  // Guarded rather than called, because this runs inside the check sweep and a browser without
+  // `matchMedia` would throw out of it — which used to leave the whole screen saying "Checking this
+  // device…" with no way to retry. "Not installed" is the right answer for a browser that cannot say.
+  const standalone =
+    typeof window.matchMedia === 'function' && window.matchMedia('(display-mode: standalone)').matches;
+  return standalone || iosNavigator.standalone === true;
 }
 
 async function serviceWorkerState(): Promise<ServiceWorkerState> {
@@ -123,15 +138,29 @@ function persistenceStorage(): IOptionalPersistenceStorage | undefined {
 export default function DeviceReadiness(props: {
   durable: boolean;
   rememberedServer?: string;
+  /** The paired room's name, for orientation in the diagnostics file. Never its id or token. */
+  roomName?: string;
+  /** How many games are on this device, and what this build could not read. */
+  games?: { saved: number; unfinished: number; unreadable: IUnreadableRecord[] };
+  /**
+   * The credentials this device currently holds.
+   *
+   * Passed in so the diagnostics export can prove none of them reached the file, rather than trusting
+   * that they did not. Nothing here is rendered, logged or written; see `findLeaks`.
+   */
+  liveSecrets?: readonly string[];
   onBack: () => void;
 }) {
-  const { durable, rememberedServer = '', onBack } = props;
+  const { durable, rememberedServer = '', roomName, games, liveSecrets = [], onBack } = props;
   const [snapshot, setSnapshot] = useState<IReadinessSnapshot | null>(null);
   const [checking, setChecking] = useState(false);
   const [requestingPersistence, setRequestingPersistence] = useState(false);
   const [serverAddress, setServerAddress] = useState(rememberedServer);
   const [serverTest, setServerTest] = useState<ServerTestState>({ kind: 'untested' });
   const [downloadState, setDownloadState] = useState<DownloadState>('untested');
+  const [workerBuild, setWorkerBuild] = useState<IWorkerBuild | null>(null);
+  const [diagnostics, setDiagnostics] = useState<DiagnosticsOutcome | null>(null);
+  const update = useAppUpdate();
 
   const runChecks = useCallback(async () => {
     setChecking(true);
@@ -156,21 +185,35 @@ export default function DeviceReadiness(props: {
       }
     }
 
-    const [worker, permission] = await Promise.all([serviceWorkerState(), localNetworkPermission()]);
-    setSnapshot({
-      localStorage: localStorageWorks(),
-      serviceWorker: worker,
-      installed: installedAsApp(),
-      secureContext: window.isSecureContext,
-      broadcastChannel: typeof BroadcastChannel !== 'undefined',
-      persistentStorage,
-      storageUsage,
-      storageQuota,
-      localNetworkPermission: permission,
-      online: navigator.onLine,
-      safari: isSafariBrowser(),
-    });
-    setChecking(false);
+    const [worker, permission, reportedBuild] = await Promise.all([
+      serviceWorkerState(),
+      localNetworkPermission(),
+      // Asks the worker actually serving this page what it is. A page running new code off the network
+      // while an old worker still owns the cache is a real state and this is the only way to see it.
+      serviceWorkerBuild(),
+    ]);
+    setWorkerBuild(reportedBuild);
+    try {
+      setSnapshot({
+        localStorage: localStorageWorks(),
+        serviceWorker: worker,
+        installed: installedAsApp(),
+        secureContext: window.isSecureContext,
+        broadcastChannel: typeof BroadcastChannel !== 'undefined',
+        persistentStorage,
+        storageUsage,
+        storageQuota,
+        localNetworkPermission: permission,
+        online: navigator.onLine,
+        safari: isSafariBrowser(),
+      });
+    } finally {
+      // Always, even if one of the probes above threw. This screen exists to be used on a locked-down
+      // browser that is behaving unexpectedly, which is exactly where a probe is most likely to throw —
+      // and a readiness screen stuck on "Checking this device…" with its retry button disabled is the
+      // least helpful thing it could possibly do.
+      setChecking(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -219,6 +262,7 @@ export default function DeviceReadiness(props: {
         message: `Tournament control answered at ${normalized.value}.`,
         protocol: protocolLabel(client),
         canonical: client.isQbtcp,
+        server: { ...client.describeProtocol(), address: safeAddress(normalized.value) },
       });
     } else {
       setServerTest({ kind: 'failed', message: result.error });
@@ -416,6 +460,45 @@ export default function DeviceReadiness(props: {
     ];
   }, [durable, downloadState, snapshot]);
 
+  /**
+   * Write the diagnostics file.
+   *
+   * Everything the bundle needs is already on this screen — which is why the button lives here rather
+   * than somewhere it would have to re-run the checks to have anything to say. The readiness results go
+   * in exactly as rendered, so the file and the screen can never disagree.
+   */
+  const saveDiagnostics = () => {
+    setDiagnostics(
+      downloadDiagnostics(
+        {
+          worker: workerBuild,
+          updateWaiting: update.available,
+          checks: checks.map((check) => ({
+            id: check.id,
+            title: check.title,
+            state: check.state,
+            kind: check.kind,
+            detail: check.detail,
+          })),
+          server:
+            serverTest.kind === 'passed'
+              ? serverTest.server
+              : { protocol: 'unknown', ...(safeAddress(serverAddress) ? { address: safeAddress(serverAddress) } : {}) },
+          ...(roomName ? { roomName } : {}),
+          persistence: {
+            recordStoreDurable: durable,
+            localStorageWorks: snapshot?.localStorage,
+            persistentStorage: snapshot?.persistentStorage ?? null,
+            ...(snapshot?.storageUsage !== undefined ? { storageUsage: snapshot.storageUsage } : {}),
+            ...(snapshot?.storageQuota !== undefined ? { storageQuota: snapshot.storageQuota } : {}),
+          },
+          ...(games ? { games } : {}),
+        },
+        liveSecrets,
+      ),
+    );
+  };
+
   const requiredFailures = checks.filter((check) => check.kind === 'required' && check.state === 'fail').length;
   const connectedFailures = checks.filter((check) => check.kind === 'connected' && check.state === 'fail').length;
   const connectedIntent = serverAddress.trim() !== '' || serverTest.kind !== 'untested';
@@ -438,6 +521,9 @@ export default function DeviceReadiness(props: {
           </button>
           <h1 className="shell-title">Device readiness</h1>
           <p className="shell-subtitle">Check this browser before it is needed in a room.</p>
+          {/* Small, and directly under the title, because it is the one fact on this screen that a
+              director will be asked to read out over a radio. */}
+          <p className="readiness-build">Build {buildLabel()}</p>
         </div>
         <button type="button" className="shell-button" disabled={checking} onClick={() => void runChecks()}>
           {checking ? 'Checking…' : 'Check again'}
@@ -563,6 +649,35 @@ export default function DeviceReadiness(props: {
           </>
         )}
         {serverTest.kind === 'failed' && <p className="readiness-test-result is-fail">× {serverTest.message}</p>}
+      </section>
+
+      <section className="shell-section">
+        <h2 className="shell-heading">Diagnostics</h2>
+        <p className="readiness-detail">
+          Saves one file describing this device: the build it is running, the browser and screen, every
+          check above, what tournament control answered, storage health, recent connection activity and
+          any recent errors. It contains no pairing code, no room or session token, and nothing typed into
+          a message box, so it is safe to send to whoever is helping.
+        </p>
+        <button type="button" className="shell-button readiness-inline-action" onClick={saveDiagnostics}>
+          Download diagnostics
+        </button>
+        {diagnostics?.ok === true && (
+          <p className="readiness-test-result is-pass">✓ Saved {diagnostics.fileName}.</p>
+        )}
+        {diagnostics?.ok === false && diagnostics.reason === 'no-download' && (
+          <p className="readiness-test-result is-fail">
+            × This browser would not write the file. Check the download test above.
+          </p>
+        )}
+        {diagnostics?.ok === false && diagnostics.reason === 'unsafe' && (
+          /* Should be unreachable. It is loud rather than silent because the alternative to refusing
+             here is a file with a live credential in it. */
+          <p className="readiness-test-result is-fail" role="alert">
+            × QBSheet stopped the download because the file would have contained something private. Please
+            report this: {diagnostics.leaks.join('; ')}
+          </p>
+        )}
       </section>
     </main>
   );

@@ -773,3 +773,34 @@ body {
   gap: 8px;
   margin-top: 10px;
 }
+
+/*
+ * The offer to update.
+ *
+ * Shaped like `.resume-card` — a fact on the left, one button on the right — because it is the same
+ * kind of thing and because a scorekeeper should not have to work out what a new kind of box is for.
+ * Styled as information rather than as a warning: nothing is wrong, and a room that ignores this for
+ * the rest of the day loses nothing.
+ */
+.update-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px;
+  border: 1px solid var(--room-info-border);
+  border-radius: 3px;
+  background: var(--room-info-bg);
+}
+
+.update-notice-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.update-notice-copy {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--room-muted);
+}
