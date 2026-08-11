@@ -24,10 +24,12 @@ export const keyboardSeatNumbers: Record<LeftOrRight, readonly number[]> = {
   right: [5, 6, 7, 8],
 };
 
-/** Shortcut labels shared by the live map and guided-practice hints. */
+/** Shortcut labels shared by the live map, the keyboard drill, and guided-practice hints. */
 export const keyboardShortcutLabels = {
   noBuzz: 'Space',
   undo: 'Ctrl/⌘ + Z',
+  /** Bound by the same listener as undo, with Shift held. See `useScorerKeyboard`. */
+  redo: 'Ctrl/⌘ + Shift + Z',
 } as const;
 
 /** The second key in a tossup sequence. `0` records a wrong answer with no penalty. */
@@ -170,10 +172,20 @@ export function sequenceLegend(format: IScorekeeperFormat, negsAvailable: boolea
   ];
 }
 
-/** Which digit picks which bonus total. */
+/**
+ * Which digit picks which bonus total.
+ *
+ * The digit is the position in the row counted from zero — which, for the totals a regular bonus can be
+ * worth, is the number of parts it got. The moderator says "two parts" or "twenty", and either way the key
+ * is 2. Counting from one instead put nothing under `0` and made `1` mean a bonus that scored nothing,
+ * which is the one value on the row a scorekeeper would never look for under a key that says one.
+ *
+ * It also means the digits are the same shape as the parts: a three-part bonus uses 0 to 3 and stops,
+ * rather than 1 to 4 with the top of the range moving whenever the format does.
+ */
 export function bonusKeyLegend(options: readonly number[]): IKeyLegendEntry[] {
-  return options.slice(0, 9).map((points, index) => ({
-    keys: String(index + 1),
+  return options.slice(0, 10).map((points, index) => ({
+    keys: String(index),
     meaning: String(points),
     available: true,
   }));
@@ -181,9 +193,9 @@ export function bonusKeyLegend(options: readonly number[]): IKeyLegendEntry[] {
 
 /** Which option a digit key selects, or null when that digit addresses nothing on screen. */
 export function bonusOptionForCode(code: string, options: readonly number[]): number | null {
-  const match = /^(?:Digit|Numpad)([1-9])$/.exec(code);
+  const match = /^(?:Digit|Numpad)(\d)$/.exec(code);
   if (!match) return null;
-  const index = Number(match[1]) - 1;
+  const index = Number(match[1]);
   return index < options.length ? options[index] : null;
 }
 

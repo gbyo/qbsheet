@@ -5,6 +5,8 @@ import { clearGame } from '../scorer/GameSession';
 import { ScoreEvent } from '../scoring/ScoreEvents';
 import { LeftOrRight } from '../scoring/types';
 import PracticeCoach from './PracticeCoach';
+import KeyboardDrill from './KeyboardDrill';
+import PracticeSummary from './PracticeSummary';
 import {
   IPracticeStep,
   practiceFormat,
@@ -179,6 +181,15 @@ export default function PracticeScreen({ onHome }: { onHome: () => void }) {
   const [feedback, setFeedback] = useState('');
   const [mistake, setMistake] = useState('');
   const [complete, setComplete] = useState(false);
+  /**
+   * The keyboard drill, offered from the completion screen and held here rather than in `App`.
+   *
+   * Practice owns its own aftermath: the drill is reachable only from the end of a practice game, it needs
+   * nothing the application knows, and keeping it inside this screen means the `practice` screen is still
+   * the one thing on the outside — including for `updatesAllowedOn`, which refuses to swap the build under
+   * somebody who is halfway through learning the software.
+   */
+  const [drill, setDrill] = useState(false);
   const step = practiceSteps[stepIndex];
 
   useEffect(() => {
@@ -261,6 +272,7 @@ export default function PracticeScreen({ onHome }: { onHome: () => void }) {
     setFeedback('');
     setMistake('');
     setComplete(false);
+    setDrill(false);
   }, []);
 
   const finish = useCallback(async () => {
@@ -294,25 +306,12 @@ export default function PracticeScreen({ onHome }: { onHome: () => void }) {
     );
   }, [feedback, mistake, onHome, restart, step, stepIndex]);
 
+  if (complete && drill) {
+    return <KeyboardDrill onBack={() => setDrill(false)} onHome={onHome} />;
+  }
+
   if (complete) {
-    return (
-      <main className="shell practice-complete">
-        <p className="practice-label">Practice</p>
-        <h1 className="shell-title">You scored a complete practice game.</h1>
-        <p>
-          You handled powers, normal and zero-point wrong answers, a neg and rebound, bonuses, no buzz, an earlier
-          question correction, Undo, a substitution and final review using the same scorer used in a real room.
-        </p>
-        <div className="practice-complete-actions">
-          <button type="button" className="shell-button is-primary" onClick={restart}>
-            Practice again
-          </button>
-          <button type="button" className="shell-button" onClick={onHome}>
-            Back to QBSheet
-          </button>
-        </div>
-      </main>
-    );
+    return <PracticeSummary onRestart={restart} onHome={onHome} onDrill={() => setDrill(true)} />;
   }
 
   return (

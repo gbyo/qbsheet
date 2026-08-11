@@ -48,8 +48,9 @@ export interface IBonusPromptProps {
 /**
  * Bind the digits to whatever choices are currently on screen.
  *
- * Left to right, one-based, so the third button is `3` and there is nothing to learn. Calls the same
- * handler the buttons call, so a keystroke cannot record a total the buttons could not offer.
+ * Left to right from zero, so the key is the number of parts and `0` is the bonus that scored none. See
+ * `bonusKeyLegend`. Calls the same handler the buttons call, so a keystroke cannot record a total the
+ * buttons could not offer.
  */
 function useChoiceKeys(options: readonly number[], pick: (points: number) => void, enabled: boolean): void {
   const latest = useRef({ options, pick, enabled });
