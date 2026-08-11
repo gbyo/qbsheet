@@ -107,6 +107,8 @@ export default function ConnectedSetup(props: {
   const [code, setCode] = useState('');
   const [roomId, setRoomId] = useState('');
   const [assignment, setAssignment] = useState<INormalizedAssignment | null>(null);
+  /** Control accepted this room's capability and refused the request anyway. */
+  const [forbidden, setForbidden] = useState('');
 
   const connect = async (event: FormEvent) => {
     event.preventDefault();
@@ -132,6 +134,18 @@ export default function ConnectedSetup(props: {
           ? 'Tournament control could not be reached from this browser.'
           : verified.error,
       );
+      return;
+    }
+    // Discovery is the authoritative statement of what this server does, so a server that cannot do
+    // the job says so here rather than at the end of a round. Naming what is missing matters: it is
+    // the difference between a director who can go and fix their server and one who cannot.
+    const missing = client.missingCapabilities();
+    if (missing.length > 0) {
+      setBusy(false);
+      setError(
+        `Tournament control at this address does not offer ${missing.join(', ')}. This room cannot score against it. A game file works with no server at all.`,
+      );
+      setUnreachable(true);
       return;
     }
     const identified = await client.identify();
@@ -186,16 +200,24 @@ export default function ConnectedSetup(props: {
     if (!result.ok) {
       // A refused room token is the one thing that sends a scorekeeper back to a pairing code. Any
       // other failure is the network's problem and the room keeps its capability.
-      if (result.status === 401 || result.status === 403) {
+      if (result.status === 401) {
         onRoomLost();
         setAssignment(null);
         setError('Tournament control no longer recognizes this room. Pair it again with a new code.');
         setStage({ kind: 'pair', client: stage.client, tournamentName: '', rooms: [] });
         return;
       }
+      // A credential control accepts and will not act on — most often this page's origin is not on
+      // the server's allowlist. The pairing is fine, so it is kept and the server's own explanation
+      // is shown; asking for a new code here would be asking for work that cannot help.
+      if (result.status === 403) {
+        setForbidden(result.detail ?? 'Tournament control will not accept requests from this page.');
+        return;
+      }
       setError(result.error);
       return;
     }
+    setForbidden('');
     setAssignment(result.value);
     if (result.value.errors?.length) setError(result.value.errors.join(' '));
   }, [stage, onRoomLost]);
@@ -203,15 +225,30 @@ export default function ConnectedSetup(props: {
   const loadRef = useRef(loadAssignment);
   loadRef.current = loadAssignment;
 
+  /** Read by the interval, which must see the current answer without being torn down and rebuilt. */
+  const forbiddenRef = useRef(forbidden);
+  forbiddenRef.current = forbidden;
+
   // The room screen keeps itself current, so a scorekeeper who finishes a game and comes back here
   // sees the next assignment appear rather than having to ask for it. Only ever reached by a press,
   // which is what satisfies the browser's local-network gesture requirement.
   useEffect(() => {
     if (stage.kind !== 'room') return undefined;
     void loadRef.current();
-    const timer = setInterval(() => void loadRef.current(), assignmentPollIntervalMs);
+    const timer = setInterval(() => {
+      // "Surface it. Do not retry in a loop." A refusal of this kind does not change because it was
+      // asked again ten seconds later, so the room stops asking and Check again is the way back —
+      // an explicit press, which is what the rule leaves room for.
+      if (forbiddenRef.current !== '') return;
+      void loadRef.current();
+    }, assignmentPollIntervalMs);
     return () => clearInterval(timer);
   }, [stage]);
+
+  // Nothing to start against a server that will not answer for this room.
+  useEffect(() => {
+    if (forbidden !== '') setAssignment(null);
+  }, [forbidden]);
 
   const start = async () => {
     if (stage.kind !== 'room' || !assignment?.definition || !assignment.scheduledMatchId) return;
@@ -343,6 +380,11 @@ export default function ConnectedSetup(props: {
             </p>
           ) : (
             <p className="shell-hint">{waiting}</p>
+          )}
+          {forbidden !== '' && (
+            <p className="shell-warning" role="alert">
+              {forbidden} This room is still paired — this is not something a new code fixes.
+            </p>
           )}
           {resumable && (
             <p className="shell-notice">Tournament control still has this room&apos;s game open.</p>

@@ -68,6 +68,17 @@ export interface IConnectedSession extends IPairedRoom {
   gameRecordId?: string;
   /** Which tournament this was paired against, so a server that has opened another is detectable. */
   tournamentKey?: string;
+  /**
+   * The highest progress sequence this room has used.
+   *
+   * Stored because monotonicity has to survive a reload and the wall clock cannot be trusted to
+   * provide it. A Chromebook that corrects its clock backward — an NTP sync, a manual change, a
+   * machine that booted without a network — would otherwise resume numbering below where it left
+   * off, and a QBTCP server is required to discard a lower sequence *silently* with a `200`. The
+   * room would go on scoring, the snapshots would go on being accepted, and none of them would be
+   * kept. There is no error anywhere in that sequence of events, which is why it is worth a field.
+   */
+  progressSequence?: number;
   /** ISO 8601 */
   updatedAt: string;
 }
@@ -126,6 +137,10 @@ export function readConnection(
       sessionId: typeof parsed.sessionId === 'string' ? parsed.sessionId : undefined,
       sessionToken: typeof parsed.sessionToken === 'string' ? parsed.sessionToken : undefined,
       gameRecordId: typeof parsed.gameRecordId === 'string' ? parsed.gameRecordId : undefined,
+      progressSequence:
+        typeof parsed.progressSequence === 'number' && Number.isFinite(parsed.progressSequence)
+          ? parsed.progressSequence
+          : undefined,
       tournamentKey: typeof parsed.tournamentKey === 'string' ? parsed.tournamentKey : undefined,
       updatedAt: parsed.updatedAt,
     };

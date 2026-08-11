@@ -16,12 +16,15 @@
  *
  * # Repair happens here, in place, with the game still running
  *
- * QBTCP distinguishes three failures that look identical from a distance and need opposite
+ * QBTCP distinguishes four failures that look identical from a distance and need opposite
  * responses, so this file keeps them apart:
  *
- *   - The **room token** was refused. The pairing is gone; a person types a new code. Only this one
- *     needs a code, and offering one for either of the others is how a scorekeeper ends up hunting
- *     for a slip of paper to fix something that was not broken.
+ *   - The **room token** was refused — `401`. The pairing is gone; a person types a new code. Only
+ *     this one needs a code, and offering one for any of the others is how a scorekeeper ends up
+ *     hunting for a slip of paper to fix something that was not broken.
+ *   - The credential was accepted and the operation **forbidden** — `403`, most often this page's
+ *     origin missing from the server's allowlist. The pairing is good and must be kept; the server's
+ *     own explanation is shown, and the room stops asking rather than repeating the question.
  *   - The **session token** was refused. The pairing is fine, so the room reopens the same session
  *     with the capability it still holds. Both surfaces return the open session rather than making
  *     a second one, so this is a repair and not a new game.
@@ -104,6 +107,10 @@ export interface IConnectedRuntimeInput {
   onRepairConnection?: () => void;
   /** A repair produced new session credentials. Persist them; the game does not change. */
   onCredentialsRepaired?: (repair: ICredentialRepair) => void;
+  /** The highest progress sequence this room has already used, as it was last persisted. */
+  progressSequence?: number;
+  /** A sequence has been used. Persist it before it can matter; nothing else changed. */
+  onProgressSequence?: (sequence: number) => void;
 }
 
 export interface IConnectedRuntime {
@@ -125,21 +132,32 @@ export interface IConnectedRuntime {
   controlRequestPending: boolean;
 }
 
-/** Decide the connection state from one poll, without reading any message text. */
+/**
+ * Decide the connection state from one poll, without reading any message text.
+ *
+ * `401` and `403` are deliberately not the same answer, because the two repairs are opposite. `401`
+ * is a credential control does not accept, which a new pairing code fixes. `403` is a credential it
+ * accepts and will not act on — most often this browser's origin is not on the server's allowlist —
+ * and a pairing code cannot fix that at all. Treating the second as the first throws away a room
+ * capability that was working, and hands the scorekeeper a task that cannot succeed.
+ */
 export function classifyPoll(result: ApiResult<unknown>): {
   connection: RoomConnectionState;
   credentialProblem: boolean;
+  forbidden: boolean;
 } {
-  if (result.ok) return { connection: RoomConnectionState.Connected, credentialProblem: false };
+  const settled = { credentialProblem: false, forbidden: false };
+  if (result.ok) return { connection: RoomConnectionState.Connected, ...settled };
   // No status means nothing answered: DNS, a refused connection, dropped Wi-Fi, or our own timeout
   // abort. That, and only that, is what "offline" means to a scorekeeper.
-  if (result.status === undefined) return { connection: RoomConnectionState.Offline, credentialProblem: false };
-  // The room link is not valid for the tournament control is running. That is a credential problem,
-  // not a connection problem, and it is repaired by pairing again rather than by retrying.
-  if (result.status === 403 || result.status === 401) {
-    return { connection: RoomConnectionState.Connected, credentialProblem: true };
+  if (result.status === undefined) return { connection: RoomConnectionState.Offline, ...settled };
+  if (result.status === 401) {
+    return { connection: RoomConnectionState.Connected, credentialProblem: true, forbidden: false };
   }
-  return { connection: RoomConnectionState.Degraded, credentialProblem: false };
+  if (result.status === 403) {
+    return { connection: RoomConnectionState.Connected, credentialProblem: false, forbidden: true };
+  }
+  return { connection: RoomConnectionState.Degraded, ...settled };
 }
 
 /**
@@ -168,11 +186,15 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     enabled,
     onRepairConnection,
     onCredentialsRepaired,
+    progressSequence,
+    onProgressSequence,
   } = input;
 
   const [connection, setConnection] = useState(RoomConnectionState.Connected);
   const [degradedMessage, setDegradedMessage] = useState<string | undefined>(undefined);
   const [roomCredentialProblem, setRoomCredentialProblem] = useState(false);
+  /** Control accepted the credential and refused the operation. A person, not a code, resolves it. */
+  const [forbidden, setForbidden] = useState<string | null>(null);
   const [sessionCredentialProblem, setSessionCredentialProblem] = useState(false);
   const [repairMessage, setRepairMessage] = useState<string | undefined>(undefined);
   const [writerConflict, setWriterConflict] = useState<IWriterConflict | null>(null);
@@ -191,12 +213,40 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
    * another device's work — not to stop the room, which keeps scoring either way.
    */
   const writesAllowed =
-    enabled && !roomCredentialProblem && !sessionCredentialProblem && !tournamentSwitched && writerConflict === null;
+    enabled &&
+    !roomCredentialProblem &&
+    !sessionCredentialProblem &&
+    !tournamentSwitched &&
+    forbidden === null &&
+    writerConflict === null;
   const writesAllowedRef = useRef(writesAllowed);
   writesAllowedRef.current = writesAllowed;
 
   /** The newest complete game state, retained so a later successful poll can re-offer it. */
   const latestSnapshotRef = useRef<object | null>(null);
+
+  /**
+   * The next sequence for this session, and the reason it is not just the clock.
+   *
+   * QBTCP requires the number to increase within a session and has servers discard a lower one
+   * silently with a `200`, so every way it can go backwards is a way for a room to keep scoring
+   * into a snapshot nobody keeps, with no error to notice. The clock alone goes backwards whenever
+   * the device corrects it. So the floor is the highest number this room is known to have used —
+   * carried across reloads by the stored connection — and the clock only ever raises it, which is
+   * what keeps two devices in one room from colliding on a small counter.
+   */
+  const usedSequence = useRef(0);
+  const nextSequence = useCallback(() => {
+    const floor = Math.max(usedSequence.current, progressSequence ?? 0);
+    const next = Math.max(floor + 1, Date.now());
+    usedSequence.current = next;
+    onProgressSequence?.(next);
+    return next;
+  }, [progressSequence, onProgressSequence]);
+
+  /** Read by the poll, which must be able to see the current answer without restarting itself. */
+  const forbiddenRef = useRef(forbidden);
+  forbiddenRef.current = forbidden;
 
   /**
    * Whether the one unattended reopen has already been spent on the current problem.
@@ -224,7 +274,11 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     }
     setRepairMessage(undefined);
     setSessionCredentialProblem(false);
-    setWriterConflict(opened.value.writer ? null : { canTakeOver: true });
+    // Reopening said another device is writing, which is worth telling the room. It did not say
+    // this room may take that away, and inventing the offer here would put a takeover button in
+    // front of somebody on this client's own authority — the one decision the protocol reserves for
+    // a server to grant and a person to make. The offer arrives with a `409`, or not at all.
+    setWriterConflict(opened.value.writer ? null : { canTakeOver: false });
     // Re-armed here rather than left to the credentials effect, because reopening usually returns
     // the same token — the session did not change, only the server's memory of it — and a token
     // that did not change means that effect never runs. Without this, a session refused twice in
@@ -274,7 +328,7 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     () =>
       new ProgressSender(async (qbj) => {
         if (!writesAllowedRef.current) return;
-        const result = await client.putSnapshot(credentials, qbj);
+        const result = await client.putSnapshot(credentials, qbj, nextSequence());
         if (result.ok) {
           setServerSnapshotAt(Date.now());
           setSnapshotError(undefined);
@@ -283,7 +337,7 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
           noteWrite(result);
         }
       }),
-    [client, credentials, noteWrite],
+    [client, credentials, noteWrite, nextSequence],
   );
   useEffect(() => () => sender.stop(), [sender]);
 
@@ -292,11 +346,20 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     if (!enabled) return undefined;
     let cancelled = false;
     const poll = async () => {
+      // "Surface it. Do not retry in a loop." A refusal of this kind does not change because it was
+      // asked again ten seconds later, so the room asks once and then waits for somebody to press
+      // the action on the alert.
+      if (forbiddenRef.current !== null) return;
       const result = await client.assignment(identity);
       if (cancelled) return;
       const classified = classifyPoll(result);
       setConnection(classified.connection);
       if (classified.credentialProblem) setRoomCredentialProblem(true);
+      if (classified.forbidden) {
+        // The server's own words. It is the only thing that can explain a refusal this client has
+        // no way to interpret, and the protocol says that string is safe to show unchanged.
+        setForbidden(result.ok ? null : result.detail ?? 'Tournament control will not accept requests from this page.');
+      }
       if (!result.ok) {
         setDegradedMessage(
           classified.connection === RoomConnectionState.Degraded
@@ -307,6 +370,7 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
       }
       setDegradedMessage(undefined);
       setRoomCredentialProblem(false);
+      setForbidden(null);
       const assignment = result.value;
       if (tournamentKey && assignment.tournamentKey && assignment.tournamentKey !== tournamentKey) {
         setTournamentSwitched(true);
@@ -344,6 +408,16 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
         title: 'Tournament connection changed — keep scoring',
         body: 'Tournament control no longer recognizes this room, so results will not be sent automatically until the connection is repaired. The game is saved on this device and can be handed over as a file.',
         actions: onRepairConnection ? [{ label: 'Repair connection…', onSelect: onRepairConnection }] : undefined,
+        offerDownload: true,
+      });
+    }
+    if (forbidden) {
+      list.push({
+        id: 'forbidden',
+        tone: 'warning',
+        title: 'Tournament control will not accept this room’s requests — keep scoring',
+        body: `${forbidden} This room is still paired, so this is not something a new pairing code fixes. The game is saved on this device and can be handed over as a file.`,
+        actions: [{ label: 'Try tournament control again', onSelect: () => setForbidden(null) }],
         offerDownload: true,
       });
     }
@@ -390,6 +464,7 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     return list;
   }, [
     roomCredentialProblem,
+    forbidden,
     sessionCredentialProblem,
     writerConflict,
     repairMessage,
@@ -420,7 +495,10 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
       if (result.ok) return { delivery: 'sent', duplicate: result.value.duplicate };
       noteWrite(result);
       // Nothing answered, so nothing refused it: worth retrying, and the room can be told to wait.
-      if (result.status === undefined) return { delivery: 'pending', detail: result.error };
+      // A capability this server never advertised is not that — no request went out, and none will.
+      if (result.status === undefined && !result.unsupported) {
+        return { delivery: 'pending', detail: result.error };
+      }
       return { delivery: 'rejected', detail: result.detail ?? result.error };
     },
     [client, credentials, noteWrite],

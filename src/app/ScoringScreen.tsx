@@ -124,6 +124,11 @@ export default function ScoringScreen(props: {
     [onConnectionRepaired],
   );
 
+  const onProgressSequence = useCallback(
+    (sequence: number) => onConnectionRepaired({ progressSequence: sequence }),
+    [onConnectionRepaired],
+  );
+
   const runtime = useConnectedRuntime({
     // A file game still constructs a runtime, pointed at a client it never calls, because hooks may
     // not be conditional. `enabled` is what actually decides whether anything is polled.
@@ -135,6 +140,8 @@ export default function ScoringScreen(props: {
     enabled: live !== null,
     onRepairConnection: live ? () => setRepairing(true) : undefined,
     onCredentialsRepaired,
+    progressSequence: connection?.progressSequence,
+    onProgressSequence,
   });
 
   /**

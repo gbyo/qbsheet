@@ -229,6 +229,7 @@ export default function App() {
       sessionToken: next.sessionToken,
       gameRecordId: next.gameRecordId,
       tournamentKey: next.tournamentKey,
+      progressSequence: next.progressSequence,
     });
     connectionRef.current = next;
     setConnection(next);

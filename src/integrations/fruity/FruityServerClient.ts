@@ -82,6 +82,16 @@ export { readWriterConflict } from './ProtocolAdapters';
 export const requestTimeoutMs = 8000;
 
 /**
+ * What a room has to have to score a connected game at all.
+ *
+ * Progress and recovery are absent on purpose: a room with neither still scores the game, still
+ * submits the result, and still hands over a file. These three are the ones without which connected
+ * scoring is not connected scoring, and a server missing one should be found out at the address box
+ * rather than at the end of a round.
+ */
+export const requiredCapabilities = ['pairing', 'assignment', 'result'] as const;
+
+/**
  * Is this a well-formed base URL for a tournament server?
  *
  * Refused deliberately: anything that is not http or https, and anything carrying a query or a
@@ -160,16 +170,6 @@ export default class FruityServerClient {
 
   private discovery: IQbtcpDiscovery | null = null;
 
-  /**
-   * The last progress sequence this client sent.
-   *
-   * Seeded from the clock rather than from zero, and that is load-bearing. QBTCP has servers prefer
-   * the higher sequence and silently discard a lower one, so a counter that restarted at zero after
-   * a reload would have every snapshot for the rest of the game accepted with a `200` and thrown
-   * away. Wall-clock milliseconds only ever go up across reloads of the same device.
-   */
-  private lastSequence = 0;
-
   constructor(
     readonly baseUrl: string,
     private fetchImpl: typeof fetch = (...args) => fetch(...args),
@@ -198,6 +198,17 @@ export default class FruityServerClient {
 
   supports(capability: string): boolean {
     return supports(this.discovery, capability);
+  }
+
+  /**
+   * Which of the capabilities connected scoring needs this server did not advertise.
+   *
+   * Empty for a pre-QBTCP server, which has no discovery document to be measured against and whose
+   * support is established the only way that surface allows: by asking.
+   */
+  missingCapabilities(): string[] {
+    if (!this.isQbtcp) return [];
+    return requiredCapabilities.filter((capability) => !this.supports(capability));
   }
 
   /**
@@ -368,16 +379,20 @@ export default class FruityServerClient {
    * Replace the live snapshot for this game.
    *
    * Safe to call repeatedly: control keeps one snapshot per session, so a retry is not a duplicate
-   * and a coalesced update is not a lost one. The sequence this attaches is what lets a server
-   * prefer the newer of two snapshots that arrived out of order.
+   * and a coalesced update is not a lost one. The sequence lets a server prefer the newer of two
+   * snapshots that arrived out of order.
    *
-   * The sequence is taken after discovery rather than before, so that two snapshots cannot be
-   * numbered in one order and sent in another.
+   * The caller supplies it, because monotonicity is a property of the *session* and this object is
+   * not. A client is constructed fresh by every screen and again by every repair, so a counter kept
+   * here would restart under a session that had not — and a server is required to discard the lower
+   * number silently, which makes that failure invisible.
    */
-  async putSnapshot(credentials: ISessionCredentials, qbj: object): Promise<ApiResult<unknown>> {
-    const adapter = await this.ready();
-    this.lastSequence = Math.max(this.lastSequence + 1, Date.now());
-    return adapter.putProgress(credentials, qbj, this.lastSequence);
+  async putSnapshot(
+    credentials: ISessionCredentials,
+    qbj: object,
+    sequence: number,
+  ): Promise<ApiResult<unknown>> {
+    return (await this.ready()).putProgress(credentials, qbj, sequence);
   }
 
   /** Submit the final. Idempotent server-side, so a retry after a network failure is not a second game. */

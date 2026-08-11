@@ -46,8 +46,12 @@ export type ApiResult<T> =
    * `payload` is the parsed error body, for the two refusals that carry structure a client acts on:
    * a writer conflict says whether a takeover is offered, and a rejected result says whether the
    * statistics were already on record.
+   *
+   * `unsupported` marks a refusal this client made on its own, because discovery did not advertise
+   * the capability. It has no status because no request was sent, and it is distinguished from a
+   * network failure for exactly that reason: nothing is going to change by trying again.
    */
-  | { ok: false; error: string; status?: number; detail?: string; payload?: unknown };
+  | { ok: false; error: string; status?: number; detail?: string; payload?: unknown; unsupported?: boolean };
 
 export interface IRoomIdentity {
   roomId: string;
