@@ -277,7 +277,9 @@ export default function ScoringScreen(props: {
           location: record.package.room?.name,
         }}
         onRequestControl={live ? runtime.requestControl : undefined}
-        controlRequestPending={runtime.controlRequestPending}
+        controlRequest={live ? runtime.controlRequest : undefined}
+        onRetryControlRequest={live ? runtime.retryControlRequest : undefined}
+        onCancelControlRequest={live ? runtime.cancelControlRequest : undefined}
         onSyncRosterPlayer={live ? runtime.syncRosterPlayer : undefined}
         onRecoverFromServer={live ? runtime.recoverFromServer : undefined}
         alerts={alerts}

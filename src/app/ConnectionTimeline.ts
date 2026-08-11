@@ -76,7 +76,13 @@ export type TimelineEventKind =
   /** A roster change was pushed to control. */
   | 'roster-synced'
   /** The room asked control for something. */
-  | 'control-requested';
+  | 'control-requested'
+  /** A room help POST did not reach an accepting server. */
+  | 'control-request-failed'
+  /** Control answered the help request but refused it. */
+  | 'control-request-refused'
+  /** The room's outstanding help request was withdrawn or disappeared from control. */
+  | 'control-request-cleared';
 
 export interface ITimelineEntry {
   /**
@@ -229,6 +235,9 @@ export const timelineLabels: Record<TimelineEventKind, string> = {
   'tournament-switched': 'control switched tournament',
   'roster-synced': 'roster change sent',
   'control-requested': 'tournament control asked for',
+  'control-request-failed': 'tournament control request failed',
+  'control-request-refused': 'tournament control request refused',
+  'control-request-cleared': 'tournament control request cleared',
 };
 
 /** `10:33:09` — local time, seconds included, because the gaps that matter are seconds long. */

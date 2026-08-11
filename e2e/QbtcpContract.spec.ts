@@ -180,6 +180,86 @@ test.describe('a server that speaks only QBTCP', () => {
     expect(browserErrors).toEqual([]);
   });
 
+  test('keeps one truthful room summons across scoring, reload, and server resolution', async ({ page }) => {
+    await pairRoom(page, control);
+    await startAssignedGame(page, 4);
+
+    await page.getByRole('button', { name: 'Flag', exact: true }).click();
+    await page.getByRole('button', { name: 'Question / packet issue', exact: true }).click();
+    await page.getByLabel('What happened?').fill('The buzzers cut out in room 204.');
+    await page.getByLabel('Ask tournament control to come', { exact: true }).check();
+    await page.getByRole('button', { name: 'Save and request control', exact: true }).click();
+
+    await expect(page.getByText(/Issue saved and was sent to tournament control/)).toBeVisible();
+    await expect.poll(() => control.helpPosts.length).toBe(1);
+    expect(control.helpPosts[0]).toEqual({
+      category: 'question-packet',
+      message: 'The buzzers cut out in room 204.',
+    });
+    expect(control.helpRequests).toHaveLength(1);
+
+    await scoreTossup(page, 'Sarah', 'Power', 20);
+    await expect(page.getByLabel('Ninety Six score')).toHaveText('35');
+    await expect(page.getByText('Tournament control requested · Question / packet issue')).toBeVisible();
+
+    await page.reload();
+    await expect(page.getByRole('heading', { name: 'Unfinished game' })).toBeVisible();
+    await page.getByRole('button', { name: 'Resume', exact: true }).click();
+    await expect(page.getByText('Tossup 2 of 20', { exact: true })).toBeVisible();
+    await expect(page.getByLabel('Ninety Six score')).toHaveText('35');
+    await expect(page.getByText('Tournament control requested · Question / packet issue')).toBeVisible({
+      timeout: 20_000,
+    });
+    // Reconciliation is GET-only on reload; restoring the banner must not notify control again.
+    expect(control.helpPosts).toHaveLength(1);
+
+    await scoreTossup(page, 'Emma', 'Correct', 10);
+    await expect(page.getByLabel('Greenwood score')).toHaveText('20');
+
+    control.resolveHelpRequest();
+    await expect(page.getByText('Tournament control requested · Question / packet issue')).toBeHidden({
+      timeout: 20_000,
+    });
+    expect(control.helpPosts).toHaveLength(1);
+    expect(control.helpRequests[0]).toMatchObject({
+      category: 'question-packet',
+      message: 'The buzzers cut out in room 204.',
+    });
+    expect(page.getByText('Tossup 3 of 20', { exact: true })).toBeVisible();
+    expect(await page.getByLabel('Ninety Six score').textContent()).toBe('35');
+  });
+
+  test('saves an issue locally when help POST fails and retries only the control request', async ({ page }) => {
+    await pairRoom(page, control);
+    await startAssignedGame(page, 4);
+    control.failNextHelp(503, 'Tournament control is temporarily unavailable.');
+
+    await page.getByRole('button', { name: 'Flag', exact: true }).click();
+    await page.getByRole('button', { name: 'Question / packet issue', exact: true }).click();
+    await page.getByLabel('What happened?').fill('A failure that must stay on the scoresheet.');
+    await page.getByLabel('Ask tournament control to come', { exact: true }).check();
+    await page.getByRole('button', { name: 'Save and request control', exact: true }).click();
+
+    await expect(page.getByText(/Issue saved, but tournament control was not reached/)).toBeVisible();
+    await expect(page.getByText('Tournament control was not reached.', { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Try request again', exact: true }).first()).toBeVisible();
+    await expect.poll(() => control.helpPosts.length).toBe(1);
+    expect(control.helpRequests).toHaveLength(0);
+
+    await page.getByRole('button', { name: 'Try request again', exact: true }).first().click();
+    await expect(page.getByText(/Tournament control requested · Question \/ packet issue/)).toBeVisible({
+      timeout: 20_000,
+    });
+    await expect.poll(() => control.helpPosts.length).toBe(2);
+    expect(control.helpPosts[1]).toEqual(control.helpPosts[0]);
+    // The retry creates no second scoresheet event and no second open request.
+    expect(control.helpRequests).toHaveLength(1);
+
+    await page.getByRole('button', { name: 'Game', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Full scoresheet review' }).click();
+    await expect(page.getByText('Flagged note: Question / packet issue: A failure that must stay on the scoresheet.')).toBeVisible();
+  });
+
   test('keeps a retryable final intact through handoff, reload, and the next assignment', async ({ page }) => {
     await pairRoom(page, control);
     await startAssignedGame(page, 4);

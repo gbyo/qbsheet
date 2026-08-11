@@ -26,7 +26,7 @@ import { useEffect, useRef, useState } from 'react';
 import { IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
 import { IRoomProcedure } from '../scoring/RoomProcedure';
 import { ITeamRoster } from '../game/Roster';
-import { HelpRequestCategory } from '../app/HelpRequests';
+import { ControlRequestState, HelpClearResult, HelpRequestCategory, HelpRequestResult } from '../app/HelpRequests';
 import { IDerivedGame, IGameSetup } from '../scoring/deriveGame';
 import { ScoreEvent } from '../scoring/ScoreEvents';
 import { RoomConnectionState } from '../app/ConnectionState';
@@ -74,8 +74,10 @@ export interface IScorerHostProps {
    */
   onEventsChanged?: (events: ScoreEvent[], setup: IGameSetup) => void;
   qbjMeta?: IQbjMatchMeta;
-  onRequestControl?: (category: HelpRequestCategory, message: string) => Promise<void>;
-  controlRequestPending?: boolean;
+  onRequestControl?: (category: HelpRequestCategory, message: string) => Promise<HelpRequestResult>;
+  controlRequest?: ControlRequestState;
+  onRetryControlRequest?: () => Promise<HelpRequestResult | null>;
+  onCancelControlRequest?: () => Promise<HelpClearResult | null>;
   /** Latest assignment rosters, used only to confirm roster synchronization. */
   authoritativeLeftTeam?: ITeamRoster;
   authoritativeRightTeam?: ITeamRoster;
@@ -129,7 +131,9 @@ export default function ScorerHost(props: IScorerHostProps) {
     onEventsChanged,
     qbjMeta,
     onRequestControl,
-    controlRequestPending,
+    controlRequest,
+    onRetryControlRequest,
+    onCancelControlRequest,
     authoritativeLeftTeam,
     authoritativeRightTeam,
     onSyncRosterPlayer,
@@ -231,7 +235,9 @@ export default function ScorerHost(props: IScorerHostProps) {
       onProgress={onProgress}
       qbjMeta={qbjMeta}
       onRequestControl={onRequestControl}
-      controlRequestPending={controlRequestPending}
+      controlRequest={controlRequest}
+      onRetryControlRequest={onRetryControlRequest}
+      onCancelControlRequest={onCancelControlRequest}
       authoritativeRosters={
         authoritativeLeftTeam && authoritativeRightTeam
           ? {
