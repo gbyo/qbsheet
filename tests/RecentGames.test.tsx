@@ -25,6 +25,10 @@ function record(overrides: Partial<IStoredGameRecord> = {}): IStoredGameRecord {
   };
 }
 
+function localTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
 describe('Recent Games operational ledger', () => {
   test('keeps server, QBJ, handoff, and replay attempt facts distinct', () => {
     render(
@@ -58,10 +62,10 @@ describe('Recent Games operational ledger', () => {
     );
 
     expect(screen.getByText('Attempt 2')).toBeInTheDocument();
-    expect(screen.getByText(/Already received · 10:42 AM/)).toBeInTheDocument();
+    expect(screen.getByText(`Already received · ${localTime('2026-08-11T14:42:00.000Z')}`)).toBeInTheDocument();
     expect(screen.getByText('2 attempts · Match sm-4471')).toBeInTheDocument();
-    expect(screen.getByText('Downloaded · 10:43 AM')).toBeInTheDocument();
-    expect(screen.getByText('Confirmed · 10:44 AM')).toBeInTheDocument();
+    expect(screen.getByText(`Downloaded · ${localTime('2026-08-11T14:43:00.000Z')}`)).toBeInTheDocument();
+    expect(screen.getByText(`Confirmed · ${localTime('2026-08-11T14:44:00.000Z')}`)).toBeInTheDocument();
     expect(screen.getAllByText('Accepted')).toHaveLength(1);
     expect(screen.queryByText('opaque-fingerprint')).toBeNull();
   });
@@ -88,7 +92,9 @@ describe('Recent Games operational ledger', () => {
       />,
     );
 
-    expect(screen.getByText(/Not delivered yet · Last tried 10:42 AM/)).toBeInTheDocument();
+    expect(
+      screen.getByText(`Not delivered yet · Last tried ${localTime('2026-08-11T14:42:00.000Z')}`),
+    ).toBeInTheDocument();
     const retry = screen.getByRole('button', { name: 'Retry sending result' });
     await act(async () => {
       fireEvent.click(retry);
