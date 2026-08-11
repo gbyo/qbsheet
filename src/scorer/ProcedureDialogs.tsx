@@ -11,12 +11,11 @@ import {
   ControlRequestState,
   HelpClearResult,
   HelpRequestResult,
-  helpRequestCategoryLabels,
 } from '../app/HelpRequests';
 import { LeftOrRight } from '../scoring/types';
 import { IDerivedGame, IDerivedProtest } from '../scoring/deriveGame';
 import { ProtestStatus, ProtestSubject } from '../scoring/ScoreEvents';
-import { formatControlRequestTime } from './OperationsDialogs';
+import { ControlRequestControl } from './OperationsDialogs';
 import ScorerDialog from './ScorerDialog';
 
 const protestSubjectLabels: Record<ProtestSubject, string> = {
@@ -199,66 +198,17 @@ export function ProtestDialog(props: {
           between games; a few need a director now, and holding up a round waiting for one that
           doesn't is the thing this is built to avoid.
         */}
-        <div className="scorer-checkbox">
-          {controlRequest.kind === 'idle' || controlRequest.kind === 'unavailable' ? (
-            <label htmlFor="scorer-protest-control">
-              <input
-                id="scorer-protest-control"
-                type="checkbox"
-                checked={requestControl}
-                disabled={recording}
-                onChange={(e) => setRequestControl(e.target.checked)}
-              />
-              Ask tournament control to come
-            </label>
-          ) : controlRequest.kind === 'sending' ? (
-            <span>Tournament control request is being sent…</span>
-          ) : controlRequest.kind === 'outstanding' ? (
-            <span>
-              Tournament control has already been requested.
-              <br />
-              {helpRequestCategoryLabels[controlRequest.request.category]} ·{' '}
-              {formatControlRequestTime(controlRequest.requestedAt, controlRequest.requestedAtSource)}
-              {onCancelControl && controlRequest.request.id && controlRequest.canCancel !== false && (
-                <>
-                  <br />
-                  <button type="button" className="scorer-text-action" onClick={() => void onCancelControl()}>
-                    Cancel request for control
-                  </button>
-                </>
-              )}
-            </span>
-          ) : controlRequest.kind === 'failed' ? (
-            <span>
-              Tournament control was not reached.
-              {onRetryControl && controlRequest.retryable && (
-                <>
-                  <br />
-                  <button type="button" className="scorer-text-action" onClick={() => void onRetryControl()}>
-                    Try request again
-                  </button>
-                </>
-              )}
-            </span>
-          ) : controlRequest.kind === 'refused' ? (
-            <span>
-              Tournament control refused this request.
-              {onRetryControl && controlRequest.retryable && (
-                <>
-                  <br />
-                  <button type="button" className="scorer-text-action" onClick={() => void onRetryControl()}>
-                    Try request again
-                  </button>
-                </>
-              )}
-            </span>
-          ) : (
-            <span>
-              This tournament connection does not support remote control requests; the protest will still be saved
-              on the scoresheet.
-            </span>
-          )}
-        </div>
+        <ControlRequestControl
+          controlRequest={controlRequest}
+          checkboxId="scorer-protest-control"
+          checkboxLabel="Ask tournament control to come"
+          unsupportedMessageNoun="protest"
+          disabled={recording}
+          requestControl={requestControl}
+          setRequestControl={setRequestControl}
+          onRetryControl={onRetryControl}
+          onCancelControl={onCancelControl}
+        />
         <button type="submit" className="scorer-choice" disabled={description.trim() === '' || recording}>
           Record protest and keep playing
         </button>

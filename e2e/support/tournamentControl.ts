@@ -168,7 +168,7 @@ export interface IHelpRequestFixture {
   roomName: string;
   category: string;
   message: string;
-  status: 'open' | 'cancelled';
+  status: 'open' | 'cancelled' | 'resolved';
   createdAt: string;
   updatedAt: string;
   deviceId: string;
@@ -358,7 +358,8 @@ export async function startTournamentControl(protocol: ControlProtocol): Promise
             return true;
           }
           const now = new Date().toISOString();
-          openHelp = { ...openHelp, status: 'cancelled', updatedAt: now };
+          openHelp.status = 'cancelled';
+          openHelp.updatedAt = now;
           send(200, helpResponse(openHelp));
           openHelp = null;
           return true;
@@ -658,6 +659,10 @@ export async function startTournamentControl(protocol: ControlProtocol): Promise
       nextResultFailure = { status, error };
     },
     resolveHelpRequest() {
+      if (openHelp) {
+        openHelp.status = 'resolved';
+        openHelp.updatedAt = new Date().toISOString();
+      }
       openHelp = null;
     },
     failNextHelp(status = 503, error = 'Tournament control is temporarily unavailable.') {

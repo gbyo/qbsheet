@@ -241,6 +241,9 @@ export default class FruityServerClient {
   /** A legacy server may predate the GET/DELETE help lifecycle while still accepting POST. */
   private legacyHelpLifecycleUnavailable = false;
 
+  /** Request ids this client has already observed, so a POST can distinguish creation from reuse. */
+  private readonly seenHelpRequestIds = new Set<string>();
+
   constructor(
     readonly baseUrl: string,
     private fetchImpl: typeof fetch = (...args) => fetch(...args),
@@ -256,6 +259,13 @@ export default class FruityServerClient {
   /** Whether the assignment body will be a QBJ document rather than the legacy shape. */
   get assignmentIsQbj(): boolean {
     return this.adapter.routes.assignmentIsQbj;
+  }
+
+  private rememberHelpRequest(request: IHelpRequestSummary): boolean {
+    if (!request.id) return false;
+    const unseen = !this.seenHelpRequestIds.has(request.id);
+    this.seenHelpRequestIds.add(request.id);
+    return unseen;
   }
 
   get capabilities(): string[] {
@@ -471,8 +481,10 @@ export default class FruityServerClient {
     if (!result.ok) return helpFailure(result);
     const request = readHelpResponse(result.value);
     if (request !== undefined && request !== null) {
+      const newlySeen = this.rememberHelpRequest(request);
       return {
-        kind: request.category === category && request.message === message ? 'accepted' : 'already-outstanding',
+        kind:
+          newlySeen || (request.category === category && request.message === message) ? 'accepted' : 'already-outstanding',
         request,
       };
     }
@@ -510,6 +522,7 @@ export default class FruityServerClient {
     if (request === undefined) {
       return { kind: 'server-error', error: 'Tournament control sent an answer this page could not read.' };
     }
+    this.rememberHelpRequest(request);
     return { kind: 'outstanding', request };
   }
 

@@ -199,7 +199,7 @@ describe('what the client puts on the wire', () => {
             id: 'help-7',
             roomId: 'room-204',
             category: 'protest',
-            message: 'The ruling needs a director.',
+            message: 'The ruling needs a director',
             status: 'open',
             createdAt: '2026-08-11T14:42:00.000Z',
           },
@@ -215,7 +215,7 @@ describe('what the client puts on the wire', () => {
       request: {
         id: 'help-7',
         category: 'protest',
-        message: 'The ruling needs a director.',
+        message: 'The ruling needs a director',
         createdAt: '2026-08-11T14:42:00.000Z',
       },
     });
@@ -240,9 +240,14 @@ describe('what the client puts on the wire', () => {
       },
     });
 
-    await expect(
-      new FruityServerClient('http://control.test', fetchImpl).requestHelp(identity, 'protest', 'A ruling needs help.'),
-    ).resolves.toEqual({
+    const client = new FruityServerClient('http://control.test', fetchImpl);
+
+    await expect(client.readHelp(identity)).resolves.toMatchObject({
+      kind: 'outstanding',
+      request: { id: 'help-existing' },
+    });
+
+    await expect(client.requestHelp(identity, 'protest', 'A ruling needs help.')).resolves.toEqual({
       kind: 'already-outstanding',
       request: {
         id: 'help-existing',
@@ -295,16 +300,15 @@ describe('what the client puts on the wire', () => {
   });
 
   test.each([
-    [401, 'refused'],
-    [403, 'refused'],
-    [503, 'server-error'],
-  ] as const)('help status %s is classified as %s without throwing', async (status, kind) => {
+    [401, { kind: 'refused', status: 401, retryable: true }],
+    [403, { kind: 'refused', status: 403, retryable: false }],
+    [503, { kind: 'server-error', status: 503 }],
+  ] as const)('help status %s is classified without throwing', async (status, expected) => {
     const { fetchImpl } = qbtcpServer({ '/qbtcp/v1/help': { status, body: { error: 'No help.' } } });
 
-    await expect(new FruityServerClient('http://control.test', fetchImpl).requestHelp(identity, 'protest', 'Help.')).resolves.toMatchObject({
-      kind,
-      ...(kind === 'refused' ? { status } : { status }),
-    });
+    await expect(
+      new FruityServerClient('http://control.test', fetchImpl).requestHelp(identity, 'protest', 'Help.'),
+    ).resolves.toMatchObject(expected);
   });
 
   test('a legacy server keeps the same normalized help lifecycle on its existing routes', async () => {

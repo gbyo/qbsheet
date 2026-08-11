@@ -527,6 +527,23 @@ class FakeControl {
     return { ok: true as const, value };
   }
 
+  private helpFailure() {
+    if (this.offline) return { kind: 'unreachable' as const, error: 'Network unavailable' };
+    if (this.degraded) return { kind: 'server-error' as const, status: 500, error: 'Server error' };
+    if (this.roomRevoked) {
+      return { kind: 'refused' as const, status: 401, error: 'Room not recognized', retryable: true };
+    }
+    if (this.forbidden) {
+      return {
+        kind: 'refused' as const,
+        status: 403,
+        error: 'This origin is not allowed.',
+        retryable: false,
+      };
+    }
+    return null;
+  }
+
   asClient(): FruityServerClient {
     return {
       ensureDiscovered: async () => null,
@@ -559,8 +576,8 @@ class FakeControl {
       recover: async () => this.answer({ latestQbj: {} }),
       addRosterPlayer: async () => this.answer({}),
       requestHelp: async () => this.answer({}),
-      readHelp: async () => this.answer({ request: null }),
-      cancelHelp: async () => this.answer({ request: null }),
+      readHelp: async () => this.helpFailure() ?? { kind: 'idle' as const },
+      cancelHelp: async () => this.helpFailure() ?? { kind: 'cleared' as const },
     } as unknown as FruityServerClient;
   }
 }
