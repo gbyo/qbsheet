@@ -3,7 +3,14 @@ import { bonusEventPoints, ScoreEvent } from '../scoring/ScoreEvents';
 import { IGameSetup } from '../scoring/deriveGame';
 import { ITeamRoster } from '../game/Roster';
 import { LeftOrRight } from '../scoring/types';
-import { keyboardActionLabels, keyboardSeatNumbers, keyboardShortcutLabels } from '../scorer/KeyboardScoring';
+import { regularBonusTotals } from '../scorer/bonusOptions';
+import {
+  bonusKeyLegend,
+  KeyboardAction,
+  keyboardActionLabels,
+  keyboardSeatNumbers,
+  keyboardShortcutLabels,
+} from '../scorer/KeyboardScoring';
 
 export type PracticeExpectation =
   | { kind: 'lineup' }
@@ -147,6 +154,15 @@ function correctedTossup(
     );
 }
 
+/**
+ * The one substitution in the scenario, named once.
+ *
+ * Two things have to agree about it: the step that waits for the event, and the seat the Tossup 7
+ * keystroke hint has to name. A substitute takes the seat of the player they replaced, so Olivia's key
+ * is Owen's key — which `practiceSeatNumber` works out from this rather than being told separately.
+ */
+export const practiceSubstitution = { side: 'left', incoming: 'Olivia', outgoing: 'Owen' } as const;
+
 function substitution(questionNumber: number, team: 'left' | 'right', incoming: string, outgoing: string) {
   return (event: ScoreEvent) =>
     event.type === 'substitution' &&
@@ -162,9 +178,9 @@ export const practiceSteps: IPracticeStep[] = [
     title: 'Set the starting lineups',
     call: 'Before the game starts, each team has five players available.',
     instruction:
-      'Tick Gibson, Jeremy, Owen and Lachlan for Ninety Six, and Tucker, Phillip, Efren and Valerie for Greenwood, then choose Start game.',
+      'Tick Gibson, Jeremy, Owen and Lachlan for Ninety Six, and Tucker, Phillip, Efren and Valerie for Greenwood — in that order — then choose Start game.',
     hint:
-      'Only four of each five may be on the floor, so leave Olivia and Bella unticked. Start game stays disabled until both teams have exactly four.',
+      'Only four of each five may be on the floor, so leave Olivia and Bella unticked. The order matters: the order you tick is the order they sit, and the seat numbers it produces are what the rest of this guide names and what the keyboard addresses. Reorder starters moves somebody without starting again. Start game stays disabled until both teams have exactly four.',
     success: 'Good. The scorer now knows who should receive tossups heard from question 1.',
     section: 'Get ready',
     expectation: { kind: 'lineup' },
@@ -352,7 +368,15 @@ export const practiceSteps: IPracticeStep[] = [
       'Every player on the floor has a ⇄ button beside their rulings: it already knows who is coming off, so it only asks who comes on. Players in the bottom toolbar does the same thing and more — adding somebody to the roster, reordering the seats, or changing several players at once at halftime.',
     success: 'Correct — Olivia will receive tossups heard starting with Tossup 7.',
     section: 'Fix mistakes',
-    expectation: { kind: 'event', matches: substitution(7, 'left', 'Olivia', 'Owen') },
+    expectation: {
+      kind: 'event',
+      matches: substitution(
+        7,
+        practiceSubstitution.side,
+        practiceSubstitution.incoming,
+        practiceSubstitution.outgoing,
+      ),
+    },
   },
   {
     id: 'q7-ten',
@@ -423,40 +447,76 @@ export function practiceLineupReady(setup: IGameSetup): boolean {
 /**
  * The keystroke that records a step, for a scorekeeper practising with the keyboard layer on.
  *
- * Derived from the practice lineups and the shared layout rather than written out, so a hint cannot
- * drift from what the keys actually do — moving a name in `practiceLeftTeam.startingLineup` moves the
- * key here too. Steps with no keyboard equivalent, and the ones that are deliberately mouse work
- * (choosing a substitute, correcting an earlier question), return null and are not annotated.
+ * What is written down here is *what a step records* — a seat and a ruling, or a bonus total — and never
+ * the key that records it. The key is worked out from the practice lineups and from the totals the
+ * practice format can produce, so a hint cannot drift from what the keys actually do: moving a name in
+ * `practiceLeftTeam.startingLineup` moves its key, and a bonus scored in fives renumbers its own digits.
+ *
+ * The four steps that are deliberately mouse work — the starting lineups, the question correction, the
+ * substitution, and the finish review — are absent, and absent means no hint rather than a wrong one.
  */
-const stepKeystrokes: Record<string, { side: LeftOrRight; player: string; action: keyof typeof keyboardActionLabels } | { literal: string }> = {
+const stepKeystrokes: Record<
+  string,
+  { side: LeftOrRight; player: string; action: KeyboardAction } | { bonus: number } | { literal: string }
+> = {
   'q1-power': { side: 'left', player: 'Gibson', action: 'power' },
-  'q1-bonus': { literal: '3' },
+  'q1-bonus': { bonus: 20 },
   'q2-ten': { side: 'right', player: 'Tucker', action: 'correct' },
-  'q2-bonus': { literal: '2' },
+  'q2-bonus': { bonus: 10 },
   'q3-neg': { side: 'left', player: 'Jeremy', action: 'neg' },
   'q3-rebound': { side: 'right', player: 'Tucker', action: 'correct' },
-  'q3-bonus': { literal: '4' },
+  'q3-bonus': { bonus: 30 },
+  'q4-wrong-no-penalty': { side: 'left', player: 'Owen', action: 'wrong' },
   'q4-dead': { literal: keyboardShortcutLabels.noBuzz },
   'q5-ten': { side: 'left', player: 'Gibson', action: 'correct' },
-  'q5-bonus': { literal: '3' },
-  'q6-ten': { side: 'right', player: 'Tucker', action: 'correct' },
+  'q5-bonus': { bonus: 20 },
+  'q6-ten': { side: 'left', player: 'Jeremy', action: 'correct' },
   'q6-undo': { literal: keyboardShortcutLabels.undo },
-  'q6-power': { side: 'left', player: 'Gibson', action: 'power' },
-  'q6-bonus': { literal: '3' },
+  'q6-power': { side: 'left', player: 'Jeremy', action: 'power' },
+  'q6-bonus': { bonus: 10 },
+  'q7-ten': { side: 'left', player: 'Olivia', action: 'correct' },
+  'q7-bonus': { bonus: 30 },
+  'q8-ten': { side: 'right', player: 'Phillip', action: 'correct' },
+  'q8-bonus': { bonus: 20 },
 };
 
-/** Which key sits under a starting seat on one side of the practice game. */
-function practiceSeatKey(side: LeftOrRight, playerName: string): string | null {
+/**
+ * Which global key number sits under a player during the practice game.
+ *
+ * The starting lineups decide it, plus the one scripted substitution: a substitute takes the seat of the
+ * player they replaced, so Olivia answers to Owen's key from Tossup 7 on. Null for anybody this layout
+ * cannot address — a fifth player who never comes on, or a seat beyond the four the keys reach.
+ */
+export function practiceSeatNumber(side: LeftOrRight, playerName: string): number | null {
   const lineup = side === 'left' ? practiceLeftTeam.startingLineup : practiceRightTeam.startingLineup;
-  const seat = lineup.indexOf(playerName);
-  return seat >= 0 && seat < keyboardSeatNumbers[side].length ? String(keyboardSeatNumbers[side][seat]) : null;
+  const seated =
+    side === practiceSubstitution.side && playerName === practiceSubstitution.incoming
+      ? practiceSubstitution.outgoing
+      : playerName;
+  const seat = lineup.indexOf(seated);
+  return seat >= 0 && seat < keyboardSeatNumbers[side].length ? keyboardSeatNumbers[side][seat] : null;
+}
+
+/**
+ * Which digit selects a bonus total in the practice format's prompt.
+ *
+ * Read out of `bonusKeyLegend`, which is the legend the prompt itself draws and the table
+ * `bonusOptionForCode` is the other half of. Asking it rather than recounting the row is what keeps this
+ * hint right through a change to how the digits are numbered. Null for a total this format cannot be
+ * worth, and for a total past the last digit — beyond that the buttons are the only way.
+ */
+export function practiceBonusKey(points: number): string | null {
+  const totals = regularBonusTotals(practiceFormat.bonus);
+  if (totals === null) return null;
+  return bonusKeyLegend(totals).find((row) => row.meaning === String(points))?.keys ?? null;
 }
 
 export function practiceKeystroke(stepId: string): string | null {
   const entry = stepKeystrokes[stepId];
   if (!entry) return null;
   if ('literal' in entry) return entry.literal;
-  const key = practiceSeatKey(entry.side, entry.player);
-  if (key === null) return null;
-  return `${key} then ${keyboardActionLabels[entry.action]}`;
+  if ('bonus' in entry) return practiceBonusKey(entry.bonus);
+  const number = practiceSeatNumber(entry.side, entry.player);
+  if (number === null) return null;
+  return `${number} then ${keyboardActionLabels[entry.action]}`;
 }

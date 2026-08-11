@@ -1,7 +1,6 @@
 import { describe, expect, test, vi } from 'vitest';
-import { GameStore, IStoredGameRecord, memoryGameStore } from '../src/game/GameStore';
+import { completedGameRetentionMs, GameStore, IStoredGameRecord, memoryGameStore } from '../src/game/GameStore';
 import {
-  classifyFinalDelivery,
   ResultDeliveryService,
 } from '../src/app/ResultDelivery';
 import {
@@ -9,6 +8,7 @@ import {
   ResultDeliveryCapabilityStore,
 } from '../src/app/ResultDeliveryCapability';
 import FruityServerClient from '../src/integrations/fruity/FruityServerClient';
+import { classifyFinalDelivery } from '../src/integrations/fruity/FruityResultDestination';
 import { validPackage } from './packages';
 import { buildDiagnostics, findLeaks } from '../src/app/Diagnostics';
 
@@ -105,6 +105,18 @@ describe('normalizing completed-result delivery', () => {
     expect(classifyFinalDelivery({ ok: false, status: 409, error: 'Another device is scoring.' })).toMatchObject({
       delivery: 'rejected',
       retryable: true,
+    });
+    expect(classifyFinalDelivery({ ok: false, status: 408, error: 'The request timed out.' })).toMatchObject({
+      delivery: 'pending',
+      retryable: true,
+    });
+    expect(classifyFinalDelivery({ ok: false, status: 429, error: 'Too many requests.' })).toMatchObject({
+      delivery: 'pending',
+      retryable: true,
+    });
+    expect(classifyFinalDelivery({ ok: false, status: 400, error: 'Malformed result.' })).toMatchObject({
+      delivery: 'rejected',
+      retryable: false,
     });
     expect(
       classifyFinalDelivery({
@@ -218,11 +230,12 @@ describe('bounded result-delivery ledger and private retry capability', () => {
   test('expired and pruned capabilities are removed without changing the game record', async () => {
     const { record } = await completedStore();
     const storage = new MemoryStorage();
-    let now = new Date('2026-08-11T14:00:00.000Z');
+    const initial = new Date('2026-08-11T14:00:00.000Z');
+    let now = new Date(initial);
     const capabilities = new ResultDeliveryCapabilityStore(storage, () => now);
     capabilities.remember(record.id, capability, record.completedAt!);
     expect(capabilities.has(record.id)).toBe(true);
-    now = new Date('2026-08-19T14:00:00.000Z');
+    now = new Date(initial.getTime() + completedGameRetentionMs + 1);
     capabilities.prune(new Set([record.id]));
     expect(capabilities.has(record.id)).toBe(false);
 
@@ -248,7 +261,7 @@ describe('bounded result-delivery ledger and private retry capability', () => {
     expect(updated?.serverDelivery).toBe('sent');
     expect(updated?.serverDeliveryLedger?.attemptCount).toBe(2);
     expect(updated?.serverDeliveryLedger?.firstAttemptedAt).toBe('2026-08-11T14:05:00.000Z');
-    expect(updated?.serverDeliveryLedger?.acceptedAt).toBe('2026-08-11T13:05:00.000Z');
+    expect(updated?.serverDeliveryLedger?.acceptedAt).toBe('2026-08-11T14:05:00.000Z');
     expect(service.canRetry(updated!)).toBe(false);
     expect(postFinal).toHaveBeenCalledTimes(2);
   });

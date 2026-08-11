@@ -199,37 +199,40 @@ describe('the keys offered to a seat that is waiting', () => {
 });
 
 describe('bonus digits', () => {
-  test('the choices are numbered left to right from one', () => {
+  test('the digit is the number of parts, so nothing scored is 0 and not 1', () => {
     expect(bonusKeyLegend([0, 10, 20, 30]).map((row) => `${row.keys}=${row.meaning}`)).toEqual([
-      '1=0',
-      '2=10',
-      '3=20',
-      '4=30',
+      '0=0',
+      '1=10',
+      '2=20',
+      '3=30',
     ]);
   });
 
   test('the values come from the caller, not from an assumption about thirty', () => {
     expect(bonusKeyLegend([0, 5, 10, 15, 20]).map((row) => row.meaning)).toEqual(['0', '5', '10', '15', '20']);
+    // A five-point part renumbers itself: four parts converted is still the key 4.
+    expect(bonusKeyLegend([0, 5, 10, 15, 20]).map((row) => row.keys)).toEqual(['0', '1', '2', '3', '4']);
   });
 
   test('a number-row or numpad digit selects the option in that position', () => {
     const options = [0, 10, 20, 30];
 
-    expect(bonusOptionForCode('Digit1', options)).toBe(0);
-    expect(bonusOptionForCode('Numpad3', options)).toBe(20);
-    expect(bonusOptionForCode('Digit4', options)).toBe(30);
+    expect(bonusOptionForCode('Digit0', options)).toBe(0);
+    expect(bonusOptionForCode('Numpad2', options)).toBe(20);
+    expect(bonusOptionForCode('Digit3', options)).toBe(30);
   });
 
   test('a digit past the end, or a non-digit, addresses nothing', () => {
+    expect(bonusOptionForCode('Digit4', [0, 10, 20, 30])).toBeNull();
     expect(bonusOptionForCode('Digit9', [0, 10, 20, 30])).toBeNull();
     expect(bonusOptionForCode('KeyA', [0, 10])).toBeNull();
-    expect(bonusOptionForCode('Digit0', [0, 10])).toBeNull();
+    expect(bonusOptionForCode('Digit2', [0, 10])).toBeNull();
   });
 
-  test('more than nine choices leaves the rest on the buttons', () => {
+  test('more than ten choices leaves the rest on the buttons', () => {
     const many = Array.from({ length: 15 }, (_value, index) => index);
 
-    expect(bonusKeyLegend(many)).toHaveLength(9);
-    expect(bonusOptionForCode('Digit9', many)).toBe(8);
+    expect(bonusKeyLegend(many)).toHaveLength(10);
+    expect(bonusOptionForCode('Digit9', many)).toBe(9);
   });
 });

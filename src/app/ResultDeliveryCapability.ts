@@ -52,24 +52,46 @@ function validCapability(value: unknown): value is IResultDeliveryCapability {
   );
 }
 
+function validStoredCapability(value: unknown): value is IStoredResultDeliveryCapability {
+  return validCapability(value) && typeof (value as Partial<IStoredResultDeliveryCapability>).expiresAt === 'string';
+}
+
+function discardDocument(storage: IResultDeliveryCapabilityStorage): void {
+  try {
+    storage.removeItem(resultDeliveryCapabilityStorageKey);
+  } catch {
+    // A malformed private document must never make the completed-result read path fail.
+  }
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function readDocument(storage: IResultDeliveryCapabilityStorage | null): ICapabilityDocument | null {
   if (!storage) return null;
   try {
     const raw = storage.getItem(resultDeliveryCapabilityStorageKey);
     if (!raw) return { version: resultDeliveryCapabilityVersion, entries: {} };
-    const parsed = JSON.parse(raw) as Partial<ICapabilityDocument>;
-    if (parsed.version !== resultDeliveryCapabilityVersion || typeof parsed.entries !== 'object' || parsed.entries === null) {
+    const parsed = JSON.parse(raw) as unknown;
+    if (
+      !isObjectRecord(parsed) ||
+      parsed.version !== resultDeliveryCapabilityVersion ||
+      !isObjectRecord(parsed.entries)
+    ) {
+      discardDocument(storage);
       return null;
     }
     const entries: Record<string, IStoredResultDeliveryCapability> = {};
     for (const [recordId, entry] of Object.entries(parsed.entries)) {
-      if (!validCapability(entry) || typeof entry.expiresAt !== 'string') continue;
+      if (!validStoredCapability(entry)) continue;
       const expiresAt = new Date(entry.expiresAt).getTime();
       if (!Number.isFinite(expiresAt)) continue;
       entries[recordId] = { ...entry, expiresAt: new Date(expiresAt).toISOString() };
     }
     return { version: resultDeliveryCapabilityVersion, entries };
   } catch {
+    discardDocument(storage);
     return null;
   }
 }
@@ -150,14 +172,14 @@ export class ResultDeliveryCapabilityStore {
   prune(retainedRecordIds?: ReadonlySet<string>): void {
     const document = readDocument(this.storage);
     if (!document) return;
-    const before = Object.keys(document.entries).length;
+    const before = JSON.stringify(document.entries);
     this.removeExpired(document);
     if (retainedRecordIds) {
       for (const recordId of Object.keys(document.entries)) {
         if (!retainedRecordIds.has(recordId)) delete document.entries[recordId];
       }
     }
-    if (Object.keys(document.entries).length === before) return;
+    if (JSON.stringify(document.entries) === before) return;
     if (Object.keys(document.entries).length === 0) {
       try {
         this.storage?.removeItem(resultDeliveryCapabilityStorageKey);

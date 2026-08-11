@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { practiceLineupsRecorded, replayPracticeProgress } from '../src/practice/PracticeScreen';
 import {
+  practiceBonusKey,
   practiceFormat,
   practiceKeystroke,
   practiceLeftTeam,
@@ -55,9 +56,37 @@ describe('guided practice scenario', () => {
     expect(practiceKeystroke('q1-power')).toBe('1 then P');
     expect(practiceKeystroke('q2-ten')).toBe('5 then C');
     expect(practiceKeystroke('q3-neg')).toBe('2 then N');
-    expect(practiceKeystroke('q4-wrong-no-penalty')).toBeNull();
+    expect(practiceKeystroke('q4-wrong-no-penalty')).toBe('3 then 0');
     expect(practiceKeystroke('q4-dead')).toBe('Space');
     expect(practiceKeystroke('q6-undo')).toBe('Ctrl/⌘ + Z');
+  });
+
+  it('names the seat the step names, on every step the keyboard can record', () => {
+    // Q6 is scored twice by the same player — once as called, once corrected after the undo — so a hint
+    // naming anybody else there is a hint that contradicts the instruction beside it.
+    expect(practiceKeystroke('q6-ten')).toBe('2 then C');
+    expect(practiceKeystroke('q6-power')).toBe('2 then P');
+    // Olivia has taken Owen's seat by Tossup 7, so her key is his.
+    expect(practiceKeystroke('q7-ten')).toBe('3 then C');
+    expect(practiceKeystroke('q8-ten')).toBe('6 then C');
+
+    // Only the four steps that are genuinely mouse work go unannotated.
+    const mouseOnly = ['lineup', 'q5-correction', 'substitution', 'submit'];
+    expect(practiceSteps.filter((step) => practiceKeystroke(step.id) === null).map((step) => step.id)).toEqual(
+      mouseOnly,
+    );
+  });
+
+  it('numbers the bonus digits from the totals the format can produce', () => {
+    // The digit is the number of parts, never the points: 0 / 10 / 20 / 30 are the keys 0 to 3.
+    expect(practiceBonusKey(0)).toBe('0');
+    expect(practiceBonusKey(10)).toBe('1');
+    expect(practiceBonusKey(20)).toBe('2');
+    expect(practiceBonusKey(30)).toBe('3');
+    expect(practiceBonusKey(15)).toBeNull();
+    expect(practiceKeystroke('q2-bonus')).toBe('1');
+    expect(practiceKeystroke('q6-bonus')).toBe('1');
+    expect(practiceKeystroke('q7-bonus')).toBe('3');
   });
 
   it('replays the current scoresheet to a safe guide checkpoint', () => {

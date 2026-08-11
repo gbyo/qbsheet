@@ -60,7 +60,8 @@ import FruityServerClient, {
   IWriterConflict,
   readWriterConflict,
 } from '../integrations/fruity/FruityServerClient';
-import { ProgressSender } from '../integrations/fruity/FruityResultDestination';
+import { deliverFinalResult, ProgressSender } from '../integrations/fruity/FruityResultDestination';
+import type { IFinalDelivery } from '../integrations/fruity/FruityResultDestination';
 import {
   ControlRequestState,
   HelpRequestCategory,
@@ -68,7 +69,6 @@ import {
   helpRequestCategoryLabels,
 } from './HelpRequests';
 import { ConnectionTimeline, connectionTimeline } from './ConnectionTimeline';
-import { deliverFinalResult, IFinalDelivery } from './ResultDelivery';
 
 /** How often a room asks control what it should be playing. */
 export const assignmentPollIntervalMs = 10_000;

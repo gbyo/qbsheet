@@ -29,11 +29,112 @@
  */
 import { DeliveryOutcome, IResultDestination } from '../../game/GameSource';
 import { IGamePackage } from '../../game/GamePackage';
-import { deliverFinalResult } from '../../app/ResultDelivery';
-import FruityServerClient, { ISessionCredentials } from './FruityServerClient';
+import FruityServerClient from './FruityServerClient';
+import { ApiResult, IResultReceipt, ISessionCredentials } from './ServerTypes';
 
 /** At most one progress update per this interval, carrying whatever the latest state is. */
 export const progressIntervalMs = 5000;
+
+export interface IFinalDelivery {
+  /** Never `none`: this path is only for a connected completed result. */
+  delivery: 'sent' | 'pending' | 'rejected';
+  /** Safe-to-display server, client, or network explanation. */
+  detail?: string;
+  /** Control already had this exact statistical result. This is successful delivery. */
+  duplicate?: boolean;
+  matchId?: string;
+  fingerprint?: string;
+  /** True only when a request was made to the result endpoint. */
+  attempted: boolean;
+  /** Whether another explicit attempt with the same private capability can be meaningful. */
+  retryable: boolean;
+  /** True when discovery refused the operation before making a request. */
+  unsupported?: boolean;
+  status?: number;
+}
+
+const acceptedFallback = 'Tournament control accepted the result.';
+const rejectedFallback = 'Tournament control did not accept this result.';
+
+function failureDetail(result: { error: string; detail?: string }): string {
+  return result.detail ?? result.error;
+}
+
+/**
+ * Translate the normalized API result into the operational meaning a record can keep.
+ *
+ * The order is intentional: a duplicate receipt is a successful receipt even if a server happens
+ * to omit or contradict its `accepted` flag. A successful response with `accepted: false` is not
+ * success, and a 5xx is not a permanent human rejection.
+ */
+export function classifyFinalDelivery(result: ApiResult<IResultReceipt>): IFinalDelivery {
+  if (result.ok) {
+    const receipt = result.value;
+    if (receipt.duplicate === true || receipt.accepted === true) {
+      return {
+        delivery: 'sent',
+        detail: receipt.duplicate ? 'Tournament control already had this result on record.' : acceptedFallback,
+        duplicate: receipt.duplicate,
+        ...(receipt.matchId !== undefined ? { matchId: receipt.matchId } : {}),
+        ...(receipt.fingerprint !== undefined ? { fingerprint: receipt.fingerprint } : {}),
+        attempted: true,
+        retryable: false,
+      };
+    }
+    return {
+      delivery: 'rejected',
+      detail: rejectedFallback,
+      ...(receipt.matchId !== undefined ? { matchId: receipt.matchId } : {}),
+      ...(receipt.fingerprint !== undefined ? { fingerprint: receipt.fingerprint } : {}),
+      attempted: true,
+      retryable: false,
+    };
+  }
+
+  const detail = failureDetail(result);
+  if (result.unsupported) {
+    return { delivery: 'rejected', detail, attempted: false, retryable: false, unsupported: true };
+  }
+  if (result.status === undefined) {
+    return { delivery: 'pending', detail, attempted: true, retryable: true };
+  }
+  // A server-side failure is not a person's rejection. Keep the result retryable without an
+  // automatic loop; Recent Games offers the explicit action after reload.
+  if (result.status === 408 || result.status === 429 || (result.status >= 500 && result.status <= 599)) {
+    return { delivery: 'pending', detail, attempted: true, retryable: true, status: result.status };
+  }
+  // These are still useful manual retries after a person fixes the condition. They are never
+  // retried in the background and retain the runtime's 403 / writer-conflict semantics.
+  if (result.status === 403 || result.status === 409) {
+    return { delivery: 'rejected', detail, attempted: true, retryable: true, status: result.status };
+  }
+  // All remaining HTTP failures are explicit client or protocol refusals. A 401 invalidates the
+  // stored session capability, so retrying it from Recent Games cannot repair the pairing.
+  return { delivery: 'rejected', detail, attempted: true, retryable: false, status: result.status };
+}
+
+/** Send one frozen result through the normalized QBTCP result boundary. */
+export async function deliverFinalResult(
+  client: FruityServerClient,
+  credentials: ISessionCredentials,
+  frozenQbj: object,
+  onResponse?: (result: ApiResult<IResultReceipt>) => void,
+): Promise<IFinalDelivery> {
+  try {
+    const result = await client.postFinal(credentials, frozenQbj);
+    onResponse?.(result);
+    return classifyFinalDelivery(result);
+  } catch {
+    // The production client resolves failures as values. This guard keeps the completed result
+    // safe if a test double or a future adapter violates that boundary.
+    return {
+      delivery: 'pending',
+      detail: 'Could not reach tournament control.',
+      attempted: true,
+      retryable: true,
+    };
+  }
+}
 
 export class FruityResultDestination implements IResultDestination {
   readonly kind = 'tournament-control';
