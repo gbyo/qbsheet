@@ -814,28 +814,31 @@ export default function Scorer(props: IScorerProps) {
       // Named for what it does rather than for the state it is in, and stating the current state after
       // it, because a menu entry that reads "Keyboard scoring" tells nobody whether it is on.
       label: keyboardEnabled ? 'Keyboard scoring: on' : 'Keyboard scoring: off',
+      icon: 'game',
       onSelect: () => setKeyboardEnabled(!keyboardEnabled),
     },
-    { label: 'Notes', onSelect: () => setDialog('notes') },
-    { label: 'Protests', onSelect: () => setDialog('protests') },
-    { label: 'Issue / tournament control', onSelect: () => setDialog('issue') },
-    { label: 'Game details', onSelect: () => setDialog('details') },
-    { label: 'Full scoresheet review', onSelect: () => openReviewAt(undefined) },
+    { label: 'Notes', icon: 'note', onSelect: () => setDialog('notes') },
+    { label: 'Protests', icon: 'flag', onSelect: () => setDialog('protests') },
+    { label: 'Issue / tournament control', icon: 'issue', onSelect: () => setDialog('issue') },
+    { label: 'Game details', icon: 'details', onSelect: () => setDialog('details') },
+    { label: 'Full scoresheet review', icon: 'review', onSelect: () => openReviewAt(undefined) },
   ];
   if (format.lightning.enabled)
-    menuItems.push({ label: 'Lightning / worksheet', onSelect: () => setDialog('lightning') });
+    menuItems.push({ label: 'Lightning / worksheet', icon: 'lightning', onSelect: () => setDialog('lightning') });
   if ((procedure?.timeoutsPerTeam ?? 0) > 0 && phase.kind !== 'complete' && phase.kind !== 'timeout') {
-    menuItems.push({ label: 'Timeout', onSelect: () => setDialog('timeout') });
+    menuItems.push({ label: 'Timeout', icon: 'clock', onSelect: () => setDialog('timeout') });
   }
   if (phase.kind === 'timeout') {
     menuItems.push({
       label: 'Resume play',
+      icon: 'play',
       onSelect: () => record({ id: newEventId(), type: 'timeout-resume', questionNumber: currentQuestion }),
     });
   }
   if (procedure?.halves && phase.kind !== 'complete' && !game.awaitingScoreCheck) {
     menuItems.push({
       label: `End ${game.halfBreaks.length === 0 ? 'first' : 'this'} half`,
+      icon: 'pause',
       // The boundary is the last tossup actually played, not the one on screen. A displayed
       // question with nothing recorded against it has not been read.
       onSelect: () =>
@@ -850,6 +853,7 @@ export default function Scorer(props: IScorerProps) {
   if (format.regulation.timed && !game.regulationComplete && phase.kind !== 'complete') {
     menuItems.push({
       label: 'End regulation',
+      icon: 'pause',
       /*
        * `lastRegulationQuestion` is the fix for the boundary being one out. Q18 finishes, Q19
        * appears, the horn goes before anybody reads it: the last regulation question is 18, and
@@ -867,11 +871,17 @@ export default function Scorer(props: IScorerProps) {
   if (phase.kind === 'tossup' || phase.kind === 'bonus') {
     menuItems.push({
       label: `Replace question ${phase.questionNumber}`,
+      icon: 'replace',
       onSelect: () => openReplacementAt(phase.questionNumber),
     });
   }
   if (phase.kind !== 'complete' && game.tossupsRead > 0) {
-    menuItems.push({ label: 'End game early…', onSelect: () => setDialog('end-early'), destructive: true });
+    menuItems.push({
+      label: 'End game early…',
+      icon: 'stop',
+      onSelect: () => setDialog('end-early'),
+      destructive: true,
+    });
   }
   /**
    * Hand the current scoresheet to the application to write out.
@@ -882,20 +892,26 @@ export default function Scorer(props: IScorerProps) {
    * scoring surface should have. What it has is a payload and a request.
    */
   const downloadQbj = () => onDownload(qbj);
-  menuItems.push({ label: 'Download QBJ backup', onSelect: downloadQbj });
+  menuItems.push({ label: 'Download QBJ backup', icon: 'download', onSelect: downloadQbj });
   if (onDownloadForm) {
     // The mid-game portable copy. Not a substitute for local recovery, which keeps the event
     // history this cannot represent; see `docs/QBJ_ASSIGNMENT_PROFILE.md`.
-    menuItems.push({ label: 'Download current QBJ', onSelect: () => onDownloadForm(game, 'partial') });
+    menuItems.push({ label: 'Download current QBJ', icon: 'download', onSelect: () => onDownloadForm(game, 'partial') });
     menuItems.push({
       label: 'Download legacy match-only QBJ',
+      icon: 'download',
       onSelect: () => onDownloadForm(game, 'legacy-match'),
     });
   }
-  menuItems.push({ label: 'Recover from QBJ', onSelect: () => setDialog('recovery') });
-  menuItems.push({ label: 'Adjust score', onSelect: () => setDialog('adjust') });
+  menuItems.push({ label: 'Recover from QBJ', icon: 'upload', onSelect: () => setDialog('recovery') });
+  menuItems.push({ label: 'Adjust score', icon: 'adjust', onSelect: () => setDialog('adjust') });
   if (phase.kind !== 'complete') {
-    menuItems.push({ label: 'Record forfeit', onSelect: () => setDialog('forfeit'), destructive: true });
+    menuItems.push({
+      label: 'Record forfeit',
+      icon: 'forfeit',
+      onSelect: () => setDialog('forfeit'),
+      destructive: true,
+    });
   }
 
   const submit = async () => {
