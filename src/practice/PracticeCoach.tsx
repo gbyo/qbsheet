@@ -1,5 +1,6 @@
 import { CSSProperties, useEffect, useState } from 'react';
-import { IPracticeStep } from './PracticeScenario';
+import { IPracticeStep, practiceKeystroke } from './PracticeScenario';
+import useKeyboardEnabled from '../scorer/useKeyboardEnabled';
 
 interface IPracticeCoachProps {
   step: IPracticeStep;
@@ -34,7 +35,7 @@ const helpTopics = [
   {
     title: 'Wrong answer, neg, or no buzz?',
     answer:
-      'Use a negative ruling only when the rules assess a penalty. Use Wrong (0) for an answer with no penalty. Use No buzz only when the remaining eligible team never answers.',
+      'Use a negative ruling only when the rules assess a penalty. Use Wrong (0) for an answer with no penalty; it stays a pointer/touch button in keyboard mode because Ctrl-letter shortcuts belong to Chrome and ChromeOS. Use No buzz only when the remaining eligible team never answers.',
   },
   {
     title: 'The question or ruling is disputed',
@@ -65,6 +66,9 @@ const helpTopics = [
 
 export default function PracticeCoach(props: IPracticeCoachProps) {
   const { step, stepIndex, stepCount, feedback, mistake, onRestart, onLeave } = props;
+  // The real preference, not a practice-only copy: the guide teaches whatever the scoresheet is doing.
+  const keyboardEnabled = useKeyboardEnabled();
+  const keystroke = step === null ? null : practiceKeystroke(step.id);
   /*
    * Open where the panel gets its full two-column width — the same 1050px the stylesheet gives up the
    * second column below. Narrower than that it reads down the page like the old panel did, tall enough
@@ -198,6 +202,18 @@ export default function PracticeCoach(props: IPracticeCoachProps) {
             <div className="practice-call is-instruction">
               <span>Do this</span>
               <p>{step.instruction}</p>
+              {/*
+                The same keystroke the real scoresheet uses, shown only when the scorekeeper has turned
+                keyboard scoring on. Beside the instruction rather than buried in the hint, because a
+                scorekeeper practising with the keyboard wants the key on the tossup they are on and not
+                after opening a disclosure — and because the button and the key are the same ruling, so
+                they belong in the same sentence.
+              */}
+              {keyboardEnabled && keystroke !== null && (
+                <p className="practice-keystroke">
+                  Keyboard: <kbd>{keystroke}</kbd>
+                </p>
+              )}
             </div>
             <details key={step.id} className="practice-hint">
               <summary>Show me where</summary>

@@ -56,16 +56,92 @@ async function chooseBonus(page: Page, points: number): Promise<void> {
     .click();
 }
 
+async function enableKeyboardScoring(page: Page): Promise<void> {
+  await page.getByRole('button', { name: 'Game', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Keyboard scoring: off' }).click();
+  await expect(page.getByLabel('Keyboard scoring')).toBeVisible();
+}
+
+async function pressModifiedKey(page: Page, modifier: 'Alt' | 'Control' | 'Shift', key: string): Promise<void> {
+  await page.keyboard.down(modifier);
+  await page.keyboard.press(key);
+  await page.keyboard.up(modifier);
+}
+
 async function openReviewWithKeyboard(page: Page): Promise<void> {
   const gameMenu = page.getByRole('button', { name: 'Game', exact: true });
   await gameMenu.focus();
   await gameMenu.press('ArrowDown');
   const review = page.getByRole('menuitem', { name: 'Full scoresheet review' });
-  for (let move = 0; move < 4; move += 1) await page.keyboard.press('ArrowDown');
+  const menuItems = page.getByRole('menuitem');
+  const labels = await menuItems.allTextContents();
+  const reviewIndex = labels.findIndex((label) => label.trim() === 'Full scoresheet review');
+  expect(reviewIndex).toBeGreaterThanOrEqual(0);
+  await page.keyboard.press('Home');
+  for (let move = 0; move < reviewIndex; move += 1) await page.keyboard.press('ArrowDown');
   await expect(review).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(page.getByRole('dialog', { name: 'Full scoresheet review' })).toBeVisible();
 }
+
+test('production keyboard scoring records seat rulings, bonuses, and safe focus boundaries', async ({ page }) => {
+  await page.goto('/');
+  await openGeneratedGame(page);
+  await enableKeyboardScoring(page);
+
+  // A real dialog and its real textarea own their printable keys. The seat listener must not score
+  // through either focus boundary.
+  await page.getByRole('button', { name: 'Game', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Notes' }).click();
+  const notes = page.getByRole('dialog', { name: 'Notes' });
+  const noteField = page.locator('#scorer-note-text');
+  await expect(notes).toBeVisible();
+  await noteField.focus();
+  await page.keyboard.press('a');
+  await expect(noteField).toHaveValue('a');
+  await expect(page.getByText('Tossup 1 of 20', { exact: true })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(notes).toBeHidden();
+  await page.locator('body').click({ position: { x: 8, y: 8 } });
+
+  // Ctrl+A is deliberately not a ruling. It remains available to Chrome/ChromeOS and leaves Q1 live.
+  await pressModifiedKey(page, 'Control', 'a');
+  await expect(page.getByLabel('Ninety Six A score')).toHaveText('0');
+
+  // A/S are the first and second left seats. Both rulings use the production document listener.
+  await page.keyboard.press('a');
+  await expect(page.getByLabel('Ninety Six A score')).toHaveText('10');
+  await expect(page.getByLabel('Bonus')).toBeVisible();
+  await page.keyboard.press('3');
+  await expect(page.getByText('Tossup 2 of 20', { exact: true })).toBeVisible();
+
+  await pressModifiedKey(page, 'Shift', 's');
+  await expect(page.getByLabel('Ninety Six A score')).toHaveText('45');
+  await page.keyboard.press('2');
+  await expect(page.getByText('Tossup 3 of 20', { exact: true })).toBeVisible();
+
+  // J is the first right seat. Its negative leaves the other team eligible, so Space then records the
+  // unanswered remainder and advances to the next tossup.
+  await pressModifiedKey(page, 'Alt', 'j');
+  await expect(page.getByLabel('Greenwood score')).toHaveText('-5');
+  await page.keyboard.press('Space');
+  await expect(page.getByText('Tossup 4 of 20', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Ninety Six A score')).toHaveText('55');
+
+  await openReviewWithKeyboard(page);
+  const review = page.getByRole('dialog', { name: 'Full scoresheet review' });
+  await expect(review).toContainText('Ninety Six A 55');
+  await expect(review).toContainText('Greenwood -5');
+
+  const questions = review.locator('.scorer-review-list > li');
+  await expect(questions).toHaveCount(3);
+  await expect(questions.filter({ hasText: 'Q1' })).toContainText('Sarah Mitchell +10');
+  await expect(questions.filter({ hasText: 'Q1' })).toContainText('Bonus 20');
+  await expect(questions.filter({ hasText: 'Q2' })).toContainText('James Okafor +15');
+  await expect(questions.filter({ hasText: 'Q2' })).toContainText('Bonus 10');
+  await expect(questions.filter({ hasText: 'Q3' })).toContainText('Emma Chen -5');
+  await expect(questions.filter({ hasText: 'Q3' })).toContainText('No buzz');
+});
 
 test('a real scorer session survives fast input, reload, correction, completion, and export', async ({ page }) => {
   const browserErrors: string[] = [];

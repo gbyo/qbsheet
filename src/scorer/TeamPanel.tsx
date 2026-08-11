@@ -19,6 +19,7 @@ import { CSSProperties, useEffect, useRef, useState } from 'react';
 import { IScorekeeperAnswerType, IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
 import { IDerivedTeam } from '../scoring/deriveGame';
 import { orderBySeating } from './PlayerSeating';
+import { availableAnswerTypes } from './tossupRulings';
 
 export interface ITeamPanelProps {
   format: IScorekeeperFormat;
@@ -62,6 +63,14 @@ export interface ITeamPanelProps {
   onSubstitute?: (outgoing: string, incoming: string) => void;
   /** Who is available to come on. Empty means everybody on the roster is already playing. */
   benchPlayers?: readonly string[];
+  /**
+   * A seat to flash, briefly, because a ruling was just recorded there from the keyboard.
+   *
+   * Confirmation for an action with no pointer behind it: a scorekeeper who pressed `Shift+D` has no
+   * cursor sitting on the button they hit and no way to know they hit the right one. Zero-based, and
+   * only ever set for a keystroke — a click needs no echo, because the finger was already there.
+   */
+  flashSeat?: number;
   /** False when the procedure does not allow a lineup change at this point in the game. */
   substitutionAllowed?: boolean;
   /** Why not, when it is not allowed. Shown in place of the bench list. */
@@ -95,6 +104,7 @@ export default function TeamPanel(props: ITeamPanelProps) {
     onWrongNoPenalty,
     seatOrder,
     onSubstitute,
+    flashSeat,
     benchPlayers = [],
     substitutionAllowed = true,
     substitutionBlockedReason,
@@ -111,8 +121,11 @@ export default function TeamPanel(props: ITeamPanelProps) {
    * The rulings actually available to this team on this tossup. Negs disappear once anybody has
    * answered, because from that point the question has been read out and nobody can be penalized on
    * it — which is exactly why the zero-point button beside them exists.
+   *
+   * Derived in `tossupRulings` rather than here, because the keyboard layer binds to the same rule and
+   * two copies of "is a neg legal right now" would disagree the first time either was corrected.
    */
-  const answerTypes = negsAvailable ? format.answerTypes : format.answerTypes.filter((type) => !type.isNeg);
+  const answerTypes = availableAnswerTypes(format, negsAvailable);
   // One extra column for the zero, so the values stay in the same place down every row.
   const columns = answerTypes.length + 1;
   const previousPoints = useRef(team.points);
@@ -155,7 +168,7 @@ export default function TeamPanel(props: ITeamPanelProps) {
        */}
       <ul className="scorer-roster" style={{ '--scorer-answer-columns': columns } as CSSProperties}>
         {active.map((player, seat) => (
-          <li key={player.name} className="scorer-player">
+          <li key={player.name} className={seat === flashSeat ? 'scorer-player is-keyed' : 'scorer-player'}>
             {/* The seat, not an identity. Hidden from assistive technology, which reads the name. */}
             <span className="scorer-player-seat" aria-hidden="true">
               {seat + 1}
