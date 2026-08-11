@@ -1,22 +1,19 @@
 /**
- * The keyboard model: fixed keys, derived meanings, and the combinations that mean nothing.
- *
- * The thing most worth pinning here is that no ruling is written down. A layout that hard-coded +15 and
- * −5 would work perfectly at every NAQT tournament and record the wrong score at the first one using
- * anything else, and it would do it silently. So most of what follows drives the same functions with
- * three deliberately different formats and asserts that the *format* decided.
+ * The keyboard model: numeric seats, two-key actions, derived meanings, and the combinations that
+ * mean nothing.
  */
 import { describe, expect, test } from 'vitest';
 import {
+  actionForKey,
   bonusKeyLegend,
   bonusOptionForCode,
+  keyboardActionLabels,
   keyboardSeatCount,
-  modifierLegend,
-  roleForModifiers,
-  rulingForRole,
-  seatForCode,
-  seatKeyCodes,
-  seatKeyLabels,
+  keyboardSeatNumbers,
+  numberForCode,
+  rulingForAction,
+  seatForNumber,
+  sequenceLegend,
 } from '../src/scorer/KeyboardScoring';
 import { negRuling, normalCorrect, powerCorrect, unreachableAnswerTypes } from '../src/scorer/tossupRulings';
 import { IScorekeeperAnswerType, IScorekeeperFormat } from '../src/scoring/ScorekeeperFormat';
@@ -39,24 +36,14 @@ function formatWith(values: IScorekeeperAnswerType[]): IScorekeeperFormat {
   return { ...validPackage().scorekeeperFormat, answerTypes: values };
 }
 
-/** Powers, tens, negs. The common case. */
 const powersFormat = formatWith([
   answerType({ index: 0, value: 15 }),
   answerType({ index: 1, value: 10 }),
   answerType({ index: 2, value: -5 }),
 ]);
 
-/** No power at all, which is most of the format space outside NAQT rules. */
 const flatFormat = formatWith([answerType({ index: 0, value: 10 }), answerType({ index: 1, value: -5 })]);
 
-/**
- * A deliberately nonstandard tournament: a base tossup worth 20, a 30-point power, a −10 penalty, and a
- * middle tier at 25 that this layout has no room for.
- *
- * The 20 matters most. `isPower` is documented as being exactly `value > 10`, so this format's *base*
- * answer has the power flag set. A layout that bound Shift to `isPower` would leave the unmodified key
- * with nothing and put the ordinary correct answer behind a modifier.
- */
 const oddFormat = formatWith([
   answerType({ index: 0, value: 30, label: 'Super', shortLabel: 'S' }),
   answerType({ index: 1, value: 25 }),
@@ -64,134 +51,104 @@ const oddFormat = formatWith([
   answerType({ index: 3, value: -10 }),
 ]);
 
-describe('the seat layout', () => {
-  test('all eight keys address the seats they are printed on', () => {
-    expect(seatForCode('KeyA')).toEqual({ side: 'left', seat: 0 });
-    expect(seatForCode('KeyS')).toEqual({ side: 'left', seat: 1 });
-    expect(seatForCode('KeyD')).toEqual({ side: 'left', seat: 2 });
-    expect(seatForCode('KeyF')).toEqual({ side: 'left', seat: 3 });
-    expect(seatForCode('KeyJ')).toEqual({ side: 'right', seat: 0 });
-    expect(seatForCode('KeyK')).toEqual({ side: 'right', seat: 1 });
-    expect(seatForCode('KeyL')).toEqual({ side: 'right', seat: 2 });
-    expect(seatForCode('Semicolon')).toEqual({ side: 'right', seat: 3 });
+describe('the numeric seat layout', () => {
+  test('numbers 1–4 address the left seats and 5–8 address the right seats', () => {
+    expect(seatForNumber(1)).toEqual({ side: 'left', seat: 0, number: 1 });
+    expect(seatForNumber(4)).toEqual({ side: 'left', seat: 3, number: 4 });
+    expect(seatForNumber(5)).toEqual({ side: 'right', seat: 0, number: 5 });
+    expect(seatForNumber(8)).toEqual({ side: 'right', seat: 3, number: 8 });
   });
 
-  test('the printed labels stay paired with the physical codes for each seat', () => {
-    const pairings = [
-      ['left', 0, 'KeyA', 'A'],
-      ['left', 1, 'KeyS', 'S'],
-      ['left', 2, 'KeyD', 'D'],
-      ['left', 3, 'KeyF', 'F'],
-      ['right', 0, 'KeyJ', 'J'],
-      ['right', 1, 'KeyK', 'K'],
-      ['right', 2, 'KeyL', 'L'],
-      ['right', 3, 'Semicolon', ';'],
-    ] as const;
-
-    for (const [side, seat, code, label] of pairings) {
-      expect(seatKeyCodes[side][seat]).toBe(code);
-      expect(seatKeyLabels[side][seat]).toBe(label);
-      expect(seatForCode(code)).toEqual({ side, seat });
-    }
+  test('number-row and numpad codes address the same seats', () => {
+    expect(numberForCode('Digit1')).toBe(1);
+    expect(numberForCode('Numpad5')).toBe(5);
+    expect(seatForNumber(numberForCode('Digit5')!)).toEqual({ side: 'right', seat: 0, number: 5 });
   });
 
-  test('nothing else addresses a seat', () => {
-    for (const code of ['KeyG', 'KeyH', 'KeyQ', 'Digit1', 'Space', 'Enter', 'Quote', 'Comma']) {
-      expect(seatForCode(code), code).toBeNull();
-    }
+  test('nothing outside 1–8 addresses a seat', () => {
+    for (const value of [0, 9, -1, 1.5, '0', '9', 'x']) expect(seatForNumber(value)).toBeNull();
+    for (const code of ['Digit0', 'Digit9', 'KeyA', 'Space', 'Numpad0']) expect(numberForCode(code)).toBeNull();
   });
 
-  test('the layout covers four seats a side and says so', () => {
+  test('the map exposes four global numbers per side', () => {
     expect(keyboardSeatCount).toBe(4);
-    expect(seatKeyCodes.left).toHaveLength(keyboardSeatCount);
-    expect(seatKeyCodes.right).toHaveLength(keyboardSeatCount);
-    // The printed labels stay parallel to the codes, which is what the legend renders.
-    expect(seatKeyLabels.left).toHaveLength(seatKeyCodes.left.length);
-    expect(seatKeyLabels.right).toHaveLength(seatKeyCodes.right.length);
-  });
-
-  test('the two hands do not overlap', () => {
-    const all = [...seatKeyCodes.left, ...seatKeyCodes.right];
-    expect(new Set(all).size).toBe(all.length);
+    expect(keyboardSeatNumbers).toEqual({ left: [1, 2, 3, 4], right: [5, 6, 7, 8] });
   });
 });
 
-describe('which role a keystroke asks for', () => {
-  const held = (modifiers: Partial<Record<'shiftKey' | 'altKey' | 'ctrlKey' | 'metaKey', boolean>>) =>
-    roleForModifiers({ shiftKey: false, altKey: false, ctrlKey: false, metaKey: false, ...modifiers });
-
-  test('bare is the ordinary correct answer', () => {
-    expect(held({})).toBe('normal');
+describe('the action key', () => {
+  test('C, P, N, and 0 are the four actions', () => {
+    expect(actionForKey('c')).toBe('correct');
+    expect(actionForKey('P')).toBe('power');
+    expect(actionForKey('n')).toBe('neg');
+    expect(actionForKey('0')).toBe('wrong');
+    expect(Object.values(keyboardActionLabels)).toEqual(['C', 'P', 'N', '0']);
   });
 
-  test('Shift is the power, Alt is the penalty, and Ctrl is not a seat modifier', () => {
-    expect(held({ shiftKey: true })).toBe('power');
-    expect(held({ altKey: true })).toBe('neg');
-    expect(held({ ctrlKey: true })).toBeNull();
-  });
-
-  test('two modifiers at once is a fumble, and a fumble records nothing', () => {
-    expect(held({ shiftKey: true, altKey: true })).toBeNull();
-    expect(held({ ctrlKey: true, shiftKey: true })).toBeNull();
-    expect(held({ altKey: true, ctrlKey: true })).toBeNull();
-  });
-
-  test('Meta is never part of the layout, because Cmd+A is Select All', () => {
-    expect(held({ metaKey: true })).toBeNull();
-    expect(held({ metaKey: true, shiftKey: true })).toBeNull();
+  test('other keys are not actions', () => {
+    expect(actionForKey('a')).toBeNull();
+    expect(actionForKey('1')).toBeNull();
+    expect(actionForKey(' ')).toBeNull();
   });
 });
 
-describe('what a role means, according to the format', () => {
-  test('the ordinary correct answer is the cheapest positive one', () => {
-    expect(rulingForRole(powersFormat, 'normal', true)).toEqual({ kind: 'buzz', answerType: expect.objectContaining({ value: 10 }) });
-    expect(rulingForRole(flatFormat, 'normal', true)).toEqual({ kind: 'buzz', answerType: expect.objectContaining({ value: 10 }) });
-    // The case that breaks an `isPower`-based layout: this format's base answer has the flag set.
-    expect(rulingForRole(oddFormat, 'normal', true)).toEqual({ kind: 'buzz', answerType: expect.objectContaining({ value: 20 }) });
+describe('what an action means, according to the format', () => {
+  test('C is the cheapest positive answer', () => {
+    expect(rulingForAction(powersFormat, 'correct', true)).toEqual({
+      kind: 'buzz',
+      answerType: expect.objectContaining({ value: 10 }),
+    });
+    expect(rulingForAction(flatFormat, 'correct', true)).toEqual({
+      kind: 'buzz',
+      answerType: expect.objectContaining({ value: 10 }),
+    });
+    // This format's base answer has the power flag set; the action still means ordinary correct.
+    expect(rulingForAction(oddFormat, 'correct', true)).toEqual({
+      kind: 'buzz',
+      answerType: expect.objectContaining({ value: 20 }),
+    });
   });
 
-  test('the power is the dearest positive one, when there is a choice', () => {
-    expect(rulingForRole(powersFormat, 'power', true)).toEqual({ kind: 'buzz', answerType: expect.objectContaining({ value: 15 }) });
-    expect(rulingForRole(oddFormat, 'power', true)).toEqual({ kind: 'buzz', answerType: expect.objectContaining({ value: 30 }) });
+  test('P is the dearest positive answer when there is a choice', () => {
+    expect(rulingForAction(powersFormat, 'power', true)).toEqual({
+      kind: 'buzz',
+      answerType: expect.objectContaining({ value: 15 }),
+    });
+    expect(rulingForAction(oddFormat, 'power', true)).toEqual({
+      kind: 'buzz',
+      answerType: expect.objectContaining({ value: 30 }),
+    });
   });
 
-  test('a format with one correct answer has no power, and Shift does nothing', () => {
-    // Not an alias for the unmodified key. A keyboard that records +10 for a power this format does not
-    // have is a keyboard that has scored the wrong thing.
+  test('P does nothing when the format has no power', () => {
     expect(powerCorrect(flatFormat)).toBeNull();
-    expect(rulingForRole(flatFormat, 'power', true)).toBeNull();
+    expect(rulingForAction(flatFormat, 'power', true)).toBeNull();
   });
 
-  test('the penalty comes from the format, whatever it is worth', () => {
-    expect(rulingForRole(powersFormat, 'neg', true)).toEqual({ kind: 'buzz', answerType: expect.objectContaining({ value: -5 }) });
-    expect(rulingForRole(oddFormat, 'neg', true)).toEqual({ kind: 'buzz', answerType: expect.objectContaining({ value: -10 }) });
+  test('N uses the format penalty and respects tossup eligibility', () => {
+    expect(rulingForAction(powersFormat, 'neg', true)).toEqual({
+      kind: 'buzz',
+      answerType: expect.objectContaining({ value: -5 }),
+    });
+    expect(rulingForAction(oddFormat, 'neg', true)).toEqual({
+      kind: 'buzz',
+      answerType: expect.objectContaining({ value: -10 }),
+    });
+    expect(rulingForAction(powersFormat, 'neg', false)).toBeNull();
   });
 
-  test('Alt does nothing once a neg is no longer a legal ruling', () => {
-    // The same condition that removes the −5 button: somebody has answered, so the question has been
-    // read out and nobody can be penalized on it.
-    expect(rulingForRole(powersFormat, 'neg', false)).toBeNull();
-  });
-
-  test('a format with no penalty at all leaves Alt dead', () => {
+  test('a format with no positive or negative answer does not guess', () => {
     const noNegs = formatWith([answerType({ index: 0, value: 10 })]);
-
-    expect(negRuling(noNegs)).toBeNull();
-    expect(rulingForRole(noNegs, 'neg', true)).toBeNull();
-  });
-
-  test('a format with no positive answer cannot be scored, and says so rather than guessing', () => {
     const broken = formatWith([answerType({ index: 0, value: -5 })]);
-
+    expect(negRuling(noNegs)).toBeNull();
+    expect(rulingForAction(noNegs, 'neg', true)).toBeNull();
     expect(normalCorrect(broken)).toBeNull();
-    expect(rulingForRole(broken, 'normal', true)).toBeNull();
+    expect(rulingForAction(broken, 'correct', true)).toBeNull();
   });
 });
 
 describe('rulings this layout cannot reach', () => {
   test('a middle tier is left to the buttons and reported', () => {
-    // Three seat rulings is the layout. Inventing Ctrl+Alt+Shift+D for a third positive tier would
-    // produce something nobody can use at speed.
     expect(unreachableAnswerTypes(oddFormat).map((type) => type.value)).toEqual([25]);
   });
 
@@ -201,32 +158,21 @@ describe('rulings this layout cannot reach', () => {
   });
 });
 
-describe('the legend', () => {
-  test('says the format’s real values, not +15 and −5', () => {
-    const rows = modifierLegend(oddFormat, true);
+describe('the sequence legend', () => {
+  test('says the format values and includes the wrong action', () => {
+    const rows = sequenceLegend(oddFormat, true);
 
-    expect(rows.map((row) => row.meaning)).toEqual([
-      '+20',
-      'S',
-      '−10',
-    ]);
-    expect(rows.some((row) => row.keys === 'Ctrl + seat')).toBe(false);
+    expect(rows.map((row) => row.meaning)).toEqual(['+20', 'S', '−10', 'wrong · 0']);
+    expect(rows.map((row) => row.keys)).toEqual(['seat → C', 'seat → P', 'seat → N', 'seat → 0']);
   });
 
-  test('marks a modifier unavailable rather than hiding it', () => {
-    // The shape of the legend stays the same between formats, so somebody who reaches for Shift learns
-    // why it did nothing instead of wondering whether they mistyped.
-    const rows = modifierLegend(flatFormat, true);
-    const shift = rows.find((row) => row.keys === 'Shift + seat');
+  test('marks unavailable actions rather than hiding them', () => {
+    const rows = sequenceLegend(flatFormat, false);
 
-    expect(shift?.available).toBe(false);
-    expect(shift?.meaning).toBe('no power in this format');
-  });
-
-  test('marks the penalty unavailable once a neg is illegal on this tossup', () => {
-    const rows = modifierLegend(powersFormat, false);
-
-    expect(rows.find((row) => row.keys === 'Alt + seat')?.available).toBe(false);
+    expect(rows.find((row) => row.keys === 'seat → P')?.available).toBe(false);
+    expect(rows.find((row) => row.keys === 'seat → P')?.meaning).toBe('no power in this format');
+    expect(rows.find((row) => row.keys === 'seat → N')?.available).toBe(false);
+    expect(rows.find((row) => row.keys === 'seat → 0')?.available).toBe(true);
   });
 });
 
@@ -241,23 +187,19 @@ describe('bonus digits', () => {
   });
 
   test('the values come from the caller, not from an assumption about thirty', () => {
-    // A five-point-a-part bonus over four parts.
     expect(bonusKeyLegend([0, 5, 10, 15, 20]).map((row) => row.meaning)).toEqual(['0', '5', '10', '15', '20']);
   });
 
-  test('a digit selects the option in that position', () => {
+  test('a number-row or numpad digit selects the option in that position', () => {
     const options = [0, 10, 20, 30];
 
     expect(bonusOptionForCode('Digit1', options)).toBe(0);
-    expect(bonusOptionForCode('Digit3', options)).toBe(20);
+    expect(bonusOptionForCode('Numpad3', options)).toBe(20);
     expect(bonusOptionForCode('Digit4', options)).toBe(30);
   });
 
-  test('a digit past the end of the choices addresses nothing', () => {
+  test('a digit past the end, or a non-digit, addresses nothing', () => {
     expect(bonusOptionForCode('Digit9', [0, 10, 20, 30])).toBeNull();
-  });
-
-  test('anything that is not a digit addresses nothing', () => {
     expect(bonusOptionForCode('KeyA', [0, 10])).toBeNull();
     expect(bonusOptionForCode('Digit0', [0, 10])).toBeNull();
   });

@@ -68,7 +68,7 @@ import useScreenWakeLock from './useScreenWakeLock';
 import { formatClock, roomClockSegment } from './RoomClock';
 import useScorerKeyboard from './useScorerKeyboard';
 import KeyboardMap, { KeyboardMapContext } from './KeyboardMap';
-import { modifierLegend, bonusKeyLegend } from './KeyboardScoring';
+import { sequenceLegend, bonusKeyLegend } from './KeyboardScoring';
 import { rulingLabel, unreachableAnswerTypes } from './tossupRulings';
 import { setKeyboardEnabled } from './keyboardPreference';
 import useKeyboardEnabled from './useKeyboardEnabled';
@@ -236,7 +236,7 @@ export default function Scorer(props: IScorerProps) {
   /**
    * Which set of choices the bonus is currently asking for, reported up by `BonusPrompt`.
    *
-   * The legend has to change when the bonus does — showing seat keys while a bounceback is on screen
+   * The legend has to change when the bonus does — showing seat sequences while a bounceback is on screen
    * would be showing bindings that do nothing — and the choices live in that component with its own
    * state. Reporting the stage upward is smaller than lifting the state, and keeps the shortcut in the
    * same file as the buttons it stands in for.
@@ -704,6 +704,7 @@ export default function Scorer(props: IScorerProps) {
     noBuzzAllowed: phase.kind === 'tossup' && !playBlockedByProtest,
     // The same callbacks the buttons are given. A keystroke cannot reach a code path a tap cannot.
     onBuzz: recordBuzz,
+    onWrongNoPenalty: (side, playerName) => recordWrongNoPenalty(side, playerName),
     onNoBuzz: recordNoBuzz,
     onUndo: events.undo,
     onRedo: events.redo,
@@ -734,7 +735,7 @@ export default function Scorer(props: IScorerProps) {
     if (playBlockedByProtest) return { kind: 'inactive', reason: 'Resolve the protest first.' };
     return {
       kind: 'tossup',
-      modifiers: modifierLegend(format, negsAvailable),
+      actions: sequenceLegend(format, negsAvailable),
       unreachable: unreachableAnswerTypes(format).map(rulingLabel),
     };
   }, [dialog, bonusStage, phase.kind, playBlockedByProtest, format, negsAvailable]);

@@ -2430,7 +2430,7 @@ div.scorer-banner .scorer-text-action {
 
 /*
  * A binding the layout has but this format does not. Struck through rather than hidden: the shape of
- * the legend stays the same between formats, and a scorekeeper who reaches for Shift learns why it did
+ * the legend stays the same between formats, and a scorekeeper who reaches for P learns why it did
  * nothing instead of wondering whether they mistyped.
  */
 .scorer-keymap-row.is-unavailable {

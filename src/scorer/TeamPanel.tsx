@@ -66,7 +66,7 @@ export interface ITeamPanelProps {
   /**
    * A seat to flash, briefly, because a ruling was just recorded there from the keyboard.
    *
-   * Confirmation for an action with no pointer behind it: a scorekeeper who pressed `Shift+D` has no
+   * Confirmation for an action with no pointer behind it: a scorekeeper who pressed `3` then `P` has no
    * cursor sitting on the button they hit and no way to know they hit the right one. Zero-based, and
    * only ever set for a keystroke — a click needs no echo, because the finger was already there.
    */
