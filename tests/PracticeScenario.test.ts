@@ -36,6 +36,11 @@ describe('guided practice scenario', () => {
         lineupEvents(['Gibson', 'Jeremy', 'Owen', 'Olivia'], ['Tucker', 'Phillip', 'Efren', 'Valerie']),
       ),
     ).toBe(false);
+    expect(
+      practiceLineupsRecorded(
+        lineupEvents(['Jeremy', 'Gibson', 'Owen', 'Lachlan'], ['Tucker', 'Phillip', 'Efren', 'Valerie']),
+      ),
+    ).toBe(false);
   });
 
   it('includes correction, substitution and submission lessons', () => {
