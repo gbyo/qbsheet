@@ -130,7 +130,7 @@ describe('a browser that stops saving mid-game', () => {
     // The quota fills, or the profile locks storage down. This is the one failure that can cost a room
     // questions it has already scored, so the test is that it is impossible to miss.
     const setItem = vi
-      .spyOn(window.localStorage, 'setItem')
+      .spyOn(Object.getPrototypeOf(window.localStorage), 'setItem')
       .mockImplementation(() => {
         throw new Error('QuotaExceededError');
       });
@@ -153,7 +153,7 @@ describe('a browser that stops saving mid-game', () => {
     await openGameFile();
     await startLineups();
 
-    const setItem = vi.spyOn(window.localStorage, 'setItem').mockImplementation(() => {
+    const setItem = vi.spyOn(Object.getPrototypeOf(window.localStorage), 'setItem').mockImplementation(() => {
       throw new Error('QuotaExceededError');
     });
     await scoreOneCycle();

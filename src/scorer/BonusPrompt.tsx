@@ -17,10 +17,11 @@
  * protested bonus, a spoiled part read from the wrong packet, a room being asked afterwards what
  * happened. So parts are one press away and never in the way.
  */
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
 import { IBonusPartResult } from '../scoring/ScoreEvents';
 import { bonusTotalProblem, bouncebackOptions, regularBonusTotals } from './bonusOptions';
+import { bonusOptionForCode, keystrokeBelongsToControl } from './KeyboardScoring';
 
 export interface IBonusPromptProps {
   format: IScorekeeperFormat;
@@ -31,6 +32,45 @@ export interface IBonusPromptProps {
   onRecord: (controlledPoints: number, bouncebackPoints?: number) => void;
   /** Record the bonus part by part instead of as a total. */
   onRecordParts: (parts: IBonusPartResult[]) => void;
+  /**
+   * Whether the digit shortcuts are live, and what the legend should say they do.
+   *
+   * The shortcut lives here rather than in the scorer's own listener because the choices on screen are
+   * this component's state — which stage of the bonus is being asked for, and what is left to bounce
+   * back. Handling it anywhere else would mean lifting that state so a keyboard layer could read it,
+   * which is a bad trade. `onStageChange` reports upward so the persistent map can change with the
+   * screen; the numbers in it are the ones on the buttons.
+   */
+  keyboardEnabled?: boolean;
+  onStageChange?: (stage: { title: string; options: number[]; cancellable: boolean } | null) => void;
+}
+
+/**
+ * Bind the digits to whatever choices are currently on screen.
+ *
+ * Left to right, one-based, so the third button is `3` and there is nothing to learn. Calls the same
+ * handler the buttons call, so a keystroke cannot record a total the buttons could not offer.
+ */
+function useChoiceKeys(options: readonly number[], pick: (points: number) => void, enabled: boolean): void {
+  const latest = useRef({ options, pick, enabled });
+  latest.current = { options, pick, enabled };
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const current = latest.current;
+      if (!current.enabled || event.repeat) return;
+      // The irregular-bonus path puts a number field on screen, and its digits are its own. This is the
+      // check that keeps a typed total from also being a shortcut.
+      if (keystrokeBelongsToControl(event)) return;
+      if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+      const points = bonusOptionForCode(event.code, current.options);
+      if (points === null) return;
+      event.preventDefault();
+      current.pick(points);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, []);
 }
 
 /**
@@ -129,8 +169,17 @@ function PartEntry(props: {
 }
 
 export default function BonusPrompt(props: IBonusPromptProps) {
-  const { format, controllingTeamName, opponentName, questionNumber, onRecord, onRecordParts } = props;
-  const totals = regularBonusTotals(format.bonus);
+  const {
+    format,
+    controllingTeamName,
+    opponentName,
+    questionNumber,
+    onRecord,
+    onRecordParts,
+    keyboardEnabled = false,
+    onStageChange,
+  } = props;
+  const totals = useMemo(() => regularBonusTotals(format.bonus), [format.bonus]);
   const partCount = regularPartCount(format);
   const [controlled, setControlled] = useState<number | null>(null);
   const [typed, setTyped] = useState('');
@@ -148,6 +197,64 @@ export default function BonusPrompt(props: IBonusPromptProps) {
   };
 
   const typedProblem = typed === '' ? null : bonusTotalProblem(format.bonus, Number(typed));
+
+  /**
+   * Which stage the keyboard is aimed at.
+   *
+   * Only the two stages that are a row of value buttons. Part entry is a grid of got-it/missed-it
+   * toggles per part, and a digit mapping over that would be a redesign of the model to suit the
+   * keyboard rather than a shortcut for the controls already there — so parts stay on the buttons, which
+   * is what the spec for this asks for and what keeps the part model untouched.
+   *
+   * The irregular-bonus path is a typed number field, which owns its own digits. It reports no stage.
+   */
+  const bounceStage = controlled !== null && bouncesBack;
+  const stageTitle = bounceStage ? `${opponentName} bounceback` : `${controllingTeamName} bonus`;
+  const stageOptions = useMemo(
+    () => (bounceStage ? bouncebackOptions(format.bonus, controlled as number) : (totals ?? null)),
+    [bounceStage, format.bonus, controlled, totals],
+  );
+  const stageActive = !byParts && stageOptions !== null;
+
+  const stage = useMemo(
+    () =>
+      stageActive && stageOptions !== null
+        ? { title: stageTitle, options: stageOptions, cancellable: bounceStage }
+        : null,
+    [stageActive, stageOptions, stageTitle, bounceStage],
+  );
+  useEffect(() => {
+    onStageChange?.(stage);
+  }, [stage, onStageChange]);
+
+  // Cleared on the way out, so a bonus that finishes does not leave the map advertising its digits.
+  useEffect(() => () => onStageChange?.(null), [onStageChange]);
+
+  useChoiceKeys(
+    stage?.options ?? [],
+    (points) => (bounceStage ? onRecord(controlled as number, points) : finish(points)),
+    keyboardEnabled && stageActive,
+  );
+
+  /**
+   * Escape steps back out of the bounceback without recording anything.
+   *
+   * Safe because the controlling team's total has not been written yet — nothing is recorded until both
+   * halves are known — so going back is genuinely a cancel and not an undo. There is deliberately no
+   * Escape on the first stage: there is nothing to cancel there, and binding it to something would put a
+   * key that means "get me out of this" next to a scoresheet where it had a side effect.
+   */
+  useEffect(() => {
+    if (!keyboardEnabled || !bounceStage) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.repeat) return;
+      if (keystrokeBelongsToControl(event)) return;
+      event.preventDefault();
+      setControlled(null);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [keyboardEnabled, bounceStage]);
 
   if (controlled !== null && bouncesBack) {
     return (

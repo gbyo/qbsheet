@@ -2346,3 +2346,121 @@ div.scorer-banner .scorer-text-action {
   font-size: 12px;
   color: var(--room-muted);
 }
+
+/*
+ * The keyboard legend.
+ *
+ * A strip, not a panel. It has to be readable in peripheral vision on the third tossup and to have
+ * stopped being noticed by the thirtieth, which means small, quiet, and in the same place every time.
+ * Laid out horizontally so it costs one line of height rather than a column of the scoresheet.
+ */
+.scorer-keymap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 18px;
+  margin: 8px 0 0;
+  padding: 6px 10px;
+  border: 1px solid var(--room-border);
+  border-radius: 3px;
+  background: var(--room-surface-sunken);
+  font-size: 12px;
+}
+
+.scorer-keymap.is-inactive {
+  color: var(--room-muted);
+}
+
+.scorer-keymap-title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--room-muted);
+}
+
+.scorer-keymap-note {
+  margin: 0;
+  color: var(--room-muted);
+}
+
+.scorer-keymap-seats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+
+.scorer-keymap-seat-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+
+.scorer-keymap-seat-side {
+  color: var(--room-muted);
+}
+
+.scorer-keymap-seat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+}
+
+.scorer-keymap-seat-number {
+  color: var(--room-muted);
+  font-size: 10px;
+}
+
+.scorer-keymap-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.scorer-keymap-row {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+/*
+ * A binding the layout has but this format does not. Struck through rather than hidden: the shape of
+ * the legend stays the same between formats, and a scorekeeper who reaches for Shift learns why it did
+ * nothing instead of wondering whether they mistyped.
+ */
+.scorer-keymap-row.is-unavailable {
+  color: var(--room-muted);
+  text-decoration: line-through;
+}
+
+.scorer-keymap-key {
+  padding: 1px 5px;
+  border: 1px solid var(--room-border-strong);
+  border-radius: 3px;
+  background: var(--room-surface);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/*
+ * The echo after a keyboard ruling.
+ *
+ * A background wash on the row that was scored, gone in under half a second. Deliberately not a toast
+ * and deliberately not a movement: the scorekeeper's eyes are on the table, not the screen, and
+ * anything that reflows the roster mid-round costs more than it confirms.
+ */
+.scorer-player.is-keyed {
+  background: var(--room-info-bg);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .scorer-player.is-keyed {
+    transition: background 120ms ease-out;
+  }
+}
