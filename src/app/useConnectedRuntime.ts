@@ -165,6 +165,10 @@ export function classifyPoll(result: ApiResult<unknown>): {
  *
  * `401` on a session token is the session's problem alone: the room capability that opened it is
  * untouched, which is exactly why reopening works. `409` is a person's problem.
+ *
+ * `403` is deliberately not here. It is not a repair at all — nothing about this session or this
+ * room can be changed to satisfy it — so it is handled by `forbiddenIn`, which every path that can
+ * receive one consults. See `classifyPoll`.
  */
 export function classifyWrite(result: ApiResult<unknown>): {
   sessionProblem: boolean;
@@ -174,6 +178,12 @@ export function classifyWrite(result: ApiResult<unknown>): {
   if (result.status === 401) return { sessionProblem: true, conflict: null };
   if (result.status === 409) return { sessionProblem: false, conflict: readWriterConflict(result.payload) };
   return { sessionProblem: false, conflict: null };
+}
+
+/** The server's own words about a refusal, or a plain fallback when it offered none. */
+export function forbiddenIn(result: ApiResult<unknown>): string | null {
+  if (result.ok || result.status !== 403) return null;
+  return result.detail ?? 'Tournament control will not accept requests from this page.';
 }
 
 export default function useConnectedRuntime(input: IConnectedRuntimeInput): IConnectedRuntime {
@@ -220,7 +230,16 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     forbidden === null &&
     writerConflict === null;
   const writesAllowedRef = useRef(writesAllowed);
-  writesAllowedRef.current = writesAllowed;
+  /*
+   * Assigned from a committed effect rather than during render. A render can be thrown away and
+   * replayed, and a ref written during one holds a value from a pass that never happened; the
+   * readers here are all timers and event handlers, which run as their own tasks after the effects
+   * of any commit before them, so an effect is never the staler of the two options and is the only
+   * one that stays correct if this tree ever renders concurrently.
+   */
+  useEffect(() => {
+    writesAllowedRef.current = writesAllowed;
+  }, [writesAllowed]);
 
   /** The newest complete game state, retained so a later successful poll can re-offer it. */
   const latestSnapshotRef = useRef<object | null>(null);
@@ -246,7 +265,9 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
 
   /** Read by the poll, which must be able to see the current answer without restarting itself. */
   const forbiddenRef = useRef(forbidden);
-  forbiddenRef.current = forbidden;
+  useEffect(() => {
+    forbiddenRef.current = forbidden;
+  }, [forbidden]);
 
   /**
    * Whether the one unattended reopen has already been spent on the current problem.
@@ -254,6 +275,23 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
    * Declared here rather than beside the effect that reads it, because the repair itself re-arms it.
    */
   const autoRepairAttempted = useRef(false);
+
+  /**
+   * Everything a refusal changes, wherever it came from.
+   *
+   * A snapshot, a reopen, a takeover and the final all reach the same server with the same
+   * credentials, so a `403` means the same thing to all four and the room stops trying on all four.
+   * Handling it only on the poll left the trailing snapshot sender repeating a refused request
+   * every few seconds for the rest of the game — the one thing the protocol names about this
+   * status, and the reason it names it.
+   */
+  const noteWrite = useCallback((result: ApiResult<unknown>) => {
+    const refusal = forbiddenIn(result);
+    if (refusal !== null) setForbidden(refusal);
+    const classified = classifyWrite(result);
+    if (classified.sessionProblem) setSessionCredentialProblem(true);
+    if (classified.conflict) setWriterConflict(classified.conflict);
+  }, []);
 
   /**
    * Reopen this room's session with the room capability it still holds.
@@ -269,6 +307,7 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     }
     const opened = await client.openSession(identity, scheduledMatchId);
     if (!opened.ok) {
+      noteWrite(opened);
       setRepairMessage(opened.error);
       return false;
     }
@@ -286,18 +325,19 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     autoRepairAttempted.current = false;
     onCredentialsRepaired?.({ sessionId: opened.value.sessionId, sessionToken: opened.value.token });
     return true;
-  }, [client, identity, scheduledMatchId, onCredentialsRepaired]);
+  }, [client, identity, scheduledMatchId, onCredentialsRepaired, noteWrite]);
 
   const takeOverWriter = useCallback(async () => {
     const result = await client.takeWriter(identity, credentials);
     if (!result.ok) {
+      noteWrite(result);
       setRepairMessage(result.error);
       return;
     }
     setRepairMessage(undefined);
     setWriterConflict(null);
     onCredentialsRepaired?.({ sessionId: result.value.sessionId, sessionToken: result.value.token });
-  }, [client, identity, credentials, onCredentialsRepaired]);
+  }, [client, identity, credentials, onCredentialsRepaired, noteWrite]);
 
   /**
    * One unattended reopen per session problem, and no more.
@@ -306,12 +346,6 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
    * about this room, and making a scorekeeper press a button for that is noise. Repeating it is
    * not: a server that refuses the reopen is saying something, and a loop would keep asking.
    */
-  const noteWrite = useCallback((result: ApiResult<unknown>) => {
-    const classified = classifyWrite(result);
-    if (classified.sessionProblem) setSessionCredentialProblem(true);
-    if (classified.conflict) setWriterConflict(classified.conflict);
-  }, []);
-
   useEffect(() => {
     if (!sessionCredentialProblem || autoRepairAttempted.current) return;
     autoRepairAttempted.current = true;
@@ -355,11 +389,8 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
       const classified = classifyPoll(result);
       setConnection(classified.connection);
       if (classified.credentialProblem) setRoomCredentialProblem(true);
-      if (classified.forbidden) {
-        // The server's own words. It is the only thing that can explain a refusal this client has
-        // no way to interpret, and the protocol says that string is safe to show unchanged.
-        setForbidden(result.ok ? null : result.detail ?? 'Tournament control will not accept requests from this page.');
-      }
+      const refusal = forbiddenIn(result);
+      if (refusal !== null) setForbidden(refusal);
       if (!result.ok) {
         setDegradedMessage(
           classified.connection === RoomConnectionState.Degraded

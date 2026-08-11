@@ -202,6 +202,61 @@ describe('connected room durability', () => {
   });
 
   /**
+   * A refusal stops the room asking, on the write path as well as the read one.
+   *
+   * "Surface it. Do not retry in a loop." The poll obeying that and the trailing snapshot sender
+   * not obeying it is the same defect twice: an origin outside the server's allowlist refuses
+   * *everything*, so a room that stopped polling but went on offering a snapshot every few seconds
+   * is still in the loop the protocol names — just a quieter one, and for the rest of the game.
+   */
+  test('a snapshot refused with 403 stops the room writing rather than retrying every few seconds', async () => {
+    vi.useFakeTimers();
+    const putSnapshot = vi.fn(async () => ({
+      ok: false as const,
+      status: 403,
+      error: 'This browser origin is not approved.',
+      detail: 'This browser origin is not approved.',
+    }));
+    const client = {
+      ensureDiscovered: vi.fn(async () => null),
+      assignment: vi.fn(async () => ({ ok: true as const, value: assignmentWithNothingToPlay })),
+      putSnapshot,
+    } as unknown as FruityServerClient;
+
+    const hook = renderHook(() =>
+      useConnectedRuntime({
+        client,
+        identity: { roomId: 'room-1', token: 'room-token' },
+        credentials: { sessionId: 'session-1', token: 'session-token' },
+        enabled: true,
+      }),
+    );
+
+    act(() => hook.result.current.reportProgress({ tossups_read: 1 }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(progressIntervalMs);
+    });
+    expect(putSnapshot).toHaveBeenCalledTimes(1);
+    expect(hook.result.current.automaticDelivery).toBe(false);
+
+    // Scoring carries on, and every further offer is dropped rather than sent.
+    for (const tossups of [2, 3, 4]) {
+      act(() => hook.result.current.reportProgress({ tossups_read: tossups }));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(progressIntervalMs + assignmentPollIntervalMs);
+      });
+    }
+    expect(putSnapshot).toHaveBeenCalledTimes(1);
+
+    // And the room is told, in the server's own words, without being asked for a pairing code.
+    const refusal = hook.result.current.alerts.find((alert) => alert.id === 'forbidden');
+    expect(refusal?.body).toContain('This browser origin is not approved.');
+    expect(hook.result.current.alerts.some((alert) => alert.id === 'credentials')).toBe(false);
+
+    hook.unmount();
+  });
+
+  /**
    * A blocked write is not a pending one.
    *
    * `pending` is a promise that something is still trying, and the completion screen makes it in
