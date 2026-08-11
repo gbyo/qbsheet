@@ -96,32 +96,38 @@ test('production keyboard scoring records seat rulings, bonuses, and safe focus 
   const noteField = page.locator('#scorer-note-text');
   await expect(notes).toBeVisible();
   await noteField.focus();
-  await page.keyboard.press('a');
-  await expect(noteField).toHaveValue('a');
+  await page.keyboard.press('1');
+  await page.keyboard.press('c');
+  await expect(noteField).toHaveValue('1c');
   await expect(page.getByText('Tossup 1 of 20', { exact: true })).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(notes).toBeHidden();
   await page.locator('body').click({ position: { x: 8, y: 8 } });
 
-  // Ctrl+A is deliberately not a ruling. It remains available to Chrome/ChromeOS and leaves Q1 live.
-  await pressModifiedKey(page, 'Control', 'a');
+  // Ctrl+1 is deliberately not a seat. It remains available to Chrome/ChromeOS, and the C that
+  // follows has no armed seat to complete, so Q1 stays live.
+  await pressModifiedKey(page, 'Control', '1');
+  await page.keyboard.press('c');
   await expect(page.getByLabel('Ninety Six A score')).toHaveText('0');
 
-  // A/S are the first and second left seats. Both rulings use the production document listener.
-  await page.keyboard.press('a');
+  // 1 and 2 are the first and second left seats. Both sequences use the production document listener.
+  await page.keyboard.press('1');
+  await page.keyboard.press('c');
   await expect(page.getByLabel('Ninety Six A score')).toHaveText('10');
   await expect(page.getByLabel('Bonus')).toBeVisible();
   await page.keyboard.press('3');
   await expect(page.getByText('Tossup 2 of 20', { exact: true })).toBeVisible();
 
-  await pressModifiedKey(page, 'Shift', 's');
+  await page.keyboard.press('2');
+  await page.keyboard.press('p');
   await expect(page.getByLabel('Ninety Six A score')).toHaveText('45');
   await page.keyboard.press('2');
   await expect(page.getByText('Tossup 3 of 20', { exact: true })).toBeVisible();
 
-  // J is the first right seat. Its negative leaves the other team eligible, so Space then records the
+  // 5 is the first right seat. Its negative leaves the other team eligible, so Space then records the
   // unanswered remainder and advances to the next tossup.
-  await pressModifiedKey(page, 'Alt', 'j');
+  await page.keyboard.press('5');
+  await page.keyboard.press('n');
   await expect(page.getByLabel('Greenwood score')).toHaveText('-5');
   await page.keyboard.press('Space');
   await expect(page.getByText('Tossup 4 of 20', { exact: true })).toBeVisible();
