@@ -68,7 +68,7 @@ export default function PracticeCoach(props: IPracticeCoachProps) {
   const { step, stepIndex, stepCount, feedback, mistake, onRestart, onLeave } = props;
   // The real preference, not a practice-only copy: the guide teaches whatever the scoresheet is doing.
   const keyboardEnabled = useKeyboardEnabled();
-  const keystroke = step === null ? null : practiceKeystroke(step.id);
+  const keystroke = practiceKeystroke(step.id);
   /*
    * Open where the panel gets its full two-column width — the same 1050px the stylesheet gives up the
    * second column below. Narrower than that it reads down the page like the old panel did, tall enough

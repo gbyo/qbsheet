@@ -9,6 +9,7 @@ import {
   IPracticeStep,
   practiceFormat,
   practiceLeftTeam,
+  practiceLineupMatches,
   practiceRightTeam,
   practiceSteps,
 } from './PracticeScenario';
@@ -58,10 +59,6 @@ function rememberCompletion(): void {
   }
 }
 
-function samePlayers(actual: string[], expected: string[]): boolean {
-  return actual.length === expected.length && expected.every((player) => actual.includes(player));
-}
-
 /** The real scorer records initial lineups as Q1 substitution events, one per team. */
 export function practiceLineupsRecorded(events: ScoreEvent[]): boolean {
   const lineups = events.filter(
@@ -70,10 +67,12 @@ export function practiceLineupsRecorded(events: ScoreEvent[]): boolean {
   );
   return (
     lineups.some(
-      (event) => event.team === 'left' && samePlayers(event.activePlayers, practiceLeftTeam.startingLineup),
+      (event) =>
+        event.team === 'left' && practiceLineupMatches(event.activePlayers, practiceLeftTeam.startingLineup),
     ) &&
     lineups.some(
-      (event) => event.team === 'right' && samePlayers(event.activePlayers, practiceRightTeam.startingLineup),
+      (event) =>
+        event.team === 'right' && practiceLineupMatches(event.activePlayers, practiceRightTeam.startingLineup),
     )
   );
 }
@@ -83,8 +82,8 @@ function practiceLineupBoundary(events: ScoreEvent[]): number | undefined {
   let right = -1;
   events.forEach((event, index) => {
     if (event.type !== 'substitution' || event.questionNumber !== 1) return;
-    if (event.team === 'left' && samePlayers(event.activePlayers, practiceLeftTeam.startingLineup)) left = index;
-    if (event.team === 'right' && samePlayers(event.activePlayers, practiceRightTeam.startingLineup)) right = index;
+    if (event.team === 'left' && practiceLineupMatches(event.activePlayers, practiceLeftTeam.startingLineup)) left = index;
+    if (event.team === 'right' && practiceLineupMatches(event.activePlayers, practiceRightTeam.startingLineup)) right = index;
   });
   return left >= 0 && right >= 0 ? Math.max(left, right) + 1 : undefined;
 }
@@ -152,8 +151,8 @@ function practiceStartingLineupProblem(lineups: Partial<Record<LeftOrRight, stri
   if (
     left &&
     right &&
-    samePlayers(left, practiceLeftTeam.startingLineup) &&
-    samePlayers(right, practiceRightTeam.startingLineup)
+    practiceLineupMatches(left, practiceLeftTeam.startingLineup) &&
+    practiceLineupMatches(right, practiceRightTeam.startingLineup)
   ) {
     return undefined;
   }

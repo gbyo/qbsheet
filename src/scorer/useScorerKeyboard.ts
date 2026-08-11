@@ -21,7 +21,7 @@
  * them belongs where they are — see the digit handling there. Reaching across for that state would have
  * meant lifting it, and a keyboard feature is not a good reason to move a component's state up.
  */
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 import { LeftOrRight } from '../scoring/types';
 import { IScorekeeperAnswerType, IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
 import {
@@ -66,7 +66,9 @@ export default function useScorerKeyboard(input: IScorerKeyboardInput): void {
    * that often is both wasteful and a way to lose a keystroke that arrives mid-swap.
    */
   const latest = useRef(input);
-  latest.current = input;
+  useLayoutEffect(() => {
+    latest.current = input;
+  }, [input]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

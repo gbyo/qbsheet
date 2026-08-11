@@ -17,7 +17,7 @@
  * Every value in it comes from the live format. There is no `+15` in this file.
  */
 import { LeftOrRight } from '../scoring/types';
-import { IKeyLegendEntry, seatKeyLabels } from './KeyboardScoring';
+import { IKeyLegendEntry, keyboardShortcutLabels, seatKeyLabels } from './KeyboardScoring';
 
 export type KeyboardMapContext =
   /** A live tossup: the seat keys and the modifiers mean something. */
@@ -85,8 +85,8 @@ export default function KeyboardMap(props: { context: KeyboardMapContext }) {
         {context.modifiers.map((entry) => (
           <Row key={entry.keys} entry={entry} />
         ))}
-        <Row entry={{ keys: 'Space', meaning: 'no buzz', available: true }} />
-        <Row entry={{ keys: 'Ctrl/⌘ + Z', meaning: 'undo', available: true }} />
+        <Row entry={{ keys: keyboardShortcutLabels.noBuzz, meaning: 'no buzz', available: true }} />
+        <Row entry={{ keys: keyboardShortcutLabels.undo, meaning: 'undo', available: true }} />
       </ul>
       <p className="scorer-keymap-note">Wrong (0): use the buttons.</p>
       {context.unreachable.length > 0 && (

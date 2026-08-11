@@ -76,6 +76,25 @@ describe('the seat layout', () => {
     expect(seatForCode('Semicolon')).toEqual({ side: 'right', seat: 3 });
   });
 
+  test('the printed labels stay paired with the physical codes for each seat', () => {
+    const pairings = [
+      ['left', 0, 'KeyA', 'A'],
+      ['left', 1, 'KeyS', 'S'],
+      ['left', 2, 'KeyD', 'D'],
+      ['left', 3, 'KeyF', 'F'],
+      ['right', 0, 'KeyJ', 'J'],
+      ['right', 1, 'KeyK', 'K'],
+      ['right', 2, 'KeyL', 'L'],
+      ['right', 3, 'Semicolon', ';'],
+    ] as const;
+
+    for (const [side, seat, code, label] of pairings) {
+      expect(seatKeyCodes[side][seat]).toBe(code);
+      expect(seatKeyLabels[side][seat]).toBe(label);
+      expect(seatForCode(code)).toEqual({ side, seat });
+    }
+  });
+
   test('nothing else addresses a seat', () => {
     for (const code of ['KeyG', 'KeyH', 'KeyQ', 'Digit1', 'Space', 'Enter', 'Quote', 'Comma']) {
       expect(seatForCode(code), code).toBeNull();

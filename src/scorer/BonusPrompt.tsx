@@ -17,7 +17,7 @@
  * protested bonus, a spoiled part read from the wrong packet, a room being asked afterwards what
  * happened. So parts are one press away and never in the way.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
 import { IBonusPartResult } from '../scoring/ScoreEvents';
 import { bonusTotalProblem, bouncebackOptions, regularBonusTotals } from './bonusOptions';
@@ -53,7 +53,9 @@ export interface IBonusPromptProps {
  */
 function useChoiceKeys(options: readonly number[], pick: (points: number) => void, enabled: boolean): void {
   const latest = useRef({ options, pick, enabled });
-  latest.current = { options, pick, enabled };
+  useLayoutEffect(() => {
+    latest.current = { options, pick, enabled };
+  }, [options, pick, enabled]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
