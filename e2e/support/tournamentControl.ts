@@ -501,7 +501,15 @@ export async function startTournamentControl(protocol: ControlProtocol): Promise
           refuse(401, 'This session is not open.');
           return;
         }
-        results.push(JSON.parse((await readBody(request)) || '{}') as object);
+        const body = JSON.parse((await readBody(request)) || '{}') as object;
+        resultAttempts.push(body);
+        if (nextResultFailure) {
+          const failure = nextResultFailure;
+          nextResultFailure = null;
+          refuse(failure.status, failure.error);
+          return;
+        }
+        results.push(body);
         send(200, { accepted: true });
         return;
       }
