@@ -55,7 +55,7 @@ export function normalCorrect(format: IScorekeeperFormat): IScorekeeperAnswerTyp
  * The power: the most valuable correct answer, when there is a choice.
  *
  * Null when the format has exactly one positive answer, which is the common case outside NAQT rules
- * and is why Shift has to be able to be unavailable rather than aliasing the unmodified key.
+ * and is why the P action has to be able to be unavailable rather than aliasing C.
  */
 export function powerCorrect(format: IScorekeeperFormat): IScorekeeperAnswerType | null {
   const correct = correctTypes(format);

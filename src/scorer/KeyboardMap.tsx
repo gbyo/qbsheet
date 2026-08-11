@@ -17,11 +17,11 @@
  * Every value in it comes from the live format. There is no `+15` in this file.
  */
 import { LeftOrRight } from '../scoring/types';
-import { IKeyLegendEntry, keyboardShortcutLabels, seatKeyLabels } from './KeyboardScoring';
+import { IKeyLegendEntry, keyboardSeatNumbers, keyboardShortcutLabels } from './KeyboardScoring';
 
 export type KeyboardMapContext =
-  /** A live tossup: the seat keys and the modifiers mean something. */
-  | { kind: 'tossup'; modifiers: IKeyLegendEntry[]; unreachable: string[] }
+  /** A live tossup: the numeric seats and action sequences mean something. */
+  | { kind: 'tossup'; actions: IKeyLegendEntry[]; unreachable: string[] }
   /** A bonus, a bounceback, or parts: digits address whatever is on screen. */
   | { kind: 'choices'; title: string; choices: IKeyLegendEntry[]; cancellable: boolean }
   /** A dialog is open, or the game is over. Nothing is bound, and saying so is the point. */
@@ -72,23 +72,21 @@ export default function KeyboardMap(props: { context: KeyboardMapContext }) {
         {(['left', 'right'] as LeftOrRight[]).map((side) => (
           <p key={side} className="scorer-keymap-seat-row">
             <span className="scorer-keymap-seat-side">{side === 'left' ? 'Left' : 'Right'}</span>
-            {seatKeyLabels[side].map((label, seat) => (
-              <span key={label} className="scorer-keymap-seat">
-                <kbd className="scorer-keymap-key">{label}</kbd>
-                <span className="scorer-keymap-seat-number">{seat + 1}</span>
+            {keyboardSeatNumbers[side].map((number) => (
+              <span key={number} className="scorer-keymap-seat">
+                <kbd className="scorer-keymap-key">{number}</kbd>
               </span>
             ))}
           </p>
         ))}
       </div>
       <ul className="scorer-keymap-list">
-        {context.modifiers.map((entry) => (
+        {context.actions.map((entry) => (
           <Row key={entry.keys} entry={entry} />
         ))}
         <Row entry={{ keys: keyboardShortcutLabels.noBuzz, meaning: 'no buzz', available: true }} />
         <Row entry={{ keys: keyboardShortcutLabels.undo, meaning: 'undo', available: true }} />
       </ul>
-      <p className="scorer-keymap-note">Wrong (0): use the buttons.</p>
       {context.unreachable.length > 0 && (
         // Said plainly rather than papered over with a new chord. A scorekeeper who knows the middle
         // tier is mouse-only will reach for the mouse; one who does not will hunt for a shortcut that

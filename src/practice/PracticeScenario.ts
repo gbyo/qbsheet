@@ -3,7 +3,7 @@ import { bonusEventPoints, ScoreEvent } from '../scoring/ScoreEvents';
 import { IGameSetup } from '../scoring/deriveGame';
 import { ITeamRoster } from '../game/Roster';
 import { LeftOrRight } from '../scoring/types';
-import { keyboardShortcutLabels, seatKeyLabels } from '../scorer/KeyboardScoring';
+import { keyboardActionLabels, keyboardSeatNumbers, keyboardShortcutLabels } from '../scorer/KeyboardScoring';
 
 export type PracticeExpectation =
   | { kind: 'lineup' }
@@ -173,9 +173,9 @@ export const practiceSteps: IPracticeStep[] = [
     id: 'q1-power',
     title: 'Tossup 1',
     call: 'Reader: “Power, Gibson on Ninety Six.”',
-    instruction: 'Press P on Gibson’s row, on the Ninety Six side.',
+    instruction: 'Press 1, then P, for Gibson on the Ninety Six side.',
     hint:
-      'Every player has their own row of rulings: P is the power, +10 the ordinary correct answer, N the neg, and 0 a wrong answer that costs nothing. In this practice format a power is 15.',
+      'Keyboard scoring uses the player’s seat number first, then the ruling: C is ordinary correct, P is power, N is neg, and 0 is wrong with no penalty. Gibson is seat 1, and a power is 15 in this practice format.',
     success: 'Correct — a power is worth 15 in this practice format.',
     section: 'Score the game',
     expectation: { kind: 'event', matches: tossup(1, 'left', 'Gibson', 0) },
@@ -195,8 +195,8 @@ export const practiceSteps: IPracticeStep[] = [
     id: 'q2-ten',
     title: 'Tossup 2',
     call: 'Reader: “Tucker, Greenwood — correct for 10.”',
-    instruction: 'Press +10 on Tucker’s row, on the Greenwood side.',
-    hint: '+10 is the ordinary correct answer, as opposed to P for a power. Greenwood is the right-hand team.',
+    instruction: 'Press 5, then C, for Tucker on the Greenwood side.',
+    hint: 'C is the ordinary correct answer, as opposed to P for a power. Greenwood is the right-hand team, so its first seat is 5.',
     success: 'Exactly.',
     section: 'Score the game',
     expectation: { kind: 'event', matches: tossup(2, 'right', 'Tucker', 1) },
@@ -215,7 +215,7 @@ export const practiceSteps: IPracticeStep[] = [
     id: 'q3-neg',
     title: 'Tossup 3',
     call: 'Jeremy on Ninety Six interrupts and negs.',
-    instruction: 'Press N on Jeremy’s row.',
+    instruction: 'Press 2, then N, for Jeremy’s row.',
     hint:
       'N is the neg, worth −5 here. Watch what happens afterwards: Ninety Six’s buttons go quiet because they have had their answer, and Greenwood’s stay live because the tossup is not over.',
     success: 'Correct — Ninety Six loses 5, and Greenwood can still answer.',
@@ -227,7 +227,7 @@ export const practiceSteps: IPracticeStep[] = [
     title: 'Tossup 3 continues',
     call:
       'Still on Tossup 3. The question is read out to the end, and Tucker answers it correctly for Greenwood.',
-    instruction: 'Press +10 on Tucker’s row. Stay on Tossup 3 — do not use No buzz and do not advance the question.',
+    instruction: 'Press 5, then C, for Tucker. Stay on Tossup 3 — do not use No buzz and do not advance the question.',
     hint:
       'Nothing needs advancing: the header still says Tossup 3 and it stays there until the tossup is settled. Ninety Six’s rulings are greyed out because they have used their answer, and Greenwood no longer shows N — a team that has heard the whole question cannot be negged. No buzz would mean Greenwood never answered, which is not what happened.',
     success: 'That is the common neg-and-rebound sequence.',
@@ -248,7 +248,7 @@ export const practiceSteps: IPracticeStep[] = [
     id: 'q4-wrong-no-penalty',
     title: 'Tossup 4: wrong, no penalty',
     call: 'Owen answers after the question is finished. The answer is wrong, but there is no penalty.',
-    instruction: 'Press the 0 button on Owen’s row — the last one in the row.',
+    instruction: 'Press 3, then 0, for Owen’s row.',
     hint:
       'Three different things that all score nothing, and they are not interchangeable: N is a neg and costs 5, 0 is an answer that was simply wrong, and No buzz means nobody answered at all. Owen answered, so it is 0.',
     success: 'Correct — Owen answered, so that attempt belongs on the scoresheet even though it changed no points.',
@@ -270,8 +270,8 @@ export const practiceSteps: IPracticeStep[] = [
     id: 'q5-ten',
     title: 'Tossup 5',
     call: 'Gibson answers correctly for 10.',
-    instruction: 'Press +10 on Gibson’s row.',
-    hint: '+10, not P. The reader said correct, not power.',
+    instruction: 'Press 1, then C, for Gibson’s row.',
+    hint: 'C, not P. The reader said correct, not power.',
     success: 'Correct.',
     section: 'Score the game',
     expectation: { kind: 'event', matches: tossup(5, 'left', 'Gibson', 1) },
@@ -306,7 +306,7 @@ export const practiceSteps: IPracticeStep[] = [
     id: 'q6-ten',
     title: 'Tossup 6',
     call: 'Reader initially reports Jeremy as correct for 10.',
-    instruction: 'Press +10 on Jeremy’s row.',
+    instruction: 'Press 2, then C, for Jeremy’s row.',
     hint: 'Score the call exactly as you heard it, even though you are about to be told it was wrong. That is the point of the next two steps.',
     success: 'Recorded. Now the moderator corrects the call.',
     section: 'Fix mistakes',
@@ -327,7 +327,7 @@ export const practiceSteps: IPracticeStep[] = [
     id: 'q6-power',
     title: 'Tossup 6, corrected',
     call: 'Jeremy’s corrected ruling is a power.',
-    instruction: 'Press P on Jeremy’s row.',
+    instruction: 'Press 2, then P, for Jeremy’s row.',
     hint: 'P is the power, worth 15 in this format.',
     success: 'Correct. The history now contains the right ruling.',
     section: 'Fix mistakes',
@@ -358,7 +358,7 @@ export const practiceSteps: IPracticeStep[] = [
     id: 'q7-ten',
     title: 'Tossup 7',
     call: 'Olivia answers correctly for 10 immediately after entering.',
-    instruction: 'Press +10 on Olivia’s row.',
+    instruction: 'Press 3, then C, on Olivia’s row.',
     hint: 'Olivia has taken Owen’s seat, so she is in the row Owen was in. Owen keeps the six tossups he actually heard.',
     success: 'Exactly. The substitution and tossups-heard history stay consistent.',
     section: 'Score the game',
@@ -378,7 +378,7 @@ export const practiceSteps: IPracticeStep[] = [
     id: 'q8-ten',
     title: 'Tossup 8',
     call: 'Phillip answers correctly for Greenwood for 10.',
-    instruction: 'Press +10 on Phillip’s row, on the Greenwood side.',
+    instruction: 'Press 6, then C, for Phillip on the Greenwood side.',
     hint: 'This is the last of the eight tossups in this practice format.',
     success: 'Correct.',
     section: 'Finish safely',
@@ -428,20 +428,20 @@ export function practiceLineupReady(setup: IGameSetup): boolean {
  * key here too. Steps with no keyboard equivalent, and the ones that are deliberately mouse work
  * (choosing a substitute, correcting an earlier question), return null and are not annotated.
  */
-const stepKeystrokes: Record<string, { side: LeftOrRight; player: string; modifier?: 'Shift' | 'Alt' } | { literal: string }> = {
-  'q1-power': { side: 'left', player: 'Gibson', modifier: 'Shift' },
+const stepKeystrokes: Record<string, { side: LeftOrRight; player: string; action: keyof typeof keyboardActionLabels } | { literal: string }> = {
+  'q1-power': { side: 'left', player: 'Gibson', action: 'power' },
   'q1-bonus': { literal: '3' },
-  'q2-ten': { side: 'right', player: 'Tucker' },
+  'q2-ten': { side: 'right', player: 'Tucker', action: 'correct' },
   'q2-bonus': { literal: '2' },
-  'q3-neg': { side: 'left', player: 'Jeremy', modifier: 'Alt' },
-  'q3-rebound': { side: 'right', player: 'Tucker' },
+  'q3-neg': { side: 'left', player: 'Jeremy', action: 'neg' },
+  'q3-rebound': { side: 'right', player: 'Tucker', action: 'correct' },
   'q3-bonus': { literal: '4' },
   'q4-dead': { literal: keyboardShortcutLabels.noBuzz },
-  'q5-ten': { side: 'left', player: 'Gibson' },
+  'q5-ten': { side: 'left', player: 'Gibson', action: 'correct' },
   'q5-bonus': { literal: '3' },
-  'q6-ten': { side: 'right', player: 'Tucker' },
+  'q6-ten': { side: 'right', player: 'Tucker', action: 'correct' },
   'q6-undo': { literal: keyboardShortcutLabels.undo },
-  'q6-power': { side: 'left', player: 'Gibson', modifier: 'Shift' },
+  'q6-power': { side: 'left', player: 'Gibson', action: 'power' },
   'q6-bonus': { literal: '3' },
 };
 
@@ -449,7 +449,7 @@ const stepKeystrokes: Record<string, { side: LeftOrRight; player: string; modifi
 function practiceSeatKey(side: LeftOrRight, playerName: string): string | null {
   const lineup = side === 'left' ? practiceLeftTeam.startingLineup : practiceRightTeam.startingLineup;
   const seat = lineup.indexOf(playerName);
-  return seat >= 0 && seat < seatKeyLabels[side].length ? seatKeyLabels[side][seat] : null;
+  return seat >= 0 && seat < keyboardSeatNumbers[side].length ? String(keyboardSeatNumbers[side][seat]) : null;
 }
 
 export function practiceKeystroke(stepId: string): string | null {
@@ -458,5 +458,5 @@ export function practiceKeystroke(stepId: string): string | null {
   if ('literal' in entry) return entry.literal;
   const key = practiceSeatKey(entry.side, entry.player);
   if (key === null) return null;
-  return entry.modifier ? `${entry.modifier} + ${key}` : key;
+  return `${key} then ${keyboardActionLabels[entry.action]}`;
 }

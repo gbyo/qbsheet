@@ -52,8 +52,9 @@ describe('guided practice scenario', () => {
   });
 
   it('teaches only the keyboard rulings the scoresheet actually supports', () => {
-    expect(practiceKeystroke('q1-power')).toBe('Shift + A');
-    expect(practiceKeystroke('q3-neg')).toBe('Alt + S');
+    expect(practiceKeystroke('q1-power')).toBe('1 then P');
+    expect(practiceKeystroke('q2-ten')).toBe('5 then C');
+    expect(practiceKeystroke('q3-neg')).toBe('2 then N');
     expect(practiceKeystroke('q4-wrong-no-penalty')).toBeNull();
     expect(practiceKeystroke('q4-dead')).toBe('Space');
     expect(practiceKeystroke('q6-undo')).toBe('Ctrl/⌘ + Z');

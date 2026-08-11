@@ -32,13 +32,8 @@ afterEach(() => {
   resetKeyboardPreference();
 });
 
-/**
- * Press a physical key at the document.
- *
- * `code` rather than `key`, because that is what the layer binds to — `Alt+A` on macOS reports `key` as
- * `å`, and a layout built on `key` would lose the neg modifier entirely.
- */
-async function pressKey(
+/** Press one key at the document. */
+async function pressRawKey(
   code: string,
   options: { shift?: boolean; alt?: boolean; ctrl?: boolean; meta?: boolean; repeat?: boolean; key?: string } = {},
 ): Promise<void> {
@@ -53,6 +48,53 @@ async function pressKey(
       repeat: options.repeat ?? false,
     });
   });
+}
+
+/** Press the numeric seat followed by its action. */
+async function pressSequence(number: number, action: string): Promise<void> {
+  await pressRawKey(`Digit${number}`, { key: String(number) });
+  await pressRawKey(`Key${action.toUpperCase()}`, { key: action.toLowerCase() });
+}
+
+/**
+ * Keep the older seat-code call sites readable while the cases migrate to the public numeric scheme.
+ * The application itself only sees the two numeric events emitted here.
+ */
+async function pressSeatCode(code: string, options: { shift?: boolean; alt?: boolean; ctrl?: boolean; meta?: boolean; repeat?: boolean } = {}): Promise<void> {
+  const numbers: Record<string, number> = {
+    KeyA: 1,
+    KeyS: 2,
+    KeyD: 3,
+    KeyF: 4,
+    KeyJ: 5,
+    KeyK: 6,
+    KeyL: 7,
+    Semicolon: 8,
+  };
+  const number = numbers[code];
+  if (number === undefined || options.ctrl || options.meta) {
+    await pressRawKey(code, { ...options, key: code.replace(/^Key/, '').toLowerCase() });
+    return;
+  }
+  if (options.repeat) {
+    await pressRawKey(`Digit${number}`, { repeat: true, key: String(number) });
+    return;
+  }
+  await pressRawKey(`Digit${number}`, { key: String(number) });
+  if (options.shift && options.alt) return;
+  const action = options.shift ? 'p' : options.alt ? 'n' : 'c';
+  await pressRawKey(`Key${action.toUpperCase()}`, { key: action });
+}
+
+async function pressKey(
+  code: string,
+  options: { shift?: boolean; alt?: boolean; ctrl?: boolean; meta?: boolean; repeat?: boolean; key?: string } = {},
+): Promise<void> {
+  if (/^(?:Key[ASDFJKL]|Semicolon)$/.test(code)) {
+    await pressSeatCode(code, options);
+    return;
+  }
+  await pressRawKey(code, options);
 }
 
 /** Open a game with the layer already on and the lineup settled. */
@@ -77,38 +119,38 @@ function rightScore(): string {
   return screen.getByLabelText('Greenwood score').textContent ?? '';
 }
 
-describe('the eight seat keys', () => {
-  // The fixture fields three players a side, so the fourth key of each hand has nobody in its seat and
+describe('the eight numeric seat numbers', () => {
+  // The fixture fields three players a side, so the fourth number of each side has nobody in its seat and
   // is checked separately below. Asserted against the activity rail, which is the scoresheet's own
   // record of who was ruled on — the roster row carries the same name, so an unscoped query matches both.
   test.each([
-    ['KeyA', 'Sarah Mitchell'],
-    ['KeyS', 'James Okafor'],
-    ['KeyD', 'Alex Rivera'],
-    ['KeyJ', 'Emma Chen'],
-    ['KeyK', 'Jordan Blake'],
-    ['KeyL', 'Morgan Ellis'],
-  ])('%s scores the player in that seat', async (code, player) => {
+    [1, 'Sarah Mitchell'],
+    [2, 'James Okafor'],
+    [3, 'Alex Rivera'],
+    [5, 'Emma Chen'],
+    [6, 'Jordan Blake'],
+    [7, 'Morgan Ellis'],
+  ])('%s then C scores the player in that seat', async (number, player) => {
     await openScoringWithKeyboard();
 
-    await pressKey(code);
+    await pressSequence(number, 'c');
 
     const rail = screen.getByLabelText('Recent activity');
     await waitFor(() => expect(within(rail).getByText(new RegExp(player))).toBeInTheDocument());
   });
 
-  test('the left keys score the left team and the right keys the right team', async () => {
+  test('1 is the first left seat', async () => {
     await openScoringWithKeyboard();
 
-    await pressKey('KeyA');
+    await pressSequence(1, 'c');
     await waitFor(() => expect(leftScore()).toContain('10'));
     expect(rightScore()).toBe('0');
   });
 
-  test('the right hand scores the right team', async () => {
+  test('5 is the first right seat', async () => {
     await openScoringWithKeyboard();
 
-    await pressKey('KeyJ');
+    await pressSequence(5, 'c');
 
     await waitFor(() => expect(rightScore()).toContain('10'));
   });
@@ -118,14 +160,14 @@ describe('the eight seat keys', () => {
     // ordinary and must not produce a ruling against nobody.
     await openScoringWithKeyboard();
 
-    await pressKey('KeyF');
+    await pressSequence(4, 'c');
 
     expect(leftScore()).toBe('0');
   });
 });
 
-describe('the modifiers', () => {
-  test('bare records the ordinary correct answer from the format', async () => {
+describe('the action keys', () => {
+  test('C records the ordinary correct answer from the format', async () => {
     await openScoringWithKeyboard();
 
     await pressKey('KeyA');
@@ -133,7 +175,7 @@ describe('the modifiers', () => {
     await waitFor(() => expect(leftScore()).toContain('10'));
   });
 
-  test('Shift records the power', async () => {
+  test('P records the power', async () => {
     await openScoringWithKeyboard();
 
     await pressKey('KeyA', { shift: true });
@@ -141,7 +183,7 @@ describe('the modifiers', () => {
     await waitFor(() => expect(leftScore()).toContain('15'));
   });
 
-  test('Alt records the penalty', async () => {
+  test('N records the penalty', async () => {
     await openScoringWithKeyboard();
 
     await pressKey('KeyA', { alt: true });
@@ -149,28 +191,28 @@ describe('the modifiers', () => {
     await waitFor(() => expect(leftScore()).toContain('-5'));
   });
 
-  test('Ctrl plus a seat key is left to Chrome or ChromeOS', async () => {
+  test('Ctrl plus a number is left to Chrome or ChromeOS', async () => {
     await openScoringWithKeyboard();
 
     const event = new KeyboardEvent('keydown', {
       bubbles: true,
       cancelable: true,
-      code: 'KeyA',
-      key: 'a',
+      code: 'Digit1',
+      key: '1',
       ctrlKey: true,
     });
     await act(async () => {
       document.dispatchEvent(event);
     });
 
-    // Ctrl+A is a browser/operating-system shortcut, not a keyboard ruling. It must not spend the
+    // Ctrl+1 event is a browser/operating-system shortcut, not a keyboard ruling. It must not spend the
     // team's chance or be turned into a no-penalty score by this listener.
     expect(event.defaultPrevented).toBe(false);
     expect(screen.getByText('Tossup 1 of 20')).toBeInTheDocument();
     expect(leftScore()).toBe('0');
   });
 
-  test('two modifiers together record nothing', async () => {
+  test('modifier chords record nothing', async () => {
     await openScoringWithKeyboard();
 
     await pressKey('KeyA', { shift: true, alt: true });
@@ -178,7 +220,7 @@ describe('the modifiers', () => {
     expect(leftScore()).toBe('0');
   });
 
-  test('Cmd plus a seat key is left to the browser', async () => {
+  test('Cmd plus a number is left to the browser', async () => {
     await openScoringWithKeyboard();
 
     await pressKey('KeyA', { meta: true });
@@ -186,15 +228,16 @@ describe('the modifiers', () => {
     expect(leftScore()).toBe('0');
   });
 
-  test('the map keeps Wrong zero on the buttons and does not teach Ctrl plus a seat', async () => {
+  test('the map teaches the numeric sequence and does not teach modifier chords', async () => {
     await openScoringWithKeyboard();
 
     const map = screen.getByLabelText('Keyboard scoring');
     expect(within(map).queryByText('Ctrl + seat')).toBeNull();
-    expect(within(map).getByText('Wrong (0): use the buttons.')).toBeInTheDocument();
+    expect(within(map).getByText('seat → 0')).toBeInTheDocument();
+    expect(within(map).getByText('5')).toBeInTheDocument();
   });
 
-  test('Alt does nothing once the other team has already answered', async () => {
+  test('N does nothing once the other team has already answered', async () => {
     await openScoringWithKeyboard();
 
     // Greenwood answers wrong with no penalty, so the question has been read out.
@@ -207,7 +250,7 @@ describe('the modifiers', () => {
     expect(leftScore()).toBe('0');
   });
 
-  test('a key aimed at a team that has already answered does nothing', async () => {
+  test('a number aimed at a team that has already answered does nothing', async () => {
     await openScoringWithKeyboard();
 
     await act(async () => {
@@ -388,16 +431,16 @@ describe('shortcuts stay silent while somebody is typing', () => {
     combo.remove();
   });
 
-  test('seat keys still work with focus on a scoring button', async () => {
-    // The other direction, and it matters: a button does not consume the letter `D`, so blocking seat
-    // keys while one has focus would break the ordinary mixed workflow — tap something, keep scoring on
-    // the keyboard — for no safety gained.
+  test('numeric sequences still work with focus on a scoring button', async () => {
+    // The other direction, and it matters: a button does not consume printable scoring keys, so
+    // blocking the numeric sequence while one has focus would break the ordinary mixed workflow.
     await openScoringWithKeyboard();
     const button = screen.getByRole('button', { name: 'Sarah Mitchell 10' });
     button.focus();
 
     await act(async () => {
-      fireEvent.keyDown(button, { code: 'KeyJ', key: 'j' });
+      fireEvent.keyDown(button, { code: 'Digit5', key: '5' });
+      fireEvent.keyDown(button, { code: 'KeyC', key: 'c' });
     });
 
     await waitFor(() => expect(rightScore()).toContain('10'));
@@ -516,12 +559,14 @@ describe('the bonus', () => {
     expect(within(map).queryByText('Left')).toBeNull();
   });
 
-  test('a seat key during the bonus does not score a tossup', async () => {
+  test('a seat sequence during the bonus does not score a tossup', async () => {
     await openScoringWithKeyboard();
     await pressKey('KeyA');
     await screen.findByLabelText('Bonus');
 
-    await pressKey('KeyS');
+    // Eight is a valid seat number but is outside this bonus's four choices. It must not reach the
+    // tossup listener while the bonus owns the number row.
+    await pressSequence(8, 'c');
 
     // Still on the bonus, and nothing added.
     expect(screen.getByLabelText('Bonus')).toBeInTheDocument();
@@ -561,5 +606,109 @@ describe('the bonus', () => {
     // Nothing recorded from the keystroke; the field is still waiting.
     expect(screen.getByLabelText('Bonus points')).toBeInTheDocument();
     expect(leftScore()).toContain('10');
+  });
+});
+
+describe('the readout at the bottom of the screen', () => {
+  /** The readout region, which is always mounted so it can be watched. */
+  function region(): HTMLElement {
+    return screen.getByRole('status', { name: 'Keyboard shortcut status' });
+  }
+
+  /** The pill inside it, or null while the readout has nothing to say. */
+  function readout(): HTMLElement | null {
+    return region().querySelector('p');
+  }
+
+  test('a seat on its own names the person it addresses', async () => {
+    // The half-finished sequence is the whole reason this exists. Pressing 2 changes nothing else on
+    // screen, and the scorekeeper has to be able to see that the next letter will score James Okafor.
+    await openScoringWithKeyboard();
+
+    await pressRawKey('Digit2', { key: '2' });
+
+    const status = readout();
+    expect(status).not.toBeNull();
+    expect(status).toHaveTextContent('2');
+    expect(status).toHaveTextContent('James Okafor');
+    // Nothing recorded yet — a named seat is not a ruling.
+    expect(leftScore()).toBe('0');
+  });
+
+  test('the waiting seat offers only the keys this format can pay for', async () => {
+    await openScoringWithKeyboard();
+
+    await pressRawKey('Digit1', { key: '1' });
+
+    const status = region();
+    for (const key of ['C', 'P', 'N', '0']) {
+      expect(within(status).getByText(key)).toBeInTheDocument();
+    }
+  });
+
+  test('the completed sequence reads back the ruling and its value', async () => {
+    await openScoringWithKeyboard();
+
+    await pressSequence(1, 'p');
+
+    const status = region();
+    expect(status).toHaveTextContent('Sarah Mitchell');
+    // The name of the action and what this format pays for it, not the bare number.
+    expect(status).toHaveTextContent('Power +15');
+  });
+
+  test('a neg is read back as a neg', async () => {
+    await openScoringWithKeyboard();
+
+    await pressSequence(5, 'n');
+
+    expect(region()).toHaveTextContent('Neg −5');
+  });
+
+  test('a wrong answer with no penalty says so rather than inventing a ruling', async () => {
+    await openScoringWithKeyboard();
+
+    await pressSequence(1, '0');
+
+    expect(region()).toHaveTextContent('Wrong 0');
+  });
+
+  test('the ruling clears itself', async () => {
+    await openScoringWithKeyboard();
+
+    await pressSequence(1, 'c');
+    expect(readout()).not.toBeNull();
+
+    await waitFor(() => expect(readout()).toBeNull(), { timeout: 4000 });
+  });
+
+  test('a seat abandoned by a key that is not an action stops being shown', async () => {
+    await openScoringWithKeyboard();
+
+    await pressRawKey('Digit1', { key: '1' });
+    expect(readout()).not.toBeNull();
+
+    await pressRawKey('KeyQ', { key: 'q' });
+
+    expect(readout()).toBeNull();
+    expect(leftScore()).toBe('0');
+  });
+
+  test('a seat aimed at nobody says nothing', async () => {
+    // The fixture fields three a side. Naming an empty seat would be confirming a ruling that cannot
+    // happen, which is worse than the silence the keystroke already gets.
+    await openScoringWithKeyboard();
+
+    await pressRawKey('Digit4', { key: '4' });
+
+    expect(readout()).toBeNull();
+  });
+
+  test('there is no readout at all with the layer switched off', async () => {
+    await openScoringWithoutKeyboard();
+
+    await pressRawKey('Digit1', { key: '1' });
+
+    expect(screen.queryByRole('status', { name: 'Keyboard shortcut status' })).toBeNull();
   });
 });

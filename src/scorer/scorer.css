@@ -2439,7 +2439,7 @@ div.scorer-banner .scorer-text-action {
 
 /*
  * A binding the layout has but this format does not. Struck through rather than hidden: the shape of
- * the legend stays the same between formats, and a scorekeeper who reaches for Shift learns why it did
+ * the legend stays the same between formats, and a scorekeeper who reaches for P learns why it did
  * nothing instead of wondering whether they mistyped.
  */
 .scorer-keymap-row.is-unavailable {
@@ -2471,5 +2471,126 @@ div.scorer-banner .scorer-text-action {
 @media (prefers-reduced-motion: no-preference) {
   .scorer-player.is-keyed {
     transition: background 120ms ease-out;
+  }
+}
+
+/*
+ * The keyboard readout.
+ *
+ * The exception to "no floating cards": this is the one thing on the scoresheet that is not part of
+ * the scoresheet. It reports the scorekeeper's own half-finished keystroke, it is true for about a
+ * second, and it has to be findable without looking for it — so it is inverted, pinned to the bottom
+ * edge where the eye already goes for the control bar, and centred so its position never depends on
+ * which team was scored.
+ *
+ * The wrapper is always in the DOM and always the full width of the window; only the pill inside it
+ * comes and goes. That keeps the live region continuously observed, and `pointer-events: none` keeps
+ * a strip of nothing across the bottom of the screen from eating a click meant for the buttons under
+ * it.
+ */
+.scorer-keystatus {
+  position: fixed;
+  right: 0;
+  /* Clears the control bar in both layouts: in flow at desktop width, fixed at phone width. */
+  bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+  left: 0;
+  z-index: 24;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.scorer-keystatus-pill {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100% - 32px);
+  margin: 0;
+  padding: 7px 14px;
+  border-radius: 999px;
+  background: var(--room-text);
+  color: var(--room-surface);
+  font-size: 14px;
+  line-height: 1.2;
+  box-shadow: 0 2px 10px rgb(25 28 32 / 28%);
+}
+
+/* The number that was actually pressed, boxed like the key it is. */
+.scorer-keystatus-seat {
+  flex: none;
+  min-width: 20px;
+  padding: 1px 0;
+  border-radius: 4px;
+  background: rgb(255 255 255 / 18%);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+}
+
+/* Truncated rather than wrapped: the pill must not change height between one name and the next. */
+.scorer-keystatus-player {
+  overflow: hidden;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.scorer-keystatus-prompt {
+  flex: none;
+  display: flex;
+  align-items: center;
+  opacity: 0.75;
+}
+
+.scorer-keystatus-key {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.scorer-keystatus-ruling {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * Green on the inverted pill, which is the one place green means "recorded" rather than "connected".
+ * The tick is doing the work; the colour is there so a glance can tell a landed ruling from a seat
+ * still waiting without reading either.
+ */
+.scorer-keystatus-check {
+  flex: none;
+  color: #7fd39b;
+  font-weight: 700;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* Appears at once and is gone before it can be watched. A toast that animates in is a toast that is
+     still arriving when the next tossup starts. */
+  .scorer-keystatus-pill {
+    animation: scorer-keystatus-in 110ms ease-out both;
+  }
+}
+
+@keyframes scorer-keystatus-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (max-width: 520px) {
+  /* The control bar leaves the flow here and becomes a taller fixed grid; the pill has to clear it. */
+  .scorer-keystatus {
+    bottom: calc(80px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .scorer-keystatus-pill {
+    font-size: 13px;
   }
 }

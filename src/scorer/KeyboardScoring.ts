@@ -1,57 +1,27 @@
 /**
- * The keyboard layer: a fixed layout, derived rulings, and the rules about when a key means nothing.
+ * The keyboard layer: numeric seats, two-key rulings, and the rules about when a key means nothing.
  *
- * # Seats, not people
+ * Seats are global rather than team-local: 1–4 are the left team's seats and 5–8 are the right
+ * team's seats. A tossup ruling is then a short sequence — for example `1` then `P` for a power by
+ * the first left player, or `5` then `C` for an ordinary correct answer by the first right player.
+ * Keeping the action separate from the seat makes the layout easy to remember and leaves the number
+ * row available for the team-to-seat mapping the scorekeeper is already watching.
  *
- * ```
- *   LEFT                RIGHT
- *   A  S  D  F          J  K  L  ;
- *   1  2  3  4          1  2  3  4
- * ```
- *
- * The keys address *seats*, which is what a scorekeeper is already watching — the third column of a
- * paper scoresheet stays the third column all game, and a substitute takes the seat of the player they
- * came on for (see `PlayerSeating`). So a substitution needs no rebinding: the key was never bound to
- * the person. That is also why the layout is fixed rather than configurable. The entire value is that
- * the fourth seat is `F` on every device at every tournament, and a remapping feature would trade that
- * away for a preference nobody can rely on in somebody else's room.
- *
- * # Physical keys, deliberately
- *
- * Bindings are matched on `KeyboardEvent.code` rather than `key`, for two reasons that point the same
- * way. `Alt+A` on macOS reports `key` as `å`, so a layout built on `key` loses the neg modifier
- * outright. And the layout is *spatial* — the point is the shape under the hand — so the physical key
- * is the thing being named, not the letter printed on it.
- *
- * # No format knowledge
- *
- * The modifiers mean roles, and the roles are resolved against the live format by `tossupRulings`.
- * Shift is the power *if the format has one*; Alt is the penalty *if a neg is legal on this tossup*. A
- * modifier with nothing behind it is reported as unavailable and does nothing at all, rather than
- * falling back to something adjacent — a keyboard that quietly records +10 because this format has no
- * power is a keyboard that has scored the wrong thing.
- *
- * # And no new chords
- *
- * Three seat rulings is the whole keyboard layout. A format with more answer types than that leaves the
- * extras on the buttons, and the legend says so. Inventing `Ctrl+Alt+Shift+D` for a third positive tier
- * would produce something nobody can use at speed, which is the only thing this feature is for. Ctrl is
- * deliberately not a seat modifier: on ChromeOS it belongs to the browser and operating system.
+ * No ruling is hard-coded here. The action keys are resolved through `tossupRulings`, so the live
+ * format decides what ordinary correct, power, and neg mean. A format with an unavailable action
+ * simply leaves that action dead; it never silently falls back to another value.
  */
 import { LeftOrRight } from '../scoring/types';
 import { IScorekeeperAnswerType, IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
 import { negRuling, normalCorrect, powerCorrect, rulingLabel } from './tossupRulings';
 
-/** Which physical keys address which seat, in reading order. Fixed; see the note above. */
-export const seatKeyCodes: Record<LeftOrRight, readonly string[]> = {
-  left: ['KeyA', 'KeyS', 'KeyD', 'KeyF'],
-  right: ['KeyJ', 'KeyK', 'KeyL', 'Semicolon'],
-};
+/** How many seats the layout can address per side. Beyond this, the buttons are the only way. */
+export const keyboardSeatCount = 4;
 
-/** What is printed on those keys, for the legend. Parallel to `seatKeyCodes` by index. */
-export const seatKeyLabels: Record<LeftOrRight, readonly string[]> = {
-  left: ['A', 'S', 'D', 'F'],
-  right: ['J', 'K', 'L', ';'],
+/** The global numbers printed in the keyboard map, parallel to each side's seat order. */
+export const keyboardSeatNumbers: Record<LeftOrRight, readonly number[]> = {
+  left: [1, 2, 3, 4],
+  right: [5, 6, 7, 8],
 };
 
 /** Shortcut labels shared by the live map and guided-practice hints. */
@@ -60,71 +30,84 @@ export const keyboardShortcutLabels = {
   undo: 'Ctrl/⌘ + Z',
 } as const;
 
-/** How many seats the layout can address per side. Beyond this, the buttons are the only way. */
-export const keyboardSeatCount = 4;
+/** The second key in a tossup sequence. `0` records a wrong answer with no penalty. */
+export const keyboardActionLabels = {
+  correct: 'C',
+  power: 'P',
+  neg: 'N',
+  wrong: '0',
+} as const;
+
+export type KeyboardAction = keyof typeof keyboardActionLabels;
+
+/**
+ * What each action is called when it is read back to the scorekeeper.
+ *
+ * A name, never a value. "Power" is what P means in every format; what a power is *worth* comes from
+ * the format and is appended by the caller, so this table stays true for a tournament whose power is
+ * 20 and for one that has no power at all.
+ */
+export const keyboardActionNames: Record<KeyboardAction, string> = {
+  correct: 'Correct',
+  power: 'Power',
+  neg: 'Neg',
+  wrong: 'Wrong',
+};
 
 export interface ISeatKey {
   side: LeftOrRight;
   /** Zero-based position among the players currently on the floor, in the room's own order. */
   seat: number;
+  /** The global number a scorekeeper presses to select this seat. */
+  number: number;
 }
 
-/** Which seat a physical key addresses, or null if it addresses none. */
-export function seatForCode(code: string): ISeatKey | null {
-  for (const side of ['left', 'right'] as LeftOrRight[]) {
-    const seat = seatKeyCodes[side].indexOf(code);
-    if (seat >= 0) return { side, seat };
+/** Which seat a global number addresses, or null if it addresses none. */
+export function seatForNumber(value: string | number): ISeatKey | null {
+  const number = typeof value === 'number' ? value : Number(value);
+  if (!Number.isInteger(number) || number < 1 || number > keyboardSeatCount * 2) return null;
+
+  if (number <= keyboardSeatCount) {
+    return { side: 'left', seat: number - 1, number };
   }
-  return null;
+  return { side: 'right', seat: number - keyboardSeatCount - 1, number };
 }
 
-/** The three roles a seat key can play. */
-export type RulingRole = 'normal' | 'power' | 'neg';
-
-/**
- * Which role a keystroke is asking for, or null when the combination is not part of the layout.
- *
- * At most one supported modifier, and never two. `Shift+Alt+A` is not a third ruling, it is a
- * scorekeeper fumbling, and the safe response to a fumble is to record nothing.
- */
-export function roleForModifiers(event: {
-  shiftKey: boolean;
-  altKey: boolean;
-  ctrlKey: boolean;
-  metaKey: boolean;
-}): RulingRole | null {
-  // Meta is never part of this layout: it belongs to the browser and the operating system, and
-  // Cmd+A is Select All in every room in the country.
-  if (event.metaKey) return null;
-  // Ctrl is intentionally not a scoring modifier. The canonical seat keys overlap with Chrome and
-  // ChromeOS shortcuts such as Ctrl+A, Ctrl+S, and Ctrl+D; leave those keystrokes to the platform
-  // instead of trying to turn browser-reserved shortcuts into controls.
-  if (event.ctrlKey) return null;
-  if (event.shiftKey && event.altKey) return null;
-  if (!event.shiftKey && !event.altKey) return 'normal';
-  if (event.shiftKey) return 'power';
-  return 'neg';
+/** Read a physical number-row or numpad key as a global seat number. */
+export function numberForCode(code: string): number | null {
+  const match = /^(?:Digit|Numpad)([1-8])$/.exec(code);
+  return match ? Number(match[1]) : null;
 }
 
-/** What a role resolves to against a live format and the state of the current tossup. */
+/** Read the action key that completes a tossup sequence. */
+export function actionForKey(key: string): KeyboardAction | null {
+  switch (key.toLowerCase()) {
+    case 'c':
+      return 'correct';
+    case 'p':
+      return 'power';
+    case 'n':
+      return 'neg';
+    case '0':
+      return 'wrong';
+    default:
+      return null;
+  }
+}
+
+/** What an action resolves to against a live format and the state of the current tossup. */
 export type SeatRuling = { kind: 'buzz'; answerType: IScorekeeperAnswerType };
 
-/**
- * What this role means right now, or null when it means nothing.
- *
- * `negsAvailable` is the same flag the buttons use, so Alt is live exactly when the −5 button is on
- * screen and dead exactly when it is not.
- */
-export function rulingForRole(
+export function rulingForAction(
   format: IScorekeeperFormat,
-  role: RulingRole,
+  action: Exclude<KeyboardAction, 'wrong'>,
   negsAvailable: boolean,
 ): SeatRuling | null {
-  if (role === 'normal') {
+  if (action === 'correct') {
     const answerType = normalCorrect(format);
     return answerType ? { kind: 'buzz', answerType } : null;
   }
-  if (role === 'power') {
+  if (action === 'power') {
     const answerType = powerCorrect(format);
     return answerType ? { kind: 'buzz', answerType } : null;
   }
@@ -133,54 +116,61 @@ export function rulingForRole(
   return answerType ? { kind: 'buzz', answerType } : null;
 }
 
+/**
+ * The action keys that would land right now, for the prompt shown while a seat is waiting.
+ *
+ * Drawn from the same resolution the keystroke itself uses, so the prompt cannot offer a key that
+ * does nothing. A format with no power leaves P out of the prompt rather than listing it and then
+ * swallowing it.
+ */
+export function availableActionKeys(format: IScorekeeperFormat, negsAvailable: boolean): string[] {
+  const scoring: Exclude<KeyboardAction, 'wrong'>[] = ['correct', 'power', 'neg'];
+  const keys = scoring
+    .filter((action) => rulingForAction(format, action, negsAvailable) !== null)
+    .map((action) => keyboardActionLabels[action]);
+  // Wrong-with-no-penalty needs nothing from the format: every format can record a used chance.
+  return [...keys, keyboardActionLabels.wrong];
+}
+
 export interface IKeyLegendEntry {
-  /** `A`, `Shift+A`, `1`. What a person reads. */
+  /** What a person reads in the keyboard map. */
   keys: string;
-  /** `+10`, `−5`, `0`, `20`. Derived from the format, never written down here. */
+  /** Derived from the format, never written down as a fixed point value. */
   meaning: string;
   /** False when this row is part of the layout but has nothing behind it in this format. */
   available: boolean;
 }
 
-/**
- * The modifier legend for one seat, in a fixed order so the shape is the same on every screen.
- *
- * Built for one representative key rather than all eight, because eight copies of the same three lines
- * is not a legend, it is a wall. The map names the seat keys once and the modifiers once.
- */
-export function modifierLegend(format: IScorekeeperFormat, negsAvailable: boolean): IKeyLegendEntry[] {
+/** The action legend for one seat, in a fixed order so the shape is the same on every screen. */
+export function sequenceLegend(format: IScorekeeperFormat, negsAvailable: boolean): IKeyLegendEntry[] {
   const normal = normalCorrect(format);
   const power = powerCorrect(format);
   const neg = negRuling(format);
   return [
     {
-      keys: 'seat',
+      keys: `seat → ${keyboardActionLabels.correct}`,
       meaning: normal ? rulingLabel(normal) : 'no correct answer in this format',
       available: normal !== null,
     },
     {
-      keys: 'Shift + seat',
+      keys: `seat → ${keyboardActionLabels.power}`,
       meaning: power ? rulingLabel(power) : 'no power in this format',
       available: power !== null,
     },
     {
-      keys: 'Alt + seat',
+      keys: `seat → ${keyboardActionLabels.neg}`,
       meaning: neg ? rulingLabel(neg) : 'no penalty in this format',
       available: neg !== null && negsAvailable,
+    },
+    {
+      keys: `seat → ${keyboardActionLabels.wrong}`,
+      meaning: 'wrong · 0',
+      available: true,
     },
   ];
 }
 
-/**
- * Which digit picks which bonus total.
- *
- * Left to right across the choices already on screen, which is the only mapping that needs no learning:
- * the third button is `3`. The values come from the caller, which got them from the format — nothing
- * here assumes a bonus is worth thirty or comes in three parts.
- *
- * Capped at nine because there is no `0` key in a left-to-right count that starts at one, and a bonus
- * with ten distinct totals is one the buttons should be used for.
- */
+/** Which digit picks which bonus total. */
 export function bonusKeyLegend(options: readonly number[]): IKeyLegendEntry[] {
   return options.slice(0, 9).map((points, index) => ({
     keys: String(index + 1),
@@ -191,7 +181,7 @@ export function bonusKeyLegend(options: readonly number[]): IKeyLegendEntry[] {
 
 /** Which option a digit key selects, or null when that digit addresses nothing on screen. */
 export function bonusOptionForCode(code: string, options: readonly number[]): number | null {
-  const match = /^Digit([1-9])$/.exec(code);
+  const match = /^(?:Digit|Numpad)([1-9])$/.exec(code);
   if (!match) return null;
   const index = Number(match[1]) - 1;
   return index < options.length ? options[index] : null;
@@ -200,22 +190,8 @@ export function bonusOptionForCode(code: string, options: readonly number[]): nu
 /**
  * Whether this keystroke belongs to whatever it landed on rather than to the scoresheet.
  *
- * The single most important function in the feature. A scorekeeper typing a player's name into the
- * Players dialog must not score four tossups doing it, and somebody typing a bonus total into a number
- * field must not have the digits stolen by a bonus shortcut.
- *
- * Stricter than the check the Space and undo shortcuts used before this existed, and now shared with
- * them, so there is one answer to "is the keyboard aimed at something else" rather than two:
- *
- *   - the obvious form controls, including `contenteditable`, which the old check missed entirely;
- *   - anything with a text-entry or list-selection role, where printable keys are the control's own —
- *     a combobox filters on them;
- *   - anything inside a dialog, ours or the platform's;
- *   - and, whatever the event says it landed on, an *open* `<dialog>` anywhere in the document.
- *
- * That last one is the belt-and-braces case: a modal is open, so nothing behind it is being aimed at,
- * regardless of what has focus. It is also what makes this safe when focus is on `document.body`,
- * which is where it sits after a dialog opens programmatically.
+ * A scorekeeper typing in a dialog or number field must not score a tossup. The same guard is shared
+ * by the tossup and bonus listeners, so printable keys have one consistent answer about ownership.
  */
 const controlSelector = [
   'input',
@@ -238,15 +214,6 @@ const controlSelector = [
   'dialog',
 ].join(', ');
 
-/**
- * Things the platform activates with Space or Enter.
- *
- * Separate from the list above, because the two need different answers and conflating them is a bug in
- * both directions. A focused button does not consume the letter `D`, so blocking seat keys while one has
- * focus would break the ordinary mixed workflow — click a substitution, then keep scoring on the
- * keyboard — for no safety gained. But it very much does consume Space, and stealing that would score
- * one thing while the scorekeeper pressed another.
- */
 const activationSelector = 'button, a[href], summary, [role="button"], [role="link"], [role="tab"]';
 
 function matches(element: unknown, selector: string): boolean {
@@ -254,22 +221,11 @@ function matches(element: unknown, selector: string): boolean {
 }
 
 export function keystrokeBelongsToControl(event: KeyboardEvent, root: Document = document): boolean {
-  // A keydown can be dispatched at something that is not an element — the document itself, for one —
-  // and reaching straight for closest() on that throws out of a listener the whole scoring screen
-  // depends on. Ask whether there is an element before asking it anything.
   if (matches(event.target, controlSelector) || matches(root.activeElement, controlSelector)) return true;
-  // Any modal open anywhere means the scoresheet is not what is being typed at, whatever has focus.
-  // This is the case that holds when focus is on `document.body`, which is where it sits after a dialog
-  // has been opened programmatically.
   return root.querySelector('dialog[open]') !== null;
 }
 
-/**
- * Whether a Space or Enter belongs to something focused rather than to the scoresheet.
- *
- * Checked *in addition* to `keystrokeBelongsToControl` for those two keys only. This is the safeguard
- * the Space shortcut has always had, kept exactly as it was.
- */
+/** Whether Space or Enter belongs to a focused control rather than to the scoresheet. */
 export function activationKeyBelongsToControl(event: KeyboardEvent, root: Document = document): boolean {
   return matches(event.target, activationSelector) || matches(root.activeElement, activationSelector);
 }
