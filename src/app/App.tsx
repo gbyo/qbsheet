@@ -212,7 +212,9 @@ export default function App() {
    * same tick — a reopened session and a re-paired room — do not lose the earlier of the two.
    */
   const connectionRef = useRef<IConnectedSession | null>(null);
-  connectionRef.current = connection;
+  useEffect(() => {
+    connectionRef.current = connection;
+  }, [connection]);
 
   const mergeConnection = useCallback((change: Partial<IConnectedSession>) => {
     const previous = connectionRef.current;
@@ -229,6 +231,7 @@ export default function App() {
       sessionToken: next.sessionToken,
       gameRecordId: next.gameRecordId,
       tournamentKey: next.tournamentKey,
+      progressSequence: next.progressSequence,
     });
     connectionRef.current = next;
     setConnection(next);

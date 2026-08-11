@@ -14,7 +14,8 @@ import {
   supports,
 } from '../src/qbtcp/QbtcpRoutes';
 import FruityServerClient, { qbjMediaType } from '../src/integrations/fruity/FruityServerClient';
-import { classifyWrite } from '../src/app/useConnectedRuntime';
+import { classifyPoll, classifyWrite } from '../src/app/useConnectedRuntime';
+import { RoomConnectionState } from '../src/app/ConnectionState';
 import { IStoredGameRecord, needsHandoff } from '../src/game/GameStore';
 import { assignmentDocument } from './qbjDocuments';
 import {
@@ -194,17 +195,17 @@ describe('what the client puts on the wire', () => {
     const { calls, fetchImpl } = qbtcpServer();
     const client = new FruityServerClient('http://control.test', fetchImpl);
 
-    await client.putSnapshot(credentials, { tossups_read: 3 });
-    await client.putSnapshot(credentials, { tossups_read: 4 });
+    await client.putSnapshot(credentials, { tossups_read: 3 }, 41);
+    await client.putSnapshot(credentials, { tossups_read: 4 }, 42);
 
     const sent = calls.filter((call) => call.path === '/qbtcp/v1/sessions/sess-1/progress');
     expect(sent).toHaveLength(2);
     expect(sent[0].method).toBe('PUT');
     expect(sent[0].headers['x-yf-session-token']).toBe('session-token');
-    expect(sent[0].body).toEqual({ sequence: expect.any(Number), match: { tossups_read: 3 } });
-    const sequences = sent.map((call) => (call.body as { sequence: number }).sequence);
-    expect(sequences[1]).toBeGreaterThan(sequences[0]);
+    // Transport metadata beside the match, never a field invented inside the QBJ.
+    expect(sent[0].body).toEqual({ sequence: 41, match: { tossups_read: 3 } });
     expect((sent[0].body as { match: object }).match).not.toHaveProperty('sequence');
+    expect(sent[1].body).toEqual({ sequence: 42, match: { tossups_read: 4 } });
   });
 
   test('the deprecated surface gets the snapshot bare, because it has no envelope', async () => {
@@ -212,7 +213,7 @@ describe('what the client puts on the wire', () => {
       path === '/qbtcp/v1' ? { status: 404, body: {} } : { body: {} },
     );
 
-    await new FruityServerClient('http://control.test', fetchImpl).putSnapshot(credentials, { tossups_read: 3 });
+    await new FruityServerClient('http://control.test', fetchImpl).putSnapshot(credentials, { tossups_read: 3 }, 41);
 
     const sent = calls.find((call) => call.path === '/api/v1/sessions/sess-1/snapshot');
     expect(sent?.body).toEqual({ tossups_read: 3 });
@@ -347,25 +348,107 @@ describe('what the client puts on the wire', () => {
     expect(result.ok && result.value.errors?.length).toBeGreaterThan(0);
   });
 
-  test('a capability discovery did not advertise is not requested', async () => {
-    const { calls, fetchImpl } = recordingFetch((path) =>
-      path === '/qbtcp/v1' ? { body: { ...qbtcpDiscovery, capabilities: ['assignment'] } } : { body: {} },
-    );
+  /**
+   * "A client MUST NOT infer support from the absence of an error."
+   *
+   * Which means the route is never requested, not that its answer is handled gracefully. Probing to
+   * see what comes back *is* the inference the protocol forbids, and against a server that answers
+   * an unadvertised route with something plausible it is how a room acts on a guess.
+   */
+  describe('a capability discovery did not advertise', () => {
+    const routeFor: Record<string, string> = {
+      pairing: '/qbtcp/v1/pair',
+      assignment: '/qbtcp/v1/assignment',
+      progress: '/qbtcp/v1/sessions/sess-1/progress',
+      result: '/qbtcp/v1/sessions/sess-1/result',
+      recovery: '/qbtcp/v1/sessions/sess-1/recovery',
+      help: '/qbtcp/v1/help',
+      presence: '/qbtcp/v1/presence',
+    };
+    const every = Object.keys(routeFor);
 
-    const result = await new FruityServerClient('http://control.test', fetchImpl).requestHelp(
-      identity,
-      'protest',
-      'A ruling needs a person.',
-    );
+    const attempt = (client: FruityServerClient, capability: string) => {
+      if (capability === 'pairing') return client.join('48213906');
+      if (capability === 'assignment') return client.assignment(identity);
+      if (capability === 'progress') return client.putSnapshot(credentials, { tossups_read: 3 }, 41);
+      if (capability === 'result') return client.postFinal(credentials, { tossups_read: 20 });
+      if (capability === 'recovery') return client.recover(credentials);
+      if (capability === 'help') return client.requestHelp(identity, 'protest', 'A ruling needs a person.');
+      return client.updatePresence(identity, { ready: true });
+    };
 
-    expect(result.ok).toBe(false);
-    expect(calls.some((call) => call.path === '/qbtcp/v1/help')).toBe(false);
+    for (const capability of every) {
+      test(`is not requested: ${capability}`, async () => {
+        const withoutIt = every.filter((entry) => entry !== capability);
+        const { calls, fetchImpl } = recordingFetch((path) =>
+          path === '/qbtcp/v1' ? { body: { ...qbtcpDiscovery, capabilities: withoutIt } } : { body: {} },
+        );
+        const client = new FruityServerClient('http://control.test', fetchImpl);
+
+        const result = await attempt(client, capability);
+
+        expect(result.ok).toBe(false);
+        expect(result.ok === false && result.unsupported).toBe(true);
+        expect(calls.map((call) => call.path)).not.toContain(routeFor[capability]);
+      });
+    }
+
+    test('the room is told before it pairs, not after it has scored a game', async () => {
+      const { fetchImpl } = recordingFetch((path) =>
+        path === '/qbtcp/v1' ? { body: { ...qbtcpDiscovery, capabilities: ['pairing', 'assignment'] } } : { body: {} },
+      );
+      const client = new FruityServerClient('http://control.test', fetchImpl);
+      await client.verify();
+
+      // A server that cannot take a result is not one this room can score against, and finding that
+      // out at the end of a round is finding it out too late to do anything about.
+      expect(client.missingCapabilities()).toEqual(['result']);
+    });
+
+    test('a pre-QBTCP server is not measured against a document it does not publish', async () => {
+      const { fetchImpl } = recordingFetch((path) => (path === '/qbtcp/v1' ? { status: 404, body: {} } : { body: {} }));
+      const client = new FruityServerClient('http://control.test', fetchImpl);
+      await client.verify();
+
+      expect(client.isQbtcp).toBe(false);
+      expect(client.missingCapabilities()).toEqual([]);
+    });
   });
 });
 
-describe('which repair a refused write calls for', () => {
+describe('which repair a refusal calls for', () => {
   test('a refused session token reopens the session rather than asking for a code', () => {
     expect(classifyWrite({ ok: false, status: 401, error: 'no' })).toEqual({ sessionProblem: true, conflict: null });
+  });
+
+  /**
+   * The two the protocol is careful to separate, and the reason it is careful.
+   *
+   * `401` is a credential control does not accept: a new pairing code fixes it. `403` is a
+   * credential it accepts and will not act on — most often this page's origin missing from the
+   * server's allowlist — and no code a director can read out will change that. A client that reads
+   * the second as the first throws away a working room capability and sets the scorekeeper a task
+   * that cannot succeed, in the middle of a round.
+   */
+  test('an unrecognized credential asks for a new code', () => {
+    const classified = classifyPoll({ ok: false, status: 401, error: 'Unknown room token.' });
+
+    expect(classified.credentialProblem).toBe(true);
+    expect(classified.forbidden).toBe(false);
+  });
+
+  test('a credential that is recognized and refused keeps the pairing it already has', () => {
+    const classified = classifyPoll({
+      ok: false,
+      status: 403,
+      error: 'This browser origin is not approved.',
+      detail: 'This browser origin is not approved.',
+    });
+
+    expect(classified.credentialProblem).toBe(false);
+    expect(classified.forbidden).toBe(true);
+    // Not offline either: the server is right there, and answered.
+    expect(classified.connection).toBe(RoomConnectionState.Connected);
   });
 
   test('a writer conflict is a person’s decision, and the offer comes from the server', () => {

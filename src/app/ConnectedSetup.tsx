@@ -38,6 +38,7 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import BrandLogo from '../BrandLogo';
 import FruityServerClient, {
+  ApiResult,
   INormalizedAssignment,
   IRoomIdentity,
   IRoomListEntry,
@@ -47,7 +48,7 @@ import FruityServerClient, {
 import { IGameDefinition } from '../game/GameDefinition';
 import { gamePackageMatchup } from '../game/GamePackage';
 import { IPairedRoom, newDeviceId } from './ConnectedSession';
-import { assignmentPollIntervalMs } from './useConnectedRuntime';
+import { assignmentPollIntervalMs, forbiddenIn } from './useConnectedRuntime';
 
 export interface IConnectedStart {
   room: IPairedRoom;
@@ -107,6 +108,8 @@ export default function ConnectedSetup(props: {
   const [code, setCode] = useState('');
   const [roomId, setRoomId] = useState('');
   const [assignment, setAssignment] = useState<INormalizedAssignment | null>(null);
+  /** Control accepted this room's capability and refused the request anyway. */
+  const [forbidden, setForbidden] = useState('');
 
   const connect = async (event: FormEvent) => {
     event.preventDefault();
@@ -132,6 +135,18 @@ export default function ConnectedSetup(props: {
           ? 'Tournament control could not be reached from this browser.'
           : verified.error,
       );
+      return;
+    }
+    // Discovery is the authoritative statement of what this server does, so a server that cannot do
+    // the job says so here rather than at the end of a round. Naming what is missing matters: it is
+    // the difference between a director who can go and fix their server and one who cannot.
+    const missing = client.missingCapabilities();
+    if (missing.length > 0) {
+      setBusy(false);
+      setError(
+        `Tournament control at this address does not offer ${missing.join(', ')}. This room cannot score against it. A game file works with no server at all.`,
+      );
+      setUnreachable(true);
       return;
     }
     const identified = await client.identify();
@@ -177,6 +192,20 @@ export default function ConnectedSetup(props: {
     setStage({ kind: 'room', client: stage.client, room });
   };
 
+  /**
+   * A refusal, wherever on this screen it arrived.
+   *
+   * The same answer for reading the assignment, opening a session, and re-reading it afterwards:
+   * every one of those is the same credential against the same server, so a refusal of one is a
+   * refusal of all three, and pressing Start after it would only ask the same question again.
+   */
+  const noteForbidden = useCallback((result: ApiResult<unknown>): boolean => {
+    const refusal = forbiddenIn(result);
+    if (refusal === null) return false;
+    setForbidden(refusal);
+    return true;
+  }, []);
+
   const loadAssignment = useCallback(async () => {
     if (stage.kind !== 'room') return;
     setBusy(true);
@@ -186,22 +215,42 @@ export default function ConnectedSetup(props: {
     if (!result.ok) {
       // A refused room token is the one thing that sends a scorekeeper back to a pairing code. Any
       // other failure is the network's problem and the room keeps its capability.
-      if (result.status === 401 || result.status === 403) {
+      if (result.status === 401) {
         onRoomLost();
         setAssignment(null);
         setError('Tournament control no longer recognizes this room. Pair it again with a new code.');
         setStage({ kind: 'pair', client: stage.client, tournamentName: '', rooms: [] });
         return;
       }
+      // A credential control accepts and will not act on — most often this page's origin is not on
+      // the server's allowlist. The pairing is fine, so it is kept and the server's own explanation
+      // is shown; asking for a new code here would be asking for work that cannot help.
+      if (noteForbidden(result)) return;
       setError(result.error);
       return;
     }
+    setForbidden('');
     setAssignment(result.value);
     if (result.value.errors?.length) setError(result.value.errors.join(' '));
-  }, [stage, onRoomLost]);
+  }, [stage, onRoomLost, noteForbidden]);
 
   const loadRef = useRef(loadAssignment);
-  loadRef.current = loadAssignment;
+  /*
+   * Assigned from a committed effect rather than during render. A render can be thrown away and
+   * replayed, and a ref written during one holds a value from a pass that never happened; the
+   * readers here are all timers and event handlers, which run as their own tasks after the effects
+   * of any commit before them, so an effect is never the staler of the two options and is the only
+   * one that stays correct if this tree ever renders concurrently.
+   */
+  useEffect(() => {
+    loadRef.current = loadAssignment;
+  }, [loadAssignment]);
+
+  /** Read by the interval, which must see the current answer without being torn down and rebuilt. */
+  const forbiddenRef = useRef(forbidden);
+  useEffect(() => {
+    forbiddenRef.current = forbidden;
+  }, [forbidden]);
 
   // The room screen keeps itself current, so a scorekeeper who finishes a game and comes back here
   // sees the next assignment appear rather than having to ask for it. Only ever reached by a press,
@@ -209,9 +258,20 @@ export default function ConnectedSetup(props: {
   useEffect(() => {
     if (stage.kind !== 'room') return undefined;
     void loadRef.current();
-    const timer = setInterval(() => void loadRef.current(), assignmentPollIntervalMs);
+    const timer = setInterval(() => {
+      // "Surface it. Do not retry in a loop." A refusal of this kind does not change because it was
+      // asked again ten seconds later, so the room stops asking and Check again is the way back —
+      // an explicit press, which is what the rule leaves room for.
+      if (forbiddenRef.current !== '') return;
+      void loadRef.current();
+    }, assignmentPollIntervalMs);
     return () => clearInterval(timer);
   }, [stage]);
+
+  // Nothing to start against a server that will not answer for this room.
+  useEffect(() => {
+    if (forbidden !== '') setAssignment(null);
+  }, [forbidden]);
 
   const start = async () => {
     if (stage.kind !== 'room' || !assignment?.definition || !assignment.scheduledMatchId) return;
@@ -223,14 +283,18 @@ export default function ConnectedSetup(props: {
     const session = await stage.client.openSession(identity, assignment.scheduledMatchId);
     if (!session.ok) {
       setStarting(false);
-      setError(session.error);
+      if (!noteForbidden(session)) setError(session.error);
       return;
     }
     // Re-read the assignment so the game is built from the rosters as they stand at kickoff rather
     // than as they stood when the room paired, which may have been an hour ago.
     const current = await stage.client.assignment(identity);
     setStarting(false);
-    if (!current.ok || !current.value.definition) {
+    if (!current.ok) {
+      if (!noteForbidden(current)) setError(current.error);
+      return;
+    }
+    if (!current.value.definition) {
       setError('Tournament control started the game but did not say what to play.');
       return;
     }
@@ -343,6 +407,11 @@ export default function ConnectedSetup(props: {
             </p>
           ) : (
             <p className="shell-hint">{waiting}</p>
+          )}
+          {forbidden !== '' && (
+            <p className="shell-warning" role="alert">
+              {forbidden} This room is still paired — this is not something a new code fixes.
+            </p>
           )}
           {resumable && (
             <p className="shell-notice">Tournament control still has this room&apos;s game open.</p>

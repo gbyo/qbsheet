@@ -284,7 +284,11 @@ export class QbtcpAdapter extends BaseAdapter {
    * called it `accessToken`. Everything above holds one name for it, so the rename happens here
    * rather than at the place a token is read.
    */
-  override async join(code: string, roomId?: string): Promise<ApiResult<IJoinResult>> {
+  override join(code: string, roomId?: string): Promise<ApiResult<IJoinResult>> {
+    return this.guard('pairing', 'pairing', () => this.pair(code, roomId));
+  }
+
+  private async pair(code: string, roomId?: string): Promise<ApiResult<IJoinResult>> {
     const result = await this.request<unknown>(this.routes.pair, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -339,7 +343,11 @@ export class QbtcpAdapter extends BaseAdapter {
    * — an early server that shipped the assignment route first — the body speaks for itself, and a
    * `204` means the same thing `state: "none"` does.
    */
-  async assignment(identity: IRoomIdentity): Promise<ApiResult<INormalizedAssignment>> {
+  assignment(identity: IRoomIdentity): Promise<ApiResult<INormalizedAssignment>> {
+    return this.guard('assignment', 'assignments', () => this.readAssignment(identity));
+  }
+
+  private async readAssignment(identity: IRoomIdentity): Promise<ApiResult<INormalizedAssignment>> {
     const base = {
       roomId: identity.roomId,
       roomName: identity.roomName ?? identity.roomId,
@@ -418,7 +426,12 @@ export class QbtcpAdapter extends BaseAdapter {
     };
   }
 
-  async openSession(identity: IRoomIdentity, matchId: string): Promise<ApiResult<IOpenedSession>> {
+  /** Sessions are how an assignment is scored, so they are gated with it: QBTCP names no other. */
+  openSession(identity: IRoomIdentity, matchId: string): Promise<ApiResult<IOpenedSession>> {
+    return this.guard('assignment', 'assignments', () => this.startSession(identity, matchId));
+  }
+
+  private async startSession(identity: IRoomIdentity, matchId: string): Promise<ApiResult<IOpenedSession>> {
     const result = await this.request<unknown>(this.routes.openSession(identity.roomId), {
       method: 'POST',
       headers: this.roomHeaders(identity, 'application/json'),
@@ -466,6 +479,14 @@ export class QbtcpAdapter extends BaseAdapter {
    * with an invented field in it.
    */
   putProgress(credentials: ISessionCredentials, qbj: object, sequence: number): Promise<ApiResult<unknown>> {
+    return this.guard('progress', 'live progress', () => this.sendProgress(credentials, qbj, sequence));
+  }
+
+  private sendProgress(
+    credentials: ISessionCredentials,
+    qbj: object,
+    sequence: number,
+  ): Promise<ApiResult<unknown>> {
     return this.request(this.routes.progress(credentials.sessionId), {
       method: 'PUT',
       headers: this.sessionHeaders(credentials, 'application/json'),
@@ -473,7 +494,11 @@ export class QbtcpAdapter extends BaseAdapter {
     });
   }
 
-  async postResult(credentials: ISessionCredentials, qbj: object): Promise<ApiResult<IResultReceipt>> {
+  postResult(credentials: ISessionCredentials, qbj: object): Promise<ApiResult<IResultReceipt>> {
+    return this.guard('result', 'result submission', () => this.sendResult(credentials, qbj));
+  }
+
+  private async sendResult(credentials: ISessionCredentials, qbj: object): Promise<ApiResult<IResultReceipt>> {
     const result = await this.request<unknown>(this.routes.result(credentials.sessionId), {
       method: 'POST',
       headers: this.sessionHeaders(credentials, qbjMediaType),
@@ -493,12 +518,33 @@ export class QbtcpAdapter extends BaseAdapter {
     };
   }
 
-  /** Discovery is authoritative about support; the absence of an error is not. */
+  /**
+   * Refuse an operation this server did not say it supports.
+   *
+   * "A client MUST NOT infer support from the absence of an error. A client MUST NOT require a
+   * capability that discovery did not advertise." So the route is not requested at all, rather than
+   * probed to see what comes back — a probe is the inference the protocol forbids, and against a
+   * server that answers something unhelpful it is also how a room ends up acting on a guess.
+   */
   private unsupported(capability: string): ApiResult<never> {
     return {
       ok: false,
+      unsupported: true,
       error: `Tournament control does not offer ${capability} on this connection.`,
     };
+  }
+
+  private guard<T>(
+    capability: string,
+    described: string,
+    operation: () => Promise<ApiResult<T>>,
+  ): Promise<ApiResult<T>> {
+    if (!supports(this.discovery, capability)) return Promise.resolve(this.unsupported(described));
+    return operation();
+  }
+
+  override recover(credentials: ISessionCredentials): Promise<ApiResult<ISessionRecovery>> {
+    return this.guard('recovery', 'server-assisted recovery', () => super.recover(credentials));
   }
 
   override requestHelp(
@@ -506,13 +552,11 @@ export class QbtcpAdapter extends BaseAdapter {
     category: HelpRequestCategory,
     message: string,
   ): Promise<ApiResult<unknown>> {
-    if (!supports(this.discovery, 'help')) return Promise.resolve(this.unsupported('help requests'));
-    return super.requestHelp(identity, category, message);
+    return this.guard('help', 'help requests', () => super.requestHelp(identity, category, message));
   }
 
   override updatePresence(identity: IRoomIdentity, update: { ready?: boolean }): Promise<ApiResult<unknown>> {
-    if (!supports(this.discovery, 'presence')) return Promise.resolve(this.unsupported('presence'));
-    return super.updatePresence(identity, update);
+    return this.guard('presence', 'presence', () => super.updatePresence(identity, update));
   }
 }
 
@@ -643,6 +687,8 @@ export class LegacyAdapter extends BaseAdapter {
     });
   }
 
+  // Ungated, and it has to be: this surface has no discovery document to ask, so every capability
+  // question here is answered by trying. That is the deprecation, not an oversight.
   async postResult(credentials: ISessionCredentials, qbj: object): Promise<ApiResult<IResultReceipt>> {
     const result = await this.request<unknown>(this.routes.result(credentials.sessionId), {
       method: 'POST',

@@ -107,6 +107,156 @@ describe('connected room durability', () => {
   });
 
   /**
+   * The sequence has to survive a reload, and it cannot lean on the clock to do it.
+   *
+   * QBTCP requires the number to increase within a session and has servers discard a lower one
+   * *silently*, with a `200`. So a device that corrects its clock backward — an NTP sync, a manual
+   * change, a machine that booted without a network — would resume numbering below where it left
+   * off and spend the rest of the game filing snapshots that are accepted and thrown away. Nothing
+   * in that sequence of events produces an error for anybody to notice, which is the whole reason
+   * the high-water mark is stored rather than derived.
+   */
+  test('the progress sequence keeps rising across a reload that moved the clock backward', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-11T15:00:00.000Z'));
+
+    const sequences: number[] = [];
+    const persisted: number[] = [];
+    const client = {
+      ensureDiscovered: vi.fn(async () => null),
+      assignment: vi.fn(async () => ({ ok: true as const, value: assignmentWithNothingToPlay })),
+      putSnapshot: vi.fn(async (_credentials: unknown, _qbj: object, sequence: number) => {
+        sequences.push(sequence);
+        return { ok: true as const, value: {} };
+      }),
+    } as unknown as FruityServerClient;
+
+    const room = (progressSequence?: number) =>
+      renderHook(() =>
+        useConnectedRuntime({
+          client,
+          identity: { roomId: 'room-1', token: 'room-token' },
+          credentials: { sessionId: 'session-1', token: 'session-token' },
+          enabled: true,
+          progressSequence,
+          onProgressSequence: (sequence) => persisted.push(sequence),
+        }),
+      );
+
+    const before = room();
+    act(() => before.result.current.reportProgress({ tossups_read: 1 }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(progressIntervalMs);
+    });
+    expect(sequences).toHaveLength(1);
+    before.unmount();
+
+    // The tab reloads and the device's clock has been put back an hour in the meantime.
+    vi.setSystemTime(new Date('2026-04-11T14:00:00.000Z'));
+    const after = room(persisted[persisted.length - 1]);
+    act(() => after.result.current.reportProgress({ tossups_read: 2 }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(progressIntervalMs);
+    });
+
+    expect(sequences).toHaveLength(2);
+    expect(sequences[1]).toBeGreaterThan(sequences[0]);
+    // And what was stored is what was sent, so the next reload starts from the truth as well.
+    expect(persisted).toEqual(sequences);
+    after.unmount();
+  });
+
+  test('the sequence still rises within one session when the clock does not move at all', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-11T15:00:00.000Z'));
+    const sequences: number[] = [];
+    const client = {
+      ensureDiscovered: vi.fn(async () => null),
+      assignment: vi.fn(async () => ({ ok: true as const, value: assignmentWithNothingToPlay })),
+      putSnapshot: vi.fn(async (_credentials: unknown, _qbj: object, sequence: number) => {
+        sequences.push(sequence);
+        return { ok: true as const, value: {} };
+      }),
+    } as unknown as FruityServerClient;
+
+    const hook = renderHook(() =>
+      useConnectedRuntime({
+        client,
+        identity: { roomId: 'room-1', token: 'room-token' },
+        credentials: { sessionId: 'session-1', token: 'session-token' },
+        enabled: true,
+      }),
+    );
+
+    for (const tossups of [1, 2, 3]) {
+      act(() => hook.result.current.reportProgress({ tossups_read: tossups }));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(progressIntervalMs);
+      });
+    }
+
+    expect(sequences).toHaveLength(3);
+    expect(sequences).toEqual([...sequences].sort((first, second) => first - second));
+    expect(new Set(sequences).size).toBe(3);
+    hook.unmount();
+  });
+
+  /**
+   * A refusal stops the room asking, on the write path as well as the read one.
+   *
+   * "Surface it. Do not retry in a loop." The poll obeying that and the trailing snapshot sender
+   * not obeying it is the same defect twice: an origin outside the server's allowlist refuses
+   * *everything*, so a room that stopped polling but went on offering a snapshot every few seconds
+   * is still in the loop the protocol names — just a quieter one, and for the rest of the game.
+   */
+  test('a snapshot refused with 403 stops the room writing rather than retrying every few seconds', async () => {
+    vi.useFakeTimers();
+    const putSnapshot = vi.fn(async () => ({
+      ok: false as const,
+      status: 403,
+      error: 'This browser origin is not approved.',
+      detail: 'This browser origin is not approved.',
+    }));
+    const client = {
+      ensureDiscovered: vi.fn(async () => null),
+      assignment: vi.fn(async () => ({ ok: true as const, value: assignmentWithNothingToPlay })),
+      putSnapshot,
+    } as unknown as FruityServerClient;
+
+    const hook = renderHook(() =>
+      useConnectedRuntime({
+        client,
+        identity: { roomId: 'room-1', token: 'room-token' },
+        credentials: { sessionId: 'session-1', token: 'session-token' },
+        enabled: true,
+      }),
+    );
+
+    act(() => hook.result.current.reportProgress({ tossups_read: 1 }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(progressIntervalMs);
+    });
+    expect(putSnapshot).toHaveBeenCalledTimes(1);
+    expect(hook.result.current.automaticDelivery).toBe(false);
+
+    // Scoring carries on, and every further offer is dropped rather than sent.
+    for (const tossups of [2, 3, 4]) {
+      act(() => hook.result.current.reportProgress({ tossups_read: tossups }));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(progressIntervalMs + assignmentPollIntervalMs);
+      });
+    }
+    expect(putSnapshot).toHaveBeenCalledTimes(1);
+
+    // And the room is told, in the server's own words, without being asked for a pairing code.
+    const refusal = hook.result.current.alerts.find((alert) => alert.id === 'forbidden');
+    expect(refusal?.body).toContain('This browser origin is not approved.');
+    expect(hook.result.current.alerts.some((alert) => alert.id === 'credentials')).toBe(false);
+
+    hook.unmount();
+  });
+
+  /**
    * A blocked write is not a pending one.
    *
    * `pending` is a promise that something is still trying, and the completion screen makes it in
