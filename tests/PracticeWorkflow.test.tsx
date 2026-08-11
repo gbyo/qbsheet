@@ -43,6 +43,9 @@ test('practice requires its named starters, keeps mistakes editable, and advance
   const right = within(prompt).getByLabelText('Greenwood starters');
   const start = within(prompt).getByText('Start game');
 
+  expect(screen.getByText(/Start Gibson, Jeremy, Owen and Lachlan for Ninety Six/)).toBeTruthy();
+  expect(screen.queryByText(/Tick|untick|Reorder starters/i)).toBeNull();
+
   fireEvent.click(within(left).getByRole('button', { name: 'Start Gibson' }));
   fireEvent.click(within(right).getByRole('button', { name: 'Start Tucker' }));
   expect(start.hasAttribute('disabled')).toBe(true);
@@ -55,9 +58,7 @@ test('practice requires its named starters, keeps mistakes editable, and advance
   fireEvent.click(start);
 
   expect(screen.getByLabelText('Starting lineups')).toBeTruthy();
-  // Names the player who should not be on the floor and the one who should — not "does not match".
-  expect(screen.getByRole('alert').textContent).toContain('Olivia starts on the bench in this scenario');
-  expect(screen.getByRole('alert').textContent).toContain('Lachlan is missing from the floor');
+  expect(screen.getByRole('alert').textContent).toContain('Bench Olivia and start Lachlan.');
 
   fireEvent.click(within(left).getByRole('button', { name: 'Bench Olivia' }));
   fireEvent.click(within(left).getByRole('button', { name: 'Start Lachlan' }));
@@ -84,11 +85,7 @@ test('the right four in the wrong seats names the seat, the player in it, and wh
   const right = within(prompt).getByLabelText('Greenwood starters');
   const start = within(prompt).getByText('Start game');
 
-  // The seats follow the order the names were started in, so starting the four back to front seats
-  // them back to front.
-  // Practice needs its own order — a seat is a keyboard number and a tossups-heard row — but it has to
-  // say which seat is wrong, because four identical names in two orders is not a difference anybody can
-  // see by looking.
+  // Start the right names in the wrong order so practice can teach the real seat-order controls.
   for (const name of ['Lachlan', 'Owen', 'Jeremy', 'Gibson'])
     fireEvent.click(within(left).getByRole('button', { name: `Start ${name}` }));
   for (const name of ['Tucker', 'Phillip', 'Efren', 'Valerie'])
@@ -96,13 +93,10 @@ test('the right four in the wrong seats names the seat, the player in it, and wh
   fireEvent.click(start);
 
   const alert = screen.getByRole('alert');
-  expect(alert.textContent).toContain("Lachlan is in Ninety Six's seat 1");
-  expect(alert.textContent).toContain('this scenario needs Gibson there');
-  // And points at the control that fixes it, which is now the arrows on the row itself.
-  expect(alert.textContent).toContain('↑ and ↓ arrows');
+  expect(alert.textContent).toContain('Use the ↑/↓ controls to put Gibson, Jeremy, Owen and Lachlan in that order.');
   expect(screen.getByLabelText('Starting lineups')).toBeTruthy();
 
-  // Started again in the order the guide lists, the same four names are accepted.
+  // Bench the wrong order, then start the names in the order the guide lists.
   for (const name of ['Lachlan', 'Owen', 'Jeremy', 'Gibson'])
     fireEvent.click(within(left).getByRole('button', { name: `Bench ${name}` }));
   for (const name of ['Gibson', 'Jeremy', 'Owen', 'Lachlan'])
