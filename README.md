@@ -6,7 +6,7 @@ file without an account, a database, or a network connection.
 
 QBSheet reads and writes QBJ, and it connects to tournament-control software with QBTCP.
 
-QBSheet owns the browser-safe scorer core and the QBJ parsing that both applications share. Fruity
+QBSheet owns the browser-safe scorer core and the QBJ parsing that both applications share. Fruity, or another stats app compatible with QBTCP
 consumes that same core through the package entry point. The desktop application and the browser
 application therefore hold no separate scoring engine and no separate QBJ reader.
 
