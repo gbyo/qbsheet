@@ -7,8 +7,14 @@ async function startPracticeGame(page: import('@playwright/test').Page): Promise
   await page.getByRole('button', { name: 'Practice scoring' }).click();
 
   await expect(page.getByRole('heading', { name: 'Who is starting?' })).toBeVisible();
-  for (const player of ['Gibson', 'Jeremy', 'Owen', 'Lachlan', 'Tucker', 'Phillip', 'Efren', 'Valerie']) {
-    await page.getByLabel(player, { exact: true }).check();
+  const prompt = page.getByLabel('Starting lineups');
+  const left = prompt.getByLabel('Ninety Six starters');
+  const right = prompt.getByLabel('Greenwood starters');
+  for (const player of ['Gibson', 'Jeremy', 'Owen', 'Lachlan']) {
+    await left.getByRole('button', { name: `Start ${player}` }).click();
+  }
+  for (const player of ['Tucker', 'Phillip', 'Efren', 'Valerie']) {
+    await right.getByRole('button', { name: `Start ${player}` }).click();
   }
   // The minimized guide quotes the step it is on, and step 1 tells you to choose Start game, so
   // the accessible name has to match exactly to pick the scoresheet's own button out of the two.

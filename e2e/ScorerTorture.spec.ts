@@ -42,8 +42,14 @@ async function openGeneratedGame(page: Page): Promise<void> {
   });
 
   await expect(page.getByRole('heading', { name: 'Who is starting?' })).toBeVisible();
-  for (const player of ['Sarah Mitchell', 'James Okafor', 'Emma Chen', 'Jordan Blake']) {
-    await page.getByLabel(player, { exact: true }).check();
+  const prompt = page.getByLabel('Starting lineups');
+  const left = prompt.getByLabel('Ninety Six A starters');
+  const right = prompt.getByLabel('Greenwood starters');
+  for (const player of ['Sarah Mitchell', 'James Okafor']) {
+    await left.getByRole('button', { name: `Start ${player}` }).click();
+  }
+  for (const player of ['Emma Chen', 'Jordan Blake']) {
+    await right.getByRole('button', { name: `Start ${player}` }).click();
   }
   await page.getByRole('button', { name: 'Start game' }).click();
   await expect(page.getByText('Tossup 1 of 20', { exact: true })).toBeVisible();
@@ -115,13 +121,14 @@ test('production keyboard scoring records seat rulings, bonuses, and safe focus 
   await page.keyboard.press('c');
   await expect(page.getByLabel('Ninety Six A score')).toHaveText('10');
   await expect(page.getByLabel('Bonus')).toBeVisible();
-  await page.keyboard.press('3');
+  // The bonus digit is the number of parts, so two parts — 20 points here — is 2.
+  await page.keyboard.press('2');
   await expect(page.getByText('Tossup 2 of 20', { exact: true })).toBeVisible();
 
   await page.keyboard.press('2');
   await page.keyboard.press('p');
   await expect(page.getByLabel('Ninety Six A score')).toHaveText('45');
-  await page.keyboard.press('2');
+  await page.keyboard.press('1');
   await expect(page.getByText('Tossup 3 of 20', { exact: true })).toBeVisible();
 
   // 5 is the first right seat. Its negative leaves the other team eligible, so Space then records the
