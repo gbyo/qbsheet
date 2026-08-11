@@ -178,9 +178,9 @@ export const practiceSteps: IPracticeStep[] = [
     title: 'Set the starting lineups',
     call: 'Before the game starts, each team has five players available.',
     instruction:
-      'Tick Gibson, Jeremy, Owen and Lachlan for Ninety Six, and Tucker, Phillip, Efren and Valerie for Greenwood, then choose Start game.',
+      'Tick Gibson, Jeremy, Owen and Lachlan for Ninety Six, and Tucker, Phillip, Efren and Valerie for Greenwood — in that order — then choose Start game.',
     hint:
-      'Only four of each five may be on the floor, so leave Olivia and Bella unticked. Start game stays disabled until both teams have exactly four.',
+      'Only four of each five may be on the floor, so leave Olivia and Bella unticked. The order matters: the order you tick is the order they sit, and the seat numbers it produces are what the rest of this guide names and what the keyboard addresses. Reorder starters moves somebody without starting again. Start game stays disabled until both teams have exactly four.',
     success: 'Good. The scorer now knows who should receive tossups heard from question 1.',
     section: 'Get ready',
     expectation: { kind: 'lineup' },
