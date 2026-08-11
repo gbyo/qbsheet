@@ -68,7 +68,8 @@ import useScreenWakeLock from './useScreenWakeLock';
 import { formatClock, roomClockSegment } from './RoomClock';
 import useScorerKeyboard from './useScorerKeyboard';
 import KeyboardMap, { KeyboardMapContext } from './KeyboardMap';
-import { sequenceLegend, bonusKeyLegend } from './KeyboardScoring';
+import KeyboardStatus, { type KeyboardStatus as IKeyboardStatus } from './KeyboardStatus';
+import { availableActionKeys, keyboardActionNames, sequenceLegend, bonusKeyLegend } from './KeyboardScoring';
 import { rulingLabel, unreachableAnswerTypes } from './tossupRulings';
 import { setKeyboardEnabled } from './keyboardPreference';
 import useKeyboardEnabled from './useKeyboardEnabled';
@@ -693,6 +694,22 @@ export default function Scorer(props: IScorerProps) {
     return () => window.clearTimeout(timer);
   }, [keyEcho]);
 
+  /**
+   * The running commentary on the keyboard sequence, shown at the bottom of the screen.
+   *
+   * Distinct from `keyEcho`, which is a wash on a roster row and says only *where* a ruling landed.
+   * This says what the keyboard is doing and survives long enough to be read: a chosen seat stays up
+   * until it resolves or expires, and the ruling it resolves to stays up on its own timer.
+   */
+  const [keyStatus, setKeyStatus] = useState<IKeyboardStatus | null>(null);
+  useEffect(() => {
+    // A waiting seat has no timer of its own. The keyboard layer already expires it and says so, and a
+    // second countdown here would be a copy of that rule, free to disagree with it.
+    if (keyStatus?.kind !== 'ruled') return undefined;
+    const timer = window.setTimeout(() => setKeyStatus(null), 1400);
+    return () => window.clearTimeout(timer);
+  }, [keyStatus]);
+
   useScorerKeyboard({
     keyboardEnabled,
     format,
@@ -708,7 +725,21 @@ export default function Scorer(props: IScorerProps) {
     onNoBuzz: recordNoBuzz,
     onUndo: events.undo,
     onRedo: events.redo,
-    onEcho: ({ side, seat }) => setKeyEcho({ side, seat }),
+    onSeatArmed: (seat) => setKeyStatus({ kind: 'armed', seat, actions: availableActionKeys(format, negsAvailable) }),
+    onSequenceCleared: () => setKeyStatus(null),
+    onEcho: ({ side, seat, number, playerName, action, answerType }) => {
+      setKeyEcho({ side, seat });
+      setKeyStatus({
+        kind: 'ruled',
+        seat: { side, seat, number, playerName },
+        // The name of the action plus what this format pays for it. A wrong answer with no penalty has
+        // no answer type behind it, and saying "0" is more honest than inventing a ruling for it.
+        ruling:
+          answerType === null
+            ? `${keyboardActionNames[action]} 0`
+            : `${keyboardActionNames[action]} ${rulingLabel(answerType)}`,
+      });
+    },
   });
 
   /**
@@ -1248,6 +1279,10 @@ export default function Scorer(props: IScorerProps) {
           <RecentRail game={game} onInspect={(questionNumber) => openReviewAt(questionNumber, true)} />
         </div>
       )}
+
+      {/* Outside the body and pinned to the viewport, so a long roster cannot scroll the one thing on
+          screen that is only true for the next second and a half out of sight. */}
+      {keyboardEnabled && <KeyboardStatus status={keyStatus} />}
 
       <footer className="scorer-footer">
         <button type="button" className="scorer-action" onClick={events.undo} disabled={!events.canUndo}>

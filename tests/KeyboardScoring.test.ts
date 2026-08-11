@@ -5,6 +5,7 @@
 import { describe, expect, test } from 'vitest';
 import {
   actionForKey,
+  availableActionKeys,
   bonusKeyLegend,
   bonusOptionForCode,
   keyboardActionLabels,
@@ -173,6 +174,27 @@ describe('the sequence legend', () => {
     expect(rows.find((row) => row.keys === 'seat → P')?.meaning).toBe('no power in this format');
     expect(rows.find((row) => row.keys === 'seat → N')?.available).toBe(false);
     expect(rows.find((row) => row.keys === 'seat → 0')?.available).toBe(true);
+  });
+});
+
+describe('the keys offered to a seat that is waiting', () => {
+  // The legend keeps unavailable rows and strikes them through, because it is a reference to the whole
+  // layout. This prompt is the opposite: it is offered mid-sequence, and a key it lists that then does
+  // nothing is worse than one it never mentioned.
+  test('every action a format can pay for', () => {
+    expect(availableActionKeys(powersFormat, true)).toEqual(['C', 'P', 'N', '0']);
+  });
+
+  test('a format with no power does not offer P', () => {
+    expect(availableActionKeys(flatFormat, true)).toEqual(['C', 'N', '0']);
+  });
+
+  test('a tossup nobody can neg on does not offer N', () => {
+    expect(availableActionKeys(powersFormat, false)).toEqual(['C', 'P', '0']);
+  });
+
+  test('the wrong answer is always offered — it costs the format nothing', () => {
+    expect(availableActionKeys(flatFormat, false)).toEqual(['C', '0']);
   });
 });
 

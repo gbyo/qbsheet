@@ -40,6 +40,20 @@ export const keyboardActionLabels = {
 
 export type KeyboardAction = keyof typeof keyboardActionLabels;
 
+/**
+ * What each action is called when it is read back to the scorekeeper.
+ *
+ * A name, never a value. "Power" is what P means in every format; what a power is *worth* comes from
+ * the format and is appended by the caller, so this table stays true for a tournament whose power is
+ * 20 and for one that has no power at all.
+ */
+export const keyboardActionNames: Record<KeyboardAction, string> = {
+  correct: 'Correct',
+  power: 'Power',
+  neg: 'Neg',
+  wrong: 'Wrong',
+};
+
 export interface ISeatKey {
   side: LeftOrRight;
   /** Zero-based position among the players currently on the floor, in the room's own order. */
@@ -100,6 +114,22 @@ export function rulingForAction(
   if (!negsAvailable) return null;
   const answerType = negRuling(format);
   return answerType ? { kind: 'buzz', answerType } : null;
+}
+
+/**
+ * The action keys that would land right now, for the prompt shown while a seat is waiting.
+ *
+ * Drawn from the same resolution the keystroke itself uses, so the prompt cannot offer a key that
+ * does nothing. A format with no power leaves P out of the prompt rather than listing it and then
+ * swallowing it.
+ */
+export function availableActionKeys(format: IScorekeeperFormat, negsAvailable: boolean): string[] {
+  const scoring: Exclude<KeyboardAction, 'wrong'>[] = ['correct', 'power', 'neg'];
+  const keys = scoring
+    .filter((action) => rulingForAction(format, action, negsAvailable) !== null)
+    .map((action) => keyboardActionLabels[action]);
+  // Wrong-with-no-penalty needs nothing from the format: every format can record a used chance.
+  return [...keys, keyboardActionLabels.wrong];
 }
 
 export interface IKeyLegendEntry {

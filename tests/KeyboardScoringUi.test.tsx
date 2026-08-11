@@ -608,3 +608,107 @@ describe('the bonus', () => {
     expect(leftScore()).toContain('10');
   });
 });
+
+describe('the readout at the bottom of the screen', () => {
+  /** The readout region, which is always mounted so it can be watched. */
+  function region(): HTMLElement {
+    return screen.getByRole('status', { name: 'Keyboard shortcut status' });
+  }
+
+  /** The pill inside it, or null while the readout has nothing to say. */
+  function readout(): HTMLElement | null {
+    return region().querySelector('p');
+  }
+
+  test('a seat on its own names the person it addresses', async () => {
+    // The half-finished sequence is the whole reason this exists. Pressing 2 changes nothing else on
+    // screen, and the scorekeeper has to be able to see that the next letter will score James Okafor.
+    await openScoringWithKeyboard();
+
+    await pressRawKey('Digit2', { key: '2' });
+
+    const status = readout();
+    expect(status).not.toBeNull();
+    expect(status).toHaveTextContent('2');
+    expect(status).toHaveTextContent('James Okafor');
+    // Nothing recorded yet — a named seat is not a ruling.
+    expect(leftScore()).toBe('0');
+  });
+
+  test('the waiting seat offers only the keys this format can pay for', async () => {
+    await openScoringWithKeyboard();
+
+    await pressRawKey('Digit1', { key: '1' });
+
+    const status = region();
+    for (const key of ['C', 'P', 'N', '0']) {
+      expect(within(status).getByText(key)).toBeInTheDocument();
+    }
+  });
+
+  test('the completed sequence reads back the ruling and its value', async () => {
+    await openScoringWithKeyboard();
+
+    await pressSequence(1, 'p');
+
+    const status = region();
+    expect(status).toHaveTextContent('Sarah Mitchell');
+    // The name of the action and what this format pays for it, not the bare number.
+    expect(status).toHaveTextContent('Power +15');
+  });
+
+  test('a neg is read back as a neg', async () => {
+    await openScoringWithKeyboard();
+
+    await pressSequence(5, 'n');
+
+    expect(region()).toHaveTextContent('Neg −5');
+  });
+
+  test('a wrong answer with no penalty says so rather than inventing a ruling', async () => {
+    await openScoringWithKeyboard();
+
+    await pressSequence(1, '0');
+
+    expect(region()).toHaveTextContent('Wrong 0');
+  });
+
+  test('the ruling clears itself', async () => {
+    await openScoringWithKeyboard();
+
+    await pressSequence(1, 'c');
+    expect(readout()).not.toBeNull();
+
+    await waitFor(() => expect(readout()).toBeNull(), { timeout: 4000 });
+  });
+
+  test('a seat abandoned by a key that is not an action stops being shown', async () => {
+    await openScoringWithKeyboard();
+
+    await pressRawKey('Digit1', { key: '1' });
+    expect(readout()).not.toBeNull();
+
+    await pressRawKey('KeyQ', { key: 'q' });
+
+    expect(readout()).toBeNull();
+    expect(leftScore()).toBe('0');
+  });
+
+  test('a seat aimed at nobody says nothing', async () => {
+    // The fixture fields three a side. Naming an empty seat would be confirming a ruling that cannot
+    // happen, which is worse than the silence the keystroke already gets.
+    await openScoringWithKeyboard();
+
+    await pressRawKey('Digit4', { key: '4' });
+
+    expect(readout()).toBeNull();
+  });
+
+  test('there is no readout at all with the layer switched off', async () => {
+    await openScoringWithoutKeyboard();
+
+    await pressRawKey('Digit1', { key: '1' });
+
+    expect(screen.queryByRole('status', { name: 'Keyboard shortcut status' })).toBeNull();
+  });
+});
