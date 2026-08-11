@@ -54,6 +54,12 @@ export const seatKeyLabels: Record<LeftOrRight, readonly string[]> = {
   right: ['J', 'K', 'L', ';'],
 };
 
+/** Shortcut labels shared by the live map and guided-practice hints. */
+export const keyboardShortcutLabels = {
+  noBuzz: 'Space',
+  undo: 'Ctrl/⌘ + Z',
+} as const;
+
 /** How many seats the layout can address per side. Beyond this, the buttons are the only way. */
 export const keyboardSeatCount = 4;
 
