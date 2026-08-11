@@ -61,7 +61,12 @@ async function openReviewWithKeyboard(page: Page): Promise<void> {
   await gameMenu.focus();
   await gameMenu.press('ArrowDown');
   const review = page.getByRole('menuitem', { name: 'Full scoresheet review' });
-  for (let move = 0; move < 4; move += 1) await page.keyboard.press('ArrowDown');
+  const menuItems = page.getByRole('menuitem');
+  const labels = await menuItems.allTextContents();
+  const reviewIndex = labels.findIndex((label) => label.trim() === 'Full scoresheet review');
+  expect(reviewIndex).toBeGreaterThanOrEqual(0);
+  await page.keyboard.press('Home');
+  for (let move = 0; move < reviewIndex; move += 1) await page.keyboard.press('ArrowDown');
   await expect(review).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(page.getByRole('dialog', { name: 'Full scoresheet review' })).toBeVisible();
