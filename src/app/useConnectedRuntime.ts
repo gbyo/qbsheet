@@ -60,6 +60,7 @@ import FruityServerClient, {
 import { ServerDeliveryState } from '../game/GameStore';
 import { ProgressSender } from '../integrations/fruity/FruityResultDestination';
 import { HelpRequestCategory } from './HelpRequests';
+import { ConnectionTimeline, connectionTimeline } from './ConnectionTimeline';
 
 /** How often a room asks control what it should be playing. */
 export const assignmentPollIntervalMs = 10_000;
@@ -111,6 +112,14 @@ export interface IConnectedRuntimeInput {
   progressSequence?: number;
   /** A sequence has been used. Persist it before it can matter; nothing else changed. */
   onProgressSequence?: (sequence: number) => void;
+  /**
+   * Where this room's connection history is written.
+   *
+   * Injectable because the history is the only externally visible evidence that the repairs below
+   * happened at all, which makes it the only thing a test can assert about them. Defaults to the
+   * device-wide buffer; see `ConnectionTimeline`.
+   */
+  timeline?: ConnectionTimeline;
 }
 
 export interface IConnectedRuntime {
@@ -198,6 +207,7 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     onCredentialsRepaired,
     progressSequence,
     onProgressSequence,
+    timeline = connectionTimeline,
   } = input;
 
   const [connection, setConnection] = useState(RoomConnectionState.Connected);
@@ -285,13 +295,19 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
    * every few seconds for the rest of the game — the one thing the protocol names about this
    * status, and the reason it names it.
    */
-  const noteWrite = useCallback((result: ApiResult<unknown>) => {
-    const refusal = forbiddenIn(result);
-    if (refusal !== null) setForbidden(refusal);
-    const classified = classifyWrite(result);
-    if (classified.sessionProblem) setSessionCredentialProblem(true);
-    if (classified.conflict) setWriterConflict(classified.conflict);
-  }, []);
+  const noteWrite = useCallback(
+    (result: ApiResult<unknown>) => {
+      const refusal = forbiddenIn(result);
+      if (refusal !== null) setForbidden(refusal);
+      const classified = classifyWrite(result);
+      if (classified.sessionProblem) setSessionCredentialProblem(true);
+      if (classified.conflict) {
+        setWriterConflict(classified.conflict);
+        timeline.record('writer-conflict');
+      }
+    },
+    [timeline],
+  );
 
   /**
    * Reopen this room's session with the room capability it still holds.
@@ -309,9 +325,13 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     if (!opened.ok) {
       noteWrite(opened);
       setRepairMessage(opened.error);
+      timeline.record('session-reopen-failed', opened.error);
       return false;
     }
     setRepairMessage(undefined);
+    // The line that makes the repair visible afterwards. Nothing on screen changes when this works,
+    // which is the point of it and also why it has to be written down somewhere.
+    timeline.record('session-reopened');
     setSessionCredentialProblem(false);
     // Reopening said another device is writing, which is worth telling the room. It did not say
     // this room may take that away, and inventing the offer here would put a takeover button in
@@ -325,7 +345,7 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     autoRepairAttempted.current = false;
     onCredentialsRepaired?.({ sessionId: opened.value.sessionId, sessionToken: opened.value.token });
     return true;
-  }, [client, identity, scheduledMatchId, onCredentialsRepaired, noteWrite]);
+  }, [client, identity, scheduledMatchId, onCredentialsRepaired, noteWrite, timeline]);
 
   const takeOverWriter = useCallback(async () => {
     const result = await client.takeWriter(identity, credentials);
@@ -336,8 +356,9 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     }
     setRepairMessage(undefined);
     setWriterConflict(null);
+    timeline.record('writer-taken');
     onCredentialsRepaired?.({ sessionId: result.value.sessionId, sessionToken: result.value.token });
-  }, [client, identity, credentials, onCredentialsRepaired, noteWrite]);
+  }, [client, identity, credentials, onCredentialsRepaired, noteWrite, timeline]);
 
   /**
    * One unattended reopen per session problem, and no more.
@@ -366,12 +387,14 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
         if (result.ok) {
           setServerSnapshotAt(Date.now());
           setSnapshotError(undefined);
+          timeline.record('progress-sent');
         } else {
           setSnapshotError(result.detail);
+          timeline.record('progress-refused', result.detail ?? result.error);
           noteWrite(result);
         }
       }),
-    [client, credentials, noteWrite, nextSequence],
+    [client, credentials, noteWrite, nextSequence, timeline],
   );
   useEffect(() => () => sender.stop(), [sender]);
 
@@ -388,7 +411,13 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
       if (cancelled) return;
       const classified = classifyPoll(result);
       setConnection(classified.connection);
-      if (classified.credentialProblem) setRoomCredentialProblem(true);
+      // Only transitions are kept; a poll every ten seconds all day would otherwise be the whole
+      // history. See `ConnectionTimeline`.
+      timeline.record(classified.connection);
+      if (classified.credentialProblem) {
+        setRoomCredentialProblem(true);
+        timeline.record('room-refused');
+      }
       const refusal = forbiddenIn(result);
       if (refusal !== null) setForbidden(refusal);
       if (!result.ok) {
@@ -405,6 +434,7 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
       const assignment = result.value;
       if (tournamentKey && assignment.tournamentKey && assignment.tournamentKey !== tournamentKey) {
         setTournamentSwitched(true);
+        timeline.record('tournament-switched');
         return;
       }
       if (
@@ -414,6 +444,7 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
         assignment.scheduledMatchId !== scheduledMatchId
       ) {
         setReassigned(true);
+        timeline.record('reassigned');
       }
 
       // A successful poll proves the room can reach and authenticate to control again. Re-offer the
@@ -428,7 +459,7 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
       cancelled = true;
       clearInterval(timer);
     };
-  }, [client, identity, scheduledMatchId, tournamentKey, enabled, sender]);
+  }, [client, identity, scheduledMatchId, tournamentKey, enabled, sender, timeline]);
 
   const alerts = useMemo<IScorerAlert[]>(() => {
     const list: IScorerAlert[] = [];
@@ -520,19 +551,25 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
       // retrying on its behalf, so calling that pending would be telling a scorekeeper to wait for
       // something that is never coming.
       if (!writesAllowedRef.current) {
+        timeline.record('final-refused', 'this room is not authorized to send results');
         return { delivery: 'rejected', detail: 'This room is not currently authorized to send results.' };
       }
       const result = await client.postFinal(credentials, qbj);
-      if (result.ok) return { delivery: 'sent', duplicate: result.value.duplicate };
+      if (result.ok) {
+        timeline.record(result.value.duplicate ? 'final-duplicate' : 'final-sent');
+        return { delivery: 'sent', duplicate: result.value.duplicate };
+      }
       noteWrite(result);
       // Nothing answered, so nothing refused it: worth retrying, and the room can be told to wait.
       // A capability this server never advertised is not that — no request went out, and none will.
       if (result.status === undefined && !result.unsupported) {
+        timeline.record('final-pending', result.error);
         return { delivery: 'pending', detail: result.error };
       }
+      timeline.record('final-refused', result.detail ?? result.error);
       return { delivery: 'rejected', detail: result.detail ?? result.error };
     },
-    [client, credentials, noteWrite],
+    [client, credentials, noteWrite, timeline],
   );
 
   const recoverFromServer = useCallback(async () => {
@@ -544,20 +581,28 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
   const syncRosterPlayer = useCallback(
     async (teamName: string, playerName: string) => {
       const result = await client.addRosterPlayer(identity, credentials, teamName, playerName);
-      if (result.ok) return { ok: true };
+      if (result.ok) {
+        timeline.record('roster-synced');
+        return { ok: true };
+      }
       // A refusal that reached control is a decision about the roster; a failure that did not is a
       // network problem the room can try again. The scorer says different things about each.
       return { ok: false, error: result.error, rejected: result.status !== undefined };
     },
-    [client, identity, credentials],
+    [client, identity, credentials, timeline],
   );
 
   const requestControl = useCallback(
     async (category: HelpRequestCategory, message: string) => {
       const result = await client.requestHelp(identity, category, message);
-      if (result.ok) setControlRequestPending(true);
+      if (result.ok) {
+        setControlRequestPending(true);
+        // The category, never the message. What a scorekeeper typed is theirs, and a diagnostics file
+        // is not the place for it.
+        timeline.record('control-requested', category);
+      }
     },
-    [client, identity],
+    [client, identity, timeline],
   );
 
   return {

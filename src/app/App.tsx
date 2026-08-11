@@ -24,9 +24,17 @@
  * lifetimes. Pairing writes the room half immediately, starting a game adds the session half, and
  * finishing a game returns to the room rather than to the front door — because a Chromebook that
  * spent the morning as Room 204 is still Room 204 after the buzzer.
+ *
+ * # This file is the only thing that says an update may be applied
+ *
+ * It is also the only thing that knows, because "is a game on screen" is precisely the state it holds.
+ * The declaration is made from the screen union below rather than from anything a component reports
+ * about itself, so a new screen is safe by default: it does not permit updates until somebody adds it
+ * to the list that does. See `AppUpdate`.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GameStore, IStoredGameRecord, isActive, needsHandoff } from '../game/GameStore';
+import { IUnreadableRecord } from '../game/GameRecordUpgrade';
 import { IGamePackage, gamePackageIdentity } from '../game/GamePackage';
 import { openRecordStore } from '../persistence/GameDatabase';
 import { claimGame, IGameClaim, newTabId } from '../persistence/TabClaim';
@@ -50,8 +58,43 @@ import GameOriginNotice from './GameOriginNotice';
 import CompletionScreen from './CompletionScreen';
 import DuplicateTabNotice from './DuplicateTabNotice';
 import DeviceReadiness from './DeviceReadiness';
+import AssignmentConfirmation from './AssignmentConfirmation';
+import FruityServerClient from '../integrations/fruity/FruityServerClient';
+import { HelpRequestCategory } from './HelpRequests';
+import { connectionTimeline } from './ConnectionTimeline';
+import { useReplaceable } from '../pwa/useAppUpdate';
 
-type Screen =
+/**
+ * Whether the application may be replaced by a newer build while this screen is up.
+ *
+ * An allow-list, so the answer for a screen nobody has thought about is no.
+ *
+ * `scoring` is the screen this exists to protect. `practice` is refused too, because a half-finished
+ * practice game is somebody learning the software and restarting it under them teaches the wrong
+ * lesson. `duplicate` holds no game itself, but the tab that does is elsewhere on this device and a
+ * worker swap is origin-wide, so it also says no. `completed` is refused for a different reason: the
+ * result is safe, but that screen is where the QBJ backup and the handoff confirmation are asked for,
+ * and a reload sends the scorekeeper looking through Recent Games for a job they were halfway through.
+ *
+ * What is left is the front door, the room screen between rounds, and the readiness screen — which is
+ * exactly where somebody checking versions is standing anyway.
+ */
+export function updatesAllowedOn(screen: Screen): boolean {
+  return screen.kind === 'home' || screen.kind === 'connect' || screen.kind === 'readiness';
+}
+
+/**
+ * Whether an assignment should be confirmed before it is scored against.
+ *
+ * Only for a game nothing has been scored into yet. A room that reloaded mid-round is resuming, not
+ * arriving: it has already checked the packet, it is under more time pressure than it was at kickoff,
+ * and putting a card in front of it would be asking it to re-approve a game it is in the middle of.
+ */
+export function needsAssignmentConfirmation(record: IStoredGameRecord): boolean {
+  return isActive(record) && record.events.length === 0;
+}
+
+export type Screen =
   | { kind: 'loading' }
   | { kind: 'home' }
   /**
@@ -64,6 +107,14 @@ type Screen =
   | { kind: 'connect'; fresh: boolean }
   | { kind: 'readiness' }
   | { kind: 'practice' }
+  /**
+   * The assignment, put in front of somebody before anything is scored against it.
+   *
+   * A screen of its own rather than a step inside the scorer, because the record already exists by the
+   * time this is on screen — the game is saved and resumable — and because the actions on it are about
+   * the *assignment*, which the scorer knows nothing about.
+   */
+  | { kind: 'confirm'; recordId: string }
   | { kind: 'scoring'; recordId: string }
   | { kind: 'completed'; recordId: string }
   /** Another live tab on this device is already scoring the game that was asked for. */
@@ -82,6 +133,7 @@ export function setupFromPackage(packageValue: IGamePackage): IGameSetup {
 export default function App() {
   const [store, setStore] = useState<GameStore | null>(null);
   const [records, setRecords] = useState<IStoredGameRecord[]>([]);
+  const [unreadable, setUnreadable] = useState<IUnreadableRecord[]>([]);
   const [screen, setScreen] = useState<Screen>({ kind: 'loading' });
   const [connection, setConnection] = useState<IConnectedSession | null>(null);
   const [pendingBaseUrl, setPendingBaseUrl] = useState('');
@@ -91,6 +143,10 @@ export default function App() {
 
   const refresh = useCallback(async (openStore: GameStore) => {
     setRecords(await openStore.list());
+    // Read after `list`, which is what populates it. A game this build cannot open is a fact the room
+    // has to be told, because the alternative — an unfinished game that is simply not on the screen
+    // any more — is indistinguishable from having lost it. See `GameRecordUpgrade`.
+    setUnreadable(openStore.unreadable);
   }, []);
 
   useEffect(() => {
@@ -103,6 +159,7 @@ export default function App() {
       if (cancelled) return;
       setStore(opened);
       setRecords(listed);
+      setUnreadable(opened.unreadable);
       setConnection(readConnection());
       setScreen({ kind: 'home' });
     })();
@@ -134,6 +191,8 @@ export default function App() {
     handoffOutstanding,
   });
 
+  useReplaceable(updatesAllowedOn(screen));
+
   /** Take the tab claim for a game, and say whether we got it. */
   const takeClaim = useCallback(async (recordId: string): Promise<boolean> => {
     claim.current?.release();
@@ -142,14 +201,31 @@ export default function App() {
     return taken.held;
   }, []);
 
+  /**
+   * Put a game on screen.
+   *
+   * `confirmAssignment` is set by the connected path and not by the file one, and the asymmetry is
+   * deliberate. A connected assignment *arrives*: nobody in the room chose it, and the round, the
+   * packet and the two teams are all things tournament control decided and could have decided wrongly.
+   * A file game was picked seconds earlier from a list showing the matchup, so a card asking whether
+   * that was really the intended game is a tap on every game to re-confirm a choice just made.
+   */
   const openRecord = useCallback(
-    async (record: IStoredGameRecord) => {
+    async (record: IStoredGameRecord, options: { confirmAssignment?: boolean } = {}) => {
       if (!isActive(record)) {
         setScreen({ kind: 'completed', recordId: record.id });
         return;
       }
       const held = await takeClaim(record.id);
-      setScreen(held ? { kind: 'scoring', recordId: record.id } : { kind: 'duplicate', recordId: record.id });
+      if (!held) {
+        setScreen({ kind: 'duplicate', recordId: record.id });
+        return;
+      }
+      setScreen(
+        options.confirmAssignment === true && needsAssignmentConfirmation(record)
+          ? { kind: 'confirm', recordId: record.id }
+          : { kind: 'scoring', recordId: record.id },
+      );
     },
     [takeClaim],
   );
@@ -176,7 +252,7 @@ export default function App() {
           if (options.resumeExisting) {
             await refresh(store);
             setNotice('');
-            await openRecord(existing);
+            await openRecord(existing, { confirmAssignment: options.connected });
             return existing;
           }
           // Otherwise it is offered rather than opened. A scorekeeper who picked the wrong file, or
@@ -198,7 +274,7 @@ export default function App() {
       });
       await refresh(store);
       setNotice('');
-      await openRecord(created);
+      await openRecord(created, { confirmAssignment: options.connected });
       return created;
     },
     [store, openRecord, refresh],
@@ -295,6 +371,31 @@ export default function App() {
     setScreen({ kind: 'home' });
   }, [store, refresh]);
 
+  /**
+   * Tell tournament control that the assignment is wrong.
+   *
+   * Here rather than in the card because the room capability lives here, and the card must not hold it:
+   * a component that renders an assignment has no business being able to authenticate as the room. It
+   * gets a function that already knows who it is.
+   */
+  const reportAssignmentProblem = useCallback(
+    async (category: HelpRequestCategory, message: string): Promise<{ ok: boolean; error?: string }> => {
+      const live = connectionRef.current;
+      if (!live) return { ok: false, error: 'This device is no longer paired with tournament control.' };
+      const client = new FruityServerClient(live.baseUrl);
+      const result = await client.requestHelp(
+        { roomId: live.roomId, token: live.roomToken, deviceId: live.deviceId, roomName: live.roomName },
+        category,
+        message,
+      );
+      if (!result.ok) return { ok: false, error: result.error };
+      // The category, never the message. See `ConnectionTimeline`.
+      connectionTimeline.record('control-requested', category);
+      return { ok: true };
+    },
+    [],
+  );
+
   const updateRecord = useCallback(
     async (recordId: string, change: Partial<IStoredGameRecord>) => {
       if (!store) return;
@@ -333,7 +434,42 @@ export default function App() {
       <DeviceReadiness
         durable={store.durable}
         rememberedServer={connection?.baseUrl}
+        roomName={pairedRoom?.roomName}
+        games={{
+          saved: records.length,
+          unfinished: records.filter(isActive).length,
+          unreadable,
+        }}
+        // Named one by one, so a field added to the stored connection later does not silently become
+        // something the diagnostics file is checked against — or worse, is not. See `findLeaks`.
+        liveSecrets={[
+          connection?.roomToken,
+          connection?.sessionToken,
+          connection?.sessionId,
+          connection?.roomId,
+          connection?.deviceId,
+        ].filter((value): value is string => typeof value === 'string' && value !== '')}
         onBack={() => setScreen({ kind: 'home' })}
+      />
+    );
+  }
+
+  if (screen.kind === 'confirm' && current) {
+    return (
+      <AssignmentConfirmation
+        packageValue={current.package}
+        onReportProblem={current.connected && connection ? reportAssignmentProblem : undefined}
+        onConfirm={() => setScreen({ kind: 'scoring', recordId: current.id })}
+        // Back to the room rather than the front door, for the same reason finishing a game goes there:
+        // a Chromebook that is Room 204 is still Room 204, and the corrected assignment will appear on
+        // that screen without anybody typing an address. The record stays saved and resumable.
+        onBack={() => {
+          claim.current?.release();
+          claim.current = null;
+          setScreen(
+            current.connected && pairedRoom !== null ? { kind: 'connect', fresh: false } : { kind: 'home' },
+          );
+        }}
       />
     );
   }
@@ -388,6 +524,7 @@ export default function App() {
   return (
     <WelcomeScreen
       records={records}
+      unreadable={unreadable}
       notice={notice}
       durable={store.durable}
       pairedRoom={pairedRoom}

@@ -773,3 +773,121 @@ body {
   gap: 8px;
   margin-top: 10px;
 }
+
+/*
+ * The offer to update.
+ *
+ * Shaped like `.resume-card` — a fact on the left, one button on the right — because it is the same
+ * kind of thing and because a scorekeeper should not have to work out what a new kind of box is for.
+ * Styled as information rather than as a warning: nothing is wrong, and a room that ignores this for
+ * the rest of the day loses nothing.
+ */
+.update-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px;
+  border: 1px solid var(--room-info-border);
+  border-radius: 3px;
+  background: var(--room-info-bg);
+}
+
+.update-notice-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.update-notice-copy {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--room-muted);
+}
+
+/*
+ * The pregame assignment card.
+ *
+ * Sized to be read from arm's length: the reader is usually across a table holding the packet, and the
+ * round and the packet number are the two things that get read out loud to check them. Everything else
+ * on the card is deliberately quieter than those.
+ */
+.pregame-card {
+  max-width: 34rem;
+  text-align: center;
+}
+
+.pregame-context {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--room-muted);
+}
+
+.pregame-matchup {
+  margin: 8px 0 0;
+  font-size: 26px;
+  line-height: 1.25;
+  font-weight: 600;
+}
+
+.pregame-packet {
+  margin: 12px 0 0;
+  font-size: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A round with no packet named is not an error, but it is the case where a wrong packet cannot be
+   caught by reading the screen, so it does not get to look like a confirmed fact. */
+.pregame-packet.is-missing {
+  font-size: 15px;
+  font-weight: 400;
+  color: var(--room-muted);
+}
+
+.pregame-tournament {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--room-muted);
+}
+
+.pregame-confirm {
+  display: block;
+  width: 100%;
+  margin: 24px 0 0;
+  padding: 14px 16px;
+  font-size: 16px;
+}
+
+.pregame-problem-heading {
+  margin: 24px 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--room-muted);
+}
+
+.pregame-problems {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+
+.pregame-report {
+  margin-top: 16px;
+  text-align: left;
+}
+
+.pregame-note {
+  width: 100%;
+  resize: vertical;
+}
+
+.pregame-back {
+  margin-top: 24px;
+}

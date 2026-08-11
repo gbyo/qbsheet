@@ -44,6 +44,9 @@ import { RoomConnectionState } from './ConnectionState';
 import { IConnectedSession } from './ConnectedSession';
 import FruityServerClient from '../integrations/fruity/FruityServerClient';
 import useConnectedRuntime, { ICredentialRepair } from './useConnectedRuntime';
+import { connectionTimeline } from './ConnectionTimeline';
+import { useAppUpdate } from '../pwa/useAppUpdate';
+import { updateDeferredAlert } from '../pwa/UpdateNotice';
 
 /** The two totals, read back out of the payload rather than derived a second time. */
 export function scoreFromQbj(qbj: object): { left: number; right: number } | undefined {
@@ -84,6 +87,7 @@ export default function ScoringScreen(props: {
   const { record, store, connection, onComplete, onConnectionRepaired, onConnectionLost } = props;
   const [downloadedAt, setDownloadedAt] = useState<string | undefined>(record.qbjDownloadedAt);
   const [repairing, setRepairing] = useState(false);
+  const update = useAppUpdate();
 
   /**
    * Whether this game has tournament control behind it.
@@ -230,6 +234,18 @@ export default function ScoringScreen(props: {
     [record.id, record.package, store, live, runtime, onComplete],
   );
 
+  /**
+   * The banner strip's contents.
+   *
+   * The update line goes last because it is the only thing here that is not about this game: every
+   * connected alert above it is something the room may have to act on now, and a waiting build is
+   * something it can act on when the round is over.
+   */
+  const alerts = useMemo(
+    () => [...(live ? runtime.alerts : []), ...(update.available ? [updateDeferredAlert()] : [])],
+    [live, runtime.alerts, update.available],
+  );
+
   return (
     <>
       <ScorerHost
@@ -258,7 +274,7 @@ export default function ScoringScreen(props: {
         controlRequestPending={runtime.controlRequestPending}
         onSyncRosterPlayer={live ? runtime.syncRosterPlayer : undefined}
         onRecoverFromServer={live ? runtime.recoverFromServer : undefined}
-        alerts={live ? runtime.alerts : []}
+        alerts={alerts}
         recovery={{
           serverSnapshotAt: live ? runtime.serverSnapshotAt : undefined,
           snapshotError: live ? runtime.snapshotError : undefined,
@@ -274,6 +290,7 @@ export default function ScoringScreen(props: {
           roomName={connection?.roomName ?? live.identity.roomId}
           onRepaired={(roomToken) => {
             onConnectionRepaired({ roomToken });
+            connectionTimeline.record('room-repaired');
             setRepairing(false);
           }}
           onDisconnect={() => {

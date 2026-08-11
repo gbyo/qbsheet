@@ -40,6 +40,7 @@ import deriveGame, {
 import { IBonusPartResult, ScoreEvent } from '../scoring/ScoreEvents';
 import validateScoresheet from '../scoring/validateScoresheet';
 import toQbjMatch, { IQbjMatchMeta } from '../scoring/toQbjMatch';
+import { connectionTimeline } from '../app/ConnectionTimeline';
 import { RoomConnectionState } from '../app/ConnectionState';
 import TeamPanel from './TeamPanel';
 import BonusPrompt from './BonusPrompt';
@@ -1467,6 +1468,9 @@ export default function Scorer(props: IScorerProps) {
           connection={connection}
           recovery={recoveryStatus}
           now={detailNow}
+          // Read when the dialog opens rather than subscribed to. A history that grew a line under
+          // somebody reading it would move the rest of the list, and nothing in here is urgent.
+          timeline={connectionTimeline.entries()}
           onDownload={downloadQbj}
           onClose={() => setDialog(null)}
         />

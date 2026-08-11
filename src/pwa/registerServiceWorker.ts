@@ -22,7 +22,16 @@
  * registration waits until the page has loaded rather than competing with it, and a browser that
  * refuses (no support, an insecure context, a locked-down profile) gets no error and no degraded
  * mode: it gets an application that simply needs the network to open.
+ *
+ * # Updates are detected here and applied nowhere
+ *
+ * Registration is also where the update watcher is attached, because that is where the registration
+ * object exists. Attaching it does not give anything permission to replace the running application:
+ * see `AppUpdate` for why the swap needs both a waiting worker and a screen that has declared itself
+ * safe to reload.
  */
+
+import { appUpdates } from './AppUpdate';
 
 /** Whether this browser will let a page install one at all. */
 export function serviceWorkerSupported(): boolean {
@@ -38,8 +47,13 @@ export function registerServiceWorker(): void {
   window.addEventListener('load', () => {
     // Relative to the document, so the worker's scope is whatever directory the site is deployed
     // in — `/` on a user site, `/repository/` on a project one — with nothing to configure.
-    navigator.serviceWorker.register(new URL('sw.js', window.location.href), { scope: './' }).catch(() => {
-      // Nothing to tell the scorekeeper. The application works; it just will not open cold offline.
-    });
+    navigator.serviceWorker
+      .register(new URL('sw.js', window.location.href), { scope: './' })
+      .then((registration) => {
+        appUpdates.observe(registration, navigator.serviceWorker);
+      })
+      .catch(() => {
+        // Nothing to tell the scorekeeper. The application works; it just will not open cold offline.
+      });
   });
 }

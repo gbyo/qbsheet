@@ -212,6 +212,34 @@ export default class FruityServerClient {
   }
 
   /**
+   * What this server said it was, for a diagnostics file.
+   *
+   * A copy rather than the discovery object itself, and only the fields that describe the protocol.
+   * Whether a room ended up on QBTCP or on the deprecated routes is one of the two or three facts that
+   * actually explains a room misbehaving, and it is invisible everywhere else. Nothing here is a
+   * credential — discovery happens before anything is authenticated.
+   */
+  describeProtocol(): {
+    protocol: 'QBTCP' | 'legacy' | 'unknown';
+    version?: number;
+    qbjVersion?: string;
+    capabilities?: string[];
+  } {
+    if (this.discovery === null) {
+      // No answer yet, or an answer that was not QBTCP. Those are different, and `discoveryAttempted`
+      // is what tells them apart: an unasked server is `unknown`, an asked one that did not announce
+      // itself is the legacy surface this client is now using.
+      return this.discoveryAttempted ? { protocol: 'legacy' } : { protocol: 'unknown' };
+    }
+    return {
+      protocol: this.isQbtcp ? 'QBTCP' : 'legacy',
+      version: this.discovery.version,
+      ...(this.discovery.qbjVersion !== undefined ? { qbjVersion: this.discovery.qbjVersion } : {}),
+      capabilities: [...this.discovery.capabilities],
+    };
+  }
+
+  /**
    * Ask the server what it speaks, and adopt the matching surface.
    *
    * Unauthenticated and cheap, and it never fails in a way that stops a room: a server that does not

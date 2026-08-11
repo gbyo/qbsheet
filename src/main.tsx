@@ -9,11 +9,16 @@
 import { createRoot } from 'react-dom/client';
 import App from './app/App';
 import { registerServiceWorker } from './pwa/registerServiceWorker';
+import { watchForErrors } from './app/ErrorLog';
 import './app/app-shell.css';
 import './app/readiness.css';
 import './scorer/scorer.css';
 import './practice/practice.css';
 import './app/motion.css';
+
+// Installed before the application renders, so an error thrown on the way up is still recorded.
+// This only writes things down; it never changes what the room sees. See `ErrorLog`.
+watchForErrors();
 
 const container = document.getElementById('root');
 if (container) createRoot(container).render(<App />);

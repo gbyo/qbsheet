@@ -19,6 +19,8 @@
  * rest waits to be asked for.
  */
 import { RoomConnectionState } from '../app/ConnectionState';
+import { ITimelineEntry, timelineLine } from '../app/ConnectionTimeline';
+import { buildLabel } from '../pwa/BuildVersion';
 import ScorerDialog from './ScorerDialog';
 
 /** One thing the room needs to tell the scorekeeper about, with what they can do about it. */
@@ -185,15 +187,49 @@ function deliveryValue(recovery: IScorerRecoveryStatus): string {
   return recovery.automaticDelivery === false ? 'Not automatic' : 'When the game ends';
 }
 
+/**
+ * What the connection did, most recent first.
+ *
+ * Newest at the top because the question being asked is always "what just happened", and a scorekeeper
+ * who has opened this mid-round should not have to scroll a morning of successful snapshots to find the
+ * two lines from ninety seconds ago. Capped on screen for the same reason; the whole history goes into
+ * the diagnostics file, which is read by somebody sitting down.
+ */
+export function ConnectionTimelineList(props: { entries: ITimelineEntry[]; limit?: number }) {
+  const { entries, limit = 12 } = props;
+  if (entries.length === 0) return null;
+  const shown = [...entries].sort((first, second) => second.seq - first.seq).slice(0, limit);
+  return (
+    <div className="scorer-timeline">
+      <p className="scorer-timeline-heading">Recent connection activity</p>
+      <ol className="scorer-timeline-list">
+        {shown.map((entry) => (
+          <li key={entry.seq} className="scorer-timeline-row">
+            {timelineLine(entry)}
+          </li>
+        ))}
+      </ol>
+      {entries.length > shown.length && (
+        <p className="scorer-timeline-more">
+          {entries.length - shown.length} earlier {entries.length - shown.length === 1 ? 'entry' : 'entries'} are in
+          the downloadable diagnostics.
+        </p>
+      )}
+    </div>
+  );
+}
+
 /** The detail behind the connection word. Opened deliberately, never on screen by itself. */
 export function ConnectionDetailDialog(props: {
   connection: RoomConnectionState;
   recovery: IScorerRecoveryStatus;
   now: number;
+  /** The connection history. Passed in rather than read from the singleton so this stays renderable. */
+  timeline?: ITimelineEntry[];
   onDownload: () => void;
   onClose: () => void;
 }) {
-  const { connection, recovery, now, onDownload, onClose } = props;
+  const { connection, recovery, now, timeline = [], onDownload, onClose } = props;
   return (
     <ScorerDialog title="Connection" onClose={onClose}>
       <p className={connectionClass(connection)}>
@@ -216,8 +252,13 @@ export function ConnectionDetailDialog(props: {
           problem={recovery.serverSnapshotAt === null || recovery.serverSnapshotAt === undefined}
         />
         <DetailRow label="Automatic delivery" value={deliveryValue(recovery)} />
+        {/* Last, because it is the only row here that is not about this game — and present at all
+            because the first question about a room that is misbehaving is whether it is running the
+            same build as the rooms that are not. */}
+        <DetailRow label="App version" value={buildLabel()} />
       </div>
       {recovery.snapshotError && <p className="scorer-dialog-note">{recovery.snapshotError}</p>}
+      <ConnectionTimelineList entries={timeline} />
       <div className="scorer-complete-actions">
         <button type="button" className="scorer-action" onClick={onDownload}>
           Download QBJ backup
