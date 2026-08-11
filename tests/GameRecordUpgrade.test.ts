@@ -81,8 +81,8 @@ class DelayedRecordStore implements IRecordStore<IStoredGameRecord> {
   }
 
   delayNextPut(): { started: Promise<void>; release: () => void } {
-    let markStarted = () => undefined;
-    let release = () => undefined;
+    let markStarted: () => void = () => undefined;
+    let release: () => void = () => undefined;
     const started = new Promise<void>((resolve) => {
       markStarted = resolve;
     });
