@@ -20,7 +20,7 @@ import {
   upgradeSteps,
 } from '../src/game/GameRecordUpgrade';
 import { GameStore, IStoredGameRecord, isActive } from '../src/game/GameStore';
-import { MemoryRecordStore } from '../src/persistence/GameDatabase';
+import { IRecordStore, MemoryRecordStore } from '../src/persistence/GameDatabase';
 import deriveGame from '../src/scoring/deriveGame';
 import { validPackage } from './packages';
 import { setupFromPackage } from '../src/app/App';
@@ -46,6 +46,54 @@ function storedGame(version: number, extra: RawRecord = {}): RawRecord {
   };
 }
 
+class DelayedRecordStore implements IRecordStore<IStoredGameRecord> {
+  readonly durable = false;
+
+  private readonly records = new MemoryRecordStore<IStoredGameRecord>();
+
+  private delay:
+    | {
+        started: () => void;
+        wait: Promise<void>;
+      }
+    | undefined;
+
+  list(): Promise<IStoredGameRecord[]> {
+    return this.records.list();
+  }
+
+  get(id: string): Promise<IStoredGameRecord | null> {
+    return this.records.get(id);
+  }
+
+  async put(record: IStoredGameRecord): Promise<boolean> {
+    const delay = this.delay;
+    if (delay) {
+      this.delay = undefined;
+      delay.started();
+      await delay.wait;
+    }
+    return this.records.put(record);
+  }
+
+  delete(id: string): Promise<boolean> {
+    return this.records.delete(id);
+  }
+
+  delayNextPut(): { started: Promise<void>; release: () => void } {
+    let markStarted: () => void = () => undefined;
+    let release: () => void = () => undefined;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const wait = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.delay = { started: markStarted, wait };
+    return { started, release };
+  }
+}
+
 describe('a record written by this build', () => {
   test('reads back as current, untouched', () => {
     const read = readStoredRecord(storedGame(gameRecordVersion));
@@ -61,6 +109,19 @@ describe('a record written by this build', () => {
     const read = readStoredRecord(storedGame(gameRecordVersion, { deliveryAttempts: 3 }));
 
     expect((read.record as unknown as RawRecord).deliveryAttempts).toBe(3);
+  });
+
+  test.each([
+    ['attempt', { attempt: undefined }],
+    ['connected', { connected: undefined }],
+    ['serverDelivery', { serverDelivery: undefined }],
+    ['package', { package: {} }],
+    ['setup', { setup: {} }],
+  ])('a record missing a required %s shape is unreadable', (_field, replacement) => {
+    const read = readStoredRecord(storedGame(gameRecordVersion, replacement));
+
+    expect(read.readability).toBe('unreadable');
+    expect(read.record).toBeNull();
   });
 });
 
@@ -227,13 +288,42 @@ describe('the store, across a version change', () => {
     const store = new GameStore(records, nextBuild);
 
     await store.list();
-    // The write-back is deliberately not awaited by the store, so the test waits for the task
-    // queue to drain rather than for a promise the store never handed back.
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     const stored = (await records.list())[0] as unknown as RawRecord;
     expect(stored.version).toBe(gameRecordVersion + 1);
     expect(stored.deliveryAttempts).toBe(0);
+  });
+
+  test('an update cannot race and overwrite a delayed migration write-back', async () => {
+    const records = new DelayedRecordStore();
+    await records.put(storedGame(gameRecordVersion) as unknown as IStoredGameRecord);
+    const store = new GameStore(records, nextBuild);
+    const delayedMigration = records.delayNextPut();
+
+    const listed = await store.list();
+    expect((listed[0] as unknown as RawRecord).deliveryAttempts).toBe(0);
+    await delayedMigration.started;
+
+    const update = store.update('spring:round-3:room-204', { serverDeliveryDetail: 'accepted after retry' });
+    delayedMigration.release();
+    await update;
+
+    const persisted = (await records.get('spring:round-3:room-204')) as unknown as RawRecord;
+    expect(persisted.version).toBe(gameRecordVersion + 1);
+    expect(persisted.deliveryAttempts).toBe(0);
+    expect(persisted.serverDeliveryDetail).toBe('accepted after retry');
+  });
+
+  test('update migrates an old stored record even when it was never listed first', async () => {
+    const records = new MemoryRecordStore<IStoredGameRecord>();
+    await records.put(storedGame(gameRecordVersion) as unknown as IStoredGameRecord);
+    const store = new GameStore(records, nextBuild);
+
+    const updated = await store.update('spring:round-3:room-204', { serverDeliveryDetail: 'updated directly' });
+
+    expect(updated?.version).toBe(gameRecordVersion + 1);
+    expect((updated as unknown as RawRecord).deliveryAttempts).toBe(0);
   });
 
   test('an unfinished game from this build is listed and is still resumable', async () => {
@@ -298,6 +388,14 @@ describe('the store, across a version change', () => {
     const broken = unreadableNotice([{ id: 'a', readability: 'unreadable', storedVersion: 1 }]);
     expect(broken).toContain('cannot read');
     expect(broken).toContain('Nothing has been deleted');
+
+    const mixed = unreadableNotice([
+      { id: 'a', readability: 'too-new', storedVersion: 2 },
+      { id: 'b', readability: 'unreadable', storedVersion: 1 },
+    ]);
+    expect(mixed).toContain('cannot be opened');
+    expect(mixed).not.toContain('were saved by a newer version');
+    expect(mixed).not.toContain('are in a format');
   });
 
   test('the store says what it could not read, so the room can be told', async () => {

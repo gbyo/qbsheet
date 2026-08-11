@@ -11,6 +11,7 @@ import { act, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import DeviceReadiness from '../src/app/DeviceReadiness';
 import { connectionTimeline } from '../src/app/ConnectionTimeline';
+import { errorLog } from '../src/app/ErrorLog';
 
 /**
  * Capture what a download would have written, instead of writing it.
@@ -64,12 +65,14 @@ let downloads: ReturnType<typeof captureDownloads>;
 
 beforeEach(() => {
   connectionTimeline.clear();
+  errorLog.clear();
   downloads = captureDownloads();
 });
 
 afterEach(() => {
   downloads.restore();
   connectionTimeline.clear();
+  errorLog.clear();
 });
 
 /** Render the readiness screen and wait for it to have measured the device. */

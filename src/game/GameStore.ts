@@ -256,6 +256,8 @@ export class GameStore implements IGameStore {
         }
         continue;
       }
+      // Register the write before exposing the migrated object. A caller may update it immediately
+      // after `list()` resolves, and that write must be ordered after this one rather than racing it.
       if (read.readability === 'upgraded') this.writeBack(read.record);
       readable.push(this.withJournal(read.record));
     }
@@ -283,15 +285,33 @@ export class GameStore implements IGameStore {
 
   private unreadableRecords: IUnreadableRecord[] = [];
 
+  /** The tail of the durable-write queue for each record. */
+  private pendingWrites = new Map<string, Promise<void>>();
+
   /**
-   * Persist a migrated record.
+   * Put one durable mutation after every earlier mutation of the same record.
    *
-   * Not awaited. A migration that does not stick costs a few microseconds on the next load; a welcome
-   * screen that waits on a write before it can offer the unfinished game costs a room time it does not
-   * have. The read has already succeeded either way.
+   * Migration write-back is deliberately not awaited by `list()`, but it still has to be ordered with
+   * an update that begins immediately afterwards. Keeping the queue here makes that ordering explicit
+   * without making the welcome screen wait for IndexedDB.
    */
+  private enqueueWrite<T>(id: string, write: () => Promise<T>): Promise<T> {
+    const previous = this.pendingWrites.get(id) ?? Promise.resolve();
+    const result = previous.then(write);
+    const pending = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.pendingWrites.set(id, pending);
+    void pending.then(() => {
+      if (this.pendingWrites.get(id) === pending) this.pendingWrites.delete(id);
+    });
+    return result;
+  }
+
+  /** Persist a migrated record without delaying the read that discovered it. */
   private writeBack(record: IStoredGameRecord): void {
-    void this.records.put(record);
+    void this.enqueueWrite(record.id, () => this.records.put(record));
   }
 
   async findByIdentity(identity: string): Promise<IStoredGameRecord[]> {
@@ -326,21 +346,28 @@ export class GameStore implements IGameStore {
   }
 
   async update(id: string, change: Partial<IStoredGameRecord>): Promise<IStoredGameRecord | null> {
-    const existing = await this.records.get(id);
-    if (!existing) return null;
-    const next: IStoredGameRecord = {
-      ...existing,
-      ...change,
-      id: existing.id,
-      version: this.schema.version,
-      updatedAt: (change.updatedAt ?? new Date().toISOString()) as string,
-    };
-    const written = await this.records.put(next);
-    // A memory fallback is intentionally usable, but it must remain visible as non-durable through
-    // `durable`. A real IndexedDB failure, on the other hand, is a failed update rather than a
-    // success that only exists in the caller's React state.
-    if (!written && this.records.durable) return null;
-    return next;
+    return this.enqueueWrite(id, async () => {
+      const stored = await this.records.get(id);
+      if (!stored) return null;
+      // The value in IndexedDB may still be from the previous schema even when no caller listed it
+      // first. Migrate that shape before applying the requested change or assigning the target version.
+      const read = readStoredRecord(stored, this.readerOptions);
+      if (read.record === null) return null;
+      const existing = read.record;
+      const next: IStoredGameRecord = {
+        ...existing,
+        ...change,
+        id: existing.id,
+        version: this.schema.version,
+        updatedAt: (change.updatedAt ?? new Date().toISOString()) as string,
+      };
+      const written = await this.records.put(next);
+      // A memory fallback is intentionally usable, but it must remain visible as non-durable through
+      // `durable`. A real IndexedDB failure, on the other hand, is a failed update rather than a
+      // success that only exists in the caller's React state.
+      if (!written && this.records.durable) return null;
+      return next;
+    });
   }
 
   saveEvents(id: string, events: ScoreEvent[]): boolean {
@@ -349,18 +376,23 @@ export class GameStore implements IGameStore {
     const cached = this.journalKeys.get(id);
     if (!cached) return false;
     const written = saveGame(cached.gameKey, cached.setup, events);
-    void this.records.get(id).then((existing) => {
-      if (!existing) return;
-      void this.records.put({ ...existing, events, updatedAt: new Date().toISOString() });
+    void this.enqueueWrite(id, async () => {
+      const stored = await this.records.get(id);
+      if (!stored) return false;
+      const read = readStoredRecord(stored, this.readerOptions);
+      if (read.record === null) return false;
+      return this.records.put({ ...read.record, events, updatedAt: new Date().toISOString() });
     });
     return written;
   }
 
   async remove(id: string): Promise<void> {
-    const existing = await this.records.get(id);
-    if (existing) clearGame(existing.gameKey);
-    this.journalKeys.delete(id);
-    await this.records.delete(id);
+    await this.enqueueWrite(id, async () => {
+      const existing = await this.records.get(id);
+      if (existing) clearGame(existing.gameKey);
+      this.journalKeys.delete(id);
+      await this.records.delete(id);
+    });
   }
 
   async prune(now: Date = new Date()): Promise<number> {

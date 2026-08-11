@@ -17,7 +17,7 @@ export default function UpdateNotice() {
   const { available, applying } = useAppUpdate();
   if (!available) return null;
   return (
-    <section className="shell-section update-notice">
+    <section className="shell-section update-notice" role="status">
       <div>
         <p className="update-notice-title">A new version of QBSheet is ready on this device.</p>
         <p className="update-notice-copy">

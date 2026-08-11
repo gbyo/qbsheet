@@ -185,15 +185,15 @@ export default function DeviceReadiness(props: {
       }
     }
 
-    const [worker, permission, reportedBuild] = await Promise.all([
-      serviceWorkerState(),
-      localNetworkPermission(),
-      // Asks the worker actually serving this page what it is. A page running new code off the network
-      // while an old worker still owns the cache is a real state and this is the only way to see it.
-      serviceWorkerBuild(),
-    ]);
-    setWorkerBuild(reportedBuild);
     try {
+      const [worker, permission, reportedBuild] = await Promise.all([
+        serviceWorkerState(),
+        localNetworkPermission(),
+        // Asks the worker actually serving this page what it is. A page running new code off the network
+        // while an old worker still owns the cache is a real state and this is the only way to see it.
+        serviceWorkerBuild(),
+      ]);
+      setWorkerBuild(reportedBuild);
       setSnapshot({
         localStorage: localStorageWorks(),
         serviceWorker: worker,
@@ -468,6 +468,7 @@ export default function DeviceReadiness(props: {
    * in exactly as rendered, so the file and the screen can never disagree.
    */
   const saveDiagnostics = () => {
+    const address = safeAddress(serverAddress);
     setDiagnostics(
       downloadDiagnostics(
         {
@@ -483,7 +484,7 @@ export default function DeviceReadiness(props: {
           server:
             serverTest.kind === 'passed'
               ? serverTest.server
-              : { protocol: 'unknown', ...(safeAddress(serverAddress) ? { address: safeAddress(serverAddress) } : {}) },
+              : { protocol: 'unknown', ...(address ? { address } : {}) },
           ...(roomName ? { roomName } : {}),
           persistence: {
             recordStoreDurable: durable,

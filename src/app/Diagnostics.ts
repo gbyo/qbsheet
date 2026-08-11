@@ -142,6 +142,7 @@ function browserFacts(): IDiagnosticsBundle['browser'] {
 
 export function buildDiagnostics(input: IDiagnosticsInput = {}): IDiagnosticsBundle {
   const now = input.now ?? new Date();
+  const timeline = input.timeline ?? connectionTimeline.entries();
   return {
     diagnosticsVersion,
     generatedAt: now.toISOString(),
@@ -155,8 +156,8 @@ export function buildDiagnostics(input: IDiagnosticsInput = {}): IDiagnosticsBun
     persistence: input.persistence ?? {},
     games: input.games ?? { saved: 0, unfinished: 0, unreadable: [] },
     checks: input.checks ?? [],
-    connectionTimeline: (input.timeline ?? connectionTimeline.entries()).map(timelineLine),
-    connectionEntries: input.timeline ?? connectionTimeline.entries(),
+    connectionTimeline: timeline.map(timelineLine),
+    connectionEntries: timeline,
     errors: input.errors ?? errorLog.entries(),
   };
 }

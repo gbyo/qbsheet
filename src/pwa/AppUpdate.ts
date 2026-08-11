@@ -41,6 +41,9 @@
 /** How often an open tab asks whether a newer build has been deployed. */
 export const updateCheckIntervalMs = 15 * 60 * 1000;
 
+/** How long an attempted worker takeover may wait for `controllerchange` before it can be retried. */
+export const updateApplyTimeoutMs = 10 * 1000;
+
 /** What the build serving this page says about itself, when it can be asked. */
 export interface IWorkerBuild {
   version: string;
@@ -76,11 +79,13 @@ export interface IRegistrationLike {
   waiting: IWorkerLike | null;
   update(): Promise<unknown>;
   addEventListener(type: 'updatefound', listener: () => void): void;
+  removeEventListener(type: 'updatefound', listener: () => void): void;
 }
 
 export interface IContainerLike {
   controller: unknown;
   addEventListener(type: 'controllerchange', listener: () => void): void;
+  removeEventListener(type: 'controllerchange', listener: () => void): void;
 }
 
 /**
@@ -114,6 +119,12 @@ export class AppUpdateWatcher {
 
   private timer: ReturnType<typeof setInterval> | null = null;
 
+  private applyResetTimer: ReturnType<typeof setTimeout> | null = null;
+
+  private updateFoundHandler: (() => void) | null = null;
+
+  private controllerChangeHandler: (() => void) | null = null;
+
   private readonly reload: () => void;
 
   constructor(options: { reload?: () => void } = {}) {
@@ -142,6 +153,13 @@ export class AppUpdateWatcher {
     this.listeners.forEach((listener) => listener(next));
   }
 
+  /** Clear transient apply state, primarily for a fresh observation or a test boundary. */
+  reset(): void {
+    if (this.applyResetTimer !== null) clearTimeout(this.applyResetTimer);
+    this.applyResetTimer = null;
+    this.publish({ applying: false });
+  }
+
   /**
    * Declare whether the running application may be replaced.
    *
@@ -155,15 +173,14 @@ export class AppUpdateWatcher {
 
   /** Begin watching a registration for newer builds. */
   observe(registration: IRegistrationLike, container: IContainerLike): void {
-    // Observing twice would otherwise leave the first interval running forever, asking a second and
-    // then a third time every quarter of an hour for the rest of the day.
+    // Observing twice would otherwise leave the first interval and event handlers running forever.
     this.stop();
     this.registration = registration;
     this.container = container;
 
     this.evaluate();
 
-    registration.addEventListener('updatefound', () => {
+    this.updateFoundHandler = () => {
       // `installing` is the new worker. It is not an update to offer until it has finished
       // installing — a download that is still in flight, or that fails, must not put a button on
       // screen that reloads into a half-cached build.
@@ -179,20 +196,35 @@ export class AppUpdateWatcher {
         this.evaluate();
       };
       installing.addEventListener('statechange', onChange);
-    });
+    };
+    registration.addEventListener('updatefound', this.updateFoundHandler);
 
-    container.addEventListener('controllerchange', () => {
+    this.controllerChangeHandler = () => {
       // Only a swap this module asked for. A first install also lands here, and reloading for that
       // would restart the application the instant somebody opened it for the first time.
-      if (this.state.applying) this.reload();
-    });
+      if (!this.state.applying) return;
+      if (this.applyResetTimer !== null) clearTimeout(this.applyResetTimer);
+      this.applyResetTimer = null;
+      this.reload();
+    };
+    container.addEventListener('controllerchange', this.controllerChangeHandler);
 
     this.timer = setInterval(() => void this.checkNow(), updateCheckIntervalMs);
   }
 
   stop(): void {
+    if (this.registration && this.updateFoundHandler) {
+      this.registration.removeEventListener('updatefound', this.updateFoundHandler);
+    }
+    if (this.container && this.controllerChangeHandler) {
+      this.container.removeEventListener('controllerchange', this.controllerChangeHandler);
+    }
+    this.updateFoundHandler = null;
+    this.controllerChangeHandler = null;
     if (this.timer !== null) clearInterval(this.timer);
     this.timer = null;
+    if (this.applyResetTimer !== null) clearTimeout(this.applyResetTimer);
+    this.applyResetTimer = null;
   }
 
   private evaluate(): void {
@@ -234,6 +266,11 @@ export class AppUpdateWatcher {
     if (!waiting || !this.replaceable || this.state.applying) return false;
     this.publish({ applying: true });
     waiting.postMessage('qbsheet:skip-waiting');
+    this.applyResetTimer = setTimeout(() => {
+      this.applyResetTimer = null;
+      this.publish({ applying: false });
+      this.evaluate();
+    }, updateApplyTimeoutMs);
     return true;
   }
 }
@@ -286,6 +323,7 @@ export async function serviceWorkerBuild(timeoutMs = 1500): Promise<IWorkerBuild
       worker.postMessage('qbsheet:build', [channel.port2]);
     } catch {
       clearTimeout(timer);
+      channel.port1.close();
       resolve(null);
     }
   });

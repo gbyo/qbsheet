@@ -84,6 +84,110 @@ export interface IReadRecord {
   storedVersion: number | null;
 }
 
+function isObject(value: unknown): value is RawRecord {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function isInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value);
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string' && item.trim() !== '');
+}
+
+function isTeamSetup(value: unknown): boolean {
+  if (!isObject(value) || typeof value.name !== 'string' || !isStringArray(value.players)) return false;
+  return value.startingLineup === undefined || isStringArray(value.startingLineup);
+}
+
+function isSetup(value: unknown): boolean {
+  return isObject(value) && isTeamSetup(value.left) && isTeamSetup(value.right);
+}
+
+function isRosterTeam(value: unknown): boolean {
+  return (
+    isObject(value) &&
+    typeof value.name === 'string' &&
+    Array.isArray(value.players) &&
+    value.players.every((player) => isObject(player) && typeof player.name === 'string' && player.name.trim() !== '') &&
+    (value.startingLineup === undefined || isStringArray(value.startingLineup))
+  );
+}
+
+function isScorekeeperFormat(value: unknown): boolean {
+  if (!isObject(value)) return false;
+  const regulation = value.regulation;
+  const bonus = value.bonus;
+  const overtime = value.overtime;
+  const lightning = value.lightning;
+  const players = value.players;
+  return (
+    isInteger(value.version) &&
+    typeof value.name === 'string' &&
+    Array.isArray(value.answerTypes) &&
+    value.answerTypes.every(
+      (answerType) =>
+        isObject(answerType) &&
+        isInteger(answerType.index) &&
+        isFiniteNumber(answerType.value) &&
+        typeof answerType.label === 'string' &&
+        typeof answerType.shortLabel === 'string' &&
+        typeof answerType.isPower === 'boolean' &&
+        typeof answerType.isNeg === 'boolean' &&
+        typeof answerType.awardsBonus === 'boolean' &&
+        typeof answerType.qbjId === 'string',
+    ) &&
+    isObject(regulation) &&
+    typeof regulation.timed === 'boolean' &&
+    isInteger(regulation.tossupCount) &&
+    isInteger(regulation.maximumTossupCount) &&
+    isObject(bonus) &&
+    typeof bonus.enabled === 'boolean' &&
+    typeof bonus.bounceBack === 'boolean' &&
+    typeof bonus.regular === 'boolean' &&
+    isFiniteNumber(bonus.divisor) &&
+    isInteger(bonus.minimumParts) &&
+    isInteger(bonus.maximumParts) &&
+    (bonus.pointsPerPart === undefined || isFiniteNumber(bonus.pointsPerPart)) &&
+    isFiniteNumber(bonus.maximumScore) &&
+    isObject(overtime) &&
+    isInteger(overtime.minimumQuestionCount) &&
+    typeof overtime.suddenDeath === 'boolean' &&
+    typeof overtime.includesBonuses === 'boolean' &&
+    isObject(lightning) &&
+    typeof lightning.enabled === 'boolean' &&
+    isInteger(lightning.countPerTeam) &&
+    isFiniteNumber(lightning.divisor) &&
+    isObject(players) &&
+    isInteger(players.maximumActive) &&
+    isFiniteNumber(value.totalDivisor)
+  );
+}
+
+function isPackage(value: unknown): boolean {
+  if (!isObject(value)) return false;
+  const tournament = value.tournament;
+  const round = value.round;
+  return (
+    typeof value.format === 'string' &&
+    isInteger(value.version) &&
+    isObject(tournament) &&
+    typeof tournament.name === 'string' &&
+    isObject(round) &&
+    isInteger(round.number) &&
+    typeof round.name === 'string' &&
+    isInteger(round.revision) &&
+    isRosterTeam(value.left) &&
+    isRosterTeam(value.right) &&
+    isScorekeeperFormat(value.scorekeeperFormat)
+  );
+}
+
 /**
  * Whether a migrated object has the parts a scoresheet cannot do without.
  *
@@ -93,16 +197,22 @@ export interface IReadRecord {
  */
 function isGameRecord(value: RawRecord): value is RawRecord & IStoredGameRecord {
   return (
+    isInteger(value.version) &&
     typeof value.id === 'string' &&
-    typeof value.gameKey === 'string' &&
     typeof value.identity === 'string' &&
+    isInteger(value.attempt) &&
+    value.attempt >= 1 &&
+    typeof value.gameKey === 'string' &&
+    isPackage(value.package) &&
+    isSetup(value.setup) &&
+    Array.isArray(value.events) &&
+    typeof value.connected === 'boolean' &&
     typeof value.createdAt === 'string' &&
     typeof value.updatedAt === 'string' &&
-    typeof value.package === 'object' &&
-    value.package !== null &&
-    typeof value.setup === 'object' &&
-    value.setup !== null &&
-    Array.isArray(value.events)
+    (value.serverDelivery === 'none' ||
+      value.serverDelivery === 'pending' ||
+      value.serverDelivery === 'sent' ||
+      value.serverDelivery === 'rejected')
   );
 }
 
