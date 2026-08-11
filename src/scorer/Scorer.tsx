@@ -51,7 +51,7 @@ import { RoomConnectionState } from '../app/ConnectionState';
 import TeamPanel from './TeamPanel';
 import BonusPrompt from './BonusPrompt';
 import RecentRail from './RecentRail';
-import GameMenu, { IGameMenuItem } from './GameMenu';
+import GameMenu, { IGameMenuItem, joinMenuGroups } from './GameMenu';
 import ControlIcon from './ControlIcon';
 import PlayersDialog, { rosterSyncKey } from './PlayersDialog';
 import StartingLineupPrompt from './StartingLineupPrompt';
@@ -68,6 +68,8 @@ import { IGameEventsApi, newEventId } from './useGameEvents';
 import {
   FlagDialog,
   formatControlRequestTime,
+  frameDescription,
+  frameQuestion,
   IssueDialog,
   RecoveryDialog,
   ScoresheetReviewDialog,
@@ -204,14 +206,61 @@ type OpenDialog =
 /** How often, at most, to tell tournament control how the game is going. Matches MODAQ's old timer. */
 const progressIntervalMs = 5000;
 
-function operationNoticeWithControl(prefix: string, result: HelpRequestResult): string {
-  if (result.kind === 'accepted') return `${prefix} and was sent to tournament control.`;
-  if (result.kind === 'already-outstanding') return `${prefix}. Tournament control was already requested.`;
+/**
+ * Something the scorer wants to say about an action, and whether it is still true in a moment.
+ *
+ * The distinction is the point. "Olivia came on for Sarah" is finished the instant it is read: it
+ * describes a thing that happened, the scoresheet already shows it, and there is nothing for anybody
+ * to do about it. "Tournament control was not reached" is a situation, and it stays a situation
+ * until somebody acts on it. A single forever-string could not tell them apart, so the screen
+ * accumulated acknowledgements of successful actions and left them sitting above the scoresheet for
+ * the rest of the game, which is how a room learns to stop reading the top of the screen — and the
+ * top of the screen is where the problems go.
+ */
+export interface IOperationNotice {
+  message: string;
+  /** `warning` gets the warning surface and `role="alert"`; ordinary acknowledgements do not. */
+  tone: 'info' | 'warning';
+  /** Whether this disappears on its own. Only ever true for "that worked". */
+  transient: boolean;
+}
+
+/**
+ * How long an acknowledgement stays.
+ *
+ * Long enough to be read by somebody whose eyes were on the table when it appeared, short enough
+ * that it is gone before the next tossup is over.
+ */
+export const operationNoticeMs = 3000;
+
+/** What happened at tournament control, appended to the local fact. */
+function controlOutcomeSuffix(result: HelpRequestResult): string {
+  if (result.kind === 'accepted') return ' and was sent to tournament control.';
+  if (result.kind === 'already-outstanding') return '. Tournament control was already requested.';
   if (result.kind === 'unreachable' || result.kind === 'server-error') {
-    return `${prefix}, but tournament control was not reached.`;
+    return ', but tournament control was not reached.';
   }
-  if (result.kind === 'refused') return `${prefix}. Tournament control refused the request.`;
-  return `${prefix}. This tournament connection does not support remote control requests.`;
+  if (result.kind === 'refused') return '. Tournament control refused the request.';
+  return '. This tournament connection does not support remote control requests.';
+}
+
+/** Whether the request left something outstanding for a person to deal with. */
+function controlOutcomeIsProblem(result: HelpRequestResult): boolean {
+  return result.kind === 'unreachable' || result.kind === 'server-error' || result.kind === 'refused';
+}
+
+/**
+ * What to say when a single historical event has been corrected.
+ *
+ * Named by what was changed rather than by the event type, because the scorekeeper is checking that
+ * the thing they went in to fix is the thing that got fixed.
+ */
+export function correctionNotice(event: ScoreEvent): string {
+  if (event.type === 'substitution') return `Lineup at Tossup ${event.questionNumber} corrected.`;
+  if (event.type === 'adjustment') return `Adjustment at Q${event.questionNumber} corrected.`;
+  if (event.type === 'lightning') return `Lightning total at Q${event.questionNumber} corrected.`;
+  if (event.type === 'note') return `Note at Q${event.questionNumber} corrected.`;
+  return `Q${event.questionNumber} corrected.`;
 }
 
 export default function Scorer(props: IScorerProps) {
@@ -278,8 +327,78 @@ export default function Scorer(props: IScorerProps) {
   );
   const [submitting, setSubmitting] = useState(false);
   const [submitResult, setSubmitResult] = useState<IScorerSubmitResult | null>(null);
-  const [operationNotice, setOperationNotice] = useState(
-    recovered ? 'Recovered the in-progress game saved on this device.' : '',
+  const [operationNotice, setOperationNotice] = useState<IOperationNotice | null>(
+    recovered
+      ? {
+          // Not an acknowledgement. It says the events on screen came from somewhere other than this
+          // session, which stays worth knowing for as long as the game does.
+          message: 'Recovered the in-progress game saved on this device.',
+          tone: 'info',
+          transient: false,
+        }
+      : null,
+  );
+  /**
+   * The Recent row something just changed.
+   *
+   * Set alongside a notice and cleared on the same timer, so the sentence at the top of the screen
+   * and the line it is about stop pointing at each other together.
+   */
+  const [emphasizedQuestion, setEmphasizedQuestion] = useState<number | undefined>(undefined);
+
+  /**
+   * Clear an acknowledgement once it has been read.
+   *
+   * Keyed on the notice object rather than on its text, so a second acknowledgement replacing a
+   * first gets its own full time on screen instead of inheriting whatever was left of the previous
+   * one. A persistent notice never enters here at all.
+   */
+  useEffect(() => {
+    if (!operationNotice?.transient) return undefined;
+    const timer = window.setTimeout(() => {
+      setOperationNotice(null);
+      setEmphasizedQuestion(undefined);
+    }, operationNoticeMs);
+    return () => window.clearTimeout(timer);
+  }, [operationNotice]);
+
+  /** Say that something worked. Goes away on its own; see `IOperationNotice`. */
+  const acknowledge = useCallback((message: string, questionNumber?: number) => {
+    setOperationNotice({ message, tone: 'info', transient: true });
+    setEmphasizedQuestion(questionNumber);
+  }, []);
+
+  /** Say something that stays until it is resolved or replaced. */
+  const warn = useCallback((message: string, tone: 'info' | 'warning' = 'warning') => {
+    setOperationNotice({ message, tone, transient: false });
+    setEmphasizedQuestion(undefined);
+  }, []);
+
+  /**
+   * Whether the room, rather than this screen, owns the persistent story about tournament control.
+   *
+   * When it does, `controlRequest` is already rendering "Tournament control was not reached" with
+   * the retry beside it, and repeating that here would leave two permanent copies of one problem
+   * with two different places to clear it. So this screen keeps the half it is authoritative about —
+   * that the issue is on the scoresheet, which is true regardless of what the network did — and says
+   * it the way it says every other completed action.
+   */
+  const controlRequestOwned = suppliedControlRequest !== undefined;
+
+  const noteControlOutcome = useCallback(
+    (facts: { prefix: string; localOnly: string }, result: HelpRequestResult) => {
+      const problem = controlOutcomeIsProblem(result);
+      if (problem && controlRequestOwned) {
+        setOperationNotice({ message: facts.localOnly, tone: 'info', transient: true });
+        return;
+      }
+      setOperationNotice({
+        message: `${facts.prefix}${controlOutcomeSuffix(result)}`,
+        tone: problem ? 'warning' : 'info',
+        transient: !problem,
+      });
+    },
+    [controlRequestOwned],
   );
   /** Only for the connection detail's relative times, so it ticks nowhere else. */
   const [detailNow, setDetailNow] = useState(() => Date.now());
@@ -519,25 +638,32 @@ export default function Scorer(props: IScorerProps) {
       }
 
       if (onSyncRosterPlayer && authoritativeRosters) {
-        setOperationNotice(`${resultNotice} Syncing with tournament control.`);
+        acknowledge(`${resultNotice} Syncing with tournament control.`);
         return;
       }
       if (!onRequestControl) {
-        setOperationNotice(resultNotice);
+        acknowledge(resultNotice);
         return;
       }
 
-      setOperationNotice(`${resultNotice} Requesting tournament control.`);
+      acknowledge(`${resultNotice} Requesting tournament control.`);
       Promise.resolve()
         .then(() => onRequestControl('roster-change', `Please add ${playerName} to ${derivedTeam.name}.`))
-        .then((result) => setOperationNotice(operationNoticeWithControl(resultNotice, result)))
-        .catch(() => setOperationNotice(`${resultNotice}, but tournament control was not reached.`));
+        .then((result) => noteControlOutcome({ prefix: resultNotice, localOnly: resultNotice }, result))
+        .catch(() =>
+          noteControlOutcome(
+            { prefix: resultNotice, localOnly: resultNotice },
+            { kind: 'unreachable', error: 'Could not reach tournament control.' },
+          ),
+        );
     },
     [
+      acknowledge,
       authoritativeRosters,
       game.left,
       game.right,
       lineupQuestion,
+      noteControlOutcome,
       onRequestControl,
       onSyncRosterPlayer,
       phase,
@@ -632,12 +758,41 @@ export default function Scorer(props: IScorerProps) {
       else activePlayers.splice(seat, 1, incoming);
       seating.substitute(team, roster, outgoing, incoming);
       record({ id: newEventId(), type: 'substitution', questionNumber: lineupQuestion, team, activePlayers });
-      setOperationNotice(
-        `${incoming} came on for ${outgoing} (${derivedTeam.name}), starting Tossup ${lineupQuestion}.`,
-      );
+      // The seat itself says most of this now — see `TeamPanel` — so the sentence is here to name the
+      // tossup it takes effect from, and then to get out of the way.
+      acknowledge(`${incoming} came on for ${outgoing} (${derivedTeam.name}), starting Tossup ${lineupQuestion}.`);
     },
-    [game.left, game.right, lineupQuestion, record, seating],
+    [acknowledge, game.left, game.right, lineupQuestion, record, seating],
   );
+
+  /**
+   * Undo and redo, with the frame they changed said out loud.
+   *
+   * # Why this wraps rather than replaces
+   *
+   * The event stack is still the authority and still does the work; this only reads what came off
+   * it. Nothing waits for the sentence — by the time it is composed the events are already gone or
+   * already back, and a scorekeeper who presses undo twice quickly gets two undos and the second
+   * sentence, not one undo and an animation queue.
+   *
+   * # Why both routes come through here
+   *
+   * Because the footer button and the keyboard shortcut are the same act. They used to call
+   * `events.undo` directly and separately, which meant any feedback added to one of them would
+   * simply not exist on the other — and the keyboard is the route used by the scorekeepers most
+   * likely to be looking at the table rather than the screen when it happens.
+   */
+  const undoWithFeedback = useCallback(() => {
+    const frame = events.undo();
+    if (!frame || frame.length === 0) return;
+    acknowledge(`Undid ${frameDescription(frame, format, game)}`, frameQuestion(frame));
+  }, [acknowledge, events, format, game]);
+
+  const redoWithFeedback = useCallback(() => {
+    const frame = events.redo();
+    if (!frame || frame.length === 0) return;
+    acknowledge(`Redid ${frameDescription(frame, format, game)}`, frameQuestion(frame));
+  }, [acknowledge, events, format, game]);
 
   const benchFor = (team: LeftOrRight): string[] => {
     const derivedTeam = team === 'left' ? game.left : game.right;
@@ -751,8 +906,8 @@ export default function Scorer(props: IScorerProps) {
     onBuzz: recordBuzz,
     onWrongNoPenalty: (side, playerName) => recordWrongNoPenalty(side, playerName),
     onNoBuzz: recordNoBuzz,
-    onUndo: events.undo,
-    onRedo: events.redo,
+    onUndo: undoWithFeedback,
+    onRedo: redoWithFeedback,
     onSeatArmed: (seat) => setKeyStatus({ kind: 'armed', seat, actions: availableActionKeys(format, negsAvailable) }),
     onSequenceCleared: () => setKeyStatus(null),
     onEcho: ({ side, seat, number, playerName, action, answerType }) => {
@@ -869,7 +1024,27 @@ export default function Scorer(props: IScorerProps) {
     return `Tossup ${phase.questionNumber} of ${format.regulation.tossupCount}`;
   })();
 
-  const menuItems: IGameMenuItem[] = [
+  /**
+   * Hand the current scoresheet to the application to write out.
+   *
+   * The scorer does not write the file itself. Turning a scored game into something a person can
+   * carry away means knowing which game package it came from, what the file should be called and
+   * what has to be stripped out of it first (see `PortableQbj`), and none of that is knowledge the
+   * scoring surface should have. What it has is a payload and a request.
+   */
+  const downloadQbj = () => onDownload(qbj);
+
+  /*
+   * The Game menu, in groups.
+   *
+   * One menu, one level, and the grouping carried by rules rather than by headings or by nesting —
+   * see `IGameMenuItem.dividerBefore`. What is not here any more is Protests and Issue: both are
+   * reached from Flag, which is a permanent footer control right beside this one, and a live-play
+   * action with two entry points is a live-play action a scorekeeper has to choose between under
+   * time pressure. Choosing the protest path from Flag opens the same Protests dialog, so nothing
+   * that was reachable has stopped being reachable — including resolving one already recorded.
+   */
+  const generalItems: IGameMenuItem[] = [
     {
       // Named for what it does rather than for the state it is in, and stating the current state after
       // it, because a menu entry that reads "Keyboard scoring" tells nobody whether it is on.
@@ -878,25 +1053,25 @@ export default function Scorer(props: IScorerProps) {
       onSelect: () => setKeyboardEnabled(!keyboardEnabled),
     },
     { label: 'Notes', icon: 'note', onSelect: () => setDialog('notes') },
-    { label: 'Protests', icon: 'flag', onSelect: () => setDialog('protests') },
-    { label: 'Issue / tournament control', icon: 'issue', onSelect: () => setDialog('issue') },
     { label: 'Game details', icon: 'details', onSelect: () => setDialog('details') },
-    { label: 'Full scoresheet review', icon: 'review', onSelect: () => openReviewAt(undefined) },
   ];
+
+  /** Things that move the round along. Only ever what this format and this moment actually allow. */
+  const roundItems: IGameMenuItem[] = [];
   if (format.lightning.enabled)
-    menuItems.push({ label: 'Lightning / worksheet', icon: 'lightning', onSelect: () => setDialog('lightning') });
+    roundItems.push({ label: 'Lightning / worksheet', icon: 'lightning', onSelect: () => setDialog('lightning') });
   if ((procedure?.timeoutsPerTeam ?? 0) > 0 && phase.kind !== 'complete' && phase.kind !== 'timeout') {
-    menuItems.push({ label: 'Timeout', icon: 'clock', onSelect: () => setDialog('timeout') });
+    roundItems.push({ label: 'Timeout', icon: 'clock', onSelect: () => setDialog('timeout') });
   }
   if (phase.kind === 'timeout') {
-    menuItems.push({
+    roundItems.push({
       label: 'Resume play',
       icon: 'play',
       onSelect: () => record({ id: newEventId(), type: 'timeout-resume', questionNumber: currentQuestion }),
     });
   }
   if (procedure?.halves && phase.kind !== 'complete' && !game.awaitingScoreCheck) {
-    menuItems.push({
+    roundItems.push({
       label: `End ${game.halfBreaks.length === 0 ? 'first' : 'this'} half`,
       icon: 'pause',
       // The boundary is the last tossup actually played, not the one on screen. A displayed
@@ -911,7 +1086,7 @@ export default function Scorer(props: IScorerProps) {
     });
   }
   if (format.regulation.timed && !game.regulationComplete && phase.kind !== 'complete') {
-    menuItems.push({
+    roundItems.push({
       label: 'End regulation',
       icon: 'pause',
       /*
@@ -928,51 +1103,56 @@ export default function Scorer(props: IScorerProps) {
         }),
     });
   }
+
+  /** Going back over what is already written. */
+  const reviewItems: IGameMenuItem[] = [
+    { label: 'Full scoresheet review', icon: 'review', onSelect: () => openReviewAt(undefined) },
+  ];
   if (phase.kind === 'tossup' || phase.kind === 'bonus') {
-    menuItems.push({
+    reviewItems.push({
       label: `Replace question ${phase.questionNumber}`,
       icon: 'replace',
       onSelect: () => openReplacementAt(phase.questionNumber),
     });
   }
+  reviewItems.push({ label: 'Adjust score', icon: 'adjust', onSelect: () => setDialog('adjust') });
+
+  /** Getting the game off this device, or back on to it. */
+  const fileItems: IGameMenuItem[] = [
+    { label: 'Download QBJ backup', icon: 'download', onSelect: downloadQbj },
+  ];
+  if (onDownloadForm) {
+    // The mid-game portable copy. Not a substitute for local recovery, which keeps the event
+    // history this cannot represent; see `docs/QBJ_ASSIGNMENT_PROFILE.md`.
+    fileItems.push({ label: 'Download current QBJ', icon: 'download', onSelect: () => onDownloadForm(game, 'partial') });
+    fileItems.push({
+      label: 'Download legacy match-only QBJ',
+      icon: 'download',
+      onSelect: () => onDownloadForm(game, 'legacy-match'),
+    });
+  }
+  fileItems.push({ label: 'Recover from QBJ', icon: 'upload', onSelect: () => setDialog('recovery') });
+
+  /** The two that end a game. Last, and behind their own rule. */
+  const endingItems: IGameMenuItem[] = [];
   if (phase.kind !== 'complete' && game.tossupsRead > 0) {
-    menuItems.push({
+    endingItems.push({
       label: 'End game early…',
       icon: 'stop',
       onSelect: () => setDialog('end-early'),
       destructive: true,
     });
   }
-  /**
-   * Hand the current scoresheet to the application to write out.
-   *
-   * The scorer does not write the file itself. Turning a scored game into something a person can
-   * carry away means knowing which game package it came from, what the file should be called and
-   * what has to be stripped out of it first (see `PortableQbj`), and none of that is knowledge the
-   * scoring surface should have. What it has is a payload and a request.
-   */
-  const downloadQbj = () => onDownload(qbj);
-  menuItems.push({ label: 'Download QBJ backup', icon: 'download', onSelect: downloadQbj });
-  if (onDownloadForm) {
-    // The mid-game portable copy. Not a substitute for local recovery, which keeps the event
-    // history this cannot represent; see `docs/QBJ_ASSIGNMENT_PROFILE.md`.
-    menuItems.push({ label: 'Download current QBJ', icon: 'download', onSelect: () => onDownloadForm(game, 'partial') });
-    menuItems.push({
-      label: 'Download legacy match-only QBJ',
-      icon: 'download',
-      onSelect: () => onDownloadForm(game, 'legacy-match'),
-    });
-  }
-  menuItems.push({ label: 'Recover from QBJ', icon: 'upload', onSelect: () => setDialog('recovery') });
-  menuItems.push({ label: 'Adjust score', icon: 'adjust', onSelect: () => setDialog('adjust') });
   if (phase.kind !== 'complete') {
-    menuItems.push({
+    endingItems.push({
       label: 'Record forfeit',
       icon: 'forfeit',
       onSelect: () => setDialog('forfeit'),
       destructive: true,
     });
   }
+
+  const menuItems = joinMenuGroups([generalItems, roundItems, reviewItems, fileItems, endingItems]);
 
   const submit = async () => {
     setSubmitting(true);
@@ -1054,7 +1234,21 @@ export default function Scorer(props: IScorerProps) {
         onDownload={() => downloadQbj()}
       />
       {recoveryNotice && <p className="scorer-banner is-info">{recoveryNotice}</p>}
-      {operationNotice && <p className="scorer-banner is-info">{operationNotice}</p>}
+      {/*
+        `role="status"` for the ordinary case, which is a completed action being acknowledged: it is
+        announced when the reader gets to it and interrupts nothing. `role="alert"` is kept for the
+        notices that are a problem rather than a receipt — see `IOperationNotice`. A screen reader
+        stopped mid-sentence to be told a substitution worked would learn to distrust the one thing
+        that interrupting is for.
+      */}
+      {operationNotice && (
+        <p
+          className={operationNotice.tone === 'warning' ? 'scorer-banner is-warning' : 'scorer-banner is-info'}
+          role={operationNotice.tone === 'warning' ? 'alert' : 'status'}
+        >
+          {operationNotice.message}
+        </p>
+      )}
       {/*
         A refused action is never silent. The engine rejecting a second buzz on the same tossup is
         almost always a double-tap the scorekeeper did not know they made, and a button that simply
@@ -1355,7 +1549,11 @@ export default function Scorer(props: IScorerProps) {
             </div>
           </main>
 
-          <RecentRail game={game} onInspect={(questionNumber) => openReviewAt(questionNumber, true)} />
+          <RecentRail
+            game={game}
+            emphasizeQuestion={emphasizedQuestion}
+            onInspect={(questionNumber) => openReviewAt(questionNumber, true)}
+          />
         </div>
       )}
 
@@ -1364,11 +1562,11 @@ export default function Scorer(props: IScorerProps) {
       {keyboardEnabled && <KeyboardStatus status={keyStatus} />}
 
       <footer className="scorer-footer">
-        <button type="button" className="scorer-action" onClick={events.undo} disabled={!events.canUndo}>
+        <button type="button" className="scorer-action" onClick={undoWithFeedback} disabled={!events.canUndo}>
           <ControlIcon name="undo" />
           Undo
         </button>
-        <button type="button" className="scorer-action" onClick={events.redo} disabled={!events.canRedo}>
+        <button type="button" className="scorer-action" onClick={redoWithFeedback} disabled={!events.canRedo}>
           <ControlIcon name="redo" />
           Redo
         </button>
@@ -1428,13 +1626,18 @@ export default function Scorer(props: IScorerProps) {
             onRequestControl
               ? (team, playerName) => {
                   const teamName = team === 'left' ? game.left.name : game.right.name;
-                  setOperationNotice(`Requesting tournament control to add ${playerName}.`);
+                  const facts = {
+                    prefix: `Roster change for ${playerName}:`,
+                    localOnly: `${playerName} is on this scoresheet.`,
+                  };
+                  acknowledge(`Requesting tournament control to add ${playerName}.`);
                   void onRequestControl('roster-change', `Please add ${playerName} to ${teamName}.`)
-                    .then((result) =>
-                      setOperationNotice(operationNoticeWithControl(`Roster change for ${playerName}:`, result)),
-                    )
+                    .then((result) => noteControlOutcome(facts, result))
                     .catch(() =>
-                      setOperationNotice(`Roster change for ${playerName}: tournament control was not reached.`),
+                      noteControlOutcome(facts, {
+                        kind: 'unreachable',
+                        error: 'Could not reach tournament control.',
+                      }),
                     );
                 }
               : undefined
@@ -1509,10 +1712,12 @@ export default function Scorer(props: IScorerProps) {
               } catch {
                 result = { kind: 'unreachable', error: 'Could not reach tournament control.' };
               }
-              setOperationNotice(operationNoticeWithControl('Issue saved', result));
+              // The scoresheet fact and the network fact, split: the note really is saved whatever
+              // happened on the wire, and when the room is modelling the request it owns the rest.
+              noteControlOutcome({ prefix: 'Issue saved', localOnly: 'Issue saved on the scoresheet.' }, result);
               return result;
             }
-            setOperationNotice('Issue saved on the scoresheet.');
+            acknowledge('Issue saved on the scoresheet.');
             return undefined;
           }}
           onClose={() => setDialog(null)}
@@ -1525,9 +1730,29 @@ export default function Scorer(props: IScorerProps) {
           format={format}
           focusQuestion={reviewFocus}
           editQuestion={reviewEditQuestion}
-          onReplace={events.replace}
+          /*
+           * A correction that landed, said out loud.
+           *
+           * The modal closing and the totals quietly becoming different numbers is the whole of the
+           * feedback today, and a scorekeeper who has just retyped question seven under time
+           * pressure has no way to tell that from a modal that closed without saving. So: the same
+           * sentence every completed action gets, and a wash on the line it changed if that line is
+           * still on screen. Both are temporary — being corrected is something that happened to a
+           * question, not a property it now has, and a permanent mark would be making a claim the
+           * scoresheet does not.
+           */
+          onReplace={(id, next) => {
+            events.replace(id, next);
+            acknowledge(correctionNotice(next), next.questionNumber);
+          }}
           onRemove={events.remove}
-          onReplaceQuestion={events.replaceQuestion}
+          onReplaceQuestion={(questionNumber, question) => {
+            // Only on the way out. A refused correction leaves the editor open with the reason on
+            // it, and saying it worked here would be contradicting the dialog underneath.
+            const applied = events.replaceQuestion(questionNumber, question);
+            if (applied) acknowledge(`Question ${questionNumber} corrected.`, questionNumber);
+            return applied;
+          }}
           onOpenReplacement={openReplacementAt}
           onClose={() => {
             setDialog(null);
@@ -1565,17 +1790,23 @@ export default function Scorer(props: IScorerProps) {
               status: 'open',
             });
             if (requestControl && onRequestControl) {
-              setOperationNotice('Protest recorded; asking tournament control to come.');
+              acknowledge('Protest recorded; asking tournament control to come.');
               let result: HelpRequestResult;
               try {
                 result = await onRequestControl('protest', `Q${currentQuestion} protest by ${teamName}: ${description}`);
               } catch {
                 result = { kind: 'unreachable', error: 'Could not reach tournament control.' };
               }
-              setOperationNotice(operationNoticeWithControl('Protest recorded', result));
+              noteControlOutcome(
+                {
+                  prefix: 'Protest recorded',
+                  localOnly: 'Protest recorded. Keep scoring; tournament control will see it on the result.',
+                },
+                result,
+              );
               return result;
             } else {
-              setOperationNotice('Protest recorded. Keep scoring; tournament control will see it on the result.');
+              acknowledge('Protest recorded. Keep scoring; tournament control will see it on the result.');
             }
             return undefined;
           }}
@@ -1641,10 +1872,16 @@ export default function Scorer(props: IScorerProps) {
               },
             );
             setDialog(null);
-            setOperationNotice(
+            /*
+             * Persistent, unlike the other acknowledgements here: this one is not "that worked", it
+             * is an instruction about the next thing to do, and it stays until the replacement has
+             * been scored over the top of it.
+             */
+            warn(
               scope === 'bonus'
                 ? `The bonus on question ${questionNumber} was cleared. Score the replacement.`
                 : `Question ${questionNumber} was cleared. Score the replacement as question ${questionNumber}.`,
+              'info',
             );
           }}
           onClose={() => {
@@ -1695,7 +1932,8 @@ export default function Scorer(props: IScorerProps) {
           expectedTeams={setup}
           onRestore={(restoredEvents) => {
             events.restore(restoredEvents);
-            setOperationNotice('Recovered the scoresheet from the QBJ backup.');
+            // Where the events on screen came from, which stays worth knowing; not an acknowledgement.
+            warn('Recovered the scoresheet from the QBJ backup.', 'info');
           }}
           onClose={() => setDialog(null)}
         />

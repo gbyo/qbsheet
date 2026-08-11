@@ -240,7 +240,10 @@ test.describe('a server that speaks only QBTCP', () => {
     await page.getByLabel('Ask tournament control to come', { exact: true }).check();
     await page.getByRole('button', { name: 'Save and request control', exact: true }).click();
 
-    await expect(page.getByText(/Issue saved, but tournament control was not reached/)).toBeVisible();
+    // The scoresheet fact and the network fact, split between the two things that own them: the
+    // note really is saved whatever the wire did, and the failure has one persistent home with the
+    // retry in it rather than a second permanent copy above the scoresheet.
+    await expect(page.getByText('Issue saved on the scoresheet.')).toBeVisible();
     await expect(page.getByText('Tournament control was not reached.', { exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Try request again', exact: true }).first()).toBeVisible();
     await expect.poll(() => control.helpPosts.length).toBe(1);
@@ -314,6 +317,77 @@ test.describe('a server that speaks only QBTCP', () => {
     expect(control.requests.filter((entry) => entry.path === '/qbtcp/v1/pair')).toHaveLength(1);
   });
 
+  /**
+   * The ten minutes between one round and the next.
+   *
+   * This is the state a Chromebook spends most of a tournament day in, and until now the only thing
+   * on screen during it was a sentence that reads identically whether the software is polling
+   * tournament control or has quietly stopped. It has always been polling. The room had no way to
+   * know, so scorekeepers pressed the manual button between every round — and some of them, seeing
+   * nothing happen, went looking for a pairing code they did not need.
+   *
+   * Driven in a real browser because every layer has to agree for it to hold: the interval has to
+   * survive a finished game and a return to the room screen, the assignment has to be re-read
+   * without a gesture, and the screen has to change exactly once when it does. A stub of any of
+   * those would prove nothing about the other two.
+   */
+  test('a room left waiting picks up the next assignment on its own', async ({ page }) => {
+    // Two full poll intervals are waited out below on purpose; a tight ceiling would turn a slow
+    // machine into a failure that says nothing about the behaviour.
+    test.setTimeout(180_000);
+    await pairRoom(page, control);
+    await startAssignedGame(page, 4);
+    // A game that has had a tossup read is a game that can be ended and submitted.
+    await scoreTossup(page, 'Sarah', 'Power', 20);
+    await expect(page.getByText('Tossup 2 of 20', { exact: true })).toBeVisible();
+    await endGameAndSubmit(page);
+
+    // Back to the room with nothing to play, which is where a scorekeeper actually waits.
+    control.assign(null);
+    await page.getByRole('button', { name: `Next game in ${roomName}` }).click();
+    await expect(page.getByRole('heading', { name: `${roomName} · Connected` })).toBeVisible();
+    await expect(page.getByText('Waiting for the next assignment.')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Start scoring' })).toBeDisabled();
+
+    // The screen says the checking is happening, so the manual button is an override rather than
+    // the way an assignment normally arrives.
+    const checkStatus = page.locator('.assignment-check');
+    await expect(checkStatus).toContainText('checks automatically');
+    await expect(page.getByRole('button', { name: 'Check now' })).toBeVisible();
+
+    // Mark the block showing the waiting line, so its replacement is something that can be seen.
+    await page.evaluate(() =>
+      document.querySelector('.assignment-state-body')?.setAttribute('data-e2e-mark', 'waiting'),
+    );
+
+    const before = control.requests.filter((entry) => entry.path === '/qbtcp/v1/assignment').length;
+    control.assign(5);
+
+    // Nothing is pressed from here on. The matchup arrives because the room asked for it.
+    await expect(
+      page.getByText(`${rounds[5].label} · ${rounds[5].left.name} vs ${rounds[5].right.name}`),
+    ).toBeVisible({ timeout: 40_000 });
+    expect(control.requests.filter((entry) => entry.path === '/qbtcp/v1/assignment').length).toBeGreaterThan(
+      before,
+    );
+    await expect(page.getByRole('button', { name: 'Start scoring' })).toBeEnabled();
+    // The block really was replaced, which is the one state change and the one entrance.
+    await expect(page.locator('.assignment-state-body[data-e2e-mark="waiting"]')).toHaveCount(0);
+
+    // And it settles: two more polls returning the same assignment leave the same element in place,
+    // so the matchup does not re-enter every ten seconds for the rest of the round.
+    await page.evaluate(() =>
+      document.querySelector('.assignment-state-body')?.setAttribute('data-e2e-mark', 'assigned'),
+    );
+    await page.waitForTimeout(assignmentPollIntervalMs * 2 + 2_000);
+    await expect(page.locator('.assignment-state-body[data-e2e-mark="assigned"]')).toHaveCount(1);
+    await expect(page.getByRole('button', { name: 'Start scoring' })).toBeEnabled();
+
+    // One pairing for the whole of it, which is the promise the room screen exists to keep.
+    expect(control.requests.filter((entry) => entry.path === '/qbtcp/v1/pair')).toHaveLength(1);
+    await startAssignedGame(page, 5);
+  });
+
   test('waits rather than asking for a code when tournament control has nothing assigned', async ({ page }) => {
     control.assign(null);
     await pairRoom(page, control);
@@ -329,7 +403,7 @@ test.describe('a server that speaks only QBTCP', () => {
     await expect(page.getByText(`${rounds[4].label} · Ninety Six vs Greenwood`)).toBeVisible();
 
     control.revokeRoomToken();
-    await page.getByRole('button', { name: 'Check again' }).click();
+    await page.getByRole('button', { name: 'Check now' }).click();
 
     await expect(page.getByLabel('Pairing code')).toBeVisible({ timeout: 20_000 });
     await expect(page.getByText(/no longer recognizes this room/)).toBeVisible();
