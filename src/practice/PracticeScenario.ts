@@ -3,7 +3,7 @@ import { bonusEventPoints, ScoreEvent } from '../scoring/ScoreEvents';
 import { IGameSetup } from '../scoring/deriveGame';
 import { ITeamRoster } from '../game/Roster';
 import { LeftOrRight } from '../scoring/types';
-import { seatKeyLabels } from '../scorer/KeyboardScoring';
+import { keyboardShortcutLabels, seatKeyLabels } from '../scorer/KeyboardScoring';
 
 export type PracticeExpectation =
   | { kind: 'lineup' }
@@ -407,12 +407,17 @@ export const practiceSteps: IPracticeStep[] = [
   },
 ];
 
+export function practiceLineupMatches(actual: readonly string[], expected: readonly string[]): boolean {
+  return actual.length === expected.length && expected.every((player, index) => actual[index] === player);
+}
+
 export function practiceLineupReady(setup: IGameSetup): boolean {
   const left = setup.left.startingLineup ?? [];
   const right = setup.right.startingLineup ?? [];
-  const same = (actual: string[], expected: string[]) =>
-    actual.length === expected.length && expected.every((player) => actual.includes(player));
-  return same(left, practiceLeftTeam.startingLineup) && same(right, practiceRightTeam.startingLineup);
+  return (
+    practiceLineupMatches(left, practiceLeftTeam.startingLineup) &&
+    practiceLineupMatches(right, practiceRightTeam.startingLineup)
+  );
 }
 
 /**
@@ -431,11 +436,11 @@ const stepKeystrokes: Record<string, { side: LeftOrRight; player: string; modifi
   'q3-neg': { side: 'left', player: 'Jeremy', modifier: 'Alt' },
   'q3-rebound': { side: 'right', player: 'Tucker' },
   'q3-bonus': { literal: '4' },
-  'q4-dead': { literal: 'Space' },
+  'q4-dead': { literal: keyboardShortcutLabels.noBuzz },
   'q5-ten': { side: 'left', player: 'Gibson' },
   'q5-bonus': { literal: '3' },
   'q6-ten': { side: 'right', player: 'Tucker' },
-  'q6-undo': { literal: 'Ctrl/\u2318 + Z' },
+  'q6-undo': { literal: keyboardShortcutLabels.undo },
   'q6-power': { side: 'left', player: 'Gibson', modifier: 'Shift' },
   'q6-bonus': { literal: '3' },
 };
