@@ -31,6 +31,7 @@ function fakeRegistration(waiting: ReturnType<typeof fakeWorker> | null) {
     waiting,
     update: () => Promise.resolve(),
     addEventListener() {},
+    removeEventListener() {},
   };
 }
 
@@ -40,6 +41,7 @@ function deployBuild(waiting: ReturnType<typeof fakeWorker> | null) {
     appUpdates.observe(fakeRegistration(waiting), {
       controller: waiting === null ? null : { id: 'old' },
       addEventListener() {},
+      removeEventListener() {},
     });
   });
 }
@@ -52,8 +54,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  appUpdates.reset();
   appUpdates.stop();
-  deployBuild(null);
 });
 
 describe('a build deployed while a game is being scored', () => {
