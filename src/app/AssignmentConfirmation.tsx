@@ -28,7 +28,7 @@
  */
 import { useState } from 'react';
 import { IGamePackage, gamePackageMatchup } from '../game/GamePackage';
-import { HelpRequestCategory } from './HelpRequests';
+import { HelpRequestCategory, HelpRequestResult } from './HelpRequests';
 
 /** The three things that are wrong often enough to deserve their own button. */
 export type AssignmentProblem = 'wrong-teams' | 'wrong-packet' | 'wrong-round';
@@ -97,7 +97,7 @@ type ReportState =
   | { kind: 'none' }
   /** A problem is chosen and the note is being typed. */
   | { kind: 'composing'; problem: AssignmentProblem; note: string; busy: boolean; error: string }
-  | { kind: 'sent'; problem: AssignmentProblem };
+  | { kind: 'sent'; problem: AssignmentProblem; alreadyOutstanding: boolean };
 
 export default function AssignmentConfirmation(props: {
   packageValue: IGamePackage;
@@ -108,7 +108,7 @@ export default function AssignmentConfirmation(props: {
    * disappearing — a scorekeeper who has spotted the wrong packet needs to be told to go and find
    * somebody, not left with a card that only offers agreement.
    */
-  onReportProblem?: (category: HelpRequestCategory, message: string) => Promise<{ ok: boolean; error?: string }>;
+  onReportProblem?: (category: HelpRequestCategory, message: string) => Promise<HelpRequestResult>;
   onConfirm: () => void;
   /** Back to the room without starting. The assignment is not consumed. */
   onBack: () => void;
@@ -127,11 +127,17 @@ export default function AssignmentConfirmation(props: {
       assignmentProblems[problem].category,
       problemMessage(problem, packageValue, note),
     );
-    if (!result.ok) {
-      setReport({ ...report, busy: false, error: result.error ?? 'Tournament control could not be reached.' });
+    if (result.kind !== 'accepted' && result.kind !== 'already-outstanding') {
+      const error =
+        result.kind === 'unsupported'
+          ? 'This tournament connection does not support remote control requests.'
+          : result.kind === 'refused'
+            ? 'Tournament control refused this request.'
+            : 'Tournament control was not reached.';
+      setReport({ ...report, busy: false, error });
       return;
     }
-    setReport({ kind: 'sent', problem });
+    setReport({ kind: 'sent', problem, alreadyOutstanding: result.kind === 'already-outstanding' });
   };
 
   return (
@@ -225,7 +231,9 @@ export default function AssignmentConfirmation(props: {
         {reported && (
           <div className="pregame-report">
             <p className="shell-notice" role="status">
-              Tournament control has been told: {assignmentProblems[report.problem].label.toLowerCase()}.
+              {report.alreadyOutstanding
+                ? 'Tournament control had already been requested for this room.'
+                : `Tournament control has been told: ${assignmentProblems[report.problem].label.toLowerCase()}.`}
             </p>
             <p className="shell-hint">
               Wait for staff if you need to. If they tell you to play it as it stands, start the game — the

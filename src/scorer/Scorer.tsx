@@ -21,7 +21,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import BrandLogo from '../BrandLogo';
 import { LeftOrRight } from '../scoring/types';
-import { HelpRequestCategory } from '../app/HelpRequests';
+import {
+  ControlRequestState,
+  HelpClearResult,
+  HelpRequestCategory,
+  HelpRequestResult,
+  helpRequestCategoryLabels,
+} from '../app/HelpRequests';
 import { IScorekeeperAnswerType, IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
 import {
   IRoomProcedure,
@@ -59,7 +65,13 @@ import {
   TimeoutDialog,
 } from './ProcedureDialogs';
 import { IGameEventsApi, newEventId } from './useGameEvents';
-import { FlagDialog, IssueDialog, RecoveryDialog, ScoresheetReviewDialog } from './OperationsDialogs';
+import {
+  FlagDialog,
+  formatControlRequestTime,
+  IssueDialog,
+  RecoveryDialog,
+  ScoresheetReviewDialog,
+} from './OperationsDialogs';
 import { attachScorerRecovery } from './ScorerRecovery';
 import useRoomClock from './useRoomClock';
 import usePlayerSeating from './usePlayerSeating';
@@ -144,9 +156,10 @@ export interface IScorerProps {
   /** Round number and the rest of the non-scoring metadata for the exported match. */
   qbjMeta?: IQbjMatchMeta;
   /** Sends an operational issue to tournament control for the assigned-room workflow. */
-  onRequestControl?: (category: HelpRequestCategory, message: string) => Promise<void>;
-  /** True while this room already has an open request in control's queue. */
-  controlRequestPending?: boolean;
+  onRequestControl?: (category: HelpRequestCategory, message: string) => Promise<HelpRequestResult>;
+  controlRequest?: ControlRequestState;
+  onRetryControlRequest?: () => Promise<HelpRequestResult | null>;
+  onCancelControlRequest?: () => Promise<HelpClearResult | null>;
   /** The event list was restored automatically from local storage. */
   recovered?: boolean;
   /** Something the host wants said about recovery, e.g. where a restored game came from. */
@@ -191,6 +204,16 @@ type OpenDialog =
 /** How often, at most, to tell tournament control how the game is going. Matches MODAQ's old timer. */
 const progressIntervalMs = 5000;
 
+function operationNoticeWithControl(prefix: string, result: HelpRequestResult): string {
+  if (result.kind === 'accepted') return `${prefix} and was sent to tournament control.`;
+  if (result.kind === 'already-outstanding') return `${prefix}. Tournament control was already requested.`;
+  if (result.kind === 'unreachable' || result.kind === 'server-error') {
+    return `${prefix}, but tournament control was not reached.`;
+  }
+  if (result.kind === 'refused') return `${prefix}. Tournament control refused the request.`;
+  return `${prefix}. This tournament connection does not support remote control requests.`;
+}
+
 export default function Scorer(props: IScorerProps) {
   const {
     gameKey,
@@ -215,7 +238,9 @@ export default function Scorer(props: IScorerProps) {
     onProgress,
     qbjMeta,
     onRequestControl,
-    controlRequestPending = false,
+    controlRequest: suppliedControlRequest,
+    onRetryControlRequest,
+    onCancelControlRequest,
     recovered = false,
     recoveryNotice,
     alerts,
@@ -223,6 +248,12 @@ export default function Scorer(props: IScorerProps) {
     authoritativeRosters,
     onSyncRosterPlayer,
   } = props;
+
+  const controlRequest: ControlRequestState =
+    suppliedControlRequest ??
+    (onRequestControl
+      ? { kind: 'unavailable' }
+      : { kind: 'unsupported', error: 'This game is being scored from a file.' });
 
   const recoveryStatus: IScorerRecoveryStatus = recovery ?? { localSaveOk: saved !== false };
 
@@ -499,11 +530,8 @@ export default function Scorer(props: IScorerProps) {
       setOperationNotice(`${resultNotice} Requesting tournament control.`);
       Promise.resolve()
         .then(() => onRequestControl('roster-change', `Please add ${playerName} to ${derivedTeam.name}.`))
-        .then(
-          () => setOperationNotice(`${resultNotice} Tournament control was notified.`),
-          () => setOperationNotice(`${resultNotice} Tournament control could not be reached.`),
-        )
-        .catch(() => undefined);
+        .then((result) => setOperationNotice(operationNoticeWithControl(resultNotice, result)))
+        .catch(() => setOperationNotice(`${resultNotice}, but tournament control was not reached.`));
     },
     [
       authoritativeRosters,
@@ -1037,8 +1065,43 @@ export default function Scorer(props: IScorerProps) {
           {events.rejection}
         </p>
       )}
-      {controlRequestPending && (
-        <p className="scorer-banner is-info">Tournament control has this room&apos;s request.</p>
+      {controlRequest.kind === 'sending' && (
+        <p className="scorer-banner is-info" role="status">
+          Requesting tournament control…
+        </p>
+      )}
+      {controlRequest.kind === 'outstanding' && (
+        <div className="scorer-banner is-info" role="status">
+          <span>
+            Tournament control requested · {helpRequestCategoryLabels[controlRequest.request.category]} ·{' '}
+            {formatControlRequestTime(controlRequest.requestedAt, controlRequest.requestedAtSource)}
+          </span>
+          {onCancelControlRequest && controlRequest.request.id && controlRequest.canCancel !== false && (
+            <button type="button" className="scorer-text-action" onClick={() => void onCancelControlRequest()}>
+              Cancel request for control
+            </button>
+          )}
+        </div>
+      )}
+      {controlRequest.kind === 'failed' && (
+        <div className="scorer-banner is-warning" role="alert">
+          <span>Tournament control was not reached.</span>
+          {onRetryControlRequest && controlRequest.retryable && (
+            <button type="button" className="scorer-text-action" onClick={() => void onRetryControlRequest()}>
+              Try request again
+            </button>
+          )}
+        </div>
+      )}
+      {controlRequest.kind === 'refused' && (
+        <p className="scorer-banner is-warning" role="alert">
+          Tournament control refused this request.
+          {onRetryControlRequest && controlRequest.retryable && (
+            <button type="button" className="scorer-text-action" onClick={() => void onRetryControlRequest()}>
+              Try request again
+            </button>
+          )}
+        </p>
       )}
 
       {phase.kind === 'lineup' && (
@@ -1365,7 +1428,14 @@ export default function Scorer(props: IScorerProps) {
             onRequestControl
               ? (team, playerName) => {
                   const teamName = team === 'left' ? game.left.name : game.right.name;
-                  onRequestControl('roster-change', `Please add ${playerName} to ${teamName}.`).catch(() => undefined);
+                  setOperationNotice(`Requesting tournament control to add ${playerName}.`);
+                  void onRequestControl('roster-change', `Please add ${playerName} to ${teamName}.`)
+                    .then((result) =>
+                      setOperationNotice(operationNoticeWithControl(`Roster change for ${playerName}:`, result)),
+                    )
+                    .catch(() =>
+                      setOperationNotice(`Roster change for ${playerName}: tournament control was not reached.`),
+                    );
                 }
               : undefined
           }
@@ -1416,22 +1486,15 @@ export default function Scorer(props: IScorerProps) {
       {dialog === 'issue' && (
         <IssueDialog
           questionNumber={currentQuestion}
-          controlAvailable={onRequestControl !== undefined}
-          requestPending={controlRequestPending}
+          controlRequest={controlRequest}
+          onRetryControl={onRetryControlRequest}
+          onCancelControl={onCancelControlRequest}
           initialCategory={issueCategory}
           onReport={async (category, details, requestControl) => {
             let label = 'Issue';
             if (category === 'protest') label = 'Protest';
             else if (category === 'question-packet') label = 'Question / packet issue';
-            let controlSent = false;
-            if (requestControl && onRequestControl) {
-              try {
-                await onRequestControl(category, details);
-                controlSent = true;
-              } catch {
-                controlSent = false;
-              }
-            }
+            // The scoresheet is authoritative. Commit the note before any network operation.
             record({
               id: newEventId(),
               type: 'note',
@@ -1439,10 +1502,18 @@ export default function Scorer(props: IScorerProps) {
               text: `${label}: ${details}`,
               flagged: true,
             });
-            if (controlSent) setOperationNotice('Issue saved and sent to tournament control.');
-            else if (requestControl)
-              setOperationNotice('Issue saved on the scoresheet, but tournament control could not be reached.');
-            else setOperationNotice('Issue saved on the scoresheet.');
+            if (requestControl && onRequestControl) {
+              let result: HelpRequestResult;
+              try {
+                result = await onRequestControl(category, details);
+              } catch {
+                result = { kind: 'unreachable', error: 'Could not reach tournament control.' };
+              }
+              setOperationNotice(operationNoticeWithControl('Issue saved', result));
+              return result;
+            }
+            setOperationNotice('Issue saved on the scoresheet.');
+            return undefined;
           }}
           onClose={() => setDialog(null)}
         />
@@ -1479,8 +1550,10 @@ export default function Scorer(props: IScorerProps) {
         <ProtestDialog
           game={game}
           questionNumber={currentQuestion}
-          controlAvailable={onRequestControl !== undefined && !controlRequestPending}
-          onRecord={(team, subject, description, requestControl) => {
+          controlRequest={controlRequest}
+          onRetryControl={onRetryControlRequest}
+          onCancelControl={onCancelControlRequest}
+          onRecord={async (team, subject, description, requestControl) => {
             const teamName = team === 'left' ? game.left.name : game.right.name;
             record({
               id: newEventId(),
@@ -1493,16 +1566,18 @@ export default function Scorer(props: IScorerProps) {
             });
             if (requestControl && onRequestControl) {
               setOperationNotice('Protest recorded; asking tournament control to come.');
-              onRequestControl('protest', `Q${currentQuestion} protest by ${teamName}: ${description}`)
-                .then(() => setOperationNotice('Protest recorded and tournament control was asked to come.'))
-                .catch(() =>
-                  setOperationNotice(
-                    'Protest recorded on the scoresheet, but tournament control could not be reached.',
-                  ),
-                );
+              let result: HelpRequestResult;
+              try {
+                result = await onRequestControl('protest', `Q${currentQuestion} protest by ${teamName}: ${description}`);
+              } catch {
+                result = { kind: 'unreachable', error: 'Could not reach tournament control.' };
+              }
+              setOperationNotice(operationNoticeWithControl('Protest recorded', result));
+              return result;
             } else {
               setOperationNotice('Protest recorded. Keep scoring; tournament control will see it on the result.');
             }
+            return undefined;
           }}
           onResolve={(protest, status, resolution) => {
             const existing = events.events.find((event) => event.id === protest.eventId);

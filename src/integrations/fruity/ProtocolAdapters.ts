@@ -134,6 +134,8 @@ export interface IServerAdapter {
     category: HelpRequestCategory,
     message: string,
   ): Promise<ApiResult<unknown>>;
+  readHelp(identity: IRoomIdentity): Promise<ApiResult<unknown>>;
+  cancelHelp(identity: IRoomIdentity, helpId: string): Promise<ApiResult<unknown>>;
   addRosterPlayer(
     identity: IRoomIdentity,
     credentials: ISessionCredentials,
@@ -206,6 +208,19 @@ abstract class BaseAdapter implements IServerAdapter {
       method: 'POST',
       headers: this.roomHeaders(identity, 'application/json'),
       body: JSON.stringify({ category, message }),
+    });
+  }
+
+  readHelp(identity: IRoomIdentity): Promise<ApiResult<unknown>> {
+    return this.request(this.routes.help(identity.roomId), {
+      headers: this.roomHeaders(identity),
+    });
+  }
+
+  cancelHelp(identity: IRoomIdentity, helpId: string): Promise<ApiResult<unknown>> {
+    return this.request(this.routes.helpItem(identity.roomId, helpId), {
+      method: 'DELETE',
+      headers: this.roomHeaders(identity),
     });
   }
 
@@ -553,6 +568,14 @@ export class QbtcpAdapter extends BaseAdapter {
     message: string,
   ): Promise<ApiResult<unknown>> {
     return this.guard('help', 'help requests', () => super.requestHelp(identity, category, message));
+  }
+
+  override readHelp(identity: IRoomIdentity): Promise<ApiResult<unknown>> {
+    return this.guard('help', 'help requests', () => super.readHelp(identity));
+  }
+
+  override cancelHelp(identity: IRoomIdentity, helpId: string): Promise<ApiResult<unknown>> {
+    return this.guard('help', 'help requests', () => super.cancelHelp(identity, helpId));
   }
 
   override updatePresence(identity: IRoomIdentity, update: { ready?: boolean }): Promise<ApiResult<unknown>> {

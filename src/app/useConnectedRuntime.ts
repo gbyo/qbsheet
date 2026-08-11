@@ -52,6 +52,9 @@ import { RoomConnectionState } from './ConnectionState';
 import { IScorerAlert } from '../scorer/ConnectionStatus';
 import FruityServerClient, {
   ApiResult,
+  HelpClearResult,
+  HelpReadResult,
+  HelpRequestResult,
   IRoomIdentity,
   ISessionCredentials,
   IWriterConflict,
@@ -59,7 +62,12 @@ import FruityServerClient, {
 } from '../integrations/fruity/FruityServerClient';
 import { deliverFinalResult, ProgressSender } from '../integrations/fruity/FruityResultDestination';
 import type { IFinalDelivery } from '../integrations/fruity/FruityResultDestination';
-import { HelpRequestCategory } from './HelpRequests';
+import {
+  ControlRequestState,
+  HelpRequestCategory,
+  IHelpRequestSummary,
+  helpRequestCategoryLabels,
+} from './HelpRequests';
 import { ConnectionTimeline, connectionTimeline } from './ConnectionTimeline';
 
 /** How often a room asks control what it should be playing. */
@@ -119,8 +127,10 @@ export interface IConnectedRuntime {
   submitFinal: (qbj: object) => Promise<IFinalDelivery>;
   recoverFromServer: () => Promise<object | null>;
   syncRosterPlayer: (teamName: string, playerName: string) => Promise<{ ok: boolean; error?: string; rejected?: boolean }>;
-  requestControl: (category: HelpRequestCategory, message: string) => Promise<void>;
-  controlRequestPending: boolean;
+  requestControl: (category: HelpRequestCategory, message: string) => Promise<HelpRequestResult>;
+  retryControlRequest: () => Promise<HelpRequestResult | null>;
+  cancelControlRequest: () => Promise<HelpClearResult | null>;
+  controlRequest: ControlRequestState;
 }
 
 /**
@@ -177,6 +187,179 @@ export function forbiddenIn(result: ApiResult<unknown>): string | null {
   return result.detail ?? 'Tournament control will not accept requests from this page.';
 }
 
+const helpMessageLimit = 500;
+
+type HelpDraftOutcome =
+  | { kind: 'failed'; status?: number }
+  | { kind: 'refused'; status: number; retryable: boolean };
+
+interface IHelpDraft {
+  category: HelpRequestCategory;
+  message: string;
+  outcome?: HelpDraftOutcome;
+}
+
+function isHelpCategory(value: unknown): value is HelpRequestCategory {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(helpRequestCategoryLabels, value);
+}
+
+function isRecordLike(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function readHelpDraft(key: string): IHelpDraft | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.sessionStorage.getItem(key);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (!isRecordLike(parsed) || !isHelpCategory(parsed.category) || typeof parsed.message !== 'string') return null;
+    if (parsed.message.trim() === '' || parsed.message.length > helpMessageLimit) return null;
+    const rawOutcome = isRecordLike(parsed.outcome) ? parsed.outcome : undefined;
+    const outcome: HelpDraftOutcome | undefined =
+      rawOutcome?.kind === 'refused' &&
+      typeof rawOutcome.status === 'number' &&
+      typeof rawOutcome.retryable === 'boolean'
+        ? { kind: 'refused', status: rawOutcome.status, retryable: rawOutcome.retryable }
+        : rawOutcome?.kind === 'failed'
+          ? {
+              kind: 'failed',
+              ...(typeof rawOutcome.status === 'number' ? { status: rawOutcome.status } : {}),
+            }
+          : undefined;
+    return { category: parsed.category, message: parsed.message, ...(outcome ? { outcome } : {}) };
+  } catch {
+    return null;
+  }
+}
+
+function writeHelpDraft(key: string, draft: IHelpDraft): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.setItem(key, JSON.stringify(draft));
+  } catch {
+    // A full or unavailable session store must not make a local issue fail.
+  }
+}
+
+function clearHelpDraft(key: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.removeItem(key);
+  } catch {
+    // In-memory state remains authoritative for this mount.
+  }
+}
+
+function requestTime(
+  request: IHelpRequestSummary,
+  existing?: ControlRequestState,
+): { value: string; source: 'server' | 'device' } {
+  if (request.createdAt && !Number.isNaN(Date.parse(request.createdAt))) {
+    return { value: request.createdAt, source: 'server' };
+  }
+  if (
+    existing?.kind === 'outstanding' &&
+    existing.requestedAtSource === 'device' &&
+    existing.request.id === request.id &&
+    existing.request.category === request.category &&
+    existing.request.message === request.message
+  ) {
+    return { value: existing.requestedAt, source: 'device' };
+  }
+  return { value: new Date().toISOString(), source: 'device' };
+}
+
+function controlFailureState(
+  category: HelpRequestCategory,
+  message: string,
+  result: Exclude<HelpRequestResult, { kind: 'accepted' | 'already-outstanding' }>,
+): ControlRequestState {
+  if (result.kind === 'unsupported') return result;
+  if (result.kind === 'refused') {
+    return { kind: 'refused', category, message, error: result.error, status: result.status, retryable: result.retryable };
+  }
+  return {
+    kind: 'failed',
+    category,
+    message,
+    error: result.error,
+    retryable: result.kind === 'unreachable' || result.kind === 'server-error',
+  };
+}
+
+function draftFailureState(draft: IHelpDraft): ControlRequestState {
+  if (draft.outcome?.kind === 'refused') {
+    return {
+      kind: 'refused',
+      category: draft.category,
+      message: draft.message,
+      error: 'Tournament control refused this request.',
+      status: draft.outcome.status,
+      retryable: draft.outcome.retryable,
+    };
+  }
+  return {
+    kind: 'failed',
+    category: draft.category,
+    message: draft.message,
+    error: 'A previous request was not confirmed by tournament control.',
+    retryable: true,
+  };
+}
+
+function readFailureState(
+  draft: IHelpDraft | null,
+  result: Exclude<HelpReadResult, { kind: 'idle' | 'outstanding' }>,
+): ControlRequestState {
+  if (result.kind === 'unsupported') return result;
+  // A legacy POST-only server cannot reconcile after a reload, but the draft still gives the room
+  // a truthful retry action. Do not replace that useful state with a generic "unavailable" line.
+  if (result.kind === 'unavailable') return draft ? draftFailureState(draft) : result;
+  if (!draft) return { kind: 'unavailable', error: result.error };
+  return controlFailureState(draft.category, draft.message, result);
+}
+
+function sameControlRequestState(first: ControlRequestState, second: ControlRequestState): boolean {
+  if (first.kind !== second.kind) return false;
+  if (first.kind === 'idle' && second.kind === 'idle') return true;
+  if (first.kind === 'unavailable' && second.kind === 'unavailable') return first.error === second.error;
+  if (first.kind === 'unsupported' && second.kind === 'unsupported') return first.error === second.error;
+  if (first.kind === 'sending' && second.kind === 'sending') {
+    return first.category === second.category && first.message === second.message;
+  }
+  if (first.kind === 'failed' && second.kind === 'failed') {
+    return (
+      first.category === second.category &&
+      first.message === second.message &&
+      first.error === second.error &&
+      first.retryable === second.retryable
+    );
+  }
+  if (first.kind === 'refused' && second.kind === 'refused') {
+    return (
+      first.category === second.category &&
+      first.message === second.message &&
+      first.error === second.error &&
+      first.status === second.status &&
+      first.retryable === second.retryable
+    );
+  }
+  if (first.kind === 'outstanding' && second.kind === 'outstanding') {
+    return (
+      first.request.id === second.request.id &&
+      first.request.category === second.request.category &&
+      first.request.message === second.request.message &&
+      first.request.createdAt === second.request.createdAt &&
+      first.request.updatedAt === second.request.updatedAt &&
+      first.requestedAt === second.requestedAt &&
+      first.requestedAtSource === second.requestedAtSource &&
+      first.canCancel === second.canCancel
+    );
+  }
+  return false;
+}
+
 export default function useConnectedRuntime(input: IConnectedRuntimeInput): IConnectedRuntime {
   const {
     client,
@@ -204,7 +387,48 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
   const [tournamentSwitched, setTournamentSwitched] = useState(false);
   const [serverSnapshotAt, setServerSnapshotAt] = useState<number | null>(null);
   const [snapshotError, setSnapshotError] = useState<string | undefined>(undefined);
-  const [controlRequestPending, setControlRequestPending] = useState(false);
+  const helpStorageKey = useMemo(
+    () => `qbsheet-help-draft:${client.baseUrl}:${identity.roomId}:${scheduledMatchId ?? 'room'}`,
+    [client.baseUrl, identity.roomId, scheduledMatchId],
+  );
+  const initialHelpDraft = useMemo(() => readHelpDraft(helpStorageKey), [helpStorageKey]);
+  const [controlRequest, setControlRequest] = useState<ControlRequestState>(() =>
+    initialHelpDraft ? draftFailureState(initialHelpDraft) : { kind: 'unavailable' },
+  );
+  const controlRequestRef = useRef(controlRequest);
+  const helpDraftRef = useRef<IHelpDraft | null>(initialHelpDraft);
+  const helpReadInFlight = useRef<Promise<HelpReadResult> | null>(null);
+  const helpSendInFlight = useRef<Promise<HelpRequestResult> | null>(null);
+  const helpClearInFlight = useRef<Promise<HelpClearResult> | null>(null);
+  const helpMutationVersion = useRef(0);
+  const helpRoomCredentialProblem = useRef(false);
+  const { deviceId: helpDeviceId, operatorName: helpOperatorName, roomId: helpRoomId, roomName: helpRoomName, token: helpToken } = identity;
+  const helpIdentity = useMemo(
+    () => ({
+      roomId: helpRoomId,
+      token: helpToken,
+      ...(helpDeviceId !== undefined ? { deviceId: helpDeviceId } : {}),
+      ...(helpOperatorName !== undefined ? { operatorName: helpOperatorName } : {}),
+      ...(helpRoomName !== undefined ? { roomName: helpRoomName } : {}),
+    }),
+    [helpDeviceId, helpOperatorName, helpRoomId, helpRoomName, helpToken],
+  );
+
+  useEffect(() => {
+    // A repaired room token is the only event that can make a help-specific 401 stale.
+    helpRoomCredentialProblem.current = false;
+  }, [helpIdentity.token]);
+
+  const noteHelpCredentialProblem = useCallback(() => {
+    helpRoomCredentialProblem.current = true;
+    setRoomCredentialProblem(true);
+  }, []);
+
+  const setControlRequestValue = useCallback((next: ControlRequestState) => {
+    if (sameControlRequestState(controlRequestRef.current, next)) return;
+    controlRequestRef.current = next;
+    setControlRequest(next);
+  }, []);
 
   /**
    * Whether it is still safe to write to this session.
@@ -290,6 +514,191 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     },
     [timeline],
   );
+
+  /** Reconcile help through the existing low-volume assignment poll. */
+  const reconcileHelp = useCallback(async (): Promise<HelpReadResult> => {
+    if (!enabled) {
+      const result: HelpReadResult = {
+        kind: 'unsupported',
+        error: 'This tournament connection does not support remote control requests.',
+      };
+      setControlRequestValue(result);
+      return result;
+    }
+    if (helpReadInFlight.current) return helpReadInFlight.current;
+
+    const readVersion = helpMutationVersion.current;
+    const mutationInFlightAtRead = helpSendInFlight.current !== null || helpClearInFlight.current !== null;
+    const read = Promise.resolve()
+      .then(() => client.readHelp(helpIdentity))
+      .catch((): HelpReadResult => ({ kind: 'unreachable', error: 'Could not reach tournament control.' }));
+    helpReadInFlight.current = read;
+    try {
+      const result = await read;
+      // A POST made after this GET began is the fresher local fact.
+      // A GET begun during a POST/DELETE may have read the old server state. Let the next poll
+      // reconcile after the mutation instead of allowing that response to undo the local result.
+      if (
+        mutationInFlightAtRead ||
+        helpSendInFlight.current !== null ||
+        helpClearInFlight.current !== null ||
+        helpMutationVersion.current !== readVersion
+      )
+        return result;
+      const current = controlRequestRef.current;
+      if (result.kind === 'outstanding') {
+        const at = requestTime(result.request, current);
+        helpDraftRef.current = null;
+        clearHelpDraft(helpStorageKey);
+        setControlRequestValue({
+          kind: 'outstanding',
+          request: result.request,
+          requestedAt: at.value,
+          requestedAtSource: at.source,
+          ...(current.kind === 'outstanding' && current.request.id === result.request.id && current.canCancel === false
+            ? { canCancel: false }
+            : {}),
+        });
+        return result;
+      }
+      if (result.kind === 'idle') {
+        if (current.kind === 'outstanding') {
+          timeline.record('control-request-cleared', current.request.category);
+          helpDraftRef.current = null;
+          clearHelpDraft(helpStorageKey);
+          setControlRequestValue({ kind: 'idle' });
+        } else if (helpDraftRef.current === null) {
+          setControlRequestValue({ kind: 'idle' });
+        }
+        // A failed POST remains visible until a person retries it.
+        return result;
+      }
+      if (result.kind === 'unsupported') {
+        if (current.kind === 'outstanding') setControlRequestValue({ ...current, canCancel: false });
+        else setControlRequestValue(result);
+        helpDraftRef.current = null;
+        clearHelpDraft(helpStorageKey);
+        return result;
+      }
+      if (result.kind === 'unavailable') {
+        if (current.kind === 'outstanding') setControlRequestValue({ ...current, canCancel: false });
+        else setControlRequestValue(readFailureState(helpDraftRef.current, result));
+        return result;
+      }
+      if (result.kind === 'refused' && result.status === 401) {
+        noteHelpCredentialProblem();
+        timeline.record('room-refused');
+      }
+      if (current.kind !== 'outstanding') setControlRequestValue(readFailureState(helpDraftRef.current, result));
+      return result;
+    } finally {
+      if (helpReadInFlight.current === read) helpReadInFlight.current = null;
+    }
+  }, [client, enabled, helpIdentity, helpStorageKey, noteHelpCredentialProblem, setControlRequestValue, timeline]);
+
+  /** Ask control to come, or return the one already outstanding without a duplicate POST. */
+  const requestControl = useCallback(
+    async (category: HelpRequestCategory, message: string): Promise<HelpRequestResult> => {
+      const current = controlRequestRef.current;
+      if (current.kind === 'outstanding') return { kind: 'already-outstanding', request: current.request };
+      if (current.kind === 'unsupported') return current;
+      if (current.kind === 'sending' && helpSendInFlight.current) return helpSendInFlight.current;
+
+      const draft = { category, message: message.slice(0, helpMessageLimit) };
+      helpMutationVersion.current += 1;
+      helpDraftRef.current = draft;
+      writeHelpDraft(helpStorageKey, draft);
+      setControlRequestValue({ kind: 'sending', ...draft });
+
+      const send = Promise.resolve()
+        .then(() => client.requestHelp(helpIdentity, draft.category, draft.message))
+        .catch((): HelpRequestResult => ({ kind: 'unreachable', error: 'Could not reach tournament control.' }));
+      helpSendInFlight.current = send;
+      try {
+        const result = await send;
+        if (result.kind === 'accepted' || result.kind === 'already-outstanding') {
+          const at = requestTime(result.request);
+          helpDraftRef.current = null;
+          clearHelpDraft(helpStorageKey);
+          setControlRequestValue({
+            kind: 'outstanding',
+            request: result.request,
+            requestedAt: at.value,
+            requestedAtSource: at.source,
+          });
+          if (result.kind === 'accepted') timeline.record('control-requested', category);
+          return result;
+        }
+        if (result.kind === 'unsupported') {
+          helpDraftRef.current = null;
+          clearHelpDraft(helpStorageKey);
+        }
+        if (result.kind === 'refused' && result.status === 401) {
+          noteHelpCredentialProblem();
+          timeline.record('room-refused');
+        }
+        setControlRequestValue(controlFailureState(draft.category, draft.message, result));
+        if (result.kind === 'unreachable' || result.kind === 'server-error') {
+          const status = result.kind === 'server-error' ? result.status : undefined;
+          helpDraftRef.current = { ...draft, outcome: { kind: 'failed', ...(status !== undefined ? { status } : {}) } };
+          writeHelpDraft(helpStorageKey, helpDraftRef.current);
+        } else if (result.kind === 'refused') {
+          helpDraftRef.current = {
+            ...draft,
+            outcome: { kind: 'refused', status: result.status, retryable: result.retryable },
+          };
+          writeHelpDraft(helpStorageKey, helpDraftRef.current);
+        }
+        timeline.record(
+          result.kind === 'refused' ? 'control-request-refused' : 'control-request-failed',
+          category,
+        );
+        return result;
+      } finally {
+        if (helpSendInFlight.current === send) helpSendInFlight.current = null;
+      }
+    },
+    [client, helpIdentity, helpStorageKey, noteHelpCredentialProblem, setControlRequestValue, timeline],
+  );
+
+  const retryControlRequest = useCallback(async (): Promise<HelpRequestResult | null> => {
+    const current = controlRequestRef.current;
+    const draft =
+      helpDraftRef.current ??
+      (current.kind === 'failed' || current.kind === 'refused'
+        ? { category: current.category, message: current.message }
+        : null);
+    if (!draft) return null;
+    return requestControl(draft.category, draft.message);
+  }, [requestControl]);
+
+  const cancelControlRequest = useCallback(async (): Promise<HelpClearResult | null> => {
+    const current = controlRequestRef.current;
+    if (current.kind !== 'outstanding' || !current.request.id) return null;
+    if (helpClearInFlight.current) return helpClearInFlight.current;
+    helpMutationVersion.current += 1;
+    const clear = Promise.resolve()
+      .then(() => client.cancelHelp(helpIdentity, current.request.id as string))
+      .catch((): HelpClearResult => ({ kind: 'unreachable', error: 'Could not reach tournament control.' }));
+    helpClearInFlight.current = clear;
+    try {
+      const result = await clear;
+      if (result.kind === 'cleared' || result.kind === 'idle') {
+        helpDraftRef.current = null;
+        clearHelpDraft(helpStorageKey);
+        setControlRequestValue({ kind: 'idle' });
+        timeline.record('control-request-cleared', current.request.category);
+      } else if (result.kind === 'unsupported') {
+        setControlRequestValue({ ...current, canCancel: false });
+      } else if (result.kind === 'refused' && result.status === 401) {
+        noteHelpCredentialProblem();
+        timeline.record('room-refused');
+      }
+      return result;
+    } finally {
+      if (helpClearInFlight.current === clear) helpClearInFlight.current = null;
+    }
+  }, [client, helpIdentity, helpStorageKey, noteHelpCredentialProblem, setControlRequestValue, timeline]);
 
   /**
    * Reopen this room's session with the room capability it still holds.
@@ -411,8 +820,9 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
         return;
       }
       setDegradedMessage(undefined);
-      setRoomCredentialProblem(false);
+      if (!helpRoomCredentialProblem.current) setRoomCredentialProblem(false);
       setForbidden(null);
+      void reconcileHelp();
       const assignment = result.value;
       if (tournamentKey && assignment.tournamentKey && assignment.tournamentKey !== tournamentKey) {
         setTournamentSwitched(true);
@@ -441,7 +851,7 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
       cancelled = true;
       clearInterval(timer);
     };
-  }, [client, identity, scheduledMatchId, tournamentKey, enabled, sender, timeline]);
+  }, [client, identity, scheduledMatchId, tournamentKey, enabled, reconcileHelp, sender, timeline]);
 
   const alerts = useMemo<IScorerAlert[]>(() => {
     const list: IScorerAlert[] = [];
@@ -576,19 +986,6 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     [client, identity, credentials, timeline],
   );
 
-  const requestControl = useCallback(
-    async (category: HelpRequestCategory, message: string) => {
-      const result = await client.requestHelp(identity, category, message);
-      if (result.ok) {
-        setControlRequestPending(true);
-        // The category, never the message. What a scorekeeper typed is theirs, and a diagnostics file
-        // is not the place for it.
-        timeline.record('control-requested', category);
-      }
-    },
-    [client, identity, timeline],
-  );
-
   return {
     connection,
     degradedMessage,
@@ -601,6 +998,8 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     recoverFromServer,
     syncRosterPlayer,
     requestControl,
-    controlRequestPending,
+    retryControlRequest,
+    cancelControlRequest,
+    controlRequest,
   };
 }

@@ -117,6 +117,19 @@ describe('what the bundle contains', () => {
     expect(bundle.connectionEntries).toHaveLength(4);
   });
 
+  test('a help message is not copied into the connection timeline or diagnostics', () => {
+    const timeline = new ConnectionTimeline();
+    const privateMessage = 'Call the director at 555-0199; this must stay out of diagnostics.';
+    timeline.record('control-requested', 'question-packet');
+    timeline.record('control-request-failed', 'question-packet');
+
+    const bundle = buildDiagnostics({ now: at, timeline: timeline.entries() });
+
+    expect(timeline.entries().map((entry) => entry.detail)).toEqual(['question-packet', 'question-packet']);
+    expect(JSON.stringify(bundle)).not.toContain(privateMessage);
+    expect(JSON.stringify(bundle)).not.toContain('555-0199');
+  });
+
   test('recent errors', () => {
     const log = new ErrorLog({ now: () => at.getTime() });
     log.record('uncaught', new TypeError('Cannot read properties of null'));

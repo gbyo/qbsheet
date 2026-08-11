@@ -191,6 +191,184 @@ describe('what the client puts on the wire', () => {
     expect(calls.map((call) => call.path)).toContain('/api/v1/rooms/room-204/assignment');
   });
 
+  test('help request uses the room-scoped QBTCP envelope and returns normalized state', async () => {
+    const { calls, fetchImpl } = qbtcpServer({
+      '/qbtcp/v1/help': {
+        body: {
+          request: {
+            id: 'help-7',
+            roomId: 'room-204',
+            category: 'protest',
+            message: 'The ruling needs a director.',
+            status: 'open',
+            createdAt: '2026-08-11T14:42:00.000Z',
+          },
+        },
+      },
+    });
+    const client = new FruityServerClient('http://control.test', fetchImpl);
+
+    const result = await client.requestHelp(identity, 'protest', 'The ruling needs a director.');
+
+    expect(result).toEqual({
+      kind: 'accepted',
+      request: {
+        id: 'help-7',
+        category: 'protest',
+        message: 'The ruling needs a director.',
+        createdAt: '2026-08-11T14:42:00.000Z',
+      },
+    });
+    const sent = calls.find((call) => call.path === '/qbtcp/v1/help');
+    expect(sent?.method).toBe('POST');
+    expect(sent?.headers['x-yf-room-token']).toBe('room-token');
+    expect(sent?.headers['x-yf-device-id']).toBe('device-1');
+    expect(sent?.body).toEqual({ category: 'protest', message: 'The ruling needs a director.' });
+  });
+
+  test('a POST that returns a different open request is normalized as already outstanding', async () => {
+    const { fetchImpl } = qbtcpServer({
+      '/qbtcp/v1/help': {
+        body: {
+          request: {
+            id: 'help-existing',
+            category: 'equipment-technical',
+            message: 'The buzzer is silent.',
+            status: 'open',
+          },
+        },
+      },
+    });
+
+    await expect(
+      new FruityServerClient('http://control.test', fetchImpl).requestHelp(identity, 'protest', 'A ruling needs help.'),
+    ).resolves.toEqual({
+      kind: 'already-outstanding',
+      request: {
+        id: 'help-existing',
+        category: 'equipment-technical',
+        message: 'The buzzer is silent.',
+      },
+    });
+  });
+
+  test('a QBTCP success without the defined help envelope is not reported as accepted', async () => {
+    const { fetchImpl } = qbtcpServer({ '/qbtcp/v1/help': { body: {} } });
+
+    await expect(new FruityServerClient('http://control.test', fetchImpl).requestHelp(identity, 'protest', 'Help.')).resolves.toMatchObject({
+      kind: 'server-error',
+    });
+  });
+
+  test('GET restores an outstanding request and DELETE clears it without exposing wire shapes', async () => {
+    const { calls, fetchImpl } = qbtcpServer({
+      '/qbtcp/v1/help': {
+        body: {
+          request: {
+            id: 'help-8',
+            category: 'question-packet',
+            message: 'Packet mismatch.',
+            status: 'open',
+            createdAt: '2026-08-11T14:42:00.000Z',
+          },
+        },
+      },
+      '/qbtcp/v1/help/help-8': {
+        body: { request: { id: 'help-8', status: 'cancelled' } },
+      },
+    });
+    const client = new FruityServerClient('http://control.test', fetchImpl);
+
+    await expect(client.readHelp(identity)).resolves.toEqual({
+      kind: 'outstanding',
+      request: {
+        id: 'help-8',
+        category: 'question-packet',
+        message: 'Packet mismatch.',
+        createdAt: '2026-08-11T14:42:00.000Z',
+      },
+    });
+    await expect(client.cancelHelp(identity, 'help-8')).resolves.toEqual({ kind: 'cleared' });
+
+    expect(calls.find((call) => call.path === '/qbtcp/v1/help')?.method).toBe('GET');
+    expect(calls.find((call) => call.path === '/qbtcp/v1/help/help-8')?.method).toBe('DELETE');
+  });
+
+  test.each([
+    [401, 'refused'],
+    [403, 'refused'],
+    [503, 'server-error'],
+  ] as const)('help status %s is classified as %s without throwing', async (status, kind) => {
+    const { fetchImpl } = qbtcpServer({ '/qbtcp/v1/help': { status, body: { error: 'No help.' } } });
+
+    await expect(new FruityServerClient('http://control.test', fetchImpl).requestHelp(identity, 'protest', 'Help.')).resolves.toMatchObject({
+      kind,
+      ...(kind === 'refused' ? { status } : { status }),
+    });
+  });
+
+  test('a legacy server keeps the same normalized help lifecycle on its existing routes', async () => {
+    const calls: { path: string; method: string }[] = [];
+    const fetchImpl = (async (input: string, init: RequestInit = {}) => {
+      const path = input.replace('http://control.test', '');
+      calls.push({ path, method: init.method ?? 'GET' });
+      if (path === '/qbtcp/v1') return { ok: false, status: 404, text: async () => '{}' } as Response;
+      if (path === '/api/v1/rooms/room-204/help') {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ request: { id: 'legacy-help', category: 'rules-question', message: 'Rule.', status: 'open' } }),
+        } as Response;
+      }
+      return { ok: true, status: 200, text: async () => '{}' } as Response;
+    }) as unknown as typeof fetch;
+    const client = new FruityServerClient('http://control.test', fetchImpl);
+
+    await expect(client.requestHelp(identity, 'rules-question', 'Rule.')).resolves.toMatchObject({ kind: 'accepted' });
+    await expect(client.readHelp(identity)).resolves.toMatchObject({ kind: 'outstanding' });
+    await expect(client.cancelHelp(identity, 'legacy-help')).resolves.toEqual({ kind: 'cleared' });
+    expect(calls.map((call) => call.path)).toEqual([
+      '/qbtcp/v1',
+      '/api/v1/rooms/room-204/help',
+      '/api/v1/rooms/room-204/help',
+      '/api/v1/rooms/room-204/help/legacy-help',
+    ]);
+  });
+
+  test('a pre-QBTCP server that only has legacy POST help remains requestable', async () => {
+    const calls: { path: string; method: string }[] = [];
+    const fetchImpl = (async (input: string, init: RequestInit = {}) => {
+      const path = input.replace('http://control.test', '');
+      calls.push({ path, method: init.method ?? 'GET' });
+      if (path === '/qbtcp/v1') return { ok: false, status: 404, text: async () => '{}' } as Response;
+      if (path === '/api/v1/rooms/room-204/help' && (init.method ?? 'GET') === 'GET') {
+        return { ok: false, status: 404, text: async () => JSON.stringify({ error: 'Not found' }) } as Response;
+      }
+      if (path === '/api/v1/rooms/room-204/help' && init.method === 'POST') {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ request: { category: 'protest', message: 'Help.', status: 'open' } }),
+        } as Response;
+      }
+      if (path === '/api/v1/rooms/room-204/help/legacy-help' && init.method === 'DELETE') {
+        return { ok: false, status: 404, text: async () => JSON.stringify({ error: 'Not found' }) } as Response;
+      }
+      return { ok: false, status: 404, text: async () => '{}' } as Response;
+    }) as unknown as typeof fetch;
+    const client = new FruityServerClient('http://control.test', fetchImpl);
+
+    await expect(client.readHelp(identity)).resolves.toMatchObject({ kind: 'unavailable' });
+    await expect(client.requestHelp(identity, 'protest', 'Help.')).resolves.toMatchObject({ kind: 'accepted' });
+    await expect(client.cancelHelp(identity, 'legacy-help')).resolves.toMatchObject({ kind: 'unsupported' });
+    expect(calls.map((call) => `${call.method} ${call.path}`)).toEqual([
+      'GET /qbtcp/v1',
+      'GET /api/v1/rooms/room-204/help',
+      'POST /api/v1/rooms/room-204/help',
+      'DELETE /api/v1/rooms/room-204/help/legacy-help',
+    ]);
+  });
+
   test('progress travels in a sequenced envelope, and the sequence is not inside the match', async () => {
     const { calls, fetchImpl } = qbtcpServer();
     const client = new FruityServerClient('http://control.test', fetchImpl);
@@ -394,8 +572,13 @@ describe('what the client puts on the wire', () => {
 
         const result = await attempt(client, capability);
 
-        expect(result.ok).toBe(false);
-        expect(result.ok === false && result.unsupported).toBe(true);
+        if (capability === 'help') {
+          expect(result).toMatchObject({ kind: 'unsupported' });
+        } else {
+          const legacyResult = result as { ok: false; unsupported?: boolean };
+          expect(legacyResult.ok).toBe(false);
+          expect(legacyResult.unsupported).toBe(true);
+        }
         expect(calls.map((call) => call.path)).not.toContain(routeFor[capability]);
       });
     }

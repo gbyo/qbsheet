@@ -1,11 +1,12 @@
 /** @vitest-environment jsdom */
 
-import { act, renderHook } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { connectionVersion, readConnection, writeConnection } from '../src/app/ConnectedSession';
 import useConnectedRuntime, { assignmentPollIntervalMs } from '../src/app/useConnectedRuntime';
 import FruityServerClient, { INormalizedAssignment } from '../src/integrations/fruity/FruityServerClient';
 import { progressIntervalMs } from '../src/integrations/fruity/FruityResultDestination';
+import { HelpRequestCategory, IHelpRequestSummary } from '../src/app/HelpRequests';
 
 class TestStorage {
   private values = new Map<string, string>();
@@ -326,6 +327,245 @@ describe('connected room durability', () => {
 
     expect(delivered.delivery).toBe('pending');
 
+    hook.unmount();
+  });
+
+  test('the help lifecycle accepts once, suppresses a second summons, and cancels once', async () => {
+    let openHelp: IHelpRequestSummary | null = null;
+    const requestHelp = vi.fn(async (_identity: unknown, category: HelpRequestCategory, message: string) => {
+      openHelp = { id: 'help-1', category, message, createdAt: '2026-08-11T14:42:00.000Z' };
+      return { kind: 'accepted' as const, request: openHelp };
+    });
+    const readHelp = vi.fn(async () =>
+      openHelp ? { kind: 'outstanding' as const, request: openHelp } : { kind: 'idle' as const },
+    );
+    const cancelHelp = vi.fn(async () => {
+      openHelp = null;
+      return { kind: 'cleared' as const };
+    });
+    const client = {
+      ensureDiscovered: vi.fn(async () => null),
+      assignment: vi.fn(async () => ({ ok: true as const, value: assignmentWithNothingToPlay })),
+      putSnapshot: vi.fn(async () => ({ ok: true as const, value: {} })),
+      requestHelp,
+      readHelp,
+      cancelHelp,
+    } as unknown as FruityServerClient;
+    const hook = renderHook(() =>
+      useConnectedRuntime({
+        client,
+        identity: { roomId: 'room-1', token: 'room-token', deviceId: 'device-1' },
+        credentials: { sessionId: 'session-1', token: 'session-token' },
+        enabled: true,
+      }),
+    );
+
+    let accepted: Awaited<ReturnType<typeof hook.result.current.requestControl>> | undefined;
+    await act(async () => {
+      accepted = await hook.result.current.requestControl('question-packet', 'The packet is wrong.');
+    });
+    expect(accepted?.kind).toBe('accepted');
+    expect(hook.result.current.controlRequest.kind).toBe('outstanding');
+
+    let duplicate: Awaited<ReturnType<typeof hook.result.current.requestControl>> | undefined;
+    await act(async () => {
+      duplicate = await hook.result.current.requestControl('protest', 'A second thing needs control.');
+    });
+    expect(duplicate?.kind).toBe('already-outstanding');
+    expect(requestHelp).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await Promise.all([hook.result.current.cancelControlRequest(), hook.result.current.cancelControlRequest()]);
+    });
+    expect(cancelHelp).toHaveBeenCalledTimes(1);
+    expect(hook.result.current.controlRequest.kind).toBe('idle');
+    hook.unmount();
+  });
+
+  test('an unreachable help request is retryable with the original bounded message', async () => {
+    const bodies: { category: HelpRequestCategory; message: string }[] = [];
+    let openHelp: IHelpRequestSummary | null = null;
+    const requestHelp = vi
+      .fn()
+      .mockImplementationOnce(async (_identity: unknown, category: HelpRequestCategory, message: string) => {
+        bodies.push({ category, message });
+        return { kind: 'unreachable' as const, error: 'Wi-Fi is down.' };
+      })
+      .mockImplementationOnce(async (_identity: unknown, category: HelpRequestCategory, message: string) => {
+        bodies.push({ category, message });
+        openHelp = { id: 'help-2', category, message, createdAt: '2026-08-11T14:43:00.000Z' };
+        return {
+          kind: 'accepted' as const,
+          request: openHelp,
+        };
+      });
+    const client = {
+      ensureDiscovered: vi.fn(async () => null),
+      assignment: vi.fn(async () => ({ ok: true as const, value: assignmentWithNothingToPlay })),
+      putSnapshot: vi.fn(async () => ({ ok: true as const, value: {} })),
+      requestHelp,
+      readHelp: vi.fn(async () => (openHelp ? { kind: 'outstanding' as const, request: openHelp } : { kind: 'idle' as const })),
+      cancelHelp: vi.fn(async () => ({ kind: 'cleared' as const })),
+    } as unknown as FruityServerClient;
+    const hook = renderHook(() =>
+      useConnectedRuntime({
+        client,
+        identity: { roomId: 'room-1', token: 'room-token', deviceId: 'device-1' },
+        credentials: { sessionId: 'session-1', token: 'session-token' },
+        enabled: true,
+      }),
+    );
+
+    let failed: Awaited<ReturnType<typeof hook.result.current.requestControl>> | undefined;
+    await act(async () => {
+      failed = await hook.result.current.requestControl('equipment-technical', 'The buzzer is silent.');
+    });
+    expect(failed?.kind).toBe('unreachable');
+    expect(hook.result.current.controlRequest).toMatchObject({
+      kind: 'failed',
+      category: 'equipment-technical',
+      message: 'The buzzer is silent.',
+      retryable: true,
+    });
+
+    await act(async () => {
+      await hook.result.current.retryControlRequest();
+    });
+    expect(requestHelp).toHaveBeenCalledTimes(2);
+    expect(bodies[1]).toEqual(bodies[0]);
+    expect(hook.result.current.controlRequest.kind).toBe('outstanding');
+    hook.unmount();
+  });
+
+  test('a legacy server without DELETE keeps the outstanding summons visible', async () => {
+    const request = { id: 'legacy-help', category: 'question-packet' as const, message: 'Packet mismatch.' };
+    const client = {
+      ensureDiscovered: vi.fn(async () => null),
+      assignment: vi.fn(async () => ({ ok: true as const, value: assignmentWithNothingToPlay })),
+      putSnapshot: vi.fn(async () => ({ ok: true as const, value: {} })),
+      requestHelp: vi.fn(async () => ({ kind: 'accepted' as const, request })),
+      readHelp: vi.fn(async () => ({ kind: 'outstanding' as const, request })),
+      cancelHelp: vi.fn(async () => ({ kind: 'unsupported' as const, error: 'This older server has no DELETE route.' })),
+    } as unknown as FruityServerClient;
+    const hook = renderHook(() =>
+      useConnectedRuntime({
+        client,
+        identity: { roomId: 'room-1', token: 'room-token', deviceId: 'device-1' },
+        credentials: { sessionId: 'session-1', token: 'session-token' },
+        enabled: true,
+      }),
+    );
+
+    await act(async () => {
+      await hook.result.current.requestControl('question-packet', request.message);
+    });
+    await act(async () => {
+      await hook.result.current.cancelControlRequest();
+    });
+
+    expect(hook.result.current.controlRequest).toMatchObject({ kind: 'outstanding', canCancel: false });
+    hook.unmount();
+  });
+
+  test('an unsupported help capability is visible and never posts', async () => {
+    const requestHelp = vi.fn();
+    const client = {
+      ensureDiscovered: vi.fn(async () => null),
+      assignment: vi.fn(async () => ({ ok: true as const, value: assignmentWithNothingToPlay })),
+      putSnapshot: vi.fn(async () => ({ ok: true as const, value: {} })),
+      requestHelp,
+      readHelp: vi.fn(async () => ({
+        kind: 'unsupported' as const,
+        error: 'This tournament connection does not support remote control requests.',
+      })),
+      cancelHelp: vi.fn(async () => ({ kind: 'unsupported' as const, error: 'Unsupported.' })),
+    } as unknown as FruityServerClient;
+    const hook = renderHook(() =>
+      useConnectedRuntime({
+        client,
+        identity: { roomId: 'room-1', token: 'room-token', deviceId: 'device-1' },
+        credentials: { sessionId: 'session-1', token: 'session-token' },
+        enabled: true,
+      }),
+    );
+
+    await waitFor(() => expect(hook.result.current.controlRequest.kind).toBe('unsupported'));
+    let result: Awaited<ReturnType<typeof hook.result.current.requestControl>> | undefined;
+    await act(async () => {
+      result = await hook.result.current.requestControl('protest', 'A ruling needs a person.');
+    });
+    if (!result) throw new Error('help request result was not returned');
+    expect(result.kind).toBe('unsupported');
+    expect(requestHelp).not.toHaveBeenCalled();
+    expect(hook.result.current.controlRequest.kind).toBe('unsupported');
+    hook.unmount();
+  });
+
+  test('a room-token 401 requests the existing room repair and does not enter a pairing loop', async () => {
+    const client = {
+      ensureDiscovered: vi.fn(async () => null),
+      assignment: vi.fn(async () => ({ ok: true as const, value: assignmentWithNothingToPlay })),
+      putSnapshot: vi.fn(async () => ({ ok: true as const, value: {} })),
+      requestHelp: vi.fn(async () => ({
+        kind: 'refused' as const,
+        status: 401,
+        error: 'Room token expired.',
+        retryable: true,
+      })),
+      readHelp: vi.fn(async () => ({ kind: 'idle' as const })),
+      cancelHelp: vi.fn(async () => ({ kind: 'cleared' as const })),
+    } as unknown as FruityServerClient;
+    const hook = renderHook(() =>
+      useConnectedRuntime({
+        client,
+        identity: { roomId: 'room-1', token: 'room-token', deviceId: 'device-1' },
+        credentials: { sessionId: 'session-1', token: 'session-token' },
+        enabled: true,
+      }),
+    );
+
+    let result: Awaited<ReturnType<typeof hook.result.current.requestControl>> | undefined;
+    await act(async () => {
+      result = await hook.result.current.requestControl('protest', 'A ruling needs a person.');
+    });
+    if (!result) throw new Error('help request result was not returned');
+    expect(result.kind).toBe('refused');
+    expect(hook.result.current.alerts.some((alert) => alert.id === 'credentials')).toBe(true);
+    expect(hook.result.current.alerts.some((alert) => alert.id === 'forbidden')).toBe(false);
+    hook.unmount();
+  });
+
+  test('a 403 help refusal stays a refusal and does not start room repair', async () => {
+    const client = {
+      ensureDiscovered: vi.fn(async () => null),
+      assignment: vi.fn(async () => ({ ok: true as const, value: assignmentWithNothingToPlay })),
+      putSnapshot: vi.fn(async () => ({ ok: true as const, value: {} })),
+      requestHelp: vi.fn(async () => ({
+        kind: 'refused' as const,
+        status: 403,
+        error: 'This page is not approved.',
+        retryable: false,
+      })),
+      readHelp: vi.fn(async () => ({ kind: 'idle' as const })),
+      cancelHelp: vi.fn(async () => ({ kind: 'cleared' as const })),
+    } as unknown as FruityServerClient;
+    const hook = renderHook(() =>
+      useConnectedRuntime({
+        client,
+        identity: { roomId: 'room-1', token: 'room-token', deviceId: 'device-1' },
+        credentials: { sessionId: 'session-1', token: 'session-token' },
+        enabled: true,
+      }),
+    );
+
+    let result: Awaited<ReturnType<typeof hook.result.current.requestControl>> | undefined;
+    await act(async () => {
+      result = await hook.result.current.requestControl('protest', 'A ruling needs a person.');
+    });
+    if (!result) throw new Error('help request result was not returned');
+    expect(result).toMatchObject({ kind: 'refused', status: 403 });
+    expect(hook.result.current.controlRequest).toMatchObject({ kind: 'refused', status: 403, retryable: false });
+    expect(hook.result.current.alerts.some((alert) => alert.id === 'credentials')).toBe(false);
     hook.unmount();
   });
 });

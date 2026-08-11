@@ -7,9 +7,16 @@
  * tap on it. They live behind the Game menu for the same reason forfeits do.
  */
 import { useState } from 'react';
+import {
+  ControlRequestState,
+  HelpClearResult,
+  HelpRequestResult,
+  helpRequestCategoryLabels,
+} from '../app/HelpRequests';
 import { LeftOrRight } from '../scoring/types';
 import { IDerivedGame, IDerivedProtest } from '../scoring/deriveGame';
 import { ProtestStatus, ProtestSubject } from '../scoring/ScoreEvents';
+import { formatControlRequestTime } from './OperationsDialogs';
 import ScorerDialog from './ScorerDialog';
 
 const protestSubjectLabels: Record<ProtestSubject, string> = {
@@ -40,19 +47,36 @@ export { protestSubjectLabels, protestStatusLabels };
 export function ProtestDialog(props: {
   game: IDerivedGame;
   questionNumber: number;
-  onRecord: (team: LeftOrRight, subject: ProtestSubject, description: string, requestControl: boolean) => void;
+  onRecord: (
+    team: LeftOrRight,
+    subject: ProtestSubject,
+    description: string,
+    requestControl: boolean,
+  ) => void | Promise<HelpRequestResult | undefined>;
   onResolve: (protest: IDerivedProtest, status: ProtestStatus, resolution: string) => void;
   /** Open the scoresheet review at this question, which is where an upheld protest is acted on. */
   onEditQuestion: (questionNumber: number) => void;
-  /** False when this room has no way to reach tournament control right now. */
-  controlAvailable: boolean;
+  controlRequest: ControlRequestState;
+  onRetryControl?: () => Promise<HelpRequestResult | null>;
+  onCancelControl?: () => Promise<HelpClearResult | null>;
   onClose: () => void;
 }) {
-  const { game, questionNumber, onRecord, onResolve, onEditQuestion, controlAvailable, onClose } = props;
+  const {
+    game,
+    questionNumber,
+    onRecord,
+    onResolve,
+    onEditQuestion,
+    controlRequest,
+    onRetryControl,
+    onCancelControl,
+    onClose,
+  } = props;
   const [side, setSide] = useState<LeftOrRight>('left');
   const [subject, setSubject] = useState<ProtestSubject>('tossup-answer');
   const [description, setDescription] = useState('');
   const [requestControl, setRequestControl] = useState(false);
+  const [recording, setRecording] = useState(false);
   const [resolving, setResolving] = useState<string | null>(null);
   const [resolution, setResolution] = useState('');
 
@@ -125,12 +149,17 @@ export function ProtestDialog(props: {
 
       <form
         className="scorer-note-form"
-        onSubmit={(submitEvent) => {
+        onSubmit={async (submitEvent) => {
           submitEvent.preventDefault();
-          if (description.trim() === '') return;
-          onRecord(side, subject, description.trim(), requestControl);
-          setDescription('');
-          setRequestControl(false);
+          if (description.trim() === '' || recording) return;
+          setRecording(true);
+          try {
+            await onRecord(side, subject, description.trim(), requestControl);
+            setDescription('');
+            setRequestControl(false);
+          } finally {
+            setRecording(false);
+          }
         }}
       >
         <h3 className="scorer-dialog-subhead">New protest on question {questionNumber}</h3>
@@ -170,17 +199,67 @@ export function ProtestDialog(props: {
           between games; a few need a director now, and holding up a round waiting for one that
           doesn't is the thing this is built to avoid.
         */}
-        <label className="scorer-checkbox" htmlFor="scorer-protest-control">
-          <input
-            id="scorer-protest-control"
-            type="checkbox"
-            checked={requestControl}
-            disabled={!controlAvailable}
-            onChange={(e) => setRequestControl(e.target.checked)}
-          />
-          {controlAvailable ? 'Ask tournament control to come now' : 'Tournament control cannot be reached from here'}
-        </label>
-        <button type="submit" className="scorer-choice" disabled={description.trim() === ''}>
+        <div className="scorer-checkbox">
+          {controlRequest.kind === 'idle' || controlRequest.kind === 'unavailable' ? (
+            <label htmlFor="scorer-protest-control">
+              <input
+                id="scorer-protest-control"
+                type="checkbox"
+                checked={requestControl}
+                disabled={recording}
+                onChange={(e) => setRequestControl(e.target.checked)}
+              />
+              Ask tournament control to come
+            </label>
+          ) : controlRequest.kind === 'sending' ? (
+            <span>Tournament control request is being sent…</span>
+          ) : controlRequest.kind === 'outstanding' ? (
+            <span>
+              Tournament control has already been requested.
+              <br />
+              {helpRequestCategoryLabels[controlRequest.request.category]} ·{' '}
+              {formatControlRequestTime(controlRequest.requestedAt, controlRequest.requestedAtSource)}
+              {onCancelControl && controlRequest.request.id && controlRequest.canCancel !== false && (
+                <>
+                  <br />
+                  <button type="button" className="scorer-text-action" onClick={() => void onCancelControl()}>
+                    Cancel request for control
+                  </button>
+                </>
+              )}
+            </span>
+          ) : controlRequest.kind === 'failed' ? (
+            <span>
+              Tournament control was not reached.
+              {onRetryControl && controlRequest.retryable && (
+                <>
+                  <br />
+                  <button type="button" className="scorer-text-action" onClick={() => void onRetryControl()}>
+                    Try request again
+                  </button>
+                </>
+              )}
+            </span>
+          ) : controlRequest.kind === 'refused' ? (
+            <span>
+              Tournament control refused this request.
+              {onRetryControl && controlRequest.retryable && (
+                <>
+                  <br />
+                  <button type="button" className="scorer-text-action" onClick={() => void onRetryControl()}>
+                    Try request again
+                  </button>
+                </>
+              )}
+            </span>
+          ) : (
+            <span>
+              This tournament connection does not support remote control requests; the protest will still be saved
+              on the scoresheet.
+            </span>
+          )}
+        </div>
+        <button type="submit" className="scorer-choice" disabled={description.trim() === '' || recording}>
           Record protest and keep playing
         </button>
       </form>
