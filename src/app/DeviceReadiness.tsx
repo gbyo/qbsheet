@@ -12,8 +12,21 @@ type DownloadState = 'untested' | 'waiting' | 'passed' | 'failed';
 type ServerTestState =
   | { kind: 'untested' }
   | { kind: 'testing' }
-  | { kind: 'passed'; message: string }
+  /** `protocol` is what this device would actually speak to that address, not what it hopes for. */
+  | { kind: 'passed'; message: string; protocol: string }
   | { kind: 'failed'; message: string };
+
+/**
+ * What a director needs to be told about the surface a Chromebook settled on.
+ *
+ * Worth a line of its own because the two are not equally good and the difference is invisible
+ * everywhere else: a device on the fallback is scoring perfectly well today and will stop being
+ * able to the day the tournament's server drops its deprecated aliases. Finding that out in a room
+ * at 9am is the failure this sentence exists to prevent.
+ */
+export function protocolLabel(client: { isQbtcp: boolean }): string {
+  return client.isQbtcp ? 'QBTCP v1' : 'Legacy API fallback';
+}
 
 interface IReadinessSnapshot {
   localStorage: boolean;
@@ -194,11 +207,18 @@ export default function DeviceReadiness(props: {
     }
 
     setServerTest({ kind: 'testing' });
-    const result = await new FruityServerClient(normalized.value).verify();
+    const client = new FruityServerClient(normalized.value);
+    // The client discovers on its first call, exactly as it does for a live room, so the protocol
+    // this reports is the one a scorekeeper would actually get at this address.
+    const result = await client.verify();
     await runChecks();
     if (result.ok) {
       setServerAddress(normalized.value);
-      setServerTest({ kind: 'passed', message: `Tournament control answered at ${normalized.value}.` });
+      setServerTest({
+        kind: 'passed',
+        message: `Tournament control answered at ${normalized.value}.`,
+        protocol: protocolLabel(client),
+      });
     } else {
       setServerTest({ kind: 'failed', message: result.error });
     }
@@ -530,7 +550,17 @@ export default function DeviceReadiness(props: {
             {serverTest.kind === 'testing' ? 'Testing…' : 'Test connection'}
           </button>
         </form>
-        {serverTest.kind === 'passed' && <p className="readiness-test-result is-pass">✓ {serverTest.message}</p>}
+        {serverTest.kind === 'passed' && (
+          <>
+            <p className="readiness-test-result is-pass">✓ {serverTest.message}</p>
+            <p className="readiness-detail">
+              Protocol: {serverTest.protocol}.{' '}
+              {serverTest.protocol === 'QBTCP v1'
+                ? 'This device is using the canonical protocol.'
+                : 'This server did not announce QBTCP, so this device is using the deprecated /api/v1 routes. Scoring works; ask whether tournament control can be updated.'}
+            </p>
+          </>
+        )}
         {serverTest.kind === 'failed' && <p className="readiness-test-result is-fail">× {serverTest.message}</p>}
       </section>
     </main>

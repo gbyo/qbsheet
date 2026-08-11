@@ -16,12 +16,19 @@
  * the case where the scorekeeper is under the most time pressure. So the game in progress is stated
  * plainly — round, room, teams, and how far in it got — with one button. Nothing about that path
  * involves the network, and it is offered whether or not anything is reachable.
+ *
+ * # And a paired room comes before the address box
+ *
+ * Once this device is Room 204, typing an address is not a thing anybody should have to do again.
+ * The room is stated at the top with one button back into it; the address box stays underneath for
+ * the case it is actually for, which is a device being pointed at a different tournament.
  */
 import { FormEvent, useState } from 'react';
 import BrandLogo from '../BrandLogo';
 import { IStoredGameRecord, isActive } from '../game/GameStore';
 import { IGamePackage, gamePackageIdentity, gamePackageLabel, gamePackageMatchup } from '../game/GamePackage';
 import deriveGame from '../scoring/deriveGame';
+import { IPairedRoom } from './ConnectedSession';
 import GameFileOpen from './GameFileOpen';
 import RecentGames from './RecentGames';
 
@@ -41,10 +48,13 @@ export default function WelcomeScreen(props: {
   records: IStoredGameRecord[];
   notice: string;
   durable: boolean;
-  rememberedRoom?: string;
+  /** The room this device is paired with, when a pairing is held. */
+  pairedRoom: IPairedRoom | null;
   practiceInProgress: boolean;
   onReadiness: () => void;
   onPractice: () => void;
+  /** Back into the room this device is already paired with. No address, no code. */
+  onOpenRoom: () => void;
   onConnect: (baseUrl: string) => void;
   onOpenPackage: (packageValue: IGamePackage, attempt?: number) => void | Promise<void>;
   onOpenRecord: (record: IStoredGameRecord) => void | Promise<void>;
@@ -54,10 +64,11 @@ export default function WelcomeScreen(props: {
     records,
     notice,
     durable,
-    rememberedRoom,
+    pairedRoom,
     practiceInProgress,
     onReadiness,
     onPractice,
+    onOpenRoom,
     onConnect,
     onOpenPackage,
     onOpenRecord,
@@ -116,6 +127,20 @@ export default function WelcomeScreen(props: {
       )}
       {notice !== '' && <p className="shell-notice">{notice}</p>}
 
+      {pairedRoom && (
+        <section className="shell-section resume-card welcome-room">
+          <div>
+            <p className="resume-context">{pairedRoom.roomName} · Connected</p>
+            <p className="welcome-option-copy">
+              This device is paired for the tournament. Its next game comes from tournament control.
+            </p>
+          </div>
+          <button type="button" className="shell-button is-primary" onClick={onOpenRoom}>
+            Go to this room
+          </button>
+        </section>
+      )}
+
       {unfinished.length > 0 && (
         <section className="shell-section">
           <h2 className="shell-heading">Unfinished game</h2>
@@ -139,9 +164,13 @@ export default function WelcomeScreen(props: {
         <div className="welcome-start-options">
           <section className="welcome-start-option" aria-labelledby="welcome-control-heading">
             <h3 id="welcome-control-heading" className="welcome-option-heading">
-              Connect to tournament control
+              {pairedRoom ? 'Connect to a different tournament' : 'Connect to tournament control'}
             </h3>
-            <p className="welcome-option-copy">Connect this room to receive its game and send back the result.</p>
+            <p className="welcome-option-copy">
+              {pairedRoom
+                ? 'Pair this device somewhere else. The room above stays paired until this replaces it.'
+                : 'Connect this room to receive its game and send back the result.'}
+            </p>
             <form className="connect-form welcome-connect-form" onSubmit={submitAddress}>
               <label className="shell-label" htmlFor="control-address">
                 Tournament control address
@@ -163,7 +192,6 @@ export default function WelcomeScreen(props: {
                 </button>
               </div>
             </form>
-            {rememberedRoom && <p className="welcome-option-note">Last paired as {rememberedRoom}.</p>}
           </section>
 
           <section className="welcome-start-option" aria-labelledby="welcome-file-heading">

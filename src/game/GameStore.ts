@@ -131,18 +131,31 @@ export function isActive(record: IStoredGameRecord): boolean {
 }
 
 /**
- * Whether this device still owes somebody a copy of this result.
+ * Whether somebody has to carry this result somewhere.
  *
- * Server delivery does not discharge it. For a connected game, both the QBJ backup and the explicit
- * handoff acknowledgement are required. A file-only game has no tournament-control acknowledgement
- * to make, so downloading its QBJ is the handoff.
+ * The distinction is between a result that has reached the tournament and one that has not. A
+ * result tournament control accepted has arrived; asking the scorekeeper to download it, upload it
+ * by hand, and then confirm they did is asking for a second delivery of something already
+ * delivered, eleven times a day. QBTCP requires the download to stay *available* — it does not
+ * require a second handoff after every success — and a workflow that demands one anyway teaches
+ * rooms to click the confirmation without doing the upload, which is the state that makes the
+ * acknowledgement worthless when it matters.
+ *
+ * So the obligation is owed when delivery did not happen or cannot be trusted to have happened:
+ *
+ *   - a game with no tournament control behind it, which only ever had the file;
+ *   - a submission that is pending or was refused;
+ *   - any game whose tournament attached its own handoff instruction, because that instruction is
+ *     the tournament saying explicitly that it wants the file too.
  */
 export function needsHandoff(record: IStoredGameRecord): boolean {
   if (isActive(record)) return false;
+  const instructed = Boolean(record.package.handoffInstruction);
+  // Accepted by tournament control, with nothing else asked for. The copy on this device stays,
+  // and `Download QBJ again` stays with it; neither is an outstanding task.
+  if (record.serverDelivery === 'sent' && !instructed) return false;
   if (record.qbjDownloadedAt === undefined) return true;
-  return record.connected || Boolean(record.package.handoffInstruction)
-    ? record.handoffAcknowledgedAt === undefined
-    : false;
+  return record.connected || instructed ? record.handoffAcknowledgedAt === undefined : false;
 }
 
 function recordId(identity: string, attempt: number): string {

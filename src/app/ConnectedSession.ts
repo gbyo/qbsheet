@@ -35,25 +35,53 @@ export const connectionVersion = 1;
  */
 export const connectionMaxAgeMs = Number.POSITIVE_INFINITY;
 
-export interface IConnectedSession {
-  version: number;
+/**
+ * A room this device is paired with, independent of any game.
+ *
+ * The unit that survives a round. Pairing produces one of these and it stays valid until tournament
+ * control refuses it; the session fields below come and go with each game played in it.
+ */
+export interface IPairedRoom {
   /** Normalized, no trailing slash. See `normalizeBaseUrl`. */
   baseUrl: string;
   roomId: string;
   roomName: string;
   /** Room capability token. Never rendered, never exported. */
   roomToken: string;
-  /** A stable per-browser label for presence. Descriptive only; carries no authority. */
+  /** A stable per-browser label for presence and writer arbitration. Carries no authority. */
   deviceId: string;
+}
+
+export interface IConnectedSession extends IPairedRoom {
+  version: number;
   /** Set once a game has been started, so a reload resumes the same session. */
   sessionId?: string;
   sessionToken?: string;
-  /** The local game record this connection belongs to. */
+  /**
+   * The local game record this connection belongs to.
+   *
+   * The link that lets a reload decide whether these session credentials are still the ones the
+   * game on screen was started with. Matching on the session id alone would be nearly the same
+   * thing and wrong in one case that matters: a game deliberately re-scored as a second attempt has
+   * its own record, and a connection pointing at the first one must not be offered to it.
+   */
   gameRecordId?: string;
   /** Which tournament this was paired against, so a server that has opened another is detectable. */
   tournamentKey?: string;
   /** ISO 8601 */
   updatedAt: string;
+}
+
+/** The room half of a stored connection, or null when there is no usable pairing. */
+export function pairedRoomOf(session: IConnectedSession | null): IPairedRoom | null {
+  if (!session) return null;
+  return {
+    baseUrl: session.baseUrl,
+    roomId: session.roomId,
+    roomName: session.roomName,
+    roomToken: session.roomToken,
+    deviceId: session.deviceId,
+  };
 }
 
 interface IStorageLike {

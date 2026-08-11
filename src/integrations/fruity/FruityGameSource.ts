@@ -26,8 +26,8 @@
 import { IGamePackage, gamePackageFormat, gamePackageProducer, gamePackageVersion } from '../../game/GamePackage';
 import { validateGamePackage } from '../../game/GamePackageValidation';
 import { GameSourceResult } from '../../game/GameSource';
-import { OpenGameResult, openGameText } from '../../game/OpenGameDefinition';
-import { IAssignmentResponse, IAssignedMatchup } from './FruityServerClient';
+import { OpenGameResult, openGameValue } from '../../game/OpenGameDefinition';
+import { IAssignmentResponse, IAssignedMatchup } from './ServerTypes';
 
 /**
  * The revision assumed when tournament control does not send one.
@@ -102,6 +102,6 @@ export function assignmentToGamePackage({ assignment, matchup }: IAssignmentConv
  * Credentials are not here because they are not in the body. They stay in the connected session's
  * own state; see `ConnectedSession`.
  */
-export function qbtcpAssignmentToDefinition(body: string): OpenGameResult {
-  return openGameText(body);
+export function qbtcpAssignmentToDefinition(body: unknown): OpenGameResult {
+  return openGameValue(body);
 }

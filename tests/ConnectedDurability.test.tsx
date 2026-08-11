@@ -4,7 +4,7 @@ import { act, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { connectionVersion, readConnection, writeConnection } from '../src/app/ConnectedSession';
 import useConnectedRuntime, { assignmentPollIntervalMs } from '../src/app/useConnectedRuntime';
-import FruityServerClient, { IAssignmentResponse } from '../src/integrations/fruity/FruityServerClient';
+import FruityServerClient, { INormalizedAssignment } from '../src/integrations/fruity/FruityServerClient';
 import { progressIntervalMs } from '../src/integrations/fruity/FruityResultDestination';
 
 class TestStorage {
@@ -62,16 +62,16 @@ describe('connected room durability', () => {
   test('re-offers the latest snapshot on periodic successful server polls', async () => {
     vi.useFakeTimers();
     const snapshots: object[] = [];
-    const assignment: IAssignmentResponse = {
+    const assignment: INormalizedAssignment = {
+      state: 'none',
       roomId: 'room-1',
       roomName: 'Room 1',
       tournamentName: 'Tournament',
-      current: null,
+      definition: null,
       session: null,
-      scoringFormat: null,
-      timedRounds: false,
     };
     const client = {
+      ensureDiscovered: vi.fn(async () => null),
       assignment: vi.fn(async () => ({ ok: true as const, value: assignment })),
       putSnapshot: vi.fn(async (_credentials: unknown, qbj: object) => {
         snapshots.push(qbj);

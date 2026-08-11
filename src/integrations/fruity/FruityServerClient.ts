@@ -9,9 +9,19 @@
  * a scorekeeper types in. Scattered relative fetches would have to become scattered absolute ones,
  * and then every component that scores a tossup would be holding an address.
  *
- * So there is one client, it is constructed with a base URL, and it is the only file in the
- * repository that knows the protocol exists. Nothing under `src/scorer` or `src/scoring` imports
- * it, and nothing there is allowed to.
+ * So there is one client, it is constructed with a base URL, and it — with the two adapters it owns
+ * — is the only part of the repository that knows the protocol exists. Nothing under `src/scorer`
+ * or `src/scoring` imports it, and nothing there is allowed to.
+ *
+ * # Two protocols, one question, asked once
+ *
+ * A client starts on the legacy surface, because a server that has never heard of QBTCP must keep
+ * working without a round trip to find out. `discover` asks, and whatever it learns is settled for
+ * the life of the client: the adapter is replaced, and no caller above ever branches on the answer
+ * again. Every method below returns the normalized vocabulary in `ServerTypes`, not a wire shape.
+ *
+ * Discovery is not optional in the live flow. A client that never asks is a client permanently on
+ * the deprecated surface, which is how a canonical route table ends up shipped and unused.
  *
  * # Nothing here throws
  *
@@ -25,127 +35,51 @@
  * never put in a URL, never logged, never rendered, and never written into anything that leaves the
  * device. The caller holds them; this file only forwards them.
  */
-import { IScorekeeperFormat } from '../../scoring/ScorekeeperFormat';
-import { IRoomProcedure } from '../../scoring/RoomProcedure';
-import { ITeamRoster } from '../../game/Roster';
 import { HelpRequestCategory } from '../../app/HelpRequests';
+import { IQbtcpDiscovery, readDiscovery, qbtcpRoutes, supports } from '../../qbtcp/QbtcpRoutes';
+import { IServerAdapter, IRequestOptions, LegacyAdapter, QbtcpAdapter } from './ProtocolAdapters';
 import {
-  IQbtcpDiscovery,
-  IQbtcpRoutes,
-  legacyRoutes,
-  readDiscovery,
-  routesFor,
-  qbtcpRoutes,
-} from '../../qbtcp/QbtcpRoutes';
+  ApiResult,
+  INormalizedAssignment,
+  IOpenedSession,
+  IResultReceipt,
+  IRoomIdentity,
+  IRoomListEntry,
+  IJoinResult,
+  IServerIdentity,
+  ISessionCredentials,
+  ISessionRecovery,
+} from './ServerTypes';
 
-export const apiPrefix = '/api/v1';
-export const sessionTokenHeader = 'x-yf-session-token';
-export const roomTokenHeader = 'x-yf-room-token';
-export const deviceIdHeader = 'x-yf-device-id';
-export const operatorNameHeader = 'x-yf-operator-name';
+export {
+  deviceIdHeader,
+  operatorNameHeader,
+  qbjMediaType,
+  roomTokenHeader,
+  sessionTokenHeader,
+} from './ServerTypes';
+export type {
+  ApiResult,
+  AssignmentState,
+  IAssignedMatchup,
+  IAssignmentResponse,
+  IJoinResult,
+  INormalizedAssignment,
+  IOpenedSession,
+  IResultReceipt,
+  IResumableSession,
+  IRoomIdentity,
+  IRoomListEntry,
+  IServerIdentity,
+  ISessionCredentials,
+  ISessionRecovery,
+  ISessionResumeInfo,
+  IWriterConflict,
+} from './ServerTypes';
+export { readWriterConflict } from './ProtocolAdapters';
 
 /** How long to wait on a request before treating tournament control as unreachable. */
 export const requestTimeoutMs = 8000;
-
-export type ApiResult<T> =
-  | { ok: true; value: T }
-  /**
-   * `error` is always safe to show. `detail` is set only when the server itself explained the
-   * refusal, so a caller can show that explanation without ever showing our status-code fallback.
-   */
-  | { ok: false; error: string; status?: number; detail?: string };
-
-export interface IRoomIdentity {
-  roomId: string;
-  token: string;
-  deviceId?: string;
-  operatorName?: string;
-}
-
-export interface ISessionCredentials {
-  sessionId: string;
-  token: string;
-}
-
-export interface IServerIdentity {
-  tournamentKey?: string;
-  name: string;
-  scoringFormat: IScorekeeperFormat | null;
-  roomProcedure?: IRoomProcedure;
-  timedRounds: boolean;
-  roundCount: number;
-  teamCount: number;
-}
-
-export interface IRoomListEntry {
-  id: string;
-  name: string;
-  description?: string;
-}
-
-export interface IJoinResult {
-  roomId: string;
-  roomName: string;
-  roomDescription?: string;
-  accessToken: string;
-}
-
-export interface IAssignedMatchup {
-  scheduledMatchId: string;
-  roundNumber: number;
-  roundName: string;
-  packetName?: string;
-  /**
-   * Which issue of this round's pairings the assignment came from.
-   *
-   * Optional on the wire because a server built before game packages existed does not send it. An
-   * absent revision is read as 1 — the first issue — which is correct for every tournament that has
-   * never rebracketed and is the only assumption available for one that has.
-   */
-  roundRevision?: number;
-  leftTeam: ITeamRoster;
-  rightTeam: ITeamRoster;
-  status: string;
-}
-
-export interface ISessionResumeInfo {
-  sessionId: string;
-  token: string;
-  status: string;
-  finalReceived: boolean;
-  rejectionReason?: string;
-}
-
-export interface IAssignmentResponse {
-  roomId: string;
-  roomName: string;
-  tournamentName: string;
-  tournamentKey?: string;
-  current: IAssignedMatchup | null;
-  session: ISessionResumeInfo | null;
-  blockedReason?: string;
-  blockedMessage?: string;
-  scoringFormat: IScorekeeperFormat | null;
-  roomProcedure?: IRoomProcedure;
-  timedRounds: boolean;
-  /** Instructions for the manual backup, when the tournament configured any. Free text. */
-  resultHandoffInstruction?: string;
-}
-
-export interface ISessionCreated {
-  sessionId: string;
-  token: string;
-}
-
-export interface ISessionRecovery {
-  sessionId: string;
-  roundNumber: number;
-  leftTeam: string;
-  rightTeam: string;
-  finalReceived: boolean;
-  /** The most recent payload this session sent, or null if it never sent one. */
-  latestQbj: object | null;
-}
 
 /**
  * Is this a well-formed base URL for a tournament server?
@@ -174,12 +108,6 @@ export function normalizeBaseUrl(input: string): { ok: true; value: string } | {
   // trailing slash so joining is unambiguous.
   const path = url.pathname.replace(/\/+$/, '');
   return { ok: true, value: `${url.protocol}//${url.host}${path}` };
-}
-
-interface IRequestOptions {
-  method?: string;
-  headers?: Record<string, string>;
-  body?: string;
 }
 
 /** Loopback needs no annotation: it is already potentially trustworthy to a browser. */
@@ -223,49 +151,107 @@ export function localNetworkFetchInit(baseUrl: string): { targetAddressSpace?: '
 
 export default class FruityServerClient {
   /**
-   * Which protocol surface this client is using.
+   * Which surface this client is having its conversation on.
    *
-   * Starts on the legacy table, because a server that has never heard of QBTCP must keep working
-   * without a round trip to find out. `discover` upgrades it. Nothing else in the class reads a
-   * path directly.
+   * Starts legacy, because that is the assumption that keeps an old server working, and is replaced
+   * exactly once by `discover`. Nothing else in the class reads a path or a wire shape directly.
    */
-  private routes: IQbtcpRoutes = legacyRoutes;
+  private adapter: IServerAdapter;
 
   private discovery: IQbtcpDiscovery | null = null;
+
+  /**
+   * The last progress sequence this client sent.
+   *
+   * Seeded from the clock rather than from zero, and that is load-bearing. QBTCP has servers prefer
+   * the higher sequence and silently discard a lower one, so a counter that restarted at zero after
+   * a reload would have every snapshot for the rest of the game accepted with a `200` and thrown
+   * away. Wall-clock milliseconds only ever go up across reloads of the same device.
+   */
+  private lastSequence = 0;
 
   constructor(
     readonly baseUrl: string,
     private fetchImpl: typeof fetch = (...args) => fetch(...args),
-  ) {}
+  ) {
+    this.adapter = new LegacyAdapter(this.requestFn);
+  }
 
   /** What protocol this client settled on. For the connection detail; never a brand. */
   get protocol(): string {
-    return this.routes.protocol;
+    return this.adapter.routes.protocol;
   }
 
   /** Whether the assignment body will be a QBJ document rather than the legacy shape. */
   get assignmentIsQbj(): boolean {
-    return this.routes.assignmentIsQbj;
+    return this.adapter.routes.assignmentIsQbj;
   }
 
   get capabilities(): string[] {
     return this.discovery?.capabilities ?? [];
   }
 
+  /** Whether discovery found a QBTCP server. False means this client is on the deprecated surface. */
+  get isQbtcp(): boolean {
+    return this.discovery !== null && this.adapter.routes.assignmentIsQbj;
+  }
+
+  supports(capability: string): boolean {
+    return supports(this.discovery, capability);
+  }
+
   /**
-   * Ask the server what it speaks, and adopt the matching routes.
+   * Ask the server what it speaks, and adopt the matching surface.
    *
    * Unauthenticated and cheap, and it never fails in a way that stops a room: a server that does not
    * answer, answers with something else, or announces a version this client does not know simply
-   * leaves the legacy table in place. Degrading to the older protocol is safe; guessing at a newer
+   * leaves the legacy adapter in place. Degrading to the older protocol is safe; guessing at a newer
    * one is not.
    */
   async discover(): Promise<IQbtcpDiscovery | null> {
     const result = await this.request<unknown>(qbtcpRoutes.discovery);
     this.discovery = result.ok ? readDiscovery(result.value) : null;
-    this.routes = routesFor(this.discovery);
+    this.adapter =
+      this.discovery && this.discovery.version === 1
+        ? new QbtcpAdapter(this.requestFn, this.discovery)
+        : new LegacyAdapter(this.requestFn);
+    this.discoveryAttempted = true;
     return this.discovery;
   }
+
+  private discoveryAttempted = false;
+
+  private discovering: Promise<IQbtcpDiscovery | null> | null = null;
+
+  /**
+   * Discover, unless this client already has.
+   *
+   * Every operation below waits on this, and that is the rule rather than a convenience. A client
+   * is constructed fresh in several places — the setup screen, the scoring screen, the readiness
+   * check — and any one of them that made its first call without asking would be pinned to the
+   * deprecated surface for the life of that client. The only symptom would be a tournament where
+   * the new server happened to still serve the old paths, which is to say: no symptom, until the
+   * aliases are withdrawn. Making it structural is the only version of this that stays true.
+   *
+   * Concurrent callers share one probe, so a screen that polls and sends at the same moment does
+   * not ask twice.
+   */
+  ensureDiscovered(): Promise<IQbtcpDiscovery | null> {
+    if (this.discoveryAttempted) return Promise.resolve(this.discovery);
+    this.discovering ??= this.discover().finally(() => {
+      this.discovering = null;
+    });
+    return this.discovering;
+  }
+
+  /** The adapter, once it is the right one. */
+  private async ready(): Promise<IServerAdapter> {
+    await this.ensureDiscovered();
+    return this.adapter;
+  }
+
+  private requestFn = <T>(path: string, init: IRequestOptions = {}): Promise<ApiResult<T>> =>
+    this.request<T>(path, init);
 
   private async request<T>(path: string, init: IRequestOptions = {}): Promise<ApiResult<T>> {
     const controller = new AbortController();
@@ -299,6 +285,7 @@ export default class FruityServerClient {
           status: response.status,
           error: detail ?? `Tournament control refused the request (${response.status}).`,
           detail,
+          payload,
         };
       }
       return { ok: true, value: payload as T };
@@ -310,112 +297,93 @@ export default class FruityServerClient {
     }
   }
 
-  private roomHeaders(identity: IRoomIdentity, json = false): Record<string, string> {
-    const headers: Record<string, string> = { [roomTokenHeader]: identity.token };
-    if (json) headers['Content-Type'] = 'application/json';
-    if (identity.deviceId) headers[deviceIdHeader] = identity.deviceId;
-    if (identity.operatorName) headers[operatorNameHeader] = identity.operatorName;
-    return headers;
-  }
-
   /** Is anything there, and is it speaking this protocol? */
-  verify(): Promise<ApiResult<{ status: string }>> {
-    return this.request(this.routes.status);
+  async verify(): Promise<ApiResult<unknown>> {
+    return (await this.ready()).verify();
   }
 
   /** What tournament is open, and can its rules be scored here? */
-  identify(): Promise<ApiResult<IServerIdentity>> {
-    return this.request(this.routes.tournament);
+  async identify(): Promise<ApiResult<IServerIdentity>> {
+    return (await this.ready()).identify();
   }
 
-  listRooms(): Promise<ApiResult<{ rooms: IRoomListEntry[]; roomScoringMode: string }>> {
-    return this.request(this.routes.rooms);
+  /** The optional room picker. An empty list means no listing was offered, not that there are none. */
+  async listRooms(): Promise<ApiResult<IRoomListEntry[]>> {
+    return (await this.ready()).listRooms();
   }
 
   /** Exchange the human pairing code for this room's token. */
-  join(code: string, roomId?: string): Promise<ApiResult<IJoinResult>> {
-    return this.request(this.routes.pair, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(roomId ? { code, roomId } : { code }),
-    });
+  async join(code: string, roomId?: string): Promise<ApiResult<IJoinResult>> {
+    return (await this.ready()).join(code, roomId);
   }
 
   /** What this room should be playing right now, and any session it already has open. */
-  assignment(identity: IRoomIdentity): Promise<ApiResult<IAssignmentResponse>> {
-    return this.request(this.routes.assignment(identity.roomId), {
-      headers: this.roomHeaders(identity),
-    });
+  async assignment(identity: IRoomIdentity): Promise<ApiResult<INormalizedAssignment>> {
+    return (await this.ready()).assignment(identity);
   }
 
-  startAssignedMatch(identity: IRoomIdentity, scheduledMatchId: string): Promise<ApiResult<ISessionCreated>> {
-    return this.request(this.routes.openSession(identity.roomId), {
-      method: 'POST',
-      headers: this.roomHeaders(identity, true),
-      body: JSON.stringify({ scheduledMatchId, scorer: 'first-party' }),
-    });
+  /**
+   * Open a session against the assigned game, or rejoin the one that is already open.
+   *
+   * Not two operations, because on both surfaces the server returns the existing session rather
+   * than creating a second one. That is what makes resume-after-reload the same call as start.
+   */
+  async openSession(identity: IRoomIdentity, matchId: string): Promise<ApiResult<IOpenedSession>> {
+    return (await this.ready()).openSession(identity, matchId);
   }
 
-  updatePresence(identity: IRoomIdentity, update: { ready?: boolean }): Promise<ApiResult<unknown>> {
-    return this.request(this.routes.presence(identity.roomId), {
-      method: 'POST',
-      headers: this.roomHeaders(identity, true),
-      body: JSON.stringify(update),
-    });
+  /** Claim the write lock from another device. A person starts this; it is never automatic. */
+  async takeWriter(
+    identity: IRoomIdentity,
+    credentials: ISessionCredentials,
+  ): Promise<ApiResult<IOpenedSession>> {
+    return (await this.ready()).takeWriter(identity, credentials);
   }
 
-  requestHelp(
+  async updatePresence(identity: IRoomIdentity, update: { ready?: boolean }): Promise<ApiResult<unknown>> {
+    return (await this.ready()).updatePresence(identity, update);
+  }
+
+  async requestHelp(
     identity: IRoomIdentity,
     category: HelpRequestCategory,
     message: string,
   ): Promise<ApiResult<unknown>> {
-    return this.request(this.routes.help(identity.roomId), {
-      method: 'POST',
-      headers: this.roomHeaders(identity, true),
-      body: JSON.stringify({ category, message }),
-    });
+    return (await this.ready()).requestHelp(identity, category, message);
   }
 
-  addRosterPlayer(
+  async addRosterPlayer(
     identity: IRoomIdentity,
     credentials: ISessionCredentials,
     teamName: string,
     playerName: string,
   ): Promise<ApiResult<unknown>> {
-    return this.request(this.routes.addPlayer(identity.roomId), {
-      method: 'POST',
-      headers: { ...this.roomHeaders(identity, true), [sessionTokenHeader]: credentials.token },
-      body: JSON.stringify({ sessionId: credentials.sessionId, teamName, playerName }),
-    });
+    return (await this.ready()).addRosterPlayer(identity, credentials, teamName, playerName);
   }
 
   /**
    * Replace the live snapshot for this game.
    *
    * Safe to call repeatedly: control keeps one snapshot per session, so a retry is not a duplicate
-   * and a coalesced update is not a lost one.
+   * and a coalesced update is not a lost one. The sequence this attaches is what lets a server
+   * prefer the newer of two snapshots that arrived out of order.
+   *
+   * The sequence is taken after discovery rather than before, so that two snapshots cannot be
+   * numbered in one order and sent in another.
    */
-  putSnapshot(credentials: ISessionCredentials, qbj: object): Promise<ApiResult<unknown>> {
-    return this.request(this.routes.progress(credentials.sessionId), {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', [sessionTokenHeader]: credentials.token },
-      body: JSON.stringify(qbj),
-    });
+  async putSnapshot(credentials: ISessionCredentials, qbj: object): Promise<ApiResult<unknown>> {
+    const adapter = await this.ready();
+    this.lastSequence = Math.max(this.lastSequence + 1, Date.now());
+    return adapter.putProgress(credentials, qbj, this.lastSequence);
   }
 
   /** Submit the final. Idempotent server-side, so a retry after a network failure is not a second game. */
-  postFinal(credentials: ISessionCredentials, qbj: object): Promise<ApiResult<unknown>> {
-    return this.request(this.routes.result(credentials.sessionId), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', [sessionTokenHeader]: credentials.token },
-      body: JSON.stringify(qbj),
-    });
+  async postFinal(credentials: ISessionCredentials, qbj: object): Promise<ApiResult<IResultReceipt>> {
+    return (await this.ready()).postResult(credentials, qbj);
   }
 
   /** This session's own latest snapshot, for a device that has lost its local copy. */
-  recover(credentials: ISessionCredentials): Promise<ApiResult<ISessionRecovery>> {
-    return this.request(this.routes.recovery(credentials.sessionId), {
-      headers: { [sessionTokenHeader]: credentials.token },
-    });
+  async recover(credentials: ISessionCredentials): Promise<ApiResult<ISessionRecovery>> {
+    return (await this.ready()).recover(credentials);
   }
 }

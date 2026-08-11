@@ -13,6 +13,10 @@ import {
   routesFor,
   supports,
 } from '../src/qbtcp/QbtcpRoutes';
+import FruityServerClient, { qbjMediaType } from '../src/integrations/fruity/FruityServerClient';
+import { classifyWrite } from '../src/app/useConnectedRuntime';
+import { IStoredGameRecord, needsHandoff } from '../src/game/GameStore';
+import { assignmentDocument } from './qbjDocuments';
 import {
   portableQbj,
   portableQbjDocument,
@@ -104,6 +108,296 @@ describe('the canonical route surface', () => {
   test('identifiers in paths are escaped', () => {
     expect(qbtcpRoutes.session('a/../b')).toBe('/qbtcp/v1/sessions/a%2F..%2Fb');
     expect(qbtcpRoutes.helpItem('room-204', 'x y')).toBe('/qbtcp/v1/help/x%20y');
+  });
+});
+
+/**
+ * A recording server, small enough to assert against directly.
+ *
+ * The browser contract test proves the application reaches the right surface. These prove the
+ * shapes it puts on the wire when it gets there, which is the half a screenshot cannot show.
+ */
+function recordingFetch(handler: (path: string, init: RequestInit) => { status?: number; body?: unknown }) {
+  const calls: { path: string; method: string; headers: Record<string, string>; body: unknown }[] = [];
+  const fetchImpl = (async (input: string, init: RequestInit = {}) => {
+    const path = input.replace('http://control.test', '');
+    const headers = (init.headers ?? {}) as Record<string, string>;
+    calls.push({
+      path,
+      method: init.method ?? 'GET',
+      headers,
+      body: typeof init.body === 'string' && init.body !== '' ? JSON.parse(init.body) : undefined,
+    });
+    const answer = handler(path, init);
+    const text = answer.body === undefined ? '' : JSON.stringify(answer.body);
+    return {
+      ok: (answer.status ?? 200) < 400,
+      status: answer.status ?? 200,
+      text: async () => text,
+    } as Response;
+  }) as unknown as typeof fetch;
+  return { calls, fetchImpl };
+}
+
+const qbtcpDiscovery = {
+  protocol: 'QBTCP',
+  version: 1,
+  capabilities: ['pairing', 'assignment', 'progress', 'result', 'help', 'presence'],
+  name: 'Spring Invitational',
+};
+
+describe('what the client puts on the wire', () => {
+  const identity = { roomId: 'room-204', token: 'room-token', deviceId: 'device-1', roomName: 'Room 204' };
+  const credentials = { sessionId: 'sess-1', token: 'session-token' };
+
+  function qbtcpServer(overrides: Record<string, { status?: number; body?: unknown }> = {}) {
+    return recordingFetch((path) => {
+      if (path in overrides) return overrides[path];
+      if (path === '/qbtcp/v1') return { body: qbtcpDiscovery };
+      if (path === '/qbtcp/v1/assignment/status') return { body: { state: 'assigned', session: null } };
+      if (path === '/qbtcp/v1/assignment') return { body: assignmentDocument() };
+      if (path.startsWith('/api/v1')) return { status: 404, body: { error: 'Not found' } };
+      return { body: {} };
+    });
+  }
+
+  test('discovery happens before the first authenticated call, without being asked for', async () => {
+    const { calls, fetchImpl } = qbtcpServer();
+    // No `discover()` here on purpose: a caller that forgets must not end up on the old surface.
+    await new FruityServerClient('http://control.test', fetchImpl).assignment(identity);
+
+    expect(calls[0].path).toBe('/qbtcp/v1');
+    expect(calls.map((call) => call.path)).toContain('/qbtcp/v1/assignment');
+    expect(calls.some((call) => call.path.startsWith('/api/v1'))).toBe(false);
+  });
+
+  test('a server that does not answer discovery is talked to on the deprecated surface', async () => {
+    const { calls, fetchImpl } = recordingFetch((path) => {
+      if (path === '/qbtcp/v1') return { status: 404, body: { error: 'Not found' } };
+      if (path.endsWith('/assignment')) {
+        return {
+          body: { roomId: 'room-204', roomName: 'Room 204', tournamentName: 'T', current: null, session: null, scoringFormat: null, timedRounds: false },
+        };
+      }
+      return { body: {} };
+    });
+    const client = new FruityServerClient('http://control.test', fetchImpl);
+
+    const result = await client.assignment(identity);
+
+    expect(client.isQbtcp).toBe(false);
+    expect(result.ok).toBe(true);
+    expect(calls.map((call) => call.path)).toContain('/api/v1/rooms/room-204/assignment');
+  });
+
+  test('progress travels in a sequenced envelope, and the sequence is not inside the match', async () => {
+    const { calls, fetchImpl } = qbtcpServer();
+    const client = new FruityServerClient('http://control.test', fetchImpl);
+
+    await client.putSnapshot(credentials, { tossups_read: 3 });
+    await client.putSnapshot(credentials, { tossups_read: 4 });
+
+    const sent = calls.filter((call) => call.path === '/qbtcp/v1/sessions/sess-1/progress');
+    expect(sent).toHaveLength(2);
+    expect(sent[0].method).toBe('PUT');
+    expect(sent[0].headers['x-yf-session-token']).toBe('session-token');
+    expect(sent[0].body).toEqual({ sequence: expect.any(Number), match: { tossups_read: 3 } });
+    const sequences = sent.map((call) => (call.body as { sequence: number }).sequence);
+    expect(sequences[1]).toBeGreaterThan(sequences[0]);
+    expect((sent[0].body as { match: object }).match).not.toHaveProperty('sequence');
+  });
+
+  test('the deprecated surface gets the snapshot bare, because it has no envelope', async () => {
+    const { calls, fetchImpl } = recordingFetch((path) =>
+      path === '/qbtcp/v1' ? { status: 404, body: {} } : { body: {} },
+    );
+
+    await new FruityServerClient('http://control.test', fetchImpl).putSnapshot(credentials, { tossups_read: 3 });
+
+    const sent = calls.find((call) => call.path === '/api/v1/sessions/sess-1/snapshot');
+    expect(sent?.body).toEqual({ tossups_read: 3 });
+  });
+
+  test('a result is sent as a QBJ document, and a duplicate is read as an answer rather than a failure', async () => {
+    const { calls, fetchImpl } = qbtcpServer({
+      '/qbtcp/v1/sessions/sess-1/result': { body: { accepted: true, duplicate: true, match_id: 'Match_sm-4471' } },
+    });
+
+    const result = await new FruityServerClient('http://control.test', fetchImpl).postFinal(credentials, {
+      tossups_read: 20,
+    });
+
+    const sent = calls.find((call) => call.path === '/qbtcp/v1/sessions/sess-1/result');
+    expect(sent?.headers['Content-Type']).toBe(qbjMediaType);
+    expect(result.ok && result.value).toEqual({ accepted: true, duplicate: true, matchId: 'Match_sm-4471' });
+  });
+
+  test('a session is opened with the fields QBTCP names, and its answer is read back', async () => {
+    const { calls, fetchImpl } = qbtcpServer({
+      '/qbtcp/v1/sessions': { body: { session_id: 'sess-9f13', token: 'session-token', writer: true } },
+    });
+
+    const opened = await new FruityServerClient('http://control.test', fetchImpl).openSession(identity, 'sm-4471');
+
+    const sent = calls.find((call) => call.path === '/qbtcp/v1/sessions');
+    expect(sent?.body).toEqual({ match_id: 'sm-4471', device_id: 'device-1' });
+    expect(sent?.headers['x-yf-room-token']).toBe('room-token');
+    expect(opened.ok && opened.value).toEqual({ sessionId: 'sess-9f13', token: 'session-token', writer: true });
+  });
+
+  test('the room capability is read under the name QBTCP gives it', async () => {
+    const { fetchImpl } = qbtcpServer({
+      '/qbtcp/v1/pair': { body: { roomId: 'room-204', roomName: 'Room 204', token: 'opaque-room-token' } },
+    });
+
+    const joined = await new FruityServerClient('http://control.test', fetchImpl).join('48213906');
+
+    expect(joined.ok && joined.value.accessToken).toBe('opaque-room-token');
+  });
+
+  test('an assignment and its operational state arrive as one normalized answer', async () => {
+    const { fetchImpl } = qbtcpServer();
+
+    const result = await new FruityServerClient('http://control.test', fetchImpl).assignment(identity);
+
+    expect(result.ok && result.value.state).toBe('assigned');
+    expect(result.ok && result.value.scheduledMatchId).toBe('Match_sm-4471');
+    expect(result.ok && result.value.definition?.left.name).toBe('Ninety Six');
+    // The QBJ parser produced it, so the standard identities came with it.
+    expect(result.ok && result.value.definition?.origin).toBe('qbj');
+    expect(result.ok && result.value.tournamentKey).toBe('Tournament_spring-2026');
+  });
+
+  test('a 204 is nothing assigned, not an empty game and not an error', async () => {
+    const { fetchImpl } = qbtcpServer({
+      '/qbtcp/v1/assignment/status': { body: { state: 'none', session: null } },
+    });
+
+    const result = await new FruityServerClient('http://control.test', fetchImpl).assignment(identity);
+
+    expect(result.ok && result.value.state).toBe('none');
+    expect(result.ok && result.value.definition).toBeNull();
+  });
+
+  test('a session tournament control still has open is reported so the room can rejoin it', async () => {
+    const { fetchImpl } = qbtcpServer({
+      '/qbtcp/v1/assignment/status': {
+        body: { state: 'assigned', session: { session_id: 'sess-9f13', resumable: true } },
+      },
+    });
+
+    const result = await new FruityServerClient('http://control.test', fetchImpl).assignment(identity);
+
+    expect(result.ok && result.value.session).toEqual({ sessionId: 'sess-9f13', resumable: true });
+  });
+
+  test('an assignment control cannot describe is an error the room is told, not an empty screen', async () => {
+    const { fetchImpl } = qbtcpServer({
+      '/qbtcp/v1/assignment': { body: { version: '2.1.1', objects: [{ type: 'Tournament', name: 'T' }] } },
+    });
+
+    const result = await new FruityServerClient('http://control.test', fetchImpl).assignment(identity);
+
+    expect(result.ok && result.value.state).toBe('assigned');
+    expect(result.ok && result.value.definition).toBeNull();
+    expect(result.ok && result.value.errors?.length).toBeGreaterThan(0);
+  });
+
+  test('a capability discovery did not advertise is not requested', async () => {
+    const { calls, fetchImpl } = recordingFetch((path) =>
+      path === '/qbtcp/v1' ? { body: { ...qbtcpDiscovery, capabilities: ['assignment'] } } : { body: {} },
+    );
+
+    const result = await new FruityServerClient('http://control.test', fetchImpl).requestHelp(
+      identity,
+      'protest',
+      'A ruling needs a person.',
+    );
+
+    expect(result.ok).toBe(false);
+    expect(calls.some((call) => call.path === '/qbtcp/v1/help')).toBe(false);
+  });
+});
+
+describe('which repair a refused write calls for', () => {
+  test('a refused session token reopens the session rather than asking for a code', () => {
+    expect(classifyWrite({ ok: false, status: 401, error: 'no' })).toEqual({ sessionProblem: true, conflict: null });
+  });
+
+  test('a writer conflict is a person’s decision, and the offer comes from the server', () => {
+    const offered = classifyWrite({
+      ok: false,
+      status: 409,
+      error: 'Another device is scoring this game.',
+      payload: { writer_device: 'device-2', can_take_over: true },
+    });
+    expect(offered.conflict).toEqual({ writerDevice: 'device-2', canTakeOver: true });
+
+    // A conflict with a recorded result carries no offer, so no takeover button appears.
+    const notOffered = classifyWrite({ ok: false, status: 409, error: 'Already recorded.', payload: {} });
+    expect(notOffered.conflict).toEqual({ canTakeOver: false });
+  });
+
+  test('an unreachable server is neither, because nothing refused anything', () => {
+    expect(classifyWrite({ ok: false, error: 'Could not reach tournament control.' })).toEqual({
+      sessionProblem: false,
+      conflict: null,
+    });
+  });
+});
+
+describe('who still owes somebody a copy of the result', () => {
+  function finished(overrides: Partial<IStoredGameRecord> = {}): IStoredGameRecord {
+    return {
+      version: 1,
+      id: 'match:sm-4471',
+      identity: 'match:sm-4471',
+      attempt: 1,
+      gameKey: 'sess-1',
+      package: validPackage(),
+      setup: { left: { name: 'A', players: [] }, right: { name: 'B', players: [] } },
+      events: [],
+      connected: true,
+      createdAt: '2026-04-11T14:00:00.000Z',
+      updatedAt: '2026-04-11T15:00:00.000Z',
+      completedAt: '2026-04-11T15:00:00.000Z',
+      serverDelivery: 'sent',
+      ...overrides,
+    };
+  }
+
+  test('a result tournament control accepted, with nothing else asked for, is delivered', () => {
+    expect(needsHandoff(finished())).toBe(false);
+  });
+
+  test('a submission that has not landed still has to be carried', () => {
+    expect(needsHandoff(finished({ serverDelivery: 'pending' }))).toBe(true);
+    expect(needsHandoff(finished({ serverDelivery: 'rejected' }))).toBe(true);
+  });
+
+  test('a tournament that asked for the file by name is still asking', () => {
+    const instructed = finished({
+      package: { ...validPackage(), handoffInstruction: 'Upload to the Round 4 folder.' },
+    });
+    expect(needsHandoff(instructed)).toBe(true);
+    expect(needsHandoff({ ...instructed, qbjDownloadedAt: '2026-04-11T15:01:00.000Z' })).toBe(true);
+    expect(
+      needsHandoff({
+        ...instructed,
+        qbjDownloadedAt: '2026-04-11T15:01:00.000Z',
+        handoffAcknowledgedAt: '2026-04-11T15:02:00.000Z',
+      }),
+    ).toBe(false);
+  });
+
+  test('a game with no tournament control behind it only ever had the file', () => {
+    const offline = finished({ connected: false, serverDelivery: 'none' });
+    expect(needsHandoff(offline)).toBe(true);
+    expect(needsHandoff({ ...offline, qbjDownloadedAt: '2026-04-11T15:01:00.000Z' })).toBe(false);
+  });
+
+  test('an unfinished game owes nobody anything yet', () => {
+    expect(needsHandoff(finished({ completedAt: undefined, serverDelivery: 'pending' }))).toBe(false);
   });
 });
 
