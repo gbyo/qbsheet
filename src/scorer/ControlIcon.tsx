@@ -1,4 +1,23 @@
-export type ControlIconName = 'undo' | 'redo' | 'players' | 'flag' | 'game';
+export type ControlIconName =
+  | 'undo'
+  | 'redo'
+  | 'players'
+  | 'flag'
+  | 'game'
+  | 'note'
+  | 'issue'
+  | 'details'
+  | 'review'
+  | 'lightning'
+  | 'clock'
+  | 'play'
+  | 'pause'
+  | 'replace'
+  | 'stop'
+  | 'download'
+  | 'upload'
+  | 'adjust'
+  | 'forfeit';
 
 const paths: Record<ControlIconName, React.ReactNode> = {
   undo: (
@@ -33,9 +52,78 @@ const paths: Record<ControlIconName, React.ReactNode> = {
       <circle cx="19" cy="12" r="1" fill="currentColor" stroke="none" />
     </>
   ),
+  note: (
+    <>
+      <path d="M6 3.5h8l4 4v13H6z" />
+      <path d="M14 3.5v4h4M9 12h6M9 16h6" />
+    </>
+  ),
+  issue: (
+    <>
+      <path d="M12 3.5 21 20H3z" />
+      <path d="M12 9v4M12 16.5v.5" />
+    </>
+  ),
+  details: (
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 10.5v5M12 7.5v.5" />
+    </>
+  ),
+  review: (
+    <>
+      <rect x="5.5" y="3.5" width="13" height="17" rx="1.5" />
+      <path d="m8.5 9 1.5 1.5 3-3M8.5 14h7M8.5 17h7" />
+    </>
+  ),
+  lightning: <path d="m13.5 2.5-8 11h6l-1 8 8-11h-6z" />,
+  clock: (
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 7v5l3.5 2" />
+    </>
+  ),
+  play: <path d="m9 6 9 6-9 6z" />,
+  pause: (
+    <>
+      <path d="M8 5v14M16 5v14" />
+    </>
+  ),
+  replace: (
+    <>
+      <path d="M20 11a8 8 0 0 0-14.5-4L4 9" />
+      <path d="M4 5v4h4M4 13a8 8 0 0 0 14.5 4l1.5-2" />
+      <path d="M20 19v-4h-4" />
+    </>
+  ),
+  stop: <rect x="6" y="6" width="12" height="12" rx="1.5" />,
+  download: (
+    <>
+      <path d="M12 4v10M8 10l4 4 4-4M5 20h14" />
+    </>
+  ),
+  upload: (
+    <>
+      <path d="M12 20V10M8 14l4-4 4 4M5 4h14" />
+    </>
+  ),
+  adjust: (
+    <>
+      <path d="M4 7h16M4 12h16M4 17h16" />
+      <circle cx="9" cy="7" r="1.5" fill="var(--room-surface)" />
+      <circle cx="15" cy="12" r="1.5" fill="var(--room-surface)" />
+      <circle cx="11" cy="17" r="1.5" fill="var(--room-surface)" />
+    </>
+  ),
+  forfeit: (
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="m6 6 12 12" />
+    </>
+  ),
 };
 
-/** Decorative line icons used beside the footer's always-visible text labels. */
+/** Decorative line icons used beside scorer controls and Game menu labels. */
 export default function ControlIcon(props: { name: ControlIconName }) {
   return (
     <svg

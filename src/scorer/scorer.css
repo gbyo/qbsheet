@@ -986,7 +986,10 @@ div.scorer-banner .scorer-text-action {
 }
 
 .scorer-menu-item {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 9px;
   width: 100%;
   padding: 7px 10px;
   font: inherit;
@@ -997,6 +1000,12 @@ div.scorer-banner .scorer-text-action {
   border: none;
   border-radius: 4px;
   cursor: pointer;
+}
+
+.scorer-menu-item .scorer-control-icon {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
 }
 
 .scorer-menu-item:hover {

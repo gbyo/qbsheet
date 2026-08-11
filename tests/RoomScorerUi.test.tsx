@@ -493,6 +493,14 @@ describe('the recent rail', () => {
 });
 
 describe('the game menu', () => {
+  test('shows an icon beside every Game menu action', () => {
+    renderScorer(formatFor());
+    fireEvent.click(screen.getByRole('button', { name: 'Game' }));
+
+    const menuItems = document.querySelectorAll('.scorer-menu-item');
+    expect(document.querySelectorAll('.scorer-menu-item .scorer-control-icon')).toHaveLength(menuItems.length);
+  });
+
   test('Flag opens the existing protest workflow', () => {
     renderScorer(formatFor());
     fireEvent.click(screen.getByRole('button', { name: 'Flag' }));
