@@ -1740,6 +1740,40 @@ describe('operation notices', () => {
   });
 
   /*
+   * The other side of the same split. With no `controlRequest` supplied there is no banner that owns
+   * the network fact, so this screen keeps it — and a message a scorekeeper has to act on is a
+   * warning that interrupts, not a receipt that waits its turn.
+   */
+  test('a control failure nothing else owns is a warning that interrupts', async () => {
+    const requestControl = vi.fn().mockResolvedValue({
+      kind: 'unreachable',
+      error: 'Tournament control did not answer.',
+    } satisfies HelpRequestResult);
+    vi.useFakeTimers();
+    try {
+      renderScorer(formatFor(), undefined, requestControl);
+      openIssue();
+      fireEvent.change(screen.getByLabelText('What happened?'), { target: { value: 'The room lost Wi-Fi.' } });
+      fireEvent.click(screen.getByText('Save and request control'));
+
+      await vi.waitFor(() => expect(document.querySelector('.scorer-banner.is-warning')).toBeTruthy());
+      const banner = document.querySelector('.scorer-banner.is-warning');
+      expect(banner?.getAttribute('role')).toBe('alert');
+      expect(banner?.textContent).toBe('Issue saved, but tournament control was not reached.');
+
+      // And it is a situation rather than an acknowledgement, so it does not clear itself.
+      act(() => {
+        vi.advanceTimersByTime(operationNoticeMs * 3);
+      });
+      expect(document.querySelector('.scorer-banner.is-warning')?.textContent).toBe(
+        'Issue saved, but tournament control was not reached.',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /*
    * When the room models the control request, its banner is the persistent copy of a network
    * failure. Two permanent lines about one problem, with two places to clear it, is how a room ends
    * up ignoring both.

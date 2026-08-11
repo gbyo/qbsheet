@@ -189,6 +189,16 @@ export default function ConnectedSetup(props: {
    */
   const [lastSuccessfulCheckAt, setLastSuccessfulCheckAt] = useState<number | null>(null);
   /**
+   * Whether the most recent assignment read failed.
+   *
+   * Its own state rather than a reading of `error`, because `error` is where four different things
+   * end up: a failed poll, but also a failed session open, a failed pairing, and — the one that
+   * makes it actively wrong here — a poll that *succeeded* and returned a document carrying
+   * `errors`. Deriving "is the room out of touch" from any of those made the status line understate
+   * a room that had just been answered, which is the one claim it exists to get right.
+   */
+  const [assignmentFailed, setAssignmentFailed] = useState(false);
+  /**
    * The clock the "checked just now" line is measured against.
    *
    * Stamped when a poll finishes rather than kept live by a timer of its own: the polls are already
@@ -277,6 +287,11 @@ export default function ConnectedSetup(props: {
     connectionTimeline.record('room-repaired', room.roomName);
     setCode('');
     setAssignment(null);
+    // Nothing has been checked yet under this pairing. The assignment is already cleared here for
+    // the same reason, and a check-status line inherited across a re-pair would spend the seconds
+    // before the first answer saying a room whose token was just refused had been reached just now.
+    setLastSuccessfulCheckAt(null);
+    setAssignmentFailed(false);
     setStage({ kind: 'room', client: stage.client, room });
   };
 
@@ -301,6 +316,7 @@ export default function ConnectedSetup(props: {
     const result = await stage.client.assignment(identityFor(stage.room));
     setBusy(false);
     setNow(Date.now());
+    setAssignmentFailed(!result.ok);
     if (!result.ok) {
       // A refused room token is the one thing that sends a scorekeeper back to a pairing code. Any
       // other failure is the network's problem and the room keeps its capability.
@@ -417,9 +433,9 @@ export default function ConnectedSetup(props: {
     forbidden,
     lastSuccessfulCheckAt,
     now,
-    // The error banner is the authority on the latest request having failed; this only stops the
-    // line claiming the room is currently in touch when the last thing it heard was a failure.
-    failing: error !== '',
+    // Only a failed assignment read. The error banner is still the authority on *what* went wrong;
+    // this decides whether the line may claim the room is currently in touch.
+    failing: assignmentFailed,
   });
 
   return (

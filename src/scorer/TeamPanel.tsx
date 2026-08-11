@@ -70,12 +70,13 @@ export interface ITeamPanelProps {
    * that is not one-for-one still live there. Absent means the host offers no quick path, and no Sub
    * button is drawn.
    *
-   * `seat` is the row the substitution was started from, zero-based and in this device's seating
-   * order. It is reported rather than left to be worked out because the only other way to find it is
-   * to look the outgoing player up in `activePlayers`, and that array is the scoring history's order,
-   * which a room that has rearranged its rows has deliberately made different from what is on screen.
+   * The visual seat is deliberately *not* reported. It is a fact about this device's row order (see
+   * `PlayerSeating`) and the two things a host does with a substitution both have better sources for
+   * it: the event stores the lineup in scoring-history order, and the seating store moves the
+   * incoming player into the outgoing one's place on its own. A seat handed up from here would be
+   * an invitation to write one of those out of the other.
    */
-  onSubstitute?: (outgoing: string, incoming: string, seat: number) => void;
+  onSubstitute?: (outgoing: string, incoming: string) => void;
   /** Who is available to come on. Empty means everybody on the roster is already playing. */
   benchPlayers?: readonly string[];
   /**
@@ -300,9 +301,11 @@ export default function TeamPanel(props: ITeamPanelProps) {
                         onClick={() => {
                           setSubstituting(null);
                           // The seat this row is in, before the lineup changes and while the row it
-                          // came from is still the row the scorekeeper is looking at.
+                          // came from is still the row the scorekeeper is looking at. Kept here
+                          // rather than reported upward: the emphasis is the only thing that wants
+                          // it, and it is drawn here.
                           setLanded({ seat });
-                          onSubstitute(player.name, name, seat);
+                          onSubstitute(player.name, name);
                         }}
                       >
                         {name}

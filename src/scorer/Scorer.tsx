@@ -368,8 +368,8 @@ export default function Scorer(props: IScorerProps) {
     setEmphasizedQuestion(questionNumber);
   }, []);
 
-  /** Say something that stays until it is resolved or replaced. */
-  const warn = useCallback((message: string, tone: 'info' | 'warning' = 'warning') => {
+  /** Say something that stays until it is resolved or replaced. Not always a warning; see the tone. */
+  const notePersistent = useCallback((message: string, tone: 'info' | 'warning' = 'warning') => {
     setOperationNotice({ message, tone, transient: false });
     setEmphasizedQuestion(undefined);
   }, []);
@@ -388,6 +388,13 @@ export default function Scorer(props: IScorerProps) {
   const noteControlOutcome = useCallback(
     (facts: { prefix: string; localOnly: string }, result: HelpRequestResult) => {
       const problem = controlOutcomeIsProblem(result);
+      /*
+       * Whatever this notice is about, it is not about a question. Cleared on every branch because
+       * the persistent one has no timer behind it: a correction emphasising Q7 and then a control
+       * request failing before its three seconds were up would have left the rail pointing at Q7
+       * under an unrelated warning, with nothing left running to take the emphasis off again.
+       */
+      setEmphasizedQuestion(undefined);
       if (problem && controlRequestOwned) {
         setOperationNotice({ message: facts.localOnly, tone: 'info', transient: true });
         return;
@@ -1877,7 +1884,7 @@ export default function Scorer(props: IScorerProps) {
              * is an instruction about the next thing to do, and it stays until the replacement has
              * been scored over the top of it.
              */
-            warn(
+            notePersistent(
               scope === 'bonus'
                 ? `The bonus on question ${questionNumber} was cleared. Score the replacement.`
                 : `Question ${questionNumber} was cleared. Score the replacement as question ${questionNumber}.`,
@@ -1933,7 +1940,7 @@ export default function Scorer(props: IScorerProps) {
           onRestore={(restoredEvents) => {
             events.restore(restoredEvents);
             // Where the events on screen came from, which stays worth knowing; not an acknowledgement.
-            warn('Recovered the scoresheet from the QBJ backup.', 'info');
+            notePersistent('Recovered the scoresheet from the QBJ backup.', 'info');
           }}
           onClose={() => setDialog(null)}
         />

@@ -524,6 +524,22 @@ function EditableEvent(props: {
         setProblem(`Choose between 1 and ${format.players.maximumActive} active players.`);
         return;
       }
+      /*
+       * The boundary and the membership are two fields that can each be edited after the other, so
+       * withholding a not-yet-rostered player from the bench is not on its own enough: moving the
+       * boundary forward, putting them on, and moving it back again reaches the same impossible
+       * lineup by a different route. Checked once here, against the boundary actually being saved.
+       *
+       * It refuses rather than dropping the name, because a player silently removed on save is a
+       * correction nobody asked for. The row stays on screen with its reason on it, and both ways
+       * out — take them off, or move the boundary past their arrival — are one press away.
+       */
+      const tooEarly = playersAddedAfter(events, event.team, chosen);
+      const impossible = Array.from(playing).find((name) => tooEarly.has(name));
+      if (impossible !== undefined) {
+        setProblem(`${impossible} was not on the roster at Tossup ${chosen}. Take them off, or move the tossup later.`);
+        return;
+      }
       const activePlayers = orderedActivePlayers(
         event.activePlayers,
         (game[event.team].players ?? []).map((player) => player.name),

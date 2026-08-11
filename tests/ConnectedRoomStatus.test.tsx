@@ -41,6 +41,10 @@ vi.mock('../src/integrations/fruity/FruityServerClient', () => {
       return { ok: true, value: { sessionId: 'session-1', token: 'session-token' } };
     }
 
+    async join() {
+      return { ok: true, value: { roomId: 'room-1', roomName: 'Room 204', accessToken: 'room-token-2' } };
+    }
+
     missingCapabilities() {
       return [];
     }
@@ -260,6 +264,35 @@ describe('an assignment arriving', () => {
   });
 });
 
+describe('a room that has to be paired again', () => {
+  /*
+   * The one route back to a pairing code is control refusing the stored room token, and it goes
+   * through the room screen — so whatever that screen was saying about checking is still in state
+   * when the new pairing lands. Saying a room had been reached "just now" on the strength of a
+   * request that was refused is the exact claim this line exists not to make.
+   */
+  test('it does not inherit the last check from the pairing it just lost', async () => {
+    renderRoom();
+    await settle();
+    expect(checkLine()).toContain('checked just now');
+
+    // Control refuses the stored token, which is what sends a scorekeeper back to a code.
+    answer = async () => ({ ok: false as const, status: 401, error: 'Unknown room.' });
+    await poll();
+    expect(screen.getByLabelText('Pairing code')).toBeTruthy();
+
+    // The new pairing hangs, so what is asserted is the state before the first answer arrives.
+    answer = () => new Promise(() => undefined);
+    fireEvent.change(screen.getByLabelText('Pairing code'), { target: { value: '123456' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Pair this room' }));
+    });
+
+    expect(checkLine()).toBe('Checking tournament control…');
+    expect(checkLine()).not.toContain('just now');
+  });
+});
+
 describe('when a check fails', () => {
   test('the last successful check is remembered, and the line stops claiming the present', async () => {
     renderRoom();
@@ -272,6 +305,17 @@ describe('when a check fails', () => {
     expect(screen.getByText('Tournament control did not answer.')).toBeTruthy();
     expect(checkLine()).toBe('Automatic checks continue · last successful check less than a minute ago');
     expect(checkLine()).not.toContain('just now');
+  });
+
+  test('a successful read carrying errors is still a successful check', async () => {
+    // `error` is where a failed poll, a failed session open and a document's own `errors` all end
+    // up. Only the first of those means the room is out of touch.
+    answer = ok(assignmentOf({ errors: ['Tournament control has not entered a roster for Greenwood.'] }));
+    renderRoom();
+    await settle();
+
+    expect(screen.getByText(/has not entered a roster/)).toBeTruthy();
+    expect(checkLine()).toBe('QBSheet checks automatically · checked just now');
   });
 
   test('a failure does not stop the room checking', async () => {

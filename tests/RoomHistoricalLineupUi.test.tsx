@@ -320,6 +320,60 @@ describe('the historical lineup editor', () => {
     expect(screen.getByText(/Sarah Jones was not active/)).toBeTruthy();
   });
 
+  /*
+   * Withholding the row is not enough on its own. The boundary and the membership are two fields
+   * that can each be edited after the other, so moving the boundary forward, putting somebody on,
+   * and moving it back again reaches the same impossible lineup by a different route.
+   */
+  test('a player put on at a later boundary cannot be carried back before they were rostered', () => {
+    renderScorer();
+    chooseStarters(['Sarah Jones', 'James Robinson']);
+    buzz('Sarah Jones', 1);
+    fireEvent.click(screen.getByText('20'));
+    addLatePlayer('Priya Raman');
+
+    openReview();
+    const editor = editEvent('Before Tossup 1, lineup changed');
+    fireEvent.change(within(editor).getByLabelText('Effective tossup'), { target: { value: '2' } });
+    fireEvent.click(within(editor).getByRole('button', { name: 'Bench James Robinson' }));
+    fireEvent.click(within(editor).getByRole('button', { name: 'Put Priya Raman in' }));
+    // Back before she existed on the roster.
+    fireEvent.change(within(editor).getByLabelText('Effective tossup'), { target: { value: '1' } });
+    fireEvent.click(within(editor).getByRole('button', { name: 'Save correction' }));
+
+    expect(
+      within(editor).getByText('Priya Raman was not on the roster at Tossup 1. Take them off, or move the tossup later.'),
+    ).toBeTruthy();
+    // Nothing was written, and the lineup on record is the one it always was.
+    expect(substitutions().find((event) => event.team === 'left')?.activePlayers).toEqual([
+      'Sarah Jones',
+      'James Robinson',
+    ]);
+    expect(substitutions().find((event) => event.team === 'left')?.questionNumber).toBe(1);
+  });
+
+  test('either way out of that refusal saves', () => {
+    renderScorer();
+    chooseStarters(['Sarah Jones', 'James Robinson']);
+    buzz('Sarah Jones', 1);
+    fireEvent.click(screen.getByText('20'));
+    addLatePlayer('Priya Raman');
+
+    openReview();
+    const editor = editEvent('Before Tossup 1, lineup changed');
+    fireEvent.change(within(editor).getByLabelText('Effective tossup'), { target: { value: '2' } });
+    fireEvent.click(within(editor).getByRole('button', { name: 'Bench James Robinson' }));
+    fireEvent.click(within(editor).getByRole('button', { name: 'Put Priya Raman in' }));
+
+    // Moving the tossup past her arrival is one of them, and it is the lineup as edited.
+    fireEvent.click(within(editor).getByRole('button', { name: 'Save correction' }));
+    expect(substitutions().find((event) => event.team === 'left')?.activePlayers).toEqual([
+      'Sarah Jones',
+      'Priya Raman',
+    ]);
+    expect(substitutions().find((event) => event.team === 'left')?.questionNumber).toBe(2);
+  });
+
   test('a name the roster had not reached yet is shown rather than hidden, so it can be taken off', () => {
     renderScorer();
     chooseStarters(['Sarah Jones', 'James Robinson']);
