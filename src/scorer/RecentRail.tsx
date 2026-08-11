@@ -24,6 +24,20 @@ export interface IRecentRailProps {
   limit?: number;
   /** Open the full scoresheet review at this question. */
   onInspect?: (questionNumber: number) => void;
+  /**
+   * Briefly wash one row, because something just changed it.
+   *
+   * A correction saved elsewhere and an undo both change a line that is already on screen, and the
+   * rail redrawing silently is exactly the problem: the numbers are different and nothing said which
+   * ones. The emphasis points at the line rather than describing it, and it is temporary on purpose —
+   * a question that stayed marked would be claiming that having been corrected is a property of the
+   * question, which it is not. There is no badge and no colour for the same reason.
+   *
+   * The host owns how long it lasts and clears it. A question no longer in the rail simply matches
+   * nothing, which is the right answer: an undo that removed the last question has no row to point
+   * at, and inventing an exit for a row that is already gone would be animating a fiction.
+   */
+  emphasizeQuestion?: number;
 }
 
 /** "+15" / "-5", so a neg reads as a neg at a glance. */
@@ -66,7 +80,7 @@ function questionLines(question: IDerivedQuestion, teamNames: { left: string; ri
 }
 
 export default function RecentRail(props: IRecentRailProps) {
-  const { game, limit = 8, onInspect } = props;
+  const { game, limit = 8, onInspect, emphasizeQuestion } = props;
   const teamNames = { left: game.left.name, right: game.right.name };
   const recent = game.questions.slice(-limit).reverse();
   const flaggedQuestions = new Set(game.notes.filter((note) => note.flagged).map((note) => note.questionNumber));
@@ -116,7 +130,16 @@ export default function RecentRail(props: IRecentRailProps) {
             );
 
             return (
-              <li key={question.questionNumber} className="scorer-rail-item">
+              <li
+                key={question.questionNumber}
+                // The class is the whole emphasis: the button inside it is untouched, so a row being
+                // pointed at is still a row that opens the question when it is pressed.
+                className={
+                  question.questionNumber === emphasizeQuestion
+                    ? 'scorer-rail-item is-emphasized'
+                    : 'scorer-rail-item'
+                }
+              >
                 {onInspect ? (
                   <button
                     type="button"

@@ -780,3 +780,227 @@ describe('somebody who turned up late', () => {
     expect(change?.activePlayers).toContain('Alex Brown');
   });
 });
+
+/**
+ * The editor for everything a one-for-one substitution is not.
+ *
+ * Halftime really is four changes at once, and a format change really does need a lineup composed
+ * rather than swapped. What that used to cost was a grid of checkboxes, a running total to check by
+ * eye, and a lineup array whose order was whatever the ticking happened to leave behind. It is now
+ * the same two lists as everywhere else in QBSheet, and the array is worked out rather than collected.
+ */
+describe('the full lineup editor', () => {
+  function openFullEditor(teamLabel = 'Ninety Six lineup'): HTMLElement {
+    openPlayers();
+    const lineup = screen.getByLabelText(teamLabel);
+    fireEvent.click(within(lineup).getByText('Change lineup'));
+    return lineup;
+  }
+
+  /**
+   * The names under one group heading, in the order they are on screen.
+   *
+   * Found by heading rather than by text, because "Bench" is also the action on every Playing row —
+   * which is the vocabulary working: the group and the button that puts somebody in it say the
+   * same word.
+   */
+  function groupNames(editor: HTMLElement, heading: string): string[] {
+    const groups = Array.from(editor.querySelectorAll('.scorer-lineup-groups .scorer-lineup-group'));
+    const list = groups.find((candidate) => candidate.textContent === heading)?.nextElementSibling;
+    if (list?.tagName !== 'UL') return [];
+    return Array.from(list.querySelectorAll('.scorer-lineup-name')).map((name) => name.textContent ?? '');
+  }
+
+  test('there is not a checkbox in it', () => {
+    renderScorer(formatFor(2));
+    chooseStarters(['Sarah Jones', 'Michael Smith']);
+    const editor = openFullEditor();
+
+    expect(editor.querySelectorAll('input[type="checkbox"]')).toHaveLength(0);
+    // Nor a drag handle or an arrow: row order here is not the thing being edited.
+    expect(within(editor).queryByLabelText(/Move .* up/)).toBeNull();
+    expect(within(editor).queryByLabelText(/Move .* down/)).toBeNull();
+  });
+
+  test('every player is under Playing or Bench, once', () => {
+    renderScorer(formatFor(2));
+    chooseStarters(['Sarah Jones', 'Michael Smith']);
+    const editor = openFullEditor();
+
+    expect(groupNames(editor, 'Playing')).toEqual(['Sarah Jones', 'Michael Smith']);
+    expect(groupNames(editor, 'Bench')).toEqual(['Jordan Hall']);
+    const everywhere = groupNames(editor, 'Playing').concat(groupNames(editor, 'Bench'));
+    expect(new Set(everywhere).size).toBe(everywhere.length);
+  });
+
+  test('Bench takes somebody off and Put in brings somebody on', () => {
+    renderScorer(formatFor(2));
+    chooseStarters(['Sarah Jones', 'Michael Smith']);
+    const editor = openFullEditor();
+
+    fireEvent.click(within(editor).getByRole('button', { name: 'Bench Sarah Jones' }));
+    expect(groupNames(editor, 'Playing')).toEqual(['Michael Smith']);
+    expect(groupNames(editor, 'Bench')).toEqual(['Sarah Jones', 'Jordan Hall']);
+
+    fireEvent.click(within(editor).getByRole('button', { name: 'Put Jordan Hall in' }));
+    expect(groupNames(editor, 'Playing')).toEqual(['Michael Smith', 'Jordan Hall']);
+    expect(groupNames(editor, 'Bench')).toEqual(['Sarah Jones']);
+  });
+
+  test('the format cap is enforced by not offering the action, not by refusing it afterwards', () => {
+    renderScorer(formatFor(2));
+    chooseStarters(['Sarah Jones', 'Michael Smith']);
+    const editor = openFullEditor();
+
+    expect(within(editor).getByRole('button', { name: 'Put Jordan Hall in' }).hasAttribute('disabled')).toBe(true);
+    fireEvent.click(within(editor).getByRole('button', { name: 'Bench Sarah Jones' }));
+    expect(within(editor).getByRole('button', { name: 'Put Jordan Hall in' }).hasAttribute('disabled')).toBe(false);
+  });
+
+  test('a lineup nobody changed cannot be applied', () => {
+    renderScorer(formatFor(2));
+    chooseStarters(['Sarah Jones', 'Michael Smith']);
+    const editor = openFullEditor();
+    const apply = within(editor).getByRole('button', { name: 'Apply lineup' });
+
+    expect(apply.hasAttribute('disabled')).toBe(true);
+    // Out and straight back in is the same lineup, and is still nothing to record.
+    fireEvent.click(within(editor).getByRole('button', { name: 'Bench Sarah Jones' }));
+    expect(within(editor).getByRole('button', { name: 'Apply lineup' }).hasAttribute('disabled')).toBe(false);
+    fireEvent.click(within(editor).getByRole('button', { name: 'Put Sarah Jones in' }));
+    expect(within(editor).getByRole('button', { name: 'Apply lineup' }).hasAttribute('disabled')).toBe(true);
+  });
+
+  test('one Apply writes one substitution with the whole lineup', () => {
+    renderScorer(formatFor(2));
+    chooseStarters(['Sarah Jones', 'Michael Smith']);
+    const before = substitutions().filter((event) => event.team === 'left').length;
+    const editor = openFullEditor();
+
+    fireEvent.click(within(editor).getByRole('button', { name: 'Bench Michael Smith' }));
+    fireEvent.click(within(editor).getByRole('button', { name: 'Put Jordan Hall in' }));
+    fireEvent.click(within(editor).getByRole('button', { name: 'Apply lineup' }));
+
+    const left = substitutions().filter((event) => event.team === 'left');
+    expect(left.length).toBe(before + 1);
+    // Sarah kept the place she already had; Jordan was appended. Nobody was moved by a click order.
+    expect(left.at(-1)?.activePlayers).toEqual(['Sarah Jones', 'Jordan Hall']);
+  });
+
+  /*
+   * The device's row order is a view preference and nothing else — see `PlayerSeating`. Presenting
+   * the editor in that order is right; serializing it would be writing a substitution that reordered
+   * a lineup nobody touched, into the history a director reads.
+   */
+  test('a rearranged screen does not rewrite the lineup it is showing', () => {
+    renderScorer(formatFor(2));
+    chooseStarters(['Sarah Jones', 'Michael Smith']);
+
+    // Put Michael above Sarah on this Chromebook only.
+    openPlayers();
+    const lineup = screen.getByLabelText('Ninety Six lineup');
+    fireEvent.click(within(lineup).getByText('Reorder'));
+    fireEvent.click(within(lineup).getByRole('button', { name: 'Move Michael Smith up' }));
+    fireEvent.click(within(lineup).getByText('Done'));
+    const recordedBefore = substitutions().filter((event) => event.team === 'left').at(-1)?.activePlayers;
+    expect(recordedBefore).toEqual(['Sarah Jones', 'Michael Smith']);
+
+    fireEvent.click(within(lineup).getByText('Change lineup'));
+    const editor = screen.getByLabelText('Ninety Six lineup');
+    // What is on screen follows the room's order…
+    expect(groupNames(editor, 'Playing')).toEqual(['Michael Smith', 'Sarah Jones']);
+    fireEvent.click(within(editor).getByRole('button', { name: 'Bench Sarah Jones' }));
+    fireEvent.click(within(editor).getByRole('button', { name: 'Put Jordan Hall in' }));
+    fireEvent.click(within(editor).getByRole('button', { name: 'Apply lineup' }));
+
+    // …and what is written follows the lineup that was already recorded.
+    expect(substitutions().filter((event) => event.team === 'left').at(-1)?.activePlayers).toEqual([
+      'Michael Smith',
+      'Jordan Hall',
+    ]);
+  });
+
+  test('the row that crossed between groups is the one that is marked', () => {
+    renderScorer(formatFor(2));
+    chooseStarters(['Sarah Jones', 'Michael Smith']);
+    const editor = openFullEditor();
+
+    fireEvent.click(within(editor).getByRole('button', { name: 'Bench Sarah Jones' }));
+
+    // The same helper the starting-lineup screen uses; see `LineupMotion`.
+    const moved = editor.querySelectorAll('.scorer-lineup-entry.is-moved');
+    expect(moved).toHaveLength(1);
+    expect(moved[0].querySelector('.scorer-lineup-name')?.textContent).toBe('Sarah Jones');
+  });
+});
+
+/**
+ * The seat, held still while the person in it changes.
+ *
+ * The event this produces is already covered above. What is checked here is the one thing a
+ * scorekeeper watches for after they press Confirm: that the row they were looking at is the row the
+ * replacement appeared in, and that it said so.
+ */
+describe('a substitution landing in a seat', () => {
+  function playerRows(teamLabel: string): HTMLElement[] {
+    return Array.from(screen.getByLabelText(teamLabel).querySelectorAll('.scorer-player'));
+  }
+
+  function nameAt(teamLabel: string, seat: number): string {
+    return playerRows(teamLabel)[seat]?.querySelector('.scorer-player-name')?.textContent ?? '';
+  }
+
+  test('the incoming player appears in the row the substitution started from', () => {
+    renderScorer(formatFor(2));
+    chooseStarters(['Sarah Jones', 'Michael Smith']);
+    expect(nameAt('Ninety Six', 1)).toBe('Michael Smith');
+
+    const row = playerRows('Ninety Six')[1];
+    fireEvent.click(within(row).getByRole('button', { name: 'Substitute for Michael Smith' }));
+    fireEvent.click(within(row).getByRole('button', { name: 'Jordan Hall' }));
+
+    // Seat two, still seat two, with somebody else in it.
+    expect(nameAt('Ninety Six', 0)).toBe('Sarah Jones');
+    expect(nameAt('Ninety Six', 1)).toBe('Jordan Hall');
+    expect(playerRows('Ninety Six')[1].querySelector('.scorer-player-seat')?.textContent).toBe('2');
+  });
+
+  test('the destination row is emphasised, and only that row', () => {
+    renderScorer(formatFor(2));
+    chooseStarters(['Sarah Jones', 'Michael Smith']);
+
+    const row = playerRows('Ninety Six')[1];
+    fireEvent.click(within(row).getByRole('button', { name: 'Substitute for Michael Smith' }));
+    fireEvent.click(within(row).getByRole('button', { name: 'Jordan Hall' }));
+
+    const emphasised = playerRows('Ninety Six').filter((candidate) =>
+      candidate.className.includes('is-substituted'),
+    );
+    expect(emphasised).toHaveLength(1);
+    expect(emphasised[0].querySelector('.scorer-player-name')?.textContent).toBe('Jordan Hall');
+    // The other team's sheet is not involved in this at all.
+    expect(playerRows('Greenwood').some((candidate) => candidate.className.includes('is-substituted'))).toBe(false);
+  });
+
+  test('it is still exactly one substitution event, and tossups heard are untouched by the emphasis', () => {
+    renderScorer(formatFor(2));
+    chooseStarters(['Sarah Jones', 'Michael Smith']);
+    buzz('Sarah Jones', 1);
+    fireEvent.click(screen.getByText('20'));
+    const before = substitutions().filter((event) => event.team === 'left').length;
+
+    const row = playerRows('Ninety Six')[1];
+    fireEvent.click(within(row).getByRole('button', { name: 'Substitute for Michael Smith' }));
+    fireEvent.click(within(row).getByRole('button', { name: 'Jordan Hall' }));
+
+    const left = substitutions().filter((event) => event.team === 'left');
+    expect(left.length).toBe(before + 1);
+    expect(left.at(-1)?.questionNumber).toBe(2);
+    expect(left.at(-1)?.activePlayers).toEqual(['Sarah Jones', 'Jordan Hall']);
+
+    openPlayers();
+    const lineup = screen.getByLabelText('Ninety Six lineup');
+    expect(within(lineup).getByText('Michael Smith').closest('li')?.textContent).toContain('1 TUH');
+    expect(within(lineup).getByText('Jordan Hall').closest('li')?.textContent).toContain('0 TUH');
+  });
+});

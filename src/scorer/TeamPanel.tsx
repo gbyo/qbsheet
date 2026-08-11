@@ -19,7 +19,17 @@ import { CSSProperties, useEffect, useRef, useState } from 'react';
 import { IScorekeeperAnswerType, IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
 import { IDerivedTeam } from '../scoring/deriveGame';
 import { orderBySeating } from './PlayerSeating';
+import { lineupMoveMs, lineupSettleMs } from './LineupMotion';
 import { availableAnswerTypes } from './tossupRulings';
+
+/**
+ * How long the seat a substitution landed in keeps its emphasis.
+ *
+ * The travel and the dwell from the lineup work, reused rather than re-chosen: this is the same
+ * event as a row crossing between Playing and Bench, seen from the scoresheet instead of from the
+ * editor, and two different durations for one thing would read as two different things happening.
+ */
+export const seatChangeEmphasisMs = lineupMoveMs + lineupSettleMs;
 
 export interface ITeamPanelProps {
   format: IScorekeeperFormat;
@@ -59,6 +69,12 @@ export interface ITeamPanelProps {
    * The dialog is not going anywhere: adding somebody to the roster, reordering seats and anything
    * that is not one-for-one still live there. Absent means the host offers no quick path, and no Sub
    * button is drawn.
+   *
+   * The visual seat is deliberately *not* reported. It is a fact about this device's row order (see
+   * `PlayerSeating`) and the two things a host does with a substitution both have better sources for
+   * it: the event stores the lineup in scoring-history order, and the seating store moves the
+   * incoming player into the outgoing one's place on its own. A seat handed up from here would be
+   * an invitation to write one of those out of the other.
    */
   onSubstitute?: (outgoing: string, incoming: string) => void;
   /** Who is available to come on. Empty means everybody on the roster is already playing. */
@@ -112,6 +128,25 @@ export default function TeamPanel(props: ITeamPanelProps) {
   } = props;
   /** Which row, if any, has its replacement list open. One at a time, by name. */
   const [substituting, setSubstituting] = useState<string | null>(null);
+  /**
+   * The seat a substitution has just landed in.
+   *
+   * A seat and not a player, because the seat is the thing being asserted. "Sarah → Olivia" is a
+   * change of person and explicitly not a change of position: the row keeps its number, the answer
+   * buttons under it do not move, and the only thing that happens is that a different name arrives
+   * in it. Emphasising the row says that; animating the row would say the opposite.
+   */
+  /*
+   * Held as a fresh object rather than as a bare number so that two substitutions into the same seat
+   * are two events. A number set to the value it already has is not a state change, and the second
+   * one would inherit the first one's remaining time instead of starting its own.
+   */
+  const [landed, setLanded] = useState<{ seat: number } | null>(null);
+  useEffect(() => {
+    if (landed === null) return undefined;
+    const timer = window.setTimeout(() => setLanded(null), seatChangeEmphasisMs);
+    return () => window.clearTimeout(timer);
+  }, [landed]);
   const active = orderBySeating(
     team.players.filter((player) => team.activePlayers.includes(player.name)),
     seatOrder ?? [],
@@ -168,12 +203,25 @@ export default function TeamPanel(props: ITeamPanelProps) {
        */}
       <ul className="scorer-roster" style={{ '--scorer-answer-columns': columns } as CSSProperties}>
         {active.map((player, seat) => (
-          <li key={player.name} className={seat === flashSeat ? 'scorer-player is-keyed' : 'scorer-player'}>
+          <li
+            key={player.name}
+            className={[
+              'scorer-player',
+              seat === flashSeat ? 'is-keyed' : '',
+              seat === landed?.seat ? 'is-substituted' : '',
+            ]
+              .filter(Boolean)
+              .join(' ')}
+          >
             {/* The seat, not an identity. Hidden from assistive technology, which reads the name. */}
             <span className="scorer-player-seat" aria-hidden="true">
               {seat + 1}
             </span>
-            <span className="scorer-player-name">{player.name}</span>
+            {/* Keyed by the name so a substitution replaces the element rather than editing its text,
+                which is what lets the arriving name have an entrance and the seat around it not. */}
+            <span key={player.name} className="scorer-player-name">
+              {player.name}
+            </span>
             {/*
               Against the name, because that is whose substitution it is — not against the rulings,
               where it spent its time being a fifth target beside +10 for a thumb to find while a
@@ -252,6 +300,11 @@ export default function TeamPanel(props: ITeamPanelProps) {
                         className="scorer-choice"
                         onClick={() => {
                           setSubstituting(null);
+                          // The seat this row is in, before the lineup changes and while the row it
+                          // came from is still the row the scorekeeper is looking at. Kept here
+                          // rather than reported upward: the emphasis is the only thing that wants
+                          // it, and it is drawn here.
+                          setLanded({ seat });
                           onSubstitute(player.name, name);
                         }}
                       >

@@ -45,10 +45,23 @@ export interface IGameEventsApi {
    * @returns whether it was accepted
    */
   append: (...added: ScoreEvent[]) => boolean;
-  /** Take back the most recent action. */
-  undo: () => void;
-  /** Put back what undo took. */
-  redo: () => void;
+  /**
+   * Take back the most recent action.
+   *
+   * @returns the events it removed, oldest first, or null if there was nothing to take back.
+   *
+   * The frame is returned so the screen can say what it just undid. It is feedback and nothing more:
+   * the stack above is still the authority on what happened, this is a copy of what came off it, and
+   * a caller that ignores it changes nothing. Nothing waits for whatever is done with it either —
+   * the events are already gone by the time it is handed over.
+   */
+  undo: () => ScoreEvent[] | null;
+  /**
+   * Put back what undo took.
+   *
+   * @returns the events it restored, oldest first, or null if there was nothing to put back.
+   */
+  redo: () => ScoreEvent[] | null;
   /** Replace an event in place, for correcting an earlier question. */
   replace: (id: string, next: ScoreEvent) => void;
   /** Remove an event outright. */
@@ -144,20 +157,23 @@ export default function useGameEvents(
 
   const undo = useCallback(() => {
     const frame = undoStack.current.pop();
-    if (frame === undefined) return;
+    if (frame === undefined) return null;
     const existing = current.current;
     const cut = Math.max(0, existing.length - frame);
-    redoStack.current.push(existing.slice(cut));
+    const removed = existing.slice(cut);
+    redoStack.current.push(removed);
     setRejection('');
     commit(existing.slice(0, cut));
+    return removed;
   }, [commit]);
 
   const redo = useCallback(() => {
     const frame = redoStack.current.pop();
-    if (frame === undefined) return;
+    if (frame === undefined) return null;
     undoStack.current.push(frame.length);
     setRejection('');
     commit(current.current.concat(frame));
+    return frame;
   }, [commit]);
 
   /**

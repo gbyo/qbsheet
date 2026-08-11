@@ -85,6 +85,72 @@ function stateLine(assignment: INormalizedAssignment | null, busy: boolean): str
   return '';
 }
 
+/**
+ * What this room is being told, reduced to the part worth redrawing for.
+ *
+ * The poll returns a fresh object every ten seconds whether or not anything about it has changed,
+ * and keying the assignment block on that object would restart its entrance animation six times a
+ * minute — for an unchanged screen, in a room where nobody has touched anything. So the key is the
+ * *meaning*: which of the four situations this room is in, and for the one that has a game attached,
+ * which game. Ten identical polls produce one key and no movement; control assigning the next round
+ * produces a different key, and that is the only thing the animation is for.
+ */
+export function assignmentStateKey(assignment: INormalizedAssignment | null): string {
+  if (!assignment) return 'none';
+  if (assignment.state === 'held') return 'held';
+  if (assignment.state === 'blocked') return 'blocked';
+  if (assignment.state === 'none' || !assignment.definition) return 'none';
+  return `assigned:${assignment.scheduledMatchId ?? 'unknown'}`;
+}
+
+/** How recent a successful check was, in the words a person would use about it. */
+export function lastCheckLabel(ageMs: number): string {
+  if (ageMs < 60_000) return 'less than a minute ago';
+  const minutes = Math.floor(ageMs / 60_000);
+  if (minutes === 1) return '1 minute ago';
+  if (minutes < 60) return `${minutes} minutes ago`;
+  const hours = Math.floor(minutes / 60);
+  return hours === 1 ? 'over an hour ago' : `over ${hours} hours ago`;
+}
+
+/**
+ * The quiet line under the assignment: is this thing still checking?
+ *
+ * # Why it exists
+ *
+ * Because "Waiting for the next assignment." is indistinguishable from a page that has stopped. The
+ * room polls every ten seconds and has done since it paired, but nothing on screen has ever said so,
+ * so a scorekeeper between rounds has no evidence and does the only thing available to them, which
+ * is to press the manual button — or, worse, to conclude the pairing has dropped and go looking for
+ * a code. One line of text answers it for the rest of the day.
+ *
+ * # Why it is not a spinner
+ *
+ * Because there is nothing to wait for. A spinner says "your request is in progress, stay here";
+ * this is an idle room being told the software is awake. Anything that animated, counted down, or
+ * pulsed would be putting movement on a screen whose entire job for the next ten minutes is to be
+ * calm and to be readable from across a classroom.
+ *
+ * # Why a failure does not make it lie
+ *
+ * A poll that failed does not stop the next one, so "checks automatically" is still true — but
+ * "checked just now" is not, and the caller has an error banner up saying as much. So the failing
+ * case reports the last check that actually succeeded and says nothing about the present. `forbidden`
+ * is the one state where the checking genuinely has stopped, on purpose, and it says that instead.
+ */
+export function checkStatusLine(state: {
+  forbidden: string;
+  lastSuccessfulCheckAt: number | null;
+  now: number;
+  failing: boolean;
+}): string {
+  if (state.forbidden !== '') return 'Automatic checks paused · choose Check now after this is fixed.';
+  if (state.lastSuccessfulCheckAt === null) return 'Checking tournament control…';
+  const age = Math.max(0, state.now - state.lastSuccessfulCheckAt);
+  if (state.failing) return `Automatic checks continue · last successful check ${lastCheckLabel(age)}`;
+  return `QBSheet checks automatically · checked ${age < 45_000 ? 'just now' : lastCheckLabel(age)}`;
+}
+
 export default function ConnectedSetup(props: {
   initialBaseUrl: string;
   /** A room this device is already paired with. Present means the address and the code are settled. */
@@ -112,6 +178,34 @@ export default function ConnectedSetup(props: {
   const [assignment, setAssignment] = useState<INormalizedAssignment | null>(null);
   /** Control accepted this room's capability and refused the request anyway. */
   const [forbidden, setForbidden] = useState('');
+  /**
+   * When tournament control last actually answered about this room.
+   *
+   * Only a completed read sets it. An HTTP failure is not a check, however promptly it came back,
+   * and the whole value of this line is that it can be believed. It is equally never cleared by a
+   * later failure: that a poll failed at 2:41 does not stop it being true that one succeeded at
+   * 2:40, and forgetting the good one would leave the screen unable to say anything at all in the
+   * situation it is most needed.
+   */
+  const [lastSuccessfulCheckAt, setLastSuccessfulCheckAt] = useState<number | null>(null);
+  /**
+   * Whether the most recent assignment read failed.
+   *
+   * Its own state rather than a reading of `error`, because `error` is where four different things
+   * end up: a failed poll, but also a failed session open, a failed pairing, and — the one that
+   * makes it actively wrong here — a poll that *succeeded* and returned a document carrying
+   * `errors`. Deriving "is the room out of touch" from any of those made the status line understate
+   * a room that had just been answered, which is the one claim it exists to get right.
+   */
+  const [assignmentFailed, setAssignmentFailed] = useState(false);
+  /**
+   * The clock the "checked just now" line is measured against.
+   *
+   * Stamped when a poll finishes rather than kept live by a timer of its own: the polls are already
+   * arriving every ten seconds and each one re-renders this screen, so the label stays current
+   * without a second interval — and without anything on screen that ticks.
+   */
+  const [now, setNow] = useState(() => Date.now());
 
   const connect = async (event: FormEvent) => {
     event.preventDefault();
@@ -193,6 +287,11 @@ export default function ConnectedSetup(props: {
     connectionTimeline.record('room-repaired', room.roomName);
     setCode('');
     setAssignment(null);
+    // Nothing has been checked yet under this pairing. The assignment is already cleared here for
+    // the same reason, and a check-status line inherited across a re-pair would spend the seconds
+    // before the first answer saying a room whose token was just refused had been reached just now.
+    setLastSuccessfulCheckAt(null);
+    setAssignmentFailed(false);
     setStage({ kind: 'room', client: stage.client, room });
   };
 
@@ -216,6 +315,8 @@ export default function ConnectedSetup(props: {
     setError('');
     const result = await stage.client.assignment(identityFor(stage.room));
     setBusy(false);
+    setNow(Date.now());
+    setAssignmentFailed(!result.ok);
     if (!result.ok) {
       // A refused room token is the one thing that sends a scorekeeper back to a pairing code. Any
       // other failure is the network's problem and the room keeps its capability.
@@ -234,6 +335,9 @@ export default function ConnectedSetup(props: {
       return;
     }
     setForbidden('');
+    // Tournament control answered about this room. Recorded here and nowhere else, so the status
+    // line below can only ever be reporting a request that actually completed.
+    setLastSuccessfulCheckAt(Date.now());
     setAssignment(result.value);
     if (result.value.errors?.length) setError(result.value.errors.join(' '));
   }, [stage, onRoomLost, noteForbidden]);
@@ -264,7 +368,7 @@ export default function ConnectedSetup(props: {
     void loadRef.current();
     const timer = setInterval(() => {
       // "Surface it. Do not retry in a loop." A refusal of this kind does not change because it was
-      // asked again ten seconds later, so the room stops asking and Check again is the way back —
+      // asked again ten seconds later, so the room stops asking and Check now is the way back —
       // an explicit press, which is what the rule leaves room for.
       if (forbiddenRef.current !== '') return;
       void loadRef.current();
@@ -324,6 +428,15 @@ export default function ConnectedSetup(props: {
   const startable =
     assignment?.state === 'assigned' && assignment.definition !== null && assignment.scheduledMatchId !== undefined;
   const waiting = stateLine(assignment, busy);
+  const assignmentKey = assignmentStateKey(assignment);
+  const checkStatus = checkStatusLine({
+    forbidden,
+    lastSuccessfulCheckAt,
+    now,
+    // Only a failed assignment read. The error banner is still the authority on *what* went wrong;
+    // this decides whether the line may claim the room is currently in touch.
+    failing: assignmentFailed,
+  });
 
   return (
     <main className="shell">
@@ -405,13 +518,31 @@ export default function ConnectedSetup(props: {
         <section className="shell-section">
           <h2 className="shell-heading">{stage.room.roomName} · Connected</h2>
           {assignment?.tournamentName && <p className="shell-subtitle">{assignment.tournamentName}</p>}
-          {waiting === '' && assignment?.definition ? (
-            <p className="assignment-matchup">
-              {assignment.definition.round.name} · {gamePackageMatchup(assignment.definition)}
-            </p>
-          ) : (
-            <p className="shell-hint">{waiting}</p>
-          )}
+          {/*
+            The live region is the container and never the contents. It stays mounted across every
+            poll so a change inside it is announced as a change; the block inside is keyed on what
+            the assignment *means*, so it is replaced — and re-enters — only when that meaning is
+            different. Polite, because an assignment arriving is news and not an emergency, and
+            focus is deliberately left alone: the Start button becoming enabled is the invitation,
+            and moving the cursor to it would take the keyboard away from whoever was using it.
+          */}
+          <div className="assignment-state" aria-live="polite">
+            <div key={assignmentKey} className="assignment-state-body">
+              {waiting === '' && assignment?.definition ? (
+                <p className="assignment-matchup">
+                  {assignment.definition.round.name} · {gamePackageMatchup(assignment.definition)}
+                </p>
+              ) : (
+                <p className="shell-hint">{waiting}</p>
+              )}
+            </div>
+          </div>
+          {/*
+            Outside the live region on purpose. This line changes every ten seconds by design, and a
+            screen reader interrupted six times a minute to be told the timestamp moved would be
+            being interrupted by the one thing on this screen that is never news.
+          */}
+          <p className="assignment-check">{checkStatus}</p>
           {forbidden !== '' && (
             <p className="shell-warning" role="alert">
               {forbidden} This room is still paired — this is not something a new code fixes.
@@ -434,8 +565,15 @@ export default function ConnectedSetup(props: {
             >
               {starting ? 'Starting…' : resumable ? 'Resume scoring' : 'Start scoring'}
             </button>
+            {/*
+              "Check now" rather than "Check again", because the room is already checking and this
+              is an override rather than the way an assignment normally arrives. Nobody should have
+              to press it between rounds; it exists for the scorekeeper who has just been told from
+              across the room that the next game is up and does not want to wait out the interval —
+              and for the `forbidden` state, where automatic checking has deliberately stopped.
+            */}
             <button type="button" className="shell-button" disabled={busy} onClick={() => void loadAssignment()}>
-              Check again
+              Check now
             </button>
           </div>
         </section>

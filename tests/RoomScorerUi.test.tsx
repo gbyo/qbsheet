@@ -10,12 +10,13 @@
  * moves itself to the next thing without being told.
  */
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { IScorekeeperFormat } from '../src/scoring/ScorekeeperFormat';
 import scoringRulesToScorekeeperFormat from './rules';
 import { CommonRuleSets, ScoringRules } from './rules';
 import AnswerType from './AnswerType';
 import ScorerHost from '../src/scorer/ScorerHost';
+import { operationNoticeMs } from '../src/scorer/Scorer';
 import { IRoomProcedure } from '../src/scoring/RoomProcedure';
 import { ITeamRoster } from '../src/game/Roster';
 import { RoomConnectionState } from '../src/app/ConnectionState';
@@ -131,6 +132,22 @@ function pressControl(name: string | RegExp) {
   }
   fireEvent.click(screen.getByRole('button', { name: 'Game' }));
   fireEvent.click(screen.getByRole('menuitem', { name }));
+}
+
+/**
+ * Open the Issue dialog the way live play reaches it.
+ *
+ * Flag is the one entry point now: the Game menu used to carry a second copy of this and of
+ * Protests, which meant a scorekeeper mid-round had two places to look for the same workflow.
+ */
+function openIssue(category = 'Question / packet issue') {
+  fireEvent.click(screen.getByRole('button', { name: 'Flag' }));
+  fireEvent.click(within(screen.getByRole('dialog', { name: 'Flag' })).getByText(category));
+}
+
+function openProtests() {
+  fireEvent.click(screen.getByRole('button', { name: 'Flag' }));
+  fireEvent.click(within(screen.getByRole('dialog', { name: 'Flag' })).getByText('Protest / disputed ruling'));
 }
 
 /** Every control the screen offers, footer and Game menu together. */
@@ -537,12 +554,96 @@ describe('the game menu', () => {
 
     // Matched loosely: what matters is that each tool is reachable from the scoring screen without
     // hunting, not which of the footer or the menu is holding it today.
-    for (const tool of [/players/i, /issue/i, /scoresheet review/i, /download qbj/i, /recover from qbj/i]) {
+    for (const tool of [/players/i, /flag/i, /scoresheet review/i, /download qbj/i, /recover from qbj/i]) {
       expect(
         controls.some((control) => tool.test(control)),
         `${tool} should be reachable`,
       ).toBe(true);
     }
+  });
+
+  /*
+   * The Game menu used to carry Protests and Issue as well as the permanent Flag control beside it,
+   * which gave one live-play workflow two doors. Flag is the one that is always on screen and always
+   * in the same place, so it is the one that kept them.
+   */
+  test('the live-play flag workflows are not duplicated inside Game', () => {
+    renderScorer(formatFor());
+    fireEvent.click(screen.getByRole('button', { name: 'Game' }));
+
+    expect(screen.queryByRole('menuitem', { name: 'Protests' })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: 'Issue / tournament control' })).toBeNull();
+    // The things that are not duplicates stay exactly where they were.
+    expect(screen.getByRole('menuitem', { name: 'Notes' })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: 'Game details' })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: 'Full scoresheet review' })).toBeTruthy();
+  });
+
+  test('Flag still reaches both workflows', () => {
+    renderScorer(formatFor());
+    openProtests();
+    expect(screen.getByRole('dialog', { name: 'Protests' })).toBeTruthy();
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Protests' })).getByText('Close'));
+
+    openIssue();
+    expect(screen.getByRole('dialog', { name: 'Issue / tournament control' })).toBeTruthy();
+  });
+
+  test('quiet rules separate the groups, and nothing can land on one', () => {
+    renderScorer(formatFor());
+    fireEvent.click(screen.getByRole('button', { name: 'Game' }));
+    const list = screen.getByRole('menu');
+    const children = Array.from(list.children);
+    const separators = children.filter((child) => child.getAttribute('role') === 'separator');
+
+    expect(separators.length).toBeGreaterThan(0);
+    // Never at either end, and never two in a row: a rule is only drawn where groups meet.
+    expect(children[0].getAttribute('role')).not.toBe('separator');
+    expect(children[children.length - 1].getAttribute('role')).not.toBe('separator');
+    children.forEach((child, index) => {
+      if (child.getAttribute('role') !== 'separator') return;
+      expect(children[index + 1]?.getAttribute('role')).not.toBe('separator');
+    });
+    // A rule holds nothing to press, so there is nothing on it for focus to reach.
+    for (const separator of separators) {
+      expect(separator.querySelectorAll('button')).toHaveLength(0);
+      expect(separator.hasAttribute('tabindex')).toBe(false);
+    }
+  });
+
+  test('arrow keys, Home and End move between entries and never onto a rule', () => {
+    renderScorer(formatFor());
+    fireEvent.click(screen.getByRole('button', { name: 'Game' }));
+    const entries = screen.getAllByRole('menuitem');
+    expect(document.activeElement).toBe(entries[0]);
+
+    // Down through every entry in turn. A rule between two of them is simply not a stop.
+    for (let index = 1; index < entries.length; index += 1) {
+      fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'ArrowDown' });
+      expect(document.activeElement).toBe(entries[index]);
+    }
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'ArrowUp' });
+    expect(document.activeElement).toBe(entries[entries.length - 2]);
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'Home' });
+    expect(document.activeElement).toBe(entries[0]);
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'End' });
+    expect(document.activeElement).toBe(entries[entries.length - 1]);
+  });
+
+  test('the actions that end a game stay last and behind their own rule', () => {
+    renderScorer(formatFor());
+    fireEvent.click(screen.getByRole('button', { name: 'Game' }));
+    const children = Array.from(screen.getByRole('menu').children);
+    const forfeit = screen.getByRole('menuitem', { name: 'Record forfeit' });
+    const forfeitRow = forfeit.closest('li');
+
+    expect(forfeit.className).toContain('is-destructive');
+    expect(children[children.length - 1]).toBe(forfeitRow);
+    // Everything above the destructive group is separated from it by a rule.
+    const destructiveStart = children.findIndex(
+      (child) => child.querySelector('.scorer-menu-item.is-destructive') !== null,
+    );
+    expect(children[destructiveStart - 1]?.getAttribute('role')).toBe('separator');
   });
 
   test('lightning is offered only when the format has lightning rounds', () => {
@@ -857,7 +958,7 @@ describe('the game menu', () => {
       request: { category: 'protest', message: 'The ruling was disputed.' },
     } satisfies HelpRequestResult);
     renderScorer(formatFor(), undefined, requestControl);
-    pressControl('Issue / tournament control');
+    openIssue();
     fireEvent.change(screen.getByLabelText('What happened?'), { target: { value: 'The buzzers cut out.' } });
     fireEvent.click(screen.getByText('Save and request control'));
 
@@ -875,7 +976,7 @@ describe('the game menu', () => {
         latestEvents = events;
       },
     });
-    pressControl('Issue / tournament control');
+    openIssue();
     fireEvent.change(screen.getByLabelText('What happened?'), { target: { value: 'The room lost Wi-Fi.' } });
     fireEvent.click(screen.getByText('Save and request control'));
 
@@ -906,7 +1007,7 @@ describe('the game menu', () => {
       },
     });
 
-    pressControl('Issue / tournament control');
+    openIssue();
     expect(screen.getByRole('dialog', { name: 'Issue / tournament control' })).toHaveTextContent(
       'Tournament control has already been requested.',
     );
@@ -931,7 +1032,7 @@ describe('the game menu', () => {
     };
     renderScorer(formatFor(), undefined, requestControl, undefined, undefined, {}, { controlRequest: outstanding });
 
-    pressControl('Protests');
+    openProtests();
     expect(screen.getByRole('dialog', { name: 'Protests' })).toHaveTextContent(
       'Tournament control has already been requested.',
     );
@@ -954,7 +1055,7 @@ describe('the game menu', () => {
       controlRequest: failed,
       onRetryControlRequest: retry,
     });
-    pressControl('Issue / tournament control');
+    openIssue();
     expect(screen.getAllByText('Tournament control was not reached.').length).toBeGreaterThan(0);
     fireEvent.click(within(screen.getByRole('dialog', { name: 'Issue / tournament control' })).getByRole('button', {
       name: 'Try request again',
@@ -969,7 +1070,7 @@ describe('the game menu', () => {
         latestEvents = events;
       },
     });
-    pressControl('Issue / tournament control');
+    openIssue();
     expect(screen.queryByLabelText('Ask tournament control to come')).toBeNull();
     expect(screen.getByText(/remote control requests/)).toBeTruthy();
     fireEvent.change(screen.getByLabelText('What happened?'), { target: { value: 'The packet is damaged.' } });
@@ -995,7 +1096,7 @@ describe('the game menu', () => {
       request: { category: 'protest', message: 'The ruling was disputed.' },
     } satisfies HelpRequestResult);
     renderScorer(formatFor(), undefined, requestControl);
-    pressControl('Protests');
+    openProtests();
     fireEvent.change(screen.getByLabelText('Details'), { target: { value: 'The ruling was disputed.' } });
     fireEvent.click(screen.getByLabelText('Ask tournament control to come'));
     fireEvent.click(screen.getByText('Record protest and keep playing'));
@@ -1232,7 +1333,7 @@ describe('ending a game short', () => {
 describe('a protest is a thing with a state', () => {
   test('it is recorded, the game carries on, and control is warned before submission', () => {
     renderScorer(formatFor());
-    pressControl('Protests');
+    openProtests();
     fireEvent.change(screen.getByLabelText('Details'), { target: { value: 'The ruling was disputed.' } });
     fireEvent.click(screen.getByText('Record protest and keep playing'));
     fireEvent.click(within(screen.getByLabelText('Protests')).getByText('Close'));
@@ -1275,5 +1376,423 @@ describe('the Recent rail is a way back into the scoresheet', () => {
     fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('20'));
 
     expect(screen.getAllByLabelText('Score after this question')[0].textContent).toBe('30–0');
+  });
+});
+
+/**
+ * Saying what was taken back.
+ *
+ * Undo has always altered the event list correctly and said nothing about it, which on a scoresheet
+ * is the wrong half of the job: a scorekeeper presses it because they believe something is wrong,
+ * and the screen answering with a silently different set of numbers gives them nothing to check
+ * their belief against. The stack is unchanged — this is a sentence about what came off it.
+ */
+describe('undo and redo say what they changed', () => {
+  function notice(): string {
+    return document.querySelector('.scorer-banner.is-info')?.textContent ?? '';
+  }
+
+  test('it names the question and the action it removed', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]); // +10 on tossup 1
+
+    fireEvent.click(screen.getByText('Undo'));
+
+    expect(notice()).toBe('Undid Q1 · Sarah Mitchell +10');
+    expect(scoreOf('Ninety Six')).toBe('0');
+  });
+
+  test('redo says the same thing the other way round', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+    fireEvent.click(screen.getByText('Undo'));
+
+    fireEvent.click(screen.getByText('Redo'));
+
+    expect(notice()).toBe('Redid Q1 · Sarah Mitchell +10');
+    expect(scoreOf('Ninety Six')).toBe('10');
+  });
+
+  /*
+   * The footer and the keyboard are one act with two switches. They used to call the event stack
+   * separately, so anything added to one of them would simply not exist on the other — and the
+   * keyboard is used by the scorekeepers least likely to be looking at the screen when it happens.
+   */
+  test('the keyboard shortcut goes through the same feedback', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+
+    fireEvent.keyDown(document, { key: 'z', ctrlKey: true });
+
+    expect(notice()).toBe('Undid Q1 · Sarah Mitchell +10');
+    expect(scoreOf('Ninety Six')).toBe('0');
+
+    fireEvent.keyDown(document, { key: 'z', ctrlKey: true, shiftKey: true });
+
+    expect(notice()).toBe('Redid Q1 · Sarah Mitchell +10');
+    expect(scoreOf('Ninety Six')).toBe('10');
+  });
+
+  test('a question still in Recent is pointed at, and stays clickable while it is', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+    fireEvent.click(screen.getByText('20'));
+    fireEvent.click(buttonsFor('Emma Turner')[1]);
+    fireEvent.click(screen.getByText('20'));
+
+    // The bonus comes off and question 2 is still a question, so there is a row to point at.
+    fireEvent.click(screen.getByText('Undo'));
+
+    const emphasised = document.querySelectorAll('.scorer-rail-item.is-emphasized');
+    expect(emphasised).toHaveLength(1);
+    expect(emphasised[0].textContent).toContain('Q2');
+    // Emphasis is a background and nothing else; the row still opens the question.
+    expect(within(emphasised[0] as HTMLElement).getByRole('button', { name: 'Review question 2' })).toBeTruthy();
+  });
+
+  test('a multi-event action is still one undo, described as one thing', () => {
+    // Replacing a spoiled cycle writes the void and the note explaining it together, and a
+    // scorekeeper who takes that back means both halves of it.
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+    fireEvent.click(screen.getByRole('button', { name: 'Game' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Replace question 1' }));
+    const dialog = screen.getByRole('dialog', { name: 'Replace question 1' });
+    fireEvent.change(within(dialog).getByLabelText('What went wrong?'), { target: { value: 'Wrong packet' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Whole cycle' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Replace question 1' }));
+
+    fireEvent.click(screen.getByText('Undo'));
+
+    expect(notice()).toBe('Undid Q1 · 2 changes');
+    // One press, one frame: the buzz underneath it is still there, and is the next thing to undo.
+    expect(scoreOf('Ninety Six')).toBe('10');
+    expect((screen.getByText('Undo').closest('button') as HTMLButtonElement).disabled).toBe(false);
+  });
+});
+
+/**
+ * One question about what kind of issue this is, asked once.
+ *
+ * Flag exists to ask it, and the Issue dialog used to open with a complete category selector as its
+ * first field — so a scorekeeper who had just pressed "Question / packet issue" was immediately
+ * asked which kind of issue this was. Reasonably, some of them concluded the first press had not
+ * taken.
+ */
+describe('the issue category carries forward from Flag', () => {
+  test('the chosen category is stated rather than asked again', () => {
+    renderScorer(formatFor());
+    openIssue('Equipment / technical issue');
+
+    const dialog = screen.getByRole('dialog', { name: 'Issue / tournament control' });
+    expect(within(dialog).getByText('Equipment / technical issue')).toBeTruthy();
+    expect(within(dialog).queryByLabelText('Issue')).toBeNull();
+    // And the thing it actually wants is right there.
+    expect(within(dialog).getByLabelText('What happened?')).toBeTruthy();
+  });
+
+  test('it is the category the issue is saved under', async () => {
+    const requestControl = vi.fn().mockResolvedValue({ kind: 'accepted', request: {} } as HelpRequestResult);
+    renderScorer(formatFor(), undefined, requestControl);
+    openIssue('Equipment / technical issue');
+    fireEvent.change(screen.getByLabelText('What happened?'), { target: { value: 'The buzzers cut out.' } });
+    fireEvent.click(screen.getByText('Save and request control'));
+
+    await vi.waitFor(() =>
+      expect(requestControl).toHaveBeenCalledWith('equipment-technical', 'The buzzers cut out.'),
+    );
+  });
+
+  test('Change type reveals the chooser without losing anything already entered', () => {
+    renderScorer(formatFor(), undefined, vi.fn());
+    openIssue('Equipment / technical issue');
+    const dialog = screen.getByRole('dialog', { name: 'Issue / tournament control' });
+    fireEvent.change(within(dialog).getByLabelText('What happened?'), {
+      target: { value: 'Half a sentence so far' },
+    });
+    const control = within(dialog).getByLabelText('Ask tournament control to come') as HTMLInputElement;
+    fireEvent.click(control);
+    const controlBefore = control.checked;
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Change type' }));
+    fireEvent.change(within(dialog).getByLabelText('Issue'), { target: { value: 'rules-question' } });
+
+    expect((within(dialog).getByLabelText('Issue') as HTMLSelectElement).value).toBe('rules-question');
+    expect((within(dialog).getByLabelText('What happened?') as HTMLTextAreaElement).value).toBe(
+      'Half a sentence so far',
+    );
+    expect((within(dialog).getByLabelText('Ask tournament control to come') as HTMLInputElement).checked).toBe(
+      controlBefore,
+    );
+  });
+
+  test('a corrected category is the one that is used', async () => {
+    const requestControl = vi.fn().mockResolvedValue({ kind: 'accepted', request: {} } as HelpRequestResult);
+    renderScorer(formatFor(), undefined, requestControl);
+    openIssue('Equipment / technical issue');
+    fireEvent.click(screen.getByRole('button', { name: 'Change type' }));
+    fireEvent.change(screen.getByLabelText('Issue'), { target: { value: 'rules-question' } });
+    fireEvent.change(screen.getByLabelText('What happened?'), { target: { value: 'A ruling needs a director.' } });
+    fireEvent.click(screen.getByText('Save and request control'));
+
+    await vi.waitFor(() =>
+      expect(requestControl).toHaveBeenCalledWith('rules-question', 'A ruling needs a director.'),
+    );
+  });
+});
+
+/**
+ * A correction that landed, said out loud.
+ *
+ * The modal closes and the totals become different numbers, which is indistinguishable from a modal
+ * that closed without saving. Both halves of the answer are temporary: being corrected is something
+ * that happened to a question, not a property it now carries.
+ */
+describe('a historical correction lands visibly', () => {
+  /** Reopen question one from Recent and rescore the buzz on it as `label`. */
+  function correctQ1To(label: string) {
+    fireEvent.click(screen.getByRole('button', { name: 'Review question 1' }));
+    const editor = screen.getByRole('dialog', { name: 'Question 1 editor' });
+    const ruling = within(editor).getByLabelText('Ruling') as HTMLSelectElement;
+    const option = Array.from(ruling.options).find((candidate) => candidate.textContent === label);
+    fireEvent.change(ruling, { target: { value: option?.value } });
+    fireEvent.click(within(editor).getByRole('button', { name: 'Save correction' }));
+  }
+
+  test('it says so, and points at the row it changed', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[0]); // +15
+    fireEvent.click(screen.getByText('20'));
+
+    correctQ1To('+10');
+
+    expect(screen.getByText('Question 1 corrected.')).toBeTruthy();
+    const emphasised = document.querySelectorAll('.scorer-rail-item.is-emphasized');
+    expect(emphasised).toHaveLength(1);
+    expect(emphasised[0].textContent).toContain('Q1');
+    // Nothing permanent is left behind: no badge, no mark, no colour.
+    expect(emphasised[0].querySelector('.scorer-rail-mark')).toBeNull();
+  });
+
+  test('the emphasised row still opens the question', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[0]);
+    fireEvent.click(screen.getByText('20'));
+    correctQ1To('+10');
+
+    const emphasised = document.querySelector('.scorer-rail-item.is-emphasized') as HTMLElement;
+    fireEvent.click(within(emphasised).getByRole('button', { name: 'Review question 1' }));
+
+    expect(screen.getByRole('dialog', { name: 'Question 1 editor' })).toBeTruthy();
+  });
+
+  test('a refused correction is not called a success', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[0]);
+    fireEvent.click(screen.getByText('20'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Review question 1' }));
+    const editor = screen.getByRole('dialog', { name: 'Question 1 editor' });
+    // Somebody who was not on the floor for this team cannot have buzzed on it.
+    fireEvent.change(within(editor).getByLabelText('Player'), { target: { value: 'Emma Turner' } });
+    fireEvent.click(within(editor).getByRole('button', { name: 'Save correction' }));
+
+    expect(screen.queryByText('Question 1 corrected.')).toBeNull();
+    expect(document.querySelectorAll('.scorer-rail-item.is-emphasized')).toHaveLength(0);
+  });
+});
+
+/**
+ * Messages that are receipts, and messages that are situations.
+ *
+ * The screen used to keep both forever, so a room accumulated a permanent line saying a substitution
+ * from twenty minutes ago had worked — above the place the actual problems go. Timers here, because
+ * the whole behaviour is about time; nothing waits on CSS and no duration is asserted beyond the one
+ * this file owns.
+ */
+describe('operation notices', () => {
+  function notice(): string | null {
+    return document.querySelector('.scorer-banner.is-info')?.textContent ?? null;
+  }
+
+  test('an acknowledgement goes away on its own', () => {
+    vi.useFakeTimers();
+    try {
+      renderScorer(formatFor());
+      pressControl('Players');
+      addMissingPlayer('Ninety Six lineup', 'Alex Brown');
+      expect(notice()).toBe('Added Alex Brown to the bench.');
+
+      act(() => {
+        vi.advanceTimersByTime(operationNoticeMs + 10);
+      });
+
+      expect(notice()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test('a newer acknowledgement gets its own full time on screen', () => {
+    vi.useFakeTimers();
+    try {
+      renderScorer(formatFor());
+      pressControl('Players');
+      addMissingPlayer('Ninety Six lineup', 'Alex Brown');
+      act(() => {
+        vi.advanceTimersByTime(operationNoticeMs - 200);
+      });
+
+      pressControl('Players');
+      addMissingPlayer('Ninety Six lineup', 'Casey Doyle');
+      // The first one's time is up, and the second one is still there because its clock restarted.
+      act(() => {
+        vi.advanceTimersByTime(400);
+      });
+      expect(notice()).toBe('Added Casey Doyle to the bench.');
+
+      act(() => {
+        vi.advanceTimersByTime(operationNoticeMs);
+      });
+      expect(notice()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test('it is announced without interrupting anybody', () => {
+    renderScorer(formatFor());
+    pressControl('Players');
+    addMissingPlayer('Ninety Six lineup', 'Alex Brown');
+
+    expect(document.querySelector('.scorer-banner.is-info')?.getAttribute('role')).toBe('status');
+  });
+
+  test('a warning stays, and says it is a warning', () => {
+    vi.useFakeTimers();
+    try {
+      renderScorer(formatFor());
+      // A cleared question is an instruction about the next thing to do, not a receipt.
+      fireEvent.click(screen.getByRole('button', { name: 'Game' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Replace question 1' }));
+      const dialog = screen.getByRole('dialog', { name: 'Replace question 1' });
+      fireEvent.change(within(dialog).getByLabelText('What went wrong?'), { target: { value: 'Wrong packet' } });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Whole cycle' }));
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Replace question 1' }));
+
+      act(() => {
+        vi.advanceTimersByTime(operationNoticeMs * 3);
+      });
+
+      expect(screen.getByText(/Question 1 was cleared/)).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test('a rejected event is its own banner and is not swept up by the timer', () => {
+    vi.useFakeTimers();
+    try {
+      renderScorer(formatFor());
+      // Replacing a cycle nothing has been recorded on: the engine refuses it outright.
+      fireEvent.click(screen.getByRole('button', { name: 'Game' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Replace question 1' }));
+      const dialog = screen.getByRole('dialog', { name: 'Replace question 1' });
+      fireEvent.change(within(dialog).getByLabelText('What went wrong?'), { target: { value: 'Wrong packet' } });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Whole cycle' }));
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Replace question 1' }));
+      expect(screen.getByText('Nothing has been recorded on that question yet.')).toBeTruthy();
+
+      act(() => {
+        vi.advanceTimersByTime(operationNoticeMs * 3);
+      });
+
+      // Still there: `events.rejection` has its own state and its own reason to disappear, and the
+      // notice timer knows nothing about it.
+      expect(screen.getByText('Nothing has been recorded on that question yet.')).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test('an outstanding room summons is not cleared by an acknowledgement expiring over it', () => {
+    vi.useFakeTimers();
+    try {
+      const outstanding: ControlRequestState = {
+        kind: 'outstanding',
+        request: { id: 'help-9', category: 'question-packet', message: 'The buzzers cut out.' },
+        requestedAt: '2026-08-11T14:42:00.000Z',
+        requestedAtSource: 'server',
+      };
+      renderScorer(formatFor(), undefined, undefined, undefined, undefined, {}, { controlRequest: outstanding });
+      pressControl('Players');
+      addMissingPlayer('Ninety Six lineup', 'Alex Brown');
+
+      act(() => {
+        vi.advanceTimersByTime(operationNoticeMs + 10);
+      });
+
+      expect(screen.queryByText('Added Alex Brown to the bench.')).toBeNull();
+      expect(screen.getByText(/Tournament control requested/)).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /*
+   * The other side of the same split. With no `controlRequest` supplied there is no banner that owns
+   * the network fact, so this screen keeps it — and a message a scorekeeper has to act on is a
+   * warning that interrupts, not a receipt that waits its turn.
+   */
+  test('a control failure nothing else owns is a warning that interrupts', async () => {
+    const requestControl = vi.fn().mockResolvedValue({
+      kind: 'unreachable',
+      error: 'Tournament control did not answer.',
+    } satisfies HelpRequestResult);
+    vi.useFakeTimers();
+    try {
+      renderScorer(formatFor(), undefined, requestControl);
+      openIssue();
+      fireEvent.change(screen.getByLabelText('What happened?'), { target: { value: 'The room lost Wi-Fi.' } });
+      fireEvent.click(screen.getByText('Save and request control'));
+
+      await vi.waitFor(() => expect(document.querySelector('.scorer-banner.is-warning')).toBeTruthy());
+      const banner = document.querySelector('.scorer-banner.is-warning');
+      expect(banner?.getAttribute('role')).toBe('alert');
+      expect(banner?.textContent).toBe('Issue saved, but tournament control was not reached.');
+
+      // And it is a situation rather than an acknowledgement, so it does not clear itself.
+      act(() => {
+        vi.advanceTimersByTime(operationNoticeMs * 3);
+      });
+      expect(document.querySelector('.scorer-banner.is-warning')?.textContent).toBe(
+        'Issue saved, but tournament control was not reached.',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /*
+   * When the room models the control request, its banner is the persistent copy of a network
+   * failure. Two permanent lines about one problem, with two places to clear it, is how a room ends
+   * up ignoring both.
+   */
+  test('a control failure the room already owns is not copied into a second permanent warning', async () => {
+    const requestControl = vi.fn().mockResolvedValue({
+      kind: 'unreachable',
+      error: 'Tournament control did not answer.',
+    } satisfies HelpRequestResult);
+    renderScorer(formatFor(), undefined, requestControl, undefined, undefined, {}, {
+      controlRequest: { kind: 'unavailable' },
+    });
+    openIssue();
+    fireEvent.change(screen.getByLabelText('What happened?'), { target: { value: 'The room lost Wi-Fi.' } });
+    fireEvent.click(screen.getByText('Save and request control'));
+
+    // The local fact, which is the half this screen is authoritative about and the half that is
+    // finished. The network fact belongs to `controlRequest`, which renders it with the retry.
+    await vi.waitFor(() => expect(screen.getByText('Issue saved on the scoresheet.')).toBeTruthy());
+    expect(screen.queryByText('Issue saved, but tournament control was not reached.')).toBeNull();
   });
 });

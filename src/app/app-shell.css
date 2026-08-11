@@ -571,6 +571,33 @@ body {
   font-weight: 600;
 }
 
+/*
+ * The room's situation, and whether the software is still asking about it.
+ *
+ * The state block moves and the line under it does not, which is the whole arrangement: a matchup
+ * arriving after ten minutes of Waiting is a change worth a few pixels of rise, and the timestamp
+ * beneath it changing every ten seconds is not worth anything at all. So the animation is on the
+ * keyed block only — see `assignmentStateKey` — and the status line is ordinary quiet text that
+ * simply reads differently the next time somebody looks at it.
+ *
+ * Nothing here pulses, spins or counts. A room between rounds should be able to be ignored.
+ */
+.assignment-state {
+  margin: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .assignment-state-body {
+    animation: qbsheet-rise-in var(--room-motion-standard) var(--room-ease-out) both;
+  }
+}
+
+.assignment-check {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: var(--room-faint);
+}
+
 /* #endregion */
 
 /* #region Modal */

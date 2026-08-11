@@ -1012,10 +1012,25 @@ div.scorer-banner .scorer-text-action {
   background: var(--room-surface-sunken);
 }
 
-.scorer-menu-item.is-destructive {
-  margin-top: 4px;
+/*
+ * The rules between groups.
+ *
+ * One hairline, the same weight as every other rule on the scoresheet, with air either side of it
+ * and nothing else: no label, no background, no inset. It is doing the same job the ruled lines on a
+ * paper sheet do, which is to say where one list stops without saying anything about it.
+ */
+.scorer-menu-separator {
+  height: 0;
+  margin: 4px 6px;
   border-top: 1px solid var(--room-border);
-  border-radius: 0 0 4px 4px;
+}
+
+/*
+ * Colour only. The separation used to be drawn here, by a border on the first red entry, which was
+ * the whole grouping mechanism this menu had; now that groups are ruled properly a border here would
+ * be a second line inside the group it already sits at the top of.
+ */
+.scorer-menu-item.is-destructive {
   color: var(--room-error);
 }
 
@@ -1147,15 +1162,6 @@ div.scorer-banner .scorer-text-action {
   padding: 0;
 }
 
-.scorer-lineup-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 5px 0;
-  font-size: 13px;
-  cursor: pointer;
-}
-
 .scorer-lineup-name {
   flex: 1;
   min-width: 0;
@@ -1180,6 +1186,19 @@ div.scorer-banner .scorer-text-action {
 .scorer-inline-add-note {
   font-size: 11px;
   color: var(--room-faint);
+}
+
+/*
+ * Why a row is unusual, said in the row.
+ *
+ * Colour rather than an icon or a badge, because this is information and not decoration: the one
+ * case it exists for is a name in a historical lineup that the roster had not reached yet, which is
+ * a scoresheet already saying something impossible. It gets the warning colour and nothing else —
+ * no box, no pill — because the row is still an ordinary row with an ordinary action on it.
+ */
+.scorer-lineup-note {
+  font-size: 11px;
+  color: var(--room-warning);
 }
 
 .scorer-sync-action {
@@ -1431,6 +1450,27 @@ div.scorer-banner .scorer-text-action {
   width: 100%;
   font-size: 13px;
   color: var(--room-muted);
+}
+
+/*
+ * The category, carried in from Flag.
+ *
+ * A line of text and a quiet action, at the weight of a settled fact rather than of a question. It
+ * is deliberately not a field, not a pill and not a badge: nothing here is waiting to be filled in,
+ * and the one thing on this screen that is waiting is the box underneath it.
+ */
+.scorer-issue-type {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  margin: 0;
+  font-size: 13px;
+}
+
+.scorer-issue-type-name {
+  font-weight: 600;
 }
 
 .scorer-note-form textarea,
@@ -2088,9 +2128,11 @@ div.scorer-banner .scorer-text-action {
 /*
  * A lineup change, shown.
  *
- * Scoped to the starting prompt, because this is the one place the room reorders rows by hand. The
- * geometry is worked out in LineupMotion; all this contributes is how long the travel takes and what
- * the moved row looks like while it happens.
+ * Scoped to the places where a press moves a row between groups: the starting prompt, and the two
+ * Playing / Bench editors that replaced the checkbox lists. Not applied to the Players roster at
+ * large, where the rows are a reading of the current lineup rather than something being rearranged.
+ * The geometry is worked out in LineupMotion; all this contributes is how long the travel takes and
+ * what the moved row looks like while it happens.
  *
  * The row stays the ruled row it already is. It is not lifted, outlined, rounded or shadowed, because
  * a row that turns into a card while it moves is saying "you are dragging this", and nobody is: they
@@ -2099,17 +2141,20 @@ div.scorer-banner .scorer-text-action {
  * touched" — arriving at once so it is legible during the travel, and taking its time leaving so the
  * eye has somewhere to land after the movement stops.
  */
-.scorer-starters-team .scorer-lineup-entry.is-moved {
+.scorer-starters-team .scorer-lineup-entry.is-moved,
+.scorer-lineup-groups .scorer-lineup-entry.is-moved {
   background: var(--room-surface-sunken);
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .scorer-starters-team .scorer-lineup-entry {
+  .scorer-starters-team .scorer-lineup-entry,
+  .scorer-lineup-groups .scorer-lineup-entry {
     transition: background-color 220ms ease-out;
   }
 
   /* Ease-out only. A seat is a fixed thing and a row that overshoots one has to be read twice. */
-  .scorer-starters-team .scorer-lineup-entry.is-moving {
+  .scorer-starters-team .scorer-lineup-entry.is-moving,
+  .scorer-lineup-groups .scorer-lineup-entry.is-moving {
     transition: transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
     will-change: transform;
   }
@@ -2306,6 +2351,25 @@ div.scorer-banner .scorer-text-action {
   background: var(--room-surface-sunken);
 }
 
+/*
+ * The line something just happened to.
+ *
+ * The same sunken wash as everywhere else, applied to the row rather than to the button, so it is
+ * there whether or not the rail is clickable in this host. It fades rather than snapping off,
+ * because it is arriving to be noticed and leaving because it is finished, and those want different
+ * speeds; and it is a background only, so a row being pointed at is still an ordinary row that
+ * opens the question when it is pressed.
+ */
+.scorer-rail-item.is-emphasized {
+  background: var(--room-surface-sunken);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .scorer-rail-item {
+    transition: background-color var(--room-motion-slow) var(--room-ease-out);
+  }
+}
+
 .scorer-rail-mark {
   display: inline-block;
   margin-left: 4px;
@@ -2495,6 +2559,37 @@ div.scorer-banner .scorer-text-action {
 @media (prefers-reduced-motion: no-preference) {
   .scorer-player.is-keyed {
     transition: background 120ms ease-out;
+  }
+}
+
+/*
+ * A substitution landing in a seat.
+ *
+ * The sentence this has to tell is "the person changed; the seat did not", so the seat is the thing
+ * that does not move: the row keeps its number, the ruling buttons under it keep their columns, and
+ * the only thing with an entrance is the name. It gets the same sunken wash a row travelling between
+ * Playing and Bench gets — this is that event, seen from the scoresheet — and the same few pixels of
+ * rise the rest of the application uses for content that has just arrived.
+ *
+ * Nothing here is a card, a toast, or a flight across the panel. A row that flew would be saying the
+ * seat moved, which is the one thing that did not happen.
+ */
+.scorer-player.is-substituted {
+  background: var(--room-surface-sunken);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .scorer-player.is-substituted {
+    transition: background-color var(--room-motion-standard) var(--room-ease-out);
+  }
+
+  /*
+   * Reduced motion keeps the wash and drops the travel, which is the whole point of the split: the
+   * row still says it is the one that changed, and nothing anybody needs to read depends on having
+   * seen six pixels of movement.
+   */
+  .scorer-player.is-substituted .scorer-player-name {
+    animation: qbsheet-rise-in var(--room-motion-standard) var(--room-ease-out) both;
   }
 }
 

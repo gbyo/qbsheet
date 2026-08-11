@@ -7,12 +7,14 @@ import {
   helpRequestCategoryLabels,
 } from '../app/HelpRequests';
 import { IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
-import { IDerivedGame } from '../scoring/deriveGame';
+import { IDerivedGame, IDerivedTeam } from '../scoring/deriveGame';
 import { ScoreEvent } from '../scoring/ScoreEvents';
 import { editableQuestionFromEvents, IEditableQuestion } from '../scoring/questionCorrection';
 import { bonusScoreProblem, lightningTotalProblem } from './bonusOptions';
 import QuestionEditor from './QuestionEditor';
 import ScorerDialog from './ScorerDialog';
+import PlayingBenchEditor from './PlayingBenchEditor';
+import { orderedActivePlayers, playersAddedAfter } from './LineupEditing';
 import { readScorerRecovery } from './ScorerRecovery';
 
 /**
@@ -150,6 +152,19 @@ export function IssueDialog(props: {
     onClose,
   } = props;
   const [category, setCategory] = useState<HelpRequestCategory>(initialCategory);
+  /**
+   * Whether the category chooser is on screen.
+   *
+   * Closed by default, because Flag has just asked this exact question and the answer arrived with
+   * the dialog. A scorekeeper who pressed "Question / packet issue" and was then shown a list whose
+   * first job is to ask which kind of issue this is reasonably concludes the first press did not
+   * take — so they answer again, and the dialog has cost two presses to learn one thing.
+   *
+   * It opens and stays open, rather than collapsing on a selection: a `select` fires a change on
+   * every arrow key, and a chooser that folded itself away mid-keyboard-navigation would be taking
+   * the control out from under somebody still using it.
+   */
+  const [changingType, setChangingType] = useState(false);
   const [details, setDetails] = useState('');
   const [requestControl, setRequestControl] = useState(
     controlRequest.kind === 'idle' || controlRequest.kind === 'unavailable',
@@ -180,20 +195,35 @@ export function IssueDialog(props: {
         Saved on this scoresheet at question {questionNumber}. Scoring can continue while control reviews it.
       </p>
       <div className="scorer-note-form">
-        <label htmlFor="scorer-issue-category">
-          Issue
-          <select
-            id="scorer-issue-category"
-            value={category}
-            onChange={(e) => setCategory(e.target.value as HelpRequestCategory)}
-          >
-            {issueCategories.map((value) => (
-              <option key={value} value={value}>
-                {helpRequestCategoryLabels[value]}
-              </option>
-            ))}
-          </select>
-        </label>
+        {changingType ? (
+          <label htmlFor="scorer-issue-category">
+            Issue
+            <select
+              id="scorer-issue-category"
+              value={category}
+              onChange={(e) => setCategory(e.target.value as HelpRequestCategory)}
+            >
+              {issueCategories.map((value) => (
+                <option key={value} value={value}>
+                  {helpRequestCategoryLabels[value]}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          /*
+            What is being reported, stated rather than asked. The escape hatch stays — a category
+            chosen by a thumb on the wrong row of the Flag list has to be correctable, and nothing
+            typed below is lost when it is used, because the details and the control request are
+            their own state and changing the category does not touch either.
+          */
+          <p className="scorer-issue-type">
+            <span className="scorer-issue-type-name">{helpRequestCategoryLabels[category]}</span>
+            <button type="button" className="scorer-text-action" onClick={() => setChangingType(true)}>
+              Change type
+            </button>
+          </p>
+        )}
         <label htmlFor="scorer-issue-details">
           What happened?
           <textarea
@@ -293,14 +323,144 @@ export function eventDescription(event: ScoreEvent, format: IScorekeeperFormat, 
   return `${event.flagged ? 'Flagged note' : 'Note'}: ${event.text}`;
 }
 
+/**
+ * Who was playing from a boundary, corrected after the fact.
+ *
+ * The same Playing / Bench vocabulary the live editors use, and deliberately with none of their
+ * furniture. There are no seat numbers here because a seat number is a fact about a Chromebook in a
+ * room that has since been packed away, and printing one beside historical scoring data would invite
+ * somebody to correct it. There are no arrows for the same reason.
+ *
+ * Playing and Bench rather than Start and Bench because this event may well take effect at tossup 8:
+ * "start" would be a claim about the beginning of the game that the effective-tossup field directly
+ * above it can contradict.
+ *
+ * # Why the boundary changes the bench
+ *
+ * A roster is a thing that grows during a game. Moving this event back to tossup 8 moves it before
+ * every name added after tossup 8, and those people cannot be put on: they were not there. They are
+ * withheld rather than refused, so a scorekeeper is not offered a choice that
+ * `validateCorrectedHistory` will then reject from underneath them.
+ *
+ * A name already in the event that the roster had not reached yet is the other direction, and it is
+ * shown rather than hidden — history that is already impossible is exactly what somebody opened this
+ * editor to fix, and a row they cannot see is a row they cannot remove.
+ */
+function SubstitutionLineupFields(props: {
+  event: Extract<ScoreEvent, { type: 'substitution' }>;
+  team: IDerivedTeam;
+  events: readonly ScoreEvent[];
+  maximumActive: number;
+  boundary: number;
+  playing: ReadonlySet<string>;
+  onChange: (playing: ReadonlySet<string>) => void;
+}) {
+  const { event, team, events, maximumActive, boundary, playing, onChange } = props;
+  const rosterNames = team.players.map((player) => player.name);
+  const addedLater = playersAddedAfter(events, event.team, boundary);
+  // Roster order, minus anybody the roster had not reached — except where this event already names
+  // them, in which case the row has to exist for the scorekeeper to take it off. A name on no
+  // roster at all is the same problem one step further along, and is appended for the same reason.
+  const order = rosterNames
+    .filter((name) => !addedLater.has(name) || playing.has(name))
+    .concat(Array.from(playing).filter((name) => !rosterNames.includes(name)));
+  const addedAt = (name: string): number | undefined =>
+    events.find(
+      (candidate): candidate is Extract<ScoreEvent, { type: 'roster-add' }> =>
+        candidate.type === 'roster-add' && candidate.team === event.team && candidate.playerName === name,
+    )?.questionNumber;
+
+  return (
+    <PlayingBenchEditor
+      idPrefix={`event-lineup-${event.id}`}
+      order={order}
+      playing={playing}
+      maximumActive={maximumActive}
+      noteFor={(name) => {
+        if (!rosterNames.includes(name)) return 'not on this roster';
+        if (!addedLater.has(name)) return undefined;
+        const at = addedAt(name);
+        return at === undefined ? 'not on the roster at this tossup' : `not on the roster until Tossup ${at}`;
+      }}
+      onBench={(name) => {
+        const next = new Set(playing);
+        next.delete(name);
+        onChange(next);
+      }}
+      onPutIn={(name) => {
+        if (playing.size >= maximumActive) return;
+        const next = new Set(playing);
+        next.add(name);
+        onChange(next);
+      }}
+    />
+  );
+}
+
+/** The events one press produces that are all part of scoring a cycle. */
+const cycleEventTypes = new Set(['tossup-buzz', 'tossup-no-penalty', 'tossup-dead', 'bonus']);
+
+/**
+ * One line for what an undo or redo just changed.
+ *
+ * # Why a frame is not a list
+ *
+ * Undo works on actions, not events, and some actions are several events: confirming the starting
+ * lineups writes one per team, replacing a question writes a void and the note explaining it. A
+ * scorekeeper pressing undo took back one thing they did, and reading them an array of the machinery
+ * behind it would be answering a question they did not ask — the useful answer is the name of the
+ * action, and for a single event that is just what the event is.
+ *
+ * Returned without a verb so the same sentence serves both directions; the caller says Undid or
+ * Redid.
+ */
+export function frameDescription(
+  frame: readonly ScoreEvent[],
+  format: IScorekeeperFormat,
+  game: IDerivedGame,
+): string {
+  if (frame.length === 0) return '';
+  if (frame.length === 1) {
+    const [only] = frame;
+    return `Q${only.questionNumber} · ${eventDescription(only, format, game)}`;
+  }
+
+  const questions = new Set(frame.map((event) => event.questionNumber));
+  const everySubstitution = frame.every((event) => event.type === 'substitution');
+  // Both teams' opening lineups, which is the one multi-event action a scorekeeper has a name for.
+  if (everySubstitution && questions.size === 1 && questions.has(1)) return 'starting lineups';
+  if (questions.size !== 1) return `${frame.length} changes`;
+
+  const [questionNumber] = questions;
+  if (everySubstitution) return `Q${questionNumber} · lineup changes`;
+  if (frame.every((event) => cycleEventTypes.has(event.type)))
+    return `Q${questionNumber} · ${frame.length} scoring records`;
+  return `Q${questionNumber} · ${frame.length} changes`;
+}
+
+/**
+ * The one question a frame is about, or nothing when it spans more than one.
+ *
+ * Used to point at a line in Recent, which only makes sense when there is exactly one line to point
+ * at. A frame covering three questions has no single row to emphasise, and picking one of them would
+ * be pointing at the wrong two-thirds of what changed.
+ */
+export function frameQuestion(frame: readonly ScoreEvent[]): number | undefined {
+  if (frame.length === 0) return undefined;
+  const [first] = frame;
+  return frame.every((event) => event.questionNumber === first.questionNumber) ? first.questionNumber : undefined;
+}
+
 function EditableEvent(props: {
   event: ScoreEvent;
   format: IScorekeeperFormat;
   game: IDerivedGame;
+  /** The whole scoresheet, so a lineup correction can tell when each name reached the roster. */
+  events: readonly ScoreEvent[];
   onSave: (event: ScoreEvent) => void;
   onCancel: () => void;
 }) {
-  const { event, format, game, onSave, onCancel } = props;
+  const { event, format, game, events, onSave, onCancel } = props;
   const [playerName, setPlayerName] = useState(event.type === 'tossup-buzz' ? event.playerName : '');
   const [answerTypeIndex, setAnswerTypeIndex] = useState(
     event.type === 'tossup-buzz' ? String(event.answerTypeIndex) : '0',
@@ -321,9 +481,21 @@ function EditableEvent(props: {
   const [flagged, setFlagged] = useState(event.type === 'note' && event.flagged === true);
   const [problem, setProblem] = useState('');
   const [effectiveQuestion, setEffectiveQuestion] = useState(String(event.questionNumber));
-  const [activePlayers, setActivePlayers] = useState(event.type === 'substitution' ? event.activePlayers : []);
+  /**
+   * Who is playing, as membership.
+   *
+   * The array the event stores is derived from this at save (see `orderedActivePlayers`) rather than
+   * accumulated as rows are pressed, so taking somebody off and putting them back leaves the
+   * recorded lineup in the order it was already in.
+   */
+  const [playing, setPlaying] = useState<ReadonlySet<string>>(
+    () => new Set(event.type === 'substitution' ? event.activePlayers : []),
+  );
 
   const eventTeam = event.type === 'tossup-buzz' || event.type === 'substitution' ? game[event.team] : undefined;
+  const parsedBoundary = Number(effectiveQuestion);
+  /** What the bench is computed against while the field is mid-edit. */
+  const boundary = Number.isInteger(parsedBoundary) && parsedBoundary >= 1 ? parsedBoundary : event.questionNumber;
   const question = game.questions.find((candidate) => candidate.questionNumber === event.questionNumber);
   const activeBuzzPlayers = event.type === 'tossup-buzz' ? question?.activePlayers[event.team] ?? [] : [];
 
@@ -343,16 +515,37 @@ function EditableEvent(props: {
       return;
     }
     if (event.type === 'substitution') {
-      const boundary = Number(effectiveQuestion);
-      if (!Number.isInteger(boundary) || boundary < 1) {
+      const chosen = Number(effectiveQuestion);
+      if (!Number.isInteger(chosen) || chosen < 1) {
         setProblem('Choose a valid tossup boundary.');
         return;
       }
-      if (activePlayers.length < 1 || activePlayers.length > format.players.maximumActive) {
+      if (playing.size < 1 || playing.size > format.players.maximumActive) {
         setProblem(`Choose between 1 and ${format.players.maximumActive} active players.`);
         return;
       }
-      onSave({ ...event, questionNumber: boundary, activePlayers });
+      /*
+       * The boundary and the membership are two fields that can each be edited after the other, so
+       * withholding a not-yet-rostered player from the bench is not on its own enough: moving the
+       * boundary forward, putting them on, and moving it back again reaches the same impossible
+       * lineup by a different route. Checked once here, against the boundary actually being saved.
+       *
+       * It refuses rather than dropping the name, because a player silently removed on save is a
+       * correction nobody asked for. The row stays on screen with its reason on it, and both ways
+       * out — take them off, or move the boundary past their arrival — are one press away.
+       */
+      const tooEarly = playersAddedAfter(events, event.team, chosen);
+      const impossible = Array.from(playing).find((name) => tooEarly.has(name));
+      if (impossible !== undefined) {
+        setProblem(`${impossible} was not on the roster at Tossup ${chosen}. Take them off, or move the tossup later.`);
+        return;
+      }
+      const activePlayers = orderedActivePlayers(
+        event.activePlayers,
+        (game[event.team].players ?? []).map((player) => player.name),
+        playing,
+      );
+      onSave({ ...event, questionNumber: chosen, activePlayers });
       return;
     }
     if (event.type === 'bonus') {
@@ -448,31 +641,15 @@ function EditableEvent(props: {
               onChange={(e) => setEffectiveQuestion(e.target.value)}
             />
           </label>
-          <fieldset>
-            <legend>Active players</legend>
-            {eventTeam.players.map((player, index) => {
-              const checked = activePlayers.includes(player.name);
-              const id = `event-lineup-${event.id}-${index}`;
-              return (
-                <label key={player.name} className="scorer-checkbox" htmlFor={id}>
-                  <input
-                    id={id}
-                    type="checkbox"
-                    checked={checked}
-                    disabled={!checked && activePlayers.length >= format.players.maximumActive}
-                    onChange={() =>
-                      setActivePlayers((current) =>
-                        current.includes(player.name)
-                          ? current.filter((name) => name !== player.name)
-                          : current.concat(player.name),
-                      )
-                    }
-                  />
-                  {player.name}
-                </label>
-              );
-            })}
-          </fieldset>
+          <SubstitutionLineupFields
+            event={event}
+            team={eventTeam}
+            events={events}
+            maximumActive={format.players.maximumActive}
+            boundary={boundary}
+            playing={playing}
+            onChange={setPlaying}
+          />
         </>
       )}
       {(event.type === 'bonus' || event.type === 'adjustment' || event.type === 'lightning') && (
@@ -671,6 +848,7 @@ export function ScoresheetReviewDialog(props: {
                                 event={event}
                                 format={format}
                                 game={game}
+                                events={events}
                                 onSave={(next) => {
                                   onReplace(event.id, next);
                                   setEditing(null);

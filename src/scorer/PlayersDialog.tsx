@@ -29,6 +29,8 @@ import { IDerivedTeam } from '../scoring/deriveGame';
 import ScorerDialog from './ScorerDialog';
 import { playerNameMaxLength, validatePlayerName } from '../game/Roster';
 import { orderBySeating } from './PlayerSeating';
+import PlayingBenchEditor from './PlayingBenchEditor';
+import { orderedActivePlayers, sameMembership } from './LineupEditing';
 
 export interface IPlayersDialogProps {
   left: IDerivedTeam;
@@ -109,7 +111,15 @@ type PanelMode =
   | { kind: 'add' }
   | { kind: 'reorder' };
 
-/** The checkbox editor, kept for halftime and for anything that is not one-for-one. */
+/**
+ * The multi-change editor, kept for halftime and for anything that is not one-for-one.
+ *
+ * Membership is the state; the array that gets written is derived from it at Apply — see
+ * `orderedActivePlayers`. Rows are presented in this device's seating order because that is what the
+ * rest of Players is showing, and that presentation order is deliberately not what gets serialized:
+ * a room that likes its rows a different way must not be able to write a substitution that reorders
+ * a lineup nobody changed.
+ */
 function FullLineupEditor(props: {
   team: IDerivedTeam;
   side: LeftOrRight;
@@ -119,60 +129,51 @@ function FullLineupEditor(props: {
   onCancel: () => void;
 }) {
   const { team, side, maximumActive, seatOrder, onApply, onCancel } = props;
-  const [selected, setSelected] = useState<string[]>(team.activePlayers);
-  const focusPlayerIndex = useRef<number | null>(null);
+  const [playing, setPlaying] = useState<ReadonlySet<string>>(() => new Set(team.activePlayers));
 
-  useEffect(() => {
-    if (focusPlayerIndex.current === null) return;
-    document.getElementById(`scorer-lineup-${side}-${focusPlayerIndex.current}`)?.focus();
-    focusPlayerIndex.current = null;
-  }, [selected, side]);
+  const rosterNames = team.players.map((player) => player.name);
+  const shownOrder = orderBySeating(team.players, seatOrder, (player) => player.name).map(
+    (player) => player.name,
+  );
+  const tossupsHeard = new Map(team.players.map((player) => [player.name, player.tossupsHeard]));
+  const proposed = orderedActivePlayers(team.activePlayers, rosterNames, playing);
+  const unchanged = sameMembership(proposed, team.activePlayers);
 
-  const atCapacity = selected.length >= maximumActive;
-  const unchanged =
-    selected.length === team.activePlayers.length && selected.every((name) => team.activePlayers.includes(name));
-
-  const toggle = (name: string, index: number) => {
-    focusPlayerIndex.current = index;
-    setSelected((current) => {
-      if (current.includes(name)) return current.filter((other) => other !== name);
-      if (current.length >= maximumActive) return current;
-      return current.concat(name);
+  const bench = (name: string) =>
+    setPlaying((current) => {
+      const next = new Set(current);
+      next.delete(name);
+      return next;
     });
-  };
+
+  const putIn = (name: string) =>
+    setPlaying((current) => {
+      if (current.size >= maximumActive) return current;
+      const next = new Set(current);
+      next.add(name);
+      return next;
+    });
 
   return (
     <div className="scorer-lineup-editor">
-      <ul className="scorer-lineup-list">
-        {orderBySeating(team.players, seatOrder, (player) => player.name).map((player, index) => {
-          const id = `scorer-lineup-${side}-${index}`;
-          const active = selected.includes(player.name);
-          return (
-            <li key={id}>
-              <label className="scorer-lineup-row" htmlFor={id}>
-                <input
-                  id={id}
-                  type="checkbox"
-                  checked={active}
-                  disabled={!active && atCapacity}
-                  onChange={() => toggle(player.name, index)}
-                />
-                <span className="scorer-lineup-name">{player.name}</span>
-                <span className="scorer-lineup-tuh">{player.tossupsHeard} TUH</span>
-              </label>
-            </li>
-          );
-        })}
-      </ul>
+      <PlayingBenchEditor
+        idPrefix={`scorer-lineup-${side}`}
+        order={shownOrder}
+        playing={playing}
+        maximumActive={maximumActive}
+        detailFor={(name) => `${tossupsHeard.get(name) ?? 0} TUH`}
+        onBench={bench}
+        onPutIn={putIn}
+      />
       <p className="scorer-lineup-count">
-        {selected.length} of {maximumActive} selected
+        {playing.size} of {maximumActive} playing
       </p>
       <div className="scorer-lineup-actions">
         <button
           type="button"
           className="scorer-choice"
-          disabled={unchanged || selected.length === 0}
-          onClick={() => onApply(selected)}
+          disabled={unchanged || proposed.length === 0}
+          onClick={() => onApply(proposed)}
         >
           Apply lineup
         </button>
