@@ -453,7 +453,9 @@ describe('a held key', () => {
 
     await pressKey('KeyA');
     await screen.findByLabelText('Bonus');
-    await pressKey('Digit1');
+    // Nought parts, so the tossup's 10 is the whole score and the repeat guard below is the only thing
+    // that can change it.
+    await pressKey('Digit0');
     await waitFor(() => expect(screen.getByText('Tossup 2 of 20')).toBeInTheDocument());
 
     // What the browser sends while a finger rests on the key. Q2 is live here, so a missing repeat
@@ -534,18 +536,32 @@ describe('Space is unchanged', () => {
 });
 
 describe('the bonus', () => {
-  test('the digits pick the totals on screen, left to right', async () => {
+  test('the digit is the number of parts converted', async () => {
     await openScoringWithKeyboard();
     await pressKey('KeyA');
     await screen.findByLabelText('Bonus');
 
-    // 0 / 10 / 20 / 30 for this format, so `3` is 20.
+    // 0 / 10 / 20 / 30 for this format, so two parts is `2` and is worth 20.
     await act(async () => {
-      fireEvent.keyDown(document, { code: 'Digit3', key: '3' });
+      fireEvent.keyDown(document, { code: 'Digit2', key: '2' });
     });
 
     // 10 for the tossup plus 20 for the bonus.
     await waitFor(() => expect(leftScore()).toContain('30'));
+  });
+
+  test('a bonus nobody converted is 0, which is the key nothing used to be under', async () => {
+    await openScoringWithKeyboard();
+    await pressKey('KeyA');
+    await screen.findByLabelText('Bonus');
+
+    await act(async () => {
+      fireEvent.keyDown(document, { code: 'Digit0', key: '0' });
+    });
+
+    // The tossup's 10 and nothing else, with the bonus recorded rather than still waiting.
+    await waitFor(() => expect(screen.queryByLabelText('Bonus')).toBeNull());
+    expect(leftScore()).toContain('10');
   });
 
   test('the map changes to the bonus choices and stops showing seat keys', async () => {
@@ -564,7 +580,7 @@ describe('the bonus', () => {
     await pressKey('KeyA');
     await screen.findByLabelText('Bonus');
 
-    // Eight is a valid seat number but is outside this bonus's four choices. It must not reach the
+    // Eight is a valid seat number but is outside this bonus's four digits. It must not reach the
     // tossup listener while the bonus owns the number row.
     await pressSequence(8, 'c');
 

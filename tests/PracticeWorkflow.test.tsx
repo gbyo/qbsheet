@@ -55,7 +55,9 @@ test('practice requires its named starters, keeps mistakes editable, and advance
   fireEvent.click(start);
 
   expect(screen.getByLabelText('Starting lineups')).toBeTruthy();
-  expect(screen.getByRole('alert').textContent).toContain('open Show me where');
+  // Names the player who should not be on the floor and the one who should — not "does not match".
+  expect(screen.getByRole('alert').textContent).toContain('Olivia starts on the bench in this scenario');
+  expect(screen.getByRole('alert').textContent).toContain('Lachlan is missing from the floor');
 
   fireEvent.click(within(left).getByRole('button', { name: 'Bench Olivia' }));
   fireEvent.click(within(left).getByRole('button', { name: 'Start Lachlan' }));
@@ -73,6 +75,38 @@ test('practice requires its named starters, keeps mistakes editable, and advance
   expect(hint.open).toBe(false);
   expect(within(hint).getByText(/P is power/)).toBeTruthy();
   expect(screen.queryByLabelText('Starting lineups')).toBeNull();
+});
+
+test('the right four in the wrong seats names the seat, the player in it, and who belongs there', async () => {
+  render(<PracticeScreen onHome={vi.fn()} />);
+  const prompt = screen.getByLabelText('Starting lineups');
+  const left = within(prompt).getByLabelText('Ninety Six starters');
+  const right = within(prompt).getByLabelText('Greenwood starters');
+  const start = within(prompt).getByText('Start game');
+
+  // The seats follow the tick order, so ticking the four names back to front seats them back to front.
+  // Practice needs its own order — a seat is a keyboard number and a tossups-heard row — but it has to
+  // say which seat is wrong, because four identical names in two orders is not a difference anybody can
+  // see by looking.
+  for (const name of ['Lachlan', 'Owen', 'Jeremy', 'Gibson']) fireEvent.click(within(left).getByLabelText(name));
+  for (const name of ['Tucker', 'Phillip', 'Efren', 'Valerie']) fireEvent.click(within(right).getByLabelText(name));
+  fireEvent.click(start);
+
+  const alert = screen.getByRole('alert');
+  expect(alert.textContent).toContain("Lachlan is in Ninety Six's seat 1");
+  expect(alert.textContent).toContain('this scenario needs Gibson there');
+  expect(alert.textContent).toContain('Reorder starters');
+  expect(screen.getByLabelText('Starting lineups')).toBeTruthy();
+
+  // Ticked again in the order the guide lists, the same four names are accepted.
+  for (const name of ['Lachlan', 'Owen', 'Jeremy', 'Gibson']) fireEvent.click(within(left).getByLabelText(name));
+  for (const name of ['Gibson', 'Jeremy', 'Owen', 'Lachlan']) fireEvent.click(within(left).getByLabelText(name));
+  fireEvent.click(start);
+
+  await vi.waitFor(() => expect(screen.getByText('Reader: “Power, Gibson on Ninety Six.”')).toBeTruthy());
+  const names = (team: string) =>
+    [...screen.getByLabelText(team).querySelectorAll('.scorer-player-name')].map((node) => node.textContent);
+  expect(names('Ninety Six')).toEqual(['Gibson', 'Jeremy', 'Owen', 'Lachlan']);
 });
 
 test('practice restores the guide checkpoint after the screen is remounted', async () => {

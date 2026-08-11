@@ -5,6 +5,8 @@ import { clearGame } from '../scorer/GameSession';
 import { ScoreEvent } from '../scoring/ScoreEvents';
 import { LeftOrRight } from '../scoring/types';
 import PracticeCoach from './PracticeCoach';
+import KeyboardDrill from './KeyboardDrill';
+import PracticeSummary from './PracticeSummary';
 import {
   IPracticeStep,
   practiceFormat,
@@ -145,18 +147,50 @@ export function replayPracticeProgress(events: ScoreEvent[], furthestStepIndex =
   return { stepIndex, acceptedEventCount };
 }
 
-function practiceStartingLineupProblem(lineups: Partial<Record<LeftOrRight, string[]>>): string | undefined {
-  const left = lineups.left;
-  const right = lineups.right;
-  if (
-    left &&
-    right &&
-    practiceLineupMatches(left, practiceLeftTeam.startingLineup) &&
-    practiceLineupMatches(right, practiceRightTeam.startingLineup)
-  ) {
-    return undefined;
+/** "Gibson, Jeremy, Owen and Lachlan" — a list a person reads rather than an array. */
+function nameList(names: readonly string[]): string {
+  if (names.length < 2) return names[0] ?? '';
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
+
+/**
+ * Why this side's lineup is not the scenario's — said precisely enough to act on.
+ *
+ * The seat order matters, and not only to the script. A seat is the number the keyboard addresses and the
+ * row the tossups-heard count is kept in, so who sits where is a real property of a real scoresheet and
+ * practice teaching a fixed one is teaching something true. What was wrong was never that practice
+ * insisted; it was that it said "does not match the scenario" without saying *what* did not match, so the
+ * scorekeeper who read four names off the guide and ticked the last one first was left comparing two lists
+ * of four identical names to find a difference that was in their order.
+ *
+ * So this names the first seat that is wrong, who is in it, and who the scenario needs there — and points
+ * at Reorder starters, which is the control that fixes it without starting again.
+ */
+function practiceLineupProblem(side: LeftOrRight, chosen: readonly string[] | undefined): string | undefined {
+  const team = side === 'left' ? practiceLeftTeam : practiceRightTeam;
+  const expected = team.startingLineup;
+  if (!chosen || chosen.length !== expected.length) {
+    return `${team.name} starts ${nameList(expected)} in this scenario. Tick those ${expected.length}, in that order.`;
   }
-  return 'The starting lineup does not match the scenario. Adjust the lineup or open Show me where, then try again.';
+
+  // The wrong people, which is the lesson this step is actually about: four of the five on the floor.
+  const extra = chosen.find((player) => !expected.includes(player));
+  const missing = expected.find((player) => !chosen.includes(player));
+  if (extra !== undefined && missing !== undefined) {
+    return `${extra} starts on the bench in this scenario, and ${missing} is missing from the floor. ${team.name} starts ${nameList(expected)} — untick ${extra} and tick ${missing}.`;
+  }
+
+  // The right people in the wrong seats.
+  const seat = expected.findIndex((player, index) => chosen[index] !== player);
+  if (seat >= 0) {
+    return `${chosen[seat]} is in ${team.name}'s seat ${seat + 1}, and this scenario needs ${expected[seat]} there. The seats follow the order you ticked the names in, so use Reorder starters to put ${nameList(expected)} in that order.`;
+  }
+  return undefined;
+}
+
+function practiceStartingLineupProblem(lineups: Partial<Record<LeftOrRight, string[]>>): string | undefined {
+  // One side at a time. Two lineups' worth of correction in one line is a paragraph nobody reads.
+  return practiceLineupProblem('left', lineups.left) ?? practiceLineupProblem('right', lineups.right);
 }
 
 function unexpectedMessage(step: IPracticeStep): string {
@@ -179,6 +213,15 @@ export default function PracticeScreen({ onHome }: { onHome: () => void }) {
   const [feedback, setFeedback] = useState('');
   const [mistake, setMistake] = useState('');
   const [complete, setComplete] = useState(false);
+  /**
+   * The keyboard drill, offered from the completion screen and held here rather than in `App`.
+   *
+   * Practice owns its own aftermath: the drill is reachable only from the end of a practice game, it needs
+   * nothing the application knows, and keeping it inside this screen means the `practice` screen is still
+   * the one thing on the outside — including for `updatesAllowedOn`, which refuses to swap the build under
+   * somebody who is halfway through learning the software.
+   */
+  const [drill, setDrill] = useState(false);
   const step = practiceSteps[stepIndex];
 
   useEffect(() => {
@@ -261,6 +304,7 @@ export default function PracticeScreen({ onHome }: { onHome: () => void }) {
     setFeedback('');
     setMistake('');
     setComplete(false);
+    setDrill(false);
   }, []);
 
   const finish = useCallback(async () => {
@@ -294,25 +338,12 @@ export default function PracticeScreen({ onHome }: { onHome: () => void }) {
     );
   }, [feedback, mistake, onHome, restart, step, stepIndex]);
 
+  if (complete && drill) {
+    return <KeyboardDrill onBack={() => setDrill(false)} onHome={onHome} />;
+  }
+
   if (complete) {
-    return (
-      <main className="shell practice-complete">
-        <p className="practice-label">Practice</p>
-        <h1 className="shell-title">You scored a complete practice game.</h1>
-        <p>
-          You handled powers, normal and zero-point wrong answers, a neg and rebound, bonuses, no buzz, an earlier
-          question correction, Undo, a substitution and final review using the same scorer used in a real room.
-        </p>
-        <div className="practice-complete-actions">
-          <button type="button" className="shell-button is-primary" onClick={restart}>
-            Practice again
-          </button>
-          <button type="button" className="shell-button" onClick={onHome}>
-            Back to QBSheet
-          </button>
-        </div>
-      </main>
-    );
+    return <PracticeSummary onRestart={restart} onHome={onHome} onDrill={() => setDrill(true)} />;
   }
 
   return (

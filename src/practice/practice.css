@@ -504,3 +504,102 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
 }
+
+/*
+ * The keyboard drill.
+ *
+ * A shell screen rather than a panel over the scoresheet, because there is no scoresheet under it: the
+ * drill teaches the keys with nothing to score, so it borrows the welcome screen's frame and spends the
+ * width on one call at a time. It reuses the coach's progress bar, call blocks and feedback, since it is
+ * the same lesson in a different room and a scorekeeper arrives here straight from that panel.
+ */
+.practice-drill {
+  max-width: 680px;
+}
+
+.practice-drill .shell-header {
+  padding-bottom: 16px;
+}
+
+.practice-drill .practice-label {
+  margin-bottom: 4px;
+}
+
+.practice-drill .practice-progress {
+  margin-bottom: 6px;
+}
+
+.practice-drill .practice-progress-track {
+  height: 4px;
+  margin-bottom: 20px;
+  border-radius: 2px;
+}
+
+/* The toggle offer, and the same shape again on the completion screen. */
+.practice-drill-preference {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.practice-drill-preference p {
+  margin: 0;
+  max-width: 52ch;
+}
+
+.practice-drill-preference h2 {
+  margin-bottom: 2px;
+}
+
+.practice-drill-task {
+  display: grid;
+  gap: 12px;
+}
+
+.practice-drill-task > h2 {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.35;
+}
+
+/* The keys are the subject here rather than a footnote to an instruction, so they are read at text size. */
+.practice-drill .practice-keystroke {
+  margin-top: 8px;
+  font-size: 13px;
+}
+
+.practice-drill .practice-keystroke kbd {
+  padding: 3px 8px;
+  font-size: 13px;
+}
+
+/*
+ * The first key of a two-key ruling, once it has landed. Half a sequence is a state the scoresheet does
+ * not show either — see `KeyboardStatus`, which exists for exactly this — so the drill says it out loud.
+ */
+.practice-drill .practice-keystroke kbd.is-done {
+  color: var(--room-success);
+  border-color: color-mix(in srgb, var(--room-success) 45%, transparent);
+  background: var(--room-success-bg);
+}
+
+.practice-drill-waiting {
+  color: var(--room-muted);
+}
+
+.practice-drill-actions {
+  margin-top: 20px;
+}
+
+/* The optional drill offer at the foot of the practice summary. */
+.practice-next {
+  margin-top: 32px;
+  border-top: 1px solid var(--room-border);
+  border-bottom: 0;
+}
+
+.practice-next button {
+  margin-top: 12px;
+}
