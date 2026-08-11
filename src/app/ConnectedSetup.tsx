@@ -234,6 +234,13 @@ export default function ConnectedSetup(props: {
       setError('Tournament control started the game but did not say what to play.');
       return;
     }
+    // The session was opened against one game and this is the answer about another, which means
+    // control moved the room between the two calls. Starting anyway would file the new game's
+    // scoresheet under the old game's session. Pressing Start again picks up the current one.
+    if (current.value.scheduledMatchId !== assignment.scheduledMatchId) {
+      setError('Tournament control changed this room’s game while it was starting. Check the game shown and start again.');
+      return;
+    }
     await onStart({
       room: stage.room,
       identity,
@@ -244,7 +251,10 @@ export default function ConnectedSetup(props: {
   };
 
   const resumable = assignment?.session?.resumable === true && assignment.session.finalReceived !== true;
-  const startable = assignment?.state === 'assigned' && assignment.definition !== null;
+  // The scheduled match is what a session is opened against, so an assignment without one cannot be
+  // started. Enabling the button for it would make Start a control that visibly does nothing.
+  const startable =
+    assignment?.state === 'assigned' && assignment.definition !== null && assignment.scheduledMatchId !== undefined;
   const waiting = stateLine(assignment, busy);
 
   return (

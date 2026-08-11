@@ -268,8 +268,8 @@ describe('what the client puts on the wire', () => {
     expect(result.ok && result.value.tournamentKey).toBe('Tournament_spring-2026');
   });
 
-  test('a 204 is nothing assigned, not an empty game and not an error', async () => {
-    const { fetchImpl } = qbtcpServer({
+  test('a status of none is answered without fetching a document there is no point reading', async () => {
+    const { calls, fetchImpl } = qbtcpServer({
       '/qbtcp/v1/assignment/status': { body: { state: 'none', session: null } },
     });
 
@@ -277,6 +277,50 @@ describe('what the client puts on the wire', () => {
 
     expect(result.ok && result.value.state).toBe('none');
     expect(result.ok && result.value.definition).toBeNull();
+    expect(calls.some((call) => call.path === '/qbtcp/v1/assignment')).toBe(false);
+  });
+
+  test('a 204 is nothing assigned, not an empty game and not an error', async () => {
+    // No status endpoint — an early server that shipped the assignment route first — so the body is
+    // the only thing speaking, and `204 No Content` has to say what `state: "none"` says.
+    const { fetchImpl } = qbtcpServer({
+      '/qbtcp/v1/assignment/status': { status: 404, body: { error: 'Not found' } },
+      '/qbtcp/v1/assignment': { status: 204 },
+    });
+
+    const result = await new FruityServerClient('http://control.test', fetchImpl).assignment(identity);
+
+    expect(result.ok && result.value.state).toBe('none');
+    expect(result.ok && result.value.definition).toBeNull();
+    expect(result.ok && result.value.errors).toBeUndefined();
+  });
+
+  test('an unreachable probe is retried rather than pinning the client to the old surface', async () => {
+    let reachable = false;
+    const { calls, fetchImpl } = recordingFetch((path) => {
+      // Nothing answers at all until the network comes back: no status, which is what a client must
+      // not mistake for "this server does not speak QBTCP".
+      if (!reachable) throw new Error('offline');
+      if (path === '/qbtcp/v1') return { body: qbtcpDiscovery };
+      if (path === '/qbtcp/v1/assignment/status') return { body: { state: 'none', session: null } };
+      return { body: {} };
+    });
+    const client = new FruityServerClient('http://control.test', fetchImpl);
+
+    await client.assignment(identity);
+    expect(client.isQbtcp).toBe(false);
+
+    const duringOutage = calls.length;
+    reachable = true;
+    await client.assignment(identity);
+
+    // Asked again once something could answer, and everything after that answer is canonical. What
+    // it tried while nothing was listening does not matter; being stuck there afterwards would.
+    expect(client.isQbtcp).toBe(true);
+    const afterRecovery = calls.slice(duringOutage);
+    expect(afterRecovery.map((call) => call.path)).toContain('/qbtcp/v1');
+    expect(afterRecovery.map((call) => call.path)).toContain('/qbtcp/v1/assignment/status');
+    expect(afterRecovery.some((call) => call.path.startsWith('/api/v1'))).toBe(false);
   });
 
   test('a session tournament control still has open is reported so the room can rejoin it', async () => {

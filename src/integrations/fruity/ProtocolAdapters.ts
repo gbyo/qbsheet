@@ -422,7 +422,9 @@ export class QbtcpAdapter extends BaseAdapter {
     const result = await this.request<unknown>(this.routes.openSession(identity.roomId), {
       method: 'POST',
       headers: this.roomHeaders(identity, 'application/json'),
-      body: JSON.stringify({ match_id: matchId, device_id: identity.deviceId ?? '' }),
+      // Omitted rather than empty when there is none. An empty string is a device identifier that
+      // every device without one shares, and the server arbitrates writer ownership by this field.
+      body: JSON.stringify({ match_id: matchId, ...(identity.deviceId ? { device_id: identity.deviceId } : {}) }),
     });
     if (!result.ok) return result;
     const body = isRecord(result.value) ? result.value : {};
@@ -441,7 +443,7 @@ export class QbtcpAdapter extends BaseAdapter {
     const result = await this.request<unknown>(`${this.routes.session(credentials.sessionId)}/writer`, {
       method: 'POST',
       headers: this.sessionHeaders(credentials, 'application/json'),
-      body: JSON.stringify({ device_id: identity.deviceId ?? '', take_over: true }),
+      body: JSON.stringify({ ...(identity.deviceId ? { device_id: identity.deviceId } : {}), take_over: true }),
     });
     if (!result.ok) return result;
     const body = isRecord(result.value) ? result.value : {};
@@ -545,17 +547,28 @@ export class LegacyAdapter extends BaseAdapter {
     });
     if (!result.ok) return result;
     const response = result.value;
-    const session: IResumableSession | null = response.session
-      ? {
-          sessionId: response.session.sessionId,
-          token: response.session.token,
-          // This surface never described a session it did not intend the room to resume.
-          resumable: !response.session.finalReceived,
-          status: response.session.status,
-          finalReceived: response.session.finalReceived,
-          ...(response.session.rejectionReason ? { rejectionReason: response.session.rejectionReason } : {}),
-        }
-      : null;
+    // Read rather than trusted. The response is untyped JSON from the network whatever the cast
+    // says, and a session block missing its identifier or its token would otherwise hand the caller
+    // credentials that are `undefined` behind a type that promises two strings.
+    const rawSession = isRecord(response) && isRecord(response.session) ? response.session : null;
+    const sessionId = rawSession ? stringOf(rawSession.sessionId) : undefined;
+    const sessionToken = rawSession ? stringOf(rawSession.token) : undefined;
+    const session: IResumableSession | null =
+      sessionId && sessionToken
+        ? {
+            sessionId,
+            token: sessionToken,
+            // This surface never described a session it did not intend the room to resume.
+            resumable: rawSession?.finalReceived !== true,
+            ...(stringOf(rawSession?.status) ? { status: stringOf(rawSession?.status) } : {}),
+            finalReceived: rawSession?.finalReceived === true,
+            ...(stringOf(rawSession?.rejectionReason) ? { rejectionReason: stringOf(rawSession?.rejectionReason) } : {}),
+          }
+        : null;
+
+    // Either field is the server saying this room is held. A block with a reason and no message is
+    // still a block, and reading it as an ordinary assignment would let the room start anyway.
+    const blocked = Boolean(response.blockedMessage) || Boolean(response.blockedReason);
 
     const base = {
       roomId: response.roomId,
@@ -568,7 +581,7 @@ export class LegacyAdapter extends BaseAdapter {
     };
 
     if (!response.current) {
-      return { ok: true, value: { ...base, state: response.blockedMessage ? 'blocked' : 'none', definition: null } };
+      return { ok: true, value: { ...base, state: blocked ? 'blocked' : 'none', definition: null } };
     }
 
     const built = assignmentToGamePackage({ assignment: response, matchup: response.current });
@@ -589,7 +602,7 @@ export class LegacyAdapter extends BaseAdapter {
       value: {
         ...base,
         // A blocked room on this surface still receives the matchup; the block is what stops it.
-        state: response.blockedMessage ? 'blocked' : 'assigned',
+        state: blocked ? 'blocked' : 'assigned',
         definition: built.value,
         scheduledMatchId: response.current.scheduledMatchId,
       },

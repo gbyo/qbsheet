@@ -215,7 +215,10 @@ export default class FruityServerClient {
       this.discovery && this.discovery.version === 1
         ? new QbtcpAdapter(this.requestFn, this.discovery)
         : new LegacyAdapter(this.requestFn);
-    this.discoveryAttempted = true;
+    // Settled only when something answered. A `404` is an answer — it is how a pre-QBTCP server
+    // says so — but nothing answering is not, and latching on it would pin a room to the deprecated
+    // surface for the whole game because its Wi-Fi happened to be out at the moment it started.
+    this.discoveryAttempted = result.ok || result.status !== undefined;
     return this.discovery;
   }
 

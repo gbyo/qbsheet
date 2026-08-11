@@ -30,7 +30,7 @@
  * that somebody cleared it.
  */
 import { useState } from 'react';
-import { IStoredGameRecord, needsHandoff } from '../game/GameStore';
+import { IStoredGameRecord, isDelivered, needsHandoff } from '../game/GameStore';
 import { gamePackageLabel } from '../game/GamePackage';
 import { downloadFile, qbjFileContents, qbjFileName } from '../integrations/file/QbjDownload';
 
@@ -53,7 +53,7 @@ export default function CompletionScreen(props: {
   const score = record.finalScore;
   const connected = record.serverDelivery !== 'none';
   /** Tournament control has it, and did not ask for anything else. */
-  const delivered = record.serverDelivery === 'sent' && !record.package.handoffInstruction;
+  const delivered = isDelivered(record);
   const requiresHandoffAcknowledgement =
     !delivered && (connected || Boolean(record.package.handoffInstruction));
   const backupDownloaded = record.qbjDownloadedAt !== undefined;

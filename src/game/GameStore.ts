@@ -150,12 +150,24 @@ export function isActive(record: IStoredGameRecord): boolean {
  */
 export function needsHandoff(record: IStoredGameRecord): boolean {
   if (isActive(record)) return false;
-  const instructed = Boolean(record.package.handoffInstruction);
   // Accepted by tournament control, with nothing else asked for. The copy on this device stays,
   // and `Download QBJ again` stays with it; neither is an outstanding task.
-  if (record.serverDelivery === 'sent' && !instructed) return false;
+  if (isDelivered(record)) return false;
   if (record.qbjDownloadedAt === undefined) return true;
-  return record.connected || instructed ? record.handoffAcknowledgedAt === undefined : false;
+  return record.connected || Boolean(record.package.handoffInstruction)
+    ? record.handoffAcknowledgedAt === undefined
+    : false;
+}
+
+/**
+ * Tournament control has this result and asked for nothing else.
+ *
+ * Exported because the completion screen decides what to say from the same fact that decides
+ * whether anything is owed, and two copies of the rule is two chances for the screen to promise
+ * something the store disagrees with.
+ */
+export function isDelivered(record: IStoredGameRecord): boolean {
+  return record.serverDelivery === 'sent' && !record.package.handoffInstruction;
 }
 
 function recordId(identity: string, attempt: number): string {

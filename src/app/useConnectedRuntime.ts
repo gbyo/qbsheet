@@ -181,6 +181,13 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
   const latestSnapshotRef = useRef<object | null>(null);
 
   /**
+   * Whether the one unattended reopen has already been spent on the current problem.
+   *
+   * Declared here rather than beside the effect that reads it, because the repair itself re-arms it.
+   */
+  const autoRepairAttempted = useRef(false);
+
+  /**
    * Reopen this room's session with the room capability it still holds.
    *
    * Not a takeover and not a new game: both surfaces answer an open request for an assignment that
@@ -200,6 +207,11 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     setRepairMessage(undefined);
     setSessionCredentialProblem(false);
     setWriterConflict(opened.value.writer ? null : { canTakeOver: true });
+    // Re-armed here rather than left to the credentials effect, because reopening usually returns
+    // the same token — the session did not change, only the server's memory of it — and a token
+    // that did not change means that effect never runs. Without this, a session refused twice in
+    // one game would silently stop repairing itself after the first.
+    autoRepairAttempted.current = false;
     onCredentialsRepaired?.({ sessionId: opened.value.sessionId, sessionToken: opened.value.token });
     return true;
   }, [client, identity, scheduledMatchId, onCredentialsRepaired]);
@@ -222,7 +234,6 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
    * about this room, and making a scorekeeper press a button for that is noise. Repeating it is
    * not: a server that refuses the reopen is saying something, and a loop would keep asking.
    */
-  const autoRepairAttempted = useRef(false);
   const noteWrite = useCallback((result: ApiResult<unknown>) => {
     const classified = classifyWrite(result);
     if (classified.sessionProblem) setSessionCredentialProblem(true);

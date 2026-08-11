@@ -13,7 +13,7 @@ type ServerTestState =
   | { kind: 'untested' }
   | { kind: 'testing' }
   /** `protocol` is what this device would actually speak to that address, not what it hopes for. */
-  | { kind: 'passed'; message: string; protocol: string }
+  | { kind: 'passed'; message: string; protocol: string; canonical: boolean }
   | { kind: 'failed'; message: string };
 
 /**
@@ -218,6 +218,7 @@ export default function DeviceReadiness(props: {
         kind: 'passed',
         message: `Tournament control answered at ${normalized.value}.`,
         protocol: protocolLabel(client),
+        canonical: client.isQbtcp,
       });
     } else {
       setServerTest({ kind: 'failed', message: result.error });
@@ -555,7 +556,7 @@ export default function DeviceReadiness(props: {
             <p className="readiness-test-result is-pass">✓ {serverTest.message}</p>
             <p className="readiness-detail">
               Protocol: {serverTest.protocol}.{' '}
-              {serverTest.protocol === 'QBTCP v1'
+              {serverTest.canonical
                 ? 'This device is using the canonical protocol.'
                 : 'This server did not announce QBTCP, so this device is using the deprecated /api/v1 routes. Scoring works; ask whether tournament control can be updated.'}
             </p>

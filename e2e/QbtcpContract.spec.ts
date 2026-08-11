@@ -19,6 +19,7 @@ import { assignmentPollIntervalMs } from '../src/app/useConnectedRuntime';
 import {
   ITournamentControl,
   pairingCode,
+  roomId,
   roomName,
   rounds,
   startTournamentControl,
@@ -208,7 +209,10 @@ test.describe('a server that speaks only QBTCP', () => {
   test('a writer conflict waits for a person, and the takeover they choose restores writing', async ({
     page,
   }) => {
-    test.setTimeout(90_000);
+    // The explicit waits below already sum to well over two minutes if every one of them is taken
+    // to its limit, and a ceiling under that turns a slow machine into a failure that says nothing
+    // about the protocol. It is a ceiling, not a duration: the test runs in about forty seconds.
+    test.setTimeout(240_000);
     await pairRoom(page, control);
     await startAssignedGame(page, 4);
 
@@ -267,6 +271,58 @@ test.describe('a server that speaks only QBTCP', () => {
     await expect(page.getByText('Result sent ✓')).toBeVisible();
   });
 
+  /**
+   * The room-token repair, which is the only one that needs a person to type something.
+   *
+   * The rule it has to keep is that the scoresheet never leaves the screen: the code is asked for
+   * over a live game, and a scorekeeper who cannot find the code just closes the dialog and keeps
+   * scoring. Which is also why the dialog has to behave like one — focus in the field, Escape out,
+   * and Tab staying inside rather than wandering onto the tossup buttons behind it.
+   */
+  test('the room-token repair is a dialog over a live scoresheet, and restores writing', async ({ page }) => {
+    test.setTimeout(120_000);
+    await pairRoom(page, control);
+    await startAssignedGame(page, 4);
+    await scoreTossup(page, 'Sarah', 'Power', 20);
+    await expect.poll(() => control.progress.length, { timeout: 20_000 }).toBeGreaterThan(0);
+
+    control.revokeRoomToken();
+    const banner = page.locator('.scorer-banner').filter({ hasText: 'Tournament connection changed' });
+    await expect(banner).toBeVisible({ timeout: 20_000 });
+
+    await banner.getByRole('button', { name: 'Repair connection…' }).click();
+    const dialog = page.getByRole('dialog', { name: `Repair the connection for ${roomName}` });
+    await expect(dialog).toBeVisible();
+
+    // The field the dialog exists for already has focus, and Escape is a way out that costs nothing.
+    await expect(page.locator('#repair-code')).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+    await expect(page.getByText('Tossup 2 of 20', { exact: true })).toBeVisible();
+
+    // Scoring continued the whole time, with the game never once off the screen.
+    await scoreTossup(page, 'Emma', 'Correct', 10);
+    await expect(page.getByLabel('Greenwood score')).toHaveText('20');
+
+    await banner.getByRole('button', { name: 'Repair connection…' }).click();
+    await expect(dialog).toBeVisible();
+    // Tab does not reach the scoresheet behind: a modal dialog keeps its own focus.
+    await page.keyboard.press('Tab');
+    expect(await dialog.evaluate((element) => element.contains(document.activeElement))).toBe(true);
+
+    await page.locator('#repair-code').fill(pairingCode);
+    await dialog.getByRole('button', { name: 'Pair this room again' }).click();
+    await expect(dialog).toBeHidden();
+    await expect(banner).toBeHidden({ timeout: 20_000 });
+
+    // Repaired in place: the same game, still on screen, writing again.
+    const repaired = control.progress.length;
+    await scoreTossup(page, 'James', 'Correct', 30);
+    await expect(page.getByText('Tossup 4 of 20', { exact: true })).toBeVisible();
+    await expect.poll(() => control.progress.length, { timeout: 30_000 }).toBeGreaterThan(repaired);
+    expect(control.progress[control.progress.length - 1].match).toMatchObject({ tossups_read: 3 });
+  });
+
   test('a refused session token reopens the same game instead of ending it', async ({ page }) => {
     await pairRoom(page, control);
     await startAssignedGame(page, 4);
@@ -317,7 +373,7 @@ test.describe('a server that only speaks the surface QBTCP replaces', () => {
     expect(control.requests.some((entry) => entry.path === '/api/v1/join')).toBe(true);
 
     await startAssignedGame(page, 4);
-    expect(control.requests.some((entry) => entry.path === '/api/v1/rooms/room-204/assignment')).toBe(true);
+    expect(control.requests.some((entry) => entry.path === `/api/v1/rooms/${roomId}/assignment`)).toBe(true);
 
     await scoreTossup(page, 'Sarah', 'Power', 20);
     await expect(page.getByLabel('Ninety Six score')).toHaveText('35');

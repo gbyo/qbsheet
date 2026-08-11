@@ -28,8 +28,9 @@
  * Step 3 cannot fail in a way that costs the room anything, because step 1 already happened. That
  * is the whole design.
  */
-import { FormEvent, useCallback, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ScorerHost from '../scorer/ScorerHost';
+import ScorerDialog from '../scorer/ScorerDialog';
 import { IScorerSubmitResult } from '../scorer/Scorer';
 import { IStoredGameRecord, GameStore } from '../game/GameStore';
 import { ScoreEvent } from '../scoring/ScoreEvents';
@@ -106,9 +107,19 @@ export default function ScoringScreen(props: {
     };
   }, [record, connection]);
 
+  /**
+   * Only the fields a repair actually produced.
+   *
+   * A change carrying `sessionToken: undefined` is indistinguishable from one deliberately clearing
+   * it once it is spread over the stored connection, and clearing a session credential a repair
+   * never touched is how a repaired game ends up with no connection at all.
+   */
   const onCredentialsRepaired = useCallback(
     (repair: ICredentialRepair) => {
-      onConnectionRepaired({ sessionId: repair.sessionId, sessionToken: repair.sessionToken });
+      onConnectionRepaired({
+        ...(repair.sessionId !== undefined ? { sessionId: repair.sessionId } : {}),
+        ...(repair.sessionToken !== undefined ? { sessionToken: repair.sessionToken } : {}),
+      });
     },
     [onConnectionRepaired],
   );
@@ -196,8 +207,17 @@ export default function ScoringScreen(props: {
 
       if (live) {
         const delivered = await runtime.submitFinal(qbjWithSourceMetadata(qbj, record.package));
+        // `pending` is a promise that something will keep trying. A room whose writes were already
+        // barred — a writer conflict, a refused session, a server that opened another tournament —
+        // has nothing retrying on its behalf, so telling it to wait would be telling it to wait
+        // forever. Only a server nobody could reach is pending.
+        const blocked = !runtime.automaticDelivery;
         await store.update(record.id, {
-          serverDelivery: delivered.ok ? 'sent' : delivered.status === undefined ? 'pending' : 'rejected',
+          serverDelivery: delivered.ok
+            ? 'sent'
+            : blocked || delivered.status !== undefined
+              ? 'rejected'
+              : 'pending',
           serverDeliveryDetail: delivered.ok
             ? // A duplicate is the correct answer to a retry, not a problem, but a room that sees
               // nothing about it has no way to know its earlier attempt had already landed.
@@ -290,6 +310,21 @@ function RepairConnectionDialog(props: {
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const codeField = useRef<HTMLInputElement>(null);
+
+  /**
+   * Start in the field this dialog exists for.
+   *
+   * Here rather than through React's `autoFocus`, and the ordering is the reason. `autoFocus` moves
+   * focus during the commit, before the shell it is inside has opened itself; the shell's own effect
+   * then calls `showModal`, which re-runs the platform's focusing steps and lands on the first
+   * control it finds, which is Close. Effects run children first, so the shell is already open by
+   * the time this runs and this is the last word. Opening a dialog only to make somebody find its
+   * one input is a step in the middle of a round that buys nothing.
+   */
+  useEffect(() => {
+    codeField.current?.focus();
+  }, []);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -305,44 +340,41 @@ function RepairConnectionDialog(props: {
   };
 
   return (
-    <div className="shell-modal" role="dialog" aria-modal="true" aria-label="Repair tournament connection">
-      <div className="shell-modal-body">
-        <h2>Repair the connection for {roomName}</h2>
-        <p>
-          Tournament control no longer recognizes this room. Ask for this room&apos;s pairing code and enter
-          it here. The game on screen is not affected, and scoring continues either way.
+    // The same shell every other dialog over this scoresheet uses, which is where Escape, the focus
+    // trap and the inertness of the page behind come from. A hand-rolled box claiming `aria-modal`
+    // would have none of the three, and this one asks a scorekeeper to type — with a game live
+    // behind it — so Tab reaching the tossup buttons is a real way to lose a question.
+    <ScorerDialog title={`Repair the connection for ${roomName}`} onClose={onClose}>
+      <p className="scorer-dialog-note">
+        Tournament control no longer recognizes this room. Ask for this room&apos;s pairing code and enter
+        it here. The game on screen is not affected, and scoring continues either way.
+      </p>
+      <form className="connect-form" onSubmit={(event) => void submit(event)}>
+        <label className="shell-label" htmlFor="repair-code">
+          Pairing code
+        </label>
+        <input
+          id="repair-code"
+          className="shell-input"
+          type="text"
+          inputMode="numeric"
+          autoComplete="off"
+          ref={codeField}
+          value={code}
+          onChange={(event) => setCode(event.target.value)}
+        />
+        <button type="submit" className="shell-button is-primary" disabled={busy || code.trim() === ''}>
+          {busy ? 'Pairing…' : 'Pair this room again'}
+        </button>
+      </form>
+      {error !== '' && (
+        <p className="scorer-problem" role="alert">
+          {error}
         </p>
-        <form className="connect-form" onSubmit={(event) => void submit(event)}>
-          <label className="shell-label" htmlFor="repair-code">
-            Pairing code
-          </label>
-          <input
-            id="repair-code"
-            className="shell-input"
-            type="text"
-            inputMode="numeric"
-            autoComplete="off"
-            value={code}
-            onChange={(event) => setCode(event.target.value)}
-          />
-          <button type="submit" className="shell-button is-primary" disabled={busy || code.trim() === ''}>
-            {busy ? 'Pairing…' : 'Pair this room again'}
-          </button>
-        </form>
-        {error !== '' && (
-          <p className="shell-warning" role="alert">
-            {error}
-          </p>
-        )}
-        <div className="shell-modal-actions">
-          <button type="button" className="shell-button" onClick={onClose}>
-            Not now
-          </button>
-          <button type="button" className="shell-button" onClick={onDisconnect}>
-            Finish this game offline
-          </button>
-        </div>
-      </div>
-    </div>
+      )}
+      <button type="button" className="scorer-choice" onClick={onDisconnect}>
+        Finish this game offline
+      </button>
+    </ScorerDialog>
   );
 }
