@@ -8,8 +8,8 @@
  * The event model underneath is unchanged and deliberately so: a substitution stores the complete
  * lineup effective at a question boundary, which is what makes tossups heard exact and what makes a
  * reload able to reconstruct who was on the floor for question eleven. What changed is that a
- * scorekeeper no longer has to *compose* that lineup out of checkboxes to record the one thing that
- * actually happens in a game, which is one player for another.
+ * scorekeeper no longer has to compose that lineup out of checkboxes: the starting order is the
+ * visible scoresheet, and the bench is directly below it.
  *
  * So the tests are in two halves: the workflow a scorekeeper sees, and the event it produces. The
  * second half is the one that matters to the standings.
@@ -48,6 +48,7 @@ function renderScorer(
     authoritative?: boolean;
     onSyncRosterPlayer?: (teamName: string, playerName: string) => Promise<{ ok: boolean }>;
   } = {},
+  requiredStarterCount?: Partial<Record<'left' | 'right', number>>,
 ) {
   gameCounter += 1;
   gameKey = `lineup-game-${gameCounter}`;
@@ -55,6 +56,7 @@ function renderScorer(
     <ScorerHost
       gameKey={gameKey}
       format={format}
+      requiredStarterCount={requiredStarterCount}
       leftTeam={leftTeam}
       rightTeam={rightTeam}
       tournamentName="Ninety Six Invitational"
@@ -84,7 +86,12 @@ function substitutions(): Extract<ScoreEvent, { type: 'substitution' }>[] {
 
 function chooseStarters(names: string[]) {
   const prompt = screen.getByLabelText('Starting lineups');
-  for (const name of names) fireEvent.click(within(prompt).getByLabelText(name));
+  for (const name of names) {
+    const roster = [leftTeam, rightTeam].find((team) => team.players.some((player) => player.name === name));
+    if (!roster) throw new Error(`No test roster contains ${name}`);
+    const team = within(prompt).getByLabelText(`${roster.name} starters`);
+    fireEvent.click(within(team).getByRole('button', { name: `Start ${name}` }));
+  }
   fireEvent.click(within(prompt).getByText('Start game'));
 }
 
@@ -160,11 +167,59 @@ describe('who is starting', () => {
   test('the count comes from the format rather than from a constant', () => {
     renderScorer(formatFor(2));
 
-    expect(screen.getAllByText('0 of 2 selected').length).toBeGreaterThan(0);
+    expect(within(screen.getByLabelText('Ninety Six starters')).getByText('0 starting')).toBeTruthy();
     cleanup();
 
     renderScorer(formatFor(1));
-    expect(screen.getAllByText('0 of 1 selected').length).toBeGreaterThan(0);
+    expect(within(screen.getByLabelText('Ninety Six starters')).getByText('0 starting')).toBeTruthy();
+  });
+
+  test('starting a bench player appends the next seat, and benching closes the order', () => {
+    renderScorer(formatFor(2));
+    const team = screen.getByLabelText('Ninety Six starters');
+
+    expect(within(team).getByText('No starters selected')).toBeTruthy();
+    expect(within(team).queryByRole('checkbox')).toBeNull();
+    fireEvent.click(within(team).getByRole('button', { name: 'Start Michael Smith' }));
+    fireEvent.click(within(team).getByRole('button', { name: 'Start Jordan Hall' }));
+    let rows = within(team).getAllByRole('listitem');
+    expect(rows[0].textContent).toContain('Michael Smith');
+    expect(rows[0].textContent).toContain('1');
+    expect(rows[1].textContent).toContain('Jordan Hall');
+    expect(rows[1].textContent).toContain('2');
+
+    fireEvent.click(within(team).getByRole('button', { name: 'Bench Michael Smith' }));
+    rows = within(team).getAllByRole('listitem');
+    expect(rows[0].textContent).toContain('Jordan Hall');
+    expect(rows[0].textContent).toContain('1');
+    expect(within(team).getAllByText('Michael Smith')).toHaveLength(1);
+    expect(within(team).getByRole('button', { name: 'Start Michael Smith' })).toBeTruthy();
+  });
+
+  test('a full starting lineup keeps the bench visible but prevents another player from starting', () => {
+    renderScorer(formatFor(2));
+    const team = screen.getByLabelText('Ninety Six starters');
+
+    fireEvent.click(within(team).getByRole('button', { name: 'Start Sarah Jones' }));
+    fireEvent.click(within(team).getByRole('button', { name: 'Start Michael Smith' }));
+
+    const startJordan = within(team).getByRole('button', { name: 'Start Jordan Hall' });
+    expect(startJordan).toBeDisabled();
+    expect(within(team).getByText('Jordan Hall')).toBeTruthy();
+    expect(within(team).getByText('2 starting')).toBeTruthy();
+  });
+
+  test('a shorthanded lineup remains valid when the required starter count permits it', () => {
+    renderScorer(formatFor(2), undefined, {}, { left: 1 });
+    const prompt = screen.getByLabelText('Starting lineups');
+    const team = within(prompt).getByLabelText('Ninety Six starters');
+
+    fireEvent.click(within(team).getByRole('button', { name: 'Start Sarah Jones' }));
+    const startGame = within(prompt).getByRole('button', { name: 'Start game' });
+    expect(startGame).not.toBeDisabled();
+    fireEvent.click(startGame);
+
+    expect(substitutions().find((event) => event.team === 'left')?.activePlayers).toEqual(['Sarah Jones']);
   });
 
   test('the starters chosen are the ones charged with tossups heard from question one', () => {
@@ -189,14 +244,14 @@ describe('who is starting', () => {
     fireEvent.change(input, { target: { value: 'Alex Brown' } });
     fireEvent.click(within(team).getByText('Add'));
 
-    const added = within(team).getByLabelText('Alex Brown') as HTMLInputElement;
-    expect(added.checked).toBe(false);
+    expect(within(team).getByText('Alex Brown')).toBeTruthy();
+    expect(within(team).getByRole('button', { name: 'Start Alex Brown' })).toBeTruthy();
     expect(savedEvents().filter((event) => event.type === 'roster-add').map((event) => event.playerName)).toEqual([
       'Alex Brown',
     ]);
 
-    fireEvent.click(within(team).getByLabelText('Michael Smith'));
-    fireEvent.click(added);
+    fireEvent.click(within(team).getByRole('button', { name: 'Start Michael Smith' }));
+    fireEvent.click(within(team).getByRole('button', { name: 'Start Alex Brown' }));
     fireEvent.click(within(screen.getByLabelText('Starting lineups')).getByText('Start game'));
 
     expect(substitutions().find((event) => event.team === 'left')?.activePlayers).toEqual([
@@ -209,15 +264,17 @@ describe('who is starting', () => {
     renderScorer(formatFor(2));
     const settledTeam = screen.getByLabelText('Greenwood starters');
 
-    expect((within(settledTeam).getByLabelText('Emma Turner') as HTMLInputElement).checked).toBe(true);
-    expect((within(settledTeam).getByLabelText('Taylor Adams') as HTMLInputElement).checked).toBe(true);
+    expect(within(settledTeam).queryByRole('checkbox')).toBeNull();
+    expect(within(settledTeam).getByText('Lineup set automatically')).toBeTruthy();
+    expect(within(settledTeam).getByText('Emma Turner')).toBeTruthy();
+    expect(within(settledTeam).getByText('Taylor Adams')).toBeTruthy();
+    expect(within(settledTeam).queryByRole('button', { name: 'Bench Emma Turner' })).toBeNull();
     fireEvent.click(within(settledTeam).getByText('+ Add player'));
     fireEvent.change(within(settledTeam).getByLabelText('Player name'), { target: { value: 'Casey Reed' } });
     fireEvent.click(within(settledTeam).getByText('Add'));
 
-    const added = within(settledTeam).getByLabelText(/Casey Reed/) as HTMLInputElement;
-    expect(added.checked).toBe(false);
-    expect(added.disabled).toBe(true);
+    expect(within(settledTeam).getByText('Casey Reed')).toBeTruthy();
+    expect(within(settledTeam).queryByRole('button', { name: 'Start Casey Reed' })).toBeNull();
     chooseStarters(['Sarah Jones', 'Michael Smith']);
 
     expect(substitutions().some((event) => event.team === 'right')).toBe(false);
@@ -262,20 +319,21 @@ describe('who is starting', () => {
     renderScorer(formatFor(2));
     const prompt = screen.getByLabelText('Starting lineups');
     const team = within(prompt).getByLabelText('Ninety Six starters');
-    fireEvent.click(within(team).getByLabelText('Sarah Jones'));
-    fireEvent.click(within(team).getByLabelText('Michael Smith'));
+    fireEvent.click(within(team).getByRole('button', { name: 'Start Sarah Jones' }));
+    fireEvent.click(within(team).getByRole('button', { name: 'Start Michael Smith' }));
 
-    expect(within(team).getByText('Seat 1')).toBeTruthy();
-    expect(within(team).getByText('Seat 2')).toBeTruthy();
-    fireEvent.click(within(team).getByText('Reorder starters'));
     fireEvent.click(within(team).getByLabelText('Move Michael Smith up in starting lineup'));
-    fireEvent.click(within(team).getByText('Done'));
     fireEvent.click(within(prompt).getByText('Start game'));
 
-    const names = Array.from(screen.getByLabelText('Ninety Six').querySelectorAll('.scorer-player-name'), (node) =>
-      (node.textContent ?? '').trim(),
-    );
-    expect(names).toEqual(['Michael Smith', 'Sarah Jones']);
+    const names = within(screen.getByLabelText('Ninety Six'))
+      .getAllByRole('listitem')
+      .map((row) => row.textContent?.trim().split(/\s+\d+\s*/).at(-1)?.trim() ?? '');
+    expect(names[0]).toContain('Michael Smith');
+    expect(names[1]).toContain('Sarah Jones');
+    expect(substitutions().find((event) => event.team === 'left')?.activePlayers).toEqual([
+      'Michael Smith',
+      'Sarah Jones',
+    ]);
     expect(savedEvents().filter((event) => event.type === 'substitution')).toHaveLength(1);
   });
 });
@@ -307,7 +365,10 @@ describe('what the starting prompt promises about the bench', () => {
     });
 
     const prompt = screen.getByLabelText('Starting lineups');
+    expect(within(prompt).getByText(/Choose who will play Tossup 1/)).toBeTruthy();
+    expect(within(prompt).getByText(/Up to 2 players may start for each team/)).toBeTruthy();
     expect(within(prompt).queryByText(/between any two tossups/)).toBeNull();
+    expect(within(prompt).getByText(/halftime, at a timeout, or at a phase checkpoint/)).toBeTruthy();
   });
 });
 
