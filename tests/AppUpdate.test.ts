@@ -14,6 +14,8 @@ import {
   IContainerLike,
   IRegistrationLike,
   IWorkerLike,
+  updateApplyTimeoutMs,
+  updateCheckIntervalMs,
   updateReady,
 } from '../src/pwa/AppUpdate';
 import { updatesAllowedOn } from '../src/app/App';
@@ -63,6 +65,10 @@ class FakeRegistration implements IRegistrationLike {
     this.listeners.add(listener);
   }
 
+  removeEventListener(_type: 'updatefound', listener: () => void): void {
+    this.listeners.delete(listener);
+  }
+
   /** A new build has started downloading. */
   findUpdate(worker: FakeWorker): void {
     this.installing = worker;
@@ -83,6 +89,10 @@ class FakeContainer implements IContainerLike {
 
   addEventListener(_type: 'controllerchange', listener: () => void): void {
     this.listeners.add(listener);
+  }
+
+  removeEventListener(_type: 'controllerchange', listener: () => void): void {
+    this.listeners.delete(listener);
   }
 
   /** The waiting worker took control. */
@@ -153,6 +163,27 @@ describe('recognizing an update', () => {
     void watcher.checkNow();
 
     expect(states.filter((state) => state.available)).toHaveLength(1);
+  });
+
+  test('observing again detaches the old registration handlers', () => {
+    const watcher = new AppUpdateWatcher({ reload: vi.fn() });
+    const firstRegistration = new FakeRegistration();
+    const firstContainer = new FakeContainer();
+    firstContainer.controller = { id: 'old-1' };
+    watcher.observe(firstRegistration, firstContainer);
+
+    const secondRegistration = new FakeRegistration();
+    const secondContainer = new FakeContainer();
+    secondContainer.controller = { id: 'old-2' };
+    watcher.observe(secondRegistration, secondContainer);
+
+    const stale = new FakeWorker();
+    firstRegistration.findUpdate(stale);
+    firstRegistration.promoteToWaiting();
+    stale.becomeInstalled();
+
+    expect(watcher.snapshot().available).toBe(false);
+    watcher.stop();
   });
 });
 
@@ -244,6 +275,26 @@ describe('applying an update on purpose', () => {
     expect(reload).toHaveBeenCalledTimes(1);
   });
 
+  test('an apply that never takes control becomes retryable', async () => {
+    vi.useFakeTimers();
+    try {
+      const { watcher, incoming } = deviceWithWaitingBuild();
+      watcher.setReplaceable(true);
+
+      expect(watcher.apply()).toBe(true);
+      expect(watcher.snapshot().applying).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(updateApplyTimeoutMs);
+
+      expect(watcher.snapshot()).toEqual({ available: true, applying: false });
+      expect(watcher.apply()).toBe(true);
+      expect(incoming.messages).toEqual(['qbsheet:skip-waiting', 'qbsheet:skip-waiting']);
+      watcher.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test('apply with nothing waiting is a no-op rather than a reload', () => {
     const reload = vi.fn();
     const registration = new FakeRegistration();
@@ -263,10 +314,42 @@ describe('checking for updates', () => {
     const { registration, watcher } = deviceWithWaitingBuild();
     const online = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
 
-    await watcher.checkNow();
+    try {
+      await watcher.checkNow();
+      expect(registration.updateCalls).toBe(0);
+    } finally {
+      online.mockRestore();
+    }
+  });
 
-    expect(registration.updateCalls).toBe(0);
-    online.mockRestore();
+  test('a check is skipped while the document is hidden', async () => {
+    const { registration, watcher } = deviceWithWaitingBuild();
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+
+    try {
+      await watcher.checkNow();
+      expect(registration.updateCalls).toBe(0);
+    } finally {
+      visibility.mockRestore();
+    }
+  });
+
+  test('an observed watcher checks periodically while it is running', async () => {
+    vi.useFakeTimers();
+    try {
+      const registration = new FakeRegistration();
+      const container = new FakeContainer();
+      container.controller = { id: 'old' };
+      const watcher = new AppUpdateWatcher({ reload: vi.fn() });
+      watcher.observe(registration, container);
+
+      await vi.advanceTimersByTimeAsync(updateCheckIntervalMs);
+
+      expect(registration.updateCalls).toBe(1);
+      watcher.stop();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   test('a check that throws is silent and leaves the state alone', async () => {
