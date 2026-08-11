@@ -116,7 +116,7 @@ export const detailLimit = 200;
  * Three shapes, and the order matters — URLs are cleaned before the token sweep so that a path segment
  * is not mistaken for a secret and a secret in a query string is definitely gone either way:
  *
- *   1. Any `key=value` pair whose key looks like a secret.
+ *   1. Any `key=value` pair whose key looks like a secret, plus ordinary `Bearer value` syntax.
  *   2. Whole query strings on anything URL-shaped, because a query string is where a token ends up when
  *      somebody is in a hurry.
  *   3. Long unbroken runs of token-ish characters, which is what a bearer token, a session id or a
@@ -128,7 +128,11 @@ export const detailLimit = 200;
  */
 export function redact(text: string): string {
   const cleaned = text
-    .replace(/\b(token|access[_-]?token|session|secret|code|key|password|auth|bearer)\b\s*[=:]\s*\S+/gi, '$1=[redacted]')
+    .replace(/\bBearer\s+\S+/gi, 'Bearer [redacted]')
+    .replace(
+      /\b(token|access[_-]?token|session(?:[_-]?token)?|secret|code|key|password|auth|bearer)\b\s*[=:]\s*\S+/gi,
+      '$1=[redacted]',
+    )
     .replace(/(\bhttps?:\/\/[^\s?]+)\?\S*/gi, '$1?[redacted]')
     .replace(/\b[A-Za-z0-9_-]{20,}\b/g, '[redacted]');
   return cleaned.length > detailLimit ? `${cleaned.slice(0, detailLimit)}…` : cleaned;
