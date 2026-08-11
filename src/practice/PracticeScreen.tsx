@@ -160,30 +160,29 @@ function nameList(names: readonly string[]): string {
  * row the tossups-heard count is kept in, so who sits where is a real property of a real scoresheet and
  * practice teaching a fixed one is teaching something true. What was wrong was never that practice
  * insisted; it was that it said "does not match the scenario" without saying *what* did not match, so the
- * scorekeeper who read four names off the guide and ticked the last one first was left comparing two lists
- * of four identical names to find a difference that was in their order.
+ * scorekeeper who read four names off the guide and put them in the wrong order was left comparing two
+ * lists of four identical names to find a difference that was in their order.
  *
- * So this names the first seat that is wrong, who is in it, and who the scenario needs there — and points
- * at Reorder starters, which is the control that fixes it without starting again.
+ * So this tells the scorekeeper which players to Bench or Start, or points at the ↑/↓ controls when the
+ * names are right but their seat order is not.
  */
 function practiceLineupProblem(side: LeftOrRight, chosen: readonly string[] | undefined): string | undefined {
   const team = side === 'left' ? practiceLeftTeam : practiceRightTeam;
   const expected = team.startingLineup;
-  if (!chosen || chosen.length !== expected.length) {
-    return `${team.name} starts ${nameList(expected)} in this scenario. Tick those ${expected.length}, in that order.`;
-  }
+  const selected = chosen ?? [];
+  const extra = selected.filter((player) => !expected.includes(player));
+  const missing = expected.filter((player) => !selected.includes(player));
 
-  // The wrong people, which is the lesson this step is actually about: four of the five on the floor.
-  const extra = chosen.find((player) => !expected.includes(player));
-  const missing = expected.find((player) => !chosen.includes(player));
-  if (extra !== undefined && missing !== undefined) {
-    return `${extra} starts on the bench in this scenario, and ${missing} is missing from the floor. ${team.name} starts ${nameList(expected)} — untick ${extra} and tick ${missing}.`;
+  if (extra.length > 0 && missing.length > 0) {
+    return `Bench ${nameList(extra)} and start ${nameList(missing)}.`;
   }
+  if (missing.length > 0) return `Start ${nameList(missing)}.`;
+  if (extra.length > 0) return `Bench ${nameList(extra)}.`;
+  if (selected.length !== expected.length) return `Start ${nameList(expected)}.`;
 
-  // The right people in the wrong seats.
-  const seat = expected.findIndex((player, index) => chosen[index] !== player);
+  const seat = expected.findIndex((player, index) => selected[index] !== player);
   if (seat >= 0) {
-    return `${chosen[seat]} is in ${team.name}'s seat ${seat + 1}, and this scenario needs ${expected[seat]} there. The seats follow the order you ticked the names in, so use Reorder starters to put ${nameList(expected)} in that order.`;
+    return `Use the ↑/↓ controls to put ${nameList(expected)} in that order.`;
   }
   return undefined;
 }

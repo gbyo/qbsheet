@@ -52,6 +52,16 @@ describe('guided practice scenario', () => {
     expect(practiceSteps.at(-1)?.expectation.kind).toBe('submit');
   });
 
+  it('teaches the Starting and Bench controls used by the real prompt', () => {
+    const lineup = practiceSteps[0];
+
+    expect(lineup.instruction).toContain('Start Gibson, Jeremy, Owen and Lachlan');
+    expect(lineup.hint).toContain('leave Olivia and Bella on the Bench');
+    expect(lineup.hint).toContain('↑/↓ controls');
+    expect(lineup.instruction).not.toMatch(/tick|untick/i);
+    expect(lineup.hint).not.toMatch(/tick|untick|Reorder starters/i);
+  });
+
   it('teaches only the keyboard rulings the scoresheet actually supports', () => {
     expect(practiceKeystroke('q1-power')).toBe('1 then P');
     expect(practiceKeystroke('q2-ten')).toBe('5 then C');
