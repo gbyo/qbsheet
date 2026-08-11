@@ -1,5 +1,11 @@
 import { useState } from 'react';
-import { HelpRequestCategory, helpRequestCategoryLabels } from '../app/HelpRequests';
+import {
+  ControlRequestState,
+  HelpClearResult,
+  HelpRequestCategory,
+  HelpRequestResult,
+  helpRequestCategoryLabels,
+} from '../app/HelpRequests';
 import { IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
 import { IDerivedGame } from '../scoring/deriveGame';
 import { ScoreEvent } from '../scoring/ScoreEvents';
@@ -26,25 +32,40 @@ const issueCategories: HelpRequestCategory[] = [
   'other',
 ];
 
+export function formatControlRequestTime(value: string, source: 'server' | 'device'): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return source === 'device' ? 'requested on this device' : 'requested time unavailable';
+  const time = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  return source === 'device' ? `${time} · time from this device` : time;
+}
+
 export function IssueDialog(props: {
   questionNumber: number;
-  controlAvailable: boolean;
-  requestPending: boolean;
+  controlRequest: ControlRequestState;
+  onRetryControl?: () => Promise<HelpRequestResult | null>;
+  onCancelControl?: () => Promise<HelpClearResult | null>;
   initialCategory?: HelpRequestCategory;
-  onReport: (category: HelpRequestCategory, details: string, requestControl: boolean) => Promise<void>;
+  onReport: (
+    category: HelpRequestCategory,
+    details: string,
+    requestControl: boolean,
+  ) => Promise<HelpRequestResult | undefined>;
   onClose: () => void;
 }) {
   const {
     questionNumber,
-    controlAvailable,
-    requestPending,
+    controlRequest,
+    onRetryControl,
+    onCancelControl,
     initialCategory = 'question-packet',
     onReport,
     onClose,
   } = props;
   const [category, setCategory] = useState<HelpRequestCategory>(initialCategory);
   const [details, setDetails] = useState('');
-  const [requestControl, setRequestControl] = useState(controlAvailable && !requestPending);
+  const [requestControl, setRequestControl] = useState(
+    controlRequest.kind === 'idle' || controlRequest.kind === 'unavailable',
+  );
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
   let submitLabel = 'Save issue';
@@ -95,16 +116,66 @@ export function IssueDialog(props: {
             onChange={(e) => setDetails(e.target.value)}
           />
         </label>
-        <label className="scorer-checkbox" htmlFor="scorer-request-control">
-          <input
-            id="scorer-request-control"
-            type="checkbox"
-            checked={requestControl}
-            disabled={!controlAvailable || requestPending}
-            onChange={(e) => setRequestControl(e.target.checked)}
-          />
-          {requestPending ? 'A tournament-control request is already open' : 'Request tournament control now'}
-        </label>
+        <div className="scorer-checkbox">
+          {controlRequest.kind === 'idle' || controlRequest.kind === 'unavailable' ? (
+            <label htmlFor="scorer-request-control">
+              <input
+                id="scorer-request-control"
+                type="checkbox"
+                checked={requestControl}
+                disabled={sending}
+                onChange={(e) => setRequestControl(e.target.checked)}
+              />
+              Ask tournament control to come
+            </label>
+          ) : controlRequest.kind === 'sending' ? (
+            <span>Tournament control request is being sent…</span>
+          ) : controlRequest.kind === 'outstanding' ? (
+            <span>
+              Tournament control has already been requested.
+              <br />
+              {helpRequestCategoryLabels[controlRequest.request.category]} ·{' '}
+              {formatControlRequestTime(controlRequest.requestedAt, controlRequest.requestedAtSource)}
+              {onCancelControl && controlRequest.request.id && controlRequest.canCancel !== false && (
+                <>
+                  <br />
+                  <button type="button" className="scorer-text-action" onClick={() => void onCancelControl()}>
+                    Cancel request for control
+                  </button>
+                </>
+              )}
+            </span>
+          ) : controlRequest.kind === 'failed' ? (
+            <span>
+              Tournament control was not reached.
+              {onRetryControl && controlRequest.retryable && (
+                <>
+                  <br />
+                  <button type="button" className="scorer-text-action" onClick={() => void onRetryControl()}>
+                    Try request again
+                  </button>
+                </>
+              )}
+            </span>
+          ) : controlRequest.kind === 'refused' ? (
+            <span>
+              Tournament control refused this request.
+              {onRetryControl && controlRequest.retryable && (
+                <>
+                  <br />
+                  <button type="button" className="scorer-text-action" onClick={() => void onRetryControl()}>
+                    Try request again
+                  </button>
+                </>
+              )}
+            </span>
+          ) : (
+            <span>
+              This tournament connection does not support remote control requests; the issue will still be saved on
+              the scoresheet.
+            </span>
+          )}
+        </div>
         {error && <p className="scorer-problem">{error}</p>}
         <button type="button" className="scorer-choice" disabled={sending || !details.trim()} onClick={submit}>
           {submitLabel}

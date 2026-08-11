@@ -35,7 +35,14 @@
  * never put in a URL, never logged, never rendered, and never written into anything that leaves the
  * device. The caller holds them; this file only forwards them.
  */
-import { HelpRequestCategory } from '../../app/HelpRequests';
+import {
+  HelpClearResult,
+  HelpReadResult,
+  HelpRequestCategory,
+  HelpRequestResult,
+  IHelpRequestSummary,
+  helpRequestCategoryLabels,
+} from '../../app/HelpRequests';
 import { IQbtcpDiscovery, readDiscovery, qbtcpRoutes, supports } from '../../qbtcp/QbtcpRoutes';
 import { IServerAdapter, IRequestOptions, LegacyAdapter, QbtcpAdapter } from './ProtocolAdapters';
 import {
@@ -76,6 +83,14 @@ export type {
   ISessionResumeInfo,
   IWriterConflict,
 } from './ServerTypes';
+export type {
+  ControlRequestState,
+  HelpClearResult,
+  HelpReadResult,
+  HelpRequestCategory,
+  HelpRequestResult,
+  IHelpRequestSummary,
+} from '../../app/HelpRequests';
 export { readWriterConflict } from './ProtocolAdapters';
 
 /** How long to wait on a request before treating tournament control as unreachable. */
@@ -90,6 +105,59 @@ export const requestTimeoutMs = 8000;
  * rather than at the end of a round.
  */
 export const requiredCapabilities = ['pairing', 'assignment', 'result'] as const;
+
+const helpCategories = new Set<HelpRequestCategory>(Object.keys(helpRequestCategoryLabels) as HelpRequestCategory[]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function stringOf(value: unknown): string | undefined {
+  return typeof value === 'string' && value !== '' ? value : undefined;
+}
+
+function isHelpCategory(value: unknown): value is HelpRequestCategory {
+  return typeof value === 'string' && helpCategories.has(value as HelpRequestCategory);
+}
+
+/** Read the server's `{ request: ... }` help envelope without exposing it above the client. */
+export function readHelpResponse(value: unknown): IHelpRequestSummary | null | undefined {
+  if (isRecord(value) && Object.prototype.hasOwnProperty.call(value, 'request')) {
+    if (value.request === null) return null;
+    value = value.request;
+  }
+  if (!isRecord(value)) return undefined;
+  // A terminal request is equivalent to GET returning no outstanding room request.
+  if (value.status !== undefined && value.status !== 'open') return null;
+  if (!isHelpCategory(value.category) || typeof value.message !== 'string') return undefined;
+  return {
+    category: value.category,
+    message: value.message,
+    ...(stringOf(value.id) ? { id: stringOf(value.id) } : {}),
+    ...(stringOf(value.createdAt) ? { createdAt: stringOf(value.createdAt) } : {}),
+    ...(stringOf(value.updatedAt) ? { updatedAt: stringOf(value.updatedAt) } : {}),
+  };
+}
+
+type HelpFailure = Exclude<HelpRequestResult, { kind: 'accepted' | 'already-outstanding' }>;
+type FailedApiResult = Extract<ApiResult<unknown>, { ok: false }>;
+
+function helpFailure(result: FailedApiResult): HelpFailure {
+  if (result.unsupported || result.status === 404 || result.status === 405) {
+    return {
+      kind: 'unsupported',
+      error: 'This tournament connection does not support remote control requests.',
+    };
+  }
+  if (result.status === undefined) return { kind: 'unreachable', error: result.error };
+  if (result.status >= 500) return { kind: 'server-error', status: result.status, error: result.error };
+  return {
+    kind: 'refused',
+    status: result.status,
+    error: result.detail ?? result.error,
+    retryable: result.status === 401,
+  };
+}
 
 /**
  * Is this a well-formed base URL for a tournament server?
@@ -169,6 +237,9 @@ export default class FruityServerClient {
   private adapter: IServerAdapter;
 
   private discovery: IQbtcpDiscovery | null = null;
+
+  /** A legacy server may predate the GET/DELETE help lifecycle while still accepting POST. */
+  private legacyHelpLifecycleUnavailable = false;
 
   constructor(
     readonly baseUrl: string,
@@ -390,8 +461,73 @@ export default class FruityServerClient {
     identity: IRoomIdentity,
     category: HelpRequestCategory,
     message: string,
-  ): Promise<ApiResult<unknown>> {
-    return (await this.ready()).requestHelp(identity, category, message);
+  ): Promise<HelpRequestResult> {
+    let result: ApiResult<unknown>;
+    try {
+      result = await (await this.ready()).requestHelp(identity, category, message);
+    } catch {
+      return { kind: 'unreachable', error: 'Could not reach tournament control.' };
+    }
+    if (!result.ok) return helpFailure(result);
+    const request = readHelpResponse(result.value);
+    if (request !== undefined && request !== null) {
+      return {
+        kind: request.category === category && request.message === message ? 'accepted' : 'already-outstanding',
+        request,
+      };
+    }
+    if (this.isQbtcp) {
+      return { kind: 'server-error', error: 'Tournament control accepted no readable help request.' };
+    }
+    // Deployed pre-QBTCP servers historically treated a successful POST with no useful body as
+    // acceptance. Keep that compatibility only on the legacy surface; QBTCP has a defined envelope
+    // and must not claim success when it did not return the request it accepted.
+    return {
+      kind: 'accepted',
+      request: { category, message },
+    };
+  }
+
+  async readHelp(identity: IRoomIdentity): Promise<HelpReadResult> {
+    let result: ApiResult<unknown>;
+    try {
+      result = await (await this.ready()).readHelp(identity);
+    } catch {
+      return { kind: 'unreachable', error: 'Could not reach tournament control.' };
+    }
+    // The original legacy surface exposed POST /help but not necessarily the later lifecycle
+    // reads. A missing legacy GET must not hide the POST action or clear a locally known request;
+    // it only means reload reconciliation is unavailable on that server. QBTCP discovery remains
+    // authoritative for its own capability.
+    if (!this.isQbtcp && !result.ok && (result.unsupported || result.status === 404 || result.status === 405)) {
+      this.legacyHelpLifecycleUnavailable = true;
+      return { kind: 'unavailable', error: 'This older tournament connection cannot restore help state.' };
+    }
+    if (!this.isQbtcp && result.ok) this.legacyHelpLifecycleUnavailable = false;
+    if (!result.ok) return helpFailure(result);
+    const request = readHelpResponse(result.value);
+    if (request === null) return { kind: 'idle' };
+    if (request === undefined) {
+      return { kind: 'server-error', error: 'Tournament control sent an answer this page could not read.' };
+    }
+    return { kind: 'outstanding', request };
+  }
+
+  async cancelHelp(identity: IRoomIdentity, helpId: string): Promise<HelpClearResult> {
+    let result: ApiResult<unknown>;
+    try {
+      result = await (await this.ready()).cancelHelp(identity, helpId);
+    } catch {
+      return { kind: 'unreachable', error: 'Could not reach tournament control.' };
+    }
+    // Control may have resolved it between GET and DELETE; the desired local state is still idle.
+    // Once a legacy GET has proved that the lifecycle routes are absent, however, the same 404
+    // means this old server cannot withdraw a POST-created request.
+    if (!result.ok && result.status === 404 && (this.isQbtcp || !this.legacyHelpLifecycleUnavailable)) {
+      return { kind: 'idle' };
+    }
+    if (!result.ok) return helpFailure(result);
+    return { kind: 'cleared' };
   }
 
   async addRosterPlayer(

@@ -305,10 +305,51 @@ recovery path. The profile document describes both paths together.
     POST   /qbtcp/v1/help                (room token)
     DELETE /qbtcp/v1/help/{id}           (room token)
 
-A room asks for a person: a protest to adjudicate, an absent player, a broken buzzer. Categories are
-implementation-defined, and discovery advertises them.
+A room asks for a person: a protest to adjudicate, an absent player, a broken buzzer, or another
+short operational problem. `help` in discovery is the authoritative capability. The request body is
+small and contains only the existing category vocabulary and an optional free-text message:
+
+```json
+{ "category": "question-packet", "message": "The packet does not match this round." }
+```
+
+The server returns the same envelope for all three endpoints:
+
+```json
+{
+  "request": {
+    "id": "help-…",
+    "roomId": "room-204",
+    "roomName": "Room 204",
+    "category": "question-packet",
+    "message": "The packet does not match this round.",
+    "status": "open",
+    "createdAt": "2026-08-11T14:42:00.000Z",
+    "updatedAt": "2026-08-11T14:42:00.000Z",
+    "deviceId": "…",
+    "operatorName": "…",
+    "currentMatchup": { "roundNumber": 4, "roundName": "Round 4", "leftTeam": "Ninety Six", "rightTeam": "Greenwood" }
+  }
+}
+```
+
+`GET` returns `{ "request": null }` when this room/device has no open request. `POST` creates an
+open request and returns it. If that same room/device already has an open request, the server returns
+the existing request instead of creating a second active summons. The response includes server
+timestamps when available; they are not a chat timestamp or an acknowledgement from staff.
+
+`DELETE /qbtcp/v1/help/{id}` withdraws the explicitly selected open request for its owning room/device
+and returns the updated request with `status: "cancelled"`. A request that tournament control marks
+`resolved` is likewise absent from a later room-scoped `GET`; the room does not claim that it was
+resolved because this endpoint does not provide a room-facing resolution workflow. A missing request
+on `DELETE` is a harmless race with resolution and can be treated as no request outstanding.
 
 Help is orthogonal to scoring. It MUST NOT affect the state of a session.
+
+This is a room-level operational signal, not a ticket queue or chat. A scoresheet may retain many
+local issue and protest events, while the server keeps at most one active summons for a room/device.
+The free-text message is delivered only because the scorekeeper explicitly asked for help; it is not
+part of connection diagnostics or progress snapshots.
 
 ## Errors and status semantics
 
@@ -349,6 +390,11 @@ game. An implementation that claims QBTCP conformance MUST hold to all of the fo
 - A reload restores from local state, not from the network.
 - Snapshots retry and coalesce. The current state always takes precedence over a stale queued one.
 - A connected final still offers a manual QBJ download.
+
+For help requests, a client classifies a `401` as a room-credential problem for the existing room
+repair flow, a `403` as an explicit refusal without starting a pairing loop, a network failure as
+unreachable, and a `5xx` as a retryable server failure. None of these outcomes removes a locally
+recorded issue or stops scoring.
 
 ## CORS and local network access
 
@@ -417,3 +463,15 @@ deprecated from its introduction. A new scoresheet MUST use the canonical `/qbtc
 paths.
 
 [`QBG_MIGRATION.md`](QBG_MIGRATION.md) holds the route mapping for the reference implementation.
+
+The legacy aliases for the help lifecycle are:
+
+    GET    /api/v1/rooms/{roomId}/help
+    POST   /api/v1/rooms/{roomId}/help
+    DELETE /api/v1/rooms/{roomId}/help/{helpId}
+
+They use the same request and response bodies and dispatch to the same server behavior. A client
+that never receives QBTCP discovery may continue using them; a QBTCP client uses the canonical paths.
+If an older pre-QBTCP server exposes only `POST /help`, the client keeps that request action
+available but reports lifecycle reads and withdrawal as unavailable; it does not hide a request that
+may still be open on that server.

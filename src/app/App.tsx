@@ -60,7 +60,7 @@ import DuplicateTabNotice from './DuplicateTabNotice';
 import DeviceReadiness from './DeviceReadiness';
 import AssignmentConfirmation from './AssignmentConfirmation';
 import FruityServerClient from '../integrations/fruity/FruityServerClient';
-import { HelpRequestCategory } from './HelpRequests';
+import { HelpRequestCategory, HelpRequestResult } from './HelpRequests';
 import { connectionTimeline } from './ConnectionTimeline';
 import { useReplaceable } from '../pwa/useAppUpdate';
 import { ResultDeliveryCapabilityStore } from './ResultDeliveryCapability';
@@ -389,19 +389,30 @@ export default function App() {
    * gets a function that already knows who it is.
    */
   const reportAssignmentProblem = useCallback(
-    async (category: HelpRequestCategory, message: string): Promise<{ ok: boolean; error?: string }> => {
+    async (category: HelpRequestCategory, message: string): Promise<HelpRequestResult> => {
       const live = connectionRef.current;
-      if (!live) return { ok: false, error: 'This device is no longer paired with tournament control.' };
+      if (!live) return { kind: 'unreachable', error: 'This device is no longer paired with tournament control.' };
       const client = new FruityServerClient(live.baseUrl);
       const result = await client.requestHelp(
         { roomId: live.roomId, token: live.roomToken, deviceId: live.deviceId, roomName: live.roomName },
         category,
         message,
       );
-      if (!result.ok) return { ok: false, error: result.error };
-      // The category, never the message. See `ConnectionTimeline`.
-      connectionTimeline.record('control-requested', category);
-      return { ok: true };
+      if (result.kind === 'accepted' || result.kind === 'already-outstanding') {
+        // The category, never the message. For a deduplicated POST, keep the category of the
+        // request that is actually outstanding rather than the new assignment note.
+        connectionTimeline.record(
+          'control-requested',
+          result.kind === 'already-outstanding' ? result.request.category : category,
+        );
+      } else if (result.kind === 'refused' && result.status === 401) {
+        connectionTimeline.record('room-refused');
+      } else if (result.kind === 'refused') {
+        connectionTimeline.record('control-request-refused', category);
+      } else {
+        connectionTimeline.record('control-request-failed', category);
+      }
+      return result;
     },
     [],
   );

@@ -19,7 +19,12 @@ import ScorerHost from '../src/scorer/ScorerHost';
 import { IRoomProcedure } from '../src/scoring/RoomProcedure';
 import { ITeamRoster } from '../src/game/Roster';
 import { RoomConnectionState } from '../src/app/ConnectionState';
-import { HelpRequestCategory } from '../src/app/HelpRequests';
+import {
+  ControlRequestState,
+  HelpClearResult,
+  HelpRequestCategory,
+  HelpRequestResult,
+} from '../src/app/HelpRequests';
 
 const leftTeam = {
   name: 'Ninety Six',
@@ -48,13 +53,21 @@ interface IRosterSyncTestOptions {
   ) => Promise<{ ok: boolean; error?: string; rejected?: boolean }>;
 }
 
+interface IControlRequestTestOptions {
+  controlRequest?: ControlRequestState;
+  onRetryControlRequest?: () => Promise<HelpRequestResult | null>;
+  onCancelControlRequest?: () => Promise<HelpClearResult | null>;
+  onEventsChanged?: (events: unknown[]) => void;
+}
+
 function renderScorer(
   format: IScorekeeperFormat,
   onSubmit?: ReturnType<typeof vi.fn>,
-  onRequestControl?: (category: HelpRequestCategory, message: string) => Promise<void>,
+  onRequestControl?: (category: HelpRequestCategory, message: string) => Promise<HelpRequestResult>,
   procedure?: IRoomProcedure,
   packetName?: string,
   rosterOptions: IRosterSyncTestOptions = {},
+  controlOptions: IControlRequestTestOptions = {},
 ) {
   const submit = onSubmit ?? vi.fn().mockResolvedValue({ ok: true, message: 'Sent' });
   gameCounter += 1;
@@ -73,6 +86,10 @@ function renderScorer(
       onDownload={() => undefined}
       onSubmit={submit}
       onRequestControl={onRequestControl}
+      controlRequest={controlOptions.controlRequest}
+      onRetryControlRequest={controlOptions.onRetryControlRequest}
+      onCancelControlRequest={controlOptions.onCancelControlRequest}
+      onEventsChanged={(events) => controlOptions.onEventsChanged?.(events)}
       authoritativeLeftTeam={rosterOptions.authoritativeLeftTeam}
       authoritativeRightTeam={rosterOptions.authoritativeRightTeam}
       onSyncRosterPlayer={rosterOptions.onSyncRosterPlayer}
@@ -112,8 +129,8 @@ function pressControl(name: string | RegExp) {
     fireEvent.click(onFooter);
     return;
   }
-  fireEvent.click(screen.getByText('Game'));
-  fireEvent.click(screen.getByText(name));
+  fireEvent.click(screen.getByRole('button', { name: 'Game' }));
+  fireEvent.click(screen.getByRole('menuitem', { name }));
 }
 
 /** Every control the screen offers, footer and Game menu together. */
@@ -642,7 +659,10 @@ describe('the game menu', () => {
   });
 
   test('a player can be added during a game and the roster change is sent to control', async () => {
-    const requestControl = vi.fn().mockResolvedValue(undefined);
+    const requestControl = vi.fn().mockResolvedValue({
+      kind: 'accepted',
+      request: { category: 'roster-change', message: 'Please add Taylor Brooks.' },
+    } satisfies HelpRequestResult);
     renderScorer(formatFor(), undefined, requestControl);
     pressControl('Players');
 
@@ -651,6 +671,20 @@ describe('the game menu', () => {
     await vi.waitFor(() =>
       expect(requestControl).toHaveBeenCalledWith('roster-change', expect.stringContaining('Taylor Brooks')),
     );
+  });
+
+  test('a failed roster help request is reported after the local roster add', async () => {
+    const requestControl = vi.fn().mockResolvedValue({
+      kind: 'unreachable',
+      error: 'Tournament control did not answer.',
+    } satisfies HelpRequestResult);
+    renderScorer(formatFor(), undefined, requestControl);
+    pressControl('Players');
+
+    addMissingPlayer('Ninety Six lineup', 'Taylor Brooks');
+
+    await vi.waitFor(() => expect(screen.getByText(/Added Taylor Brooks .*not reached/)).toBeTruthy());
+    expect(requestControl).toHaveBeenCalledWith('roster-change', expect.stringContaining('Taylor Brooks'));
   });
 
   test('a restricted substitution window adds a player to the bench without changing the lineup', () => {
@@ -814,13 +848,136 @@ describe('the game menu', () => {
   });
 
   test('an operational issue is saved and can request tournament control', async () => {
-    const requestControl = vi.fn().mockResolvedValue(undefined);
+    const requestControl = vi.fn().mockResolvedValue({
+      kind: 'accepted',
+      request: { category: 'protest', message: 'The ruling was disputed.' },
+    } satisfies HelpRequestResult);
     renderScorer(formatFor(), undefined, requestControl);
-    pressControl(/issue/i);
+    pressControl('Issue / tournament control');
     fireEvent.change(screen.getByLabelText('What happened?'), { target: { value: 'The buzzers cut out.' } });
     fireEvent.click(screen.getByText('Save and request control'));
 
     await vi.waitFor(() => expect(requestControl).toHaveBeenCalledWith('question-packet', 'The buzzers cut out.'));
+  });
+
+  test('a failed control request never prevents the local issue from being saved', async () => {
+    const requestControl = vi.fn().mockResolvedValue({
+      kind: 'unreachable',
+      error: 'Tournament control did not answer.',
+    } satisfies HelpRequestResult);
+    let latestEvents: unknown[] = [];
+    renderScorer(formatFor(), undefined, requestControl, undefined, undefined, {}, {
+      onEventsChanged: (events) => {
+        latestEvents = events;
+      },
+    });
+    pressControl('Issue / tournament control');
+    fireEvent.change(screen.getByLabelText('What happened?'), { target: { value: 'The room lost Wi-Fi.' } });
+    fireEvent.click(screen.getByText('Save and request control'));
+
+    await vi.waitFor(() => expect(screen.getByText('Issue saved, but tournament control was not reached.')).toBeTruthy());
+    await vi.waitFor(() =>
+      expect(latestEvents).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: 'note', text: 'Question / packet issue: The room lost Wi-Fi.', flagged: true }),
+        ]),
+      ),
+    );
+    expect(requestControl).toHaveBeenCalledTimes(1);
+  });
+
+  test('a second issue is saved while one room summons is outstanding, without another request', async () => {
+    const requestControl = vi.fn();
+    const outstanding: ControlRequestState = {
+      kind: 'outstanding',
+      request: { id: 'help-1', category: 'question-packet', message: 'The buzzers cut out.' },
+      requestedAt: '2026-08-11T14:42:00.000Z',
+      requestedAtSource: 'server',
+    };
+    let latestEvents: unknown[] = [];
+    renderScorer(formatFor(), undefined, requestControl, undefined, undefined, {}, {
+      controlRequest: outstanding,
+      onEventsChanged: (events) => {
+        latestEvents = events;
+      },
+    });
+
+    pressControl('Issue / tournament control');
+    expect(screen.getByRole('dialog', { name: 'Issue / tournament control' })).toHaveTextContent(
+      'Tournament control has already been requested.',
+    );
+    expect(screen.queryByLabelText('Ask tournament control to come')).toBeNull();
+    fireEvent.change(screen.getByLabelText('What happened?'), { target: { value: 'A second issue.' } });
+    fireEvent.click(screen.getByText('Save issue'));
+    await vi.waitFor(() =>
+      expect(latestEvents).toEqual(
+        expect.arrayContaining([expect.objectContaining({ type: 'note', text: 'Question / packet issue: A second issue.' })]),
+      ),
+    );
+    expect(requestControl).not.toHaveBeenCalled();
+  });
+
+  test('the outstanding room summons is shared by ordinary issues and protests', () => {
+    const requestControl = vi.fn();
+    const outstanding: ControlRequestState = {
+      kind: 'outstanding',
+      request: { id: 'help-2', category: 'protest', message: 'A ruling needs a director.' },
+      requestedAt: '2026-08-11T14:42:00.000Z',
+      requestedAtSource: 'server',
+    };
+    renderScorer(formatFor(), undefined, requestControl, undefined, undefined, {}, { controlRequest: outstanding });
+
+    pressControl('Protests');
+    expect(screen.getByRole('dialog', { name: 'Protests' })).toHaveTextContent(
+      'Tournament control has already been requested.',
+    );
+    expect(screen.queryByLabelText('Ask tournament control to come')).toBeNull();
+  });
+
+  test('a failed summons offers a retry without asking for the issue again', async () => {
+    const retry = vi.fn().mockResolvedValue({
+      kind: 'accepted',
+      request: { id: 'help-3', category: 'question-packet', message: 'The buzzers cut out.' },
+    } satisfies HelpRequestResult);
+    const failed: ControlRequestState = {
+      kind: 'failed',
+      category: 'question-packet',
+      message: 'The buzzers cut out.',
+      error: 'Could not reach tournament control.',
+      retryable: true,
+    };
+    renderScorer(formatFor(), undefined, undefined, undefined, undefined, {}, {
+      controlRequest: failed,
+      onRetryControlRequest: retry,
+    });
+    pressControl('Issue / tournament control');
+    expect(screen.getAllByText('Tournament control was not reached.').length).toBeGreaterThan(0);
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Issue / tournament control' })).getByRole('button', {
+      name: 'Try request again',
+    }));
+    await vi.waitFor(() => expect(retry).toHaveBeenCalledTimes(1));
+  });
+
+  test('a file-scored issue is saved without offering remote controls', async () => {
+    let latestEvents: unknown[] = [];
+    renderScorer(formatFor(), undefined, undefined, undefined, undefined, {}, {
+      onEventsChanged: (events) => {
+        latestEvents = events;
+      },
+    });
+    pressControl('Issue / tournament control');
+    expect(screen.queryByLabelText('Ask tournament control to come')).toBeNull();
+    expect(screen.getByText(/remote control requests/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('What happened?'), { target: { value: 'The packet is damaged.' } });
+    fireEvent.click(screen.getByText('Save issue'));
+
+    await vi.waitFor(() =>
+      expect(latestEvents).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: 'note', text: 'Question / packet issue: The packet is damaged.' }),
+        ]),
+      ),
+    );
   });
 
   /*
@@ -829,11 +986,14 @@ describe('the game menu', () => {
    * pending when the result is submitted. Asking for a director is still one checkbox away.
    */
   test('a protest can also ask tournament control to come', async () => {
-    const requestControl = vi.fn().mockResolvedValue(undefined);
+    const requestControl = vi.fn().mockResolvedValue({
+      kind: 'accepted',
+      request: { category: 'protest', message: 'The ruling was disputed.' },
+    } satisfies HelpRequestResult);
     renderScorer(formatFor(), undefined, requestControl);
     pressControl('Protests');
     fireEvent.change(screen.getByLabelText('Details'), { target: { value: 'The ruling was disputed.' } });
-    fireEvent.click(screen.getByLabelText('Ask tournament control to come now'));
+    fireEvent.click(screen.getByLabelText('Ask tournament control to come'));
     fireEvent.click(screen.getByText('Record protest and keep playing'));
 
     await vi.waitFor(() =>

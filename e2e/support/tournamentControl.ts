@@ -162,6 +162,18 @@ export interface IProgressEnvelope {
   match: unknown;
 }
 
+export interface IHelpRequestFixture {
+  id: string;
+  roomId: string;
+  roomName: string;
+  category: string;
+  message: string;
+  status: 'open' | 'cancelled';
+  createdAt: string;
+  updatedAt: string;
+  deviceId: string;
+}
+
 export interface ITournamentControl {
   readonly origin: string;
   readonly protocol: ControlProtocol;
@@ -170,6 +182,10 @@ export interface ITournamentControl {
   /** Every progress body, exactly as it arrived. */
   readonly progress: IProgressEnvelope[];
   readonly results: object[];
+  /** Every accepted help request created by this room. */
+  readonly helpRequests: IHelpRequestFixture[];
+  /** Every POST /help attempt, including attempts answered with a failure. */
+  readonly helpPosts: { category: string; message: string }[];
   /** Every final result body, including bodies whose response was deliberately failed. */
   readonly resultAttempts: object[];
   /** Every explicit takeover this server was asked for, with the device that asked. */
@@ -193,6 +209,10 @@ export interface ITournamentControl {
   writerHeldBy(): string | null;
   /** Make the next result request fail with a retryable server response. */
   failNextResult(status?: number, error?: string): void;
+  /** Resolve the room's open help request, as tournament control would. */
+  resolveHelpRequest(): void;
+  /** Make the next help request fail without creating an open request. */
+  failNextHelp(status?: number, error?: string): void;
   close(): Promise<void>;
 }
 
@@ -218,6 +238,8 @@ export async function startTournamentControl(protocol: ControlProtocol): Promise
   const progress: IProgressEnvelope[] = [];
   const results: object[] = [];
   const resultAttempts: object[] = [];
+  const helpRequests: IHelpRequestFixture[] = [];
+  const helpPosts: { category: string; message: string }[] = [];
   const takeovers: { deviceId: unknown; takeOver: unknown }[] = [];
   const openSessions = new Map<string, { matchId: string; token: string }>();
   let assigned: RoundNumber | null = 4;
@@ -227,6 +249,9 @@ export async function startTournamentControl(protocol: ControlProtocol): Promise
   let refusedWrites = 0;
   let sessionCounter = 0;
   let nextResultFailure: { status: number; error: string } | null = null;
+  let helpCounter = 0;
+  let openHelp: IHelpRequestFixture | null = null;
+  let nextHelpFailure: { status: number; error: string } | null = null;
 
   const server: Server = createServer((request: IncomingMessage, response: ServerResponse) => {
     void (async () => {
@@ -264,6 +289,83 @@ export async function startTournamentControl(protocol: ControlProtocol): Promise
 
       const roomAuthorized = () => roomTokenValid && request.headers['x-yf-room-token'] === roomToken;
       const sessionAuthorized = () => sessionTokenValid && request.headers['x-yf-session-token'] === sessionToken;
+      const deviceForHelp = () => {
+        const value = request.headers['x-yf-device-id'];
+        return Array.isArray(value) ? value[0] ?? '' : value ?? '';
+      };
+
+      const helpVisibleToThisDevice = () =>
+        openHelp !== null && openHelp.deviceId === deviceForHelp() ? openHelp : null;
+
+      const helpResponse = (requestValue: IHelpRequestFixture | null) => ({ request: requestValue });
+
+      const handleHelp = async (helpPath: string, helpMethod: string): Promise<boolean> => {
+        const qbtcpHelp = helpPath === '/qbtcp/v1/help';
+        const legacyHelp = helpPath === `/api/v1/rooms/${roomId}/help`;
+        const deleteMatch = qbtcpHelp
+          ? null
+          : /^\/qbtcp\/v1\/help\/([^/]+)$/.exec(helpPath) ??
+            new RegExp(`^/api/v1/rooms/${roomId}/help/([^/]+)$`).exec(helpPath);
+        if (!(qbtcpHelp || legacyHelp || deleteMatch)) return false;
+        if (!roomAuthorized()) {
+          refuse(401, 'This room is no longer paired.');
+          return true;
+        }
+        if (helpMethod === 'GET' && (qbtcpHelp || legacyHelp)) {
+          send(200, helpResponse(helpVisibleToThisDevice()));
+          return true;
+        }
+        if (helpMethod === 'POST' && (qbtcpHelp || legacyHelp)) {
+          const body = JSON.parse((await readBody(request)) || '{}') as {
+            category?: unknown;
+            message?: unknown;
+          };
+          const category = typeof body.category === 'string' ? body.category : '';
+          const message = typeof body.message === 'string' ? body.message : '';
+          helpPosts.push({ category, message });
+          if (nextHelpFailure) {
+            const failure = nextHelpFailure;
+            nextHelpFailure = null;
+            refuse(failure.status, failure.error);
+            return true;
+          }
+          const existing = helpVisibleToThisDevice();
+          if (existing) {
+            send(200, helpResponse(existing));
+            return true;
+          }
+          helpCounter += 1;
+          const now = new Date().toISOString();
+          openHelp = {
+            id: `help-${helpCounter}`,
+            roomId,
+            roomName,
+            category,
+            message,
+            status: 'open',
+            createdAt: now,
+            updatedAt: now,
+            deviceId: deviceForHelp(),
+          };
+          helpRequests.push(openHelp);
+          send(200, helpResponse(openHelp));
+          return true;
+        }
+        if (helpMethod === 'DELETE' && deleteMatch) {
+          const id = decodeURIComponent(deleteMatch[1]);
+          if (!openHelp || openHelp.id !== id || openHelp.deviceId !== deviceForHelp()) {
+            refuse(404, 'No such open request.');
+            return true;
+          }
+          const now = new Date().toISOString();
+          openHelp = { ...openHelp, status: 'cancelled', updatedAt: now };
+          send(200, helpResponse(openHelp));
+          openHelp = null;
+          return true;
+        }
+        refuse(405, 'Method not allowed.');
+        return true;
+      };
 
       /**
        * Refuse a write that another device owns.
@@ -428,6 +530,7 @@ export async function startTournamentControl(protocol: ControlProtocol): Promise
           send(200, {});
           return;
         }
+        if (await handleHelp(path, method)) return;
         refuse(404, 'Not found');
         return;
       }
@@ -505,6 +608,7 @@ export async function startTournamentControl(protocol: ControlProtocol): Promise
         send(200, { accepted: true });
         return;
       }
+      if (await handleHelp(path, method)) return;
       refuse(404, 'Not found');
     })().catch(() => {
       response.writeHead(500).end();
@@ -520,6 +624,8 @@ export async function startTournamentControl(protocol: ControlProtocol): Promise
     requests,
     progress,
     results,
+    helpRequests,
+    helpPosts,
     resultAttempts,
     takeovers,
     refusedWrites() {
@@ -542,6 +648,12 @@ export async function startTournamentControl(protocol: ControlProtocol): Promise
     },
     failNextResult(status = 503, error = 'Tournament control is temporarily unavailable.') {
       nextResultFailure = { status, error };
+    },
+    resolveHelpRequest() {
+      openHelp = null;
+    },
+    failNextHelp(status = 503, error = 'Tournament control is temporarily unavailable.') {
+      nextHelpFailure = { status, error };
     },
     close() {
       return new Promise<void>((resolve) => {

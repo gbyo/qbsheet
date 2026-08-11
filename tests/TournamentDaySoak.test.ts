@@ -559,6 +559,8 @@ class FakeControl {
       recover: async () => this.answer({ latestQbj: {} }),
       addRosterPlayer: async () => this.answer({}),
       requestHelp: async () => this.answer({}),
+      readHelp: async () => this.answer({ request: null }),
+      cancelHelp: async () => this.answer({ request: null }),
     } as unknown as FruityServerClient;
   }
 }

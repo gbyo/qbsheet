@@ -32,3 +32,64 @@ export const helpRequestCategoryLabels: Record<HelpRequestCategory, string> = {
   'wrong-room': 'Wrong room',
   other: 'Other',
 };
+
+/** The protocol-independent request data the scorer needs to display and retry. */
+export interface IHelpRequestSummary {
+  id?: string;
+  category: HelpRequestCategory;
+  message: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/** A normalized outcome of asking tournament control to come to this room. */
+export type HelpRequestResult =
+  | { kind: 'accepted'; request: IHelpRequestSummary }
+  | { kind: 'already-outstanding'; request: IHelpRequestSummary }
+  | { kind: 'unreachable'; error: string }
+  | { kind: 'unsupported'; error: string }
+  | { kind: 'server-error'; status?: number; error: string }
+  | { kind: 'refused'; status: number; error: string; retryable: boolean };
+
+/** A normalized answer to the low-volume GET `/help` reconciliation. */
+export type HelpReadResult =
+  | { kind: 'idle' }
+  | { kind: 'outstanding'; request: IHelpRequestSummary }
+  | { kind: 'unavailable'; error: string }
+  | Exclude<HelpRequestResult, { kind: 'accepted' | 'already-outstanding' }>;
+
+/** A normalized answer to an explicit DELETE/withdrawal. */
+export type HelpClearResult =
+  | { kind: 'cleared' }
+  | { kind: 'idle' }
+  | Exclude<HelpRequestResult, { kind: 'accepted' | 'already-outstanding' }>;
+
+/** Facts the live room can show about its one active summons. */
+export type ControlRequestState =
+  | { kind: 'unavailable'; error?: string }
+  | { kind: 'idle' }
+  | { kind: 'sending'; category: HelpRequestCategory; message: string }
+  | {
+      kind: 'outstanding';
+      request: IHelpRequestSummary;
+      requestedAt: string;
+      requestedAtSource: 'server' | 'device';
+      /** False only after this server explicitly says its help lifecycle has no DELETE route. */
+      canCancel?: boolean;
+    }
+  | {
+      kind: 'failed';
+      category: HelpRequestCategory;
+      message: string;
+      error: string;
+      retryable: boolean;
+    }
+  | {
+      kind: 'refused';
+      category: HelpRequestCategory;
+      message: string;
+      error: string;
+      status?: number;
+      retryable: boolean;
+    }
+  | { kind: 'unsupported'; error: string };

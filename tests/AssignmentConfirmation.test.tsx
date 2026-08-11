@@ -15,7 +15,7 @@ import AssignmentConfirmation, {
 } from '../src/app/AssignmentConfirmation';
 import { needsAssignmentConfirmation } from '../src/app/App';
 import { IStoredGameRecord } from '../src/game/GameStore';
-import { HelpRequestCategory } from '../src/app/HelpRequests';
+import { HelpRequestCategory, HelpRequestResult } from '../src/app/HelpRequests';
 import { validPackage } from './packages';
 
 function packageWith(overrides: Parameters<typeof validPackage>[0] = {}) {
@@ -28,9 +28,14 @@ function open(options: { canReport?: boolean; reportFails?: boolean; packageOver
   const onBack = vi.fn();
   // Typed explicitly so `mock.calls[0]` is the two arguments the card sends rather than an empty tuple
   // inferred from a zero-parameter implementation.
-  const onReportProblem = vi.fn<(category: HelpRequestCategory, message: string) => Promise<{ ok: boolean; error?: string }>>(
+  const onReportProblem = vi.fn<(category: HelpRequestCategory, message: string) => Promise<HelpRequestResult>>(
     async () =>
-      options.reportFails === true ? { ok: false, error: 'Tournament control did not answer.' } : { ok: true },
+      options.reportFails === true
+        ? { kind: 'unreachable', error: 'Tournament control did not answer.' }
+        : {
+            kind: 'accepted',
+            request: { category: 'question-packet', message: 'assignment report', id: 'help-1' },
+          },
   );
   render(
     <AssignmentConfirmation
@@ -176,7 +181,7 @@ describe('never a wall between a room and a game', () => {
     await press('Wrong packet');
     await press('Tell tournament control');
 
-    expect(screen.getByRole('alert')).toHaveTextContent('Tournament control did not answer.');
+    expect(screen.getByRole('alert')).toHaveTextContent('Tournament control was not reached.');
     // The sentence that matters: the game is not lost because a help request was not.
     expect(screen.getByRole('alert')).toHaveTextContent('can still be scored');
   });
