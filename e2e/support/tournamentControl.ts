@@ -170,6 +170,8 @@ export interface ITournamentControl {
   /** Every progress body, exactly as it arrived. */
   readonly progress: IProgressEnvelope[];
   readonly results: object[];
+  /** Every final result body, including bodies whose response was deliberately failed. */
+  readonly resultAttempts: object[];
   /** Every explicit takeover this server was asked for, with the device that asked. */
   readonly takeovers: { deviceId: unknown; takeOver: unknown }[];
   /** How many session writes have been refused because another device holds the lock. */
@@ -189,6 +191,8 @@ export interface ITournamentControl {
   giveWriterTo(device: string): void;
   /** Who currently holds the write lock, or null for this room's own device. */
   writerHeldBy(): string | null;
+  /** Make the next result request fail with a retryable server response. */
+  failNextResult(status?: number, error?: string): void;
   close(): Promise<void>;
 }
 
@@ -213,6 +217,7 @@ export async function startTournamentControl(protocol: ControlProtocol): Promise
   const requests: { method: string; path: string }[] = [];
   const progress: IProgressEnvelope[] = [];
   const results: object[] = [];
+  const resultAttempts: object[] = [];
   const takeovers: { deviceId: unknown; takeOver: unknown }[] = [];
   const openSessions = new Map<string, { matchId: string; token: string }>();
   let assigned: RoundNumber | null = 4;
@@ -221,6 +226,7 @@ export async function startTournamentControl(protocol: ControlProtocol): Promise
   let writerDevice: string | null = null;
   let refusedWrites = 0;
   let sessionCounter = 0;
+  let nextResultFailure: { status: number; error: string } | null = null;
 
   const server: Server = createServer((request: IncomingMessage, response: ServerResponse) => {
     void (async () => {
@@ -401,6 +407,13 @@ export async function startTournamentControl(protocol: ControlProtocol): Promise
           }
           if (writerRefused()) return;
           const body = JSON.parse((await readBody(request)) || '{}') as object;
+          resultAttempts.push(body);
+          if (nextResultFailure) {
+            const failure = nextResultFailure;
+            nextResultFailure = null;
+            refuse(failure.status, failure.error);
+            return;
+          }
           const duplicate = results.length > 0;
           results.push(body);
           send(200, {
@@ -507,6 +520,7 @@ export async function startTournamentControl(protocol: ControlProtocol): Promise
     requests,
     progress,
     results,
+    resultAttempts,
     takeovers,
     refusedWrites() {
       return refusedWrites;
@@ -525,6 +539,9 @@ export async function startTournamentControl(protocol: ControlProtocol): Promise
     },
     writerHeldBy() {
       return writerDevice;
+    },
+    failNextResult(status = 503, error = 'Tournament control is temporarily unavailable.') {
+      nextResultFailure = { status, error };
     },
     close() {
       return new Promise<void>((resolve) => {

@@ -221,7 +221,9 @@ describe('what the client puts on the wire', () => {
 
   test('a result is sent as a QBJ document, and a duplicate is read as an answer rather than a failure', async () => {
     const { calls, fetchImpl } = qbtcpServer({
-      '/qbtcp/v1/sessions/sess-1/result': { body: { accepted: true, duplicate: true, match_id: 'Match_sm-4471' } },
+      '/qbtcp/v1/sessions/sess-1/result': {
+        body: { accepted: true, duplicate: true, match_id: 'Match_sm-4471', fingerprint: 'fp-4471' },
+      },
     });
 
     const result = await new FruityServerClient('http://control.test', fetchImpl).postFinal(credentials, {
@@ -230,7 +232,12 @@ describe('what the client puts on the wire', () => {
 
     const sent = calls.find((call) => call.path === '/qbtcp/v1/sessions/sess-1/result');
     expect(sent?.headers['Content-Type']).toBe(qbjMediaType);
-    expect(result.ok && result.value).toEqual({ accepted: true, duplicate: true, matchId: 'Match_sm-4471' });
+    expect(result.ok && result.value).toEqual({
+      accepted: true,
+      duplicate: true,
+      matchId: 'Match_sm-4471',
+      fingerprint: 'fp-4471',
+    });
   });
 
   test('a session is opened with the fields QBTCP names, and its answer is read back', async () => {

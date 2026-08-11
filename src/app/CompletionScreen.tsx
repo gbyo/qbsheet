@@ -87,11 +87,15 @@ export default function CompletionScreen(props: {
       {connected && (
         <section className="shell-section">
           <h2 className="shell-heading">Tournament control</h2>
-          {record.serverDelivery === 'sent' && <p className="final-ok">Result sent ✓</p>}
+          {record.serverDelivery === 'sent' && (
+            <p className="final-ok">
+              {record.serverDeliveryLedger?.acceptedAsDuplicate ? 'Result already on record ✓' : 'Result sent ✓'}
+            </p>
+          )}
           {record.serverDelivery === 'pending' && (
             <p className="final-pending">
-              Tournament control is unavailable. The result is saved on this device and will keep trying to
-              send on its own.
+              Tournament control did not receive the result yet. It is saved on this device; retry it from
+              Recent Games when control is available.
             </p>
           )}
           {record.serverDelivery === 'rejected' && (

@@ -47,6 +47,7 @@ import useConnectedRuntime, { ICredentialRepair } from './useConnectedRuntime';
 import { connectionTimeline } from './ConnectionTimeline';
 import { useAppUpdate } from '../pwa/useAppUpdate';
 import { updateDeferredAlert } from '../pwa/UpdateNotice';
+import { ResultDeliveryService } from './ResultDelivery';
 
 /** The two totals, read back out of the payload rather than derived a second time. */
 export function scoreFromQbj(qbj: object): { left: number; right: number } | undefined {
@@ -76,6 +77,8 @@ export function connectionBelongsTo(connection: IConnectedSession | null, record
 export default function ScoringScreen(props: {
   record: IStoredGameRecord;
   store: GameStore;
+  /** Shared completed-result delivery boundary, including the private retry capability. */
+  resultDelivery: ResultDeliveryService;
   connection: IConnectedSession | null;
   durable: boolean;
   onComplete: (recordId: string) => void | Promise<void>;
@@ -84,7 +87,7 @@ export default function ScoringScreen(props: {
   /** The room gave up on tournament control for this game. The game continues, offline. */
   onConnectionLost: () => void;
 }) {
-  const { record, store, connection, onComplete, onConnectionRepaired, onConnectionLost } = props;
+  const { record, store, resultDelivery, connection, onComplete, onConnectionRepaired, onConnectionLost } = props;
   const [downloadedAt, setDownloadedAt] = useState<string | undefined>(record.qbjDownloadedAt);
   const [repairing, setRepairing] = useState(false);
   const update = useAppUpdate();
@@ -217,21 +220,24 @@ export default function ScoringScreen(props: {
       }
 
       if (live) {
-        const delivered = await runtime.submitFinal(qbjWithSourceMetadata(qbj, record.package));
-        await store.update(record.id, {
-          serverDelivery: delivered.delivery,
-          // A duplicate is the correct answer to a retry, not a problem, but a room that sees
-          // nothing about it has no way to know its earlier attempt had already landed.
-          serverDeliveryDetail: delivered.duplicate
-            ? 'Tournament control already had this result on record.'
-            : delivered.detail,
-        });
+        // The capability is device-only. If this write is refused, the live send still happens and
+        // the completed QBJ remains safe; only a post-reload retry cannot be promised.
+        resultDelivery.remember(record.id, {
+          baseUrl: live.client.baseUrl,
+          sessionId: live.credentials.sessionId,
+          sessionToken: live.credentials.token,
+        }, completedAt);
+
+        // Send exactly the object just committed as `finalQbj`. The internal scorer recovery layer
+        // is for this device and must not be a second version of the portable QBTCP/file result.
+        const delivered = await runtime.submitFinal(portable);
+        await resultDelivery.recordOutcome(record.id, delivered);
       }
 
       await onComplete(record.id);
       return { ok: true, message: 'The result is saved on this device.' };
     },
-    [record.id, record.package, store, live, runtime, onComplete],
+    [record.id, record.package, store, resultDelivery, live, runtime, onComplete],
   );
 
   /**

@@ -54,12 +54,47 @@ export const completedGameRetentionMs = 7 * 24 * 60 * 60 * 1000;
 export type ServerDeliveryState =
   /** This game has no tournament control. A file game is complete when its QBJ is handed over. */
   | 'none'
-  /** Connected, and the final has not been accepted yet. Retried in the background. */
+  /** Connected, and the final has not been accepted yet. A person may retry it explicitly. */
   | 'pending'
   /** Control acknowledged the result. Does not remove the obligation to hand over the backup. */
   | 'sent'
   /** Control refused it, and said why. The game stays exactly as it is. */
   | 'rejected';
+
+/** The last normalized outcome recorded by the result-delivery boundary. */
+export type ServerDeliveryLedgerOutcome = 'accepted' | 'pending' | 'rejected' | 'unsupported';
+
+/**
+ * Small, bounded operational facts about delivery.
+ *
+ * This is deliberately a summary rather than an event log. The connection timeline is the place
+ * for deeper troubleshooting; a finished game only needs enough durable context to explain its
+ * current state and make a useful manual retry possible after a reload.
+ */
+export interface IServerDeliveryLedger {
+  /** Real requests made to the result endpoint. A capability refusal does not increment this. */
+  attemptCount: number;
+  /** ISO 8601. The first real request this device made for the result. */
+  firstAttemptedAt?: string;
+  /** ISO 8601. The most recent real request this device made for the result. */
+  lastAttemptedAt?: string;
+  /** ISO 8601. When control accepted the result, including a duplicate receipt. */
+  acceptedAt?: string;
+  /** Which attempt received the accepted receipt, when there was one. */
+  acceptedOnAttempt?: number;
+  /** True when the accepted receipt said control already had this exact result. */
+  acceptedAsDuplicate?: boolean;
+  /** The match identifier returned by control, when it supplied one. */
+  matchId?: string;
+  /** The result fingerprint returned by control, when it supplied one. */
+  fingerprint?: string;
+  /** The last safe-to-display explanation for a pending or rejected outcome. */
+  lastFailureDetail?: string;
+  /** Whether a later explicit attempt is meaningful with the capability still held. */
+  retryable?: boolean;
+  /** The latest normalized result, including a client-side unsupported-capability refusal. */
+  outcome?: ServerDeliveryLedgerOutcome;
+}
 
 export interface IStoredGameRecord {
   version: number;
@@ -96,6 +131,8 @@ export interface IStoredGameRecord {
   serverDelivery: ServerDeliveryState;
   /** Whatever control said, when it said something. Shown verbatim. */
   serverDeliveryDetail?: string;
+  /** Optional bounded delivery facts. Records from before this field was added remain valid. */
+  serverDeliveryLedger?: IServerDeliveryLedger;
   /** ISO 8601. When this device last wrote the QBJ to the downloads folder. */
   qbjDownloadedAt?: string;
   /** ISO 8601. When somebody said they had handed the file over. Our workflow state, not proof. */

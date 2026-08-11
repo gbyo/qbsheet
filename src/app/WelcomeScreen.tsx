@@ -85,6 +85,8 @@ export default function WelcomeScreen(props: {
   onConnect: (baseUrl: string) => void;
   onOpenPackage: (packageValue: IGamePackage, attempt?: number) => void | Promise<void>;
   onOpenRecord: (record: IStoredGameRecord) => void | Promise<void>;
+  onRetryResult: (recordId: string) => void | Promise<void>;
+  canRetryResult: (record: IStoredGameRecord) => boolean;
   onFindExisting: (identity: string) => Promise<IStoredGameRecord[]>;
 }) {
   const {
@@ -100,6 +102,8 @@ export default function WelcomeScreen(props: {
     onConnect,
     onOpenPackage,
     onOpenRecord,
+    onRetryResult,
+    canRetryResult,
     onFindExisting,
   } = props;
   const [address, setAddress] = useState('');
@@ -252,7 +256,12 @@ export default function WelcomeScreen(props: {
         </button>
       </section>
 
-      <RecentGames records={completed} onOpen={(record) => void onOpenRecord(record)} />
+      <RecentGames
+        records={completed}
+        onOpen={(record) => void onOpenRecord(record)}
+        onRetry={(record) => onRetryResult(record.id)}
+        canRetry={canRetryResult}
+      />
 
       {alreadyPlayed && (
         <div className="shell-modal" role="dialog" aria-modal="true" aria-label="Game already completed">

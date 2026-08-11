@@ -57,31 +57,13 @@ import FruityServerClient, {
   IWriterConflict,
   readWriterConflict,
 } from '../integrations/fruity/FruityServerClient';
-import { ServerDeliveryState } from '../game/GameStore';
 import { ProgressSender } from '../integrations/fruity/FruityResultDestination';
 import { HelpRequestCategory } from './HelpRequests';
 import { ConnectionTimeline, connectionTimeline } from './ConnectionTimeline';
+import { deliverFinalResult, IFinalDelivery } from './ResultDelivery';
 
 /** How often a room asks control what it should be playing. */
 export const assignmentPollIntervalMs = 10_000;
-
-/**
- * What became of a final.
- *
- * Classified here rather than by the caller, because the facts it depends on are here. The
- * difference between `pending` and `rejected` is the difference between "wait, something is
- * retrying" and "a person has to act", and the caller would have to reconstruct it from a rendered
- * copy of state this hook holds live — which is wrong in the one case that matters, a snapshot
- * refused in the instant somebody was pressing Submit.
- */
-export interface IFinalDelivery {
-  /** Never `none`: this path only runs for a game that has tournament control behind it. */
-  delivery: Exclude<ServerDeliveryState, 'none'>;
-  /** Whatever control said, when it said anything. Safe to show. */
-  detail?: string;
-  /** Control already had this exact statistical result. The right answer to a retry, not a problem. */
-  duplicate?: boolean;
-}
 
 /** New credentials a repair produced, for the caller to persist. */
 export interface ICredentialRepair {
@@ -552,24 +534,26 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
       // something that is never coming.
       if (!writesAllowedRef.current) {
         timeline.record('final-refused', 'this room is not authorized to send results');
-        return { delivery: 'rejected', detail: 'This room is not currently authorized to send results.' };
+        return {
+          delivery: 'rejected',
+          detail: 'This room is not currently authorized to send results.',
+          attempted: false,
+          // A forbidden response or writer conflict can become valid after a person fixes it; an
+          // invalid room/session credential cannot be repaired from Recent Games alone.
+          retryable: forbidden !== null || writerConflict !== null,
+        };
       }
-      const result = await client.postFinal(credentials, qbj);
-      if (result.ok) {
-        timeline.record(result.value.duplicate ? 'final-duplicate' : 'final-sent');
-        return { delivery: 'sent', duplicate: result.value.duplicate };
+      const delivered = await deliverFinalResult(client, credentials, qbj, noteWrite);
+      if (delivered.delivery === 'sent') {
+        timeline.record(delivered.duplicate ? 'final-duplicate' : 'final-sent');
+      } else if (delivered.delivery === 'pending') {
+        timeline.record('final-pending', delivered.detail);
+      } else {
+        timeline.record('final-refused', delivered.detail);
       }
-      noteWrite(result);
-      // Nothing answered, so nothing refused it: worth retrying, and the room can be told to wait.
-      // A capability this server never advertised is not that — no request went out, and none will.
-      if (result.status === undefined && !result.unsupported) {
-        timeline.record('final-pending', result.error);
-        return { delivery: 'pending', detail: result.error };
-      }
-      timeline.record('final-refused', result.detail ?? result.error);
-      return { delivery: 'rejected', detail: result.detail ?? result.error };
+      return delivered;
     },
-    [client, credentials, noteWrite, timeline],
+    [client, credentials, forbidden, noteWrite, timeline, writerConflict],
   );
 
   const recoverFromServer = useCallback(async () => {
