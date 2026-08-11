@@ -63,6 +63,8 @@ import FruityServerClient from '../integrations/fruity/FruityServerClient';
 import { HelpRequestCategory } from './HelpRequests';
 import { connectionTimeline } from './ConnectionTimeline';
 import { useReplaceable } from '../pwa/useAppUpdate';
+import { ResultDeliveryCapabilityStore } from './ResultDeliveryCapability';
+import { ResultDeliveryService } from './ResultDelivery';
 
 /**
  * Whether the application may be replaced by a newer build while this screen is up.
@@ -140,14 +142,21 @@ export default function App() {
   const [notice, setNotice] = useState('');
   const tabId = useRef(newTabId());
   const claim = useRef<IGameClaim | null>(null);
+  const resultDeliveryCapabilities = useMemo(() => new ResultDeliveryCapabilityStore(), []);
+  const resultDelivery = useMemo(
+    () => (store ? new ResultDeliveryService(store, resultDeliveryCapabilities) : null),
+    [store, resultDeliveryCapabilities],
+  );
 
   const refresh = useCallback(async (openStore: GameStore) => {
-    setRecords(await openStore.list());
+    const listed = await openStore.list();
+    resultDeliveryCapabilities.prune(new Set(listed.map((record) => record.id)));
+    setRecords(listed);
     // Read after `list`, which is what populates it. A game this build cannot open is a fact the room
     // has to be told, because the alternative — an unfinished game that is simply not on the screen
     // any more — is indistinguishable from having lost it. See `GameRecordUpgrade`.
     setUnreadable(openStore.unreadable);
-  }, []);
+  }, [resultDeliveryCapabilities]);
 
   useEffect(() => {
     let cancelled = false;
@@ -156,6 +165,7 @@ export default function App() {
       if (cancelled) return;
       await opened.prune();
       const listed = await opened.list();
+      resultDeliveryCapabilities.prune(new Set(listed.map((record) => record.id)));
       if (cancelled) return;
       setStore(opened);
       setRecords(listed);
@@ -166,7 +176,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [resultDeliveryCapabilities]);
 
   useEffect(
     () => () => {
@@ -405,6 +415,20 @@ export default function App() {
     [store, refresh],
   );
 
+  const retryResult = useCallback(
+    async (recordId: string) => {
+      if (!resultDelivery || !store) return;
+      await resultDelivery.retry(recordId);
+      await refresh(store);
+    },
+    [refresh, resultDelivery, store],
+  );
+
+  const canRetryResult = useCallback(
+    (record: IStoredGameRecord) => resultDelivery?.canRetry(record) ?? false,
+    [resultDelivery],
+  );
+
   if (screen.kind === 'loading' || !store) {
     return (
       <main className="shell shell-centered">
@@ -489,6 +513,7 @@ export default function App() {
         <ScoringScreen
           record={current}
           store={store}
+          resultDelivery={resultDelivery as ResultDeliveryService}
           connection={connection}
           durable={store.durable}
           onComplete={onComplete}
@@ -542,6 +567,8 @@ export default function App() {
         await startFromPackage(packageValue, { connected: false, attempt });
       }}
       onOpenRecord={openRecord}
+      onRetryResult={retryResult}
+      canRetryResult={canRetryResult}
       onFindExisting={(identity) => store.findByIdentity(identity)}
     />
   );

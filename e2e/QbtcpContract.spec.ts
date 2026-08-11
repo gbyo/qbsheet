@@ -172,6 +172,47 @@ test.describe('a server that speaks only QBTCP', () => {
     expect(browserErrors).toEqual([]);
   });
 
+  test('keeps a retryable final intact through handoff, reload, and the next assignment', async ({ page }) => {
+    await pairRoom(page, control);
+    await startAssignedGame(page, 4);
+    await scoreTossup(page, 'Sarah', 'Power', 20);
+
+    // The request reached the fixture but its retryable server failure means no result was accepted.
+    control.failNextResult(503, 'Tournament control is temporarily unavailable.');
+    await endGameAndSubmit(page);
+    await expect(page.getByText(/did not receive the result yet/)).toBeVisible();
+    await expect.poll(() => control.resultAttempts.length).toBe(1);
+    const firstAttempt = JSON.stringify(control.resultAttempts[0]);
+    expect(control.results).toHaveLength(0);
+    expect(control.resultAttempts[0]).not.toHaveProperty('_yf_scorekeeper_recovery');
+
+    // Pending delivery still needs the independent human/file handoff before this screen can close.
+    await page.getByRole('button', { name: 'Download QBJ', exact: true }).click();
+    await page.getByRole('button', { name: 'I uploaded the result', exact: true }).click();
+    const next = page.getByRole('button', { name: `Next game in ${roomName}` });
+    await expect(next).toBeEnabled();
+
+    // Move the room on. The earlier result's private capability is keyed to its record, not to the
+    // one current connection that now points at the next session.
+    control.assign(5);
+    await next.click();
+    await startAssignedGame(page, 5);
+    await page.reload();
+    await expect(page.getByRole('heading', { name: 'Recent' })).toBeVisible();
+
+    const oldGame = page.locator('.recent-item').filter({ hasText: 'Ninety Six' });
+    await expect(oldGame).toContainText('Not delivered yet');
+    await expect(oldGame.getByText('Ninety Six 35–0 Greenwood')).toBeVisible();
+    await oldGame.getByRole('button', { name: 'Retry sending result', exact: true }).click();
+
+    await expect.poll(() => control.results.length, { timeout: 20_000 }).toBe(1);
+    await expect.poll(() => control.resultAttempts.length, { timeout: 20_000 }).toBe(2);
+    expect(JSON.stringify(control.resultAttempts[1])).toBe(firstAttempt);
+    await expect(oldGame).toContainText('Accepted');
+    await expect(oldGame).toContainText('2 attempts');
+    await expect(oldGame.getByText('Ninety Six 35–0 Greenwood')).toBeVisible();
+  });
+
   test('a room that has paired once goes straight back to its room after a reload', async ({ page }) => {
     await pairRoom(page, control);
 

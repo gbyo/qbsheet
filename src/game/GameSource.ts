@@ -28,9 +28,9 @@ export interface IGameSource {
 /** What became of one attempt to deliver a result. */
 export type DeliveryOutcome =
   | { state: 'sent'; detail?: string }
-  /** Reached control and was refused. Not retried; somebody has to look at it. */
+  /** Reached control and was refused. Not retried automatically; somebody has to look at it. */
   | { state: 'rejected'; detail: string }
-  /** Did not reach anybody. Retried in the background; never blocks the room. */
+  /** Did not reach anybody. A caller may offer an explicit retry; never blocks the room. */
   | { state: 'unreachable'; detail: string };
 
 export interface IResultDestination {

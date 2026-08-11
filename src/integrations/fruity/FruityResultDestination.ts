@@ -17,24 +17,23 @@
  * than a queue of stale ones. Falling behind is therefore self-correcting — the thing that gets
  * dropped is always the older picture.
  *
- * # Retry, and what is never retried
+ * # Retry, and what is never retried automatically
  *
- * A submission that did not reach anybody is retried with backoff, because "the Wi-Fi was out for
- * ninety seconds" is not a result anybody wants to re-enter. A submission that reached control and
- * was *refused* is not retried at any interval, because a refusal is a person's decision and
- * repeating the request will not change it. The distinction is the difference between a network
- * problem and a tournament problem, and conflating them is how a room ends up hammering a server
- * that has already told it no.
+ * The completed-result boundary records a network failure as pending so Recent Games can offer one
+ * explicit retry later. This destination is a single-attempt adapter for callers that still use the
+ * older `IResultDestination` vocabulary; it does not own a background loop. A submission that
+ * reached control and was *refused* is not retried automatically, because a refusal is a person's
+ * decision and repeating the request will not change it. The distinction is the difference between
+ * a network problem and a tournament problem, and conflating them is how a room ends up hammering a
+ * server that has already told it no.
  */
 import { DeliveryOutcome, IResultDestination } from '../../game/GameSource';
 import { IGamePackage } from '../../game/GamePackage';
+import { deliverFinalResult } from '../../app/ResultDelivery';
 import FruityServerClient, { ISessionCredentials } from './FruityServerClient';
 
 /** At most one progress update per this interval, carrying whatever the latest state is. */
 export const progressIntervalMs = 5000;
-
-/** Backoff for a final that has not reached anybody yet. Capped so a room that comes back is quick. */
-export const retryDelaysMs = [2000, 5000, 15000, 30000, 60000];
 
 export class FruityResultDestination implements IResultDestination {
   readonly kind = 'tournament-control';
@@ -45,12 +44,12 @@ export class FruityResultDestination implements IResultDestination {
   ) {}
 
   async deliver(qbj: object): Promise<DeliveryOutcome> {
-    const result = await this.client.postFinal(this.credentials, qbj);
-    if (result.ok) return { state: 'sent' };
-    // No status at all means nothing answered: a network problem, and worth retrying.
-    if (result.status === undefined) return { state: 'unreachable', detail: result.error };
-    // An answer that refuses is a decision. Surface it and stop.
-    return { state: 'rejected', detail: result.detail ?? result.error };
+    const result = await deliverFinalResult(this.client, this.credentials, qbj);
+    if (result.delivery === 'sent') return { state: 'sent' };
+    if (result.delivery === 'pending') {
+      return { state: 'unreachable', detail: result.detail ?? 'Could not reach tournament control.' };
+    }
+    return { state: 'rejected', detail: result.detail ?? 'Tournament control did not accept this result.' };
   }
 }
 

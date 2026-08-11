@@ -422,6 +422,12 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+.recent-attempt {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--room-muted);
+}
+
 .recent-when {
   margin: 2px 0 0;
   font-size: 12px;
@@ -448,6 +454,59 @@ body {
 .recent-status dd {
   margin: 0;
   font-variant-numeric: tabular-nums;
+}
+
+.recent-status dd,
+.recent-status-detail,
+.recent-status-secondary,
+.recent-receipt {
+  display: block;
+}
+
+.recent-status-detail,
+.recent-status-secondary,
+.recent-receipt {
+  margin-top: 2px;
+  color: var(--room-muted);
+  font-size: 11px;
+  font-variant-numeric: normal;
+}
+
+.recent-status-detail {
+  max-width: 260px;
+  white-space: normal;
+}
+
+.recent-receipt summary {
+  cursor: pointer;
+}
+
+.recent-receipt span {
+  overflow-wrap: anywhere;
+}
+
+.recent-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+@media (max-width: 760px) {
+  .recent-item {
+    grid-template-columns: 1fr auto;
+  }
+
+  .recent-status {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .recent-actions {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    justify-content: flex-start;
+  }
 }
 
 .final-score {
