@@ -51,8 +51,20 @@ async function startAssignedGame(page: Page, round: 4 | 5): Promise<void> {
   await expect(page.getByText(`${spec.label} · ${spec.left.name} vs ${spec.right.name}`)).toBeVisible();
   await page.getByRole('button', { name: /^(Start|Resume) scoring$/ }).click();
 
+  const confirm = page.getByRole('button', { name: 'Everything matches' });
   const lineup = page.getByRole('heading', { name: 'Who is starting?' });
-  await expect(lineup.or(page.getByText('Tossup 1 of 20', { exact: true })).first()).toBeVisible();
+  const scoresheet = page.getByText('Tossup 1 of 20', { exact: true });
+
+  // A connected assignment is confirmed before anything is scored against it. It appears on a fresh
+  // start and not on a resume that already has questions in it, so all three landing places are waited
+  // for together — asking `count()` straight after the click would race the render and read zero.
+  await expect(confirm.or(lineup).or(scoresheet).first()).toBeVisible();
+  if (await confirm.count()) {
+    await expect(page.getByText(`${spec.label} · ${roomName}`)).toBeVisible();
+    await confirm.click();
+  }
+
+  await expect(lineup.or(scoresheet).first()).toBeVisible();
   if (await lineup.count()) {
     for (const player of spec.starters) await page.getByLabel(player, { exact: true }).check();
     await page.getByRole('button', { name: 'Start game', exact: true }).click();
