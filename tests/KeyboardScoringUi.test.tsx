@@ -102,7 +102,7 @@ describe('the eight seat keys', () => {
 
     await pressKey('KeyA');
     await waitFor(() => expect(leftScore()).toContain('10'));
-    expect(rightScore()).toContain('0');
+    expect(rightScore()).toBe('0');
   });
 
   test('the right hand scores the right team', async () => {
@@ -120,7 +120,7 @@ describe('the eight seat keys', () => {
 
     await pressKey('KeyF');
 
-    expect(leftScore()).toContain('0');
+    expect(leftScore()).toBe('0');
   });
 });
 
@@ -167,7 +167,7 @@ describe('the modifiers', () => {
     // team's chance or be turned into a no-penalty score by this listener.
     expect(event.defaultPrevented).toBe(false);
     expect(screen.getByText('Tossup 1 of 20')).toBeInTheDocument();
-    expect(leftScore()).toContain('0');
+    expect(leftScore()).toBe('0');
   });
 
   test('two modifiers together record nothing', async () => {
@@ -175,7 +175,7 @@ describe('the modifiers', () => {
 
     await pressKey('KeyA', { shift: true, alt: true });
 
-    expect(leftScore()).toContain('0');
+    expect(leftScore()).toBe('0');
   });
 
   test('Cmd plus a seat key is left to the browser', async () => {
@@ -183,7 +183,7 @@ describe('the modifiers', () => {
 
     await pressKey('KeyA', { meta: true });
 
-    expect(leftScore()).toContain('0');
+    expect(leftScore()).toBe('0');
   });
 
   test('the map keeps Wrong zero on the buttons and does not teach Ctrl plus a seat', async () => {
@@ -204,7 +204,7 @@ describe('the modifiers', () => {
     await pressKey('KeyA', { alt: true });
 
     // No neg was recorded, because a neg is not a legal ruling any more.
-    expect(leftScore()).toContain('0');
+    expect(leftScore()).toBe('0');
   });
 
   test('a key aimed at a team that has already answered does nothing', async () => {
@@ -215,7 +215,7 @@ describe('the modifiers', () => {
     });
     await pressKey('KeyA');
 
-    expect(leftScore()).toContain('0');
+    expect(leftScore()).toBe('0');
   });
 });
 
@@ -268,7 +268,7 @@ describe('opting in', () => {
 
     // The whole point: an ordinary keystroke on a scoresheet somebody has been using for a year must
     // not record a tossup.
-    expect(leftScore()).toContain('0');
+    expect(leftScore()).toBe('0');
     expect(screen.queryByLabelText('Keyboard scoring')).toBeNull();
   });
 
@@ -315,7 +315,7 @@ describe('shortcuts stay silent while somebody is typing', () => {
     await pressKey('KeyA');
     await pressKey('KeyA', { shift: true });
 
-    expect(leftScore()).toContain('0');
+    expect(leftScore()).toBe('0');
   });
 
   test('the map says the keyboard is not aimed at the scoresheet', async () => {
@@ -341,7 +341,7 @@ describe('shortcuts stay silent while somebody is typing', () => {
       fireEvent.keyDown(field, { code: 'KeyA', key: 'a' });
     });
 
-    expect(leftScore()).toContain('0');
+    expect(leftScore()).toBe('0');
     field.remove();
   });
 
@@ -355,7 +355,7 @@ describe('shortcuts stay silent while somebody is typing', () => {
       fireEvent.keyDown(field, { code: 'KeyD', key: 'd' });
     });
 
-    expect(leftScore()).toContain('0');
+    expect(leftScore()).toBe('0');
     field.remove();
   });
 
@@ -370,7 +370,7 @@ describe('shortcuts stay silent while somebody is typing', () => {
       fireEvent.keyDown(editable, { code: 'KeyA', key: 'a' });
     });
 
-    expect(leftScore()).toContain('0');
+    expect(leftScore()).toBe('0');
     editable.remove();
   });
 
@@ -384,7 +384,7 @@ describe('shortcuts stay silent while somebody is typing', () => {
       fireEvent.keyDown(combo, { code: 'KeyS', key: 's' });
     });
 
-    expect(leftScore()).toContain('0');
+    expect(leftScore()).toBe('0');
     combo.remove();
   });
 
@@ -409,11 +409,18 @@ describe('a held key', () => {
     await openScoringWithKeyboard();
 
     await pressKey('KeyA');
-    // What the browser sends while a finger rests on the key.
+    await screen.findByLabelText('Bonus');
+    await pressKey('Digit1');
+    await waitFor(() => expect(screen.getByText('Tossup 2 of 20')).toBeInTheDocument());
+
+    // What the browser sends while a finger rests on the key. Q2 is live here, so a missing repeat
+    // guard would record another tossup and add another question to Recent.
     await pressKey('KeyA', { repeat: true });
     await pressKey('KeyA', { repeat: true });
     await pressKey('KeyA', { repeat: true });
 
+    const rail = screen.getByLabelText('Recent activity');
+    expect(within(rail).getAllByRole('listitem')).toHaveLength(1);
     await waitFor(() => expect(leftScore()).toContain('10'));
   });
 
@@ -426,7 +433,7 @@ describe('a held key', () => {
     await pressKey('KeyZ', { ctrl: true, key: 'z', repeat: true });
     await pressKey('KeyZ', { ctrl: true, key: 'z', repeat: true });
 
-    await waitFor(() => expect(leftScore()).toContain('0'));
+    await waitFor(() => expect(leftScore()).toBe('0'));
   });
 });
 
@@ -437,7 +444,7 @@ describe('undo and redo are unchanged', () => {
     await waitFor(() => expect(leftScore()).toContain('15'));
 
     await pressKey('KeyZ', { ctrl: true, key: 'z' });
-    await waitFor(() => expect(leftScore()).toContain('0'));
+    await waitFor(() => expect(leftScore()).toBe('0'));
 
     await pressKey('KeyZ', { ctrl: true, key: 'z', shift: true });
     await waitFor(() => expect(leftScore()).toContain('15'));
@@ -454,7 +461,7 @@ describe('undo and redo are unchanged', () => {
 
     await pressKey('KeyZ', { ctrl: true, key: 'z' });
 
-    await waitFor(() => expect(leftScore()).toContain('0'));
+    await waitFor(() => expect(leftScore()).toBe('0'));
   });
 });
 
