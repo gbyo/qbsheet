@@ -199,16 +199,20 @@
   content: attr(data-suffix);
 }
 
-.qbsheet-motion-number {
+.qbsheet-motion-number,
+.scorer-progress-number-copy {
   --qbsheet-number-digits: 1;
 
   position: relative;
   display: inline-grid;
   min-width: calc(var(--qbsheet-number-digits) * 1ch);
-  overflow: hidden;
   vertical-align: bottom;
   text-align: center;
   font-variant-numeric: tabular-nums;
+}
+
+.qbsheet-motion-number {
+  overflow: hidden;
 }
 
 .qbsheet-motion-number-current,
@@ -392,6 +396,11 @@
   inset: 14px 16px;
   pointer-events: none;
   animation: qbsheet-bonus-exit var(--room-motion-standard) var(--room-ease-out) both;
+}
+
+/* Presentation-only prompt labels stay out of DOM text and cannot be mistaken for the new controls. */
+.scorer-bonus-exit [data-presentation-label]::before {
+  content: attr(data-presentation-label);
 }
 
 @keyframes qbsheet-bonus-exit {

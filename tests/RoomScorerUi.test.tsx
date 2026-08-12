@@ -283,6 +283,18 @@ describe('what the header says', () => {
     expect(screen.getByText('Connected')).toBeTruthy();
     expect(screen.getByText('Tossup 1 of 20')).toBeTruthy();
   });
+
+  test('the hidden progress copy reserves the same digit column as the painted counter', () => {
+    renderScorer(formatFor());
+
+    const layoutNumber = document.querySelector('.scorer-progress-copy .scorer-progress-number-copy') as HTMLElement;
+    const paintedNumber = document.querySelector('.scorer-progress-visual .qbsheet-motion-number') as HTMLElement;
+    expect(layoutNumber.style.getPropertyValue('--qbsheet-number-digits')).toBe('2');
+    expect(layoutNumber.style.getPropertyValue('--qbsheet-number-digits')).toBe(
+      paintedNumber.style.getPropertyValue('--qbsheet-number-digits'),
+    );
+    expect(layoutNumber).toHaveTextContent('1');
+  });
 });
 
 describe('scoring buttons come from the format', () => {
@@ -475,7 +487,15 @@ describe('scoring motion state', () => {
     fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('20'));
     expect(counter().dataset.motionDirection).toBe('forward');
     expect(counter().dataset.previousValue).toBe('1');
-    expect(document.querySelector('.scorer-bonus-exit')).toHaveAttribute('data-motion-token');
+    const bonusExit = document.querySelector('.scorer-bonus-exit') as HTMLElement;
+    expect(bonusExit).toHaveAttribute('data-motion-token');
+    expect(within(bonusExit).getByText('Ninety Six bonus')).toBeTruthy();
+    expect(
+      Array.from(bonusExit.querySelectorAll('.scorer-choice')).map((choice) =>
+        choice.getAttribute('data-presentation-label'),
+      ),
+    ).toEqual(['0', '10', '20', '30']);
+    expect(bonusExit.querySelector('[data-presentation-label="20"]')).toHaveClass('is-selected');
 
     fireEvent.click(screen.getByText('Undo'));
     expect(counter().dataset.motionDirection).toBe('backward');
@@ -550,6 +570,22 @@ describe('scoring motion state', () => {
     expect(total).toHaveAttribute('data-previous-value', '10');
   });
 
+  test('a completed part-entry bonus exits as the intact, inert part prompt', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+    fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('Parts…'));
+    const firstPart = screen.getByText('Part 1').closest('.scorer-part-row') as HTMLElement;
+    fireEvent.click(within(firstPart).getByRole('button', { name: '+10' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Record parts' }));
+
+    const exit = document.querySelector('.scorer-bonus-exit') as HTMLElement;
+    expect(exit.querySelector('[data-presentation-label="Part 1"]')).toBeTruthy();
+    expect(exit.querySelector('[data-presentation-label="Part 2"]')).toBeTruthy();
+    expect(exit.querySelector('[data-presentation-label="Record parts"]')).toHaveClass('is-selected');
+    const firstExitPart = exit.querySelector('.scorer-part-row') as HTMLElement;
+    expect(firstExitPart.querySelector('[data-presentation-label="+10"]')).toHaveClass('is-selected');
+  });
+
   test('clock motion tokens follow start and stop, while the clock state changes immediately', () => {
     renderScorer(formatFor(), undefined, undefined, {
       version: 1,
@@ -566,6 +602,22 @@ describe('scoring motion state', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Pause' }));
     expect(clock).toHaveAttribute('data-clock-state', 'paused');
     expect(screen.getByRole('button', { name: 'Resume' })).toBeEnabled();
+  });
+
+  test('an expired clock presents Reset without a play icon', async () => {
+    vi.useFakeTimers();
+    renderScorer(formatFor(), undefined, undefined, {
+      version: 1,
+      halves: true,
+      halfLengthMinutes: 1,
+      timeoutsPerTeam: 0,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    await act(() => vi.advanceTimersByTimeAsync(60_000));
+
+    const reset = screen.getByRole('button', { name: 'Reset' });
+    expect(reset.querySelector('.scorer-clock-icons')).toBeNull();
   });
 
   test('connection recovery is absent on an initially connected mount and retriggers on each real recovery', () => {

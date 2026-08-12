@@ -18,7 +18,7 @@
  * the game sitting next to the buttons that score it is a mis-tap away from a half-finished result
  * reaching tournament control.
  */
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { CSSProperties, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import BrandLogo from '../BrandLogo';
 import { LeftOrRight } from '../scoring/types';
 import {
@@ -107,6 +107,7 @@ import MotionNumber, {
   noBuzzAcknowledgementMotionMs,
   recentMotionMs,
 } from './ScoringMotion';
+import { bouncebackNeedsTypedEntry, bouncebackOptions, regularBonusTotals } from './bonusOptions';
 
 export type { IScorerAlert, IScorerRecoveryStatus } from './ConnectionStatus';
 
@@ -246,6 +247,103 @@ export interface IOperationNotice {
  */
 export const operationNoticeMs = 3000;
 
+type BonusExitContent =
+  | { kind: 'choices'; options: number[]; selected: number }
+  | { kind: 'typed'; fieldLabel: string; selected: number }
+  | { kind: 'parts'; parts: IBonusPartResult[]; pointsPerPart: number; bounceBack: boolean };
+
+interface IBonusExit {
+  token: number;
+  title: string;
+  context: string;
+  content: BonusExitContent;
+}
+
+/** An inert snapshot of the prompt that committed the bonus, kept intact for its brief exit. */
+function BonusExitPrompt({ exit }: { exit: IBonusExit }) {
+  const content = exit.content;
+  return (
+    <div
+      key={`bonus-exit-${exit.token}`}
+      className="scorer-prompt scorer-bonus-exit"
+      data-motion-token={exit.token}
+      aria-hidden="true"
+    >
+      <div className="scorer-prompt-content">
+        <p className="scorer-prompt-title">
+          <span className="scorer-prompt-team">{exit.title}</span>
+          <span className="scorer-prompt-context">{exit.context}</span>
+        </p>
+        {content.kind === 'choices' && (
+          <div className="scorer-choices">
+            {content.options.map((points) => (
+              <span
+                key={points}
+                className={`scorer-choice${points === content.selected ? ' is-selected' : ''}`}
+                data-presentation-label={points}
+              />
+            ))}
+          </div>
+        )}
+        {content.kind === 'typed' && (
+          <div className="scorer-inline-form">
+            <label>
+              {content.fieldLabel}
+              <input type="number" value={content.selected} readOnly disabled />
+            </label>
+            <span className="scorer-choice is-selected" data-presentation-label="Record" />
+          </div>
+        )}
+        {content.kind === 'parts' && (() => {
+          const controlledTotal = content.parts.reduce((sum, part) => sum + part.controlledPoints, 0);
+          const bouncebackTotal = content.parts.reduce((sum, part) => sum + (part.bouncebackPoints ?? 0), 0);
+          return (
+            <div className="scorer-bonus-parts">
+              <ol className="scorer-part-list">
+                {content.parts.map((part, index) => {
+                  const outcome =
+                    part.controlledPoints > 0 ? 'controlled' : (part.bouncebackPoints ?? 0) > 0 ? 'bounceback' : 'missed';
+                  return (
+                    <li key={index} className="scorer-part-row">
+                      <span className="scorer-part-label" data-presentation-label={`Part ${index + 1}`} />
+                      <span className="scorer-choices">
+                        <span
+                          className={`scorer-choice${outcome === 'controlled' ? ' is-selected' : ''}`}
+                          data-presentation-label={`+${content.pointsPerPart}`}
+                        />
+                        {content.bounceBack && (
+                          <span
+                            className={`scorer-choice${outcome === 'bounceback' ? ' is-selected' : ''}`}
+                            data-presentation-label="Bounce"
+                          />
+                        )}
+                        <span
+                          className={`scorer-choice${outcome === 'missed' ? ' is-selected' : ''}`}
+                          data-presentation-label="Miss"
+                        />
+                      </span>
+                    </li>
+                  );
+                })}
+              </ol>
+              <p
+                className="scorer-part-total"
+                data-presentation-label={`${controlledTotal}${
+                  content.bounceBack && bouncebackTotal > 0 ? ` · ${bouncebackTotal} bounced back` : ''
+                }`}
+              />
+              <div className="scorer-choices">
+                <span className="scorer-choice is-selected" data-presentation-label="Record parts" />
+                <span className="scorer-action" data-presentation-label="Back to totals" />
+              </div>
+            </div>
+          );
+        })()}
+      </div>
+    </div>
+  );
+}
+
 /**
  * A clock control that changes its paint when start/stop state changes, while the clock hook remains
  * the sole owner of time. Tick updates only replace `display`; they never create a motion token.
@@ -299,16 +397,18 @@ function ClockControl(props: {
         {status === 'expired' ? 'Time expired' : display}
       </span>
       <button type="button" className="scorer-clock-button" onClick={action}>
-        <span className="scorer-clock-icons" aria-hidden="true">
-          {motion && (
-            <span className="scorer-clock-icon is-outgoing">
-              <ControlIcon name={oldIcon} />
+        {status !== 'expired' && (
+          <span className="scorer-clock-icons" aria-hidden="true">
+            {motion && (
+              <span className="scorer-clock-icon is-outgoing">
+                <ControlIcon name={oldIcon} />
+              </span>
+            )}
+            <span className={motion ? 'scorer-clock-icon is-incoming' : 'scorer-clock-icon'}>
+              <ControlIcon name={icon} />
             </span>
-          )}
-          <span className={motion ? 'scorer-clock-icon is-incoming' : 'scorer-clock-icon'}>
-            <ControlIcon name={icon} />
           </span>
-        </span>
+        )}
         {label}
       </button>
     </span>
@@ -429,9 +529,7 @@ export default function Scorer(props: IScorerProps) {
   const [emphasizedQuestion, setEmphasizedQuestion] = useState<number | undefined>(undefined);
   const transientSequence = useRef(0);
   const [noBuzzAcknowledgement, setNoBuzzAcknowledgement] = useState<{ token: number } | null>(null);
-  const [bonusExit, setBonusExit] = useState<
-    { token: number; questionNumber: number; controllingTeamName: string } | null
-  >(null);
+  const [bonusExit, setBonusExit] = useState<IBonusExit | null>(null);
   const [recentMotion, setRecentMotion] = useState<IRecentMotion | undefined>(undefined);
 
   const nextTransientToken = useCallback(() => {
@@ -882,6 +980,8 @@ export default function Scorer(props: IScorerProps) {
   const recordBonusWithExit = useCallback(
     (payload: Pick<IBonusEvent, 'controlledPoints' | 'bouncebackPoints' | 'parts'>) => {
       if (phase.kind !== 'bonus') return false;
+      const controllingTeamName = phase.team === 'left' ? game.left.name : game.right.name;
+      const opponentName = phase.team === 'left' ? game.right.name : game.left.name;
       const accepted = record({
         id: newEventId(),
         type: 'bonus',
@@ -890,15 +990,46 @@ export default function Scorer(props: IScorerProps) {
         ...payload,
       });
       if (accepted) {
-        setBonusExit({
-          token: nextTransientToken(),
-          questionNumber: phase.questionNumber,
-          controllingTeamName: phase.team === 'left' ? game.left.name : game.right.name,
-        });
+        if (payload.parts) {
+          setBonusExit({
+            token: nextTransientToken(),
+            title: `${controllingTeamName} bonus`,
+            context: `Q${phase.questionNumber}`,
+            content: {
+              kind: 'parts',
+              parts: payload.parts,
+              pointsPerPart: format.bonus.pointsPerPart ?? 0,
+              bounceBack: format.bonus.bounceBack,
+            },
+          });
+        } else {
+          const controlledPoints = payload.controlledPoints ?? 0;
+          const completingBounceback = format.bonus.bounceBack && payload.bouncebackPoints !== undefined;
+          const options = completingBounceback
+            ? bouncebackNeedsTypedEntry(format.bonus, controlledPoints)
+              ? null
+              : bouncebackOptions(format.bonus, controlledPoints)
+            : regularBonusTotals(format.bonus);
+          const selected = completingBounceback ? (payload.bouncebackPoints as number) : controlledPoints;
+          setBonusExit({
+            token: nextTransientToken(),
+            title: completingBounceback ? `${opponentName} bounceback` : `${controllingTeamName} bonus`,
+            context: completingBounceback
+              ? `Q${phase.questionNumber} · ${controllingTeamName} took ${controlledPoints}`
+              : `Q${phase.questionNumber}`,
+            content: options
+              ? { kind: 'choices', options, selected }
+              : {
+                  kind: 'typed',
+                  fieldLabel: completingBounceback ? 'Bounceback points' : 'Bonus points',
+                  selected,
+                },
+          });
+        }
       }
       return accepted;
     },
-    [game.left.name, game.right.name, nextTransientToken, record, phase],
+    [format.bonus, game.left.name, game.right.name, nextTransientToken, record, phase],
   );
 
   const recordBonus = useCallback(
@@ -1428,8 +1559,18 @@ export default function Scorer(props: IScorerProps) {
             >
               {progressMotion ? (
                 <>
-                  <span className="scorer-progress-copy">
+                  <span className="visually-hidden" aria-hidden="true">
                     {progressText}
+                  </span>
+                  <span className="scorer-progress-copy">
+                    {progressMotion.prefix}
+                    <span
+                      className="scorer-progress-number-copy"
+                      style={{ '--qbsheet-number-digits': progressMotion.digits } as CSSProperties}
+                    >
+                      {progressMotion.value}
+                    </span>
+                    {progressMotion.suffix}
                   </span>
                   <span
                     className="scorer-progress-visual"
@@ -1642,19 +1783,7 @@ export default function Scorer(props: IScorerProps) {
                   aria-hidden="true"
                 />
               )}
-              {bonusExit && (
-                <div
-                  key={`bonus-exit-${bonusExit.token}`}
-                  className="scorer-prompt scorer-bonus-exit"
-                  data-motion-token={bonusExit.token}
-                  aria-hidden="true"
-                >
-                  <p className="scorer-prompt-title">
-                    <span className="scorer-prompt-team">{bonusExit.controllingTeamName}</span> bonus
-                    <span className="scorer-prompt-context">Q{bonusExit.questionNumber}</span>
-                  </p>
-                </div>
-              )}
+              {bonusExit && <BonusExitPrompt exit={bonusExit} />}
               {phase.kind === 'score-check' && (
                 <HalftimeCheck
                   game={game}
