@@ -475,8 +475,10 @@ describe('reordering the starting lineup', () => {
 });
 
 describe('what the starting prompt promises about the bench', () => {
-  test('the permissive default says substitutions happen between tossups', () => {
-    expect(substitutionSentence(undefined)).toContain('between any two tossups');
+  test('the permissive default defers to the tournament rather than promising a rule', () => {
+    const sentence = substitutionSentence(undefined);
+    expect(sentence).not.toContain('between any two tossups');
+    expect(sentence).toContain('when tournament rules allow');
   });
 
   test('a restrictive procedure is not told a rule it does not have', () => {

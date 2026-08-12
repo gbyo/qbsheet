@@ -45,12 +45,17 @@ export interface IStartingLineupPromptProps {
  * When the players not chosen here can come on.
  *
  * Said from the configured procedure rather than from the usual case. A room running the
- * restrictive policy that is told it can substitute "between any two tossups" will try to, be
- * refused, and reasonably conclude the software is broken.
+ * restrictive policy that is told it can substitute at any point will try to, be refused, and
+ * reasonably conclude the software is broken.
+ *
+ * The permissive branch says only that the lineup can change later, because "any boundary" is what
+ * *this software* allows, not what the tournament allows. Plenty of events restrict substitutions
+ * to set or packet breaks without anybody configuring a policy here, and a prompt that promised
+ * substitutions between any two tossups would be stating a rule it has no way to know.
  */
 export function substitutionSentence(procedure: IRoomProcedure | undefined): string {
   return substitutionPolicy(procedure) === 'any-boundary'
-    ? 'The rest start on the bench and can come on between any two tossups.'
+    ? 'The rest start on the bench. You can change the lineup later when tournament rules allow.'
     : 'The rest start on the bench and can come on at halftime, at a timeout, or at a phase checkpoint.';
 }
 
