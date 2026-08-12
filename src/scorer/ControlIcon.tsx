@@ -17,7 +17,8 @@ export type ControlIconName =
   | 'download'
   | 'upload'
   | 'adjust'
-  | 'forfeit';
+  | 'forfeit'
+  | 'settings';
 
 const paths: Record<ControlIconName, React.ReactNode> = {
   undo: (
@@ -119,6 +120,14 @@ const paths: Record<ControlIconName, React.ReactNode> = {
     <>
       <circle cx="12" cy="12" r="8.5" />
       <path d="m6 6 12 12" />
+    </>
+  ),
+  settings: (
+    <>
+      <circle cx="12" cy="12" r="3" />
+      <circle cx="12" cy="12" r="7" />
+      <path d="M12 5V3M12 21v-2M19 12h2M3 12h2" />
+      <path d="m16.95 7.05 1.41-1.41M5.64 18.36l1.41-1.41M16.95 16.95l1.41 1.41M5.64 5.64l1.41 1.41" />
     </>
   ),
 };
