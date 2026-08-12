@@ -843,12 +843,13 @@ export default function Scorer(props: IScorerProps) {
    * zero — removes the team that gave it from the eligible list. See `TeamPanel`.
    */
   const negsAvailable = scoringEnabled && phase.kind === 'tossup' && phase.eligibleTeams.length === 2;
-  let noBuzzLabel = 'No buzz';
-  if (playBlockedByProtest) {
-    noBuzzLabel = 'Resolve protest before play';
-  } else if (phase.kind === 'tossup' && phase.eligibleTeams.length === 1) {
-    noBuzzLabel = `${phase.eligibleTeams[0] === 'left' ? game.left.name : game.right.name} has no answer`;
-  }
+  /**
+   * The button says the same thing all game.
+   *
+   * Which team is still able to buzz is said in the hint beside it, where it can change without the
+   * button a scorekeeper is aiming for moving or renaming itself mid-tossup.
+   */
+  const noBuzzLabel = playBlockedByProtest ? 'Resolve protest before play' : 'No buzz';
 
   /**
    * Who is in each seat, per side, in the order the room arranged them.
