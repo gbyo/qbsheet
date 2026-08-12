@@ -62,12 +62,12 @@ export default function NativeDialog(props: {
         <button
           type="button"
           className="scorer-action scorer-dialog-close"
+          aria-label="Close dialog"
           onClick={() => (typeof panel.current?.close === 'function' ? panel.current.close() : onCloseRef.current())}
         >
           <span className="scorer-dialog-close-glyph" aria-hidden="true">
-            ✕
+            ×
           </span>
-          <span>Close</span>
         </button>
       </div>
       <div className={`scorer-dialog-body ${bodyClassName}`.trim()}>{children}</div>

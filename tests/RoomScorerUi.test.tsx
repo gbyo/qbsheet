@@ -587,7 +587,7 @@ describe('the game menu', () => {
     renderScorer(formatFor());
     openProtests();
     expect(screen.getByRole('dialog', { name: 'Protests' })).toBeTruthy();
-    fireEvent.click(within(screen.getByRole('dialog', { name: 'Protests' })).getByText('Close'));
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Protests' })).getByRole('button', { name: 'Close dialog' }));
 
     openIssue();
     expect(screen.getByRole('dialog', { name: 'Issue / tournament control' })).toBeTruthy();
@@ -942,7 +942,7 @@ describe('the game menu', () => {
     pressControl('Full scoresheet review');
     fireEvent.click(screen.getByText('Edit question'));
     // The replacement workflow is secondary information, so it lives behind the disclosure.
-    fireEvent.click(screen.getByText('More context'));
+    fireEvent.click(screen.getByText('Correction details'));
     fireEvent.click(screen.getByText('Edit full question\u2026'));
 
     const replacementDialog = screen.getByRole('dialog', { name: 'Replace question 1' });
@@ -1340,7 +1340,7 @@ describe('a protest is a thing with a state', () => {
     openProtests();
     fireEvent.change(screen.getByLabelText('Details'), { target: { value: 'The ruling was disputed.' } });
     fireEvent.click(screen.getByText('Record protest and keep playing'));
-    fireEvent.click(within(screen.getByLabelText('Protests')).getByText('Close'));
+    fireEvent.click(within(screen.getByLabelText('Protests')).getByRole('button', { name: 'Close dialog' }));
 
     // Scoring is untouched by it: the game is still on tossup one and still scoreable.
     expect(screen.getByText('Tossup 1 of 20')).toBeTruthy();
