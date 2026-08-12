@@ -53,6 +53,9 @@ jobs:
       - name: Verify runner Chrome
         run: google-chrome --version
 
+      - name: Install Playwright video helper
+        run: npx playwright install ffmpeg
+
       - name: Run scorer browser torture test
         run: npm run test:browser
 
