@@ -61,6 +61,7 @@ function emptyInput(): IManualGameInput {
 
 /** The in-progress setup, separate from game records because it is not a game yet. */
 export const manualDraftStorageKey = 'qbsheet.manual-game-draft.v1';
+export const manualPresetStorageKey = 'qbsheet.manual-game-presets.v1';
 
 function manualDraftStorage(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null {
   try {
@@ -121,6 +122,107 @@ function hasManualInput(input: IManualGameInput): boolean {
   return JSON.stringify(input) !== JSON.stringify(emptyInput());
 }
 
+export interface IManualGamePreset {
+  id: string;
+  label: string;
+  left: IManualTeamInput;
+  right: IManualTeamInput;
+  rules: IBasicScoringRulesInput;
+  options: IManualRoundOptions;
+  savedAt: string;
+}
+
+function presetStorageValue(value: IManualGamePreset): IManualGamePreset {
+  return {
+    ...value,
+    left: { ...value.left },
+    right: { ...value.right },
+    rules: { ...value.rules },
+    options: { ...value.options },
+  };
+}
+
+/** Read recent team/rule presets defensively; local storage is a convenience, never a dependency. */
+export function readManualGamePresets(): IManualGamePreset[] {
+  const storage = manualDraftStorage();
+  if (!storage) return [];
+  try {
+    const parsed = JSON.parse(storage.getItem(manualPresetStorageKey) ?? '[]') as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((value): IManualGamePreset[] => {
+      if (typeof value !== 'object' || value === null) return [];
+      const candidate = value as Partial<IManualGamePreset>;
+      if (
+        typeof candidate.id !== 'string' ||
+        typeof candidate.label !== 'string' ||
+        typeof candidate.savedAt !== 'string' ||
+        !isDraftTeam(candidate.left) ||
+        !isDraftTeam(candidate.right) ||
+        typeof candidate.rules !== 'object' ||
+        candidate.rules === null ||
+        typeof candidate.options !== 'object' ||
+        candidate.options === null
+      ) {
+        return [];
+      }
+      const input: IManualGameInput = {
+        gameLabel: candidate.label,
+        left: candidate.left,
+        right: candidate.right,
+        rules: { ...basicScoringRulesDefaults, ...(candidate.rules as object) },
+        options: { ...manualRoundOptionDefaults, ...(candidate.options as object) },
+      };
+      if (!defineManualGame(input).ok) return [];
+      return [
+        presetStorageValue({
+          id: candidate.id,
+          label: candidate.label,
+          left: input.left,
+          right: input.right,
+          rules: input.rules,
+          options: input.options,
+          savedAt: candidate.savedAt,
+        }),
+      ];
+    }).slice(0, 8);
+  } catch {
+    return [];
+  }
+}
+
+/** Remember one successful setup, newest first, with a small bounded history. */
+export function rememberManualGamePreset(input: IManualGameInput): IManualGamePreset[] {
+  const preset: IManualGamePreset = {
+    id: `manual-preset-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    label: input.gameLabel.trim() || `${input.left.name.trim()} vs ${input.right.name.trim()}`,
+    left: { ...input.left },
+    right: { ...input.right },
+    rules: { ...input.rules },
+    options: { ...input.options },
+    savedAt: new Date().toISOString(),
+  };
+  const signature = JSON.stringify({
+    left: preset.left,
+    right: preset.right,
+    rules: preset.rules,
+    options: preset.options,
+  });
+  const next = [
+    preset,
+    ...readManualGamePresets().filter(
+      (existing) =>
+        JSON.stringify({ left: existing.left, right: existing.right, rules: existing.rules, options: existing.options }) !==
+        signature,
+    ),
+  ].slice(0, 8);
+  try {
+    manualDraftStorage()?.setItem(manualPresetStorageKey, JSON.stringify(next));
+  } catch {
+    // The current setup still starts; presets are only a convenience.
+  }
+  return next;
+}
+
 export default function ManualGameSetup(props: {
   onStart: (definition: IGameDefinition) => void | Promise<void>;
   onCancel: () => void;
@@ -136,6 +238,9 @@ export default function ManualGameSetup(props: {
    */
   const [submissions, setSubmissions] = useState(0);
   const [startError, setStartError] = useState('');
+  const [presets, setPresets] = useState<IManualGamePreset[]>(() => readManualGamePresets());
+  const [rosterPresetId, setRosterPresetId] = useState('');
+  const [rulePresetId, setRulePresetId] = useState('defaults');
 
   const set = (patch: Partial<IManualGameInput>) => setInput((current) => ({ ...current, ...patch }));
   const setOptions = (patch: Partial<IManualRoundOptions>) =>
@@ -149,6 +254,23 @@ export default function ManualGameSetup(props: {
 
   const result = useMemo(() => defineManualGame(input), [input]);
   const problems = result.ok ? [] : result.problems;
+  const rulePresets = useMemo(
+    () => [
+      {
+        id: 'defaults',
+        label: 'QBSheet defaults',
+        rules: { ...basicScoringRulesDefaults },
+        options: { ...manualRoundOptionDefaults },
+      },
+      ...presets.map((preset) => ({
+        id: preset.id,
+        label: preset.label,
+        rules: { ...preset.rules },
+        options: { ...preset.options },
+      })),
+    ],
+    [presets],
+  );
   const dirty = hasManualInput(input);
   const problemsIn = (section: ManualGameSection) =>
     problems.filter((problem) => problem.section === section).map((problem) => problem.message);
@@ -194,6 +316,7 @@ export default function ManualGameSetup(props: {
     if (!defined.ok) return;
     try {
       await onStart(defined.definition);
+      setPresets(rememberManualGamePreset(input));
       clearManualGameDraft();
     } catch {
       setStartError(
@@ -209,6 +332,18 @@ export default function ManualGameSetup(props: {
   };
 
   const showErrors = submissions > 0;
+
+  const loadRosters = () => {
+    const preset = presets.find((candidate) => candidate.id === rosterPresetId);
+    if (!preset) return;
+    setInput((current) => ({ ...current, left: { ...preset.left }, right: { ...preset.right } }));
+  };
+
+  const loadRules = () => {
+    const preset = rulePresets.find((candidate) => candidate.id === rulePresetId);
+    if (!preset) return;
+    setInput((current) => ({ ...current, rules: { ...preset.rules }, options: { ...preset.options } }));
+  };
 
   const teamSide = (side: 'left' | 'right') => {
     const team = input[side];
@@ -261,6 +396,63 @@ export default function ManualGameSetup(props: {
           game, saved on this device like any other.
         </p>
       </header>
+
+      <section className="shell-section manual-presets" aria-labelledby="manual-presets-heading">
+        <details>
+          <summary id="manual-presets-heading" className="shell-heading">
+            Reuse recent teams and rules
+          </summary>
+          <p className="shell-hint">
+            Successful setups stay on this device as a convenience. Loading one changes this draft; it
+            does not start a game.
+          </p>
+          <div className="manual-preset-row">
+            <div className="manual-preset-field">
+              <label className="shell-label" htmlFor="manual-roster-preset">
+                Recent teams &amp; rosters
+              </label>
+              <select
+                id="manual-roster-preset"
+                className="shell-input"
+                value={rosterPresetId}
+                onChange={(event) => setRosterPresetId(event.target.value)}
+                disabled={presets.length === 0}
+              >
+                <option value="">Choose a recent setup…</option>
+                {presets.map((preset) => (
+                  <option key={preset.id} value={preset.id}>
+                    {preset.label}
+                  </option>
+                ))}
+              </select>
+              <button type="button" className="shell-button" disabled={!rosterPresetId} onClick={loadRosters}>
+                Load rosters
+              </button>
+            </div>
+            <div className="manual-preset-field">
+              <label className="shell-label" htmlFor="manual-rule-preset">
+                Rule preset
+              </label>
+              <select
+                id="manual-rule-preset"
+                className="shell-input"
+                value={rulePresetId}
+                onChange={(event) => setRulePresetId(event.target.value)}
+              >
+                {rulePresets.map((preset) => (
+                  <option key={preset.id} value={preset.id}>
+                    {preset.label}
+                  </option>
+                ))}
+              </select>
+              <button type="button" className="shell-button" onClick={loadRules}>
+                Load rules
+              </button>
+            </div>
+          </div>
+          {presets.length === 0 && <p className="shell-hint">Your first successful setup will appear here.</p>}
+        </details>
+      </section>
 
       <form aria-label="Create a game" onSubmit={submit}>
       <section className="shell-section">

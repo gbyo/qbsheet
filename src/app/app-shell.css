@@ -940,6 +940,33 @@ body {
   padding-bottom: 32px;
 }
 
+.manual-presets details > summary {
+  cursor: pointer;
+  list-style-position: inside;
+}
+
+.manual-presets .shell-heading {
+  display: list-item;
+}
+
+.manual-preset-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 20px;
+  margin-top: 12px;
+}
+
+.manual-preset-field {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.manual-preset-field .shell-input {
+  width: 100%;
+}
+
 /* Keep the decision to start or cancel reachable while a long setup is being filled in. */
 .manual-actions {
   position: sticky;
