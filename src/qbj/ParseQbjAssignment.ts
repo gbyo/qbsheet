@@ -51,7 +51,7 @@ import {
   wholeNumber,
 } from './QbjSerialization';
 import { readQbjScoringRules } from './QbjScoringRules';
-import { IQbtcpExtension, readQbtcpExtension } from './QbtcpExtension';
+import { IQbtcpExtension, readQbtcpExtension, unsupportedProcedureMessage } from './QbtcpExtension';
 
 const maxPlayersPerTeam = 200;
 const maxMatches = 4000;
@@ -416,6 +416,30 @@ export function defineGame(
   const errors: string[] = [];
   const assumptions: string[] = [];
   const extension: IQbtcpExtension | null = readQbtcpExtension(match);
+
+  /*
+   * A procedure this build cannot read is refused; a procedure that was never sent is not.
+   *
+   * The asymmetry is the whole of it. No procedure means the tournament stated no procedural rules,
+   * and the room scores with none enforced — which is what it asked for. A procedure in a shape this
+   * build does not understand means the tournament stated rules that did not arrive, and continuing
+   * would fall back to `any-boundary`: the *permissive* substitution policy. The room would then be
+   * granted more freedom than the tournament allowed, on the strength of running an old build, with
+   * nothing on screen to say so.
+   *
+   * First, and not answerable. Every other refusal below is either the scorekeeper's to fix — rules,
+   * rosters — or a fact about the document they could sort out with staff. This one is a fact about
+   * *this software*, and no answer given in the room makes it safe to continue.
+   *
+   * `.qbg` files and the pre-QBTCP connected path have always refused this, in `GamePackageValidation`.
+   * This is the same refusal reaching the one route that dropped it instead — the route a connected
+   * QBTCP assignment takes, and the route where a director's rules are likeliest to be newer than the
+   * room's software. A generic QBJ carrying no `_qbtcp` block is untouched; only a document that
+   * explicitly states procedural rules can be refused for stating them in a shape from the future.
+   */
+  if (extension?.unsupportedProcedureVersion !== undefined) {
+    return { ok: false, errors: [unsupportedProcedureMessage(extension.unsupportedProcedureVersion)] };
+  }
 
   // --- scoring rules --------------------------------------------------------------------------
   const rulesObject = source.document

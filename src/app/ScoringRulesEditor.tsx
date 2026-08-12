@@ -81,7 +81,10 @@ export default function ScoringRulesEditor(props: {
             <p className="shell-hint rules-mode-hint">
               {canSimplify
                 ? 'These rules also fit the simple form. Nothing is lost either way.'
-                : 'The simple form cannot state these rules, so going back would change what this game is worth.'}
+                : /* Not "would change what this game is worth": an extended regulation and a renamed
+                     answer type are both things the simple form cannot hold and neither changes a
+                     score. The sentence has to cover what the check actually refuses. */
+                  'The simple form cannot state these rules, so going back would change them.'}
             </p>
           </>
         )}
