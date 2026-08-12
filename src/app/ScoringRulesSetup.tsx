@@ -12,26 +12,30 @@
  * So it asks. The values are shown, they start at the most common shape rather than an empty form,
  * and nothing is applied until the scorekeeper submits.
  *
- * # Small on purpose
+ * # Small on purpose, and not a ceiling
  *
- * Four questions, no rules editor. Anything more elaborate is better fixed upstream by exporting
- * the rules in the QBJ, which is what this screen says.
+ * It opens as four questions, because four questions is what a document that forgot its rules almost
+ * always needs and a rules administration screen is a poor way to start a round. The advanced form is
+ * one press away for the tournament whose format the four questions cannot state — two power tiers, an
+ * irregular bonus — because "we cannot score this room today" is a worse answer than a longer form.
+ * Fixing it upstream by exporting the rules in the QBJ is still the right answer, which is what this
+ * screen says.
  *
  * # The fields themselves are shared
  *
- * They are also what Create a game asks, so they live in `BasicScoringRulesEditor` and this screen
- * supplies only the reason it is asking. What stays here is everything about the missing document:
- * the parser's own complaints, and the request to fix it upstream.
+ * They are also what Create a game asks, so they live in `ScoringRulesEditor` and this screen supplies
+ * only the reason it is asking. What stays here is everything about the missing document: the parser's
+ * own complaints, and the request to fix it upstream.
  */
 import { useState } from 'react';
 import {
-  IBasicScoringRulesInput,
-  basicScoringRulesDefaults,
-  basicScoringRulesProblems,
-  basicScorekeeperFormat,
-} from '../qbj/BasicScoringRules';
+  IScoringRulesInput,
+  scoringRulesInputDefaults,
+  scoringRulesInputFormat,
+  scoringRulesInputProblems,
+} from '../qbj/ScoringRulesInput';
 import { IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
-import BasicScoringRulesEditor from './BasicScoringRulesEditor';
+import ScoringRulesEditor from './ScoringRulesEditor';
 
 export default function ScoringRulesSetup(props: {
   /** Why the scoresheet is asking, in the parser's own words. */
@@ -40,14 +44,14 @@ export default function ScoringRulesSetup(props: {
   onCancel: () => void;
 }) {
   const { reason, onUse, onCancel } = props;
-  const [input, setInput] = useState<IBasicScoringRulesInput>(basicScoringRulesDefaults);
+  const [input, setInput] = useState<IScoringRulesInput>(scoringRulesInputDefaults);
   const [submitted, setSubmitted] = useState(false);
 
-  const problems = basicScoringRulesProblems(input);
+  const problems = scoringRulesInputProblems(input);
 
   const submit = () => {
     setSubmitted(true);
-    const format = basicScorekeeperFormat(input);
+    const format = scoringRulesInputFormat(input);
     if (format) onUse(format);
   };
 
@@ -64,7 +68,7 @@ export default function ScoringRulesSetup(props: {
         the QBJ to avoid this next time.
       </p>
 
-      <BasicScoringRulesEditor idPrefix="rules" value={input} onChange={setInput} />
+      <ScoringRulesEditor idPrefix="rules" value={input} onChange={setInput} />
 
       {submitted && problems.length > 0 && (
         <div className="shell-errors" role="alert">

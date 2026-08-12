@@ -22,33 +22,75 @@ import {
   manualTournamentName,
   newManualRecordIdentity,
 } from '../src/game/ManualGame';
-import { basicScoringRulesDefaults } from '../src/qbj/BasicScoringRules';
+import { IBasicScoringRulesInput, basicScoringRulesDefaults } from '../src/qbj/BasicScoringRules';
 import { readQbjScoringRules } from '../src/qbj/QbjScoringRules';
 import { basicScoringRulesToQbj } from '../src/qbj/BasicScoringRules';
+import {
+  IAdvancedScoringRulesInput,
+  advancedFromBasic,
+  advancedScoringRulesToQbj,
+  newAdvancedAnswerType,
+} from '../src/qbj/AdvancedScoringRules';
+import { advancedRulesInput, basicRulesInput } from '../src/qbj/ScoringRulesInput';
 import { gamePackageFormat, gamePackageProducer, gamePackageVersion } from '../src/game/GamePackage';
 import { roomProcedureVersion } from '../src/scoring/RoomProcedure';
 
-function input(overrides: Partial<IManualGameInput> = {}): IManualGameInput {
+/**
+ * The setup, with `rules` given as the basic form's own fields.
+ *
+ * The input now holds a discriminated wrapper so that an advanced format is statable, but almost every
+ * test here is about a basic one and `rules: { ...basicScoringRulesDefaults, tossupValue: 0 }` is the
+ * clearest way to say what is being varied. So the wrapping happens here rather than at ninety call
+ * sites. `advancedRules` below is the other branch, tested on its own terms.
+ */
+type ManualOverrides = Omit<Partial<IManualGameInput>, 'rules'> & { rules?: IBasicScoringRulesInput };
+
+function input(overrides: ManualOverrides = {}): IManualGameInput {
+  const { rules, ...rest } = overrides;
   return {
     gameLabel: '',
     left: { name: 'Ninety Six', players: 'Sarah\nJames\nAlex' },
     right: { name: 'Greenwood', players: 'Emma\nJordan' },
-    rules: { ...basicScoringRulesDefaults },
+    rules: basicRulesInput(rules ?? basicScoringRulesDefaults),
     options: { ...manualRoundOptionDefaults },
-    ...overrides,
+    ...rest,
   };
 }
 
 /** The definition, or a failure the test wants to see as one. */
-function define(overrides: Partial<IManualGameInput> = {}) {
+function define(overrides: ManualOverrides = {}) {
   const result = defineManualGame(input(overrides));
   if (!result.ok) throw new Error(`expected a definition, got: ${result.problems.map((p) => p.message).join(' ')}`);
   return result.definition;
 }
 
-function problems(overrides: Partial<IManualGameInput> = {}): string[] {
+function problems(overrides: ManualOverrides = {}): string[] {
   const result = defineManualGame(input(overrides));
   return result.ok ? [] : result.problems.map((problem) => problem.message);
+}
+
+/** The setup with an advanced format in it, for the branch the basic form cannot state. */
+function advancedInput(advanced: IAdvancedScoringRulesInput, overrides: ManualOverrides = {}): IManualGameInput {
+  return { ...input(overrides), rules: advancedRulesInput(advanced) };
+}
+
+function advancedRules(overrides: Partial<IAdvancedScoringRulesInput> = {}): IAdvancedScoringRulesInput {
+  return { ...advancedFromBasic(basicScoringRulesDefaults), ...overrides };
+}
+
+function defineAdvanced(advanced: IAdvancedScoringRulesInput) {
+  const result = defineManualGame(advancedInput(advanced));
+  if (!result.ok) throw new Error(`expected a definition, got: ${result.problems.map((p) => p.message).join(' ')}`);
+  return result.definition;
+}
+
+function advancedProblems(advanced: IAdvancedScoringRulesInput): string[] {
+  const result = defineManualGame(advancedInput(advanced));
+  return result.ok ? [] : result.problems.map((problem) => problem.message);
+}
+
+function answerType(value: number, label: string, shortLabel: string, awardsBonus = value > 0) {
+  return newAdvancedAnswerType({ value, label, shortLabel, awardsBonus });
 }
 
 describe('teams and players', () => {
@@ -247,6 +289,215 @@ describe('scoring rules', () => {
 
   test('no rule set is named anywhere in what it produces', () => {
     const serialized = JSON.stringify(define({ rules: { ...basicScoringRulesDefaults, powerValue: 15 } }));
+    expect(serialized).not.toContain('NAQT');
+    expect(serialized).not.toContain('ACF');
+  });
+});
+
+/**
+ * The formats the basic form could never state.
+ *
+ * The claim under test is the same one the basic form has to satisfy — a hand-entered format and the
+ * equivalent QBJ document are the same `IScorekeeperFormat`, field for field — applied to the cases
+ * that used to have to arrive as a document or not at all.
+ */
+describe('advanced scoring rules', () => {
+  test('two power tiers survive as three positive answer types', () => {
+    const format = defineAdvanced(
+      advancedRules({
+        answerTypes: [
+          answerType(20, 'Superpower', 'S'),
+          answerType(15, 'Power', 'P'),
+          answerType(10, 'Correct', 'C'),
+          answerType(-5, 'Neg', 'N'),
+        ],
+      }),
+    ).scorekeeperFormat;
+
+    expect(format.answerTypes.map((type) => type.value)).toEqual([20, 15, 10, -5]);
+    // Descending by value, powers first and negs last, exactly as an imported document is sorted.
+    expect(format.answerTypes.map((type) => type.index)).toEqual([0, 1, 2, 3]);
+    expect(format.answerTypes.filter((type) => type.isPower).map((type) => type.value)).toEqual([20, 15]);
+    expect(format.answerTypes.filter((type) => type.isNeg).map((type) => type.value)).toEqual([-5]);
+  });
+
+  test('two different negs are both kept', () => {
+    const format = defineAdvanced(
+      advancedRules({
+        answerTypes: [answerType(10, 'Correct', 'C'), answerType(-5, 'Neg', 'N'), answerType(-10, 'Bad neg', 'B')],
+      }),
+    ).scorekeeperFormat;
+
+    expect(format.answerTypes.map((type) => type.value)).toEqual([10, -5, -10]);
+    expect(format.totalDivisor).toBe(5);
+  });
+
+  test('a zero-point answer type is a real answer type, and earns no bonus by default', () => {
+    const format = defineAdvanced(
+      advancedRules({
+        answerTypes: [answerType(10, 'Correct', 'C'), answerType(0, 'Wrong after readout', 'W')],
+      }),
+    ).scorekeeperFormat;
+
+    const zero = format.answerTypes.find((type) => type.value === 0);
+    expect(zero?.awardsBonus).toBe(false);
+    expect(zero?.isPower).toBe(false);
+    expect(zero?.isNeg).toBe(false);
+  });
+
+  test('an irregular bonus is irregular, and states no points per part', () => {
+    const bonus = defineAdvanced(
+      advancedRules({
+        bonusStructure: 'irregular',
+        maximumBonusScore: 40,
+        bonusDivisor: 10,
+        minimumPartsPerBonus: 2,
+        maximumPartsPerBonus: 3,
+      }),
+    ).scorekeeperFormat.bonus;
+
+    expect(bonus.enabled).toBe(true);
+    expect(bonus.regular).toBe(false);
+    // What makes it irregular, and what tells the scorer to take a typed total rather than buttons.
+    expect(bonus.pointsPerPart).toBeUndefined();
+    expect(bonus).toMatchObject({ divisor: 10, minimumParts: 2, maximumParts: 3, maximumScore: 40 });
+  });
+
+  test('a regular bonus stated through the advanced form is still regular', () => {
+    const bonus = defineAdvanced(advancedRules()).scorekeeperFormat.bonus;
+
+    expect(bonus.regular).toBe(true);
+    expect(bonus.pointsPerPart).toBe(10);
+  });
+
+  test('a hand-entered advanced format and the equivalent QBJ are the same format', () => {
+    // Written out by hand rather than through the builder, so this compares the advanced pipeline
+    // against a document rather than against itself.
+    const byHand = readQbjScoringRules(
+      {
+        type: 'ScoringRules',
+        id: 'ScoringRules_Entered',
+        name: 'Scoring rules entered in the room',
+        teams_per_match: 2,
+        maximum_players_per_team: 4,
+        regulation_tossup_count: 20,
+        maximum_regulation_tossup_count: 20,
+        minimum_overtime_question_count: 1,
+        overtime_includes_bonuses: false,
+        answer_types: [
+          { type: 'AnswerType', id: 'AnswerType_20', value: 20, label: 'Superpower', short_label: 'S', awards_bonus: true },
+          { type: 'AnswerType', id: 'AnswerType_15', value: 15, label: 'Power', short_label: 'P', awards_bonus: true },
+          { type: 'AnswerType', id: 'AnswerType_10', value: 10, label: 'Correct', short_label: 'C', awards_bonus: true },
+          { type: 'AnswerType', id: 'AnswerType_-5', value: -5, label: 'Neg', short_label: 'N', awards_bonus: false },
+        ],
+        maximum_bonus_score: 40,
+        bonus_divisor: 10,
+        minimum_parts_per_bonus: 2,
+        maximum_parts_per_bonus: 3,
+        bonuses_bounce_back: false,
+      },
+      false,
+    );
+    expect(byHand.ok).toBe(true);
+    if (!byHand.ok) return;
+
+    const definition = defineAdvanced(
+      advancedRules({
+        answerTypes: [
+          answerType(20, 'Superpower', 'S'),
+          answerType(15, 'Power', 'P'),
+          answerType(10, 'Correct', 'C'),
+          answerType(-5, 'Neg', 'N'),
+        ],
+        bonusStructure: 'irregular',
+        maximumBonusScore: 40,
+        bonusDivisor: 10,
+        minimumPartsPerBonus: 2,
+        maximumPartsPerBonus: 3,
+      }),
+    );
+
+    expect(definition.scorekeeperFormat).toEqual(byHand.format);
+  });
+
+  test('the QBJ object it builds carries no points per part for an irregular bonus', () => {
+    const qbj = advancedScoringRulesToQbj(
+      advancedRules({ bonusStructure: 'irregular', maximumBonusScore: 40, bonusDivisor: 10, minimumPartsPerBonus: 2, maximumPartsPerBonus: 3 }),
+    );
+
+    expect(qbj.points_per_bonus_part).toBeUndefined();
+    expect(qbj.maximum_bonus_score).toBe(40);
+  });
+
+  test('a row with no value typed in it is refused rather than scored as zero', () => {
+    const found = advancedProblems(
+      advancedRules({ answerTypes: [answerType(10, 'Correct', 'C'), newAdvancedAnswerType({ label: 'Power' })] }),
+    );
+
+    expect(found).toContain('"Power" needs a point value.');
+  });
+
+  test('two answer types worth the same are refused, because the scorer would show two of them', () => {
+    const found = advancedProblems(
+      advancedRules({ answerTypes: [answerType(10, 'Correct', 'C'), answerType(10, 'Also correct', 'A')] }),
+    );
+
+    expect(found).toContain('Two answer types are worth 10 points.');
+  });
+
+  test('a format with no answer types at all is refused', () => {
+    expect(advancedProblems(advancedRules({ answerTypes: [] }))).toContain('Add at least one way to answer a tossup.');
+  });
+
+  test('bonuses nothing earns are refused, because no buzz could ever open one', () => {
+    const found = advancedProblems(
+      advancedRules({ answerTypes: [answerType(10, 'Correct', 'C', false)], useBonuses: true }),
+    );
+
+    expect(found).toContain('This format uses bonuses but no answer type earns one.');
+  });
+
+  test('an irregular bonus whose maximum is not a multiple of its increment is refused', () => {
+    const found = advancedProblems(
+      advancedRules({
+        bonusStructure: 'irregular',
+        maximumBonusScore: 35,
+        bonusDivisor: 10,
+        minimumPartsPerBonus: 2,
+        maximumPartsPerBonus: 3,
+      }),
+    );
+
+    expect(found).toContain('The maximum bonus score must be a multiple of the bonus score increment.');
+  });
+
+  test('a part range the wrong way round is refused', () => {
+    const found = advancedProblems(
+      advancedRules({
+        bonusStructure: 'irregular',
+        maximumBonusScore: 40,
+        bonusDivisor: 10,
+        minimumPartsPerBonus: 4,
+        maximumPartsPerBonus: 2,
+      }),
+    );
+
+    expect(found).toContain('The fewest parts per bonus cannot exceed the most parts per bonus.');
+  });
+
+  test('the engine still gets the last word on a format nobody could play', () => {
+    // Nothing positive to score. The complaint comes from the shared playability judgement rather
+        // than from a check written twice.
+    expect(advancedProblems(advancedRules({ answerTypes: [answerType(-5, 'Neg', 'N')] }))).toContain(
+      'These scoring rules have no way to score points on a tossup.',
+    );
+  });
+
+  test('no rule set is named anywhere in what it produces', () => {
+    const serialized = JSON.stringify(
+      defineAdvanced(advancedRules({ answerTypes: [answerType(20, 'Superpower', 'S'), answerType(10, 'Correct', 'C')] })),
+    );
+
     expect(serialized).not.toContain('NAQT');
     expect(serialized).not.toContain('ACF');
   });

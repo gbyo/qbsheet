@@ -35,7 +35,12 @@ import {
   gamePackageVersion,
 } from './GamePackage';
 import { playerNameMaxLength, readRosterLines, rosterLineProblems } from './Roster';
-import { IBasicScoringRulesInput, basicScoringRulesProblems, basicScorekeeperFormat } from '../qbj/BasicScoringRules';
+import {
+  IScoringRulesInput,
+  scoringRulesInputFormat,
+  scoringRulesInputProblems,
+  scoringRulesInputTossupCount,
+} from '../qbj/ScoringRulesInput';
 import {
   IRoomBreak,
   IRoomProcedure,
@@ -136,7 +141,14 @@ export interface IManualGameInput {
   gameLabel: string;
   left: IManualTeamInput;
   right: IManualTeamInput;
-  rules: IBasicScoringRulesInput;
+  /**
+   * The scoring rules, in whichever of the two forms they were entered.
+   *
+   * A wrapper rather than the basic fields, so that a format with two power tiers or an irregular
+   * bonus is something this screen can state. Both forms end up as a standard `ScoringRules` object
+   * read back through `readQbjScoringRules`; see `ScoringRulesInput`.
+   */
+  rules: IScoringRulesInput;
   options: IManualRoundOptions;
 }
 
@@ -267,11 +279,11 @@ function optionProblems(options: IManualRoundOptions): string[] {
 export function manualGameProblems(input: IManualGameInput): IManualGameProblem[] {
   return [
     ...teamProblems(input).map((message) => ({ section: 'teams' as const, message })),
-    ...basicScoringRulesProblems(input.rules).map((message) => ({ section: 'rules' as const, message })),
+    ...scoringRulesInputProblems(input.rules).map((message) => ({ section: 'rules' as const, message })),
     ...optionProblems(input.options).map((message) => ({ section: 'options' as const, message })),
     // Breaks are the one option whose validity depends on the rules section above it, because a break
     // is a tossup number and the round's length is stated there.
-    ...breakProblems(input.options, input.rules.tossupCount).map((message) => ({
+    ...breakProblems(input.options, scoringRulesInputTossupCount(input.rules)).map((message) => ({
       section: 'options' as const,
       message,
     })),
@@ -331,7 +343,7 @@ export function defineManualGame(input: IManualGameInput): ManualGameResult {
   const problems = manualGameProblems(input);
   if (problems.length > 0) return { ok: false, problems };
 
-  const format = basicScorekeeperFormat(input.rules);
+  const format = scoringRulesInputFormat(input.rules);
   if (!format) {
     // Unreachable while `manualGameProblems` consults the same judgement, and kept because "the
     // form said it was fine" is not a reason to hand the scorer a format nothing checked.
