@@ -85,7 +85,8 @@ export default function ScoringScreen(props: {
   operatorName?: string;
   /** True when the record store is currently healthy as well as backed by IndexedDB. */
   storageDegraded?: boolean;
-  onComplete: (recordId: string) => void | Promise<void>;
+  /** `acceptedJustNow` is a transient presentation fact, never persisted as game state. */
+  onComplete: (recordId: string, acceptedJustNow?: boolean) => void | Promise<void>;
   /** A repair produced new credentials for the same game. Persist them; nothing else changes. */
   onConnectionRepaired: (change: Partial<IConnectedSession>) => void;
   /** The room gave up on tournament control for this game. The game continues, offline. */
@@ -265,6 +266,7 @@ export default function ScoringScreen(props: {
       }
       if (onScreen.current) setRecordDurablyStored(store.durable && !store.storageDegraded);
 
+      let acceptedByTournamentControl = false;
       if (live) {
         // The capability is device-only. If this write is refused, the live send still happens and
         // the completed QBJ remains safe; only a post-reload retry cannot be promised.
@@ -278,10 +280,16 @@ export default function ScoringScreen(props: {
         // is for this device and must not be a second version of the portable QBTCP/file result.
         const delivered = await runtime.submitFinal(portable);
         await resultDelivery.recordOutcome(record.id, delivered);
+        acceptedByTournamentControl = delivered.delivery === 'sent';
       }
 
-      await onComplete(record.id);
-      return { ok: true, message: 'The result is saved on this device.' };
+      await onComplete(record.id, acceptedByTournamentControl);
+      return {
+        ok: true,
+        message: acceptedByTournamentControl
+          ? 'Tournament control accepted the result.'
+          : 'The result is saved on this device.',
+      };
     },
     [record.id, record.package, store, resultDelivery, live, runtime, onComplete],
   );
