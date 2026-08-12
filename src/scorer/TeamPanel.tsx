@@ -48,9 +48,10 @@ export interface ITeamPanelProps {
   negsAvailable: boolean;
   /** Whether a timeout has been used, when the tournament tracks them. */
   timeoutsUsed?: number;
-  onBuzz: (playerName: string, answerType: IScorekeeperAnswerType) => void;
+  /** Returns true only when the scoring engine committed the ruling. */
+  onBuzz: (playerName: string, answerType: IScorekeeperAnswerType) => boolean;
   /** An answer worth nothing that still spends this team's chance at the tossup. */
-  onWrongNoPenalty: (playerName: string) => void;
+  onWrongNoPenalty: (playerName: string) => boolean;
   /**
    * The players on the floor, in the order the room wants to see them.
    *
@@ -142,11 +143,31 @@ export default function TeamPanel(props: ITeamPanelProps) {
    * one would inherit the first one's remaining time instead of starting its own.
    */
   const [landed, setLanded] = useState<{ seat: number } | null>(null);
+  /**
+   * Pointer/touch confirmation for the ruling the engine actually accepted.
+   *
+   * Keyboard scoring deliberately does not enter this path. Its established `is-keyed` row wash is
+   * the row acknowledgement, avoiding two nearly identical flashes on the same keystroke.
+   */
+  const [recorded, setRecorded] = useState<
+    { playerName: string; answerTypeIndex: number | 'zero'; isNeg: boolean; token: number } | null
+  >(null);
+  const recordedSequence = useRef(0);
   useEffect(() => {
     if (landed === null) return undefined;
     const timer = window.setTimeout(() => setLanded(null), seatChangeEmphasisMs);
     return () => window.clearTimeout(timer);
   }, [landed]);
+  useEffect(() => {
+    if (recorded === null) return undefined;
+    const timer = window.setTimeout(() => setRecorded(null), 220);
+    return () => window.clearTimeout(timer);
+  }, [recorded]);
+
+  const acknowledgeRuling = (playerName: string, answerTypeIndex: number | 'zero', isNeg: boolean) => {
+    recordedSequence.current += 1;
+    setRecorded({ playerName, answerTypeIndex, isNeg, token: recordedSequence.current });
+  };
   const active = orderBySeating(
     team.players.filter((player) => team.activePlayers.includes(player.name)),
     seatOrder ?? [],
@@ -209,6 +230,8 @@ export default function TeamPanel(props: ITeamPanelProps) {
               'scorer-player',
               seat === flashSeat ? 'is-keyed' : '',
               seat === landed?.seat ? 'is-substituted' : '',
+              recorded?.playerName === player.name ? 'is-ruling-recorded' : '',
+              recorded?.playerName === player.name && recorded.isNeg ? 'is-neg-recorded' : '',
             ]
               .filter(Boolean)
               .join(' ')}
@@ -250,9 +273,15 @@ export default function TeamPanel(props: ITeamPanelProps) {
                 <button
                   key={answerType.index}
                   type="button"
-                  className={answerButtonClass(answerType)}
+                  className={`${answerButtonClass(answerType)}${
+                    recorded?.playerName === player.name && recorded.answerTypeIndex === answerType.index
+                      ? ' is-recorded'
+                      : ''
+                  }`}
                   disabled={!scoringEnabled || !eligible}
-                  onClick={() => onBuzz(player.name, answerType)}
+                  onClick={() => {
+                    if (onBuzz(player.name, answerType)) acknowledgeRuling(player.name, answerType.index, answerType.isNeg);
+                  }}
                   aria-label={`${player.name} ${answerType.label}`}
                 >
                   {buttonLabel(answerType)}
@@ -265,9 +294,13 @@ export default function TeamPanel(props: ITeamPanelProps) {
               */}
               <button
                 type="button"
-                className="scorer-answer scorer-answer-zero"
+                className={`scorer-answer scorer-answer-zero${
+                  recorded?.playerName === player.name && recorded.answerTypeIndex === 'zero' ? ' is-recorded' : ''
+                }`}
                 disabled={!scoringEnabled || !eligible}
-                onClick={() => onWrongNoPenalty(player.name)}
+                onClick={() => {
+                  if (onWrongNoPenalty(player.name)) acknowledgeRuling(player.name, 'zero', false);
+                }}
                 aria-label={`${player.name} ${negsAvailable ? '0 after readout' : '0'} wrong, no penalty`}
                 title={negsAvailable ? 'Wrong answer after readout, no penalty' : 'Wrong answer, no penalty'}
               >

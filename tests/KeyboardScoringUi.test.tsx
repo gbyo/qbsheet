@@ -167,6 +167,19 @@ describe('the eight numeric seat numbers', () => {
 });
 
 describe('the action keys', () => {
+  test('the established keyboard row echo is not duplicated by the pointer ruling acknowledgement', async () => {
+    await openScoringWithKeyboard();
+
+    await pressSequence(1, 'c');
+
+    const row = Array.from(document.querySelectorAll('.scorer-player')).find((candidate) =>
+      candidate.textContent?.includes('Sarah Mitchell'),
+    );
+    expect(row).toHaveClass('is-keyed');
+    expect(row).not.toHaveClass('is-ruling-recorded');
+    expect(row?.querySelector('.scorer-answer.is-recorded')).toBeNull();
+  });
+
   test('C records the ordinary correct answer from the format', async () => {
     await openScoringWithKeyboard();
 
