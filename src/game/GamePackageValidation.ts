@@ -164,6 +164,8 @@ function teamProblems(value: unknown, side: 'left' | 'right', maximumActive: num
   if (team.startingLineup !== undefined) {
     if (!Array.isArray(team.startingLineup)) {
       problems.push(`The ${side} team's starting lineup is not a list.`);
+    } else if (team.startingLineup.length === 0) {
+      problems.push(`The ${side} team's starting lineup is empty.`);
     } else if (team.startingLineup.length > maximumActive) {
       problems.push(`The ${side} team's starting lineup has more than ${maximumActive} players in it.`);
     } else {

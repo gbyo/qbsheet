@@ -18,7 +18,7 @@
  * the game sitting next to the buttons that score it is a mis-tap away from a half-finished result
  * reaching tournament control.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import BrandLogo from '../BrandLogo';
 import { LeftOrRight } from '../scoring/types';
 import {
@@ -57,7 +57,7 @@ import { connectionTimeline } from '../app/ConnectionTimeline';
 import { RoomConnectionState } from '../app/ConnectionState';
 import TeamPanel from './TeamPanel';
 import BonusPrompt from './BonusPrompt';
-import RecentRail from './RecentRail';
+import RecentRail, { IRecentMotion } from './RecentRail';
 import GameMenu, { IGameMenuItem, joinMenuGroups } from './GameMenu';
 import ControlIcon from './ControlIcon';
 import PlayersDialog, { rosterSyncKey } from './PlayersDialog';
@@ -86,7 +86,7 @@ import useRoomClock from './useRoomClock';
 import usePlayerSeating from './usePlayerSeating';
 import { orderBySeating } from './PlayerSeating';
 import useScreenWakeLock from './useScreenWakeLock';
-import { formatClock, roomClockSegment } from './RoomClock';
+import { formatClock, RoomClockStatus, roomClockSegment } from './RoomClock';
 import useScorerKeyboard from './useScorerKeyboard';
 import KeyboardMap, { KeyboardMapContext } from './KeyboardMap';
 import KeyboardStatus, { type KeyboardStatus as IKeyboardStatus } from './KeyboardStatus';
@@ -101,6 +101,7 @@ import ScorerBanners, {
   connectionClass,
   connectionLabel,
 } from './ConnectionStatus';
+import MotionNumber from './ScoringMotion';
 
 export type { IScorerAlert, IScorerRecoveryStatus } from './ConnectionStatus';
 
@@ -240,6 +241,75 @@ export interface IOperationNotice {
  */
 export const operationNoticeMs = 3000;
 
+/**
+ * A clock control that changes its paint when start/stop state changes, while the clock hook remains
+ * the sole owner of time. Tick updates only replace `display`; they never create a motion token.
+ */
+function ClockControl(props: {
+  status: RoomClockStatus;
+  display: string;
+  onStart: () => void;
+  onPause: () => void;
+  onResume: () => void;
+  onReset: () => void;
+}) {
+  const { status, display, onStart, onPause, onResume, onReset } = props;
+  const previous = useRef(status);
+  const sequence = useRef(0);
+  const [motion, setMotion] = useState<{ from: RoomClockStatus; to: RoomClockStatus; token: number } | null>(null);
+
+  useLayoutEffect(() => {
+    const from = previous.current;
+    previous.current = status;
+    const isStartStop =
+      from !== status &&
+      (status === 'running' || status === 'paused') &&
+      (from === 'idle' || from === 'running' || from === 'paused');
+    if (!isStartStop) {
+      setMotion(null);
+      return undefined;
+    }
+    sequence.current += 1;
+    const next = { from, to: status, token: sequence.current };
+    setMotion(next);
+    const timer = window.setTimeout(
+      () => setMotion((current) => (current?.token === next.token ? null : current)),
+      180,
+    );
+    return () => window.clearTimeout(timer);
+  }, [status]);
+
+  const label = status === 'running' ? 'Pause' : status === 'paused' ? 'Resume' : status === 'expired' ? 'Reset' : 'Start';
+  const action = status === 'running' ? onPause : status === 'paused' ? onResume : status === 'expired' ? onReset : onStart;
+  const icon = status === 'running' ? 'pause' : 'play';
+  const oldIcon = motion?.from === 'running' ? 'pause' : 'play';
+
+  return (
+    <span className={status === 'expired' ? 'scorer-clock is-expired' : 'scorer-clock'} data-clock-state={status}>
+      <span
+        className={motion ? `scorer-clock-digits is-${motion.to}` : 'scorer-clock-digits'}
+        aria-label="Room clock"
+        data-motion-token={motion?.token}
+      >
+        {status === 'expired' ? 'Time expired' : display}
+      </span>
+      <button type="button" className="scorer-clock-button" onClick={action}>
+        <span className="scorer-clock-icons" aria-hidden="true">
+          {motion && (
+            <span className="scorer-clock-icon is-outgoing">
+              <ControlIcon name={oldIcon} />
+            </span>
+          )}
+          <span className={motion ? 'scorer-clock-icon is-incoming' : 'scorer-clock-icon'}>
+            <ControlIcon name={icon} />
+          </span>
+        </span>
+        {label}
+      </button>
+    </span>
+  );
+}
+
 /** What happened at tournament control, appended to the local fact. */
 function controlOutcomeSuffix(result: HelpRequestResult): string {
   if (result.kind === 'accepted') return ' and was sent to tournament control.';
@@ -352,6 +422,53 @@ export default function Scorer(props: IScorerProps) {
    * and the line it is about stop pointing at each other together.
    */
   const [emphasizedQuestion, setEmphasizedQuestion] = useState<number | undefined>(undefined);
+  const transientSequence = useRef(0);
+  const [noBuzzAcknowledgement, setNoBuzzAcknowledgement] = useState<{ token: number } | null>(null);
+  const [bonusExit, setBonusExit] = useState<
+    { token: number; questionNumber: number; controllingTeamName: string } | null
+  >(null);
+  const [recentMotion, setRecentMotion] = useState<IRecentMotion | undefined>(undefined);
+
+  const nextTransientToken = useCallback(() => {
+    transientSequence.current += 1;
+    return transientSequence.current;
+  }, []);
+
+  useEffect(() => {
+    if (!noBuzzAcknowledgement) return undefined;
+    const timer = window.setTimeout(() => setNoBuzzAcknowledgement(null), 170);
+    return () => window.clearTimeout(timer);
+  }, [noBuzzAcknowledgement]);
+
+  useEffect(() => {
+    if (!bonusExit) return undefined;
+    const timer = window.setTimeout(() => setBonusExit(null), 180);
+    return () => window.clearTimeout(timer);
+  }, [bonusExit]);
+
+  useEffect(() => {
+    if (!recentMotion) return undefined;
+    const token = recentMotion.token;
+    const timer = window.setTimeout(
+      () => setRecentMotion((current) => (current?.token === token ? undefined : current)),
+      200,
+    );
+    return () => window.clearTimeout(timer);
+  }, [recentMotion]);
+
+  const previousConnection = useRef(connection);
+  const [connectionRecovery, setConnectionRecovery] = useState<{ token: number } | null>(null);
+  useEffect(() => {
+    const from = previousConnection.current;
+    previousConnection.current = connection;
+    if (from === RoomConnectionState.Connected || connection !== RoomConnectionState.Connected) return;
+    setConnectionRecovery({ token: nextTransientToken() });
+  }, [connection, nextTransientToken]);
+  useEffect(() => {
+    if (!connectionRecovery) return undefined;
+    const timer = window.setTimeout(() => setConnectionRecovery(null), 320);
+    return () => window.clearTimeout(timer);
+  }, [connectionRecovery]);
 
   /**
    * Clear an acknowledgement once it has been read.
@@ -446,6 +563,26 @@ export default function Scorer(props: IScorerProps) {
     [format, setup, events.events, procedure],
   );
   const { phase } = game;
+  const previousPhaseKind = useRef(phase.kind);
+  const [completionMotion, setCompletionMotion] = useState<{ token: number } | null>(null);
+  useLayoutEffect(() => {
+    const from = previousPhaseKind.current;
+    previousPhaseKind.current = phase.kind;
+    if (from !== 'complete' && phase.kind === 'complete') {
+      setCompletionMotion({ token: nextTransientToken() });
+    } else if (phase.kind !== 'complete') {
+      setCompletionMotion(null);
+    }
+  }, [nextTransientToken, phase.kind]);
+  useEffect(() => {
+    if (!completionMotion) return undefined;
+    const token = completionMotion.token;
+    const timer = window.setTimeout(
+      () => setCompletionMotion((current) => (current?.token === token ? null : current)),
+      280,
+    );
+    return () => window.clearTimeout(timer);
+  }, [completionMotion]);
   useScreenWakeLock(phase.kind === 'tossup' || phase.kind === 'bonus' || phase.kind === 'timeout');
   const {
     configured: roomClockConfigured,
@@ -687,8 +824,8 @@ export default function Scorer(props: IScorerProps) {
 
   const recordBuzz = useCallback(
     (team: LeftOrRight, playerName: string, answerType: IScorekeeperAnswerType) => {
-      if (phase.kind !== 'tossup') return;
-      record({
+      if (phase.kind !== 'tossup') return false;
+      return record({
         id: newEventId(),
         type: 'tossup-buzz',
         questionNumber: phase.questionNumber,
@@ -708,8 +845,8 @@ export default function Scorer(props: IScorerProps) {
    */
   const recordWrongNoPenalty = useCallback(
     (team: LeftOrRight, playerName: string) => {
-      if (phase.kind !== 'tossup') return;
-      record({
+      if (phase.kind !== 'tossup') return false;
+      return record({
         id: newEventId(),
         type: 'tossup-no-penalty',
         questionNumber: phase.questionNumber,
@@ -721,14 +858,26 @@ export default function Scorer(props: IScorerProps) {
   );
 
   const recordNoBuzz = useCallback(() => {
+    if (phase.kind !== 'tossup') return false;
+    const accepted = record({ id: newEventId(), type: 'tossup-dead', questionNumber: phase.questionNumber });
+    if (accepted) setNoBuzzAcknowledgement({ token: nextTransientToken() });
+    return accepted;
+  }, [nextTransientToken, record, phase]);
+
+  const recordReadingResumed = useCallback(() => {
     if (phase.kind !== 'tossup') return;
-    record({ id: newEventId(), type: 'tossup-dead', questionNumber: phase.questionNumber });
+    record({ id: newEventId(), type: 'tossup-reading-resumed', questionNumber: phase.questionNumber });
+  }, [record, phase]);
+
+  const recordReadout = useCallback(() => {
+    if (phase.kind !== 'tossup') return;
+    record({ id: newEventId(), type: 'tossup-readout', questionNumber: phase.questionNumber });
   }, [record, phase]);
 
   const recordBonus = useCallback(
     (controlledPoints: number, bouncebackPoints?: number) => {
-      if (phase.kind !== 'bonus') return;
-      record({
+      if (phase.kind !== 'bonus') return false;
+      const accepted = record({
         id: newEventId(),
         type: 'bonus',
         questionNumber: phase.questionNumber,
@@ -736,22 +885,38 @@ export default function Scorer(props: IScorerProps) {
         controlledPoints,
         bouncebackPoints,
       });
+      if (accepted) {
+        setBonusExit({
+          token: nextTransientToken(),
+          questionNumber: phase.questionNumber,
+          controllingTeamName: phase.team === 'left' ? game.left.name : game.right.name,
+        });
+      }
+      return accepted;
     },
-    [record, phase],
+    [game.left.name, game.right.name, nextTransientToken, record, phase],
   );
 
   const recordBonusParts = useCallback(
     (parts: IBonusPartResult[]) => {
-      if (phase.kind !== 'bonus') return;
-      record({
+      if (phase.kind !== 'bonus') return false;
+      const accepted = record({
         id: newEventId(),
         type: 'bonus',
         questionNumber: phase.questionNumber,
         team: phase.team,
         parts,
       });
+      if (accepted) {
+        setBonusExit({
+          token: nextTransientToken(),
+          questionNumber: phase.questionNumber,
+          controllingTeamName: phase.team === 'left' ? game.left.name : game.right.name,
+        });
+      }
+      return accepted;
     },
-    [record, phase],
+    [game.left.name, game.right.name, nextTransientToken, record, phase],
   );
 
   /**
@@ -799,14 +964,27 @@ export default function Scorer(props: IScorerProps) {
   const undoWithFeedback = useCallback(() => {
     const frame = events.undo();
     if (!frame || frame.length === 0) return;
-    acknowledge(`Undid ${frameDescription(frame, format, game)}`, frameQuestion(frame));
-  }, [acknowledge, events, format, game]);
+    const questionNumber = frameQuestion(frame);
+    acknowledge(`Undid ${frameDescription(frame, format, game)}`, questionNumber);
+    if (questionNumber !== undefined) {
+      setRecentMotion({
+        questionNumber,
+        kind: 'undo',
+        token: nextTransientToken(),
+        snapshot: game.questions.find((question) => question.questionNumber === questionNumber),
+      });
+    }
+  }, [acknowledge, events, format, game, nextTransientToken]);
 
   const redoWithFeedback = useCallback(() => {
     const frame = events.redo();
     if (!frame || frame.length === 0) return;
-    acknowledge(`Redid ${frameDescription(frame, format, game)}`, frameQuestion(frame));
-  }, [acknowledge, events, format, game]);
+    const questionNumber = frameQuestion(frame);
+    acknowledge(`Redid ${frameDescription(frame, format, game)}`, questionNumber);
+    if (questionNumber !== undefined) {
+      setRecentMotion({ questionNumber, kind: 'redo', token: nextTransientToken() });
+    }
+  }, [acknowledge, events, format, game, nextTransientToken]);
 
   const benchFor = (team: LeftOrRight): string[] => {
     const derivedTeam = team === 'left' ? game.left : game.right;
@@ -849,7 +1027,26 @@ export default function Scorer(props: IScorerProps) {
    * Both teams still being eligible is exactly that condition: an answer of any kind — a buzz or a
    * zero — removes the team that gave it from the eligible list. See `TeamPanel`.
    */
-  const negsAvailable = scoringEnabled && phase.kind === 'tossup' && phase.eligibleTeams.length === 2;
+  const currentQuestionState =
+    phase.kind === 'tossup' ? game.questions.find((question) => question.questionNumber === phase.questionNumber) : undefined;
+  const answeredTeams = new Set<LeftOrRight>([
+    ...(currentQuestionState?.buzzes.map((buzz) => buzz.team) ?? []),
+    ...(currentQuestionState?.noPenalty.map((missed) => missed.team) ?? []),
+  ]);
+  const negsAvailable = (side: LeftOrRight) =>
+    scoringEnabled &&
+    phase.kind === 'tossup' &&
+    phase.eligibleTeams.includes(side) &&
+    currentQuestionState?.readout !== true &&
+    (answeredTeams.size === 0 || currentQuestionState?.readingResumed === true);
+  const anyNegAvailable = negsAvailable('left') || negsAvailable('right');
+  const canResumeReading =
+    phase.kind === 'tossup' &&
+    answeredTeams.size > 0 &&
+    answeredTeams.size < 2 &&
+    currentQuestionState?.readingResumed !== true &&
+    currentQuestionState?.readout !== true;
+  const canReadout = phase.kind === 'tossup' && currentQuestionState?.readout !== true;
   /**
    * The button says the same thing all game.
    *
@@ -923,7 +1120,8 @@ export default function Scorer(props: IScorerProps) {
     onNoBuzz: recordNoBuzz,
     onUndo: undoWithFeedback,
     onRedo: redoWithFeedback,
-    onSeatArmed: (seat) => setKeyStatus({ kind: 'armed', seat, actions: availableActionKeys(format, negsAvailable) }),
+    onSeatArmed: (seat) =>
+      setKeyStatus({ kind: 'armed', seat, actions: availableActionKeys(format, negsAvailable(seat.side)) }),
     onSequenceCleared: () => setKeyStatus(null),
     onEcho: ({ side, seat, number, playerName, action, answerType }) => {
       setKeyEcho({ side, seat });
@@ -964,10 +1162,10 @@ export default function Scorer(props: IScorerProps) {
     if (playBlockedByProtest) return { kind: 'inactive', reason: 'Resolve the protest first.' };
     return {
       kind: 'tossup',
-      actions: sequenceLegend(format, negsAvailable),
+      actions: sequenceLegend(format, anyNegAvailable),
       unreachable: unreachableAnswerTypes(format).map(rulingLabel),
     };
-  }, [dialog, bonusStage, phase.kind, playBlockedByProtest, format, negsAvailable]);
+  }, [dialog, bonusStage, phase.kind, playBlockedByProtest, format, anyNegAvailable]);
 
   const lineupChangeAllowed = lineupChangeAllowedAtPhase(substitutionPolicy(procedure), phase.kind);
   const rosterAdditionAllowed = phase.kind !== 'complete';
@@ -1043,10 +1241,63 @@ export default function Scorer(props: IScorerProps) {
       // Sudden death is a state a game arrives at, not a property a format has: NAQT plays three
       // overtime tossups and only then becomes sudden death.
       const suddenDeath = game.suddenDeathStarted ? ' · sudden death' : '';
-      return `Overtime tossup ${Math.max(1, overtimeNumber)}${suddenDeath}`;
+      return (
+        <>
+          Overtime tossup <MotionNumber value={Math.max(1, overtimeNumber)} minimumDigits={1} />
+          {suddenDeath}
+        </>
+      );
+    }
+    if (format.regulation.timed) {
+      return (
+        <>
+          Tossup <MotionNumber value={phase.questionNumber} minimumDigits={2} /> · timed round
+        </>
+      );
+    }
+    return (
+      <>
+        Tossup{' '}
+        <MotionNumber
+          value={phase.questionNumber}
+          minimumDigits={String(format.regulation.tossupCount).length}
+        />{' '}
+        of {format.regulation.tossupCount}
+      </>
+    );
+  })();
+  const progressText = (() => {
+    if (phase.kind === 'complete') return 'Game complete';
+    if (phase.kind === 'lineup') return 'Choose starters';
+    if (phase.kind === 'score-check') return `Halftime · after tossup ${phase.afterQuestion}`;
+    if (phase.kind === 'checkpoint') {
+      return phase.checkpoint === 'overtime' ? 'Regulation complete' : 'Initial overtime complete';
+    }
+    if (phase.kind === 'timeout') return `Timeout · ${phase.team === 'left' ? game.left.name : game.right.name}`;
+    if (phase.period === 'overtime') {
+      const overtimeNumber = game.overtimeTossupsRead + (phase.kind === 'tossup' ? 1 : 0);
+      return `Overtime tossup ${Math.max(1, overtimeNumber)}${game.suddenDeathStarted ? ' · sudden death' : ''}`;
     }
     if (format.regulation.timed) return `Tossup ${phase.questionNumber} · timed round`;
     return `Tossup ${phase.questionNumber} of ${format.regulation.tossupCount}`;
+  })();
+  const progressMotion = (() => {
+    if (phase.kind !== 'tossup' && phase.kind !== 'bonus') return null;
+    if (phase.period === 'overtime') {
+      const overtimeNumber = game.overtimeTossupsRead + (phase.kind === 'tossup' ? 1 : 0);
+      return {
+        prefix: 'Overtime tossup ',
+        value: Math.max(1, overtimeNumber),
+        suffix: game.suddenDeathStarted ? ' · sudden death' : '',
+        digits: 1,
+      };
+    }
+    return {
+      prefix: 'Tossup ',
+      value: phase.questionNumber,
+      suffix: format.regulation.timed ? ' · timed round' : ` of ${format.regulation.tossupCount}`,
+      digits: format.regulation.timed ? 2 : String(format.regulation.tossupCount).length,
+    };
   })();
 
   /**
@@ -1218,37 +1469,42 @@ export default function Scorer(props: IScorerProps) {
         </div>
         <div className="scorer-header-side">
           <div className="scorer-header-status">
-            <span className="scorer-progress">{progress}</span>
+            <span
+              className={progressMotion ? 'scorer-progress has-motion-number' : 'scorer-progress'}
+              aria-label={progressMotion ? progressText : undefined}
+            >
+              {progressMotion ? (
+                <>
+                  <span className="scorer-progress-copy" aria-hidden="true">
+                    {progressText}
+                  </span>
+                  <span
+                    className="scorer-progress-visual"
+                    data-prefix={progressMotion.prefix}
+                    data-suffix={progressMotion.suffix}
+                    aria-hidden="true"
+                  >
+                    <MotionNumber value={progressMotion.value} minimumDigits={progressMotion.digits} />
+                  </span>
+                </>
+              ) : (
+                progress
+              )}
+            </span>
             {roomClock.configured && (
-              <span className={roomClock.state.status === 'expired' ? 'scorer-clock is-expired' : 'scorer-clock'}>
-                <span aria-label="Room clock">
-                  {roomClock.state.status === 'expired' ? 'Time expired' : roomClock.display}
-                </span>
-                {roomClock.state.status === 'idle' && (
-                  <button type="button" className="scorer-clock-button" onClick={roomClock.start}>
-                    Start
-                  </button>
-                )}
-                {roomClock.state.status === 'running' && (
-                  <button type="button" className="scorer-clock-button" onClick={roomClock.pause}>
-                    Pause
-                  </button>
-                )}
-                {roomClock.state.status === 'paused' && (
-                  <button type="button" className="scorer-clock-button" onClick={roomClock.resume}>
-                    Resume
-                  </button>
-                )}
-                {roomClock.state.status === 'expired' && (
-                  <button type="button" className="scorer-clock-button" onClick={resetRoomClock}>
-                    Reset
-                  </button>
-                )}
-              </span>
+              <ClockControl
+                status={roomClock.state.status}
+                display={roomClock.display}
+                onStart={roomClock.start}
+                onPause={roomClock.pause}
+                onResume={roomClock.resume}
+                onReset={resetRoomClock}
+              />
             )}
             <button
               type="button"
-              className={connectionClass(connection)}
+              className={`${connectionClass(connection)}${connectionRecovery ? ' is-recovered' : ''}`}
+              data-recovery-token={connectionRecovery?.token}
               aria-label={`${statusLabel ?? `Connection: ${connectionLabel(connection)}`}. Show connection detail`}
               onClick={() => {
                 setDetailNow(Date.now());
@@ -1386,7 +1642,7 @@ export default function Scorer(props: IScorerProps) {
                 flashSeat={keyEcho?.side === 'left' ? keyEcho.seat : undefined}
                 scoringEnabled={scoringEnabled}
                 eligible={eligible('left')}
-                negsAvailable={negsAvailable}
+                negsAvailable={negsAvailable('left')}
                 timeoutsUsed={(procedure?.timeoutsPerTeam ?? 0) > 0 ? game.timeouts.left : undefined}
                 onBuzz={(playerName, answerType) => recordBuzz('left', playerName, answerType)}
                 onWrongNoPenalty={(playerName) => recordWrongNoPenalty('left', playerName)}
@@ -1403,7 +1659,7 @@ export default function Scorer(props: IScorerProps) {
                 flashSeat={keyEcho?.side === 'right' ? keyEcho.seat : undefined}
                 scoringEnabled={scoringEnabled}
                 eligible={eligible('right')}
-                negsAvailable={negsAvailable}
+                negsAvailable={negsAvailable('right')}
                 timeoutsUsed={(procedure?.timeoutsPerTeam ?? 0) > 0 ? game.timeouts.right : undefined}
                 onBuzz={(playerName, answerType) => recordBuzz('right', playerName, answerType)}
                 onWrongNoPenalty={(playerName) => recordWrongNoPenalty('right', playerName)}
@@ -1424,7 +1680,32 @@ export default function Scorer(props: IScorerProps) {
               the completion review is the one thing put in here that can outgrow the window, and a
               pinned block taller than the window loses its top edge off the top of the screen.
             */}
-            <div className={phase.kind === 'complete' ? 'scorer-stage' : 'scorer-stage is-pinned'}>
+            <div
+              className={`${phase.kind === 'complete' ? 'scorer-stage' : 'scorer-stage is-pinned'}${
+                noBuzzAcknowledgement ? ' is-no-buzz-recorded' : ''
+              }`}
+            >
+              {noBuzzAcknowledgement && (
+                <span
+                  key={`no-buzz-${noBuzzAcknowledgement.token}`}
+                  className="scorer-no-buzz-sweep"
+                  data-motion-token={noBuzzAcknowledgement.token}
+                  aria-hidden="true"
+                />
+              )}
+              {bonusExit && (
+                <div
+                  key={`bonus-exit-${bonusExit.token}`}
+                  className="scorer-prompt scorer-bonus-exit"
+                  data-motion-token={bonusExit.token}
+                  aria-hidden="true"
+                >
+                  <p className="scorer-prompt-title">
+                    <span className="scorer-prompt-team">{bonusExit.controllingTeamName}</span> bonus
+                    <span className="scorer-prompt-context">Q{bonusExit.questionNumber}</span>
+                  </p>
+                </div>
+              )}
               {phase.kind === 'score-check' && (
                 <HalftimeCheck
                   game={game}
@@ -1454,6 +1735,16 @@ export default function Scorer(props: IScorerProps) {
                   >
                     {noBuzzLabel}
                   </button>
+                  {canResumeReading && (
+                    <button type="button" className="scorer-action" onClick={recordReadingResumed} disabled={playBlockedByProtest}>
+                      Resume reading
+                    </button>
+                  )}
+                  {canReadout && (
+                    <button type="button" className="scorer-action" onClick={recordReadout} disabled={playBlockedByProtest}>
+                      Question read out
+                    </button>
+                  )}
                   {phase.eligibleTeams.length === 1 && (
                     <p className="scorer-hint">
                       {phase.eligibleTeams[0] === 'left' ? game.left.name : game.right.name} may still answer.
@@ -1549,6 +1840,7 @@ export default function Scorer(props: IScorerProps) {
                   key={phase.questionNumber}
                   format={format}
                   controllingTeamName={phase.team === 'left' ? game.left.name : game.right.name}
+                  controllingSide={phase.team}
                   opponentName={phase.team === 'left' ? game.right.name : game.left.name}
                   questionNumber={phase.questionNumber}
                   onRecord={recordBonus}
@@ -1559,7 +1851,10 @@ export default function Scorer(props: IScorerProps) {
               )}
 
               {phase.kind === 'complete' && (
-                <div className="scorer-complete">
+                <div
+                  className={`scorer-complete${completionMotion ? ' is-newly-complete' : ''}`}
+                  data-completion-token={completionMotion?.token}
+                >
                   <PreSubmitReview
                     format={format}
                     game={game}
@@ -1598,6 +1893,7 @@ export default function Scorer(props: IScorerProps) {
           <RecentRail
             game={game}
             emphasizeQuestion={emphasizedQuestion}
+            motion={recentMotion}
             onInspect={(questionNumber) => openReviewAt(questionNumber, true)}
           />
         </div>

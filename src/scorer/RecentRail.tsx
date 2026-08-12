@@ -38,6 +38,16 @@ export interface IRecentRailProps {
    * at, and inventing an exit for a row that is already gone would be animating a fiction.
    */
   emphasizeQuestion?: number;
+  /** One presentation frame for the question an undo removed or a redo restored. */
+  motion?: IRecentMotion;
+}
+
+export interface IRecentMotion {
+  questionNumber: number;
+  kind: 'undo' | 'redo';
+  token: number;
+  /** The inert copy used only when undo removed the real row immediately. */
+  snapshot?: IDerivedQuestion;
 }
 
 /** "+15" / "-5", so a neg reads as a neg at a glance. */
@@ -79,8 +89,49 @@ function questionLines(question: IDerivedQuestion, teamNames: { left: string; ri
   return lines;
 }
 
+function QuestionBody(props: {
+  question: IDerivedQuestion;
+  teamNames: { left: string; right: string };
+  marked: boolean;
+}) {
+  const { question, teamNames, marked } = props;
+  return (
+    <>
+      <span className="scorer-rail-q">
+        Q{question.questionNumber}
+        {question.period === 'overtime' && <span className="scorer-rail-ot">OT</span>}
+        {question.replaced && (
+          <span className="scorer-rail-mark" title="Replaced question">
+            R
+          </span>
+        )}
+        {marked && (
+          <span
+            className="scorer-rail-mark is-flagged"
+            title={question.openProtests > 0 ? 'Protest outstanding' : 'Flagged for tournament control'}
+          >
+            !
+          </span>
+        )}
+      </span>
+      <span className="scorer-rail-lines">
+        {questionLines(question, teamNames).map((line, index) => (
+          // Position is the identity: identical activity lines may legitimately repeat.
+          <span key={index} className="scorer-rail-line">
+            <span className="scorer-rail-what">{line.what}</span>
+            <span className="scorer-rail-points">{line.points}</span>
+          </span>
+        ))}
+      </span>
+      <span className="scorer-rail-running" aria-label="Score after this question">
+        {question.scoreAfter.left}&ndash;{question.scoreAfter.right}
+      </span>
+    </>
+  );
+}
+
 export default function RecentRail(props: IRecentRailProps) {
-  const { game, limit = 8, onInspect, emphasizeQuestion } = props;
+  const { game, limit = 8, onInspect, emphasizeQuestion, motion } = props;
   const teamNames = { left: game.left.name, right: game.right.name };
   const recent = game.questions.slice(-limit).reverse();
   const flaggedQuestions = new Set(game.notes.filter((note) => note.flagged).map((note) => note.questionNumber));
@@ -88,57 +139,39 @@ export default function RecentRail(props: IRecentRailProps) {
   return (
     <aside className="scorer-rail" aria-label="Recent activity">
       <h2 className="scorer-rail-heading">Recent</h2>
-      {recent.length === 0 ? (
+      {recent.length === 0 && !(motion?.kind === 'undo' && motion.snapshot) ? (
         <p className="scorer-rail-empty">Nothing scored yet.</p>
       ) : (
         <ol className="scorer-rail-list">
+          {motion?.kind === 'undo' &&
+            motion.snapshot &&
+            !recent.some((question) => question.questionNumber === motion.questionNumber) && (
+              <li
+                key={`undo-${motion.token}`}
+                className="scorer-rail-item is-motion-ghost is-undoing"
+                aria-hidden="true"
+              >
+                <QuestionBody question={motion.snapshot} teamNames={teamNames} marked={false} />
+              </li>
+            )}
           {recent.map((question) => {
             const marked = question.openProtests > 0 || flaggedQuestions.has(question.questionNumber);
-            const body = (
-              <>
-                <span className="scorer-rail-q">
-                  Q{question.questionNumber}
-                  {question.period === 'overtime' && <span className="scorer-rail-ot">OT</span>}
-                  {question.replaced && (
-                    <span className="scorer-rail-mark" title="Replaced question">
-                      R
-                    </span>
-                  )}
-                  {marked && (
-                    <span
-                      className="scorer-rail-mark is-flagged"
-                      title={question.openProtests > 0 ? 'Protest outstanding' : 'Flagged for tournament control'}
-                    >
-                      !
-                    </span>
-                  )}
-                </span>
-                <span className="scorer-rail-lines">
-                  {questionLines(question, teamNames).map((line, index) => (
-                    // Position is the identity: identical activity lines may legitimately repeat.
-
-                    <span key={index} className="scorer-rail-line">
-                      <span className="scorer-rail-what">{line.what}</span>
-                      <span className="scorer-rail-points">{line.points}</span>
-                    </span>
-                  ))}
-                </span>
-                <span className="scorer-rail-running" aria-label="Score after this question">
-                  {question.scoreAfter.left}&ndash;{question.scoreAfter.right}
-                </span>
-              </>
-            );
+            const body = <QuestionBody question={question} teamNames={teamNames} marked={marked} />;
+            const isMotionTarget = question.questionNumber === motion?.questionNumber;
 
             return (
               <li
-                key={question.questionNumber}
+                key={isMotionTarget ? `${question.questionNumber}-${motion.token}` : question.questionNumber}
                 // The class is the whole emphasis: the button inside it is untouched, so a row being
                 // pointed at is still a row that opens the question when it is pressed.
-                className={
-                  question.questionNumber === emphasizeQuestion
-                    ? 'scorer-rail-item is-emphasized'
-                    : 'scorer-rail-item'
-                }
+                className={[
+                  'scorer-rail-item',
+                  question.questionNumber === emphasizeQuestion ? 'is-emphasized' : '',
+                  isMotionTarget ? (motion.kind === 'undo' ? 'is-undoing' : 'is-redoing') : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+                data-motion-token={isMotionTarget ? motion.token : undefined}
               >
                 {onInspect ? (
                   <button

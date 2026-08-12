@@ -11,6 +11,9 @@
  */
 import { IScorekeeperBonus } from '../scoring/ScorekeeperFormat';
 
+/** A malformed or merely enormous format must not make the browser build unbounded button lists. */
+const maximumEnumeratedBonusChoices = 1_000;
+
 /**
  * Every total a regular bonus can be worth, ascending.
  *
@@ -21,7 +24,8 @@ import { IScorekeeperBonus } from '../scoring/ScorekeeperFormat';
 export function regularBonusTotals(bonus: IScorekeeperBonus): number[] | null {
   if (!bonus.regular) return null;
   const perPart = bonus.pointsPerPart;
-  if (!perPart || perPart <= 0) return null;
+  if (typeof perPart !== 'number' || !Number.isInteger(perPart) || perPart <= 0 || !Number.isInteger(bonus.maximumScore) || bonus.maximumScore < 0) return null;
+  if (Math.floor(bonus.maximumScore / perPart) + 2 > maximumEnumeratedBonusChoices) return null;
 
   const totals: number[] = [];
   for (let points = 0; points <= bonus.maximumScore; points += perPart) totals.push(points);
@@ -31,6 +35,14 @@ export function regularBonusTotals(bonus: IScorekeeperBonus): number[] | null {
   return totals;
 }
 
+/** Whether bounceback choices are too numerous for a useful button row. */
+export function bouncebackNeedsTypedEntry(bonus: IScorekeeperBonus, controlledPoints: number): boolean {
+  if (!Number.isInteger(bonus.maximumScore) || bonus.maximumScore < 0 || !Number.isInteger(controlledPoints)) return false;
+  const available = Math.max(0, bonus.maximumScore - Math.max(0, controlledPoints));
+  const step = bonus.pointsPerPart && bonus.pointsPerPart > 0 ? bonus.pointsPerPart : bonus.divisor;
+  return Number.isInteger(step) && step > 0 && Math.floor(available / step) + 2 > maximumEnumeratedBonusChoices;
+}
+
 /**
  * What the opposing team can earn on bouncebacks, given what the controlling team took.
  *
@@ -38,9 +50,11 @@ export function regularBonusTotals(bonus: IScorekeeperBonus): number[] | null {
  * bounce, and offering a button for it would invite a score that cannot happen.
  */
 export function bouncebackOptions(bonus: IScorekeeperBonus, controlledPoints: number): number[] {
-  const available = Math.max(0, bonus.maximumScore - controlledPoints);
+  if (!Number.isInteger(bonus.maximumScore) || bonus.maximumScore < 0 || !Number.isInteger(controlledPoints)) return [0];
+  const available = Math.max(0, bonus.maximumScore - Math.max(0, controlledPoints));
   const step = bonus.pointsPerPart && bonus.pointsPerPart > 0 ? bonus.pointsPerPart : bonus.divisor;
-  if (step <= 0) return [0];
+  if (!Number.isInteger(step) || step <= 0) return [0];
+  if (Math.floor(available / step) + 2 > maximumEnumeratedBonusChoices) return [0, available];
 
   const options: number[] = [];
   for (let points = 0; points <= available; points += step) options.push(points);
@@ -55,6 +69,9 @@ export function bouncebackOptions(bonus: IScorekeeperBonus, controlledPoints: nu
  * problem in both places is told the same thing about it.
  */
 export function bonusTotalProblem(bonus: IScorekeeperBonus, points: number): string | null {
+  if (!Number.isInteger(bonus.maximumScore) || bonus.maximumScore < 0 || !Number.isInteger(bonus.divisor) || bonus.divisor < 1) {
+    return 'This bonus format is not usable.';
+  }
   if (!Number.isFinite(points) || !Number.isInteger(points)) return 'Enter a whole number of points.';
   if (points < 0) return 'Bonus points cannot be negative.';
   if (points > bonus.maximumScore) return `The most a bonus can be worth is ${bonus.maximumScore}.`;

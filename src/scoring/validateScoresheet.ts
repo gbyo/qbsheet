@@ -41,6 +41,8 @@ function isCycleEvent(event: ScoreEvent): boolean {
   return (
     event.type === 'tossup-buzz' ||
     event.type === 'tossup-no-penalty' ||
+    event.type === 'tossup-reading-resumed' ||
+    event.type === 'tossup-readout' ||
     event.type === 'tossup-dead' ||
     event.type === 'bonus'
   );
@@ -49,6 +51,8 @@ function isCycleEvent(event: ScoreEvent): boolean {
 const knownEventTypes = new Set<ScoreEvent['type']>([
   'tossup-buzz',
   'tossup-no-penalty',
+  'tossup-reading-resumed',
+  'tossup-readout',
   'tossup-dead',
   'bonus',
   'lightning',
@@ -105,6 +109,8 @@ function isDerivableEvent(value: unknown, format: IScorekeeperFormat): value is 
         validTeam(event.team) &&
         (event.playerName === undefined || (typeof event.playerName === 'string' && event.playerName.trim() !== ''))
       );
+    case 'tossup-reading-resumed':
+    case 'tossup-readout':
     case 'tossup-dead':
     case 'half-resume':
     case 'begin-overtime':
@@ -354,10 +360,84 @@ function validateQuestion(
   }
 
   let priorAttempt = false;
+  let attemptsSeen = 0;
+  let conversionSeen = false;
+  let deadSeen = false;
+  let readingResumed = false;
+  let readout = false;
   for (const event of cycleEvents) {
+    if (event.type === 'tossup-reading-resumed') {
+      if (!priorAttempt) {
+        addUnique(
+          blockers,
+          problem(
+            'blocker',
+            'invalid-reading-state',
+            `Question ${questionNumber} resumed reading before either team answered.`,
+            questionNumber,
+          ),
+        );
+      }
+      if (attemptsSeen >= 2 || conversionSeen || deadSeen) {
+        addUnique(
+          blockers,
+          problem(
+            'blocker',
+            'invalid-reading-state',
+            `Question ${questionNumber} cannot resume reading after the tossup was resolved.`,
+            questionNumber,
+          ),
+        );
+      }
+      if (readingResumed) {
+        addUnique(
+          blockers,
+          problem(
+            'blocker',
+            'duplicate-reading-resume',
+            `Question ${questionNumber} resumed reading more than once.`,
+            questionNumber,
+          ),
+        );
+      }
+      if (readout) {
+        addUnique(
+          blockers,
+          problem(
+            'blocker',
+            'invalid-reading-state',
+            `Question ${questionNumber} resumed reading after it had already been read out.`,
+            questionNumber,
+          ),
+        );
+      }
+      readingResumed = true;
+      continue;
+    }
+    if (event.type === 'tossup-readout') {
+      if (readout) {
+        addUnique(
+          blockers,
+          problem('blocker', 'duplicate-readout', `Question ${questionNumber} was read out more than once.`, questionNumber),
+        );
+      }
+      if (attemptsSeen >= 2 || conversionSeen || deadSeen) {
+        addUnique(
+          blockers,
+          problem(
+            'blocker',
+            'invalid-reading-state',
+            `Question ${questionNumber} was read out after the tossup was resolved.`,
+            questionNumber,
+          ),
+        );
+      }
+      readout = true;
+      continue;
+    }
     if (event.type === 'tossup-buzz') {
       const answerType = format.answerTypes[event.answerTypeIndex];
-      if (answerType?.isNeg && priorAttempt) {
+      if (answerType?.isNeg && (readout || (priorAttempt && !readingResumed))) {
         addUnique(
           blockers,
           problem(
@@ -368,8 +448,13 @@ function validateQuestion(
           ),
         );
       }
+      if (answerType?.value > 0) conversionSeen = true;
     }
-    if (usesTossupOpportunity(event)) priorAttempt = true;
+    if (usesTossupOpportunity(event)) {
+      priorAttempt = true;
+      attemptsSeen += 1;
+    }
+    if (event.type === 'tossup-dead') deadSeen = true;
   }
 
   if (question) {

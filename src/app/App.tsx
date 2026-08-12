@@ -131,7 +131,7 @@ export type Screen =
    */
   | { kind: 'confirm'; recordId: string }
   | { kind: 'scoring'; recordId: string }
-  | { kind: 'completed'; recordId: string }
+  | { kind: 'completed'; recordId: string; acceptedJustNow?: boolean }
   /** Another live tab on this device is already scoring the game that was asked for. */
   | { kind: 'duplicate'; recordId: string };
 
@@ -439,12 +439,12 @@ export default function App() {
   const pairedRoom = useMemo(() => pairedRoomOf(connection), [connection]);
 
   const onComplete = useCallback(
-    async (recordId: string) => {
+    async (recordId: string, acceptedJustNow = false) => {
       if (!store) return;
       await refresh(store);
       claim.current?.release();
       claim.current = null;
-      setScreen({ kind: 'completed', recordId });
+      setScreen({ kind: 'completed', recordId, acceptedJustNow });
     },
     [store, refresh],
   );
@@ -631,6 +631,7 @@ export default function App() {
     return (
       <CompletionScreen
         record={current}
+        acceptedJustNow={screen.acceptedJustNow === true}
         onUpdate={updateRecord}
           continueLabel={backToRoom ? `Next game in ${pairedRoom.roomName}` : 'Done'}
           onRematch={

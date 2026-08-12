@@ -13,6 +13,8 @@ export interface IScorerRecoveryPayload {
 const eventTypes = new Set([
   'tossup-buzz',
   'tossup-no-penalty',
+  'tossup-reading-resumed',
+  'tossup-readout',
   'tossup-dead',
   'bonus',
   'lightning',
@@ -42,7 +44,7 @@ function validTeam(value: unknown): value is 'left' | 'right' {
 }
 
 function validPlayerList(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((name) => typeof name === 'string' && name.trim() !== '');
+  return Array.isArray(value) && value.length > 0 && value.every((name) => typeof name === 'string' && name.trim() !== '');
 }
 
 function validStartingLineup(value: unknown, players: string[]): boolean {

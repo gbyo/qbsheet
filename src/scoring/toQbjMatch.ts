@@ -54,7 +54,8 @@ export interface IQbjMatchMeta {
 type QbjObject = Record<string, unknown>;
 
 /**
- * Answer counts for one player, as `[{number, answer_type: {value}}]`.
+ * Answer counts for one player, retaining both the value used by legacy readers and the answer type
+ * identity needed when two distinct rulings share that value.
  *
  * Answer types are referenced by value rather than by id. `resolveAnswerTypeIdentity` tries an id
  * lookup first and falls back to matching on value, and value is the identity that actually travels:
@@ -68,7 +69,7 @@ function answerCounts(format: IScorekeeperFormat, counts: Map<number, number>): 
   for (const answerType of format.answerTypes) {
     const number = counts.get(answerType.index) ?? 0;
     if (number === 0) continue;
-    entries.push({ number, answer_type: { value: answerType.value } });
+    entries.push({ number, answer_type: { id: answerType.qbjId, value: answerType.value } });
   }
   return entries;
 }
@@ -128,7 +129,7 @@ function matchQuestions(game: IDerivedGame, teamNames: Record<LeftOrRight, strin
     const buzzes: QbjObject[] = question.buzzes.map((buzz) => ({
       team: { name: teamNames[buzz.team] },
       player: { name: buzz.playerName },
-      result: { value: buzz.answerType.value },
+      result: { id: buzz.answerType.qbjId, value: buzz.answerType.value },
     }));
     for (const missed of question.noPenalty) {
       buzzes.push({

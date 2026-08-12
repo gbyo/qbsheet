@@ -37,6 +37,11 @@ const exhaustiveTraversalTimeoutMs = 15_000;
 
 const deepStressEnabled = process.env.QBSHEET_DEEP_STRESS === '1';
 
+/** Keep the Vitest worker heartbeat alive during the intentionally long deep traversal. */
+function yieldToTestRunner(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
 function positiveEnvironmentInteger(name: string, fallback: number): number {
   const value = Number(process.env[name]);
   return Number.isSafeInteger(value) && value > 0 ? value : fallback;
@@ -892,7 +897,7 @@ describe('seeded state-machine stress coverage', () => {
   ]).map((format) => withRegulationLength(format, 12));
   const formats = deepStressEnabled ? deepFormats : ordinaryFormats;
 
-  test('checks invariants after every transition in many reproducible mixed-event games', () => {
+  test('checks invariants after every transition in many reproducible mixed-event games', async () => {
     const acceptedTypes = new Set<ScoreEvent['type']>();
     const recoveredAfterTypes = new Set<ScoreEvent['type']>();
     const recoveredPhases = new Set<string>();
@@ -913,6 +918,7 @@ describe('seeded state-machine stress coverage', () => {
     let recoveryCycles = 0;
 
     for (let seed = 1; seed <= generatedSeedCount; seed += 1) {
+      if (deepStressEnabled && seed % 32 === 0) await yieldToTestRunner();
       const random = seededRandom(seed);
       const format = formats[seed % formats.length];
       const storage = memoryStorage();
@@ -1229,6 +1235,16 @@ describe('every score event variant', () => {
           playerName: 'Sarah',
         }),
       },
+      'tossup-reading-resumed': {
+        context: ordinaryContext,
+        before: [nextEvent({ type: 'tossup-no-penalty', questionNumber: 1, team: 'left', playerName: 'Sarah' })],
+        candidate: nextEvent({ type: 'tossup-reading-resumed', questionNumber: 1 }),
+      },
+      'tossup-readout': {
+        context: ordinaryContext,
+        before: [],
+        candidate: nextEvent({ type: 'tossup-readout', questionNumber: 1 }),
+      },
       'tossup-dead': {
         context: ordinaryContext,
         before: [],
@@ -1354,6 +1370,8 @@ describe('every score event variant', () => {
     const samples: Record<ScoreEvent['type'], EventInput> = {
       'tossup-buzz': { type: 'tossup-buzz', questionNumber: 1, team: 'left', playerName: 'Sarah', answerTypeIndex: 0 },
       'tossup-no-penalty': { type: 'tossup-no-penalty', questionNumber: 1, team: 'left', playerName: 'Sarah' },
+      'tossup-reading-resumed': { type: 'tossup-reading-resumed', questionNumber: 1 },
+      'tossup-readout': { type: 'tossup-readout', questionNumber: 1 },
       'tossup-dead': { type: 'tossup-dead', questionNumber: 1 },
       bonus: { type: 'bonus', questionNumber: 1, team: 'left', controlledPoints: 10 },
       lightning: { type: 'lightning', questionNumber: 1, team: 'left', points: 20 },

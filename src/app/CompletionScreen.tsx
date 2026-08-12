@@ -59,8 +59,10 @@ export default function CompletionScreen(props: {
   onHome: () => void | Promise<void>;
   /** Start another local game with the same manual setup, when this was a manual game. */
   onRematch?: () => void | Promise<void>;
+  /** True only on the navigation caused by a server-accepted submission. */
+  acceptedJustNow?: boolean;
 }) {
-  const { record, onUpdate, continueLabel = 'Done', onHome, onRematch } = props;
+  const { record, onUpdate, continueLabel = 'Done', onHome, onRematch, acceptedJustNow = false } = props;
   const [writeFailed, setWriteFailed] = useState(false);
   const [rematchFailed, setRematchFailed] = useState(false);
   const score = record.finalScore;
@@ -103,8 +105,15 @@ export default function CompletionScreen(props: {
         <section className="shell-section">
           <h2 className="shell-heading">Tournament control</h2>
           {record.serverDelivery === 'sent' && (
-            <p className="final-ok">
-              {record.serverDeliveryLedger?.acceptedAsDuplicate ? 'Result already on record ✓' : 'Result sent ✓'}
+            <p
+              className={`final-ok final-accepted${acceptedJustNow ? ' is-newly-accepted' : ''}`}
+              data-acceptance-motion={acceptedJustNow ? 'new' : undefined}
+            >
+              <svg className="final-accepted-mark" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+                <path d="m4 10 4 4 8-9" />
+              </svg>
+              {record.serverDeliveryLedger?.acceptedAsDuplicate ? 'Result already on record' : 'Result sent'}
+              <span className="visually-hidden"> ✓</span>
             </p>
           )}
           {record.serverDelivery === 'pending' && (

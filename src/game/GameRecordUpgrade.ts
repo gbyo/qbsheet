@@ -40,6 +40,7 @@
 // Type-only, so the pairing with `GameStore` — which imports the reader from here — is erased at
 // runtime and there is no module cycle to reason about.
 import type { IStoredGameRecord } from './GameStore';
+import { scorekeeperFormatProblems, IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
 
 /**
  * The shape of a record this build writes.
@@ -100,9 +101,13 @@ function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === 'string' && item.trim() !== '');
 }
 
+function isNonEmptyStringArray(value: unknown): value is string[] {
+  return isStringArray(value) && value.length > 0;
+}
+
 function isTeamSetup(value: unknown): boolean {
   if (!isObject(value) || typeof value.name !== 'string' || !isStringArray(value.players)) return false;
-  return value.startingLineup === undefined || isStringArray(value.startingLineup);
+  return value.startingLineup === undefined || isNonEmptyStringArray(value.startingLineup);
 }
 
 function isSetup(value: unknown): boolean {
@@ -115,7 +120,7 @@ function isRosterTeam(value: unknown): boolean {
     typeof value.name === 'string' &&
     Array.isArray(value.players) &&
     value.players.every((player) => isObject(player) && typeof player.name === 'string' && player.name.trim() !== '') &&
-    (value.startingLineup === undefined || isStringArray(value.startingLineup))
+    (value.startingLineup === undefined || isNonEmptyStringArray(value.startingLineup))
   );
 }
 
@@ -126,7 +131,7 @@ function isScorekeeperFormat(value: unknown): boolean {
   const overtime = value.overtime;
   const lightning = value.lightning;
   const players = value.players;
-  return (
+  const structurallyValid = (
     isInteger(value.version) &&
     typeof value.name === 'string' &&
     Array.isArray(value.answerTypes) &&
@@ -167,6 +172,7 @@ function isScorekeeperFormat(value: unknown): boolean {
     isInteger(players.maximumActive) &&
     isFiniteNumber(value.totalDivisor)
   );
+  return structurallyValid && scorekeeperFormatProblems(value as unknown as IScorekeeperFormat).length === 0;
 }
 
 function isPackage(value: unknown): boolean {

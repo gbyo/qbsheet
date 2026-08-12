@@ -14,12 +14,13 @@
  *
  * # Small on purpose, and not a ceiling
  *
- * It opens as four questions, because four questions is what a document that forgot its rules almost
- * always needs and a rules administration screen is a poor way to start a round. The advanced form is
- * one press away for the tournament whose format the four questions cannot state — two power tiers, an
- * irregular bonus — because "we cannot score this room today" is a worse answer than a longer form.
- * Fixing it upstream by exporting the rules in the QBJ is still the right answer, which is what this
- * screen says.
+ * It opens as the simple form, because a rules administration screen is a poor way to start a round.
+ * That form is the structural variant rather than the bare four questions: a document that forgot its
+ * rules also forgot its bouncebacks and its overtime, and a default that can change what the game is
+ * worth has to be on screen rather than assumed. The advanced form is one press away for the
+ * tournament whose format the simple one cannot state — two power tiers, an irregular bonus — because
+ * "we cannot score this room today" is a worse answer than a longer form. Fixing it upstream by
+ * exporting the rules in the QBJ is still the right answer, which is what this screen says.
  *
  * # The fields themselves are shared
  *
@@ -68,7 +69,12 @@ export default function ScoringRulesSetup(props: {
         the QBJ to avoid this next time.
       </p>
 
-      <ScoringRulesEditor idPrefix="rules" value={input} onChange={setInput} />
+      <ScoringRulesEditor
+        idPrefix="rules"
+        basicVariant="full"
+        value={input}
+        onChange={setInput}
+      />
 
       {submitted && problems.length > 0 && (
         <div className="shell-errors" role="alert">

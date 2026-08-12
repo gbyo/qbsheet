@@ -50,24 +50,26 @@ import {
   conversion,
   validateEditableQuestion,
 } from '../scoring/questionCorrection';
-import { bouncebackOptions, regularBonusTotals } from './bonusOptions';
+import { bouncebackNeedsTypedEntry, bouncebackOptions, regularBonusTotals } from './bonusOptions';
 import { powerCorrect } from './tossupRulings';
 
 const noPenaltyValue = 'no-penalty';
 
-/** "Power (+15)" / "Correct (+10)" / "Neg (-5)" / "Wrong (0)". The editor should say what the ruling means. */
+/** The format's own ruling label plus its value. */
 function rulingLabel(format: IScorekeeperFormat, index: number): string {
   const answerType = format.answerTypes[index];
   if (!answerType) return 'Choose…';
-  const name =
-    answerType.value < 0
+  const points = answerType.value > 0 ? `+${answerType.value}` : String(answerType.value);
+  const hasExplicitLabel = answerType.label.trim() !== '' && answerType.label !== String(answerType.value);
+  const name = hasExplicitLabel
+    ? answerType.label
+    : answerType.value < 0
       ? 'Neg'
       : powerCorrect(format)?.index === answerType.index
         ? 'Power'
         : answerType.value > 0
           ? 'Correct'
           : 'Wrong';
-  const points = answerType.value > 0 ? `+${answerType.value}` : String(answerType.value);
   return `${name} (${points})`;
 }
 
@@ -551,7 +553,7 @@ export default function QuestionEditor(props: {
                 {model.attempts.length === 0 ? 'No buzz' : 'End question without a bonus'}
               </label>
               {/* Offered rather than drawn: a blank bonus form should not fill every correction. */}
-              {!model.dead && (
+              {!model.dead && format.bonus.enabled && (
                 <button
                   type="button"
                   className="scorer-action"
@@ -612,21 +614,37 @@ export default function QuestionEditor(props: {
             )}
             {/* Only where the format actually has bouncebacks; otherwise there is nothing to enter. */}
             {format.bonus.bounceBack && !showParts && (
-              <label htmlFor={`question-${model.questionNumber}-bonus-bounceback`}>
-                Bounceback
-                <select
-                  id={`question-${model.questionNumber}-bonus-bounceback`}
-                  aria-label="Bonus bounceback points"
-                  value={String(model.bonus.bouncebackPoints)}
-                  onChange={(event) => setBonus({ bouncebackPoints: Number(event.target.value), parts: undefined })}
-                >
-                  {bouncebackOptions(format.bonus, model.bonus.controlledPoints).map((points) => (
-                    <option key={points} value={points}>
-                      {points}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              bouncebackNeedsTypedEntry(format.bonus, model.bonus.controlledPoints) ? (
+                <label htmlFor={`question-${model.questionNumber}-bonus-bounceback`}>
+                  Bounceback
+                  <input
+                    id={`question-${model.questionNumber}-bonus-bounceback`}
+                    aria-label="Bonus bounceback points"
+                    type="number"
+                    min={0}
+                    max={Math.max(0, format.bonus.maximumScore - model.bonus.controlledPoints)}
+                    step={format.bonus.divisor || 1}
+                    value={bonusDrafts.bounceback ?? String(model.bonus.bouncebackPoints)}
+                    onChange={(event) => updateBonusTotal('bouncebackPoints', event.target.value)}
+                  />
+                </label>
+              ) : (
+                <label htmlFor={`question-${model.questionNumber}-bonus-bounceback`}>
+                  Bounceback
+                  <select
+                    id={`question-${model.questionNumber}-bonus-bounceback`}
+                    aria-label="Bonus bounceback points"
+                    value={String(model.bonus.bouncebackPoints)}
+                    onChange={(event) => setBonus({ bouncebackPoints: Number(event.target.value), parts: undefined })}
+                  >
+                    {bouncebackOptions(format.bonus, model.bonus.controlledPoints).map((points) => (
+                      <option key={points} value={points}>
+                        {points}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )
             )}
             {format.bonus.regular && (
               <button
@@ -700,6 +718,31 @@ export default function QuestionEditor(props: {
             On the floor — {game.left.name}: {active.left.length > 0 ? active.left.join(', ') : 'none'};{' '}
             {game.right.name}: {active.right.length > 0 ? active.right.join(', ') : 'none'}.
           </p>
+          <div className="scorer-question-reading-state">
+            <label className="scorer-checkbox">
+              <input
+                type="checkbox"
+                checked={model.readingResumed === true}
+                disabled={model.attempts.length === 0}
+                onChange={(event) => setModel((current) => ({ ...current, readingResumed: event.target.checked }))}
+              />
+              Reading resumed after the first answer
+            </label>
+            <label className="scorer-checkbox">
+              <input
+                type="checkbox"
+                checked={model.readout === true}
+                onChange={(event) =>
+                  setModel((current) => ({
+                    ...current,
+                    readout: event.target.checked,
+                    ...(event.target.checked ? {} : { readoutBeforeAttempt: undefined }),
+                  }))
+                }
+              />
+              Question was read out before the final ruling
+            </label>
+          </div>
           {questionProtests.map((protest) => (
             <p key={protest.eventId} className="scorer-dialog-note">
               Protest ({protest.status}) — {protest.description}

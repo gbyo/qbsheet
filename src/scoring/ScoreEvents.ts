@@ -95,6 +95,16 @@ export interface ITossupNoPenaltyEvent extends IScoreEventBase {
   playerName?: string;
 }
 
+/** The moderator resumed reading after a tossup was interrupted by an answer. */
+export interface ITossupReadingResumedEvent extends IScoreEventBase {
+  type: 'tossup-reading-resumed';
+}
+
+/** The moderator reached the end of a tossup without a conversion. */
+export interface ITossupReadoutEvent extends IScoreEventBase {
+  type: 'tossup-readout';
+}
+
 /** The tossup went dead: read, nobody converted it. */
 export interface ITossupDeadEvent extends IScoreEventBase {
   type: 'tossup-dead';
@@ -332,6 +342,8 @@ export interface INoteEvent extends IScoreEventBase {
 export type ScoreEvent =
   | ITossupBuzzEvent
   | ITossupNoPenaltyEvent
+  | ITossupReadingResumedEvent
+  | ITossupReadoutEvent
   | ITossupDeadEvent
   | IBonusEvent
   | ILightningEvent
@@ -353,7 +365,13 @@ export type ScoreEvent =
   | INoteEvent;
 
 /** Events that belong to a tossup cycle rather than to the game as a whole. */
-export type CycleScoreEvent = ITossupBuzzEvent | ITossupNoPenaltyEvent | ITossupDeadEvent | IBonusEvent;
+export type CycleScoreEvent =
+  | ITossupBuzzEvent
+  | ITossupNoPenaltyEvent
+  | ITossupReadingResumedEvent
+  | ITossupReadoutEvent
+  | ITossupDeadEvent
+  | IBonusEvent;
 
 /** Did this event use up a team's chance at the tossup it belongs to? */
 export function usesTossupOpportunity(event: ScoreEvent): event is ITossupBuzzEvent | ITossupNoPenaltyEvent {

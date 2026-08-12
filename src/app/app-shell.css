@@ -689,6 +689,24 @@ body {
   font-weight: 500;
 }
 
+.final-accepted {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  transform-origin: left center;
+}
+
+.final-accepted-mark {
+  width: 18px;
+  height: 18px;
+  overflow: visible;
+  fill: none;
+  stroke: currentcolor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .final-pending {
   margin: 0;
   color: var(--room-warning);

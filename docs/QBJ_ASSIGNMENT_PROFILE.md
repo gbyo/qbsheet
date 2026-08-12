@@ -273,7 +273,7 @@ of the behaviours is a guess.
 | **Procedure** | Scoring works. QBSheet states that the document included no tournament procedure, and that it will not enforce a procedural rule that it does not know. It enforces breaks, substitution, timeout and clock policy only when a `procedure` says what they are. |
 | **Room** | Scoring works. QBSheet displays no room. |
 | **Round** | Scoring works. QBSheet displays a neutral fallback label. |
-| **`timed`** | QBSheet assumes neither value. When the distinction affects scoring for the chosen format, QBSheet asks. |
+| **`timed`** | QBSheet refuses to start scoring until the assignment or scorekeeper supplies timed or untimed. It never assumes either value. |
 
 The rule behind the table is that QBSheet asks instead of guesses. A repaired ambiguity that QBSheet
 does not report produces a mis-scored game that nobody knows to examine.
@@ -285,6 +285,14 @@ Scoring behaviour derives from the structural `ScoringRules` fields: `answer_typ
 `minimum_overtime_question_count`, `overtime_includes_bonuses`, `maximum_bonus_score`,
 `bonus_divisor`, `minimum_parts_per_bonus`, `maximum_parts_per_bonus`, `points_per_bonus_part`,
 `bonuses_bounce_back`, the lightning fields, and `total_divisor`.
+
+When bonus structure is present, QBSheet requires both bonus toggles (`bonuses_bounce_back` and
+`overtime_includes_bonuses`) explicitly; their absence can change the score. A lightning divisor
+without a lightning count is likewise treated as incomplete. Missing labels or a missing total
+divisor may be filled only when they affect presentation or validation rather than the points of a
+game, and those harmless assumptions are reported to the scorekeeper. An `AnswerType` that
+explicitly awards a bonus without any bonus structure is also incomplete; a root-level
+`awards_bonus` flag cannot create one.
 
 `ScoringRules.name` is a label. No code path branches on `"NAQT"`, on `"ACF"`, or on any other
 string in that field.

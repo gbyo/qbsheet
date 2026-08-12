@@ -16,9 +16,9 @@
  *
  * # Two variants, not two components
  *
- * `basic` is the four questions the missing-rules form has always asked. `full` adds the controls a
- * game being described from scratch needs — how many players are on the floor, bouncebacks, the
- * shape of overtime, lightning — under a quiet advanced heading rather than in the main grid,
+ * `basic` is the compact four-question surface. `full` adds the controls a game being described
+ * from scratch or a rule-less imported game needs — how many players are on the floor, bouncebacks,
+ * the shape of overtime, lightning — under a quiet advanced heading rather than in the main grid,
  * because a practice game almost never changes them.
  *
  * No rule set is named anywhere. A format is what its numbers say, and a scorer that recognized
@@ -34,7 +34,7 @@ export function numberValue(raw: string): number | undefined {
 }
 
 export type BasicScoringRulesVariant =
-  /** What a QBJ with no rules in it is asked: values, counts, bonuses, whether there is a clock. */
+  /** The four questions: values, counts, bonuses, whether there is a clock. */
   | 'basic'
   /** The same, plus the floor size, bouncebacks, overtime and lightning. */
   | 'full';

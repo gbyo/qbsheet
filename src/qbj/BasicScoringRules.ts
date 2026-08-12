@@ -94,7 +94,7 @@ export function basicScoringRulesToQbj(input: IBasicScoringRulesInput): QbjObjec
       value: input.powerValue,
       label: 'Power',
       short_label: 'P',
-      awards_bonus: true,
+      awards_bonus: input.useBonuses,
     });
   }
   answerTypes.push({
@@ -103,7 +103,7 @@ export function basicScoringRulesToQbj(input: IBasicScoringRulesInput): QbjObjec
     value: input.tossupValue,
     label: 'Correct',
     short_label: 'C',
-    awards_bonus: true,
+    awards_bonus: input.useBonuses,
   });
   if (input.negValue !== undefined) {
     answerTypes.push({
