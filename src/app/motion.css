@@ -181,6 +181,7 @@
 
 /* Holds the exact label and its width for compatibility; the visual copy is painted over it. */
 .scorer-progress-copy {
+  padding-inline-end: var(--scorer-progress-missing-digit-width, 0);
   color: transparent;
   user-select: none;
 }
@@ -392,6 +393,11 @@
   inset: 14px 16px;
   pointer-events: none;
   animation: qbsheet-bonus-exit var(--room-motion-standard) var(--room-ease-out) both;
+}
+
+/* Presentation-only prompt labels stay out of DOM text and cannot be mistaken for the new controls. */
+.scorer-bonus-exit [data-presentation-label]::before {
+  content: attr(data-presentation-label);
 }
 
 @keyframes qbsheet-bonus-exit {
