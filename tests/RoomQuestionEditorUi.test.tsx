@@ -211,8 +211,7 @@ describe('leaving the editor', () => {
     fireEvent.click(screen.getByText('20'));
     openEditorFromRecent(1);
 
-    // The exit says where it goes, because "Cancel" gave no clue that it led to an event list.
-    fireEvent.click(screen.getByRole('button', { name: 'Close without saving' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
     expect(screen.queryByText('Question 1')).toBeNull();
     // Not the review list, which is somewhere this scorekeeper never asked to be.
@@ -225,7 +224,7 @@ describe('leaving the editor', () => {
     fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
     openEditor();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Back to review' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
     expect(screen.getByText('Full scoresheet review')).toBeTruthy();
     expect(screen.getByText('Edit question')).toBeTruthy();
@@ -261,7 +260,7 @@ describe('leaving the editor', () => {
     openEditorFromRecent(1);
 
     chooseRuling('Power (+15)');
-    fireEvent.click(screen.getByRole('button', { name: 'Close without saving' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
     expect(scoreOf('Ninety Six')).toBe('30');
   });
@@ -277,13 +276,13 @@ describe('the first time somebody opens a correction', () => {
     // The three things nothing else on screen says: what the scope is, that saving is the commit, and
     // how to get out.
     expect(screen.getByText(/every buzz on it and its bonus/)).toBeTruthy();
-    expect(screen.getByText(/Nothing changes until you choose Save correction/)).toBeTruthy();
+    expect(screen.getByText(/Nothing changes until you choose Save changes/)).toBeTruthy();
     expect(screen.getByText(/To leave it exactly as it is/)).toBeTruthy();
 
     fireEvent.click(screen.getByText('Got it — don’t show this again'));
     expect(screen.queryByLabelText('About editing this question')).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Close without saving' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     openEditorFromRecent(1);
     expect(screen.queryByLabelText('About editing this question')).toBeNull();
   });
@@ -327,7 +326,7 @@ describe('the ruling is one control', () => {
 
     openEditor();
     chooseRuling('Power (+15)');
-    fireEvent.click(screen.getByText('Save correction'));
+    fireEvent.click(screen.getByText('Save changes'));
 
     expect(scoreOf('Ninety Six')).toBe('35');
   });
@@ -338,7 +337,7 @@ describe('the ruling is one control', () => {
     openEditor();
 
     chooseRuling('Wrong (0)');
-    fireEvent.click(screen.getByText('Save correction'));
+    fireEvent.click(screen.getByText('Save changes'));
 
     // The neg is gone, and nothing replaced it in the score.
     expect(scoreOf('Ninety Six')).toBe('0');

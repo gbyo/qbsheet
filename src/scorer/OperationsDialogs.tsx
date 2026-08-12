@@ -759,7 +759,6 @@ export function ScoresheetReviewDialog(props: {
           initial={editableQuestionFromEvents(events, editingQuestion)}
           onSave={(question) => onReplaceQuestion(editingQuestion, question)}
           onCancel={leaveEditor}
-          cancelLabel={cameFromList ? 'Back to review' : 'Close without saving'}
           onOpenReplacement={onOpenReplacement ? () => onOpenReplacement(editingQuestion) : undefined}
         />
       ) : (

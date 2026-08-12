@@ -175,11 +175,9 @@ export default function QuestionEditor(props: {
   initial: IEditableQuestion;
   onSave: (question: IEditableQuestion) => boolean;
   onCancel: () => void;
-  /** What leaving without saving actually does, which depends on where the editor was opened from. */
-  cancelLabel?: string;
   onOpenReplacement?: () => void;
 }) {
-  const { game, format, initial, onSave, onCancel, cancelLabel = 'Cancel', onOpenReplacement } = props;
+  const { game, format, initial, onSave, onCancel, onOpenReplacement } = props;
   const [model, setModel] = useState<IEditableQuestion>(() => ({
     ...initial,
     attempts: initial.attempts.map((attempt) => ({ ...attempt })),
@@ -327,10 +325,10 @@ export default function QuestionEditor(props: {
               This is the whole of Question {model.questionNumber} — every buzz on it and its bonus — not just the one
               action you selected.
             </li>
-            <li>Nothing changes until you choose Save correction. Every later question is then worked out again.</li>
+            <li>Nothing changes until you choose Save changes. Every later question is then worked out again.</li>
             <li>
-              To leave it exactly as it is, use <strong>{cancelLabel}</strong> below or <strong>Close</strong> at the top
-              right. Escape works too.
+              To leave it exactly as it is, use <strong>Cancel</strong> below or <strong>Close</strong> at the top right.
+              Escape works too.
             </li>
           </ul>
           <button
@@ -738,7 +736,7 @@ export default function QuestionEditor(props: {
           </p>
           {onOpenReplacement && (
             <button type="button" className="scorer-action" onClick={onOpenReplacement}>
-              Replace question…
+              Edit full question…
             </button>
           )}
         </section>
@@ -756,10 +754,10 @@ export default function QuestionEditor(props: {
       )}
       <div className="scorer-question-footer">
         <button type="button" className="scorer-action" onClick={onCancel}>
-          {cancelLabel}
+          Cancel
         </button>
         <button type="submit" className="scorer-submit">
-          Save correction
+          Save changes
         </button>
       </div>
     </form>

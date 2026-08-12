@@ -827,7 +827,7 @@ describe('the game menu', () => {
     fireEvent.click(screen.getByText('Edit question'));
 
     chooseEditorRuling('Power (+15)');
-    fireEvent.click(screen.getByText('Save correction'));
+    fireEvent.click(screen.getByText('Save changes'));
 
     expect(scoreOf('Ninety Six')).toBe('15');
   });
@@ -871,10 +871,10 @@ describe('the game menu', () => {
     // out-of-range total can still be typed — and it still has to be refused.
     fireEvent.click(screen.getByText('Edit parts\u2026'));
     fireEvent.change(screen.getByLabelText('Bonus part 1 controlled points'), { target: { value: '40' } });
-    fireEvent.click(screen.getByText('Save correction'));
+    fireEvent.click(screen.getByText('Save changes'));
 
     expect(screen.getByText('The most a bonus can be worth is 30.')).toBeTruthy();
-    expect(screen.getByText('Save correction')).toBeTruthy();
+    expect(screen.getByText('Save changes')).toBeTruthy();
   });
 
   test('bonus correction drafts can be cleared without entering zero', () => {
@@ -894,7 +894,7 @@ describe('the game menu', () => {
     const points = screen.getByLabelText('Points') as HTMLInputElement;
     fireEvent.change(points, { target: { value: '' } });
     expect(points.value).toBe('');
-    fireEvent.click(screen.getByText('Save correction'));
+    fireEvent.click(screen.getByText('Save changes'));
 
     expect(screen.getByText('Enter a valid number for controlled.')).toBeTruthy();
   });
@@ -930,7 +930,7 @@ describe('the game menu', () => {
     fireEvent.click(screen.getByText('Edit question'));
     fireEvent.click(screen.getByText('Remove'));
     fireEvent.click(screen.getByLabelText('No buzz'));
-    fireEvent.click(screen.getByText('Save correction'));
+    fireEvent.click(screen.getByText('Save changes'));
 
     expect(scoreOf('Ninety Six')).toBe('0');
     expect(screen.getByText('No buzz', { selector: '.scorer-review-event > span' })).toBeTruthy();
@@ -943,7 +943,7 @@ describe('the game menu', () => {
     fireEvent.click(screen.getByText('Edit question'));
     // The replacement workflow is secondary information, so it lives behind the disclosure.
     fireEvent.click(screen.getByText('More context'));
-    fireEvent.click(screen.getByText('Replace question\u2026'));
+    fireEvent.click(screen.getByText('Edit full question\u2026'));
 
     const replacementDialog = screen.getByRole('dialog', { name: 'Replace question 1' });
     expect(replacementDialog).toBeTruthy();
@@ -1559,7 +1559,7 @@ describe('a historical correction lands visibly', () => {
     const editor = screen.getByRole('dialog', { name: 'Edit Question 1' });
     const ruling = within(editor).getByRole('group', { name: 'Ruling' });
     fireEvent.click(within(ruling).getByRole('button', { name: label }));
-    fireEvent.click(within(editor).getByRole('button', { name: 'Save correction' }));
+    fireEvent.click(within(editor).getByRole('button', { name: 'Save changes' }));
   }
 
   test('it says so, and points at the row it changed', () => {
@@ -1598,7 +1598,7 @@ describe('a historical correction lands visibly', () => {
     const editor = screen.getByRole('dialog', { name: 'Edit Question 1' });
     // Somebody who was not on the floor for this team cannot have buzzed on it.
     fireEvent.change(within(editor).getByLabelText('Player'), { target: { value: 'Emma Turner' } });
-    fireEvent.click(within(editor).getByRole('button', { name: 'Save correction' }));
+    fireEvent.click(within(editor).getByRole('button', { name: 'Save changes' }));
 
     expect(screen.queryByText('Question 1 corrected.')).toBeNull();
     expect(document.querySelectorAll('.scorer-rail-item.is-emphasized')).toHaveLength(0);
