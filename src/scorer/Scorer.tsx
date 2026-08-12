@@ -1559,18 +1559,18 @@ export default function Scorer(props: IScorerProps) {
             >
               {progressMotion ? (
                 <>
-                  <span className="visually-hidden" aria-hidden="true">
+                  <span
+                    className="scorer-progress-copy"
+                    style={
+                      {
+                        '--scorer-progress-missing-digit-width': `${Math.max(
+                          0,
+                          progressMotion.digits - String(progressMotion.value).length,
+                        )}ch`,
+                      } as CSSProperties
+                    }
+                  >
                     {progressText}
-                  </span>
-                  <span className="scorer-progress-copy">
-                    {progressMotion.prefix}
-                    <span
-                      className="scorer-progress-number-copy"
-                      style={{ '--qbsheet-number-digits': progressMotion.digits } as CSSProperties}
-                    >
-                      {progressMotion.value}
-                    </span>
-                    {progressMotion.suffix}
                   </span>
                   <span
                     className="scorer-progress-visual"

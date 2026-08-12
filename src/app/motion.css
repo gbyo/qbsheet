@@ -181,6 +181,7 @@
 
 /* Holds the exact label and its width for compatibility; the visual copy is painted over it. */
 .scorer-progress-copy {
+  padding-inline-end: var(--scorer-progress-missing-digit-width, 0);
   color: transparent;
   user-select: none;
 }
@@ -199,20 +200,16 @@
   content: attr(data-suffix);
 }
 
-.qbsheet-motion-number,
-.scorer-progress-number-copy {
+.qbsheet-motion-number {
   --qbsheet-number-digits: 1;
 
   position: relative;
   display: inline-grid;
   min-width: calc(var(--qbsheet-number-digits) * 1ch);
+  overflow: hidden;
   vertical-align: bottom;
   text-align: center;
   font-variant-numeric: tabular-nums;
-}
-
-.qbsheet-motion-number {
-  overflow: hidden;
 }
 
 .qbsheet-motion-number-current,

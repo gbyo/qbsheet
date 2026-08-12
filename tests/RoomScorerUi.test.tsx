@@ -284,16 +284,14 @@ describe('what the header says', () => {
     expect(screen.getByText('Tossup 1 of 20')).toBeTruthy();
   });
 
-  test('the hidden progress copy reserves the same digit column as the painted counter', () => {
+  test('the hidden progress copy reserves the digits missing from the painted counter', () => {
     renderScorer(formatFor());
 
-    const layoutNumber = document.querySelector('.scorer-progress-copy .scorer-progress-number-copy') as HTMLElement;
+    const layoutCopy = document.querySelector('.scorer-progress-copy') as HTMLElement;
     const paintedNumber = document.querySelector('.scorer-progress-visual .qbsheet-motion-number') as HTMLElement;
-    expect(layoutNumber.style.getPropertyValue('--qbsheet-number-digits')).toBe('2');
-    expect(layoutNumber.style.getPropertyValue('--qbsheet-number-digits')).toBe(
-      paintedNumber.style.getPropertyValue('--qbsheet-number-digits'),
-    );
-    expect(layoutNumber).toHaveTextContent('1');
+    expect(layoutCopy).toHaveTextContent('Tossup 1 of 20');
+    expect(layoutCopy.style.getPropertyValue('--scorer-progress-missing-digit-width')).toBe('1ch');
+    expect(paintedNumber.style.getPropertyValue('--qbsheet-number-digits')).toBe('2');
   });
 });
 
