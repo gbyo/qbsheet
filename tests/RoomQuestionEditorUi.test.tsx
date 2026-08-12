@@ -70,12 +70,15 @@ function openEditorFromRecent(questionNumber: number) {
   fireEvent.click(screen.getByRole('button', { name: `Review question ${questionNumber}` }));
 }
 
-function rulingGroup() {
-  return screen.getByRole('group', { name: 'Ruling' });
+function rulingSelect() {
+  return screen.getByLabelText('Ruling') as HTMLSelectElement;
 }
 
 function chooseRuling(label: string) {
-  fireEvent.click(within(rulingGroup()).getByRole('button', { name: label }));
+  const select = rulingSelect();
+  const option = Array.from(select.options).find((candidate) => candidate.textContent === label);
+  if (!option) throw new Error(`No ruling option named "${label}"`);
+  fireEvent.change(select, { target: { value: option.value } });
 }
 
 function installLocalStorage() {
@@ -287,17 +290,17 @@ describe('the first time somebody opens a correction', () => {
   });
 });
 
-describe('the ruling is one control', () => {
-  test('it offers exactly the format’s answer values plus the incorrect answer that costs nothing', () => {
+describe('the ruling is one dropdown', () => {
+  test('it offers exactly the format’s answer values plus the wrong answer that costs nothing', () => {
     renderScorer(formatFor());
     fireEvent.click(buttonsFor('Sarah Mitchell')[1]); // +10
     openEditor();
 
-    expect(within(rulingGroup()).getAllByRole('button').map((button) => button.textContent)).toEqual([
+    expect(Array.from(rulingSelect().options, (option) => option.textContent)).toEqual([
       'Power (+15)',
       'Correct (+10)',
-      'Incorrect (0)',
       'Neg (-5)',
+      'Wrong (0)',
     ]);
   });
 
@@ -310,10 +313,10 @@ describe('the ruling is one control', () => {
     fireEvent.click(buttonsFor('Sarah Mitchell')[0]); // +7
     openEditor();
 
-    expect(within(rulingGroup()).getAllByRole('button').map((button) => button.textContent)).toEqual([
+    expect(Array.from(rulingSelect().options, (option) => option.textContent)).toEqual([
       'Correct (+7)',
-      'Incorrect (0)',
       'Neg (-3)',
+      'Wrong (0)',
     ]);
   });
 
@@ -335,7 +338,7 @@ describe('the ruling is one control', () => {
     fireEvent.click(buttonsFor('Sarah Mitchell')[2]); // -5
     openEditor();
 
-    chooseRuling('Incorrect (0)');
+    chooseRuling('Wrong (0)');
     fireEvent.click(screen.getByText('Save changes'));
 
     // The neg is gone, and nothing replaced it in the score.
