@@ -119,7 +119,7 @@ describe('what the editor leads with', () => {
     fireEvent.click(screen.getByText('20'));
     openEditor();
 
-    expect(screen.getByText('Question 1')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Question 1 editor' })).toBeTruthy();
     expect(screen.getByText('Score before')).toBeTruthy();
     expect(screen.getByText('Score after')).toBeTruthy();
   });
