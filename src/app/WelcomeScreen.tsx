@@ -7,8 +7,19 @@
  * software is arranged rather than about what the room is doing. A room at a connected tournament
  * has an address on the projector and types it in; a room at any other tournament has a file. Both
  * are offered, one after the other, in the order they are likely, and neither requires understanding
- * that the other exists. Practice is separate from both: it is a self-contained training game that
- * never needs tournament data.
+ * that the other exists.
+ *
+ * # And a third way in, for when there is no tournament at all
+ *
+ * A practice, a scrimmage, a tryout, a pickup game: real scoring, with nobody to hand out an
+ * assignment. Create a game asks for the two teams and the rules and then produces an ordinary game,
+ * so it belongs under the same heading as the other two rather than in a feature of its own. It is
+ * the third row of that block and is styled like one — a rule and a button, not a promoted card,
+ * because it is the least likely of the three at a tournament and the most likely everywhere else.
+ *
+ * Guided practice is a different thing again and stays below: it is a tutorial with a script in it,
+ * it invents its own teams, and its result is not a game anybody keeps. "Create a game" is scoring;
+ * "Practice scoring" is learning where the buttons are.
  *
  * # An unfinished game comes before either
  *
@@ -80,6 +91,8 @@ export default function WelcomeScreen(props: {
   practiceInProgress: boolean;
   onReadiness: () => void;
   onPractice: () => void;
+  /** Into the hand-entered setup form. Creates nothing until that form is submitted. */
+  onCreateGame: () => void;
   /** Back into the room this device is already paired with. No address, no code. */
   onOpenRoom: () => void;
   onConnect: (baseUrl: string) => void;
@@ -98,6 +111,7 @@ export default function WelcomeScreen(props: {
     practiceInProgress,
     onReadiness,
     onPractice,
+    onCreateGame,
     onOpenRoom,
     onConnect,
     onOpenPackage,
@@ -239,6 +253,16 @@ export default function WelcomeScreen(props: {
             <p className="welcome-option-copy">Open a QBJ or QBG file provided by tournament staff.</p>
             <GameFileOpen onOpen={openPackage} />
           </section>
+        </div>
+
+        <div className="welcome-create">
+          <div className="welcome-create-copy">
+            <h3 className="welcome-option-heading">Create a game</h3>
+            <p className="welcome-option-copy">Enter teams, players, and scoring rules yourself.</p>
+          </div>
+          <button type="button" className="shell-button" onClick={onCreateGame}>
+            Create game
+          </button>
         </div>
       </section>
 

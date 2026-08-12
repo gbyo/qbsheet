@@ -213,6 +213,8 @@ describe('refusing to replace a running game', () => {
     expect(updatesAllowedOn({ kind: 'practice' })).toBe(false);
     expect(updatesAllowedOn({ kind: 'duplicate', recordId: 'game-1' })).toBe(false);
     expect(updatesAllowedOn({ kind: 'completed', recordId: 'game-1' })).toBe(false);
+    // Two typed rosters that exist nowhere else yet. A worker swap would discard them mid-sentence.
+    expect(updatesAllowedOn({ kind: 'create' })).toBe(false);
 
     expect(updatesAllowedOn({ kind: 'home' })).toBe(true);
     expect(updatesAllowedOn({ kind: 'connect', fresh: false })).toBe(true);

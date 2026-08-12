@@ -241,7 +241,7 @@ describe('a QBJ with no scoring rules', () => {
     await waitFor(() => {
       expect(screen.getByText('Scoring rules needed')).toBeInTheDocument();
     });
-    expect(screen.getByLabelText('Tossup')).toBeInTheDocument();
+    expect(screen.getByLabelText('Correct tossup')).toBeInTheDocument();
     expect(screen.getByLabelText('Tossups in regulation')).toBeInTheDocument();
   });
 
@@ -271,7 +271,7 @@ describe('a QBJ with no scoring rules', () => {
     await waitFor(() => expect(screen.getByText('Scoring rules needed')).toBeInTheDocument());
 
     await act(async () => {
-      fireEvent.change(screen.getByLabelText('Tossup'), { target: { value: '12' } });
+      fireEvent.change(screen.getByLabelText('Correct tossup'), { target: { value: '12' } });
     });
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Use these rules' }));

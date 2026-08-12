@@ -27,6 +27,7 @@
 import { ScoreEvent } from '../scoring/ScoreEvents';
 import { IGameSetup } from '../scoring/deriveGame';
 import { IGamePackage, gamePackageIdentity } from './GamePackage';
+import { isManualGame } from './GameDefinition';
 import { IRecordStore, MemoryRecordStore } from '../persistence/GameDatabase';
 import { clearGame, loadGame, saveGame } from '../scorer/GameSession';
 import {
@@ -167,6 +168,20 @@ export interface ICreateGameInput {
   connected: boolean;
   /** Supplied by the connected path so the scorer's key matches the server's session. */
   gameKey?: string;
+  /**
+   * A device-local identity to file this record under, instead of the package's.
+   *
+   * For games that have no assignment behind them. `gamePackageIdentity` answers "which scheduled
+   * game is this", which is exactly right for a file or a connected assignment and has no answer at
+   * all for a practice somebody typed in: two practices between the same two teams are two games,
+   * and the package cannot tell them apart. The fields that would — a scheduled match id, a
+   * tournament key — mean something outside this device and must not be invented to solve a local
+   * filing problem. See `newManualRecordIdentity`.
+   *
+   * Local only. It is the record id and the journal key; it is never written into the package, and
+   * therefore never into a QBJ.
+   */
+  recordIdentity?: string;
   attempt?: number;
   now?: Date;
 }
@@ -193,16 +208,42 @@ export function isActive(record: IStoredGameRecord): boolean {
  *   - a submission that is pending or was refused;
  *   - any game whose tournament attached its own handoff instruction, because that instruction is
  *     the tournament saying explicitly that it wants the file too.
+ *
+ * And not owed at all by a game nobody is waiting for; see `gameRequiresHandoff`.
  */
 export function needsHandoff(record: IStoredGameRecord): boolean {
   if (isActive(record)) return false;
   // Accepted by tournament control, with nothing else asked for. The copy on this device stays,
   // and `Download QBJ again` stays with it; neither is an outstanding task.
   if (isDelivered(record)) return false;
+  if (!gameRequiresHandoff(record)) return false;
   if (record.qbjDownloadedAt === undefined) return true;
   return record.connected || Boolean(record.package.handoffInstruction)
     ? record.handoffAcknowledgedAt === undefined
     : false;
+}
+
+/**
+ * Whether this game's result has to reach anybody other than the person who scored it.
+ *
+ * A file game's answer is yes, and stays yes: a tournament handed the room an assignment and the
+ * downloaded QBJ is the only path the result has back. That is why the completion screen will not
+ * let a file game leave until the file has been written, and nothing here weakens it.
+ *
+ * A game somebody created on this device to score a practice has no such path, because there is
+ * nobody at the other end of it. Demanding a download before the screen will close is asking a
+ * coach to file paperwork with themselves, and the predictable result is the same one every
+ * unnecessary confirmation produces: it gets clicked through, including on the day it mattered.
+ * The result is saved, it is in Recent Games, and the QBJ stays one press away for as long as the
+ * record does — it is simply not owed to anyone.
+ *
+ * Provenance, not UI state: a manual game that arrived with an explicit handoff instruction, or one
+ * scored connected, is back to the ordinary rule.
+ */
+export function gameRequiresHandoff(record: IStoredGameRecord): boolean {
+  if (record.connected) return true;
+  if (record.package.handoffInstruction) return true;
+  return !isManualGame(record.package);
 }
 
 /**
@@ -361,7 +402,7 @@ export class GameStore implements IGameStore {
 
   async create(input: ICreateGameInput): Promise<IStoredGameRecord> {
     const now = input.now ?? new Date();
-    const identity = gamePackageIdentity(input.package);
+    const identity = input.recordIdentity ?? gamePackageIdentity(input.package);
     const attempt = input.attempt ?? 1;
     const id = recordId(identity, attempt);
     const record: IStoredGameRecord = {

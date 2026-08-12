@@ -23,30 +23,12 @@
  * looking at the box rather than after submitting. If the two ever disagree, the parser is right.
  */
 import { useMemo, useState } from 'react';
-import { IRosterPlayer, playerNameMaxLength } from '../game/Roster';
+import { IRosterPlayer, readRosterLines, rosterLineProblems } from '../game/Roster';
 
-/** Split a textarea into candidate names. Not the authority; see the note above. */
-export function readRosterLines(text: string): string[] {
-  return text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line !== '');
-}
-
-/** What is wrong with what has been typed so far, in words a scorekeeper can act on. */
-export function rosterLineProblems(names: string[]): string[] {
-  const problems: string[] = [];
-  const seen = new Set<string>();
-  for (const name of names) {
-    if (name.length > playerNameMaxLength) {
-      problems.push(`"${name.slice(0, 20)}…" is too long to be a name.`);
-      continue;
-    }
-    if (seen.has(name)) problems.push(`"${name}" is listed more than once.`);
-    seen.add(name);
-  }
-  return problems;
-}
+// The reading and the complaints live next to the roster type, because Create a game asks the same
+// question of the same textarea and the two must not drift. Re-exported from where they were first
+// imported from.
+export { readRosterLines, rosterLineProblems };
 
 export default function RosterSetup(props: {
   /** The teams that need a roster, by the name the document gave them. */
