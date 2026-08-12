@@ -61,7 +61,7 @@ describe('Recent Games operational ledger', () => {
       />,
     );
 
-    expect(screen.getByText('Attempt 2')).toBeInTheDocument();
+    expect(screen.getAllByText('Receipts and attempts')).toHaveLength(2);
     expect(screen.getByText(`Already received · ${localTime('2026-08-11T14:42:00.000Z')}`)).toBeInTheDocument();
     expect(screen.getByText('2 attempts · Match sm-4471')).toBeInTheDocument();
     expect(screen.getByText(`Downloaded · ${localTime('2026-08-11T14:43:00.000Z')}`)).toBeInTheDocument();

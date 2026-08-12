@@ -51,6 +51,18 @@ export { gameRecordVersion };
  */
 export const completedGameRetentionMs = 7 * 24 * 60 * 60 * 1000;
 
+/**
+ * Hand-entered games are useful to a coach well after a tournament result has been reconciled.
+ * Keep them for a month by default; they have no server-side copy that a recent-games cleanup can
+ * rediscover, and their local record is the convenient history users asked for when they created it.
+ */
+export const manualGameRetentionMs = 30 * 24 * 60 * 60 * 1000;
+
+/** The retention policy shared by pruning and the Recent Games explanation. */
+export function retentionMsFor(packageValue: IGamePackage): number {
+  return isManualGame(packageValue) ? manualGameRetentionMs : completedGameRetentionMs;
+}
+
 /** What is known about the copy tournament control was supposed to receive. */
 export type ServerDeliveryState =
   /** This game has no tournament control. A file game is complete when its QBJ is handed over. */
@@ -143,6 +155,12 @@ export interface IStoredGameRecord {
 export interface IGameStore {
   /** Whether the record store is durable. False means the room must be warned. */
   readonly durable: boolean;
+  /** Whether a durable record store is currently unavailable. */
+  readonly storageDegraded: boolean;
+  /** A safe-to-display explanation for a current storage failure, when available. */
+  readonly storageError?: string;
+  /** Notify the app when the underlying record store changes health. */
+  subscribeToStorageStatus?(listener: () => void): () => void;
   list(): Promise<IStoredGameRecord[]>;
   get(id: string): Promise<IStoredGameRecord | null>;
   findByIdentity(identity: string): Promise<IStoredGameRecord[]>;
@@ -297,6 +315,18 @@ export class GameStore implements IGameStore {
     return this.records.durable;
   }
 
+  get storageDegraded(): boolean {
+    return this.records.storageDegraded === true;
+  }
+
+  get storageError(): string | undefined {
+    return this.records.storageError;
+  }
+
+  subscribeToStorageStatus(listener: () => void): () => void {
+    return this.records.subscribeToStatus?.(listener) ?? (() => undefined);
+  }
+
   /**
    * The schema, in the vocabulary the reader uses.
    *
@@ -419,7 +449,13 @@ export class GameStore implements IGameStore {
       updatedAt: now.toISOString(),
       serverDelivery: input.connected ? 'pending' : 'none',
     };
-    await this.records.put(record);
+    const written = await this.records.put(record);
+    // The in-memory fallback is intentionally allowed to keep the current tab useful, but an
+    // IndexedDB-backed store that refuses this first write must not let the scorer start with a
+    // record that cannot be rediscovered after a reload.
+    if (!written && this.records.durable) {
+      throw new Error('The game could not be committed to the local database.');
+    }
     return record;
   }
 
@@ -480,7 +516,7 @@ export class GameStore implements IGameStore {
       if (isActive(record)) continue;
       const completed = new Date(record.completedAt!).getTime();
       if (!Number.isFinite(completed)) continue;
-      if (now.getTime() - completed <= completedGameRetentionMs) continue;
+      if (now.getTime() - completed <= retentionMsFor(record.package)) continue;
       await this.remove(record.id);
       removed += 1;
     }

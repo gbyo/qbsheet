@@ -263,9 +263,14 @@ export default function ConnectedSetup(props: {
   const pair = async (event: FormEvent) => {
     event.preventDefault();
     if (stage.kind !== 'pair') return;
+    const trimmedCode = code.trim();
+    if (trimmedCode === '') {
+      setError('Enter the pairing code for this room.');
+      return;
+    }
     setBusy(true);
     setError('');
-    const joined = await stage.client.join(code.trim(), roomId === '' ? undefined : roomId);
+    const joined = await stage.client.join(trimmedCode, roomId === '' ? undefined : roomId);
     setBusy(false);
     if (!joined.ok) {
       setError(joined.error);
@@ -504,10 +509,11 @@ export default function ConnectedSetup(props: {
               type="text"
               inputMode="numeric"
               autoComplete="off"
+              required
               value={code}
               onChange={(event) => setCode(event.target.value)}
             />
-            <button type="submit" className="shell-button is-primary" disabled={busy}>
+            <button type="submit" className="shell-button is-primary" disabled={busy || code.trim() === ''}>
               {busy ? 'Pairing…' : 'Pair this room'}
             </button>
           </form>

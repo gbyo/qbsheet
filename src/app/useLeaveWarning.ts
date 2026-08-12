@@ -38,16 +38,20 @@ export interface ILeaveWarningState {
   localSaveFailed: boolean;
   /** A finished game whose QBJ has not been downloaded and acknowledged. */
   handoffOutstanding: boolean;
+  /** The hand-entered game setup has unsaved fields. */
+  setupDirty?: boolean;
 }
 
 export function shouldWarnBeforeLeaving(state: ILeaveWarningState): boolean {
-  return state.gameInProgress || state.localSaveFailed || state.handoffOutstanding;
+  return state.gameInProgress || state.localSaveFailed || state.handoffOutstanding || state.setupDirty === true;
 }
 
 export default function useLeaveWarning(state: ILeaveWarningState): void {
-  const { gameInProgress, localSaveFailed, handoffOutstanding } = state;
+  const { gameInProgress, localSaveFailed, handoffOutstanding, setupDirty = false } = state;
   useEffect(() => {
-    if (!shouldWarnBeforeLeaving({ gameInProgress, localSaveFailed, handoffOutstanding })) return undefined;
+    if (!shouldWarnBeforeLeaving({ gameInProgress, localSaveFailed, handoffOutstanding, setupDirty })) {
+      return undefined;
+    }
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       // Set for the browsers that still require a truthy returnValue to show the dialog at all.
@@ -56,5 +60,5 @@ export default function useLeaveWarning(state: ILeaveWarningState): void {
     };
     window.addEventListener('beforeunload', onBeforeUnload);
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
-  }, [gameInProgress, localSaveFailed, handoffOutstanding]);
+  }, [gameInProgress, localSaveFailed, handoffOutstanding, setupDirty]);
 }

@@ -40,6 +40,7 @@
  */
 import { useState } from 'react';
 import { IStoredGameRecord, gameRequiresHandoff, isDelivered, needsHandoff } from '../game/GameStore';
+import { isManualGame } from '../game/GameDefinition';
 import { gamePackageLabel } from '../game/GamePackage';
 import { downloadFile, qbjFileContents, qbjFileName } from '../integrations/file/QbjDownload';
 
@@ -56,9 +57,12 @@ export default function CompletionScreen(props: {
   /** What leaving this screen is called. A connected room is going back to its room, not home. */
   continueLabel?: string;
   onHome: () => void | Promise<void>;
+  /** Start another local game with the same manual setup, when this was a manual game. */
+  onRematch?: () => void | Promise<void>;
 }) {
-  const { record, onUpdate, continueLabel = 'Done', onHome } = props;
+  const { record, onUpdate, continueLabel = 'Done', onHome, onRematch } = props;
   const [writeFailed, setWriteFailed] = useState(false);
+  const [rematchFailed, setRematchFailed] = useState(false);
   const score = record.finalScore;
   const connected = record.serverDelivery !== 'none';
   /** Tournament control has it, and did not ask for anything else. */
@@ -205,7 +209,24 @@ export default function CompletionScreen(props: {
         >
           {continueLabel}
         </button>
+        {onRematch && isManualGame(record.package) && (
+          <button
+            type="button"
+            className="shell-button"
+            onClick={() => {
+              setRematchFailed(false);
+              void Promise.resolve(onRematch()).catch(() => setRematchFailed(true));
+            }}
+          >
+            Rematch
+          </button>
+        )}
       </div>
+      {rematchFailed && (
+        <p className="shell-warning" role="alert">
+          The rematch could not be saved locally. The finished result is still here.
+        </p>
+      )}
     </main>
   );
 }

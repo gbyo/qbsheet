@@ -25,6 +25,12 @@ export const gameStoreName = 'games';
 export interface IRecordStore<T extends { id: string }> {
   /** Whether writes to this store survive the tab closing. */
   readonly durable: boolean;
+  /** Whether a previously opened durable store is currently unavailable. */
+  readonly storageDegraded?: boolean;
+  /** A safe-to-display explanation for the current storage failure, when there is one. */
+  readonly storageError?: string;
+  /** Notify a host when storage health changes. */
+  subscribeToStatus?(listener: () => void): () => void;
   list(): Promise<T[]>;
   get(id: string): Promise<T | null>;
   put(record: T): Promise<boolean>;
@@ -34,6 +40,7 @@ export interface IRecordStore<T extends { id: string }> {
 /** Used when IndexedDB is unavailable, and by tests that want no persistence at all. */
 export class MemoryRecordStore<T extends { id: string }> implements IRecordStore<T> {
   readonly durable = false;
+  readonly storageDegraded = false;
 
   private records = new Map<string, T>();
 
@@ -78,7 +85,6 @@ function openDatabaseNamed(name: string): Promise<IDBDatabase | null> {
       }
     };
     request.onsuccess = () => {
-      request.result.onversionchange = () => request.result.close();
       resolve(request.result);
     };
     request.onerror = () => resolve(null);
@@ -89,47 +95,153 @@ function openDatabaseNamed(name: string): Promise<IDBDatabase | null> {
 class IndexedDbRecordStore<T extends { id: string }> implements IRecordStore<T> {
   readonly durable = true;
 
-  constructor(
-    private database: IDBDatabase,
-    private storeName: string,
-  ) {}
+  private database: IDBDatabase | null;
+  private degraded = false;
+  private error: string | undefined;
+  private reopening: Promise<boolean> | null = null;
+  private readonly statusListeners = new Set<() => void>();
 
-  private run<R>(mode: IDBTransactionMode, work: (store: IDBObjectStore) => IDBRequest): Promise<R | null> {
+  constructor(
+    database: IDBDatabase,
+    private storeName: string,
+    private databaseNameForReopen: string = databaseName,
+  ) {
+    this.database = database;
+    this.attachDatabase(database);
+  }
+
+  get storageDegraded(): boolean {
+    return this.degraded;
+  }
+
+  get storageError(): string | undefined {
+    return this.error;
+  }
+
+  subscribeToStatus(listener: () => void): () => void {
+    this.statusListeners.add(listener);
+    return () => this.statusListeners.delete(listener);
+  }
+
+  private notifyStatus(): void {
+    for (const listener of this.statusListeners) listener();
+  }
+
+  private attachDatabase(database: IDBDatabase): void {
+    this.database = database;
+    database.onversionchange = () => {
+      this.markDegraded('The local game database changed and is being reopened.');
+    };
+  }
+
+  private markHealthy(): void {
+    if (!this.degraded && this.error === undefined) return;
+    this.degraded = false;
+    this.error = undefined;
+    this.notifyStatus();
+  }
+
+  private markDegraded(message: string): void {
+    const changed = !this.degraded || this.error !== message;
+    this.degraded = true;
+    this.error = message;
+    const database = this.database;
+    this.database = null;
+    try {
+      database?.close();
+    } catch {
+      // Closing an already-broken connection is best effort.
+    }
+    if (changed) this.notifyStatus();
+    void this.reopen();
+  }
+
+  private async reopen(): Promise<boolean> {
+    if (this.reopening) return this.reopening;
+    this.reopening = (async () => {
+      const opened = await openDatabaseNamed(this.databaseNameForReopen);
+      if (!opened) return false;
+      this.attachDatabase(opened);
+      return true;
+    })().finally(() => {
+      this.reopening = null;
+    });
+    return this.reopening;
+  }
+
+  private async ready(): Promise<boolean> {
+    // A reopened connection is not declared healthy until a transaction commits. This keeps a
+    // failed `list()` distinguishable from a successful empty list even when reopening is quick.
+    if (this.database) return true;
+    return this.reopen();
+  }
+
+  private async run<R>(
+    mode: IDBTransactionMode,
+    work: (store: IDBObjectStore) => IDBRequest,
+  ): Promise<{ ok: true; result: R } | { ok: false }> {
+    if (!(await this.ready())) return { ok: false };
     return new Promise((resolve) => {
       let request: IDBRequest;
+      let requestResult!: R;
+      let requestFailed = false;
+      let settled = false;
+      const fail = () => {
+        if (settled) return;
+        settled = true;
+        this.markDegraded('The local game database could not complete a transaction.');
+        resolve({ ok: false });
+      };
       try {
-        const transaction = this.database.transaction(this.storeName, mode);
-        transaction.onerror = () => resolve(null);
-        transaction.onabort = () => resolve(null);
+        const database = this.database;
+        if (!database) {
+          fail();
+          return;
+        }
+        const transaction = database.transaction(this.storeName, mode);
+        transaction.onerror = fail;
+        transaction.onabort = fail;
+        transaction.oncomplete = () => {
+          if (requestFailed) fail();
+          else if (!settled) {
+            settled = true;
+            this.markHealthy();
+            resolve({ ok: true, result: requestResult });
+          }
+        };
         request = work(transaction.objectStore(this.storeName));
       } catch {
-        resolve(null);
+        fail();
         return;
       }
-      request.onsuccess = () => resolve(request.result as R);
-      request.onerror = () => resolve(null);
+      request.onsuccess = () => {
+        requestResult = request.result as R;
+      };
+      request.onerror = () => {
+        requestFailed = true;
+      };
     });
   }
 
   async list(): Promise<T[]> {
-    const all = await this.run<T[]>('readonly', (store) => store.getAll());
-    return all ?? [];
+    const result = await this.run<T[]>('readonly', (store) => store.getAll());
+    return result.ok ? result.result : [];
   }
 
   async get(id: string): Promise<T | null> {
-    return (await this.run<T>('readonly', (store) => store.get(id))) ?? null;
+    const result = await this.run<T | null>('readonly', (store) => store.get(id));
+    return result.ok ? result.result ?? null : null;
   }
 
   async put(record: T): Promise<boolean> {
-    // `put` resolves to the key, so anything non-null is a write that happened.
-    return (await this.run<IDBValidKey>('readwrite', (store) => store.put(record))) !== null;
+    return (await this.run<IDBValidKey>('readwrite', (store) => store.put(record))).ok;
   }
 
   async delete(id: string): Promise<boolean> {
-    // A successful delete resolves undefined, which is indistinguishable from the failure sentinel
-    // through `run`, so ask separately whether the record survived.
-    await this.run<undefined>('readwrite', (store) => store.delete(id));
-    return (await this.get(id)) === null;
+    const removed = await this.run<undefined>('readwrite', (store) => store.delete(id));
+    if (!removed.ok) return false;
+    const remaining = await this.run<T | null>('readonly', (store) => store.get(id));
+    return remaining.ok && remaining.result === undefined;
   }
 }
 
@@ -149,13 +261,18 @@ export async function openRecordStore<T extends { id: string }>(
   // The product was renamed after the first public build. Copy the old game records into the new
   // database before the app starts looking for an unfinished game, and never delete the old copy:
   // it is a recoverable fallback if a browser interrupts this one-time migration.
-  if (storeName === gameStoreName && (await store.list()).length === 0) {
-    const legacy = await openDatabaseNamed(legacyDatabaseName);
-    if (legacy) {
-      const legacyStore = new IndexedDbRecordStore<T>(legacy, gameStoreName);
-      const records = await legacyStore.list();
-      for (const record of records) await store.put(record);
-      legacy.close();
+  if (storeName === gameStoreName && !store.storageDegraded) {
+    const current = await store.list();
+    if (!store.storageDegraded && current.length === 0) {
+      const legacy = await openDatabaseNamed(legacyDatabaseName);
+      if (legacy) {
+        const legacyStore = new IndexedDbRecordStore<T>(legacy, gameStoreName, legacyDatabaseName);
+        const records = await legacyStore.list();
+        if (!legacyStore.storageDegraded) {
+          for (const record of records) await store.put(record);
+        }
+        legacy.close();
+      }
     }
   }
   return store;

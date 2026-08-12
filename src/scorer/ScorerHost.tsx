@@ -22,7 +22,7 @@
  * one from a build that did not attach it — is not reconstructed: no events are invented, and the
  * room is told plainly that the file has to come back through the QBJ recovery workflow instead.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
 import { IRoomProcedure } from '../scoring/RoomProcedure';
 import { ITeamRoster } from '../game/Roster';
@@ -54,6 +54,8 @@ export interface IScorerHostProps {
   procedure?: IRoomProcedure;
   /** Whoever is signed in to this room browser, recorded on the result as the scorekeeper. */
   operatorName?: string;
+  /** Whether the complete game record is currently backed by a healthy durable store. */
+  recordDurablyStored?: boolean;
   connection: RoomConnectionState;
   /** Overrides the word in the header when the game's standing is not a network fact. See `Scorer`. */
   statusLabel?: string;
@@ -121,6 +123,7 @@ export default function ScorerHost(props: IScorerHostProps) {
     packetName,
     procedure,
     operatorName,
+    recordDurablyStored = true,
     connection,
     statusLabel,
     degradedMessage,
@@ -161,6 +164,8 @@ export default function ScorerHost(props: IScorerHostProps) {
   const activeSetup = recovered?.setup ?? setup;
   const events = useGameEvents(gameKey, format, activeSetup, recovered?.events ?? [], procedure);
   const [serverRecoveryNotice, setServerRecoveryNotice] = useState('');
+  const [serverRecoveryError, setServerRecoveryError] = useState('');
+  const [serverRecoveryAttempt, setServerRecoveryAttempt] = useState(0);
 
   /**
    * Ask the server for this session's own snapshot, but only when there is nothing local to lose.
@@ -179,11 +184,23 @@ export default function ScorerHost(props: IScorerHostProps) {
   useEffect(() => {
     if (onEventsChanged) onEventsChanged(eventList, activeSetup);
   }, [onEventsChanged, eventList, activeSetup]);
-  const attemptedServerRecovery = useRef(false);
+  const lastServerRecoveryAttempt = useRef(-1);
+  const localEventCount = useRef(eventCount);
+  localEventCount.current = eventCount;
+  const recoveryFailed = useRef(false);
+
+  const retryServerRecovery = useCallback(() => {
+    if (localEventCount.current > 0) return;
+    setServerRecoveryError('');
+    setServerRecoveryAttempt((attempt) => attempt + 1);
+  }, []);
+
   useEffect(() => {
-    if (!onRecoverFromServer || attemptedServerRecovery.current) return undefined;
+    if (!onRecoverFromServer || lastServerRecoveryAttempt.current >= serverRecoveryAttempt) return undefined;
     if (recovered !== null || eventCount > 0) return undefined;
-    attemptedServerRecovery.current = true;
+    lastServerRecoveryAttempt.current = serverRecoveryAttempt;
+    recoveryFailed.current = false;
+    setServerRecoveryError('');
     let cancelled = false;
     onRecoverFromServer()
       .then((qbj) => {
@@ -202,14 +219,48 @@ export default function ScorerHost(props: IScorerHostProps) {
         setServerRecoveryNotice('Recovered this game from the copy tournament control was holding.');
         return undefined;
       })
-      .catch(() => undefined);
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        recoveryFailed.current = true;
+        setServerRecoveryError(
+          error instanceof Error && error.message !== ''
+            ? error.message
+            : 'Tournament control could not be reached right now.',
+        );
+      });
     return () => {
       cancelled = true;
     };
-    // `events.events` is read inside the callback deliberately and must not re-run this effect;
-    // `attemptedServerRecovery` already makes it once-per-game.
+    // `events.events` is read inside the callback deliberately and must not re-run this effect merely
+    // because a local event list was replaced. The event-count guard above still cancels recovery as
+    // soon as somebody scores locally.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onRecoverFromServer, recovered, eventCount, restore, activeSetup]);
+  }, [onRecoverFromServer, recovered, eventCount, restore, activeSetup, serverRecoveryAttempt]);
+
+  // A failed first check is exactly the case where a browser coming back online should get another
+  // chance. The event-count ref prevents that retry from overwriting a game that started locally in
+  // the meantime.
+  useEffect(() => {
+    const retryWhenOnline = () => {
+      if (localEventCount.current === 0 && recoveryFailed.current) retryServerRecovery();
+    };
+    window.addEventListener('online', retryWhenOnline);
+    return () => window.removeEventListener('online', retryWhenOnline);
+  }, [retryServerRecovery]);
+
+  const recoveryAlerts = useMemo<IScorerAlert[]>(() => {
+    if (serverRecoveryError === '') return [];
+    return [
+      {
+        id: 'server-recovery',
+        tone: 'warning',
+        title: "Couldn't check tournament control for recovery",
+        body: serverRecoveryError,
+        actions: eventCount === 0 ? [{ label: 'Retry', onSelect: retryServerRecovery }] : undefined,
+      },
+    ];
+  }, [eventCount, retryServerRecovery, serverRecoveryError]);
+  const allAlerts = useMemo(() => [...(alerts ?? []), ...recoveryAlerts], [alerts, recoveryAlerts]);
 
   return (
     <Scorer
@@ -249,10 +300,11 @@ export default function ScorerHost(props: IScorerHostProps) {
       onSyncRosterPlayer={onSyncRosterPlayer}
       recovered={recovered !== null && recovered.events.length > 0}
       recoveryNotice={serverRecoveryNotice}
-      alerts={alerts}
+      alerts={allAlerts}
       recovery={{
         ...(recovery ?? {}),
         localSaveOk: events.saved,
+        recordDurablyStored,
         localSavedAt: events.savedAt,
       }}
     />

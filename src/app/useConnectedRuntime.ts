@@ -968,7 +968,9 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
 
   const recoverFromServer = useCallback(async () => {
     const result = await client.recover(credentials);
-    if (!result.ok) return null;
+    if (!result.ok) {
+      throw new Error(result.detail ?? result.error);
+    }
     return result.value.latestQbj;
   }, [client, credentials]);
 

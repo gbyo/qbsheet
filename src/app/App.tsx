@@ -36,7 +36,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GameStore, IStoredGameRecord, isActive, needsHandoff } from '../game/GameStore';
 import { IUnreadableRecord } from '../game/GameRecordUpgrade';
 import { IGamePackage, gamePackageIdentity } from '../game/GamePackage';
-import { IGameDefinition } from '../game/GameDefinition';
+import { IGameDefinition, isManualGame } from '../game/GameDefinition';
 import { newManualRecordIdentity } from '../game/ManualGame';
 import { openRecordStore } from '../persistence/GameDatabase';
 import { claimGame, IGameClaim, newTabId } from '../persistence/TabClaim';
@@ -68,6 +68,7 @@ import { connectionTimeline } from './ConnectionTimeline';
 import { useReplaceable } from '../pwa/useAppUpdate';
 import { ResultDeliveryCapabilityStore } from './ResultDeliveryCapability';
 import { ResultDeliveryService } from './ResultDelivery';
+import { readOperatorName, writeOperatorName } from './OperatorIdentity';
 
 /**
  * Whether the application may be replaced by a newer build while this screen is up.
@@ -148,6 +149,9 @@ export default function App() {
   const [store, setStore] = useState<GameStore | null>(null);
   const [records, setRecords] = useState<IStoredGameRecord[]>([]);
   const [unreadable, setUnreadable] = useState<IUnreadableRecord[]>([]);
+  const [storageDegraded, setStorageDegraded] = useState(false);
+  const [storageError, setStorageError] = useState<string | undefined>(undefined);
+  const [operatorName, setOperatorName] = useState(() => readOperatorName());
   const [screen, setScreen] = useState<Screen>({ kind: 'loading' });
   const [connection, setConnection] = useState<IConnectedSession | null>(null);
   const [pendingBaseUrl, setPendingBaseUrl] = useState('');
@@ -197,6 +201,20 @@ export default function App() {
     [],
   );
 
+  useEffect(() => {
+    if (!store) {
+      setStorageDegraded(false);
+      setStorageError(undefined);
+      return undefined;
+    }
+    const readStatus = () => {
+      setStorageDegraded(store.storageDegraded);
+      setStorageError(store.storageError);
+    };
+    readStatus();
+    return store.subscribeToStorageStatus(readStatus);
+  }, [store]);
+
   const current = useMemo(
     () =>
       'recordId' in screen ? (records.find((record) => record.id === screen.recordId) ?? null) : null,
@@ -205,7 +223,9 @@ export default function App() {
 
   const handoffOutstanding = records.some(needsHandoff);
   const localSaveFailed =
-    store !== null && !store.durable && records.some((record) => isActive(record) || needsHandoff(record));
+    store !== null &&
+    (!store.durable || storageDegraded) &&
+    records.some((record) => isActive(record) || needsHandoff(record));
 
   useLeaveWarning({
     gameInProgress: screen.kind === 'scoring' && current !== null && isActive(current),
@@ -214,6 +234,11 @@ export default function App() {
   });
 
   useReplaceable(updatesAllowedOn(screen));
+
+  const updateOperatorName = useCallback((value: string) => {
+    setOperatorName(value);
+    void writeOperatorName(value);
+  }, []);
 
   /** Take the tab claim for a game, and say whether we got it. */
   const takeClaim = useCallback(async (recordId: string): Promise<boolean> => {
@@ -287,13 +312,21 @@ export default function App() {
           return null;
         }
       }
-      const created = await store.create({
-        package: packageValue,
-        setup: setupFromPackage(packageValue),
-        connected: options.connected,
-        gameKey: options.gameKey,
-        attempt: options.attempt,
-      });
+      let created: IStoredGameRecord;
+      try {
+        created = await store.create({
+          package: packageValue,
+          setup: setupFromPackage(packageValue),
+          connected: options.connected,
+          gameKey: options.gameKey,
+          attempt: options.attempt,
+        });
+      } catch {
+        await refresh(store);
+        setNotice('This game could not be committed to local storage. No scoring has started.');
+        setScreen({ kind: 'home' });
+        return null;
+      }
       await refresh(store);
       setNotice('');
       await openRecord(created, { confirmAssignment: options.connected });
@@ -558,7 +591,7 @@ export default function App() {
   if (screen.kind === 'create') {
     return (
       <ManualGameSetup
-        onStart={(definition) => void createManualGame(definition)}
+        onStart={createManualGame}
         onCancel={() => setScreen({ kind: 'home' })}
       />
     );
@@ -572,12 +605,14 @@ export default function App() {
     return (
       <>
         <GameOriginNotice packageValue={current.package} />
-        <ScoringScreen
+      <ScoringScreen
           record={current}
           store={store}
           resultDelivery={resultDelivery as ResultDeliveryService}
           connection={connection}
           durable={store.durable}
+          storageDegraded={storageDegraded}
+          operatorName={operatorName}
           onComplete={onComplete}
           onConnectionRepaired={mergeConnection}
           onConnectionLost={() => {
@@ -597,8 +632,13 @@ export default function App() {
       <CompletionScreen
         record={current}
         onUpdate={updateRecord}
-        continueLabel={backToRoom ? `Next game in ${pairedRoom.roomName}` : 'Done'}
-        onHome={async () => {
+          continueLabel={backToRoom ? `Next game in ${pairedRoom.roomName}` : 'Done'}
+          onRematch={
+            isManualGame(current.package)
+              ? () => createManualGame(current.package as IGameDefinition)
+              : undefined
+          }
+          onHome={async () => {
           claim.current?.release();
           claim.current = null;
           await refresh(store);
@@ -614,6 +654,10 @@ export default function App() {
       unreadable={unreadable}
       notice={notice}
       durable={store.durable}
+      storageDegraded={storageDegraded}
+      storageError={storageError}
+      operatorName={operatorName}
+      onOperatorNameChange={updateOperatorName}
       pairedRoom={pairedRoom}
       practiceInProgress={(loadGame(practiceGameKey)?.events.length ?? 0) > 0}
       onReadiness={() => setScreen({ kind: 'readiness' })}

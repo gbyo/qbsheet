@@ -137,7 +137,7 @@ describe('a browser that stops saving mid-game', () => {
     try {
       await scoreOneCycle();
 
-      const banner = await screen.findByText(/Local save failed/);
+      const banner = await screen.findByText(/Event journal save failed/);
       expect(banner).toBeInTheDocument();
       // And a way out that does not need the network or the failed storage.
       expect(screen.getAllByRole('button', { name: /Download QBJ backup/ }).length).toBeGreaterThan(0);
@@ -157,12 +157,12 @@ describe('a browser that stops saving mid-game', () => {
       throw new Error('QuotaExceededError');
     });
     await scoreOneCycle();
-    await screen.findByText(/Local save failed/);
+    await screen.findByText(/Event journal save failed/);
     setItem.mockRestore();
 
     await scoreOneCycle();
 
     // A permanent warning is a warning nobody reads by round four.
-    await waitFor(() => expect(screen.queryByText(/Local save failed/)).toBeNull());
+    await waitFor(() => expect(screen.queryByText(/Event journal save failed/)).toBeNull());
   });
 });

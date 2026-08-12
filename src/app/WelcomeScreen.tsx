@@ -44,6 +44,7 @@ import { IPairedRoom } from './ConnectedSession';
 import UpdateNotice from '../pwa/UpdateNotice';
 import GameFileOpen from './GameFileOpen';
 import RecentGames from './RecentGames';
+import NativeDialog from './NativeDialog';
 
 /** How far a saved game got, for the resume card. */
 export function progressLabel(record: IStoredGameRecord): string {
@@ -86,6 +87,11 @@ export default function WelcomeScreen(props: {
   unreadable: IUnreadableRecord[];
   notice: string;
   durable: boolean;
+  storageDegraded?: boolean;
+  storageError?: string;
+  /** Optional device identity carried into results and connected presence. */
+  operatorName?: string;
+  onOperatorNameChange?: (value: string) => void;
   /** The room this device is paired with, when a pairing is held. */
   pairedRoom: IPairedRoom | null;
   practiceInProgress: boolean;
@@ -107,6 +113,10 @@ export default function WelcomeScreen(props: {
     unreadable,
     notice,
     durable,
+    storageDegraded = false,
+    storageError,
+    operatorName = '',
+    onOperatorNameChange,
     pairedRoom,
     practiceInProgress,
     onReadiness,
@@ -121,6 +131,7 @@ export default function WelcomeScreen(props: {
     onFindExisting,
   } = props;
   const [address, setAddress] = useState('');
+  const [addressError, setAddressError] = useState('');
   const [alreadyPlayed, setAlreadyPlayed] = useState<{ record: IStoredGameRecord; opened: IGamePackage } | null>(
     null,
   );
@@ -130,7 +141,13 @@ export default function WelcomeScreen(props: {
 
   const submitAddress = (event: FormEvent) => {
     event.preventDefault();
-    onConnect(address);
+    const trimmed = address.trim();
+    if (trimmed === '') {
+      setAddressError('Enter the address tournament control gave you.');
+      return;
+    }
+    setAddressError('');
+    onConnect(trimmed);
   };
 
   /**
@@ -164,10 +181,12 @@ export default function WelcomeScreen(props: {
         </button>
       </header>
 
-      {!durable && (
+      {(!durable || storageDegraded) && (
         <p className="shell-warning" role="alert">
-          This browser will not let the scoresheet save anything. A game scored here will be lost if the tab
-          closes. Download a QBJ backup as soon as the game starts and again when it ends.
+          {!durable
+            ? 'This browser will not let the scoresheet save anything. A game scored here will be lost if the tab closes.'
+            : 'The local game database is temporarily unavailable. Do not close an active game; download a QBJ backup now.'}{' '}
+          {storageError}
         </p>
       )}
       {unreadableNotice(unreadable) !== null && (
@@ -176,6 +195,26 @@ export default function WelcomeScreen(props: {
         </p>
       )}
       {notice !== '' && <p className="shell-notice">{notice}</p>}
+
+      {onOperatorNameChange && (
+        <section className="shell-section operator-identity" aria-labelledby="operator-identity-heading">
+          <h2 id="operator-identity-heading" className="shell-heading">
+            Scorekeeper
+          </h2>
+          <label className="shell-label" htmlFor="operator-name">
+            Name (optional)
+          </label>
+          <input
+            id="operator-name"
+            className="shell-input"
+            type="text"
+            autoComplete="name"
+            value={operatorName}
+            onChange={(event) => onOperatorNameChange(event.target.value)}
+          />
+          <p className="shell-hint">Included in saved results and connected tournament presence.</p>
+        </section>
+      )}
 
       <UpdateNotice />
 
@@ -237,12 +276,17 @@ export default function WelcomeScreen(props: {
                   spellCheck={false}
                   placeholder="http://"
                   value={address}
-                  onChange={(event) => setAddress(event.target.value)}
+                  required
+                  onChange={(event) => {
+                    setAddress(event.target.value);
+                    if (event.target.value.trim() !== '') setAddressError('');
+                  }}
                 />
-                <button type="submit" className="shell-button is-primary">
+                <button type="submit" className="shell-button is-primary" disabled={address.trim() === ''}>
                   Connect
                 </button>
               </div>
+              {addressError !== '' && <p className="shell-errors" role="alert">{addressError}</p>}
             </form>
           </section>
 
@@ -288,42 +332,45 @@ export default function WelcomeScreen(props: {
       />
 
       {alreadyPlayed && (
-        <div className="shell-modal" role="dialog" aria-modal="true" aria-label="Game already completed">
-          <div className="shell-modal-body">
-            <h2>This game has already been completed on this device.</h2>
-            <p>
-              {gamePackageLabel(alreadyPlayed.record.package)} · {gamePackageMatchup(alreadyPlayed.record.package)}
-            </p>
-            <div className="shell-modal-actions">
-              <button
-                type="button"
-                className="shell-button is-primary"
-                onClick={() => {
-                  const record = alreadyPlayed.record;
-                  setAlreadyPlayed(null);
-                  void onOpenRecord(record);
-                }}
-              >
-                Download previous QBJ
-              </button>
-              <button
-                type="button"
-                className="shell-button is-destructive"
-                onClick={() => {
-                  const opened = alreadyPlayed.opened;
-                  const attempt = alreadyPlayed.record.attempt + 1;
-                  setAlreadyPlayed(null);
-                  void onOpenPackage(opened, attempt);
-                }}
-              >
-                Open as new attempt…
-              </button>
-              <button type="button" className="shell-button" onClick={() => setAlreadyPlayed(null)}>
-                Cancel
-              </button>
-            </div>
+        <NativeDialog
+          title="Game already completed"
+          onClose={() => setAlreadyPlayed(null)}
+          className="welcome-dialog"
+          bodyClassName="shell-modal-body"
+        >
+          <p>This game has already been completed on this device.</p>
+          <p>
+            {gamePackageLabel(alreadyPlayed.record.package)} · {gamePackageMatchup(alreadyPlayed.record.package)}
+          </p>
+          <div className="shell-modal-actions">
+            <button
+              type="button"
+              className="shell-button is-primary"
+              onClick={() => {
+                const record = alreadyPlayed.record;
+                setAlreadyPlayed(null);
+                void onOpenRecord(record);
+              }}
+            >
+              Download previous QBJ
+            </button>
+            <button
+              type="button"
+              className="shell-button is-destructive"
+              onClick={() => {
+                const opened = alreadyPlayed.opened;
+                const attempt = alreadyPlayed.record.attempt + 1;
+                setAlreadyPlayed(null);
+                void onOpenPackage(opened, attempt);
+              }}
+            >
+              Open as new attempt…
+            </button>
+            <button type="button" className="shell-button" onClick={() => setAlreadyPlayed(null)}>
+              Cancel
+            </button>
           </div>
-        </div>
+        </NativeDialog>
       )}
     </main>
   );

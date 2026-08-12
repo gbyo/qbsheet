@@ -33,6 +33,8 @@ export const claimHeartbeatMs = 2000;
 
 type ClaimMessage =
   | { kind: 'who-holds'; gameId: string; from: string }
+  | { kind: 'candidate'; gameId: string; from: string }
+  | { kind: 'claim'; gameId: string; from: string }
   | { kind: 'holding'; gameId: string; from: string };
 
 export interface IChannelLike {
@@ -51,6 +53,53 @@ function defaultChannel(): IChannelLike | null {
   }
 }
 
+/**
+ * Prefer the browser's actual writer lock. The promise returned by `locks.request` stays pending for
+ * the lifetime of the claim, so acquisition and release are deliberately split into two promises.
+ */
+async function claimWithWebLock(gameId: string): Promise<IGameClaim | null> {
+  if (typeof navigator === 'undefined' || !('locks' in navigator) || !navigator.locks) return null;
+
+  let resolveAcquired: (held: boolean) => void = () => undefined;
+  const acquired = new Promise<boolean>((resolve) => {
+    resolveAcquired = resolve;
+  });
+  let releaseLock: () => void = () => undefined;
+  let released = false;
+
+  try {
+    void navigator.locks
+      .request(`qbsheet.game.${gameId}`, { ifAvailable: true }, async (lock) => {
+        if (!lock) {
+          resolveAcquired(false);
+          return undefined;
+        }
+        const heldUntilReleased = new Promise<void>((resolve) => {
+          releaseLock = resolve;
+        });
+        resolveAcquired(true);
+        await heldUntilReleased;
+        return undefined;
+      })
+      .catch(() => resolveAcquired(false));
+  } catch {
+    // A partial Web Locks implementation is no better than no Web Locks. The caller can use the
+    // BroadcastChannel election below instead.
+    return null;
+  }
+
+  const held = await acquired;
+  if (!held) return { held: false, release: () => undefined };
+  return {
+    held: true,
+    release: () => {
+      if (released) return;
+      released = true;
+      releaseLock();
+    },
+  };
+}
+
 export interface IGameClaim {
   /** False when another live tab answered that it already holds this game. */
   readonly held: boolean;
@@ -67,48 +116,101 @@ export interface IGameClaim {
 export async function claimGame(
   gameId: string,
   tabId: string,
-  channel: IChannelLike | null = defaultChannel(),
+  channel?: IChannelLike | null,
   timeoutMs: number = claimResponseTimeoutMs,
 ): Promise<IGameClaim> {
-  if (!channel) return { held: true, release: () => undefined };
+  const webLockClaim = await claimWithWebLock(gameId);
+  if (webLockClaim) return webLockClaim;
+
+  const claimChannel = channel === undefined ? defaultChannel() : channel;
+  if (!claimChannel) return { held: true, release: () => undefined };
 
   let heldByAnother = false;
+  let lostElection = false;
+  const candidates = new Set([tabId]);
+  const heartbeat: { handle?: ReturnType<typeof setInterval> } = {};
+  let claimed = false;
+  let closed = false;
+
+  const post = (message: ClaimMessage) => {
+    try {
+      claimChannel.postMessage(message);
+    } catch {
+      // A channel that closes while a tab is being torn down is not a claim conflict.
+    }
+  };
+
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    if (heartbeat.handle !== undefined) clearInterval(heartbeat.handle);
+    claimChannel.removeEventListener('message', listener);
+    claimChannel.close();
+  };
+
   const listener = (event: MessageEvent) => {
     const message = event.data as ClaimMessage | undefined;
     if (!message || message.gameId !== gameId || message.from === tabId) return;
-    if (message.kind === 'holding') heldByAnother = true;
+    if (message.kind === 'candidate') {
+      candidates.add(message.from);
+      if (!claimed && message.from < tabId) lostElection = true;
+      return;
+    }
+    if (message.kind === 'holding') {
+      if (!claimed) {
+        heldByAnother = true;
+      } else if (message.from < tabId) {
+        // Two tabs that crossed the election boundary still converge on one deterministic winner.
+        close();
+      } else {
+        post({ kind: 'holding', gameId, from: tabId });
+      }
+      return;
+    }
+    if (message.kind === 'claim') {
+      candidates.add(message.from);
+      if (message.from < tabId) {
+        lostElection = true;
+        if (claimed) close();
+      } else if (claimed) {
+        post({ kind: 'holding', gameId, from: tabId });
+      }
+      return;
+    }
     // Somebody new is asking and we are the holder: answer, so they stand down.
     if (message.kind === 'who-holds' && claimed) {
-      channel.postMessage({ kind: 'holding', gameId, from: tabId } satisfies ClaimMessage);
+      post({ kind: 'holding', gameId, from: tabId });
     }
   };
-  let claimed = false;
-  channel.addEventListener('message', listener);
 
-  channel.postMessage({ kind: 'who-holds', gameId, from: tabId } satisfies ClaimMessage);
+  claimChannel.addEventListener('message', listener);
+
+  post({ kind: 'who-holds', gameId, from: tabId });
+  // Every contender announces itself before waiting. If two tabs start in the same response window,
+  // both hear the other candidate and the lexical tab id chooses one of them before either writes.
+  post({ kind: 'candidate', gameId, from: tabId });
   await new Promise((resolve) => {
     setTimeout(resolve, timeoutMs);
   });
 
-  if (heldByAnother) {
-    channel.removeEventListener('message', listener);
-    channel.close();
+  if (heldByAnother || lostElection || [...candidates].some((candidate) => candidate < tabId)) {
+    close();
     return { held: false, release: () => undefined };
   }
 
   claimed = true;
-  channel.postMessage({ kind: 'holding', gameId, from: tabId } satisfies ClaimMessage);
-  const heartbeat = setInterval(() => {
-    channel.postMessage({ kind: 'holding', gameId, from: tabId } satisfies ClaimMessage);
+  post({ kind: 'claim', gameId, from: tabId });
+  post({ kind: 'holding', gameId, from: tabId });
+  heartbeat.handle = setInterval(() => {
+    post({ kind: 'holding', gameId, from: tabId });
   }, claimHeartbeatMs);
 
   return {
     held: true,
     release: () => {
+      if (closed) return;
       claimed = false;
-      clearInterval(heartbeat);
-      channel.removeEventListener('message', listener);
-      channel.close();
+      close();
     },
   };
 }
