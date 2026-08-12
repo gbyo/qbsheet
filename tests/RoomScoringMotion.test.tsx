@@ -1,9 +1,9 @@
 /**
  * @vitest-environment jsdom
  */
-import { readFileSync } from 'node:fs';
 import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
+import motionCss from '../src/app/motion.css?raw';
 import MotionNumber, { numberMotionMs } from '../src/scorer/ScoringMotion';
 
 afterEach(() => {
@@ -31,21 +31,20 @@ describe('shared scoring motion primitives', () => {
   });
 
   test('reduced motion explicitly removes every travel, scale, sweep, ring, and ghost layer', () => {
-    const css = readFileSync(new URL('../src/app/motion.css', import.meta.url), 'utf8');
-    const reducedStart = css.indexOf('@media (prefers-reduced-motion: reduce)');
-    const blockStart = css.indexOf('{', reducedStart);
+    const reducedStart = motionCss.indexOf('@media (prefers-reduced-motion: reduce)');
+    const blockStart = motionCss.indexOf('{', reducedStart);
     let depth = 0;
-    let reducedEnd = css.length;
-    for (let index = blockStart; index < css.length; index += 1) {
-      if (css[index] === '{') depth += 1;
-      if (css[index] !== '}') continue;
+    let reducedEnd = motionCss.length;
+    for (let index = blockStart; index < motionCss.length; index += 1) {
+      if (motionCss[index] === '{') depth += 1;
+      if (motionCss[index] !== '}') continue;
       depth -= 1;
       if (depth === 0) {
         reducedEnd = index + 1;
         break;
       }
     }
-    const reduced = css.slice(reducedStart, reducedEnd);
+    const reduced = motionCss.slice(reducedStart, reducedEnd);
 
     expect(reduced).toContain('.qbsheet-motion-number[data-motion-direction]::before');
     expect(reduced).toContain('.scorer-no-buzz-sweep');
