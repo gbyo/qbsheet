@@ -104,8 +104,13 @@ export default function ScoringScreen(props: {
     onConnectionLost,
   } = props;
   const [downloadedAt, setDownloadedAt] = useState<string | undefined>(record.qbjDownloadedAt);
+  const [recordDurablyStored, setRecordDurablyStored] = useState(durable && !storageDegraded);
   const [repairing, setRepairing] = useState(false);
   const update = useAppUpdate();
+
+  useEffect(() => {
+    if (!durable || storageDegraded) setRecordDurablyStored(false);
+  }, [durable, storageDegraded]);
 
   /**
    * Whether this game has tournament control behind it.
@@ -176,7 +181,9 @@ export default function ScoringScreen(props: {
    */
   const mirror = useCallback(
     (events: ScoreEvent[], setup: IGameSetup) => {
-      void store.update(record.id, { events, setup });
+      void store.update(record.id, { events, setup }).then((updated) => {
+        setRecordDurablyStored(updated !== null && store.durable && !store.storageDegraded);
+      });
     },
     [record.id, store],
   );
@@ -187,7 +194,9 @@ export default function ScoringScreen(props: {
       if (written) {
         const at = new Date().toISOString();
         setDownloadedAt(at);
-        void store.update(record.id, { qbjDownloadedAt: at });
+        void store.update(record.id, { qbjDownloadedAt: at }).then((updated) => {
+          if (updated === null || !store.durable || store.storageDegraded) setRecordDurablyStored(false);
+        });
       }
       return written;
     },
@@ -228,12 +237,14 @@ export default function ScoringScreen(props: {
         finalScore: scoreFromQbj(portable),
       });
       if (!saved) {
+        setRecordDurablyStored(false);
         return {
           ok: false,
           message:
             'This device could not save the finished result. Do not close this tab. Download the QBJ backup now.',
         };
       }
+      setRecordDurablyStored(store.durable && !store.storageDegraded);
 
       if (live) {
         // The capability is device-only. If this write is refused, the live send still happens and
@@ -283,7 +294,7 @@ export default function ScoringScreen(props: {
         operatorName={operatorName}
         procedure={record.package.procedure}
         connection={live ? runtime.connection : RoomConnectionState.Connected}
-        recordDurablyStored={durable && !storageDegraded}
+        recordDurablyStored={recordDurablyStored}
         degradedMessage={live ? runtime.degradedMessage : undefined}
         onSubmit={submit}
         onDownload={write}
