@@ -1,0 +1,85 @@
+# Path-based pull request labels, applied by .github/workflows/labeler.yml.
+# Syntax: https://github.com/actions/labeler
+
+"area: scorer":
+  - changed-files:
+      - any-glob-to-any-file: "src/scorer/**"
+
+"area: scoring":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "src/scoring/**"
+          - "src/game/**"
+          - "src/core/**"
+
+"area: practice":
+  - changed-files:
+      - any-glob-to-any-file: "src/practice/**"
+
+"area: qbj":
+  - changed-files:
+      - any-glob-to-any-file: "src/qbj/**"
+
+"area: qbtcp":
+  - changed-files:
+      - any-glob-to-any-file: "src/qbtcp/**"
+
+"area: persistence":
+  - changed-files:
+      - any-glob-to-any-file: "src/persistence/**"
+
+"area: app shell":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "src/app/**"
+          - "src/assets/**"
+          - "src/BrandLogo.tsx"
+          - "src/main.tsx"
+          - "index.html"
+          - "public/**"
+
+"area: pwa":
+  - changed-files:
+      - any-glob-to-any-file: "src/pwa/**"
+
+"area: integrations":
+  - changed-files:
+      - any-glob-to-any-file: "src/integrations/**"
+
+# Almost every pull request touches tests, so only call it out when tests are
+# all that changed — that is the part a reviewer can read differently.
+"tests only":
+  - changed-files:
+      - all-globs-to-all-files:
+          - "tests/**"
+          - "e2e/**"
+          - "vitest.config.ts"
+          - "playwright.config.ts"
+          - "stryker.config.json"
+
+documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "**/*.md"
+          - "docs/**"
+          - ".github/ISSUE_TEMPLATE/**"
+          - ".github/PULL_REQUEST_TEMPLATE.md"
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file: ".github/workflows/**"
+
+dependencies:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "package.json"
+          - "package-lock.json"
+
+tooling:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "eslint.config.js"
+          - "vite.config.ts"
+          - "tsconfig*.json"
+          - "scripts/**"
+          - ".gitignore"
