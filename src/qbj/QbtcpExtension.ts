@@ -70,6 +70,18 @@ export interface IQbtcpExtension {
   roomId?: string;
   /** Halves, clock and timeouts. Operations, not scoring; QBJ models scoring. */
   procedure?: IRoomProcedure;
+  /**
+   * A `procedure` that was sent but written in a shape this build cannot interpret, by its version.
+   *
+   * Separate from `procedure` being absent, and the distinction is the point. Absent means the
+   * tournament stated no procedural rules, and scoring without enforcement is exactly right. This
+   * means the tournament stated some and they did not arrive — and the two must not lead to the same
+   * place, because the default when no procedure is present is `any-boundary`, the *permissive*
+   * substitution policy. Collapsing the second case into the first is how a room running an old
+   * build gets more freedom than the tournament granted it, silently, on the strength of being out
+   * of date. See `unsupportedProcedureMessage` for what a room is told.
+   */
+  unsupportedProcedureVersion?: number;
   /** What the room should do with the finished file, in the tournament's own words. */
   handoffInstruction?: string;
   scorekeeper?: IQbtcpScorekeeper;
@@ -81,6 +93,10 @@ export interface IQbtcpExtension {
  * Never throws and never refuses the document: an unreadable extension means the operational extras
  * are unavailable, which degrades to a perfectly scoreable generic QBJ. Refusing a whole assignment
  * over a malformed optional block would be the wrong trade every time.
+ *
+ * `procedure` is the one field that does not degrade quietly, because it is the one field whose
+ * absence is *more* permissive than its presence. A version this build does not know is reported as
+ * `unsupportedProcedureVersion` and left for the caller to refuse rather than dropped here.
  */
 export function readQbtcpExtension(value: unknown): IQbtcpExtension | null {
   if (!isPlainObject(value)) return null;
@@ -99,14 +115,42 @@ export function readQbtcpExtension(value: unknown): IQbtcpExtension | null {
   if (typeof raw.handoff_instruction === 'string' && raw.handoff_instruction.length <= maxHandoffInstructionLength) {
     if (raw.handoff_instruction.trim() !== '') extension.handoffInstruction = raw.handoff_instruction;
   }
-  if (isPlainObject(raw.procedure) && isKnownRoomProcedureVersion(raw.procedure.version)) {
-    extension.procedure = readRoomProcedure(raw.procedure);
+  if (isPlainObject(raw.procedure)) {
+    if (isKnownRoomProcedureVersion(raw.procedure.version)) {
+      extension.procedure = readRoomProcedure(raw.procedure);
+    } else {
+      // Zero for a procedure with no usable version on it at all, which is the same problem: rules
+      // were sent and this build cannot tell what they say.
+      const stated = raw.procedure.version;
+      extension.unsupportedProcedureVersion = typeof stated === 'number' && Number.isFinite(stated) ? stated : 0;
+    }
   }
   if (isPlainObject(raw.scorekeeper) && typeof raw.scorekeeper.timed === 'boolean') {
     extension.scorekeeper = { timed: raw.scorekeeper.timed };
   }
 
   return extension;
+}
+
+/**
+ * What a room is told when an assignment states procedure rules this build cannot read.
+ *
+ * Names the version and says what fixes it, because the two things a scorekeeper standing in a room
+ * needs are "this is not my mistake" and "who do I go to". It deliberately does not offer to score
+ * the game without the rules: that offer is the permissive fallback this whole path exists to
+ * prevent, and it is tournament control's call to make, not a busy room's.
+ *
+ * Worded to match `GamePackageValidation`, which has always refused an unknown procedure version in a
+ * `.qbg` file — and so has the pre-QBTCP connected path, which runs through the same validation. This
+ * is that same rule reaching the one route that was missing it.
+ */
+export function unsupportedProcedureMessage(version: number): string {
+  const which = version > 0 ? `version ${version}` : 'a version it does not state';
+  return (
+    `This game's tournament procedure is written in ${which}, which this scoresheet does not know how ` +
+    'to read. Update QBSheet, or ask tournament control for an assignment this build can enforce. ' +
+    'Scoring it without those rules could allow substitutions the tournament does not.'
+  );
 }
 
 /**

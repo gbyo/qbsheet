@@ -40,6 +40,12 @@
  * Every version in `readableRoomProcedureVersions` is one this build can interpret without guessing.
  * A procedure from the future is not read at all — a room that silently ignored a break it did not
  * understand would allow substitutions the tournament forbade.
+ *
+ * "Not read" is not the end of it, because the fallback for an unread procedure is *no* procedure,
+ * and no procedure is the permissive `any-boundary` policy. Whoever hands a procedure to this reader
+ * has to notice the version first and refuse the game rather than score it unenforced. See
+ * `GamePackageValidation` for the file and legacy-assignment paths and `readQbtcpExtension` for the
+ * QBJ one.
  */
 export const roomProcedureVersion = 3;
 export const legacyRoomProcedureVersion = 1;
@@ -161,19 +167,34 @@ export function roomTakesBreaks(procedure: IRoomProcedure | undefined): boolean 
 }
 
 /**
- * The highest tossup the room has already broken after.
+ * The next configured break the room has not reached yet, for telling it what is coming.
  *
- * Recorded breaks are matched against configured ones by "at or past", not by equality, because a
- * room that misses the break after tossup 5 and takes it after 6 has taken that break. Requiring the
- * numbers to agree would leave the break permanently outstanding and the room permanently unable to
- * reach the next one.
+ * Scheduled breaks are spent **in order, one per recorded break**, and never matched against the
+ * tossup a break was physically taken at. A room told to stop after 5, 10 and 15 that plays through
+ * tossup 12 before anybody remembers the first break has taken *one* break — its first — and still
+ * owes the other two. Matching on the tossup number instead would let that single stop satisfy both
+ * the break after 5 and the break after 10, which is a break the tournament scheduled and the room
+ * never took, and — under the restrictive policy — a substitution window that quietly disappears.
+ *
+ * So the count is the cursor. `breaksTaken` is `IDerivedGame.halfBreaks`, whose entries are the
+ * tossup each break was recorded at; only its length is read here. The tossup numbers stay in the
+ * event because that is the history of what the room actually did, and it is a different question
+ * from which scheduled break the event fulfilled.
  */
-function highestBreakTaken(breaksTaken: readonly number[]): number {
-  return breaksTaken.reduce((carry, value) => Math.max(carry, value), 0);
+export function roomBreakUpcoming(
+  procedure: IRoomProcedure | undefined,
+  breaksTaken: readonly number[],
+): IRoomBreak | undefined {
+  return roomBreaks(procedure)[breaksTaken.length];
 }
 
 /**
  * The configured break the room owes right now, if any.
+ *
+ * The next one in the schedule, once the tossup it comes after has been played. "At or past" rather
+ * than exactly, because a room that misses the break after tossup 5 and takes it after 6 has taken
+ * that break; requiring the numbers to agree would leave it owed forever and the rest of the
+ * schedule permanently out of reach.
  *
  * @param breaksTaken the `lastQuestion` of every break already recorded, i.e. `IDerivedGame.halfBreaks`
  * @param lastPlayedQuestion the last tossup actually played; see `lastPlayedQuestion`
@@ -183,19 +204,8 @@ export function roomBreakDue(
   breaksTaken: readonly number[],
   lastPlayedQuestion: number,
 ): IRoomBreak | undefined {
-  const taken = highestBreakTaken(breaksTaken);
-  return roomBreaks(procedure).find(
-    (roomBreak) => roomBreak.afterTossup > taken && roomBreak.afterTossup <= lastPlayedQuestion,
-  );
-}
-
-/** The next configured break the room has not reached yet, for telling it what is coming. */
-export function roomBreakUpcoming(
-  procedure: IRoomProcedure | undefined,
-  breaksTaken: readonly number[],
-): IRoomBreak | undefined {
-  const taken = highestBreakTaken(breaksTaken);
-  return roomBreaks(procedure).find((roomBreak) => roomBreak.afterTossup > taken);
+  const next = roomBreakUpcoming(procedure, breaksTaken);
+  return next !== undefined && next.afterTossup <= lastPlayedQuestion ? next : undefined;
 }
 
 /**
@@ -233,15 +243,22 @@ export function roomBreakLabel(
   return breaks.length === 1 ? 'Break' : `Break ${position + 1}`;
 }
 
-/** The break, if any, that a recorded break at this tossup satisfied. Used to name a score check. */
-export function roomBreakAt(
+/**
+ * The scheduled break the room's most recent stop fulfilled. Used to name a score check.
+ *
+ * By count, for the reason `roomBreakUpcoming` is: the room that played through tossup 12 before
+ * taking its first break is at Break 1, whatever the schedule says is nearest to 12. Naming it from
+ * the tossup would put the room on a screen headed "Break 2" immediately after it chose "End of
+ * set 1", and then leave Break 2 owed — one break appearing twice, under two different names.
+ *
+ * @param breaksTakenCount how many breaks have been recorded, i.e. `IDerivedGame.halfBreaks.length`
+ */
+export function roomBreakTaken(
   procedure: IRoomProcedure | undefined,
-  lastQuestion: number,
+  breaksTakenCount: number,
 ): IRoomBreak | undefined {
-  // Ascending, so the last one at or before the recorded tossup is the one the room stopped for.
-  return roomBreaks(procedure)
-    .filter((roomBreak) => roomBreak.afterTossup <= lastQuestion)
-    .at(-1);
+  if (breaksTakenCount < 1) return undefined;
+  return roomBreaks(procedure)[breaksTakenCount - 1];
 }
 
 /** `"5, 10 or 15"` — the breaks as a phrase, for a sentence about when the room stops. */
