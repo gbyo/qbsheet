@@ -1190,46 +1190,57 @@ export default function Scorer(props: IScorerProps) {
           </div>
         </div>
         <div className="scorer-header-side">
-          <span className="scorer-progress">{progress}</span>
-          {roomClock.configured && (
-            <span className={roomClock.state.status === 'expired' ? 'scorer-clock is-expired' : 'scorer-clock'}>
-              <span aria-label="Room clock">
-                {roomClock.state.status === 'expired' ? 'Time expired' : roomClock.display}
+          <div className="scorer-header-status">
+            <span className="scorer-progress">{progress}</span>
+            {roomClock.configured && (
+              <span className={roomClock.state.status === 'expired' ? 'scorer-clock is-expired' : 'scorer-clock'}>
+                <span aria-label="Room clock">
+                  {roomClock.state.status === 'expired' ? 'Time expired' : roomClock.display}
+                </span>
+                {roomClock.state.status === 'idle' && (
+                  <button type="button" className="scorer-clock-button" onClick={roomClock.start}>
+                    Start
+                  </button>
+                )}
+                {roomClock.state.status === 'running' && (
+                  <button type="button" className="scorer-clock-button" onClick={roomClock.pause}>
+                    Pause
+                  </button>
+                )}
+                {roomClock.state.status === 'paused' && (
+                  <button type="button" className="scorer-clock-button" onClick={roomClock.resume}>
+                    Resume
+                  </button>
+                )}
+                {roomClock.state.status === 'expired' && (
+                  <button type="button" className="scorer-clock-button" onClick={resetRoomClock}>
+                    Reset
+                  </button>
+                )}
               </span>
-              {roomClock.state.status === 'idle' && (
-                <button type="button" className="scorer-clock-button" onClick={roomClock.start}>
-                  Start
-                </button>
-              )}
-              {roomClock.state.status === 'running' && (
-                <button type="button" className="scorer-clock-button" onClick={roomClock.pause}>
-                  Pause
-                </button>
-              )}
-              {roomClock.state.status === 'paused' && (
-                <button type="button" className="scorer-clock-button" onClick={roomClock.resume}>
-                  Resume
-                </button>
-              )}
-              {roomClock.state.status === 'expired' && (
-                <button type="button" className="scorer-clock-button" onClick={resetRoomClock}>
-                  Reset
-                </button>
-              )}
-            </span>
-          )}
-          <button
-            type="button"
-            className={connectionClass(connection)}
-            aria-label={`${statusLabel ?? `Connection: ${connectionLabel(connection)}`}. Show connection detail`}
-            onClick={() => {
-              setDetailNow(Date.now());
-              setDialog('connection');
-            }}
-          >
-            <span className="scorer-dot" aria-hidden="true" />
-            {statusLabel ?? connectionLabel(connection)}
-          </button>
+            )}
+            <button
+              type="button"
+              className={connectionClass(connection)}
+              aria-label={`${statusLabel ?? `Connection: ${connectionLabel(connection)}`}. Show connection detail`}
+              onClick={() => {
+                setDetailNow(Date.now());
+                setDialog('connection');
+              }}
+            >
+              <span className="scorer-dot" aria-hidden="true" />
+              {statusLabel ?? connectionLabel(connection)}
+            </button>
+          </div>
+          {/*
+            Who this device thinks is scoring, under the round and the status pill.
+
+            The full name rather than the first, because this line is the one place on the scoresheet
+            that shows what will go out on the result as the scorekeeper — a "Gibby" in the header
+            over a "Gibson Bell" in the submitted match is a mismatch nobody can check mid-game.
+            Absent when nobody has named themselves, since an empty label claims a fact.
+          */}
+          {operatorName?.trim() && <span className="scorer-operator">Scorekeeper: {operatorName.trim()}</span>}
         </div>
       </header>
 

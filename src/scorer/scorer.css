@@ -79,14 +79,28 @@
 
 .scorer-header-side {
   display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  font-size: 13px;
+}
+
+.scorer-header-status {
+  display: flex;
   align-items: center;
   gap: 16px;
-  font-size: 13px;
 }
 
 .scorer-progress {
   color: var(--room-muted);
   font-variant-numeric: tabular-nums;
+}
+
+/* Matches `.scorer-context` on the other side of the header: both are the standing facts about this
+ * game rather than anything that changes as it is scored. */
+.scorer-operator {
+  color: var(--room-muted);
+  white-space: nowrap;
 }
 
 .scorer-conn {
@@ -891,6 +905,10 @@ div.scorer-banner .scorer-text-action {
 
   .scorer-header-side {
     width: 100%;
+    align-items: stretch;
+  }
+
+  .scorer-header-status {
     justify-content: space-between;
     gap: 8px;
   }
