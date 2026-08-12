@@ -190,7 +190,7 @@ describe('what the editor leads with', () => {
   test('a zero-point answer remains editable when the other team never converts', () => {
     renderScorer(formatFor());
     fireEvent.click(screen.getByLabelText('Sarah Mitchell 0 after readout wrong, no penalty'));
-    fireEvent.click(screen.getByText('Greenwood has no answer'));
+    fireEvent.click(screen.getByText('No buzz'));
     openEditor();
 
     expect(screen.getByLabelText('Ruling')).toBeTruthy();

@@ -277,7 +277,7 @@ export const practiceSteps: IPracticeStep[] = [
     call: 'Greenwood does not buzz after Owen’s answer.',
     instruction: 'Press the No buzz button below the two teams.',
     hint:
-      'It now reads “Greenwood has no answer”, because they are the only team left who could have buzzed. Owen’s 0 stays on the scoresheet; this only closes the tossup with nobody converting it, so there is no bonus.',
+      'The line beside it names Greenwood, because they are the only team left who could have buzzed. Owen’s 0 stays on the scoresheet; this only closes the tossup with nobody converting it, so there is no bonus.',
     success: 'Right — the scoresheet now distinguishes the wrong answer from the team that never buzzed.',
     section: 'Score the game',
     expectation: { kind: 'event', matches: dead(4) },
