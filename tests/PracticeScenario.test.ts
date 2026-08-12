@@ -62,6 +62,29 @@ describe('guided practice scenario', () => {
     expect(lineup.hint).not.toMatch(/tick|untick|Reorder starters/i);
   });
 
+  it('tells the guided game what to press on screen, not what to type', () => {
+    // The first section teaches what a scoresheet records. Naming a seat number and a ruling letter
+    // there taught the keyboard layout instead — to a scorekeeper who, by default, does not have it
+    // switched on and is looking at buttons that say P and +10.
+    const keySequence = /\d\s*,?\s+then\s+[CPN0]\b/i;
+    practiceSteps.forEach((step) => {
+      expect(step.instruction, `${step.id} instruction`).not.toMatch(keySequence);
+      expect(step.hint, `${step.id} hint`).not.toMatch(keySequence);
+    });
+
+    const instruction = (id: string) => practiceSteps.find((step) => step.id === id)?.instruction;
+    expect(instruction('q1-power')).toBe('Press P on Gibson’s row, on the Ninety Six side.');
+    expect(instruction('q2-ten')).toBe('Press +10 on Tucker’s row, on the Greenwood side.');
+    expect(instruction('q3-neg')).toBe('Press N on Jeremy’s row.');
+    // The zero button widens its own label while a neg is still possible, and Tossup 4 is such a tossup.
+    expect(instruction('q4-wrong-no-penalty')).toContain('0 after readout');
+    // The exception, because this shortcut works whether or not keyboard scoring is on.
+    expect(instruction('q6-undo')).toContain('Ctrl/⌘ + Z');
+
+    // And the keys are still there, for the scorekeeper who asked for them.
+    expect(practiceKeystroke('q1-power')).toBe('1 then P');
+  });
+
   it('teaches only the keyboard rulings the scoresheet actually supports', () => {
     expect(practiceKeystroke('q1-power')).toBe('1 then P');
     expect(practiceKeystroke('q2-ten')).toBe('5 then C');
