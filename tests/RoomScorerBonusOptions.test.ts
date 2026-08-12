@@ -8,6 +8,7 @@ import {
   bonusPartProblem,
   bonusScoreProblem,
   bonusTotalProblem,
+  bouncebackNeedsTypedEntry,
   bouncebackOptions,
   lightningTotalProblem,
   regularBonusTotals,
@@ -84,6 +85,18 @@ describe('regular bonus totals', () => {
 });
 
 describe('bouncebacks', () => {
+  test('a large valid bounceback range uses typed entry instead of an incomplete button list', () => {
+    const bonus = bonusFor((rules) => {
+      rules.bonusesBounceBack = true;
+      rules.pointsPerBonusPart = undefined;
+      rules.bonusDivisor = 1;
+      rules.maximumBonusScore = 2_000;
+    });
+
+    expect(bouncebackNeedsTypedEntry(bonus, 0)).toBe(true);
+    expect(bouncebackOptions(bonus, 0)).toEqual([0, 2_000]);
+  });
+
   test('the opponent is offered only what the controlling team left', () => {
     const bonus = bonusFor((rules) => {
       rules.bonusesBounceBack = true;

@@ -32,6 +32,7 @@
 import {
   IScorekeeperAnswerType,
   IScorekeeperFormat,
+  scorekeeperFormatLimits,
   scorekeeperFormatProblems,
   scorekeeperFormatVersion,
 } from '../scoring/ScorekeeperFormat';
@@ -53,9 +54,6 @@ export type QbjScoringRulesResult =
       problems: string[];
     };
 
-/** Caps chosen to be absurd for a real tournament and cheap to check. */
-const maxAnswerTypes = 50;
-
 /** The largest integer dividing every value, used when a document omits `total_divisor`. */
 function greatestCommonDivisor(values: number[]): number {
   const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
@@ -65,33 +63,76 @@ function greatestCommonDivisor(values: number[]): number {
 /**
  * Read `answer_types`.
  *
- * `awards_bonus` is honoured when the document states it. When it does not, the fallback is the
- * reference implementation's own behavior — a buzz worth positive points earns a bonus — rather
- * than an invention. `isPower` and `isNeg` are likewise derived exactly as that implementation
- * derives them, so a format read from QBJ and the same format read from a `.qbg` agree.
+ * `awards_bonus` is honoured when the document states it. A legacy no-bonus document may omit the
+ * field because it has no effect there; once bonus structure is present the caller rejects a missing
+ * per-answer flag rather than deciding that every positive answer earns one. A per-answer true flag
+ * without bonus structure is also treated as incomplete rather than silently disabling the bonus.
+ * `isPower` and `isNeg` are derived exactly as the reference implementation derives them, so a
+ * format read from QBJ and the same format read from a `.qbg` agree.
  */
 function readAnswerTypes(value: unknown): { types: IScorekeeperAnswerType[]; problems: string[] } {
   const problems: string[] = [];
   if (!Array.isArray(value) || value.length === 0) {
     return { types: [], problems: ['These scoring rules do not say how a tossup can be answered.'] };
   }
-  if (value.length > maxAnswerTypes) {
+  if (value.length > scorekeeperFormatLimits.answerTypes) {
     return { types: [], problems: ['These scoring rules list an implausible number of answer types.'] };
   }
 
+  const numericValues = value
+    .filter((entry): entry is QbjObject => isPlainObject(entry) && finiteNumber(entry.value) && Number.isInteger(entry.value))
+    .map((entry) => Number(entry.value));
+  const positiveValues = numericValues.filter((points) => points > 0);
+  const highestPositive = positiveValues.length > 0 ? Math.max(...positiveValues) : undefined;
+
   const types: IScorekeeperAnswerType[] = [];
+  const usedIds = new Set<string>();
+  const reservedExplicitIds = new Set(
+    value
+      .filter((entry): entry is QbjObject => isPlainObject(entry) && nonBlankString(entry.id))
+      .map((entry) => entry.id),
+  );
+  const generatedIdCounts = new Map<string, number>();
   value.forEach((entry, position) => {
     if (!isPlainObject(entry)) {
       problems.push(`Answer type ${position + 1} is not an object.`);
       return;
     }
-    if (!finiteNumber(entry.value)) {
-      problems.push(`Answer type ${position + 1} has no point value.`);
+    if (!finiteNumber(entry.value) || !Number.isInteger(entry.value)) {
+      problems.push(`Answer type ${position + 1} needs a finite whole-number point value.`);
       return;
     }
     const points = entry.value;
-    const label = nonBlankString(entry.label) ? entry.label : String(points);
+    // Labels are presentation, not scoring semantics. When a legacy source omits them, retain the
+    // familiar structural wording used by the old scorer; explicit custom labels remain untouched.
+    const label = nonBlankString(entry.label)
+      ? entry.label
+      : points > 0
+        ? positiveValues.length > 1 && points === highestPositive
+          ? 'Power'
+          : 'Correct'
+        : points < 0
+          ? 'Neg'
+          : 'Wrong';
     const shortLabel = nonBlankString(entry.short_label) ? entry.short_label : label;
+    const explicitId = nonBlankString(entry.id) ? entry.id : undefined;
+    let qbjId = explicitId;
+    if (qbjId !== undefined) {
+      if (usedIds.has(qbjId)) {
+        problems.push(`Answer type ${position + 1} reuses another answer type's QBJ identity.`);
+      }
+    } else {
+      const base = `AnswerType_${label}`;
+      let suffix = generatedIdCounts.get(base) ?? 0;
+      let candidate = base;
+      do {
+        suffix += 1;
+        candidate = suffix === 1 ? base : `${base}_${suffix}`;
+      } while (usedIds.has(candidate) || reservedExplicitIds.has(candidate));
+      generatedIdCounts.set(base, suffix);
+      qbjId = candidate;
+    }
+    usedIds.add(qbjId);
     types.push({
       index: types.length,
       value: points,
@@ -100,7 +141,7 @@ function readAnswerTypes(value: unknown): { types: IScorekeeperAnswerType[]; pro
       isPower: points > 10,
       isNeg: points < 0,
       awardsBonus: typeof entry.awards_bonus === 'boolean' ? entry.awards_bonus : points > 0,
-      qbjId: nonBlankString(entry.id) ? entry.id : `AnswerType_${label}`,
+      qbjId,
     });
   });
 
@@ -121,21 +162,28 @@ function readAnswerTypes(value: unknown): { types: IScorekeeperAnswerType[]; pro
 /**
  * Whether this rule set uses bonuses at all.
  *
- * QBJ has no `useBonuses` flag; bonuses are used when the bonus fields are there. Reading
- * `awards_bonus` as well matters for a document that describes the award side without restating the
- * bonus structure.
+ * QBJ has no `useBonuses` flag. Bonus structure is definitive when any bonus field is present, and
+ * an answer type that explicitly awards a bonus is evidence that the missing structure is incomplete
+ * rather than proof that bonuses are disabled. A root-level `awards_bonus` flag is ignored because
+ * the schema places the property on each `AnswerType`.
  */
-function bonusesAreUsed(rules: QbjObject, answerTypes: IScorekeeperAnswerType[]): boolean {
+function bonusesAreUsed(rules: QbjObject): boolean {
   const bonusFields = [
     'maximum_bonus_score',
     'bonus_divisor',
     'points_per_bonus_part',
     'minimum_parts_per_bonus',
     'maximum_parts_per_bonus',
-    'bonuses_bounce_back',
   ];
   if (bonusFields.some((field) => rules[field] !== undefined)) return true;
-  return answerTypes.some((type) => type.awardsBonus && type.value > 0 && rules.awards_bonus === true);
+  if (rules.bonuses_bounce_back === true) return true;
+  if (
+    Array.isArray(rules.answer_types) &&
+    rules.answer_types.some((entry) => isPlainObject(entry) && entry.awards_bonus === true)
+  ) {
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -155,10 +203,27 @@ export function readQbjScoringRules(rules: QbjObject | null, timed?: boolean): Q
   const problems: string[] = [];
   const assumptions: string[] = [];
 
+  if (timed !== true && timed !== false) {
+    problems.push('These scoring rules do not say whether the round is timed. Choose timed or untimed before scoring.');
+  }
+
   const { types: answerTypes, problems: answerProblems } = readAnswerTypes(rules.answer_types);
   problems.push(...answerProblems);
 
-  const useBonuses = bonusesAreUsed(rules, answerTypes);
+  const useBonuses = bonusesAreUsed(rules);
+  if (useBonuses && typeof rules.bonuses_bounce_back !== 'boolean') {
+    problems.push('These scoring rules use bonuses but do not say whether missed parts bounce back.');
+  }
+  if (useBonuses && typeof rules.overtime_includes_bonuses !== 'boolean') {
+    problems.push('These scoring rules use bonuses but do not say whether overtime includes bonuses.');
+  }
+  if (useBonuses && Array.isArray(rules.answer_types)) {
+    rules.answer_types.forEach((entry, position) => {
+      if (isPlainObject(entry) && typeof entry.awards_bonus !== 'boolean') {
+        problems.push(`Answer type ${position + 1} does not say whether it awards a bonus.`);
+      }
+    });
+  }
 
   // --- regulation -----------------------------------------------------------------------------
   const regulationTossupCount = finiteNumber(rules.regulation_tossup_count) ? rules.regulation_tossup_count : undefined;
@@ -166,14 +231,18 @@ export function readQbjScoringRules(rules: QbjObject | null, timed?: boolean): Q
     ? rules.maximum_regulation_tossup_count
     : undefined;
 
-  if (regulationTossupCount === undefined && maximumRegulation === undefined) {
-    problems.push('These scoring rules do not say how many tossups a game has.');
+  if (regulationTossupCount === undefined) {
+    problems.push('These scoring rules do not say how many tossups are in regulation.');
+  } else if (!Number.isInteger(regulationTossupCount) || regulationTossupCount < 1) {
+    problems.push('The regulation tossup count must be a positive whole number.');
   }
-  const tossupCount = regulationTossupCount ?? maximumRegulation ?? 0;
+  if (maximumRegulation === undefined) {
+    problems.push('These scoring rules do not say the maximum regulation tossup count.');
+  } else if (!Number.isInteger(maximumRegulation) || maximumRegulation < 1) {
+    problems.push('The maximum regulation tossup count must be a positive whole number.');
+  }
+  const tossupCount = regulationTossupCount ?? 0;
   const maximumTossupCount = maximumRegulation ?? tossupCount;
-  if (regulationTossupCount === undefined && maximumRegulation !== undefined) {
-    assumptions.push(`Regulation length was taken from the maximum tossup count (${maximumRegulation}).`);
-  }
 
   // --- bonus ----------------------------------------------------------------------------------
   const pointsPerPart = finiteNumber(rules.points_per_bonus_part) ? rules.points_per_bonus_part : undefined;
@@ -181,21 +250,37 @@ export function readQbjScoringRules(rules: QbjObject | null, timed?: boolean): Q
   const maximumParts = finiteNumber(rules.maximum_parts_per_bonus) ? rules.maximum_parts_per_bonus : undefined;
   const maximumBonusScore = finiteNumber(rules.maximum_bonus_score) ? rules.maximum_bonus_score : undefined;
   const bonusDivisor = finiteNumber(rules.bonus_divisor) ? rules.bonus_divisor : undefined;
-
-  if (useBonuses && maximumBonusScore === undefined && pointsPerPart === undefined) {
-    problems.push('These scoring rules use bonuses but do not say what a bonus is worth.');
+  if (rules.points_per_bonus_part !== undefined && pointsPerPart === undefined) {
+    problems.push('Points per bonus part must be a finite number.');
   }
 
-  const resolvedMinimumParts = minimumParts ?? maximumParts ?? 3;
-  const resolvedMaximumParts = maximumParts ?? minimumParts ?? 3;
-  if (useBonuses && minimumParts === undefined && maximumParts === undefined) {
-    assumptions.push('Bonuses were assumed to have three parts, which these rules did not state.');
-  }
-  const resolvedMaximumBonusScore =
-    maximumBonusScore ?? (pointsPerPart !== undefined ? pointsPerPart * resolvedMaximumParts : 0);
-  const resolvedBonusDivisor = bonusDivisor ?? pointsPerPart ?? (useBonuses ? 10 : 0);
-  if (useBonuses && bonusDivisor === undefined && pointsPerPart === undefined) {
-    assumptions.push('A bonus part was assumed to be worth a multiple of 10, which these rules did not state.');
+  const requireBonusField = (value: number | undefined, label: string): number => {
+    if (value === undefined) {
+      problems.push(`These scoring rules use bonuses but do not specify ${label}.`);
+      return 0;
+    }
+    if (!Number.isInteger(value) || value < 1) problems.push(`${label} must be a positive whole number.`);
+    return value;
+  };
+
+  let resolvedMinimumParts = 1;
+  let resolvedMaximumParts = 1;
+  let resolvedMaximumBonusScore = 0;
+  let resolvedBonusDivisor = 1;
+  if (useBonuses) {
+    resolvedMinimumParts = requireBonusField(minimumParts, 'the minimum bonus part count');
+    resolvedMaximumParts = requireBonusField(maximumParts, 'the maximum bonus part count');
+    if (maximumBonusScore === undefined) {
+      problems.push('These scoring rules use bonuses but do not specify the maximum bonus score.');
+    } else if (!Number.isInteger(maximumBonusScore) || maximumBonusScore < 0) {
+      problems.push('The maximum bonus score must be a non-negative whole number.');
+    } else {
+      resolvedMaximumBonusScore = maximumBonusScore;
+    }
+    resolvedBonusDivisor = requireBonusField(bonusDivisor, 'the bonus divisor');
+    if (pointsPerPart !== undefined && (!Number.isInteger(pointsPerPart) || pointsPerPart < 1)) {
+      problems.push('Points per bonus part must be a positive whole number.');
+    }
   }
 
   // Regular means every bonus has the same number of parts, each worth the same. That is exactly
@@ -207,22 +292,51 @@ export function readQbjScoringRules(rules: QbjObject | null, timed?: boolean): Q
     ? rules.minimum_overtime_question_count
     : undefined;
   if (minimumOvertime === undefined) {
-    assumptions.push('Overtime was assumed to be sudden death, which these rules did not state.');
+    problems.push('These scoring rules do not say how many tossups the initial overtime has.');
+  } else if (!Number.isInteger(minimumOvertime) || minimumOvertime < 1) {
+    problems.push('This tournament has an overtime period with no tossups in it.');
   }
   const minimumQuestionCount = minimumOvertime ?? 1;
 
   // --- lightning ------------------------------------------------------------------------------
-  const lightningCount = finiteNumber(rules.lightning_count_per_team) ? rules.lightning_count_per_team : 0;
-  const lightningDivisor = finiteNumber(rules.lightning_divisor) ? rules.lightning_divisor : 10;
+  const rawLightningCount = finiteNumber(rules.lightning_count_per_team)
+    ? rules.lightning_count_per_team
+    : undefined;
+  const rawLightningDivisor = finiteNumber(rules.lightning_divisor) ? rules.lightning_divisor : undefined;
+  if (rules.lightning_count_per_team !== undefined && rawLightningCount === undefined) {
+    problems.push('The lightning count per team must be a finite number.');
+  }
+  if (rules.lightning_divisor !== undefined && rawLightningDivisor === undefined) {
+    problems.push('The lightning divisor must be a finite number.');
+  }
+  if (rawLightningCount === undefined && rules.lightning_divisor !== undefined) {
+    problems.push('These scoring rules specify a lightning divisor but no lightning count per team.');
+  }
+  if (rawLightningCount !== undefined && (!Number.isInteger(rawLightningCount) || rawLightningCount < 0)) {
+    problems.push('The lightning count per team must be a non-negative whole number.');
+  }
+  if (rawLightningCount !== undefined && rawLightningCount > 0) {
+    if (rawLightningDivisor === undefined) problems.push('Lightning rounds need a scoring divisor.');
+    else if (!Number.isInteger(rawLightningDivisor) || rawLightningDivisor < 1) {
+      problems.push('The lightning divisor must be a positive whole number.');
+    }
+  }
+  const lightningCount = rawLightningCount ?? 0;
+  const lightningDivisor = lightningCount > 0 ? rawLightningDivisor ?? 0 : 10;
 
   // --- players --------------------------------------------------------------------------------
   const maximumPlayers = finiteNumber(rules.maximum_players_per_team) ? rules.maximum_players_per_team : undefined;
   if (maximumPlayers === undefined) {
-    assumptions.push('Four active players per team were assumed, which these rules did not state.');
+    problems.push('These scoring rules do not say how many players may be active per team.');
+  } else if (!Number.isInteger(maximumPlayers) || maximumPlayers < 1) {
+    problems.push('The maximum active players per team must be a positive whole number.');
   }
 
   // --- divisor --------------------------------------------------------------------------------
   const statedTotalDivisor = finiteNumber(rules.total_divisor) ? rules.total_divisor : undefined;
+  if (rules.total_divisor !== undefined && statedTotalDivisor === undefined) {
+    problems.push('The total divisor must be a finite number.');
+  }
   const derivedDivisor = greatestCommonDivisor(
     [
       ...answerTypes.map((type) => type.value).filter((value) => value !== 0),
@@ -244,7 +358,7 @@ export function readQbjScoringRules(rules: QbjObject | null, timed?: boolean): Q
     },
     bonus: {
       enabled: useBonuses,
-      bounceBack: rules.bonuses_bounce_back === true,
+      bounceBack: useBonuses && rules.bonuses_bounce_back === true,
       regular,
       divisor: resolvedBonusDivisor,
       minimumParts: resolvedMinimumParts,
@@ -262,7 +376,7 @@ export function readQbjScoringRules(rules: QbjObject | null, timed?: boolean): Q
       countPerTeam: lightningCount,
       divisor: lightningDivisor,
     },
-    players: { maximumActive: maximumPlayers ?? 4 },
+    players: { maximumActive: maximumPlayers ?? 0 },
     totalDivisor: statedTotalDivisor ?? derivedDivisor,
   };
 
@@ -271,10 +385,8 @@ export function readQbjScoringRules(rules: QbjObject | null, timed?: boolean): Q
   const playability = scorekeeperFormatProblems(format);
   if (playability.length > 0) return { ok: false, problems: playability };
 
-  if (timed === undefined) {
-    assumptions.push(
-      'This QBJ does not say whether rounds are timed. The game is being scored as untimed; change this if the round runs on a clock.',
-    );
+  if (statedTotalDivisor === undefined) {
+    assumptions.push(`The total score divisor was derived from the stated scoring increments (${derivedDivisor}).`);
   }
 
   return { ok: true, format, assumptions };

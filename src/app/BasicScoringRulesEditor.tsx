@@ -16,9 +16,9 @@
  *
  * # Two variants, not two components
  *
- * `basic` is the four questions the missing-rules form has always asked. `full` adds the controls a
- * game being described from scratch needs — how many players are on the floor, bouncebacks, the
- * shape of overtime, lightning — under a quiet advanced heading rather than in the main grid,
+ * `basic` is the compact four-question surface. `full` adds the controls a game being described
+ * from scratch or a rule-less imported game needs — how many players are on the floor, bouncebacks,
+ * the shape of overtime, lightning — under a quiet advanced heading rather than in the main grid,
  * because a practice game almost never changes them.
  *
  * No rule set is named anywhere. A format is what its numbers say, and a scorer that recognized

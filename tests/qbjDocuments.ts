@@ -155,7 +155,12 @@ export function assignmentDocument(options: IAssignmentOptions = {}): object {
         left: teams[0],
         right: teams[1],
         location: 'Room 204',
-        qbtcp: { round_revision: 3, room_id: 'room-204', handoff_instruction: 'Upload to the Round 4 folder.' },
+        qbtcp: {
+          round_revision: 3,
+          room_id: 'room-204',
+          handoff_instruction: 'Upload to the Round 4 folder.',
+          scorekeeper: { timed: false },
+        },
       }),
     ];
   const rules = options.scoringRules === null ? null : (options.scoringRules ?? acfPowersScoringRules());
@@ -202,8 +207,20 @@ export function tournamentDocument(): object {
   const rules = acfPowersScoringRules();
 
   const roundFour = [
-    matchObject({ id: 'Match_r4-101', left: ninetySix, right: clinton, location: 'Room 101' }),
-    matchObject({ id: 'Match_r4-102', left: emerald, right: greenwood, location: 'Room 102' }),
+    matchObject({
+      id: 'Match_r4-101',
+      left: ninetySix,
+      right: clinton,
+      location: 'Room 101',
+      qbtcp: { scorekeeper: { timed: false } },
+    }),
+    matchObject({
+      id: 'Match_r4-102',
+      left: emerald,
+      right: greenwood,
+      location: 'Room 102',
+      qbtcp: { scorekeeper: { timed: false } },
+    }),
   ];
   const roundThree = [
     matchObject({
@@ -211,6 +228,7 @@ export function tournamentDocument(): object {
       left: ninetySix,
       right: greenwood,
       location: 'Room 101',
+      qbtcp: { scorekeeper: { timed: false } },
       extra: {
         tossups_read: 20,
         match_teams: [

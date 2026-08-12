@@ -202,6 +202,8 @@ export default function ScoringScreen(props: {
       void store.update(record.id, { events, setup }).then((updated) => {
         if (!onScreen.current) return;
         setRecordDurablyStored(updated !== null && store.durable && !store.storageDegraded);
+      }).catch(() => {
+        if (onScreen.current) setRecordDurablyStored(false);
       });
     },
     [record.id, store],
@@ -216,6 +218,8 @@ export default function ScoringScreen(props: {
         void store.update(record.id, { qbjDownloadedAt: at }).then((updated) => {
           if (!onScreen.current) return;
           if (updated === null || !store.durable || store.storageDegraded) setRecordDurablyStored(false);
+        }).catch(() => {
+          if (onScreen.current) setRecordDurablyStored(false);
         });
       }
       return written;

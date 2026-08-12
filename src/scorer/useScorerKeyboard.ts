@@ -25,8 +25,8 @@ export interface IScorerKeyboardInput {
   format: IScorekeeperFormat;
   /** True only while a tossup is live and not blocked. Nothing scores otherwise. */
   scoringEnabled: boolean;
-  /** Whether a neg is a legal ruling on this tossup. The same flag the buttons use for the −5 column. */
-  negsAvailable: boolean;
+  /** Whether a neg is legal for the selected side on this tossup. The buttons use the same query. */
+  negsAvailable: (side: LeftOrRight) => boolean;
   /** Whether this side may still answer. A key aimed at an ineligible team does nothing. */
   eligible: (side: LeftOrRight) => boolean;
   /** Who is in each seat right now, in the room's own order. */
@@ -198,7 +198,7 @@ export default function useScorerKeyboard(input: IScorerKeyboardInput): void {
         return;
       }
 
-      const ruling = rulingForAction(current.format, action, current.negsAvailable);
+      const ruling = rulingForAction(current.format, action, current.negsAvailable(selected.side));
       // An action with nothing behind it in this format is deliberately silent. Falling back to an
       // adjacent ruling is how a keyboard records the wrong thing.
       if (ruling === null) {

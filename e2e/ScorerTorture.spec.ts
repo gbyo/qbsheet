@@ -4,7 +4,7 @@ import { validPackage } from '../tests/packages';
 
 interface IQbjAnswerCount {
   number: number;
-  answer_type: { value: number };
+  answer_type: { id: string; value: number };
 }
 
 interface IQbjMatchPlayer {
@@ -252,7 +252,7 @@ test('a real scorer session survives fast input, reload, correction, completion,
   expect(qbj.match_questions[0].buzzes).toHaveLength(1);
   const greenwood = qbj.match_teams.find((team) => team.team.name === 'Greenwood');
   const jordan = greenwood?.match_players.find((player) => player.player.name === 'Jordan Blake');
-  expect(jordan?.answer_counts).toContainEqual({ number: 1, answer_type: { value: 15 } });
+  expect(jordan?.answer_counts).toContainEqual({ number: 1, answer_type: { id: 'AnswerType_15', value: 15 } });
   await expect(page.getByRole('button', { name: 'Done' })).toBeEnabled();
   expect(browserErrors).toEqual([]);
 });

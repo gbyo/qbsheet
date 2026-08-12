@@ -25,6 +25,12 @@ export interface IEditableBonus {
 export interface IEditableQuestion {
   questionNumber: number;
   attempts: IEditableAttempt[];
+  /** Preserve the explicit interruption/resume state when a question is corrected. */
+  readingResumed?: boolean;
+  /** Preserve the moderator's readout marker when a question is corrected. */
+  readout?: boolean;
+  /** A readout recorded before either team answered, rather than after the first attempt. */
+  readoutBeforeAttempt?: boolean;
   dead: boolean;
   bonus?: IEditableBonus;
 }
@@ -33,6 +39,8 @@ function isCycleEvent(event: ScoreEvent): boolean {
   return (
     event.type === 'tossup-buzz' ||
     event.type === 'tossup-no-penalty' ||
+    event.type === 'tossup-reading-resumed' ||
+    event.type === 'tossup-readout' ||
     event.type === 'tossup-dead' ||
     event.type === 'bonus'
   );
@@ -42,6 +50,9 @@ export function editableQuestionFromEvents(events: readonly ScoreEvent[], questi
   const cycleEvents = effectiveQuestionEvents(events, questionNumber);
   const attempts: IEditableAttempt[] = [];
   let dead = false;
+  let readingResumed = false;
+  let readout = false;
+  let readoutBeforeAttempt = false;
   let bonus: IEditableBonus | undefined;
   for (const event of cycleEvents) {
     if (event.type === 'tossup-buzz') {
@@ -54,7 +65,12 @@ export function editableQuestionFromEvents(events: readonly ScoreEvent[], questi
       });
     } else if (event.type === 'tossup-no-penalty') {
       attempts.push({ id: event.id, kind: 'no-penalty', team: event.team, playerName: event.playerName });
-    } else if (event.type === 'tossup-dead') dead = true;
+    } else if (event.type === 'tossup-reading-resumed') readingResumed = true;
+    else if (event.type === 'tossup-readout') {
+      readout = true;
+      readoutBeforeAttempt = attempts.length === 0;
+    }
+    else if (event.type === 'tossup-dead') dead = true;
     else if (event.type === 'bonus') {
       const parts = event.parts?.map((part) => ({ ...part }));
       const controlledPoints =
@@ -74,7 +90,15 @@ export function editableQuestionFromEvents(events: readonly ScoreEvent[], questi
       };
     }
   }
-  return { questionNumber, attempts, dead, bonus };
+  return {
+    questionNumber,
+    attempts,
+    readingResumed,
+    readout,
+    ...(readoutBeforeAttempt ? { readoutBeforeAttempt: true } : {}),
+    dead,
+    bonus,
+  };
 }
 
 export function conversion(model: IEditableQuestion, format: IScorekeeperFormat): IEditableAttempt | undefined {
@@ -96,6 +120,15 @@ export function validateEditableQuestion(
   const question = game.questions.find((candidate) => candidate.questionNumber === model.questionNumber);
   const activePlayers = question?.activePlayers ?? { left: [], right: [] };
   if (model.attempts.length === 0 && !model.dead) errors.push(`Question ${model.questionNumber} needs a ruling.`);
+  if (model.readingResumed === true && model.attempts.length === 0) {
+    errors.push(`Question ${model.questionNumber} cannot resume reading before an answer.`);
+  }
+  if (model.readoutBeforeAttempt === true && model.readout !== true) {
+    errors.push(`Question ${model.questionNumber} cannot place a missing readout before an answer.`);
+  }
+  if (model.readoutBeforeAttempt === true && model.readingResumed === true) {
+    errors.push(`Question ${model.questionNumber} cannot resume reading after a pre-answer readout.`);
+  }
 
   const used = new Set<'left' | 'right'>();
   let previousAttempt = false;
@@ -114,7 +147,12 @@ export function validateEditableQuestion(
       const answerType =
         attempt.answerTypeIndex === undefined ? undefined : format.answerTypes[attempt.answerTypeIndex];
       if (!answerType) errors.push(`Choose a valid ruling for Question ${model.questionNumber}.`);
-      else if (answerType.isNeg && previousAttempt)
+      else if (
+        answerType.isNeg &&
+        (model.readoutBeforeAttempt === true ||
+          (model.readout === true && previousAttempt) ||
+          (previousAttempt && model.readingResumed !== true))
+      )
         errors.push(`Question ${model.questionNumber} cannot have a second-team neg.`);
     } else if (attempt.playerName !== undefined && !activePlayers[attempt.team].includes(attempt.playerName)) {
       errors.push(`${attempt.playerName} was not active for Question ${model.questionNumber}.`);
@@ -127,6 +165,13 @@ export function validateEditableQuestion(
     errors.push(`Question ${model.questionNumber} cannot have both a correct answer and no conversion.`);
   const convertedType =
     converted?.answerTypeIndex === undefined ? undefined : format.answerTypes[converted.answerTypeIndex];
+  const firstAttemptType =
+    model.attempts[0]?.kind === 'buzz' && model.attempts[0].answerTypeIndex !== undefined
+      ? format.answerTypes[model.attempts[0].answerTypeIndex]
+      : undefined;
+  if (model.readingResumed === true && firstAttemptType !== undefined && firstAttemptType.value > 0) {
+    errors.push(`Question ${model.questionNumber} cannot resume reading after a conversion.`);
+  }
   const expectsBonus =
     converted !== undefined &&
     convertedType?.awardsBonus === true &&
@@ -172,7 +217,7 @@ function nextId(): string {
 
 /** Turn the editable representation back into only the cycle events it describes. */
 export function eventsFromEditableQuestion(model: IEditableQuestion, idFactory: () => string = nextId): ScoreEvent[] {
-  const result: ScoreEvent[] = model.attempts.map((attempt) => {
+  const attempts = model.attempts.map((attempt) => {
     if (attempt.kind === 'no-penalty') {
       return {
         id: attempt.id ?? idFactory(),
@@ -191,6 +236,27 @@ export function eventsFromEditableQuestion(model: IEditableQuestion, idFactory: 
       answerTypeIndex: attempt.answerTypeIndex ?? -1,
     };
   });
+  const result: ScoreEvent[] = [];
+  if (model.readoutBeforeAttempt === true) {
+    result.push({ id: idFactory(), type: 'tossup-readout', questionNumber: model.questionNumber });
+  }
+  attempts.forEach((attempt, index) => {
+    result.push(attempt);
+    if (index === 0 && model.readingResumed === true) {
+      result.push({ id: idFactory(), type: 'tossup-reading-resumed', questionNumber: model.questionNumber });
+    }
+    if (index === 0 && model.readout === true && model.readoutBeforeAttempt !== true) {
+      result.push({ id: idFactory(), type: 'tossup-readout', questionNumber: model.questionNumber });
+    }
+  });
+  if (attempts.length === 0) {
+    if (model.readingResumed === true) {
+      result.push({ id: idFactory(), type: 'tossup-reading-resumed', questionNumber: model.questionNumber });
+    }
+    if (model.readout === true && model.readoutBeforeAttempt !== true) {
+      result.push({ id: idFactory(), type: 'tossup-readout', questionNumber: model.questionNumber });
+    }
+  }
   if (model.dead) result.push({ id: idFactory(), type: 'tossup-dead', questionNumber: model.questionNumber });
   if (model.bonus) {
     result.push({

@@ -59,6 +59,22 @@ describe('whole-scoresheet validation', () => {
     expect(validation.blockers).toEqual([]);
   });
 
+  test('validation preserves explicit read/resume timing and rejects markers after resolution', () => {
+    const legal = validateCorrectedHistory(formatFor(), setup, [
+      event({ type: 'tossup-buzz', questionNumber: 1, team: 'left', playerName: 'Sarah', answerTypeIndex: 2 }),
+      event({ type: 'tossup-reading-resumed', questionNumber: 1 }),
+      event({ type: 'tossup-buzz', questionNumber: 1, team: 'right', playerName: 'Emma', answerTypeIndex: 2 }),
+    ]);
+    expect(legal.blockers).toEqual([]);
+
+    const invalid = validateCorrectedHistory(formatFor(), setup, [
+      event({ type: 'tossup-no-penalty', questionNumber: 1, team: 'left', playerName: 'Sarah' }),
+      event({ type: 'tossup-no-penalty', questionNumber: 1, team: 'right', playerName: 'Emma' }),
+      event({ type: 'tossup-reading-resumed', questionNumber: 1 }),
+    ]);
+    expect(invalid.blockers.map((problem) => problem.code)).toContain('invalid-reading-state');
+  });
+
   test('a missing bonus blocks submission but is allowed while correcting the current question', () => {
     const format = formatFor();
     const events = [

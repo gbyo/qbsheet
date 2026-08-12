@@ -37,6 +37,14 @@
 /** Bumped when the descriptor's shape changes. An unrecognized version is treated as unusable. */
 export const scorekeeperFormatVersion = 1;
 
+/** Bounds for untrusted or hand-assembled format data. */
+export const scorekeeperFormatLimits = {
+  answerTypes: 50,
+  count: 10_000,
+  players: 200,
+  points: 1_000_000_000,
+} as const;
+
 /**
  * One way a tossup can be answered.
  *
@@ -181,6 +189,7 @@ export interface IScorekeeperFormat {
  */
 export function scorekeeperFormatProblems(format: IScorekeeperFormat): string[] {
   const problems: string[] = [];
+  if (!format || typeof format !== 'object') return ['There is no usable scorekeeper format.'];
 
   if (format.version !== scorekeeperFormatVersion) {
     problems.push('These scoring rules were saved by a different version of YellowFruit.');
@@ -188,18 +197,201 @@ export function scorekeeperFormatProblems(format: IScorekeeperFormat): string[] 
     return problems;
   }
 
-  if (format.answerTypes.length === 0) {
+  if (!Array.isArray(format.answerTypes)) {
     problems.push('This tournament has no answer types defined, so there is nothing to score.');
-  } else if (!format.answerTypes.some((answerType) => answerType.value > 0)) {
-    problems.push('This tournament has no way to score points on a tossup.');
+  } else if (format.answerTypes.length === 0) {
+    problems.push('This tournament has no answer types defined, so there is nothing to score.');
+  } else {
+    if (format.answerTypes.length > scorekeeperFormatLimits.answerTypes) {
+      problems.push('This tournament lists an implausible number of answer types.');
+    }
+    const ids = new Set<string>();
+    format.answerTypes.forEach((answerType, position) => {
+      if (!answerType || typeof answerType !== 'object') {
+        problems.push(`Answer type ${position + 1} is not an object.`);
+        return;
+      }
+      if (!Number.isInteger(answerType.index) || answerType.index !== position) {
+        problems.push(`Answer type ${position + 1} is out of order or has the wrong index.`);
+      }
+      if (
+        !Number.isFinite(answerType.value) ||
+        !Number.isInteger(answerType.value) ||
+        Math.abs(answerType.value) > scorekeeperFormatLimits.points
+      ) {
+        problems.push(`Answer type ${position + 1} does not have a usable whole-number point value.`);
+      }
+      if (typeof answerType.label !== 'string' || answerType.label.trim() === '') {
+        problems.push(`Answer type ${position + 1} has no label.`);
+      }
+      if (typeof answerType.shortLabel !== 'string' || answerType.shortLabel.trim() === '') {
+        problems.push(`Answer type ${position + 1} has no short label.`);
+      }
+      if (answerType.isPower !== (answerType.value > 10)) {
+        problems.push(`Answer type ${position + 1} has an inconsistent power flag.`);
+      }
+      if (answerType.isNeg !== (answerType.value < 0)) {
+        problems.push(`Answer type ${position + 1} has an inconsistent penalty flag.`);
+      }
+      if (typeof answerType.awardsBonus !== 'boolean') {
+        problems.push(`Answer type ${position + 1} does not say whether it awards a bonus.`);
+      }
+      if (typeof answerType.qbjId !== 'string' || answerType.qbjId.trim() === '') {
+        problems.push(`Answer type ${position + 1} has no QBJ identity.`);
+      } else if (ids.has(answerType.qbjId)) {
+        problems.push(`Answer type ${position + 1} reuses another answer type's QBJ identity.`);
+      } else {
+        ids.add(answerType.qbjId);
+      }
+    });
+    if (!format.answerTypes.some((answerType) => answerType && typeof answerType === 'object' && answerType.value > 0)) {
+      problems.push('This tournament has no way to score points on a tossup.');
+    }
   }
 
-  if (format.regulation.tossupCount < 1) {
-    problems.push('This tournament has no tossups in regulation.');
+  const regulation = format.regulation;
+  if (typeof regulation?.timed !== 'boolean') problems.push('The regulation timed flag is not usable.');
+  if (!Number.isInteger(regulation?.tossupCount) || regulation.tossupCount < 1) {
+    problems.push('This tournament has no usable tossup count in regulation.');
+  } else if (regulation.tossupCount > scorekeeperFormatLimits.count) {
+    problems.push('This tournament has an implausibly long regulation round.');
+  }
+  if (!Number.isInteger(regulation?.maximumTossupCount) || regulation.maximumTossupCount < 1) {
+    problems.push('This tournament has no usable maximum regulation tossup count.');
+  } else if (regulation.maximumTossupCount > scorekeeperFormatLimits.count) {
+    problems.push('This tournament has an implausibly long maximum regulation round.');
+  }
+  if (
+    Number.isInteger(regulation?.tossupCount) &&
+    Number.isInteger(regulation?.maximumTossupCount) &&
+    regulation.maximumTossupCount < regulation.tossupCount
+  ) {
+    problems.push('The maximum regulation tossup count cannot be less than the regulation count.');
   }
 
-  if (format.overtime.minimumQuestionCount < 1) {
-    problems.push('This tournament has an overtime period with no tossups in it.');
+  const bonus = format.bonus;
+  if (!bonus || typeof bonus !== 'object') {
+    problems.push('These scoring rules have no bonus section.');
+  } else if (typeof bonus.enabled !== 'boolean') {
+    problems.push('The bonus enabled flag is not usable.');
+  } else if (typeof bonus.bounceBack !== 'boolean') {
+    problems.push('The bonus bounceback flag is not usable.');
+  } else if (typeof bonus.regular !== 'boolean') {
+    problems.push('The regular-bonus flag is not usable.');
+  } else if (bonus.enabled) {
+    if (!Number.isInteger(bonus.divisor) || bonus.divisor < 1 || bonus.divisor > scorekeeperFormatLimits.points) {
+      problems.push('Bonuses need a positive whole-number scoring divisor.');
+    }
+    if (!Number.isInteger(bonus.minimumParts) || bonus.minimumParts < 1 || bonus.minimumParts > scorekeeperFormatLimits.count) {
+      problems.push('Bonuses need a usable minimum part count.');
+    }
+    if (!Number.isInteger(bonus.maximumParts) || bonus.maximumParts < 1 || bonus.maximumParts > scorekeeperFormatLimits.count) {
+      problems.push('Bonuses need a usable maximum part count.');
+    }
+    if (
+      Number.isInteger(bonus.minimumParts) &&
+      Number.isInteger(bonus.maximumParts) &&
+      bonus.maximumParts < bonus.minimumParts
+    ) {
+      problems.push('A bonus maximum part count cannot be less than its minimum.');
+    }
+    if (!Number.isInteger(bonus.maximumScore) || bonus.maximumScore < 0 || bonus.maximumScore > scorekeeperFormatLimits.points) {
+      problems.push('Bonuses need a usable maximum score.');
+    }
+    if (bonus.pointsPerPart !== undefined && (!Number.isInteger(bonus.pointsPerPart) || bonus.pointsPerPart < 1)) {
+      problems.push('A bonus part value must be a positive whole number.');
+    }
+    const shouldBeRegular =
+      bonus.pointsPerPart !== undefined && bonus.minimumParts === bonus.maximumParts;
+    if (bonus.regular !== shouldBeRegular) {
+      problems.push('The regular-bonus flag does not match the stated part structure.');
+    }
+    if (
+      bonus.regular &&
+      typeof bonus.pointsPerPart === 'number' &&
+      Number.isInteger(bonus.maximumParts) &&
+      bonus.maximumScore !== bonus.pointsPerPart * bonus.maximumParts
+    ) {
+      problems.push('A regular bonus maximum score does not match its part value and count.');
+    }
+    const bonusStep =
+      bonus.regular && typeof bonus.pointsPerPart === 'number' ? bonus.pointsPerPart : bonus.divisor;
+    if (
+      Number.isInteger(bonusStep) &&
+      bonusStep > 0 &&
+      Number.isInteger(bonus.maximumScore) &&
+      bonus.maximumScore % bonusStep !== 0
+    ) {
+      problems.push('The maximum bonus score must be reachable in the stated scoring increments.');
+    }
+  } else if (bonus.bounceBack) {
+    problems.push('Bouncebacks cannot be enabled when bonuses are disabled.');
+  }
+
+  const overtime = format.overtime;
+  if (typeof overtime?.suddenDeath !== 'boolean') problems.push('The sudden-death flag is not usable.');
+  if (typeof overtime?.includesBonuses !== 'boolean') problems.push('The overtime bonus flag is not usable.');
+  if (!Number.isInteger(overtime?.minimumQuestionCount) || overtime.minimumQuestionCount < 1) {
+    problems.push('This tournament has an overtime period with no usable tossup count.');
+  } else if (overtime.minimumQuestionCount > scorekeeperFormatLimits.count) {
+    problems.push('This tournament has an implausibly long overtime period.');
+  }
+  if (typeof overtime?.suddenDeath === 'boolean' && overtime.suddenDeath !== (overtime?.minimumQuestionCount === 1)) {
+    problems.push('The sudden-death flag does not match the overtime question count.');
+  }
+  if (overtime?.includesBonuses && !bonus?.enabled) {
+    problems.push('Overtime cannot include bonuses when bonuses are disabled.');
+  }
+
+  const lightning = format.lightning;
+  if (!lightning || typeof lightning !== 'object') {
+    problems.push('These scoring rules have no lightning section.');
+  } else if (typeof lightning.enabled !== 'boolean') {
+    problems.push('The lightning enabled flag is not usable.');
+  } else if (lightning.enabled) {
+    if (!Number.isInteger(lightning.countPerTeam) || lightning.countPerTeam < 1 || lightning.countPerTeam > scorekeeperFormatLimits.count) {
+      problems.push('Lightning needs a positive whole-number count per team.');
+    }
+    if (!Number.isInteger(lightning.divisor) || lightning.divisor < 1 || lightning.divisor > scorekeeperFormatLimits.points) {
+      problems.push('Lightning needs a positive whole-number scoring divisor.');
+    }
+  } else if (lightning.countPerTeam !== 0) {
+    problems.push('A disabled lightning round must have zero questions per team.');
+  }
+
+  if (!Number.isInteger(format.players?.maximumActive) || format.players.maximumActive < 1) {
+    problems.push('A team must have at least one active player.');
+  } else if (format.players.maximumActive > scorekeeperFormatLimits.players) {
+    problems.push('This tournament allows an implausible number of active players.');
+  }
+
+  if (!Number.isInteger(format.totalDivisor) || format.totalDivisor < 1 || format.totalDivisor > scorekeeperFormatLimits.points) {
+    problems.push('The total score divisor must be a positive whole number.');
+  } else if (Array.isArray(format.answerTypes)) {
+    for (const answerType of format.answerTypes) {
+      if (
+        answerType &&
+        typeof answerType === 'object' &&
+        Number.isFinite(answerType.value) &&
+        answerType.value % format.totalDivisor !== 0
+      ) {
+        problems.push('The total score divisor must divide every answer type value.');
+        break;
+      }
+    }
+    if (bonus?.enabled && Number.isInteger(bonus.divisor) && bonus.divisor % format.totalDivisor !== 0) {
+      problems.push('The total score divisor must divide the bonus divisor.');
+    }
+    if (
+      bonus?.enabled &&
+      typeof bonus.pointsPerPart === 'number' &&
+      bonus.pointsPerPart % format.totalDivisor !== 0
+    ) {
+      problems.push('The total score divisor must divide the bonus part value.');
+    }
+    if (lightning?.enabled && Number.isInteger(lightning.divisor) && lightning.divisor % format.totalDivisor !== 0) {
+      problems.push('The total score divisor must divide the lightning divisor.');
+    }
   }
 
   return problems;

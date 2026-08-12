@@ -857,6 +857,16 @@ export default function Scorer(props: IScorerProps) {
     return accepted;
   }, [nextTransientToken, record, phase]);
 
+  const recordReadingResumed = useCallback(() => {
+    if (phase.kind !== 'tossup') return;
+    record({ id: newEventId(), type: 'tossup-reading-resumed', questionNumber: phase.questionNumber });
+  }, [record, phase]);
+
+  const recordReadout = useCallback(() => {
+    if (phase.kind !== 'tossup') return;
+    record({ id: newEventId(), type: 'tossup-readout', questionNumber: phase.questionNumber });
+  }, [record, phase]);
+
   const recordBonus = useCallback(
     (controlledPoints: number, bouncebackPoints?: number) => {
       if (phase.kind !== 'bonus') return false;
@@ -1010,7 +1020,26 @@ export default function Scorer(props: IScorerProps) {
    * Both teams still being eligible is exactly that condition: an answer of any kind — a buzz or a
    * zero — removes the team that gave it from the eligible list. See `TeamPanel`.
    */
-  const negsAvailable = scoringEnabled && phase.kind === 'tossup' && phase.eligibleTeams.length === 2;
+  const currentQuestionState =
+    phase.kind === 'tossup' ? game.questions.find((question) => question.questionNumber === phase.questionNumber) : undefined;
+  const answeredTeams = new Set<LeftOrRight>([
+    ...(currentQuestionState?.buzzes.map((buzz) => buzz.team) ?? []),
+    ...(currentQuestionState?.noPenalty.map((missed) => missed.team) ?? []),
+  ]);
+  const negsAvailable = (side: LeftOrRight) =>
+    scoringEnabled &&
+    phase.kind === 'tossup' &&
+    phase.eligibleTeams.includes(side) &&
+    currentQuestionState?.readout !== true &&
+    (answeredTeams.size === 0 || currentQuestionState?.readingResumed === true);
+  const anyNegAvailable = negsAvailable('left') || negsAvailable('right');
+  const canResumeReading =
+    phase.kind === 'tossup' &&
+    answeredTeams.size > 0 &&
+    answeredTeams.size < 2 &&
+    currentQuestionState?.readingResumed !== true &&
+    currentQuestionState?.readout !== true;
+  const canReadout = phase.kind === 'tossup' && currentQuestionState?.readout !== true;
   /**
    * The button says the same thing all game.
    *
@@ -1084,7 +1113,8 @@ export default function Scorer(props: IScorerProps) {
     onNoBuzz: recordNoBuzz,
     onUndo: undoWithFeedback,
     onRedo: redoWithFeedback,
-    onSeatArmed: (seat) => setKeyStatus({ kind: 'armed', seat, actions: availableActionKeys(format, negsAvailable) }),
+    onSeatArmed: (seat) =>
+      setKeyStatus({ kind: 'armed', seat, actions: availableActionKeys(format, negsAvailable(seat.side)) }),
     onSequenceCleared: () => setKeyStatus(null),
     onEcho: ({ side, seat, number, playerName, action, answerType }) => {
       setKeyEcho({ side, seat });
@@ -1125,10 +1155,10 @@ export default function Scorer(props: IScorerProps) {
     if (playBlockedByProtest) return { kind: 'inactive', reason: 'Resolve the protest first.' };
     return {
       kind: 'tossup',
-      actions: sequenceLegend(format, negsAvailable),
+      actions: sequenceLegend(format, anyNegAvailable),
       unreachable: unreachableAnswerTypes(format).map(rulingLabel),
     };
-  }, [dialog, bonusStage, phase.kind, playBlockedByProtest, format, negsAvailable]);
+  }, [dialog, bonusStage, phase.kind, playBlockedByProtest, format, anyNegAvailable]);
 
   const lineupChangeAllowed = lineupChangeAllowedAtPhase(substitutionPolicy(procedure), phase.kind);
   const rosterAdditionAllowed = phase.kind !== 'complete';
@@ -1586,7 +1616,7 @@ export default function Scorer(props: IScorerProps) {
                 flashSeat={keyEcho?.side === 'left' ? keyEcho.seat : undefined}
                 scoringEnabled={scoringEnabled}
                 eligible={eligible('left')}
-                negsAvailable={negsAvailable}
+                negsAvailable={negsAvailable('left')}
                 timeoutsUsed={(procedure?.timeoutsPerTeam ?? 0) > 0 ? game.timeouts.left : undefined}
                 onBuzz={(playerName, answerType) => recordBuzz('left', playerName, answerType)}
                 onWrongNoPenalty={(playerName) => recordWrongNoPenalty('left', playerName)}
@@ -1603,7 +1633,7 @@ export default function Scorer(props: IScorerProps) {
                 flashSeat={keyEcho?.side === 'right' ? keyEcho.seat : undefined}
                 scoringEnabled={scoringEnabled}
                 eligible={eligible('right')}
-                negsAvailable={negsAvailable}
+                negsAvailable={negsAvailable('right')}
                 timeoutsUsed={(procedure?.timeoutsPerTeam ?? 0) > 0 ? game.timeouts.right : undefined}
                 onBuzz={(playerName, answerType) => recordBuzz('right', playerName, answerType)}
                 onWrongNoPenalty={(playerName) => recordWrongNoPenalty('right', playerName)}
@@ -1678,6 +1708,16 @@ export default function Scorer(props: IScorerProps) {
                   >
                     {noBuzzLabel}
                   </button>
+                  {canResumeReading && (
+                    <button type="button" className="scorer-action" onClick={recordReadingResumed} disabled={playBlockedByProtest}>
+                      Resume reading
+                    </button>
+                  )}
+                  {canReadout && (
+                    <button type="button" className="scorer-action" onClick={recordReadout} disabled={playBlockedByProtest}>
+                      Question read out
+                    </button>
+                  )}
                   {phase.eligibleTeams.length === 1 && (
                     <p className="scorer-hint">
                       {phase.eligibleTeams[0] === 'left' ? game.left.name : game.right.name} may still answer.

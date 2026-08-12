@@ -14,8 +14,9 @@
  *
  * # Small on purpose
  *
- * Four questions, no rules editor. Anything more elaborate is better fixed upstream by exporting
- * the rules in the QBJ, which is what this screen says.
+ * This is still a compact rule-entry surface rather than a complete QBJ authoring tool. It uses the
+ * shared structural variant so every default that can affect scoring is visible, while unusual
+ * answer tiers, irregular bonuses, and other full QBJ shapes remain file-provided.
  *
  * # The fields themselves are shared
  *
@@ -64,7 +65,7 @@ export default function ScoringRulesSetup(props: {
         the QBJ to avoid this next time.
       </p>
 
-      <BasicScoringRulesEditor idPrefix="rules" value={input} onChange={setInput} />
+      <BasicScoringRulesEditor idPrefix="rules" value={input} onChange={setInput} variant="full" />
 
       {submitted && problems.length > 0 && (
         <div className="shell-errors" role="alert">

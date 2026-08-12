@@ -20,7 +20,13 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
 import { IBonusPartResult } from '../scoring/ScoreEvents';
-import { bonusTotalProblem, bouncebackOptions, regularBonusTotals } from './bonusOptions';
+import {
+  bonusScoreProblem,
+  bonusTotalProblem,
+  bouncebackNeedsTypedEntry,
+  bouncebackOptions,
+  regularBonusTotals,
+} from './bonusOptions';
 import { bonusOptionForCode, keystrokeBelongsToControl } from './KeyboardScoring';
 import MotionNumber from './ScoringMotion';
 import { LeftOrRight } from '../scoring/types';
@@ -252,6 +258,7 @@ export default function BonusPrompt(props: IBonusPromptProps) {
       onRecord(controlledPoints);
       return;
     }
+    setTyped('');
     handoffSequence.current += 1;
     setHandoff({ token: handoffSequence.current, controlledPoints });
     setControlled(controlledPoints);
@@ -263,7 +270,14 @@ export default function BonusPrompt(props: IBonusPromptProps) {
     return () => window.clearTimeout(timer);
   }, [handoff]);
 
-  const typedProblem = typed === '' ? null : bonusTotalProblem(format.bonus, Number(typed));
+  const bounceStage = controlled !== null && bouncesBack;
+  const bouncebackTyped = bounceStage && bouncebackNeedsTypedEntry(format.bonus, controlled as number);
+  const typedProblem =
+    typed === ''
+      ? null
+      : bounceStage
+        ? bonusScoreProblem(format.bonus, controlled as number, Number(typed))
+        : bonusTotalProblem(format.bonus, Number(typed));
 
   /**
    * Which stage the keyboard is aimed at.
@@ -275,11 +289,15 @@ export default function BonusPrompt(props: IBonusPromptProps) {
    *
    * The irregular-bonus path is a typed number field, which owns its own digits. It reports no stage.
    */
-  const bounceStage = controlled !== null && bouncesBack;
   const stageTitle = bounceStage ? `${opponentName} bounceback` : `${controllingTeamName} bonus`;
   const stageOptions = useMemo(
-    () => (bounceStage ? bouncebackOptions(format.bonus, controlled as number) : (totals ?? null)),
-    [bounceStage, format.bonus, controlled, totals],
+    () =>
+      bounceStage && !bouncebackTyped
+        ? bouncebackOptions(format.bonus, controlled as number)
+        : bounceStage
+          ? null
+          : (totals ?? null),
+    [bounceStage, bouncebackTyped, format.bonus, controlled, totals],
   );
   const stageActive = !byParts && stageOptions !== null;
 
@@ -324,6 +342,7 @@ export default function BonusPrompt(props: IBonusPromptProps) {
   }, [keyboardEnabled, bounceStage]);
 
   if (controlled !== null && bouncesBack) {
+    const availableBounceback = Math.max(0, format.bonus.maximumScore - controlled);
     const handoffDirection = controllingSide === 'left' ? 'right' : 'left';
     return (
       <section
@@ -350,13 +369,44 @@ export default function BonusPrompt(props: IBonusPromptProps) {
               Q{questionNumber} · {controllingTeamName} took {controlled}
             </span>
           </p>
+          {stageOptions ? (
           <div className="scorer-choices">
-            {bouncebackOptions(format.bonus, controlled).map((points) => (
+            {stageOptions.map((points) => (
               <button key={points} type="button" className="scorer-choice" onClick={() => onRecord(controlled, points)}>
                 {points}
               </button>
             ))}
           </div>
+          ) : (
+          <form
+            className="scorer-inline-form"
+            onSubmit={(submitEvent) => {
+              submitEvent.preventDefault();
+              if (typed === '' || typedProblem) return;
+              onRecord(controlled, Number(typed));
+            }}
+          >
+            <label htmlFor="scorer-bounceback-points">
+              Bounceback points
+              <input
+                id="scorer-bounceback-points"
+                type="number"
+                inputMode="numeric"
+                step={format.bonus.divisor || 1}
+                min={0}
+                max={availableBounceback}
+                value={typed}
+                onChange={(changeEvent) => setTyped(changeEvent.target.value)}
+                // eslint-disable-next-line jsx-a11y/no-autofocus
+                autoFocus
+              />
+            </label>
+            <button type="submit" className="scorer-choice" disabled={typed === '' || typedProblem !== null}>
+              Record
+            </button>
+            {typedProblem && <p className="scorer-problem">{typedProblem}</p>}
+          </form>
+          )}
         </div>
       </section>
     );
