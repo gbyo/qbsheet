@@ -441,7 +441,7 @@ body {
  * the name themselves and is here to score a game.
  */
 .welcome-greeting {
-  margin-top: 10px;
+  margin-top: 26px;
 }
 
 /*
@@ -451,6 +451,14 @@ body {
  */
 .welcome-shell .shell-header-row {
   align-items: flex-start;
+}
+
+/*
+ * Tighter under the rule than the other screens. The greeting is the label on the block below it,
+ * not a section of its own, so it sits closer to Start scoring than to the wordmark above it.
+ */
+.welcome-shell .shell-header {
+  margin-bottom: 0;
 }
 
 .welcome-greeting-line {
