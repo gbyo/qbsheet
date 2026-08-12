@@ -36,6 +36,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GameStore, IStoredGameRecord, isActive, needsHandoff } from '../game/GameStore';
 import { IUnreadableRecord } from '../game/GameRecordUpgrade';
 import { IGamePackage, gamePackageIdentity } from '../game/GamePackage';
+import { IGameDefinition } from '../game/GameDefinition';
+import { newManualRecordIdentity } from '../game/ManualGame';
 import { openRecordStore } from '../persistence/GameDatabase';
 import { claimGame, IGameClaim, newTabId } from '../persistence/TabClaim';
 import { IGameSetup } from '../scoring/deriveGame';
@@ -53,6 +55,7 @@ import {
 import useLeaveWarning from './useLeaveWarning';
 import WelcomeScreen from './WelcomeScreen';
 import ConnectedSetup, { IConnectedStart } from './ConnectedSetup';
+import ManualGameSetup from './ManualGameSetup';
 import ScoringScreen from './ScoringScreen';
 import GameOriginNotice from './GameOriginNotice';
 import CompletionScreen from './CompletionScreen';
@@ -77,6 +80,8 @@ import { ResultDeliveryService } from './ResultDelivery';
  * worker swap is origin-wide, so it also says no. `completed` is refused for a different reason: the
  * result is safe, but that screen is where the QBJ backup and the handoff confirmation are asked for,
  * and a reload sends the scorekeeper looking through Recent Games for a job they were halfway through.
+ * `create` is refused because it holds unsaved work and nothing else: two typed rosters that exist
+ * nowhere but in that form, which a worker swap would discard mid-sentence.
  *
  * What is left is the front door, the room screen between rounds, and the readiness screen — which is
  * exactly where somebody checking versions is standing anyway.
@@ -109,6 +114,13 @@ export type Screen =
   | { kind: 'connect'; fresh: boolean }
   | { kind: 'readiness' }
   | { kind: 'practice' }
+  /**
+   * Describing a game by hand, for a practice or anything else nobody scheduled.
+   *
+   * Holds no record. Nothing is created until the form validates and Start game is pressed, at which
+   * point what it produces is an ordinary definition and this screen is done. See `ManualGameSetup`.
+   */
+  | { kind: 'create' }
   /**
    * The assignment, put in front of somebody before anything is scored against it.
    *
@@ -288,6 +300,36 @@ export default function App() {
       return created;
     },
     [store, openRecord, refresh],
+  );
+
+  /**
+   * Start a game somebody typed in.
+   *
+   * Deliberately not `startFromPackage`. That function's first act is to look for an unfinished game
+   * with the same `gamePackageIdentity` and offer to resume it, which is exactly right for a file or
+   * a connected assignment — opening the same file twice must not produce two half-scored copies —
+   * and exactly wrong here. Two practices between the same two teams on the same afternoon share
+   * every field that identity is built from, and they are two games. Loosening the file path to
+   * accommodate that would weaken duplicate detection for the case it exists to protect, so the
+   * manual path is its own three lines instead and the file path is untouched.
+   *
+   * Everything after `create` is the ordinary route: the same tab claim, the same `openRecord`, the
+   * same scorer. No assignment card, because nothing was assigned.
+   */
+  const createManualGame = useCallback(
+    async (definition: IGameDefinition) => {
+      if (!store) return;
+      const created = await store.create({
+        package: definition,
+        setup: setupFromPackage(definition),
+        connected: false,
+        recordIdentity: newManualRecordIdentity(),
+      });
+      await refresh(store);
+      setNotice('');
+      await openRecord(created);
+    },
+    [store, refresh, openRecord],
   );
 
   /**
@@ -513,6 +555,15 @@ export default function App() {
     return <PracticeScreen onHome={goHome} />;
   }
 
+  if (screen.kind === 'create') {
+    return (
+      <ManualGameSetup
+        onStart={(definition) => void createManualGame(definition)}
+        onCancel={() => setScreen({ kind: 'home' })}
+      />
+    );
+  }
+
   if (screen.kind === 'duplicate' && current) {
     return <DuplicateTabNotice record={current} onHome={goHome} />;
   }
@@ -569,6 +620,7 @@ export default function App() {
       onPractice={() => {
         setScreen({ kind: 'practice' });
       }}
+      onCreateGame={() => setScreen({ kind: 'create' })}
       onOpenRoom={() => setScreen({ kind: 'connect', fresh: false })}
       onConnect={(baseUrl) => {
         setPendingBaseUrl(baseUrl);

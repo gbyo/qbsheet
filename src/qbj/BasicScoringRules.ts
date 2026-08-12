@@ -12,16 +12,17 @@
  * is nothing to keep in step. With two, the typed-in format quietly diverges from the imported one
  * and only one of them gets fixed.
  *
- * # Deliberately small
+ * # Deliberately small, and where the boundary now is
  *
- * Four questions: what a tossup is worth, whether there are powers and negs, what a bonus is worth,
- * and how long a game is. That is enough to score the overwhelming majority of tournaments, and a
- * generic QBJ arriving with no rules at all is uncommon enough that a full rules editor would be a
- * large surface maintained for a rare case — and a second place for rule semantics to live, which
- * is the thing this migration is trying to stop.
+ * This began as four questions for the rare generic QBJ that carried no rules at all. Creating a
+ * game by hand is a rule-entry surface rather than a fallback, so the input models a little more:
+ * how many players are on the floor, how long an overtime period is, whether it has bonuses in it,
+ * and the one lightning shape `IScorekeeperFormat` already represents.
  *
- * A tournament with an irregular bonus structure or lightning rounds is better served by its
- * director exporting rules in the QBJ, which is the supported path and the one this asks for.
+ * It stops there. Multiple power tiers, multiple negs, irregular bonuses and anything else unusual
+ * still arrive as a QBJ, which the scorer reads in full. Growing this into a complete rules
+ * administration UI would be a second place for rule semantics to live, which is the thing this
+ * whole arrangement exists to prevent.
  */
 import { IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
 import { QbjObject } from './QbjSerialization';
@@ -44,6 +45,21 @@ export interface IBasicScoringRulesInput {
   bonusesBounceBack?: boolean;
   tossupCount: number;
   maximumPlayersPerTeam: number;
+  /**
+   * Tossups in the first overtime period. 1 is sudden death under the existing engine.
+   *
+   * Modelled here rather than hard-coded because a form somebody uses to *state* the rules has to be
+   * able to state this one; a fallback for a QBJ that forgot its rules did not.
+   */
+  overtimeQuestionCount?: number;
+  /** Whether an overtime tossup earns a bonus. */
+  overtimeIncludesBonuses?: boolean;
+  /** Whether the game has lightning rounds at all. */
+  useLightning?: boolean;
+  /** Lightning rounds each team gets, when lightning is used. */
+  lightningCountPerTeam?: number;
+  /** The increment a lightning total moves in. See `IScorekeeperLightning`. */
+  lightningDivisor?: number;
   /** Whether the round runs on a clock. QBJ cannot express this; see `QbtcpExtension`. */
   timed?: boolean;
   name?: string;
@@ -60,6 +76,11 @@ export const basicScoringRulesDefaults: IBasicScoringRulesInput = {
   bonusesBounceBack: false,
   tossupCount: 20,
   maximumPlayersPerTeam: 4,
+  overtimeQuestionCount: 1,
+  overtimeIncludesBonuses: false,
+  useLightning: false,
+  lightningCountPerTeam: 1,
+  lightningDivisor: 10,
   timed: false,
 };
 
@@ -106,8 +127,8 @@ export function basicScoringRulesToQbj(input: IBasicScoringRulesInput): QbjObjec
     maximum_players_per_team: input.maximumPlayersPerTeam,
     regulation_tossup_count: input.tossupCount,
     maximum_regulation_tossup_count: input.tossupCount,
-    minimum_overtime_question_count: 1,
-    overtime_includes_bonuses: false,
+    minimum_overtime_question_count: input.overtimeQuestionCount ?? 1,
+    overtime_includes_bonuses: input.overtimeIncludesBonuses === true,
     answer_types: answerTypes,
     ...(input.useBonuses
       ? {
@@ -117,6 +138,14 @@ export function basicScoringRulesToQbj(input: IBasicScoringRulesInput): QbjObjec
           maximum_parts_per_bonus: parts,
           points_per_bonus_part: perPart,
           bonuses_bounce_back: input.bonusesBounceBack === true,
+        }
+      : {}),
+    // Absent rather than zero when lightning is off, because `lightning_count_per_team: 0` and no
+    // lightning fields at all are the same rule set and the reader already treats absence as off.
+    ...(input.useLightning
+      ? {
+          lightning_count_per_team: input.lightningCountPerTeam ?? 1,
+          lightning_divisor: input.lightningDivisor ?? 10,
         }
       : {}),
   };
@@ -132,14 +161,46 @@ export function readBasicScoringRules(input: IBasicScoringRulesInput): QbjScorin
   return readQbjScoringRules(basicScoringRulesToQbj(input), input.timed === true);
 }
 
-/** Whether these values describe a game anybody could play. */
-export function basicScoringRulesProblems(input: IBasicScoringRulesInput): string[] {
-  const result = readBasicScoringRules(input);
-  return result.ok ? [] : result.problems;
+/**
+ * Counts that have to be whole and positive before the QBJ object is worth building.
+ *
+ * `ScoringRules` cannot express "the number you typed is not a number", so these are checked here
+ * rather than in the reader. They are field complaints, not rule semantics: everything about what a
+ * game is *worth* is still decided by `readQbjScoringRules` and `scorekeeperFormatProblems` below.
+ */
+function fieldProblems(input: IBasicScoringRulesInput): string[] {
+  const problems: string[] = [];
+  const wholeAtLeastOne = (value: number | undefined, complaint: string) => {
+    if (value === undefined || !Number.isInteger(value) || value < 1) problems.push(complaint);
+  };
+
+  wholeAtLeastOne(input.maximumPlayersPerTeam, 'Players playing at once must be at least 1.');
+  if (input.useBonuses) {
+    wholeAtLeastOne(input.partsPerBonus, 'Parts per bonus must be at least 1.');
+    wholeAtLeastOne(input.pointsPerBonusPart, 'Points per bonus part must be at least 1.');
+  }
+  if (input.useLightning) {
+    wholeAtLeastOne(input.lightningCountPerTeam, 'Lightning rounds per team must be at least 1.');
+    wholeAtLeastOne(input.lightningDivisor, 'Lightning score increment must be at least 1.');
+  }
+  return problems;
 }
 
-/** The format, or null when the values do not describe a playable game. */
+/** Whether these values describe a game anybody could play. */
+export function basicScoringRulesProblems(input: IBasicScoringRulesInput): string[] {
+  const fields = fieldProblems(input);
+  const result = readBasicScoringRules(input);
+  return [...fields, ...(result.ok ? [] : result.problems)];
+}
+
+/**
+ * The format, or null when the values do not describe a playable game.
+ *
+ * Gated on the same list the form shows, so a value the screen is complaining about cannot also be
+ * the value it silently accepts.
+ */
 export function basicScorekeeperFormat(input: IBasicScoringRulesInput): IScorekeeperFormat | null {
+  if (basicScoringRulesProblems(input).length > 0) return null;
   const result = readBasicScoringRules(input);
   return result.ok ? result.format : null;
 }

@@ -27,6 +27,40 @@ export interface ITeamRoster {
  */
 export const playerNameMaxLength = 200;
 
+/**
+ * Split a roster typed one name per line into candidate names.
+ *
+ * Not the authority on what a roster is — `defineGame`'s `overrides.rosters` is, and a file's roster
+ * goes through the same rules there. This is the same judgement shown early, so somebody sees the
+ * problem while looking at the box rather than after submitting.
+ *
+ * Here rather than beside a form because two forms now read a textarea this way: the one that fills
+ * in a roster a QBJ left out, and the one that creates a game from nothing. Blank lines dropped by
+ * one and kept by the other is the kind of difference nobody notices until two rosters disagree
+ * about how many players a team has.
+ */
+export function readRosterLines(text: string): string[] {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line !== '');
+}
+
+/** What is wrong with what has been typed so far, in words a scorekeeper can act on. */
+export function rosterLineProblems(names: string[]): string[] {
+  const problems: string[] = [];
+  const seen = new Set<string>();
+  for (const name of names) {
+    if (name.length > playerNameMaxLength) {
+      problems.push(`"${name.slice(0, 20)}…" is too long to be a name.`);
+      continue;
+    }
+    if (seen.has(name)) problems.push(`"${name}" is listed more than once.`);
+    seen.add(name);
+  }
+  return problems;
+}
+
 export interface IPlayerNameValidation {
   /** The value that may be written to the roster. */
   name: string;

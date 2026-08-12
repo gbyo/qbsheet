@@ -45,6 +45,12 @@ neither, and prefers neither.
 - **Connect to tournament control.** Enter the address of the control server, verify the room
   identity, pair the room, then score the assigned game. The package and the credentials stay
   separate. QBSheet writes no token into a game package or a portable QBJ.
+- **Create a game.** Enter two teams, their players, and the scoring rules, for a practice,
+  scrimmage, tryout, or pickup game with no tournament system behind it. The rules go through the
+  same QBJ `ScoringRules` reader an imported format does, and once Start game is pressed the game is
+  an ordinary QBSheet game: the same scorer, journal, recovery, corrections, and QBJ export. No
+  tournament, match, or room identity is invented for it. Distinct from the guided **Practice
+  scoring** tutorial, which is a scripted walkthrough rather than real scoring.
 - **Recover locally.** QBSheet writes the current event journal synchronously to `localStorage`, and
   mirrors the package, the record state, and the finished QBJ in IndexedDB. When IndexedDB is
   unavailable, the scoresheet stays usable and reports that local persistence is not durable.
@@ -53,7 +59,9 @@ QBSheet retains a completed record locally for seven days. It does not remove a 
 server accepted a result, and it does not remove a record because a scorekeeper downloaded a QBJ.
 
 A connected game keeps an explicit handoff acknowledgement. A file-only game is complete once QBSheet
-has written its QBJ successfully.
+has written its QBJ successfully. A game created on the device owes no handoff at all — there is
+nobody at the other end of it — so it is complete as soon as the result is durably saved, and the QBJ
+download stays available but optional.
 
 ## Static hosting
 

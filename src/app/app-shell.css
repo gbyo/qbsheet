@@ -310,6 +310,37 @@ body {
   margin-top: 0;
 }
 
+/*
+ * The third way into a game.
+ *
+ * Attached to the bottom of the two-column block rather than beside it: it shares that block's
+ * border, drops its own top edge so the join is one rule rather than two, and gets a button instead
+ * of a column. Nothing about it is promoted — no shadow, no tile, no accent — because it is a third
+ * practical entry path and not a feature.
+ */
+.welcome-create {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 12px 16px;
+  border: 1px solid var(--room-border-strong);
+  border-top: 0;
+  background: var(--room-surface);
+}
+
+.welcome-create-copy {
+  min-width: 0;
+}
+
+.welcome-create .welcome-option-copy {
+  margin: 4px 0 0;
+}
+
+.welcome-create .shell-button {
+  flex: 0 0 auto;
+}
+
 .welcome-practice {
   display: flex;
   align-items: center;
@@ -348,6 +379,7 @@ body {
     border-left: 0;
   }
 
+  .welcome-create,
   .welcome-practice {
     align-items: flex-start;
     flex-direction: column;
@@ -858,6 +890,120 @@ body {
   display: flex;
   gap: 8px;
   margin-top: 10px;
+}
+
+/*
+ * Creating a game from nothing.
+ *
+ * The same shell as the front door and the completion screen: ruled sections, small uppercase
+ * headings, the ordinary input and button treatment. It is allowed to scroll, which nothing else in
+ * this file is, because it is the only screen here that is used before a game rather than during
+ * one — there is no clock running and no reason to compress two rosters onto 768 pixels.
+ *
+ * No cards inside cards, no stepper, no hero. Every section is a heading and some fields.
+ */
+.manual-shell {
+  padding-bottom: 32px;
+}
+
+.manual-field {
+  max-width: 420px;
+  margin-top: 12px;
+}
+
+/* A setting that only exists because the checkbox above it is on, indented to say so. */
+.manual-field-inset {
+  margin-left: 22px;
+}
+
+.manual-number {
+  max-width: 140px;
+}
+
+.manual-teams {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 20px;
+  margin: 4px 0 8px;
+}
+
+.manual-team {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.manual-roster-label {
+  margin-top: 12px;
+  margin-bottom: 0;
+}
+
+.manual-roster-hint {
+  margin: 0 0 4px;
+}
+
+.manual-roster {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--room-border-strong);
+  border-radius: 3px;
+  background: var(--room-surface);
+  color: inherit;
+  font: inherit;
+  line-height: 1.4;
+  resize: vertical;
+}
+
+.manual-roster:focus-visible {
+  outline: 2px solid var(--room-accent);
+  outline-offset: -1px;
+}
+
+.manual-roster-count {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--room-faint);
+}
+
+.manual-options-intro {
+  margin-top: 0;
+  margin-bottom: 8px;
+}
+
+/* A radio group is a group. The browser's own fieldset border is the one thing here that would
+ * read as a card, so it is removed and the legend carries the label treatment instead. */
+.manual-fieldset {
+  margin: 12px 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.manual-fieldset legend {
+  padding: 0;
+}
+
+.rules-fields-hint {
+  margin-top: 0;
+}
+
+/*
+ * Overtime and lightning.
+ *
+ * Under the rules a practice actually changes rather than beside them, because almost nobody
+ * changes these and a form that shows every field at equal weight makes the four that matter harder
+ * to find. A rule above it, not a box around it.
+ */
+.rules-advanced {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--room-border);
+}
+
+.rules-advanced-heading {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--room-muted);
 }
 
 /*

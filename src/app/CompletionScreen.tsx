@@ -16,6 +16,15 @@
  * tournament asked for the file by name: a pending or refused submission, a game with no
  * tournament control behind it, or an assignment carrying its own handoff instruction.
  *
+ * # A game nobody is waiting for
+ *
+ * The one case where nothing is demanded at all is a game created on this device: a practice, a
+ * scrimmage, a pickup game. There is no tournament at the other end of it, so there is no delivery
+ * to insist on and no second copy anybody needs. The result is saved, it is in Recent Games, and the
+ * QBJ is offered for whoever wants to keep or share one — which is a different sentence from "hand
+ * this result over", and is written as one. `needsHandoff` is still the only thing that decides
+ * whether the screen may be left; this file asks it rather than reasoning alongside it.
+ *
  * # And the acknowledgement is not proof
  *
  * The button records that the room says it uploaded the file. This application has no way to check
@@ -30,7 +39,7 @@
  * that somebody cleared it.
  */
 import { useState } from 'react';
-import { IStoredGameRecord, isDelivered, needsHandoff } from '../game/GameStore';
+import { IStoredGameRecord, gameRequiresHandoff, isDelivered, needsHandoff } from '../game/GameStore';
 import { gamePackageLabel } from '../game/GamePackage';
 import { downloadFile, qbjFileContents, qbjFileName } from '../integrations/file/QbjDownload';
 
@@ -56,6 +65,8 @@ export default function CompletionScreen(props: {
   const delivered = isDelivered(record);
   const requiresHandoffAcknowledgement =
     !delivered && (connected || Boolean(record.package.handoffInstruction));
+  /** Nobody is owed this result. The copy stops calling the download a handoff. */
+  const optionalCopy = !gameRequiresHandoff(record);
   const backupDownloaded = record.qbjDownloadedAt !== undefined;
   const canLeave = !needsHandoff(record);
 
@@ -108,8 +119,15 @@ export default function CompletionScreen(props: {
       )}
 
       <section className="shell-section">
-        <h2 className="shell-heading">{delivered ? 'Back up this result' : 'Hand this result over'}</h2>
-        {delivered ? (
+        <h2 className="shell-heading">
+          {optionalCopy ? 'Save a copy' : delivered ? 'Back up this result' : 'Hand this result over'}
+        </h2>
+        {optionalCopy ? (
+          <p className="shell-hint">
+            This result is saved on this device. Download a QBJ if you want to keep or share a portable
+            copy.
+          </p>
+        ) : delivered ? (
           <p className="shell-hint">
             Tournament control has this game. A copy stays on this device, and downloading one is always
             worth doing when there is a moment for it.
@@ -127,8 +145,16 @@ export default function CompletionScreen(props: {
         )}
 
         <div className="shell-actions">
-          <button type="button" className="shell-button is-primary" onClick={download}>
-            {record.qbjDownloadedAt ? 'Download QBJ again' : delivered ? 'Download QBJ backup' : 'Download QBJ'}
+          {/* Optional means secondary. Done is the action on this screen for a game nobody is
+              waiting for, and two primary buttons would say otherwise. */}
+          <button type="button" className={`shell-button${optionalCopy ? '' : ' is-primary'}`} onClick={download}>
+            {record.qbjDownloadedAt
+              ? 'Download QBJ again'
+              : optionalCopy
+                ? 'Download QBJ copy'
+                : delivered
+                  ? 'Download QBJ backup'
+                  : 'Download QBJ'}
           </button>
         </div>
 
@@ -141,7 +167,9 @@ export default function CompletionScreen(props: {
         {record.qbjDownloadedAt && (
           <div className="final-handoff">
             <p className="shell-hint">Downloaded at {timeOfDay(record.qbjDownloadedAt)}</p>
-            {!requiresHandoffAcknowledgement ? (
+            {optionalCopy ? (
+              <p className="final-ok">A copy of this result is in your downloads.</p>
+            ) : !requiresHandoffAcknowledgement ? (
               <p className="final-ok">The QBJ is ready to hand over.</p>
             ) : record.handoffAcknowledgedAt ? (
               <p className="final-ok">Handoff confirmed at {timeOfDay(record.handoffAcknowledgedAt)}</p>

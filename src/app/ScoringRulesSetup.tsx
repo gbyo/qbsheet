@@ -16,6 +16,12 @@
  *
  * Four questions, no rules editor. Anything more elaborate is better fixed upstream by exporting
  * the rules in the QBJ, which is what this screen says.
+ *
+ * # The fields themselves are shared
+ *
+ * They are also what Create a game asks, so they live in `BasicScoringRulesEditor` and this screen
+ * supplies only the reason it is asking. What stays here is everything about the missing document:
+ * the parser's own complaints, and the request to fix it upstream.
  */
 import { useState } from 'react';
 import {
@@ -25,13 +31,7 @@ import {
   basicScorekeeperFormat,
 } from '../qbj/BasicScoringRules';
 import { IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
-
-/** A number field that tolerates being empty while it is being typed in. */
-function numberValue(raw: string): number | undefined {
-  if (raw.trim() === '') return undefined;
-  const parsed = Number(raw);
-  return Number.isFinite(parsed) ? parsed : undefined;
-}
+import BasicScoringRulesEditor from './BasicScoringRulesEditor';
 
 export default function ScoringRulesSetup(props: {
   /** Why the scoresheet is asking, in the parser's own words. */
@@ -44,7 +44,6 @@ export default function ScoringRulesSetup(props: {
   const [submitted, setSubmitted] = useState(false);
 
   const problems = basicScoringRulesProblems(input);
-  const set = (patch: Partial<IBasicScoringRulesInput>) => setInput((current) => ({ ...current, ...patch }));
 
   const submit = () => {
     setSubmitted(true);
@@ -65,87 +64,7 @@ export default function ScoringRulesSetup(props: {
         the QBJ to avoid this next time.
       </p>
 
-      <div className="rules-setup-grid">
-        <label htmlFor="rules-tossup">
-          Tossup
-          <input
-            id="rules-tossup"
-            type="number"
-            value={String(input.tossupValue)}
-            onChange={(event) => set({ tossupValue: numberValue(event.target.value) ?? 0 })}
-          />
-        </label>
-        <label htmlFor="rules-power">
-          Power (blank for none)
-          <input
-            id="rules-power"
-            type="number"
-            value={input.powerValue === undefined ? '' : String(input.powerValue)}
-            onChange={(event) => set({ powerValue: numberValue(event.target.value) })}
-          />
-        </label>
-        <label htmlFor="rules-neg">
-          Neg (blank for none)
-          <input
-            id="rules-neg"
-            type="number"
-            value={input.negValue === undefined ? '' : String(input.negValue)}
-            onChange={(event) => set({ negValue: numberValue(event.target.value) })}
-          />
-        </label>
-        <label htmlFor="rules-tossup-count">
-          Tossups in regulation
-          <input
-            id="rules-tossup-count"
-            type="number"
-            value={String(input.tossupCount)}
-            onChange={(event) => set({ tossupCount: numberValue(event.target.value) ?? 0 })}
-          />
-        </label>
-      </div>
-
-      <label className="rules-setup-check" htmlFor="rules-bonuses">
-        <input
-          id="rules-bonuses"
-          type="checkbox"
-          checked={input.useBonuses}
-          onChange={(event) => set({ useBonuses: event.target.checked })}
-        />
-        This tournament uses bonuses
-      </label>
-
-      {input.useBonuses && (
-        <div className="rules-setup-grid">
-          <label htmlFor="rules-bonus-part">
-            Points per bonus part
-            <input
-              id="rules-bonus-part"
-              type="number"
-              value={String(input.pointsPerBonusPart ?? 10)}
-              onChange={(event) => set({ pointsPerBonusPart: numberValue(event.target.value) })}
-            />
-          </label>
-          <label htmlFor="rules-bonus-parts">
-            Parts per bonus
-            <input
-              id="rules-bonus-parts"
-              type="number"
-              value={String(input.partsPerBonus ?? 3)}
-              onChange={(event) => set({ partsPerBonus: numberValue(event.target.value) })}
-            />
-          </label>
-        </div>
-      )}
-
-      <label className="rules-setup-check" htmlFor="rules-timed">
-        <input
-          id="rules-timed"
-          type="checkbox"
-          checked={input.timed === true}
-          onChange={(event) => set({ timed: event.target.checked })}
-        />
-        Rounds run on a clock
-      </label>
+      <BasicScoringRulesEditor idPrefix="rules" value={input} onChange={setInput} />
 
       {submitted && problems.length > 0 && (
         <div className="shell-errors" role="alert">
