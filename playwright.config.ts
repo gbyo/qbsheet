@@ -1,5 +1,9 @@
 import { defineConfig, devices } from '@playwright/test';
 
+// GitHub's Ubuntu runner already includes Google Chrome. Use it in CI so PRs do not download a
+// second Chromium build; local runs stay on Playwright's pinned browser for a hermetic setup.
+const browserChannel = process.env.CI ? 'chrome' : undefined;
+
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: false,
@@ -30,7 +34,11 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 800 } },
+      use: {
+        ...devices['Desktop Chrome'],
+        channel: browserChannel,
+        viewport: { width: 1280, height: 800 },
+      },
     },
   ],
   webServer: {
