@@ -64,3 +64,24 @@ export function writeOperatorName(value: string): boolean {
     return false;
   }
 }
+
+/**
+ * Return the operator identity to the state of a device that has never been asked.
+ *
+ * Both keys are deliberately named here. This is a narrow preference reset, not a prefix scan, and
+ * it must not grow into a way to clear games, connection capabilities, or any other device data.
+ */
+export function clearOperatorIdentity(
+  target: Pick<Storage, 'removeItem'> | null = storage(),
+): boolean {
+  if (!target) return false;
+  let cleared = true;
+  for (const key of [operatorNameStorageKey, operatorNameAskedStorageKey]) {
+    try {
+      target.removeItem(key);
+    } catch {
+      cleared = false;
+    }
+  }
+  return cleared;
+}
