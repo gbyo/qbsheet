@@ -1694,12 +1694,6 @@ div.scorer-banner .scorer-text-action {
   gap: 16px;
 }
 
-.scorer-question-title {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-}
-
 /*
  * Said once to somebody who has never opened a correction before, then dismissed for good.
  *
@@ -1745,7 +1739,12 @@ div.scorer-banner .scorer-text-action {
 .scorer-question-score th,
 .scorer-question-score td {
   padding: 6px 10px;
-  text-align: right;
+  text-align: left;
+}
+
+.scorer-question-score th:not(:first-child),
+.scorer-question-score td:not(:first-child) {
+  text-align: center;
 }
 
 /*
