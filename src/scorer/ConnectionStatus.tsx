@@ -45,6 +45,8 @@ export interface IScorerAlert {
 export interface IScorerRecoveryStatus {
   /** False when this browser refused the last write of the game. */
   localSaveOk: boolean;
+  /** Whether the complete game record survives closing and reopening this tab. */
+  recordDurablyStored?: boolean;
   /** Epoch ms of the last accepted local write, or null if there has never been one. */
   localSavedAt?: number | null;
   /** Epoch ms of the last snapshot the server accepted. Null means one has never been sent. */
@@ -93,6 +95,9 @@ export function connectionClass(connection: RoomConnectionState): string {
  * home and one who has to find the director.
  */
 export function offlineBody(recovery: IScorerRecoveryStatus): string {
+  if (recovery.recordDurablyStored === false) {
+    return 'This game is temporary in this tab. Download a QBJ backup now and again when the game ends; do not close or reload this tab.';
+  }
   if (!recovery.localSaveOk) {
     return 'This browser could not save the game. Download a QBJ backup now and again when the game ends.';
   }
@@ -117,11 +122,24 @@ export default function ScorerBanners(props: {
   onDownload: () => void;
 }) {
   const { connection, recovery, alerts, degradedMessage, onDownload } = props;
+  const recordDurablyStored = recovery.recordDurablyStored !== false;
   return (
     <>
+      {!recordDurablyStored && (
+        <div className="scorer-banner is-error" role="alert">
+          <strong>Temporary — do not close this tab.</strong>
+          <span>
+            The complete game record is not currently durable on this device. Download a QBJ backup now and again
+            when the game ends.
+          </span>
+          <button type="button" className="scorer-text-action" onClick={onDownload}>
+            Download QBJ backup
+          </button>
+        </div>
+      )}
       {!recovery.localSaveOk && (
         <div className="scorer-banner is-error" role="alert">
-          <strong>Local save failed — do not reload or close this tab.</strong>
+          <strong>Event journal save failed — do not reload or close this tab.</strong>
           <span>
             The game currently exists only on this screen. Download a QBJ backup now and again when the game ends.
           </span>
@@ -230,6 +248,7 @@ export function ConnectionDetailDialog(props: {
   onClose: () => void;
 }) {
   const { connection, recovery, now, timeline = [], onDownload, onClose } = props;
+  const recordDurablyStored = recovery.recordDurablyStored !== false;
   return (
     <ScorerDialog title="Connection" onClose={onClose}>
       <p className={connectionClass(connection)}>
@@ -238,9 +257,14 @@ export function ConnectionDetailDialog(props: {
       </p>
       <div className="scorer-detail-rows">
         <DetailRow
-          label="Game saved locally"
+          label="Event journal"
           value={recovery.localSaveOk ? describeAge(recovery.localSavedAt, now) : 'FAILED'}
           problem={!recovery.localSaveOk}
+        />
+        <DetailRow
+          label="Game record"
+          value={recordDurablyStored ? 'Durable' : 'Temporary'}
+          problem={!recordDurablyStored}
         />
         <DetailRow
           label="Server snapshot"

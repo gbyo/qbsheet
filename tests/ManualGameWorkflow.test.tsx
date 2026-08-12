@@ -10,7 +10,7 @@
  * The two places it is legitimately different are checked as hard as the places it is not: nothing
  * is created until Start game is pressed, and nobody is owed the finished file.
  */
-import { afterEach, describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { bonus, openApp, openGameFile, press, pressControl, score, startLineups } from './appHarness';
 import { claimResponseTimeoutMs } from '../src/persistence/TabClaim';
@@ -193,7 +193,12 @@ describe('the front door', () => {
     await openApp();
     await fillSetup();
 
-    await press('Cancel');
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    try {
+      await press('Cancel');
+    } finally {
+      confirm.mockRestore();
+    }
 
     expect(await screen.findByText('Start scoring')).toBeInTheDocument();
     expect(screen.queryByText('Unfinished game')).toBeNull();
@@ -215,6 +220,19 @@ describe('the setup form', () => {
     expect(screen.getByText('Enter a name for the right team.')).toBeInTheDocument();
     // Still on the form, and nothing was created.
     expect(screen.getByRole('heading', { name: 'Create a game' })).toBeInTheDocument();
+  });
+
+  test('the setup is a form so keyboard submission reaches the same validation', async () => {
+    await openApp();
+    await press('Create game');
+
+    const form = screen.getByRole('form', { name: 'Create a game' });
+    await act(async () => {
+      fireEvent.submit(form);
+    });
+
+    expect(screen.getByText('Enter a name for the left team.')).toBeInTheDocument();
+    expect(screen.getByText('Enter a name for the right team.')).toBeInTheDocument();
   });
 
   test('a refused submission puts an alert on screen and moves focus to it', async () => {

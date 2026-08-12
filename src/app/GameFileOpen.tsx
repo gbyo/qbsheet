@@ -47,6 +47,7 @@ export default function GameFileOpen(props: {
   const { label = 'Open game file', onOpen } = props;
   const input = useRef<HTMLInputElement | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
+  const [diagnostic, setDiagnostic] = useState('');
   const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState(false);
   const [choice, setChoice] = useState<IPendingChoice | null>(null);
@@ -67,26 +68,34 @@ export default function GameFileOpen(props: {
     if (!file) return;
     setBusy(true);
     setErrors([]);
+    setDiagnostic('');
     setChoice(null);
     setNeedsRules(null);
     setNeedsRoster(null);
-    const result = await new FileGameSource(file).open();
-    setBusy(false);
-    if (!result.ok) {
-      // A gap the room can answer gets a form; anything else is something upstream has to fix, and
-      // saying so plainly is the most useful thing this can do.
-      if (result.source && (result.needsScoringRules || result.needsRoster)) {
-        await resolve(result.source, result.index ?? 0, {});
+    try {
+      const result = await new FileGameSource(file).open();
+      if (!result.ok) {
+        // A gap the room can answer gets a form; anything else is something upstream has to fix, and
+        // saying so plainly is the most useful thing this can do.
+        if (result.source && (result.needsScoringRules || result.needsRoster)) {
+          await resolve(result.source, result.index ?? 0, {});
+          return;
+        }
+        setErrors(result.errors);
         return;
       }
-      setErrors(result.errors);
-      return;
+      if (result.kind === 'choice') {
+        setChoice({ source: result.source, candidates: orderCandidates(result.source.candidates) });
+        return;
+      }
+      await accept(result.definition);
+    } catch (error: unknown) {
+      const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+      setErrors(['QBSheet encountered an unexpected error while opening this file. Try another copy or ask tournament staff for the original file.']);
+      setDiagnostic(detail);
+    } finally {
+      setBusy(false);
     }
-    if (result.kind === 'choice') {
-      setChoice({ source: result.source, candidates: orderCandidates(result.source.candidates) });
-      return;
-    }
-    await accept(result.definition);
   };
 
   /**
@@ -197,6 +206,12 @@ export default function GameFileOpen(props: {
               <li key={error}>{error}</li>
             ))}
           </ul>
+          {diagnostic !== '' && (
+            <details className="shell-error-details">
+              <summary>Technical details</summary>
+              <pre>{diagnostic}</pre>
+            </details>
+          )}
         </div>
       )}
     </div>

@@ -433,6 +433,14 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+.operator-identity {
+  max-width: 520px;
+}
+
+.operator-identity .shell-input {
+  max-width: 360px;
+}
+
 .recent-list {
   margin: 0;
   padding: 0;
@@ -441,23 +449,38 @@ body {
 
 .recent-item {
   display: grid;
-  grid-template-columns: 1fr auto auto;
-  align-items: center;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
   gap: 16px;
   padding: 12px 0;
   border-top: 1px solid var(--room-border);
 }
 
-.recent-score {
+.recent-primary {
   margin: 2px 0 0;
   font-size: 15px;
   font-variant-numeric: tabular-nums;
 }
 
-.recent-attempt {
-  margin: 2px 0 0;
-  font-size: 12px;
+.recent-state {
+  font-weight: 600;
+}
+
+.recent-state.is-success {
+  color: var(--room-success);
+}
+
+.recent-state.is-warning {
+  color: var(--room-warning);
+}
+
+.recent-state.is-local {
   color: var(--room-muted);
+}
+
+.recent-primary-separator {
+  margin: 0 6px;
+  color: var(--room-faint);
 }
 
 .recent-when {
@@ -469,8 +492,19 @@ body {
 .recent-status {
   display: grid;
   gap: 2px;
-  margin: 0;
+  margin: 8px 0 0;
   font-size: 12px;
+}
+
+.recent-details {
+  grid-column: 1 / -1;
+  font-size: 12px;
+}
+
+.recent-details summary {
+  display: inline-block;
+  color: var(--room-muted);
+  cursor: pointer;
 }
 
 .recent-status div {
@@ -529,7 +563,7 @@ body {
     grid-template-columns: 1fr auto;
   }
 
-  .recent-status {
+  .recent-details {
     grid-column: 1 / -1;
     grid-row: 2;
   }
@@ -904,6 +938,16 @@ body {
  */
 .manual-shell {
   padding-bottom: 32px;
+}
+
+/* Keep the decision to start or cancel reachable while a long setup is being filled in. */
+.manual-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  padding: 10px 0 max(10px, env(safe-area-inset-bottom));
+  border-top: 1px solid var(--room-border-strong);
+  background: var(--room-surface);
 }
 
 .manual-field {

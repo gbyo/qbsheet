@@ -31,7 +31,7 @@
  * knows what is wrong and will not say, and the fix — enumerate the problems next to the fields
  * that caused them, and move focus to the first group — is both more useful and less work.
  */
-import { RefObject, useEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, RefObject, useEffect, useMemo, useRef, useState } from 'react';
 import { IGameDefinition } from '../game/GameDefinition';
 import {
   IManualGameInput,
@@ -46,6 +46,7 @@ import { readRosterLines } from '../game/Roster';
 import { IBasicScoringRulesInput, basicScoringRulesDefaults } from '../qbj/BasicScoringRules';
 import { SubstitutionPolicy } from '../scoring/RoomProcedure';
 import BasicScoringRulesEditor, { numberValue } from './BasicScoringRulesEditor';
+import useLeaveWarning from './useLeaveWarning';
 
 /** The form as it opens: common rules, no round options, nothing typed. */
 function emptyInput(): IManualGameInput {
@@ -58,12 +59,74 @@ function emptyInput(): IManualGameInput {
   };
 }
 
+/** The in-progress setup, separate from game records because it is not a game yet. */
+export const manualDraftStorageKey = 'qbsheet.manual-game-draft.v1';
+
+function manualDraftStorage(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null {
+  try {
+    return typeof window !== 'undefined' ? window.localStorage : null;
+  } catch {
+    return null;
+  }
+}
+
+function isDraftTeam(value: unknown): value is IManualTeamInput {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as { name?: unknown }).name === 'string' &&
+    typeof (value as { players?: unknown }).players === 'string'
+  );
+}
+
+/** Read a draft defensively; a malformed local value should never stop the welcome screen opening. */
+export function readManualGameDraft(): IManualGameInput | null {
+  const storage = manualDraftStorage();
+  if (!storage) return null;
+  try {
+    const parsed = JSON.parse(storage.getItem(manualDraftStorageKey) ?? 'null') as Partial<IManualGameInput> | null;
+    if (
+      !parsed ||
+      typeof parsed.gameLabel !== 'string' ||
+      !isDraftTeam(parsed.left) ||
+      !isDraftTeam(parsed.right) ||
+      typeof parsed.rules !== 'object' ||
+      parsed.rules === null ||
+      typeof parsed.options !== 'object' ||
+      parsed.options === null
+    ) {
+      return null;
+    }
+    return {
+      gameLabel: parsed.gameLabel,
+      left: parsed.left,
+      right: parsed.right,
+      rules: { ...basicScoringRulesDefaults, ...(parsed.rules as object) },
+      options: { ...manualRoundOptionDefaults, ...(parsed.options as object) },
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function clearManualGameDraft(): void {
+  try {
+    manualDraftStorage()?.removeItem(manualDraftStorageKey);
+  } catch {
+    // Storage may disappear between render and cancel; the leave warning remains the fallback.
+  }
+}
+
+function hasManualInput(input: IManualGameInput): boolean {
+  return JSON.stringify(input) !== JSON.stringify(emptyInput());
+}
+
 export default function ManualGameSetup(props: {
   onStart: (definition: IGameDefinition) => void | Promise<void>;
   onCancel: () => void;
 }) {
   const { onStart, onCancel } = props;
-  const [input, setInput] = useState<IManualGameInput>(emptyInput);
+  const [input, setInput] = useState<IManualGameInput>(() => readManualGameDraft() ?? emptyInput());
   /**
    * How many times Start game has been pressed.
    *
@@ -72,6 +135,7 @@ export default function ManualGameSetup(props: {
    * and a boolean that is already true says nothing happened.
    */
   const [submissions, setSubmissions] = useState(0);
+  const [startError, setStartError] = useState('');
 
   const set = (patch: Partial<IManualGameInput>) => setInput((current) => ({ ...current, ...patch }));
   const setOptions = (patch: Partial<IManualRoundOptions>) =>
@@ -85,8 +149,22 @@ export default function ManualGameSetup(props: {
 
   const result = useMemo(() => defineManualGame(input), [input]);
   const problems = result.ok ? [] : result.problems;
+  const dirty = hasManualInput(input);
   const problemsIn = (section: ManualGameSection) =>
     problems.filter((problem) => problem.section === section).map((problem) => problem.message);
+
+  useLeaveWarning({ gameInProgress: false, localSaveFailed: false, handoffOutstanding: false, setupDirty: dirty });
+
+  useEffect(() => {
+    const storage = manualDraftStorage();
+    if (!storage) return;
+    try {
+      if (dirty) storage.setItem(manualDraftStorageKey, JSON.stringify(input));
+      else storage.removeItem(manualDraftStorageKey);
+    } catch {
+      // The before-unload warning still protects a draft when local storage is unavailable.
+    }
+  }, [dirty, input]);
 
   const errorRefs = {
     teams: useRef<HTMLDivElement>(null),
@@ -108,10 +186,26 @@ export default function ManualGameSetup(props: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [submissions]);
 
-  const submit = () => {
+  const submit = async (event?: FormEvent<HTMLFormElement>) => {
+    event?.preventDefault();
     setSubmissions((count) => count + 1);
+    setStartError('');
     const defined = defineManualGame(input);
-    if (defined.ok) void onStart(defined.definition);
+    if (!defined.ok) return;
+    try {
+      await onStart(defined.definition);
+      clearManualGameDraft();
+    } catch {
+      setStartError(
+        'This game could not be saved locally. Your setup is still here; try again after storage is repaired.',
+      );
+    }
+  };
+
+  const cancel = () => {
+    if (dirty && !window.confirm('Discard this game setup?')) return;
+    clearManualGameDraft();
+    onCancel();
   };
 
   const showErrors = submissions > 0;
@@ -168,6 +262,7 @@ export default function ManualGameSetup(props: {
         </p>
       </header>
 
+      <form aria-label="Create a game" onSubmit={submit}>
       <section className="shell-section">
         <h2 className="shell-heading">This game</h2>
         <div className="manual-field">
@@ -307,14 +402,17 @@ export default function ManualGameSetup(props: {
         <SectionErrors problems={problemsIn('options')} show={showErrors} anchor={errorRefs.options} />
       </section>
 
-      <div className="shell-actions">
-        <button type="button" className="shell-button is-primary" onClick={submit}>
+      {startError !== '' && <p className="shell-warning" role="alert">{startError}</p>}
+      {dirty && <p className="shell-hint">Draft saved on this device while you type.</p>}
+      <div className="shell-actions manual-actions">
+        <button type="submit" className="shell-button is-primary">
           Start game
         </button>
-        <button type="button" className="shell-button" onClick={onCancel}>
+        <button type="button" className="shell-button" onClick={cancel}>
           Cancel
         </button>
       </div>
+      </form>
     </main>
   );
 }

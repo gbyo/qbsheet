@@ -81,13 +81,28 @@ export default function ScoringScreen(props: {
   resultDelivery: ResultDeliveryService;
   connection: IConnectedSession | null;
   durable: boolean;
+  /** Optional device identity included in the portable result and connected presence headers. */
+  operatorName?: string;
+  /** True when the record store is currently healthy as well as backed by IndexedDB. */
+  storageDegraded?: boolean;
   onComplete: (recordId: string) => void | Promise<void>;
   /** A repair produced new credentials for the same game. Persist them; nothing else changes. */
   onConnectionRepaired: (change: Partial<IConnectedSession>) => void;
   /** The room gave up on tournament control for this game. The game continues, offline. */
   onConnectionLost: () => void;
 }) {
-  const { record, store, resultDelivery, connection, onComplete, onConnectionRepaired, onConnectionLost } = props;
+  const {
+    record,
+    store,
+    resultDelivery,
+    connection,
+    durable,
+    operatorName,
+    storageDegraded = false,
+    onComplete,
+    onConnectionRepaired,
+    onConnectionLost,
+  } = props;
   const [downloadedAt, setDownloadedAt] = useState<string | undefined>(record.qbjDownloadedAt);
   const [repairing, setRepairing] = useState(false);
   const update = useAppUpdate();
@@ -107,12 +122,13 @@ export default function ScoringScreen(props: {
         roomId: connection.roomId,
         token: connection.roomToken,
         deviceId: connection.deviceId,
+        operatorName: operatorName?.trim() || undefined,
         roomName: connection.roomName,
       },
       credentials: { sessionId: connection.sessionId as string, token: connection.sessionToken as string },
       tournamentKey: connection.tournamentKey,
     };
-  }, [record, connection]);
+  }, [record, connection, operatorName]);
 
   /**
    * Only the fields a repair actually produced.
@@ -264,8 +280,10 @@ export default function ScoringScreen(props: {
         roundName={record.package.round.name}
         roomName={record.package.room?.name}
         packetName={record.package.round.packetName}
+        operatorName={operatorName}
         procedure={record.package.procedure}
         connection={live ? runtime.connection : RoomConnectionState.Connected}
+        recordDurablyStored={durable && !storageDegraded}
         degradedMessage={live ? runtime.degradedMessage : undefined}
         onSubmit={submit}
         onDownload={write}

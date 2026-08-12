@@ -13,8 +13,9 @@
  * because the second most common thing that goes wrong with a downloads folder is that somebody
  * cleared it.
  */
-import { IStoredGameRecord } from '../game/GameStore';
+import { IStoredGameRecord, isDelivered, retentionMsFor } from '../game/GameStore';
 import { gamePackageLabel, gamePackageMatchup } from '../game/GamePackage';
+import { isManualGame } from '../game/GameDefinition';
 import { useState } from 'react';
 
 function timeOfDay(iso: string | undefined): string {
@@ -26,6 +27,23 @@ function timeOfDay(iso: string | undefined): string {
 
 function attemptText(count: number): string {
   return `${count} attempt${count === 1 ? '' : 's'}`;
+}
+
+function primaryState(record: IStoredGameRecord): { label: string; tone: 'success' | 'warning' | 'local' } {
+  if (record.serverDelivery === 'none' || isManualGame(record.package)) {
+    return { label: 'Local only', tone: 'local' };
+  }
+  if (isDelivered(record)) return { label: 'Delivered', tone: 'success' };
+  return { label: 'Needs attention', tone: 'warning' };
+}
+
+function retentionDate(record: IStoredGameRecord): string {
+  const completed = new Date(record.completedAt ?? '').getTime();
+  if (!Number.isFinite(completed)) return '';
+  return new Date(completed + retentionMsFor(record.package)).toLocaleDateString([], {
+    month: 'short',
+    day: 'numeric',
+  });
 }
 
 function serverStatus(record: IStoredGameRecord): { title: string; detail?: string; secondary?: string } {
@@ -91,47 +109,56 @@ export default function RecentGames(props: {
           <li key={record.id} className="recent-item">
             <div className="recent-main">
               <p className="recent-context">{gamePackageLabel(record.package)}</p>
-              {record.attempt > 1 && <p className="recent-attempt">Attempt {record.attempt}</p>}
-              <p className="recent-score">
+              <p className="recent-primary">
+                <span className={`recent-state is-${primaryState(record).tone}`}>
+                  {primaryState(record).label}
+                </span>
+                <span className="recent-primary-separator">·</span>
                 <ScoreLine record={record} />
               </p>
-              <p className="recent-when">Completed {timeOfDay(record.completedAt)}</p>
+              <p className="recent-when">
+                Completed {timeOfDay(record.completedAt)}
+                {retentionDate(record) && <> · Kept on this device until {retentionDate(record)}</>}
+              </p>
             </div>
-            <dl className="recent-status">
-              <div>
-                <dt>Server</dt>
-                <dd>
-                  {(() => {
-                    const status = serverStatus(record);
-                    return (
-                      <>
-                        <span>{status.title}</span>
-                        {status.detail && <small className="recent-status-detail">{status.detail}</small>}
-                        {status.secondary && <small className="recent-status-secondary">{status.secondary}</small>}
-                        {record.serverDeliveryLedger?.fingerprint && (
-                          <details className="recent-receipt">
-                            <summary>Receipt details</summary>
-                            <span>Fingerprint {record.serverDeliveryLedger.fingerprint}</span>
-                          </details>
-                        )}
-                      </>
-                    );
-                  })()}
-                </dd>
-              </div>
-              <div>
-                <dt>QBJ</dt>
-                <dd>{record.qbjDownloadedAt ? `Downloaded · ${timeOfDay(record.qbjDownloadedAt)}` : 'Not downloaded'}</dd>
-              </div>
-              <div>
-                <dt>Handoff</dt>
-                <dd>
-                  {record.handoffAcknowledgedAt
-                    ? `Confirmed · ${timeOfDay(record.handoffAcknowledgedAt)}`
-                    : 'Not confirmed'}
-                </dd>
-              </div>
-            </dl>
+            <details className="recent-details">
+              <summary>Receipts and attempts</summary>
+              <dl className="recent-status">
+                <div>
+                  <dt>Server</dt>
+                  <dd>
+                    {(() => {
+                      const status = serverStatus(record);
+                      return (
+                        <>
+                          <span>{status.title}</span>
+                          {status.detail && <small className="recent-status-detail">{status.detail}</small>}
+                          {status.secondary && <small className="recent-status-secondary">{status.secondary}</small>}
+                          {record.serverDeliveryLedger?.fingerprint && (
+                            <details className="recent-receipt">
+                              <summary>Receipt details</summary>
+                              <span>Fingerprint {record.serverDeliveryLedger.fingerprint}</span>
+                            </details>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </dd>
+                </div>
+                <div>
+                  <dt>QBJ</dt>
+                  <dd>{record.qbjDownloadedAt ? `Downloaded · ${timeOfDay(record.qbjDownloadedAt)}` : 'Not downloaded'}</dd>
+                </div>
+                <div>
+                  <dt>Handoff</dt>
+                  <dd>
+                    {record.handoffAcknowledgedAt
+                      ? `Confirmed · ${timeOfDay(record.handoffAcknowledgedAt)}`
+                      : 'Not confirmed'}
+                  </dd>
+                </div>
+              </dl>
+            </details>
             <div className="recent-actions">
               {onRetry && canRetry?.(record) && (
                 <button
