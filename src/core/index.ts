@@ -12,7 +12,9 @@ export * from '../game/OpenGameDefinition';
 export * from '../game/PortableQbj';
 export * from '../game/Roster';
 
+export * from '../qbj/AdvancedScoringRules';
 export * from '../qbj/BasicScoringRules';
+export * from '../qbj/ScoringRulesInput';
 export * from '../qbj/ParseQbjAssignment';
 export * from '../qbj/QbjResult';
 export * from '../qbj/QbjScoringRules';
