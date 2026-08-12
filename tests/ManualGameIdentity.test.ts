@@ -15,7 +15,7 @@ import { describe, expect, test } from 'vitest';
 import { memoryGameStore } from '../src/game/GameStore';
 import { gamePackageIdentity } from '../src/game/GamePackage';
 import { defineManualGame, newManualRecordIdentity } from '../src/game/ManualGame';
-import { basicScoringRulesDefaults } from '../src/qbj/BasicScoringRules';
+import { basicRulesInput } from '../src/qbj/ScoringRulesInput';
 import { manualRoundOptionDefaults } from '../src/game/ManualGame';
 import { setupFromPackage } from '../src/app/App';
 import { validPackage } from './packages';
@@ -25,7 +25,7 @@ function manualDefinition(label = 'Practice game') {
     gameLabel: label,
     left: { name: 'Ninety Six', players: 'Sarah\nJames' },
     right: { name: 'Greenwood', players: 'Emma\nJordan' },
-    rules: { ...basicScoringRulesDefaults },
+    rules: basicRulesInput(),
     options: { ...manualRoundOptionDefaults },
   });
   if (!result.ok) throw new Error('fixture does not define a game');

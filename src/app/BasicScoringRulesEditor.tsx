@@ -34,7 +34,7 @@ export function numberValue(raw: string): number | undefined {
 }
 
 export type BasicScoringRulesVariant =
-  /** What a QBJ with no rules in it is asked: values, counts, bonuses, whether there is a clock. */
+  /** The four questions: values, counts, bonuses, whether there is a clock. */
   | 'basic'
   /** The same, plus the floor size, bouncebacks, overtime and lightning. */
   | 'full';

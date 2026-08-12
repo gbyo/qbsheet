@@ -34,18 +34,31 @@
 import { FormEvent, RefObject, useEffect, useMemo, useRef, useState } from 'react';
 import { IGameDefinition } from '../game/GameDefinition';
 import {
+  IManualBreakInput,
   IManualGameInput,
   IManualRoundOptions,
   IManualTeamInput,
   ManualGameSection,
   defaultManualGameLabel,
   defineManualGame,
+  manualRoomProcedure,
   manualRoundOptionDefaults,
+  newManualBreak,
 } from '../game/ManualGame';
 import { readRosterLines } from '../game/Roster';
-import { IBasicScoringRulesInput, basicScoringRulesDefaults } from '../qbj/BasicScoringRules';
-import { SubstitutionPolicy } from '../scoring/RoomProcedure';
-import BasicScoringRulesEditor, { numberValue } from './BasicScoringRulesEditor';
+import {
+  IScoringRulesInput,
+  readScoringRulesInput,
+  scoringRulesInputDefaults,
+} from '../qbj/ScoringRulesInput';
+import {
+  SubstitutionPolicy,
+  maximumRoomBreakLabelLength,
+  maximumRoomBreaks,
+  substitutionOpportunityPhrase,
+} from '../scoring/RoomProcedure';
+import { numberValue } from './BasicScoringRulesEditor';
+import ScoringRulesEditor from './ScoringRulesEditor';
 import useLeaveWarning from './useLeaveWarning';
 
 /** The form as it opens: common rules, no round options, nothing typed. */
@@ -54,7 +67,7 @@ function emptyInput(): IManualGameInput {
     gameLabel: '',
     left: { name: '', players: '' },
     right: { name: '', players: '' },
-    rules: { ...basicScoringRulesDefaults },
+    rules: scoringRulesInputDefaults(),
     options: { ...manualRoundOptionDefaults },
   };
 }
@@ -91,18 +104,20 @@ export function readManualGameDraft(): IManualGameInput | null {
       typeof parsed.gameLabel !== 'string' ||
       !isDraftTeam(parsed.left) ||
       !isDraftTeam(parsed.right) ||
-      typeof parsed.rules !== 'object' ||
-      parsed.rules === null ||
       typeof parsed.options !== 'object' ||
       parsed.options === null
     ) {
       return null;
     }
+    // Migrated on read rather than behind a new storage key, because the point of a draft is that a
+    // half-typed practice setup survives — including across the release that added advanced rules.
+    const rules = readScoringRulesInput(parsed.rules);
+    if (!rules) return null;
     return {
       gameLabel: parsed.gameLabel,
       left: parsed.left,
       right: parsed.right,
-      rules: { ...basicScoringRulesDefaults, ...(parsed.rules as object) },
+      rules,
       options: { ...manualRoundOptionDefaults, ...(parsed.options as object) },
     };
   } catch {
@@ -127,7 +142,7 @@ export interface IManualGamePreset {
   label: string;
   left: IManualTeamInput;
   right: IManualTeamInput;
-  rules: IBasicScoringRulesInput;
+  rules: IScoringRulesInput;
   options: IManualRoundOptions;
   savedAt: string;
 }
@@ -137,9 +152,21 @@ function presetStorageValue(value: IManualGamePreset): IManualGamePreset {
     ...value,
     left: { ...value.left },
     right: { ...value.right },
-    rules: { ...value.rules },
+    rules: cloneRules(value.rules),
     options: { ...value.options },
   };
+}
+
+/**
+ * A copy of the rules that shares nothing with the original.
+ *
+ * A shallow spread would leave the advanced form's answer-type rows shared between the preset and the
+ * live draft, and editing one would silently edit the other.
+ */
+function cloneRules(rules: IScoringRulesInput): IScoringRulesInput {
+  return rules.mode === 'advanced'
+    ? { mode: 'advanced', advanced: { ...rules.advanced, answerTypes: rules.advanced.answerTypes.map((row) => ({ ...row })) } }
+    : { mode: 'basic', basic: { ...rules.basic } };
 }
 
 /** Read recent team/rule presets defensively; local storage is a convenience, never a dependency. */
@@ -158,18 +185,18 @@ export function readManualGamePresets(): IManualGamePreset[] {
         typeof candidate.savedAt !== 'string' ||
         !isDraftTeam(candidate.left) ||
         !isDraftTeam(candidate.right) ||
-        typeof candidate.rules !== 'object' ||
-        candidate.rules === null ||
         typeof candidate.options !== 'object' ||
         candidate.options === null
       ) {
         return [];
       }
+      const rules = readScoringRulesInput(candidate.rules);
+      if (!rules) return [];
       const input: IManualGameInput = {
         gameLabel: candidate.label,
         left: candidate.left,
         right: candidate.right,
-        rules: { ...basicScoringRulesDefaults, ...(candidate.rules as object) },
+        rules,
         options: { ...manualRoundOptionDefaults, ...(candidate.options as object) },
       };
       if (!defineManualGame(input).ok) return [];
@@ -259,13 +286,13 @@ export default function ManualGameSetup(props: {
       {
         id: 'defaults',
         label: 'QBSheet defaults',
-        rules: { ...basicScoringRulesDefaults },
+        rules: scoringRulesInputDefaults(),
         options: { ...manualRoundOptionDefaults },
       },
       ...presets.map((preset) => ({
         id: preset.id,
         label: preset.label,
-        rules: { ...preset.rules },
+        rules: cloneRules(preset.rules),
         options: { ...preset.options },
       })),
     ],
@@ -342,7 +369,7 @@ export default function ManualGameSetup(props: {
   const loadRules = () => {
     const preset = rulePresets.find((candidate) => candidate.id === rulePresetId);
     if (!preset) return;
-    setInput((current) => ({ ...current, rules: { ...preset.rules }, options: { ...preset.options } }));
+    setInput((current) => ({ ...current, rules: cloneRules(preset.rules), options: { ...preset.options } }));
   };
 
   const teamSide = (side: 'left' | 'right') => {
@@ -492,12 +519,12 @@ export default function ManualGameSetup(props: {
         <h2 id="manual-rules-heading" className="shell-heading">
           Scoring rules
         </h2>
-        <BasicScoringRulesEditor
+        <ScoringRulesEditor
           idPrefix="manual-rules"
-          variant="full"
+          basicVariant="full"
           value={input.rules}
-          onChange={(rules: IBasicScoringRulesInput) => set({ rules })}
-          timedHint="A timed round ends when the moderator calls time rather than after a fixed count. QBSheet can show a half clock if halves are configured below; otherwise the moderator keeps time."
+          onChange={(rules: IScoringRulesInput) => set({ rules })}
+          timedHint="A timed round ends when the moderator calls time rather than after a fixed count. QBSheet can show a clock for each play segment if breaks are configured below; otherwise the moderator keeps time."
         />
         <SectionErrors problems={problemsIn('rules')} show={showErrors} anchor={errorRefs.rules} />
       </section>
@@ -515,24 +542,41 @@ export default function ManualGameSetup(props: {
             id="manual-halves"
             type="checkbox"
             checked={input.options.halves}
-            onChange={(event) => setOptions({ halves: event.target.checked })}
+            onChange={(event) =>
+              // Turning breaks off takes the settings that only exist because they were on with it.
+              // A hidden break list would otherwise reach the procedure from a screen that had stopped
+              // showing it, which is the one way a room gets a rule nobody can see they configured.
+              setOptions(
+                event.target.checked
+                  ? { halves: true }
+                  : { halves: false, halfLengthMinutes: undefined, breaks: undefined },
+              )
+            }
           />
-          Play in halves
+          The round has breaks
         </label>
 
         {input.options.halves && (
-          <div className="manual-field manual-field-inset">
-            <label className="shell-label" htmlFor="manual-half-length">
-              Half length in minutes
-            </label>
-            <input
-              id="manual-half-length"
-              className="shell-input manual-number"
-              type="number"
-              value={input.options.halfLengthMinutes === undefined ? '' : String(input.options.halfLengthMinutes)}
-              onChange={(event) => setOptions({ halfLengthMinutes: numberValue(event.target.value) })}
+          <div className="manual-field-inset">
+            <div className="manual-field">
+              <label className="shell-label" htmlFor="manual-half-length">
+                Minutes of play between breaks
+              </label>
+              <input
+                id="manual-half-length"
+                className="shell-input manual-number"
+                type="number"
+                value={input.options.halfLengthMinutes === undefined ? '' : String(input.options.halfLengthMinutes)}
+                onChange={(event) => setOptions({ halfLengthMinutes: numberValue(event.target.value) })}
+              />
+              <p className="shell-hint">Blank means QBSheet does not run the clock.</p>
+            </div>
+
+            <ManualBreaksEditor
+              breaks={input.options.breaks ?? []}
+              substitutionPolicy={input.options.substitutionPolicy}
+              onChange={(breaks) => setOptions({ breaks })}
             />
-            <p className="shell-hint">Blank means QBSheet does not run the clock.</p>
           </div>
         )}
 
@@ -589,6 +633,14 @@ export default function ManualGameSetup(props: {
               {label}
             </label>
           ))}
+          {/* The restrictive policy is only as precise as the breaks above it, so it says which ones
+              it means rather than leaving the director to work out whether "breaks" covers theirs. */}
+          {input.options.substitutionPolicy === 'breaks-timeouts-overtime' && (
+            <p className="shell-hint manual-subs-hint">
+              {`Lineup changes will be available ${substitutionOpportunityPhrase(manualRoomProcedure(input.options))}.`}
+              {!input.options.halves && ' This round has no breaks configured, so only timeouts and checkpoints qualify.'}
+            </p>
+          )}
         </fieldset>
 
         <SectionErrors problems={problemsIn('options')} show={showErrors} anchor={errorRefs.options} />
@@ -606,6 +658,106 @@ export default function ManualGameSetup(props: {
       </div>
       </form>
     </main>
+  );
+}
+
+/**
+ * The points a round stops at.
+ *
+ * # Rows, not a comma-separated box
+ *
+ * "5, 10, 15" is faster to type and worse to live with: it cannot carry the name the tournament uses
+ * for each break, and a typo in it is a parse error rather than a field with something wrong in it.
+ * The scorer shows these names — a room at "End of set 1" is being told where it is, a room told
+ * "Halftime" after tossup 5 of 24 is being told something false — so the name is worth a field.
+ *
+ * # Empty is a meaningful state
+ *
+ * No rows means the room takes one break wherever the moderator calls it, which is what every
+ * procedure written before scheduled breaks existed says. So the list opens empty and says so, rather
+ * than starting with a row that would quietly commit a practice game to a break after tossup 10.
+ */
+function ManualBreaksEditor(props: {
+  breaks: IManualBreakInput[];
+  substitutionPolicy: SubstitutionPolicy;
+  onChange: (breaks: IManualBreakInput[] | undefined) => void;
+}) {
+  const { breaks, substitutionPolicy: policy, onChange } = props;
+
+  const replace = (position: number, patch: Partial<IManualBreakInput>) =>
+    onChange(breaks.map((row, index) => (index === position ? { ...row, ...patch } : row)));
+  // Undefined rather than an empty array when the last row goes, so a procedure with no scheduled
+  // breaks is indistinguishable from one that never had the field. See `manualRoomProcedure`.
+  const remove = (position: number) => {
+    const next = breaks.filter((_, index) => index !== position);
+    onChange(next.length === 0 ? undefined : next);
+  };
+
+  return (
+    <fieldset className="manual-fieldset manual-breaks">
+      <legend className="shell-label">Scheduled breaks</legend>
+      <p className="shell-hint manual-breaks-hint">
+        The tossups this round stops after. Leave this empty for a single break the moderator calls.
+        {policy === 'breaks-timeouts-overtime' && ' These are the points the lineup may change at.'}
+      </p>
+
+      {breaks.length === 0 && <p className="shell-hint">No scheduled breaks.</p>}
+
+      {breaks.map((row, position) => (
+        <div key={row.key} className="manual-break-row">
+          <div className="manual-break-field">
+            <label className="shell-label" htmlFor={`manual-break-after-${row.key}`}>
+              After tossup
+            </label>
+            <input
+              id={`manual-break-after-${row.key}`}
+              className="shell-input manual-number"
+              type="number"
+              inputMode="numeric"
+              min={1}
+              value={row.afterTossup === undefined ? '' : String(row.afterTossup)}
+              onChange={(event) => replace(position, { afterTossup: numberValue(event.target.value) })}
+            />
+          </div>
+          <div className="manual-break-field manual-break-field-grow">
+            <label className="shell-label" htmlFor={`manual-break-label-${row.key}`}>
+              Name (optional)
+            </label>
+            <input
+              id={`manual-break-label-${row.key}`}
+              className="shell-input"
+              type="text"
+              autoComplete="off"
+              maxLength={maximumRoomBreakLabelLength}
+              placeholder={`Break ${position + 1}`}
+              value={row.label}
+              onChange={(event) => replace(position, { label: event.target.value })}
+            />
+          </div>
+          <button
+            type="button"
+            className="shell-button manual-break-remove"
+            // The row is identified by what it says, not by its position: "Remove break 2" is the same
+            // words on every row after one is deleted, and a screen reader user would be pressing a
+            // button whose name no longer describes what it removes.
+            aria-label={`Remove the break after tossup ${row.afterTossup ?? position + 1}`}
+            onClick={() => remove(position)}
+          >
+            Remove
+          </button>
+        </div>
+      ))}
+
+      {breaks.length < maximumRoomBreaks && (
+        <button
+          type="button"
+          className="shell-button manual-break-add"
+          onClick={() => onChange([...breaks, newManualBreak()])}
+        >
+          Add a break
+        </button>
+      )}
+    </fieldset>
   );
 }
 

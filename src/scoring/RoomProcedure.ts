@@ -19,14 +19,53 @@
  * has always had to be told by the moderator that time expired. Rather than hard-coding a number
  * that would be wrong for half the tournaments that use it, the length is a setting the director
  * fills in when they want the room to show a clock, and is simply absent otherwise.
+ *
+ * # Breaks are stated, not approximated
+ *
+ * `halves` says a room stops once, somewhere the moderator chooses. That is one tournament's
+ * procedure, not every tournament's: events break after tossup 5 and 10, between sets, at the end of
+ * a packet, or at several stated points in a round. Version 3 therefore carries `breaks` — the
+ * tossups after which this room stops — and `halves` remains for the rooms that only ever wanted the
+ * single moderator-chosen break, and for every procedure already written to a file or a wire.
+ *
+ * A break is the boundary everything procedural hangs off: it is where the score is agreed, where
+ * substitutions are available under the restrictive policy, and where the clock pauses. So stating
+ * the breaks precisely is what lets substitution availability be precise, which is the whole point
+ * of configuring them.
  */
 
-/** Bumped when the shape changes. Older versions are migrated by `readRoomProcedure`. */
-export const roomProcedureVersion = 2;
+/**
+ * Bumped when the shape changes. Older versions are migrated by `readRoomProcedure`.
+ *
+ * Every version in `readableRoomProcedureVersions` is one this build can interpret without guessing.
+ * A procedure from the future is not read at all — a room that silently ignored a break it did not
+ * understand would allow substitutions the tournament forbade.
+ */
+export const roomProcedureVersion = 3;
 export const legacyRoomProcedureVersion = 1;
+export const readableRoomProcedureVersions: readonly number[] = [1, 2, 3];
 
 export type ProtestCheckpointPolicy = 'none' | 'phase-boundaries' | 'strict-overtime';
 export type SubstitutionPolicy = 'any-boundary' | 'breaks-timeouts-overtime';
+
+/**
+ * One point in the round where the room stops.
+ *
+ * `afterTossup` is a tossup number rather than a clock time because that is the boundary a
+ * scoresheet can actually be at: a break "at 4:00 remaining" is a break the room takes after
+ * whichever tossup was in progress, and the scorekeeper knows that number and not the clock's.
+ */
+export interface IRoomBreak {
+  /** The break falls after this tossup has been played. Whole, at least 1. */
+  afterTossup: number;
+  /**
+   * What the room calls this break — "Halftime", "End of set 1".
+   *
+   * Optional because a break with no name is still a break, and a fabricated name would be the
+   * tournament's procedure stated in words the tournament did not use.
+   */
+  label?: string;
+}
 
 export interface IRoomProcedure {
   version: number;
@@ -35,8 +74,21 @@ export interface IRoomProcedure {
    *
    * Purely operational: the room gets somewhere to stop, agree the score with the moderator, and
    * substitute. Nothing about the resulting `Match` changes.
+   *
+   * This is the imprecise form, kept because it is what every existing procedure says: one break,
+   * at a point the moderator picks. When `breaks` is configured it supersedes this — see
+   * `roomBreaksAreScheduled`.
    */
   halves: boolean;
+  /**
+   * The tossups after which this room stops, in ascending order.
+   *
+   * Absent means the room's breaks are not scheduled, and `halves` decides whether it takes one at
+   * all. Present means these are the breaks: the room may not stop between them, which is exactly
+   * what makes the restrictive substitution policy mean something a director stated rather than an
+   * approximation of it.
+   */
+  breaks?: IRoomBreak[];
   /**
    * Minutes in a half, when the room should show a clock.
    *
@@ -62,6 +114,16 @@ export function defaultRoomProcedure(): IRoomProcedure {
 /** Longest half a director can configure. Four hours, i.e. "this is clearly a typo" territory. */
 export const maximumHalfLengthMinutes = 240;
 
+/**
+ * The most breaks a round can be cut into, and the highest tossup one can fall after.
+ *
+ * Both are chosen to be absurd rather than restrictive: a round with 32 breaks in it is a typo, and
+ * so is a break after tossup 400. Neither is a rule about how quiz bowl is played.
+ */
+export const maximumRoomBreaks = 32;
+export const maximumRoomBreakTossup = 400;
+export const maximumRoomBreakLabelLength = 60;
+
 /** The most timeouts per team the room will track. Well above any real rule set. */
 export const maximumTimeoutsPerTeam = 9;
 
@@ -75,6 +137,134 @@ export function protestCheckpointPolicy(procedure: IRoomProcedure | undefined): 
 export function substitutionPolicy(procedure: IRoomProcedure | undefined): SubstitutionPolicy {
   return procedure?.substitutionPolicy ?? 'any-boundary';
 }
+
+// #region breaks
+
+/** The configured breaks, ascending. Empty when this room's breaks are not scheduled. */
+export function roomBreaks(procedure: IRoomProcedure | undefined): IRoomBreak[] {
+  return procedure?.breaks ?? [];
+}
+
+/**
+ * Whether this room's breaks are stated as tossup numbers.
+ *
+ * The distinction the rest of the room turns on: a scheduled room stops where the director said and
+ * nowhere else, an unscheduled `halves` room stops once wherever the moderator says.
+ */
+export function roomBreaksAreScheduled(procedure: IRoomProcedure | undefined): boolean {
+  return roomBreaks(procedure).length > 0;
+}
+
+/** Whether this room stops at all. */
+export function roomTakesBreaks(procedure: IRoomProcedure | undefined): boolean {
+  return procedure?.halves === true || roomBreaksAreScheduled(procedure);
+}
+
+/**
+ * The highest tossup the room has already broken after.
+ *
+ * Recorded breaks are matched against configured ones by "at or past", not by equality, because a
+ * room that misses the break after tossup 5 and takes it after 6 has taken that break. Requiring the
+ * numbers to agree would leave the break permanently outstanding and the room permanently unable to
+ * reach the next one.
+ */
+function highestBreakTaken(breaksTaken: readonly number[]): number {
+  return breaksTaken.reduce((carry, value) => Math.max(carry, value), 0);
+}
+
+/**
+ * The configured break the room owes right now, if any.
+ *
+ * @param breaksTaken the `lastQuestion` of every break already recorded, i.e. `IDerivedGame.halfBreaks`
+ * @param lastPlayedQuestion the last tossup actually played; see `lastPlayedQuestion`
+ */
+export function roomBreakDue(
+  procedure: IRoomProcedure | undefined,
+  breaksTaken: readonly number[],
+  lastPlayedQuestion: number,
+): IRoomBreak | undefined {
+  const taken = highestBreakTaken(breaksTaken);
+  return roomBreaks(procedure).find(
+    (roomBreak) => roomBreak.afterTossup > taken && roomBreak.afterTossup <= lastPlayedQuestion,
+  );
+}
+
+/** The next configured break the room has not reached yet, for telling it what is coming. */
+export function roomBreakUpcoming(
+  procedure: IRoomProcedure | undefined,
+  breaksTaken: readonly number[],
+): IRoomBreak | undefined {
+  const taken = highestBreakTaken(breaksTaken);
+  return roomBreaks(procedure).find((roomBreak) => roomBreak.afterTossup > taken);
+}
+
+/**
+ * Whether the room may stop right now.
+ *
+ * A scheduled room may stop only at a break it owes. An unscheduled `halves` room may stop whenever
+ * the moderator says, which is the behavior every procedure written before version 3 has.
+ */
+export function roomMayBreakNow(
+  procedure: IRoomProcedure | undefined,
+  breaksTaken: readonly number[],
+  lastPlayedQuestion: number,
+): boolean {
+  if (roomBreaksAreScheduled(procedure)) {
+    return roomBreakDue(procedure, breaksTaken, lastPlayedQuestion) !== undefined;
+  }
+  return procedure?.halves === true;
+}
+
+/**
+ * What this room calls a break.
+ *
+ * Its own label when the director gave it one, and otherwise its place in the schedule — "Break 2"
+ * rather than "Break", because a room that takes three of them needs to know which one it is at.
+ */
+export function roomBreakLabel(
+  procedure: IRoomProcedure | undefined,
+  roomBreak: IRoomBreak | undefined,
+): string {
+  if (roomBreak === undefined) return 'Break';
+  if (roomBreak.label !== undefined && roomBreak.label !== '') return roomBreak.label;
+  const breaks = roomBreaks(procedure);
+  const position = breaks.findIndex((candidate) => candidate.afterTossup === roomBreak.afterTossup);
+  if (position < 0) return 'Break';
+  return breaks.length === 1 ? 'Break' : `Break ${position + 1}`;
+}
+
+/** The break, if any, that a recorded break at this tossup satisfied. Used to name a score check. */
+export function roomBreakAt(
+  procedure: IRoomProcedure | undefined,
+  lastQuestion: number,
+): IRoomBreak | undefined {
+  // Ascending, so the last one at or before the recorded tossup is the one the room stopped for.
+  return roomBreaks(procedure)
+    .filter((roomBreak) => roomBreak.afterTossup <= lastQuestion)
+    .at(-1);
+}
+
+/** `"5, 10 or 15"` — the breaks as a phrase, for a sentence about when the room stops. */
+function breakTossupPhrase(breaks: readonly IRoomBreak[]): string {
+  const numbers = breaks.map((roomBreak) => String(roomBreak.afterTossup));
+  if (numbers.length === 1) return numbers[0];
+  return `${numbers.slice(0, -1).join(', ')} or ${numbers[numbers.length - 1]}`;
+}
+
+/**
+ * When the restrictive policy lets this room change its lineup, in words.
+ *
+ * One phrase, read by the starting-lineup prompt, the scorer's own explanation and the event guard's
+ * refusal, because a room told three different things about the same rule will believe the software
+ * is broken — and under configured breaks the old wording ("at halftime") was simply wrong.
+ */
+export function substitutionOpportunityPhrase(procedure: IRoomProcedure | undefined): string {
+  const breaks = roomBreaks(procedure);
+  const when = breaks.length > 0 ? `after tossup ${breakTossupPhrase(breaks)}` : 'at a break';
+  return `${when}, at a timeout, or at a phase checkpoint`;
+}
+
+// #endregion
 
 /** Whether an open protest must stop the named checkpoint before play can continue. */
 export function protestBlocksCheckpoint(
@@ -93,7 +283,15 @@ export function protestBlocksSuddenDeathTossup(
   return suddenDeathStarted && hasOpenProtest && policy === 'strict-overtime';
 }
 
-/** Procedure-level lineup boundary, shared by the scorer UI and event guard. */
+/**
+ * Procedure-level lineup boundary, shared by the scorer UI and event guard.
+ *
+ * Phase-shaped rather than tossup-shaped on purpose. A restrictive room substitutes at a break, and
+ * "the room is at a break" is a phase — `score-check` — that the engine already derives. Which
+ * tossups those breaks fall after is `breaks`, and the two compose: configure breaks after 5, 10 and
+ * 15 and this function permits substitutions after exactly tossups 5, 10 and 15 without knowing that
+ * it does. Nothing here needs a tossup number, which is why nothing here has one.
+ */
 export function lineupChangeAllowedAtPhase(
   policy: SubstitutionPolicy,
   phase: 'lineup' | 'tossup' | 'bonus' | 'score-check' | 'checkpoint' | 'timeout' | 'complete',
@@ -110,7 +308,7 @@ export function lineupChangeAllowedAtPhase(
 
 /** Whether this is a procedure shape this build knows how to interpret. */
 export function isKnownRoomProcedureVersion(version: unknown): boolean {
-  return version === roomProcedureVersion || version === legacyRoomProcedureVersion;
+  return typeof version === 'number' && readableRoomProcedureVersions.includes(version);
 }
 
 /** Does this procedure ask the room to do anything at all? */
@@ -118,11 +316,50 @@ export function roomProcedureIsActive(procedure: IRoomProcedure | undefined): pr
   if (!procedure || !isKnownRoomProcedureVersion(procedure.version)) return false;
   return (
     procedure.halves ||
+    roomBreaksAreScheduled(procedure) ||
     procedure.timeoutsPerTeam > 0 ||
     procedure.halfLengthMinutes !== undefined ||
     (procedure.protestCheckpoints !== undefined && procedure.protestCheckpoints !== 'none') ||
     (procedure.substitutionPolicy !== undefined && procedure.substitutionPolicy !== 'any-boundary')
   );
+}
+
+/**
+ * Read `breaks`.
+ *
+ * Sorted, deduplicated by tossup and capped, because everything downstream reads them in order and
+ * asking every caller to re-establish that is how one of them ends up not doing it. A break that is
+ * not a whole positive tossup number is dropped rather than repaired: there is no defensible guess at
+ * which tossup a director meant by `4.5`.
+ */
+function readRoomBreaks(value: unknown): IRoomBreak[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const byTossup = new Map<number, IRoomBreak>();
+
+  for (const entry of value) {
+    if (typeof entry !== 'object' || entry === null) continue;
+    const raw = entry as Partial<IRoomBreak>;
+    const afterTossup = raw.afterTossup;
+    if (
+      typeof afterTossup !== 'number' ||
+      !Number.isInteger(afterTossup) ||
+      afterTossup < 1 ||
+      afterTossup > maximumRoomBreakTossup ||
+      byTossup.has(afterTossup)
+    ) {
+      continue;
+    }
+    const label =
+      typeof raw.label === 'string' && raw.label.trim() !== ''
+        ? raw.label.trim().slice(0, maximumRoomBreakLabelLength)
+        : undefined;
+    byTossup.set(afterTossup, { afterTossup, ...(label !== undefined ? { label } : {}) });
+  }
+
+  const breaks = [...byTossup.values()]
+    .sort((a, b) => a.afterTossup - b.afterTossup)
+    .slice(0, maximumRoomBreaks);
+  return breaks.length > 0 ? breaks : undefined;
 }
 
 /**
@@ -169,14 +406,20 @@ export function readRoomProcedure(value: unknown): IRoomProcedure {
       ? raw.substitutionPolicy
       : undefined;
 
+  const breaks = readRoomBreaks(raw.breaks);
+  // Scheduled breaks are breaks, so a procedure that lists them is a room that stops — whether or not
+  // whoever wrote it also remembered to set the older flag.
+  const takesBreaks = raw.halves === true || breaks !== undefined;
+
   const normalized: IRoomProcedure = {
     version: roomProcedureVersion,
-    halves: raw.halves === true,
-    // A clock length with no halves to apply it to is not a rule anybody stated.
-    halfLengthMinutes: raw.halves === true ? halfLength : undefined,
+    halves: takesBreaks,
+    // A clock length with no play segments to apply it to is not a rule anybody stated.
+    halfLengthMinutes: takesBreaks ? halfLength : undefined,
     timeoutsPerTeam: timeouts,
   };
 
+  if (breaks !== undefined) normalized.breaks = breaks;
   if (timeoutDurationSeconds !== undefined) normalized.timeoutDurationSeconds = timeoutDurationSeconds;
   if (protestCheckpoints !== undefined) normalized.protestCheckpoints = protestCheckpoints;
   if (configuredSubstitutionPolicy !== undefined) normalized.substitutionPolicy = configuredSubstitutionPolicy;

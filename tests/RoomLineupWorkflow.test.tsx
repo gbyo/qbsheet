@@ -491,7 +491,23 @@ describe('what the starting prompt promises about the bench', () => {
 
     const sentence = substitutionSentence(restrictive);
     expect(sentence).not.toContain('between any two tossups');
-    expect(sentence).toContain('halftime');
+    // A room with one moderator-chosen break has a break, not a halftime the software can place.
+    expect(sentence).toContain('at a break, at a timeout, or at a phase checkpoint');
+  });
+
+  test('scheduled breaks are named in the sentence rather than approximated', () => {
+    const scheduled: IRoomProcedure = {
+      version: roomProcedureVersion,
+      halves: true,
+      timeoutsPerTeam: 1,
+      substitutionPolicy: 'breaks-timeouts-overtime',
+      breaks: [{ afterTossup: 5 }, { afterTossup: 10 }, { afterTossup: 15 }],
+    };
+
+    const sentence = substitutionSentence(scheduled);
+    expect(sentence).toContain('after tossup 5, 10 or 15');
+    // The word this room's procedure does not justify: its breaks are not halves of anything.
+    expect(sentence).not.toContain('halftime');
   });
 
   test('the prompt itself uses the configured sentence', () => {
@@ -506,7 +522,7 @@ describe('what the starting prompt promises about the bench', () => {
     expect(within(prompt).getByText(/Choose who will play Tossup 1/)).toBeTruthy();
     expect(within(prompt).getByText(/Up to 2 players may start for each team/)).toBeTruthy();
     expect(within(prompt).queryByText(/between any two tossups/)).toBeNull();
-    expect(within(prompt).getByText(/halftime, at a timeout, or at a phase checkpoint/)).toBeTruthy();
+    expect(within(prompt).getByText(/at a break, at a timeout, or at a phase checkpoint/)).toBeTruthy();
   });
 });
 
@@ -719,7 +735,20 @@ describe('a procedure that does not allow substitutions right now', () => {
     const row = within(panel).getByText('Sarah Jones').closest('li') as HTMLElement;
     const sub = within(row).getByRole('button', { name: 'Substitute for Sarah Jones' });
     expect(sub.hasAttribute('disabled')).toBe(true);
-    expect(sub.getAttribute('title')).toContain('halftime, timeouts, and phase checkpoints');
+    expect(sub.getAttribute('title')).toContain('at a break, at a timeout, or at a phase checkpoint');
+  });
+
+  test('a scheduled procedure names the tossups the lineup may change after', () => {
+    renderScorer(formatFor(2), { ...restrictive, breaks: [{ afterTossup: 10 }, { afterTossup: 20 }] });
+    chooseStarters(['Sarah Jones', 'Michael Smith']);
+    buzz('Sarah Jones', 1);
+    fireEvent.click(screen.getByText('20'));
+
+    const panel = screen.getByLabelText('Ninety Six');
+    const row = within(panel).getByText('Sarah Jones').closest('li') as HTMLElement;
+    const sub = within(row).getByRole('button', { name: 'Substitute for Sarah Jones' });
+    expect(sub.hasAttribute('disabled')).toBe(true);
+    expect(sub.getAttribute('title')).toContain('after tossup 10 or 20');
   });
 
   test('the roster can be read, but nothing can be changed, and the reason is given', () => {
@@ -736,7 +765,7 @@ describe('a procedure that does not allow substitutions right now', () => {
         .getAllByText('Replace')
         .every((button) => button.hasAttribute('disabled')),
     ).toBe(true);
-    expect(screen.getByText(/halftime, timeouts, and phase checkpoints/)).toBeTruthy();
+    expect(screen.getByText(/at a break, at a timeout, or at a phase checkpoint/)).toBeTruthy();
   });
 });
 

@@ -1153,6 +1153,62 @@ body {
   padding: 0;
 }
 
+.manual-subs-hint {
+  margin: 6px 0 0 22px;
+  max-width: 520px;
+}
+
+/*
+ * Scheduled breaks.
+ *
+ * A list of rows, laid out as a row per break rather than a table: two fields and a button is not
+ * tabular data, and a table here would need a header row saying "After tossup" and "Name" twice —
+ * once for sighted readers and once in the labels a screen reader needs anyway.
+ *
+ * The number field keeps its own narrow width so a column of tossup numbers lines up; the name takes
+ * whatever is left, because break names are the part that varies in length.
+ */
+.manual-breaks {
+  margin-top: 16px;
+}
+
+.manual-breaks-hint {
+  margin: 2px 0 8px;
+  max-width: 520px;
+}
+
+.manual-break-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.manual-break-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.manual-break-field-grow {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.manual-break-field-grow .shell-input {
+  width: 100%;
+}
+
+/* Aligned with the bottom of the two inputs beside it rather than with their labels. */
+.manual-break-remove {
+  flex: 0 0 auto;
+}
+
+.manual-break-add {
+  margin-top: 2px;
+}
+
 .rules-fields-hint {
   margin-top: 0;
 }
@@ -1175,6 +1231,91 @@ body {
   font-size: 13px;
   font-weight: 600;
   color: var(--room-muted);
+}
+
+/*
+ * Switching between the simple and advanced rule forms.
+ *
+ * Below the fields rather than above them, and an ordinary button rather than a tab strip or a
+ * segmented control. Tabs would imply two views of one thing that can be flipped between freely;
+ * these are two forms, one of which cannot always state what the other holds — which is what the
+ * sentence under the button is for.
+ */
+.rules-mode {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--room-border);
+}
+
+.rules-mode-hint {
+  margin: 6px 0 0;
+  max-width: 520px;
+}
+
+/*
+ * The answer-type table.
+ *
+ * A row per answer type, wrapping rather than scrolling: this screen is used before a game with no
+ * clock running, and a horizontal scroller full of number fields is worse on a Chromebook than two
+ * lines per row. Points stays narrow so a column of values lines up, the name takes what is left, and
+ * the reorder and remove buttons sit together at the end so they are not mistaken for fields.
+ */
+.answer-types {
+  margin-top: 4px;
+}
+
+.answer-types-hint {
+  margin: 2px 0 10px;
+  max-width: 560px;
+}
+
+.answer-type-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--room-border);
+}
+
+.answer-type-row:last-of-type {
+  border-bottom: 0;
+}
+
+.answer-type-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.answer-type-field-grow {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.answer-type-field-grow .shell-input {
+  width: 100%;
+}
+
+.answer-type-short .shell-input {
+  width: 72px;
+}
+
+/* Sits on the input baseline rather than the label's, like the buttons beside it. */
+.answer-type-bonus {
+  margin-bottom: 6px;
+  white-space: nowrap;
+}
+
+.answer-type-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.answer-type-add {
+  margin-top: 2px;
 }
 
 /*

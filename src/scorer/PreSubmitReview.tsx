@@ -80,22 +80,30 @@ function TeamLines(props: { format: IScorekeeperFormat; team: IDerivedTeam }) {
 }
 
 /**
- * The break between halves.
+ * The break the room has stopped at.
  *
  * Deliberately the smallest thing that could work: the score, a way to look at the players, and one
  * button that means "the moderator and I agree". Nothing about the scoring engine changes across it.
+ *
+ * The break's name is passed in rather than written here, because under a configured procedure it is
+ * whatever the director called it — "End of set 1", "Break 2" — and "Halftime" is only the right word
+ * for the room that takes exactly one break. The accessible name stays generic for the same reason.
  */
 export function HalftimeCheck(props: {
   game: IDerivedGame;
   afterQuestion: number;
+  /** What this room calls the break it is at. See `roomBreakLabel`. */
+  breakName?: string;
   onPlayers: () => void;
   onContinue: () => void;
 }) {
-  const { game, afterQuestion, onPlayers, onContinue } = props;
+  const { game, afterQuestion, breakName = 'Halftime', onPlayers, onContinue } = props;
 
   return (
-    <section className="scorer-score-check" aria-label="Halftime score check">
-      <p className="scorer-check-heading">Halftime · after tossup {afterQuestion}</p>
+    <section className="scorer-score-check" aria-label={`${breakName} score check`}>
+      <p className="scorer-check-heading">
+        {breakName} · after tossup {afterQuestion}
+      </p>
       <p className="scorer-complete-score">
         <span>
           {game.left.name} <strong>{game.left.points}</strong>

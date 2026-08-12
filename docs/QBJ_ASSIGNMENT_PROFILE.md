@@ -131,7 +131,7 @@ only the operational information that standard QBJ cannot express, and it attach
     "version": 1,
     "round_revision": 3,
     "room_id": "room-204",
-    "procedure": { "...": "halves, clock, timeout policy" },
+    "procedure": { "...": "breaks, clock, timeout and substitution policy" },
     "handoff_instruction": "Upload to the Round 4 folder in the shared drive.",
     "scorekeeper": { "timed": true }
   }
@@ -147,9 +147,49 @@ as it would read a match without the block.
 | --- | --- |
 | `round_revision` | QBJ has no concept of a redrawn pairing. Without this field, a result scored against a superseded bracket looks the same as a current one. |
 | `room_id` | `Match.location` is a display string. A stable room identifier survives a rename from "Room 204" to "Library". Include it only when it differs in kind from `location`. |
-| `procedure` | Halves, the clock, and the timeout policy are tournament operations. QBJ models scoring, not the way a room runs a game. |
+| `procedure` | Breaks, the clock, and the timeout and substitution policies are tournament operations. QBJ models scoring, not the way a room runs a game. See below. |
 | `handoff_instruction` | Free text that tells the room what to do with the finished file. The application does not interpret it. |
 | `scorekeeper.timed` | See below. |
+
+### `procedure`
+
+`procedure` is an `IRoomProcedure`, currently at version 3. Tournament control should send the
+tournament's own procedure rather than picking whichever built-in shape is closest.
+
+```json
+{
+  "version": 3,
+  "halves": true,
+  "halfLengthMinutes": 10,
+  "timeoutsPerTeam": 1,
+  "substitutionPolicy": "breaks-timeouts-overtime",
+  "breaks": [
+    { "afterTossup": 5, "label": "End of set 1" },
+    { "afterTossup": 10, "label": "Halftime" },
+    { "afterTossup": 15, "label": "End of set 3" }
+  ]
+}
+```
+
+The keys inside `procedure` are camelCase, unlike the snake_case keys of `_qbtcp` itself and of QBJ
+proper. That is deliberate and it is the safe choice: the reference parser rewrites snake_case keys it
+recognises and deletes the originals, recursing into nested objects, and a camelCase key is not a
+candidate for that rewrite. See the compatibility note in `QbtcpExtension`.
+
+`breaks` is the field worth sending. It states the tossups the round stops after, and those stops are
+what the room uses for its score checks, its clock segments, and — under
+`substitution_policy: "breaks-timeouts-overtime"` — the only points at which the lineup may change. A
+room with `halves: true` and no `breaks` takes one break wherever the moderator calls it, which is all
+a version 1 or 2 procedure could say; that remains supported and unchanged.
+
+Send `breaks` when the tournament states its breaks. A tournament that allows substitutions only after
+tossups 5, 10 and 15 is describable exactly, rather than as "at breaks" and a hope that the room
+breaks in the right places.
+
+Reading is deliberately forgiving in one direction and strict in the other. A malformed break is
+dropped, because a room that will not load is worse than a room missing a break. A `version` this
+build does not recognise is not interpreted at all, because a room that silently ignored a break it
+did not understand would permit substitutions the tournament forbade.
 
 ### `scorekeeper.timed`
 
@@ -230,7 +270,7 @@ of the behaviours is a guess.
 | --- | --- |
 | **Scoring rules**, absent or insufficient | Stop, and state *"This QBJ does not specify enough scoring information."* Let the scorekeeper choose or configure a format. Never assume NAQT, ACF, or any other named rule set. |
 | **Rosters**, with teams present and players absent | Allow manual player entry. Scoring proceeds normally. |
-| **Procedure** | Scoring works. QBSheet states that the document included no tournament procedure, and that it will not enforce a procedural rule that it does not know. It does not model substitution, timeout, or clock policy. |
+| **Procedure** | Scoring works. QBSheet states that the document included no tournament procedure, and that it will not enforce a procedural rule that it does not know. It enforces breaks, substitution, timeout and clock policy only when a `procedure` says what they are. |
 | **Room** | Scoring works. QBSheet displays no room. |
 | **Round** | Scoring works. QBSheet displays a neutral fallback label. |
 | **`timed`** | QBSheet refuses to start scoring until the assignment or scorekeeper supplies timed or untimed. It never assumes either value. |
