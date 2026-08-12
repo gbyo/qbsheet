@@ -70,6 +70,14 @@ function openEditorFromRecent(questionNumber: number) {
   fireEvent.click(screen.getByRole('button', { name: `Review question ${questionNumber}` }));
 }
 
+function rulingGroup() {
+  return screen.getByRole('group', { name: 'Ruling' });
+}
+
+function chooseRuling(label: string) {
+  fireEvent.click(within(rulingGroup()).getByRole('button', { name: label }));
+}
+
 function installLocalStorage() {
   let store: Record<string, string> = {};
   Object.defineProperty(window, 'localStorage', {
@@ -119,9 +127,11 @@ describe('what the editor leads with', () => {
     fireEvent.click(screen.getByText('20'));
     openEditor();
 
-    expect(screen.getByRole('heading', { name: 'Question 1 editor' })).toBeTruthy();
-    expect(screen.getByText('Score before')).toBeTruthy();
-    expect(screen.getByText('Score after')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Edit Question 1' })).toBeTruthy();
+    expect(screen.getByText('Score impact')).toBeTruthy();
+    expect(within(screen.getByRole('table', { name: 'Question 1 score change' })).getByRole('row', {
+      name: 'Ninety Six 0 35',
+    })).toBeTruthy();
   });
 
   test('the lineup and the technical explanation wait behind More', () => {
@@ -130,7 +140,7 @@ describe('what the editor leads with', () => {
     openEditor();
 
     expect(screen.queryByText(/On the floor/)).toBeNull();
-    fireEvent.click(screen.getByText('Question details'));
+    fireEvent.click(screen.getByText('More context'));
     expect(screen.getByText(/On the floor/)).toBeTruthy();
   });
 
@@ -143,9 +153,7 @@ describe('what the editor leads with', () => {
     const score = screen.getByRole('table', { name: 'Question 1 score change' });
     expect(within(score).getByRole('row', { name: 'Ninety Six 0 30' })).toBeTruthy();
 
-    const ruling = screen.getByLabelText('Ruling') as HTMLSelectElement;
-    const power = Array.from(ruling.options).find((option) => option.textContent === '+15');
-    fireEvent.change(ruling, { target: { value: power?.value } });
+    chooseRuling('Power (+15)');
 
     expect(within(score).getByRole('row', { name: 'Ninety Six 0 35' })).toBeTruthy();
   });
@@ -158,9 +166,7 @@ describe('what the editor leads with', () => {
 
     expect(screen.queryByText('+ Add attempt')).toBeNull();
 
-    const ruling = screen.getByLabelText('Ruling') as HTMLSelectElement;
-    const neg = Array.from(ruling.options).find((option) => option.textContent === '-5');
-    fireEvent.change(ruling, { target: { value: neg?.value } });
+    chooseRuling('Neg (-5)');
 
     expect(screen.getByText('+ Add attempt')).toBeTruthy();
   });
@@ -171,7 +177,8 @@ describe('what the editor leads with', () => {
     fireEvent.click(screen.getByText('20'));
     openEditor();
 
-    fireEvent.click(screen.getByLabelText('End without conversion'));
+    fireEvent.click(screen.getByText('Remove bonus'));
+    fireEvent.click(screen.getByLabelText('End question without a bonus'));
 
     expect(screen.queryByLabelText('Ruling')).toBeNull();
     expect(screen.queryByRole('group', { name: 'Bonus points' })).toBeNull();
@@ -185,7 +192,7 @@ describe('what the editor leads with', () => {
     openEditor();
 
     expect(screen.getByLabelText('Ruling')).toBeTruthy();
-    expect(screen.getByLabelText('End without conversion')).toBeTruthy();
+    expect(screen.getByLabelText('End question without a bonus')).toBeTruthy();
     expect(screen.getByText('No team converted this tossup.')).toBeTruthy();
   });
 });
@@ -204,8 +211,7 @@ describe('leaving the editor', () => {
     fireEvent.click(screen.getByText('20'));
     openEditorFromRecent(1);
 
-    // The exit says where it goes, because "Cancel" gave no clue that it led to an event list.
-    fireEvent.click(screen.getByRole('button', { name: 'Close without saving' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
     expect(screen.queryByText('Question 1')).toBeNull();
     // Not the review list, which is somewhere this scorekeeper never asked to be.
@@ -218,7 +224,7 @@ describe('leaving the editor', () => {
     fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
     openEditor();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Back to review' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
     expect(screen.getByText('Full scoresheet review')).toBeTruthy();
     expect(screen.getByText('Edit question')).toBeTruthy();
@@ -253,10 +259,8 @@ describe('leaving the editor', () => {
     expect(scoreOf('Ninety Six')).toBe('30');
     openEditorFromRecent(1);
 
-    const ruling = screen.getByLabelText('Ruling') as HTMLSelectElement;
-    const power = Array.from(ruling.options).find((option) => option.textContent === '+15');
-    fireEvent.change(ruling, { target: { value: power?.value } });
-    fireEvent.click(screen.getByRole('button', { name: 'Close without saving' }));
+    chooseRuling('Power (+15)');
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
     expect(scoreOf('Ninety Six')).toBe('30');
   });
@@ -268,19 +272,19 @@ describe('the first time somebody opens a correction', () => {
     fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
     openEditorFromRecent(1);
 
-    expect(screen.getByLabelText('About the question editor')).toBeTruthy();
+    expect(screen.getByLabelText('About editing this question')).toBeTruthy();
     // The three things nothing else on screen says: what the scope is, that saving is the commit, and
     // how to get out.
     expect(screen.getByText(/every buzz on it and its bonus/)).toBeTruthy();
-    expect(screen.getByText(/Nothing changes until you choose Save correction/)).toBeTruthy();
+    expect(screen.getByText(/Nothing changes until you choose Save changes/)).toBeTruthy();
     expect(screen.getByText(/To leave it exactly as it is/)).toBeTruthy();
 
     fireEvent.click(screen.getByText('Got it — don’t show this again'));
-    expect(screen.queryByLabelText('About the question editor')).toBeNull();
+    expect(screen.queryByLabelText('About editing this question')).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Close without saving' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     openEditorFromRecent(1);
-    expect(screen.queryByLabelText('About the question editor')).toBeNull();
+    expect(screen.queryByLabelText('About editing this question')).toBeNull();
   });
 });
 
@@ -290,8 +294,12 @@ describe('the ruling is one control', () => {
     fireEvent.click(buttonsFor('Sarah Mitchell')[1]); // +10
     openEditor();
 
-    const ruling = screen.getByLabelText('Ruling') as HTMLSelectElement;
-    expect(Array.from(ruling.options, (option) => option.textContent)).toEqual(['+15', '+10', '-5', 'Wrong · 0']);
+    expect(within(rulingGroup()).getAllByRole('button').map((button) => button.textContent)).toEqual([
+      'Power (+15)',
+      'Correct (+10)',
+      'Neg (-5)',
+      'Wrong (0)',
+    ]);
   });
 
   test('a custom rule set produces custom rulings, with nothing assumed', () => {
@@ -303,8 +311,11 @@ describe('the ruling is one control', () => {
     fireEvent.click(buttonsFor('Sarah Mitchell')[0]); // +7
     openEditor();
 
-    const ruling = screen.getByLabelText('Ruling') as HTMLSelectElement;
-    expect(Array.from(ruling.options, (option) => option.textContent)).toEqual(['+7', '-3', 'Wrong · 0']);
+    expect(within(rulingGroup()).getAllByRole('button').map((button) => button.textContent)).toEqual([
+      'Correct (+7)',
+      'Neg (-3)',
+      'Wrong (0)',
+    ]);
   });
 
   test('choosing a different value rescores the question and everything after it', () => {
@@ -314,10 +325,8 @@ describe('the ruling is one control', () => {
     expect(scoreOf('Ninety Six')).toBe('30');
 
     openEditor();
-    const ruling = screen.getByLabelText('Ruling') as HTMLSelectElement;
-    const power = Array.from(ruling.options).find((option) => option.textContent === '+15');
-    fireEvent.change(ruling, { target: { value: power?.value } });
-    fireEvent.click(screen.getByText('Save correction'));
+    chooseRuling('Power (+15)');
+    fireEvent.click(screen.getByText('Save changes'));
 
     expect(scoreOf('Ninety Six')).toBe('35');
   });
@@ -327,10 +336,8 @@ describe('the ruling is one control', () => {
     fireEvent.click(buttonsFor('Sarah Mitchell')[2]); // -5
     openEditor();
 
-    const ruling = screen.getByLabelText('Ruling') as HTMLSelectElement;
-    const wrong = Array.from(ruling.options).find((option) => option.textContent === 'Wrong · 0');
-    fireEvent.change(ruling, { target: { value: wrong?.value } });
-    fireEvent.click(screen.getByText('Save correction'));
+    chooseRuling('Wrong (0)');
+    fireEvent.click(screen.getByText('Save changes'));
 
     // The neg is gone, and nothing replaced it in the score.
     expect(scoreOf('Ninety Six')).toBe('0');
