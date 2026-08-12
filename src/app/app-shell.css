@@ -255,16 +255,35 @@ body {
 
 /* The home screen gives the two ordinary ways into a game equal, explicit names. The shared
  * border reads as one compact choice rather than a pair of promotional cards. */
+/* The 3px the buttons, inputs and resume cards already use: enough to stop the corner reading as a
+ * cut edge, not enough to make the block a tile. The card is two elements — this one and
+ * `.welcome-create` below it — so the rounding is split across the pair's outer corners. */
 .welcome-start-options {
   display: grid;
   grid-template-columns: minmax(0, 3fr) minmax(210px, 2fr);
   border: 1px solid var(--room-border-strong);
+  border-radius: 3px 3px 0 0;
   background: var(--room-surface);
 }
 
 .welcome-start-option {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   padding: 14px 16px 16px;
+}
+
+/*
+ * The two columns end in a control, and those controls line up along the bottom of the block rather
+ * than wherever each column's copy happens to stop. Left of the rule there is a labelled field
+ * above the button and right of it a sentence that wraps to a second line at some widths, so
+ * stacking from the top alone leaves the two buttons a few pixels out of line — and by a different
+ * few pixels at every width. Both columns stretch to the same height, so pushing each column's
+ * action down puts the buttons on one line whatever the copy does.
+ */
+.welcome-start-option > .welcome-connect-form,
+.welcome-start-option > .file-open {
+  margin-top: auto;
 }
 
 .welcome-start-option + .welcome-start-option {
@@ -326,6 +345,7 @@ body {
   padding: 12px 16px;
   border: 1px solid var(--room-border-strong);
   border-top: 0;
+  border-radius: 0 0 3px 3px;
   background: var(--room-surface);
 }
 
