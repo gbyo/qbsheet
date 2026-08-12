@@ -46,7 +46,6 @@ export default tseslint.config(
       // real changes to how effects and refs behave, not lint noise, so they are deferred to their
       // own change rather than smuggled into a dependency bump.
       'react-hooks/set-state-in-effect': 'off',
-      'react-hooks/refs': 'off',
     },
   },
   {

@@ -789,9 +789,24 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     },
     [client, credentials, noteWrite, nextSequence, timeline],
   );
-  // A new sender whenever the send changes, which is whenever those same dependencies change.
-  const sender = useMemo(() => new ProgressSender(sendProgress), [sendProgress]);
-  useEffect(() => () => sender.stop(), [sender]);
+  /*
+   * The sender is built by an effect and held in a ref, not memoized into render.
+   *
+   * It is a timer that outlives the render that asked for it, and its send reads the clock and the
+   * writes-allowed ref when the send happens. Building it during render would hand a render-scoped
+   * closure to something that calls it much later. The effect keys on the send, which changes with
+   * exactly the dependencies the memo used to list, so a new sender is still built — and the one
+   * before it still stopped — at the same moments as before.
+   */
+  const senderRef = useRef<ProgressSender | null>(null);
+  useEffect(() => {
+    const built = new ProgressSender(sendProgress);
+    senderRef.current = built;
+    return () => {
+      built.stop();
+      if (senderRef.current === built) senderRef.current = null;
+    };
+  }, [sendProgress]);
 
   // The assignment poll. Its only outputs are state; it can neither start nor stop a game.
   useEffect(() => {
@@ -847,7 +862,7 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
       // newest complete state even when nobody has scored since the outage, so reconnecting always
       // converges the server snapshot instead of waiting for the next tossup.
       const latestSnapshot = latestSnapshotRef.current;
-      if (latestSnapshot !== null) sender.offer(latestSnapshot);
+      if (latestSnapshot !== null) senderRef.current?.offer(latestSnapshot);
     };
     void poll();
     const timer = setInterval(() => void poll(), assignmentPollIntervalMs);
@@ -855,91 +870,113 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
       cancelled = true;
       clearInterval(timer);
     };
-  }, [client, identity, scheduledMatchId, tournamentKey, enabled, reconcileHelp, sender, timeline]);
+    // `sendProgress` rather than the sender itself, so the poll still restarts on the same changes
+    // the memoized sender used to signal.
+  }, [client, identity, scheduledMatchId, tournamentKey, enabled, reconcileHelp, sendProgress, timeline]);
 
-  const alerts = useMemo<IScorerAlert[]>(() => {
-    const list: IScorerAlert[] = [];
-    if (roomCredentialProblem) {
-      list.push({
-        id: 'credentials',
-        tone: 'warning',
-        title: 'Tournament connection changed — keep scoring',
-        body: 'Tournament control no longer recognizes this room, so results will not be sent automatically until the connection is repaired. The game is saved on this device and can be handed over as a file.',
-        actions: onRepairConnection ? [{ label: 'Repair connection…', onSelect: onRepairConnection }] : undefined,
-        offerDownload: true,
-      });
-    }
-    if (forbidden) {
-      list.push({
-        id: 'forbidden',
-        tone: 'warning',
-        title: 'Tournament control will not accept this room’s requests — keep scoring',
-        body: `${forbidden} This room is still paired, so this is not something a new pairing code fixes. The game is saved on this device and can be handed over as a file.`,
-        actions: [{ label: 'Try tournament control again', onSelect: () => setForbidden(null) }],
-        offerDownload: true,
-      });
-    }
-    if (sessionCredentialProblem) {
-      list.push({
-        id: 'session-credentials',
-        tone: 'warning',
-        title: 'This game lost its place with tournament control — keep scoring',
-        body: `${repairMessage ?? 'Tournament control did not accept this game’s credentials.'} The room is still paired, so reconnecting reopens the same game rather than starting a new one. Nothing scored is affected.`,
-        actions: [{ label: 'Reconnect this game', onSelect: () => void repairSession() }],
-        offerDownload: true,
-      });
-    }
-    if (writerConflict) {
-      list.push({
-        id: 'writer-conflict',
-        tone: 'warning',
-        title: 'Another device is scoring this game',
-        body: `${repairMessage ?? 'Tournament control is accepting writes from a different device, so nothing from here is being sent.'} Keep scoring — this scoresheet is complete and can be handed over as a file. Take over only if the other device has stopped.`,
-        actions: writerConflict.canTakeOver
-          ? [{ label: 'Take over scoring', onSelect: () => void takeOverWriter() }]
-          : undefined,
-        offerDownload: true,
-      });
-    }
-    if (tournamentSwitched) {
-      list.push({
-        id: 'tournament-switched',
-        tone: 'warning',
-        title: 'Tournament control is running a different tournament',
-        body: 'Nothing more will be sent, so this game cannot be filed against the wrong event. Finish the game normally and hand the QBJ over.',
-        offerDownload: true,
-      });
-    }
-    if (reassigned) {
-      list.push({
-        id: 'reassigned',
-        tone: 'info',
-        title: 'Tournament control has moved this room on to another game',
-        body: 'The game on screen is kept. Finish it, submit it, and check with tournament control about the change.',
-        offerDownload: true,
-      });
-    }
-    return list;
-  }, [
-    roomCredentialProblem,
-    forbidden,
-    sessionCredentialProblem,
-    writerConflict,
-    repairMessage,
-    tournamentSwitched,
-    reassigned,
-    onRepairConnection,
-    repairSession,
-    takeOverWriter,
-  ]);
-
-  const reportProgress = useCallback(
-    (qbj: object) => {
-      latestSnapshotRef.current = qbj;
-      sender.offer(qbj);
-    },
-    [sender],
+  /*
+   * Built as one literal rather than by pushing onto a list.
+   *
+   * "Reconnect this game" carries `repairSession`, which re-arms the one-unattended-reopen ref when
+   * it succeeds. Handing that to a function during render — even `Array.prototype.push` — is how a
+   * ref escapes into somewhere that could read it mid-render, so the alerts are declared in the
+   * order they appear instead. The conditions and their order are the ones that were here.
+   */
+  const alerts = useMemo<IScorerAlert[]>(
+    () => [
+      ...(roomCredentialProblem
+        ? [
+            {
+              id: 'credentials',
+              tone: 'warning' as const,
+              title: 'Tournament connection changed — keep scoring',
+              body: 'Tournament control no longer recognizes this room, so results will not be sent automatically until the connection is repaired. The game is saved on this device and can be handed over as a file.',
+              actions: onRepairConnection
+                ? [{ label: 'Repair connection…', onSelect: onRepairConnection }]
+                : undefined,
+              offerDownload: true,
+            },
+          ]
+        : []),
+      ...(forbidden
+        ? [
+            {
+              id: 'forbidden',
+              tone: 'warning' as const,
+              title: 'Tournament control will not accept this room’s requests — keep scoring',
+              body: `${forbidden} This room is still paired, so this is not something a new pairing code fixes. The game is saved on this device and can be handed over as a file.`,
+              actions: [{ label: 'Try tournament control again', onSelect: () => setForbidden(null) }],
+              offerDownload: true,
+            },
+          ]
+        : []),
+      ...(sessionCredentialProblem
+        ? [
+            {
+              id: 'session-credentials',
+              tone: 'warning' as const,
+              title: 'This game lost its place with tournament control — keep scoring',
+              body: `${repairMessage ?? 'Tournament control did not accept this game’s credentials.'} The room is still paired, so reconnecting reopens the same game rather than starting a new one. Nothing scored is affected.`,
+              actions: [{ label: 'Reconnect this game', onSelect: () => void repairSession() }],
+              offerDownload: true,
+            },
+          ]
+        : []),
+      ...(writerConflict
+        ? [
+            {
+              id: 'writer-conflict',
+              tone: 'warning' as const,
+              title: 'Another device is scoring this game',
+              body: `${repairMessage ?? 'Tournament control is accepting writes from a different device, so nothing from here is being sent.'} Keep scoring — this scoresheet is complete and can be handed over as a file. Take over only if the other device has stopped.`,
+              actions: writerConflict.canTakeOver
+                ? [{ label: 'Take over scoring', onSelect: () => void takeOverWriter() }]
+                : undefined,
+              offerDownload: true,
+            },
+          ]
+        : []),
+      ...(tournamentSwitched
+        ? [
+            {
+              id: 'tournament-switched',
+              tone: 'warning' as const,
+              title: 'Tournament control is running a different tournament',
+              body: 'Nothing more will be sent, so this game cannot be filed against the wrong event. Finish the game normally and hand the QBJ over.',
+              offerDownload: true,
+            },
+          ]
+        : []),
+      ...(reassigned
+        ? [
+            {
+              id: 'reassigned',
+              tone: 'info' as const,
+              title: 'Tournament control has moved this room on to another game',
+              body: 'The game on screen is kept. Finish it, submit it, and check with tournament control about the change.',
+              offerDownload: true,
+            },
+          ]
+        : []),
+    ],
+    [
+      roomCredentialProblem,
+      forbidden,
+      sessionCredentialProblem,
+      writerConflict,
+      repairMessage,
+      tournamentSwitched,
+      reassigned,
+      onRepairConnection,
+      repairSession,
+      takeOverWriter,
+    ],
   );
+
+  const reportProgress = useCallback((qbj: object) => {
+    latestSnapshotRef.current = qbj;
+    senderRef.current?.offer(qbj);
+  }, []);
 
   const submitFinal = useCallback(
     async (qbj: object): Promise<IFinalDelivery> => {
