@@ -43,7 +43,7 @@ import deriveGame, {
   lastPlayedQuestion,
   lineupChangeEffectiveQuestion,
 } from '../scoring/deriveGame';
-import { IBonusPartResult, ScoreEvent } from '../scoring/ScoreEvents';
+import { IBonusEvent, IBonusPartResult, ScoreEvent } from '../scoring/ScoreEvents';
 import validateScoresheet from '../scoring/validateScoresheet';
 import toQbjMatch, { IQbjMatchMeta } from '../scoring/toQbjMatch';
 import { connectionTimeline } from '../app/ConnectionTimeline';
@@ -94,7 +94,12 @@ import ScorerBanners, {
   connectionClass,
   connectionLabel,
 } from './ConnectionStatus';
-import MotionNumber from './ScoringMotion';
+import MotionNumber, {
+  bonusExitMotionMs,
+  connectionRecoveryMotionMs,
+  noBuzzAcknowledgementMotionMs,
+  recentMotionMs,
+} from './ScoringMotion';
 
 export type { IScorerAlert, IScorerRecoveryStatus } from './ConnectionStatus';
 
@@ -429,13 +434,13 @@ export default function Scorer(props: IScorerProps) {
 
   useEffect(() => {
     if (!noBuzzAcknowledgement) return undefined;
-    const timer = window.setTimeout(() => setNoBuzzAcknowledgement(null), 170);
+    const timer = window.setTimeout(() => setNoBuzzAcknowledgement(null), noBuzzAcknowledgementMotionMs);
     return () => window.clearTimeout(timer);
   }, [noBuzzAcknowledgement]);
 
   useEffect(() => {
     if (!bonusExit) return undefined;
-    const timer = window.setTimeout(() => setBonusExit(null), 180);
+    const timer = window.setTimeout(() => setBonusExit(null), bonusExitMotionMs);
     return () => window.clearTimeout(timer);
   }, [bonusExit]);
 
@@ -444,7 +449,7 @@ export default function Scorer(props: IScorerProps) {
     const token = recentMotion.token;
     const timer = window.setTimeout(
       () => setRecentMotion((current) => (current?.token === token ? undefined : current)),
-      200,
+      recentMotionMs,
     );
     return () => window.clearTimeout(timer);
   }, [recentMotion]);
@@ -459,7 +464,7 @@ export default function Scorer(props: IScorerProps) {
   }, [connection, nextTransientToken]);
   useEffect(() => {
     if (!connectionRecovery) return undefined;
-    const timer = window.setTimeout(() => setConnectionRecovery(null), 320);
+    const timer = window.setTimeout(() => setConnectionRecovery(null), connectionRecoveryMotionMs);
     return () => window.clearTimeout(timer);
   }, [connectionRecovery]);
 
@@ -867,16 +872,15 @@ export default function Scorer(props: IScorerProps) {
     record({ id: newEventId(), type: 'tossup-readout', questionNumber: phase.questionNumber });
   }, [record, phase]);
 
-  const recordBonus = useCallback(
-    (controlledPoints: number, bouncebackPoints?: number) => {
+  const recordBonusWithExit = useCallback(
+    (payload: Pick<IBonusEvent, 'controlledPoints' | 'bouncebackPoints' | 'parts'>) => {
       if (phase.kind !== 'bonus') return false;
       const accepted = record({
         id: newEventId(),
         type: 'bonus',
         questionNumber: phase.questionNumber,
         team: phase.team,
-        controlledPoints,
-        bouncebackPoints,
+        ...payload,
       });
       if (accepted) {
         setBonusExit({
@@ -890,26 +894,15 @@ export default function Scorer(props: IScorerProps) {
     [game.left.name, game.right.name, nextTransientToken, record, phase],
   );
 
+  const recordBonus = useCallback(
+    (controlledPoints: number, bouncebackPoints?: number) =>
+      recordBonusWithExit({ controlledPoints, bouncebackPoints }),
+    [recordBonusWithExit],
+  );
+
   const recordBonusParts = useCallback(
-    (parts: IBonusPartResult[]) => {
-      if (phase.kind !== 'bonus') return false;
-      const accepted = record({
-        id: newEventId(),
-        type: 'bonus',
-        questionNumber: phase.questionNumber,
-        team: phase.team,
-        parts,
-      });
-      if (accepted) {
-        setBonusExit({
-          token: nextTransientToken(),
-          questionNumber: phase.questionNumber,
-          controllingTeamName: phase.team === 'left' ? game.left.name : game.right.name,
-        });
-      }
-      return accepted;
-    },
-    [game.left.name, game.right.name, nextTransientToken, record, phase],
+    (parts: IBonusPartResult[]) => recordBonusWithExit({ parts }),
+    [recordBonusWithExit],
   );
 
   /**
@@ -1211,44 +1204,6 @@ export default function Scorer(props: IScorerProps) {
         question.questionNumber === phase.questionNumber && (question.bonus !== undefined || question.awaitingBonus),
     );
 
-  const progress = (() => {
-    if (phase.kind === 'complete') return 'Game complete';
-    if (phase.kind === 'lineup') return 'Choose starters';
-    if (phase.kind === 'score-check') return `Halftime · after tossup ${phase.afterQuestion}`;
-    if (phase.kind === 'checkpoint') {
-      return phase.checkpoint === 'overtime' ? 'Regulation complete' : 'Initial overtime complete';
-    }
-    if (phase.kind === 'timeout') return `Timeout · ${phase.team === 'left' ? game.left.name : game.right.name}`;
-    if (phase.period === 'overtime') {
-      const overtimeNumber = game.overtimeTossupsRead + (phase.kind === 'tossup' ? 1 : 0);
-      // Sudden death is a state a game arrives at, not a property a format has: NAQT plays three
-      // overtime tossups and only then becomes sudden death.
-      const suddenDeath = game.suddenDeathStarted ? ' · sudden death' : '';
-      return (
-        <>
-          Overtime tossup <MotionNumber value={Math.max(1, overtimeNumber)} minimumDigits={1} />
-          {suddenDeath}
-        </>
-      );
-    }
-    if (format.regulation.timed) {
-      return (
-        <>
-          Tossup <MotionNumber value={phase.questionNumber} minimumDigits={2} /> · timed round
-        </>
-      );
-    }
-    return (
-      <>
-        Tossup{' '}
-        <MotionNumber
-          value={phase.questionNumber}
-          minimumDigits={String(format.regulation.tossupCount).length}
-        />{' '}
-        of {format.regulation.tossupCount}
-      </>
-    );
-  })();
   const progressText = (() => {
     if (phase.kind === 'complete') return 'Game complete';
     if (phase.kind === 'lineup') return 'Choose starters';
@@ -1445,11 +1400,10 @@ export default function Scorer(props: IScorerProps) {
           <div className="scorer-header-status">
             <span
               className={progressMotion ? 'scorer-progress has-motion-number' : 'scorer-progress'}
-              aria-label={progressMotion ? progressText : undefined}
             >
               {progressMotion ? (
                 <>
-                  <span className="scorer-progress-copy" aria-hidden="true">
+                  <span className="scorer-progress-copy">
                     {progressText}
                   </span>
                   <span
@@ -1462,7 +1416,7 @@ export default function Scorer(props: IScorerProps) {
                   </span>
                 </>
               ) : (
-                progress
+                progressText
               )}
             </span>
             {roomClock.configured && (
@@ -1654,11 +1608,7 @@ export default function Scorer(props: IScorerProps) {
               the completion review is the one thing put in here that can outgrow the window, and a
               pinned block taller than the window loses its top edge off the top of the screen.
             */}
-            <div
-              className={`${phase.kind === 'complete' ? 'scorer-stage' : 'scorer-stage is-pinned'}${
-                noBuzzAcknowledgement ? ' is-no-buzz-recorded' : ''
-              }`}
-            >
+            <div className={phase.kind === 'complete' ? 'scorer-stage' : 'scorer-stage is-pinned'}>
               {noBuzzAcknowledgement && (
                 <span
                   key={`no-buzz-${noBuzzAcknowledgement.token}`}

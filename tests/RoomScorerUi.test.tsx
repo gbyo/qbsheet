@@ -582,7 +582,13 @@ describe('scoring motion state', () => {
 
     view.rerenderConnection(RoomConnectionState.Offline);
     view.rerenderConnection(RoomConnectionState.Connected);
-    expect(connection().getAttribute('data-recovery-token')).not.toBe(firstToken);
+    const secondToken = connection().getAttribute('data-recovery-token');
+    expect(secondToken).not.toBe(firstToken);
+
+    view.rerenderConnection(RoomConnectionState.Degraded);
+    view.rerenderConnection(RoomConnectionState.Connected);
+    expect(connection()).toHaveClass('is-recovered');
+    expect(connection().getAttribute('data-recovery-token')).not.toBe(secondToken);
   });
 });
 

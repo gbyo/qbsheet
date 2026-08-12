@@ -22,6 +22,10 @@ export function numberMotion(from: number, to: number, token = 1): INumberMotion
 }
 
 export const numberMotionMs = 180;
+export const noBuzzAcknowledgementMotionMs = 170;
+export const bonusExitMotionMs = 180;
+export const recentMotionMs = 200;
+export const connectionRecoveryMotionMs = 320;
 
 export default function MotionNumber(props: {
   value: number;
