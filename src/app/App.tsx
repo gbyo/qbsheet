@@ -585,7 +585,7 @@ export default function App() {
   }
 
   if (screen.kind === 'practice') {
-    return <PracticeScreen onHome={goHome} />;
+    return <PracticeScreen onHome={goHome} operatorName={operatorName} />;
   }
 
   if (screen.kind === 'create') {
