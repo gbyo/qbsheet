@@ -1700,15 +1700,20 @@ div.scorer-banner .scorer-text-action {
   font-weight: 600;
 }
 
-/* Said once to somebody who has never opened a correction before, then dismissed for good. */
+/*
+ * Said once to somebody who has never opened a correction before, then dismissed for good.
+ *
+ * A note, not a card: the same left rule and tinted ground the errors block and the flag list use,
+ * so the three kinds of aside in this dialog are one thing said in three colours. It had been a
+ * rounded box outlined on all four sides, which is the one shape this stylesheet does not have.
+ */
 .scorer-question-intro {
-  padding: 12px 14px;
+  padding: 10px 12px;
   font-size: 13px;
   line-height: 1.45;
   color: var(--room-text);
   background: var(--room-info-bg);
-  border: 1px solid var(--room-border);
-  border-radius: 5px;
+  border-left: 3px solid var(--room-info-border);
 }
 
 .scorer-question-intro-title {
@@ -1739,16 +1744,26 @@ div.scorer-banner .scorer-text-action {
 
 .scorer-question-score th,
 .scorer-question-score td {
-  padding: 7px 10px;
+  padding: 6px 10px;
   text-align: right;
-  border-bottom: 1px solid var(--room-border);
 }
 
+/*
+ * The only rule inside the table, and it is the one a table earns: it says the words above it name
+ * the columns below it. Ruling the two team rows as well drew three lines under six numbers and
+ * made the summary look busier than the thing being corrected.
+ */
 .scorer-question-score thead th {
   padding-top: 0;
   font-size: 11px;
   font-weight: 500;
   color: var(--room-muted);
+  border-bottom: 1px solid var(--room-border);
+}
+
+.scorer-question-score tbody tr:first-child th,
+.scorer-question-score tbody tr:first-child td {
+  padding-top: 8px;
 }
 
 .scorer-question-score th:first-child {
@@ -1784,10 +1799,10 @@ div.scorer-banner .scorer-text-action {
   gap: 6px;
 }
 
+/* Opens directly under its own disclosure, so the form's 16px gap is cancelled. */
 .scorer-question-more {
   margin-top: -16px;
-  padding: 12px 0 0;
-  border-bottom: 1px solid var(--room-border);
+  padding: 4px 0 0;
 }
 
 .scorer-question-scoreline {
@@ -1840,27 +1855,27 @@ div.scorer-banner .scorer-text-action {
 
 .scorer-question-attempt-head {
   margin-top: 10px;
-  padding: 0 0 4px;
+  padding: 0 0 6px;
   font-size: 11px;
   color: var(--room-muted);
 }
 
+/*
+ * A list of at most two rows, so it is not ruled.
+ *
+ * It used to carry a rule above every row and another below the last, which is three lines to
+ * separate two things — and drawn in the same 1px as the rules that divide Tossup from Bonus, so
+ * the eye could not tell a row boundary from a section boundary. The rows are made of bordered
+ * selects sitting in fixed columns under their own headings; they are already legible as rows. Air
+ * is enough.
+ */
 .scorer-question-attempts {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 14px;
   margin: 0;
   padding: 0;
   list-style: none;
-}
-
-.scorer-question-attempt {
-  padding: 8px 0;
-  border-top: 1px solid var(--room-border);
-}
-
-.scorer-question-attempt:last-child {
-  border-bottom: 1px solid var(--room-border);
 }
 
 .scorer-question-field {
@@ -1896,10 +1911,8 @@ div.scorer-banner .scorer-text-action {
 
 .scorer-question-empty {
   margin: 10px 0 0;
-  padding: 10px 0;
   font-size: 13px;
   color: var(--room-muted);
-  border-bottom: 1px solid var(--room-border);
 }
 
 .scorer-question-actions,
@@ -1932,32 +1945,71 @@ div.scorer-banner .scorer-text-action {
   color: var(--room-muted);
 }
 
+/* Two or three digits. Sized to what goes in it, so it does not read as a field for a sentence. */
+.scorer-question-bonus input {
+  width: 84px;
+}
+
+/*
+ * While the parts are open the total is their sum, not something to type in. Sunken and muted so it
+ * reads as a figure being shown rather than a box that has stopped accepting what is typed into it.
+ */
+.scorer-question-bonus input:disabled {
+  color: var(--room-muted);
+  background: var(--room-surface-sunken);
+  border-color: var(--room-border);
+}
+
+/*
+ * Its own line under the bonus row rather than a column standing beside it.
+ *
+ * The parts block is a flex item of a wrapping row, so without a full basis it packed itself into
+ * whatever space was left next to Points and Use total and the three parts came out staggered down
+ * the middle of the dialog. They are a short column of small numbers; they belong under the total
+ * they add up to.
+ */
 .scorer-question-parts {
+  flex-basis: 100%;
   flex-direction: column;
   align-items: stretch;
+  gap: 6px;
+  margin-top: 2px;
 }
 
 .scorer-question-part {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   font-size: 12px;
   color: var(--room-muted);
 }
 
+.scorer-question-part > span {
+  flex: 0 0 auto;
+  width: 48px;
+}
+
+.scorer-question-part input {
+  width: 84px;
+}
+
+/*
+ * Ruled off the section above it exactly as Tossup and Bonus are, and closed by the footer's rule
+ * rather than one of its own — a line above, a line below and the footer's line made three rules
+ * inside forty pixels for a control that is one word and a plus sign.
+ */
 .scorer-question-disclosure {
   display: flex;
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  padding: 9px 0;
+  padding: 12px 0 2px;
   font: inherit;
   font-size: 13px;
   color: var(--room-text);
   background: none;
   border: 0;
   border-top: 1px solid var(--room-border);
-  border-bottom: 1px solid var(--room-border);
   cursor: pointer;
 }
 
@@ -2005,6 +2057,11 @@ div.scorer-banner .scorer-text-action {
     display: none;
   }
 
+  /* A row is two lines tall here, so the space between rows has to beat the space inside one. */
+  .scorer-question-attempts {
+    gap: 22px;
+  }
+
   .scorer-question-attempt {
     grid-template-columns: 20px minmax(0, 1fr) minmax(84px, 0.55fr);
     align-items: end;
@@ -2043,6 +2100,11 @@ div.scorer-banner .scorer-text-action {
   .scorer-question-score td {
     padding-right: 6px;
     padding-left: 6px;
+  }
+
+  /* Four lines tall now. */
+  .scorer-question-attempts {
+    gap: 26px;
   }
 
   .scorer-question-attempt {
