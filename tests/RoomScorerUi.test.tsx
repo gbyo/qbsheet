@@ -179,7 +179,10 @@ function editReviewEvent(description: string) {
 }
 
 function chooseEditorRuling(label: string) {
-  fireEvent.click(within(screen.getByRole('group', { name: 'Ruling' })).getByRole('button', { name: label }));
+  const select = screen.getByLabelText('Ruling') as HTMLSelectElement;
+  const option = Array.from(select.options).find((candidate) => candidate.textContent === label);
+  if (!option) throw new Error(`No ruling option named "${label}"`);
+  fireEvent.change(select, { target: { value: option.value } });
 }
 
 /** Add somebody who turned up late, through the panel that keeps that separate from the lineup. */
@@ -1557,8 +1560,10 @@ describe('a historical correction lands visibly', () => {
   function correctQ1To(label: string) {
     fireEvent.click(screen.getByRole('button', { name: 'Review question 1' }));
     const editor = screen.getByRole('dialog', { name: 'Edit Question 1' });
-    const ruling = within(editor).getByRole('group', { name: 'Ruling' });
-    fireEvent.click(within(ruling).getByRole('button', { name: label }));
+    const ruling = within(editor).getByLabelText('Ruling') as HTMLSelectElement;
+    const option = Array.from(ruling.options).find((candidate) => candidate.textContent === label);
+    if (!option) throw new Error(`No ruling option named "${label}"`);
+    fireEvent.change(ruling, { target: { value: option.value } });
     fireEvent.click(within(editor).getByRole('button', { name: 'Save changes' }));
   }
 

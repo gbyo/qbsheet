@@ -55,7 +55,7 @@ import { powerCorrect } from './tossupRulings';
 
 const noPenaltyValue = 'no-penalty';
 
-/** "Power (+15)" / "Correct (+10)" / "Incorrect (0)" / "Neg (-5)". The editor should say what the ruling means. */
+/** "Power (+15)" / "Correct (+10)" / "Neg (-5)" / "Wrong (0)". The editor should say what the ruling means. */
 function rulingLabel(format: IScorekeeperFormat, index: number): string {
   const answerType = format.answerTypes[index];
   if (!answerType) return 'Choose…';
@@ -66,7 +66,7 @@ function rulingLabel(format: IScorekeeperFormat, index: number): string {
         ? 'Power'
         : answerType.value > 0
           ? 'Correct'
-          : 'Incorrect';
+          : 'Wrong';
   const points = answerType.value > 0 ? `+${answerType.value}` : String(answerType.value);
   return `${name} (${points})`;
 }
@@ -224,11 +224,9 @@ export default function QuestionEditor(props: {
     label: rulingLabel(format, answerType.index),
   });
   const rulingOptions = [
-    ...orderedTypes.filter((answerType) => answerType.value >= 0).map(rulingOption),
-    { value: noPenaltyValue, label: 'Incorrect (0)' },
-    ...orderedTypes.filter((answerType) => answerType.value < 0).map(rulingOption),
+    ...orderedTypes.map(rulingOption),
+    { value: noPenaltyValue, label: 'Wrong (0)' },
   ];
-  const useRulingSegments = rulingOptions.length <= 4;
   const initialPoints = useMemo(() => questionPoints(initial, format), [format, initial]);
   const proposedPoints = useMemo(() => questionPoints(model, format), [format, model]);
 
@@ -456,55 +454,24 @@ export default function QuestionEditor(props: {
                   ))}
                 </select>
               </label>
-              {useRulingSegments ? (
-                <div className="scorer-question-field scorer-question-field-ruling">
-                  <span>Ruling</span>
-                  <div
-                    className="scorer-question-ruling"
-                    role="group"
-                    aria-label={
-                      model.attempts.length === 1
-                        ? 'Ruling'
-                        : `Question ${model.questionNumber} attempt ${index + 1} ruling`
-                    }
-                  >
-                    {rulingOptions.map((option) => (
-                      <button
-                        key={option.value}
-                        type="button"
-                        className={
-                          rulingValue(attempt) === option.value
-                            ? 'scorer-choice scorer-question-ruling-choice is-selected'
-                            : 'scorer-choice scorer-question-ruling-choice'
-                        }
-                        aria-pressed={rulingValue(attempt) === option.value}
-                        onClick={() => setRuling(index, option.value)}
-                      >
-                        {option.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <label className="scorer-question-field">
-                  <span>Ruling</span>
-                  <select
-                    aria-label={
-                      model.attempts.length === 1
-                        ? 'Ruling'
-                        : `Question ${model.questionNumber} attempt ${index + 1} ruling`
-                    }
-                    value={rulingValue(attempt)}
-                    onChange={(event) => setRuling(index, event.target.value)}
-                  >
-                    {rulingOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
+              <label className="scorer-question-field scorer-question-field-ruling">
+                <span>Ruling</span>
+                <select
+                  aria-label={
+                    model.attempts.length === 1
+                      ? 'Ruling'
+                      : `Question ${model.questionNumber} attempt ${index + 1} ruling`
+                  }
+                  value={rulingValue(attempt)}
+                  onChange={(event) => setRuling(index, event.target.value)}
+                >
+                  {rulingOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <button
                 type="button"
                 className="scorer-text-action is-destructive"
