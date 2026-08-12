@@ -770,23 +770,27 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     setSessionCredentialProblem(false);
   }, [credentials.token]);
 
-  const sender = useMemo(
-    () =>
-      new ProgressSender(async (qbj) => {
-        if (!writesAllowedRef.current) return;
-        const result = await client.putSnapshot(credentials, qbj, nextSequence());
-        if (result.ok) {
-          setServerSnapshotAt(Date.now());
-          setSnapshotError(undefined);
-          timeline.record('progress-sent');
-        } else {
-          setSnapshotError(result.detail);
-          timeline.record('progress-refused', result.detail ?? result.error);
-          noteWrite(result);
-        }
-      }),
+  // The send itself is a callback rather than part of the `useMemo` below, because it reads the
+  // clock and the writes-allowed ref at the moment the send happens. Both are the right thing to do
+  // from a timer and the wrong thing to do while rendering, and only the callback form says so.
+  const sendProgress = useCallback(
+    async (qbj: object) => {
+      if (!writesAllowedRef.current) return;
+      const result = await client.putSnapshot(credentials, qbj, nextSequence());
+      if (result.ok) {
+        setServerSnapshotAt(Date.now());
+        setSnapshotError(undefined);
+        timeline.record('progress-sent');
+      } else {
+        setSnapshotError(result.detail);
+        timeline.record('progress-refused', result.detail ?? result.error);
+        noteWrite(result);
+      }
+    },
     [client, credentials, noteWrite, nextSequence, timeline],
   );
+  // A new sender whenever the send changes, which is whenever those same dependencies change.
+  const sender = useMemo(() => new ProgressSender(sendProgress), [sendProgress]);
   useEffect(() => () => sender.stop(), [sender]);
 
   // The assignment poll. Its only outputs are state; it can neither start nor stop a game.
