@@ -20,7 +20,7 @@
 import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from 'react';
 import { LeftOrRight } from '../scoring/types';
 import { IDerivedTeam } from '../scoring/deriveGame';
-import { IRoomProcedure, substitutionPolicy } from '../scoring/RoomProcedure';
+import { IRoomProcedure, substitutionOpportunityPhrase, substitutionPolicy } from '../scoring/RoomProcedure';
 import { playerNameMaxLength, validatePlayerName } from '../game/Roster';
 import { moveWithin } from './PlayerSeating';
 import { useLineupMotion } from './LineupMotion';
@@ -56,7 +56,7 @@ export interface IStartingLineupPromptProps {
 export function substitutionSentence(procedure: IRoomProcedure | undefined): string {
   return substitutionPolicy(procedure) === 'any-boundary'
     ? 'The rest start on the bench. You can change the lineup later when tournament rules allow.'
-    : 'The rest start on the bench and can come on at halftime, at a timeout, or at a phase checkpoint.';
+    : `The rest start on the bench and can come on ${substitutionOpportunityPhrase(procedure)}.`;
 }
 
 function TeamStarters(props: {

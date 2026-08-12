@@ -37,9 +37,13 @@ import {
 import { playerNameMaxLength, readRosterLines, rosterLineProblems } from './Roster';
 import { IBasicScoringRulesInput, basicScoringRulesProblems, basicScorekeeperFormat } from '../qbj/BasicScoringRules';
 import {
+  IRoomBreak,
   IRoomProcedure,
   SubstitutionPolicy,
   maximumHalfLengthMinutes,
+  maximumRoomBreakLabelLength,
+  maximumRoomBreakTossup,
+  maximumRoomBreaks,
   maximumTimeoutDurationSeconds,
   maximumTimeoutsPerTeam,
   roomProcedureIsActive,
@@ -66,7 +70,33 @@ export interface IManualTeamInput {
  * anything is worth. Kept as its own shape rather than as a partial `IRoomProcedure` because a form
  * has an in-between state — halves on with no length yet — that a procedure does not.
  */
+/**
+ * One scheduled break, as a form row.
+ *
+ * `afterTossup` is optional and `label` is a plain string because a half-typed row is a state a form
+ * has and a procedure does not — somebody who has clicked Add break and not yet typed a number has a
+ * row, not a break after tossup 0.
+ */
+export interface IManualBreakInput {
+  /**
+   * Row identity for React and for reordering.
+   *
+   * Not the tossup number, which is the thing being edited: keying a row on its own value makes the
+   * row unmount and remount every keystroke, which takes the caret with it.
+   */
+  key: string;
+  afterTossup?: number;
+  label: string;
+}
+
 export interface IManualRoundOptions {
+  /**
+   * The room stops during the round.
+   *
+   * Named `halves` because that is the procedure field it becomes and every stored procedure already
+   * uses it. With no `breaks` listed it means what it always meant: one break, whenever the moderator
+   * calls it.
+   */
   halves: boolean;
   /** Blank means QBSheet does not run the clock. No length is invented. */
   halfLengthMinutes?: number;
@@ -74,6 +104,14 @@ export interface IManualRoundOptions {
   /** Blank means the timeout is recorded but not counted down. */
   timeoutDurationSeconds?: number;
   substitutionPolicy: SubstitutionPolicy;
+  /**
+   * The exact points the round stops at, when the tournament states them.
+   *
+   * Empty or absent means the room takes the single moderator-chosen break `halves` describes. This is
+   * what makes the restrictive substitution policy precise: with breaks after tossups 5 and 10, the
+   * lineup may change after tossups 5 and 10, and not after tossup 7.
+   */
+  breaks?: IManualBreakInput[];
 }
 
 export const manualRoundOptionDefaults: IManualRoundOptions = {
@@ -81,6 +119,17 @@ export const manualRoundOptionDefaults: IManualRoundOptions = {
   timeoutsPerTeam: 0,
   substitutionPolicy: 'any-boundary',
 };
+
+/** A blank break row. Sequenced so two rows added in the same millisecond still differ. */
+let manualBreakSequence = 0;
+export function newManualBreak(afterTossup?: number): IManualBreakInput {
+  manualBreakSequence += 1;
+  return {
+    key: `break-${Date.now().toString(36)}-${manualBreakSequence.toString(36)}`,
+    ...(afterTossup !== undefined ? { afterTossup } : {}),
+    label: '',
+  };
+}
 
 export interface IManualGameInput {
   /** Free text. A human label for headers, Recent Games and export context; never an identifier. */
@@ -135,6 +184,53 @@ function teamProblems(input: IManualGameInput): string[] {
  * off a wire and a room that will not load is worse than a room with a wrong timeout count; a person
  * looking at the box they just typed in is owed the opposite treatment.
  */
+/**
+ * What is wrong with the breaks somebody typed.
+ *
+ * Every row is checked, including the ones a reader would silently drop. `readRoomProcedure` drops a
+ * malformed break because it is reading a wire message and a room that will not load is worse than a
+ * room missing a break; a director looking at the row they just typed needs to be told it will not
+ * count, or they will run the round believing in a break that is not there.
+ */
+function breakProblems(options: IManualRoundOptions, regulationTossupCount: number): string[] {
+  const problems: string[] = [];
+  const rows = options.breaks ?? [];
+  if (rows.length === 0) return problems;
+
+  if (rows.length > maximumRoomBreaks) {
+    problems.push(`A round can have at most ${maximumRoomBreaks} breaks.`);
+  }
+
+  const seen = new Set<number>();
+  rows.forEach((row, position) => {
+    const at = row.afterTossup;
+    const which = `Break ${position + 1}`;
+    if (at === undefined) {
+      problems.push(`${which} needs the tossup it comes after.`);
+      return;
+    }
+    if (!Number.isInteger(at) || at < 1 || at > maximumRoomBreakTossup) {
+      problems.push(`${which} must come after a whole tossup between 1 and ${maximumRoomBreakTossup}.`);
+      return;
+    }
+    if (seen.has(at)) {
+      problems.push(`Two breaks are set after tossup ${at}.`);
+      return;
+    }
+    seen.add(at);
+    // A break after the last tossup of the round is a break the room will never reach. Worth saying
+    // here, where the tossup count is on the same screen, rather than discovering it mid-game.
+    if (regulationTossupCount >= 1 && at >= regulationTossupCount) {
+      problems.push(`${which} comes after tossup ${at}, which is not inside a ${regulationTossupCount}-tossup round.`);
+    }
+    if (row.label.trim().length > maximumRoomBreakLabelLength) {
+      problems.push(`${which}'s name is too long.`);
+    }
+  });
+
+  return problems;
+}
+
 function optionProblems(options: IManualRoundOptions): string[] {
   const problems: string[] = [];
 
@@ -173,6 +269,12 @@ export function manualGameProblems(input: IManualGameInput): IManualGameProblem[
     ...teamProblems(input).map((message) => ({ section: 'teams' as const, message })),
     ...basicScoringRulesProblems(input.rules).map((message) => ({ section: 'rules' as const, message })),
     ...optionProblems(input.options).map((message) => ({ section: 'options' as const, message })),
+    // Breaks are the one option whose validity depends on the rules section above it, because a break
+    // is a tossup number and the round's length is stated there.
+    ...breakProblems(input.options, input.rules.tossupCount).map((message) => ({
+      section: 'options' as const,
+      message,
+    })),
   ];
 }
 
@@ -184,11 +286,29 @@ export function manualGameProblems(input: IManualGameInput): IManualGameProblem[
  * later reader has to look at and discard.
  */
 export function manualRoomProcedure(options: IManualRoundOptions): IRoomProcedure | undefined {
+  // Only rows that describe a break become one. A row with no tossup number in it is unfinished work,
+  // and `manualGameProblems` has already refused to start the game over it.
+  const breaks: IRoomBreak[] = (options.breaks ?? [])
+    .flatMap((row): IRoomBreak[] => {
+      const at = row.afterTossup;
+      if (at === undefined || !Number.isInteger(at) || at < 1) return [];
+      const label = row.label.trim();
+      return [{ afterTossup: at, ...(label !== '' ? { label: label.slice(0, maximumRoomBreakLabelLength) } : {}) }];
+    })
+    .filter((roomBreak, position, all) => all.findIndex((other) => other.afterTossup === roomBreak.afterTossup) === position)
+    .sort((a, b) => a.afterTossup - b.afterTossup)
+    .slice(0, maximumRoomBreaks);
+
+  // Scheduled breaks are breaks. A procedure listing them and denying that the room stops would be
+  // contradicting itself, and `readRoomProcedure` resolves it the same way at the other end.
+  const takesBreaks = options.halves || breaks.length > 0;
+
   const procedure: IRoomProcedure = {
     version: roomProcedureVersion,
-    halves: options.halves,
-    // A clock length with no halves to apply it to is not a rule anybody stated.
-    ...(options.halves && options.halfLengthMinutes !== undefined
+    halves: takesBreaks,
+    ...(breaks.length > 0 ? { breaks } : {}),
+    // A clock length with no play segments to apply it to is not a rule anybody stated.
+    ...(takesBreaks && options.halfLengthMinutes !== undefined
       ? { halfLengthMinutes: options.halfLengthMinutes }
       : {}),
     timeoutsPerTeam: options.timeoutsPerTeam,

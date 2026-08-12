@@ -1135,6 +1135,62 @@ body {
   padding: 0;
 }
 
+.manual-subs-hint {
+  margin: 6px 0 0 22px;
+  max-width: 520px;
+}
+
+/*
+ * Scheduled breaks.
+ *
+ * A list of rows, laid out as a row per break rather than a table: two fields and a button is not
+ * tabular data, and a table here would need a header row saying "After tossup" and "Name" twice —
+ * once for sighted readers and once in the labels a screen reader needs anyway.
+ *
+ * The number field keeps its own narrow width so a column of tossup numbers lines up; the name takes
+ * whatever is left, because break names are the part that varies in length.
+ */
+.manual-breaks {
+  margin-top: 16px;
+}
+
+.manual-breaks-hint {
+  margin: 2px 0 8px;
+  max-width: 520px;
+}
+
+.manual-break-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.manual-break-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.manual-break-field-grow {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.manual-break-field-grow .shell-input {
+  width: 100%;
+}
+
+/* Aligned with the bottom of the two inputs beside it rather than with their labels. */
+.manual-break-remove {
+  flex: 0 0 auto;
+}
+
+.manual-break-add {
+  margin-top: 2px;
+}
+
 .rules-fields-hint {
   margin-top: 0;
 }

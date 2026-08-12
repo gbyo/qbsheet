@@ -35,6 +35,13 @@ import {
   protestBlocksCheckpoint,
   protestBlocksSuddenDeathTossup,
   protestCheckpointPolicy,
+  roomBreakAt,
+  roomBreakDue,
+  roomBreakLabel,
+  roomBreaksAreScheduled,
+  roomMayBreakNow,
+  roomTakesBreaks,
+  substitutionOpportunityPhrase,
   substitutionPolicy,
 } from '../scoring/RoomProcedure';
 import deriveGame, {
@@ -428,7 +435,7 @@ export default function Scorer(props: IScorerProps) {
 
   const game = useMemo(() => deriveGame(format, setup, events.events), [format, setup, events.events]);
   const clockSegment = roomClockSegment(
-    procedure?.halves,
+    roomTakesBreaks(procedure),
     game.halfBreaks.length,
     game.awaitingScoreCheck,
     game.overtimeStarted,
@@ -967,7 +974,7 @@ export default function Scorer(props: IScorerProps) {
   const lineupChangeReason =
     phase.kind === 'complete'
       ? 'This game is complete. Use scoresheet review to correct historical lineup information.'
-      : 'This procedure allows lineup changes at halftime, timeouts, and phase checkpoints.';
+      : `This procedure allows lineup changes ${substitutionOpportunityPhrase(procedure)}.`;
 
   const timeoutDurationMs = (procedure?.timeoutDurationSeconds ?? 0) * 1000;
   const timeoutRemainingMs =
@@ -1013,10 +1020,20 @@ export default function Scorer(props: IScorerProps) {
         question.questionNumber === phase.questionNumber && (question.bonus !== undefined || question.awaitingBonus),
     );
 
+  /**
+   * What this room calls the break it is at.
+   *
+   * Named from the schedule where there is one. A room breaking after tossup 5 of 24 is not at
+   * halftime, and telling it that it is makes the scoresheet look like it has lost the round.
+   */
+  const currentBreakName = roomBreaksAreScheduled(procedure)
+    ? roomBreakLabel(procedure, roomBreakAt(procedure, phase.kind === 'score-check' ? phase.afterQuestion : 0))
+    : 'Halftime';
+
   const progress = (() => {
     if (phase.kind === 'complete') return 'Game complete';
     if (phase.kind === 'lineup') return 'Choose starters';
-    if (phase.kind === 'score-check') return `Halftime · after tossup ${phase.afterQuestion}`;
+    if (phase.kind === 'score-check') return `${currentBreakName} · after tossup ${phase.afterQuestion}`;
     if (phase.kind === 'checkpoint') {
       return phase.checkpoint === 'overtime' ? 'Regulation complete' : 'Initial overtime complete';
     }
@@ -1078,20 +1095,29 @@ export default function Scorer(props: IScorerProps) {
       onSelect: () => record({ id: newEventId(), type: 'timeout-resume', questionNumber: currentQuestion }),
     });
   }
-  if (procedure?.halves && phase.kind !== 'complete' && !game.awaitingScoreCheck) {
-    roundItems.push({
-      label: `End ${game.halfBreaks.length === 0 ? 'first' : 'this'} half`,
-      icon: 'pause',
-      // The boundary is the last tossup actually played, not the one on screen. A displayed
-      // question with nothing recorded against it has not been read.
-      onSelect: () =>
-        record({
-          id: newEventId(),
-          type: 'half-break',
-          questionNumber: currentQuestion,
-          lastQuestion: lastPlayedQuestion(game),
-        }),
-    });
+  if (roomTakesBreaks(procedure) && phase.kind !== 'complete' && !game.awaitingScoreCheck) {
+    // A scheduled room is only offered the break it actually owes; an unscheduled `halves` room keeps
+    // the moderator-chosen break it has always had. Offering "End this half" to a room whose
+    // procedure says "after tossup 5, 10 and 15" would be offering it a break nobody scheduled.
+    const mayBreak = roomMayBreakNow(procedure, game.halfBreaks, lastPlayedQuestion(game));
+    const due = roomBreakDue(procedure, game.halfBreaks, lastPlayedQuestion(game));
+    if (mayBreak) {
+      roundItems.push({
+        label: roomBreaksAreScheduled(procedure)
+          ? `${roomBreakLabel(procedure, due)} · after tossup ${due?.afterTossup}`
+          : `End ${game.halfBreaks.length === 0 ? 'first' : 'this'} half`,
+        icon: 'pause',
+        // The boundary is the last tossup actually played, not the one on screen. A displayed
+        // question with nothing recorded against it has not been read.
+        onSelect: () =>
+          record({
+            id: newEventId(),
+            type: 'half-break',
+            questionNumber: currentQuestion,
+            lastQuestion: lastPlayedQuestion(game),
+          }),
+      });
+    }
   }
   if (format.regulation.timed && !game.regulationComplete && phase.kind !== 'complete') {
     roundItems.push({
@@ -1403,6 +1429,7 @@ export default function Scorer(props: IScorerProps) {
                 <HalftimeCheck
                   game={game}
                   afterQuestion={phase.afterQuestion}
+                  breakName={currentBreakName}
                   onPlayers={() => setDialog('players')}
                   onContinue={() => record({ id: newEventId(), type: 'half-resume', questionNumber: currentQuestion })}
                 />

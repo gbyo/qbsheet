@@ -3,16 +3,27 @@ export const roomClockVersion = 2;
 
 export type RoomClockSegment = string;
 
-/** Select the persisted timer from derived procedure state, never from elapsed wall-clock time. */
+/**
+ * Select the persisted timer from derived procedure state, never from elapsed wall-clock time.
+ *
+ * A round with configured breaks has as many play segments as it has breaks, plus one, so the segment
+ * is the number of breaks behind the room rather than a choice between two halves. The `half-N`
+ * naming is kept because it is already in the storage keys of every device that has run a timed game,
+ * and renaming it would silently discard a clock a room is in the middle of.
+ *
+ * A score check belongs to the segment that just ended, not the one about to start: the room is still
+ * agreeing the score of the half it played, and the clock it is looking at is that half's.
+ */
 export function roomClockSegment(
-  halves: boolean | undefined,
-  halfBreakCount: number,
+  takesBreaks: boolean | undefined,
+  breaksTaken: number,
   awaitingScoreCheck: boolean,
   overtimeStarted: boolean,
 ): RoomClockSegment {
   if (overtimeStarted) return 'overtime';
-  if (halves && halfBreakCount > 0 && !awaitingScoreCheck) return 'half-2';
-  return 'half-1';
+  if (!takesBreaks || breaksTaken <= 0) return 'half-1';
+  const segmentsFinished = awaitingScoreCheck ? breaksTaken - 1 : breaksTaken;
+  return `half-${Math.max(0, segmentsFinished) + 1}`;
 }
 
 export type RoomClockStatus = 'idle' | 'running' | 'paused' | 'expired';

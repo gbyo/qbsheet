@@ -31,8 +31,12 @@ import {
   protestBlocksCheckpoint,
   protestBlocksSuddenDeathTossup,
   protestCheckpointPolicy,
+  roomBreakUpcoming,
+  roomMayBreakNow,
+  roomTakesBreaks,
+  substitutionOpportunityPhrase,
 } from './RoomProcedure';
-import deriveGame, { IGameSetup, IDerivedGame, lineupChangeEffectiveQuestion } from './deriveGame';
+import deriveGame, { IGameSetup, IDerivedGame, lastPlayedQuestion, lineupChangeEffectiveQuestion } from './deriveGame';
 import { ScoreEvent, usesTossupOpportunity } from './ScoreEvents';
 
 export type ScoreEventVerdict = { ok: true } | { ok: false; reason: string };
@@ -198,7 +202,10 @@ export default function canApplyScoreEvent(
         return refuse(`The next safe lineup boundary is Tossup ${lineupChangeEffectiveQuestion(game, events)}.`);
       }
       if (!lineupChangeAllowedAtPhase(procedure?.substitutionPolicy ?? 'any-boundary', phase.kind)) {
-        return refuse('Lineup changes are available at halftime, timeouts, and overtime checkpoints.');
+        // Said from the configured breaks rather than from the usual case: a room whose breaks are
+        // after tossups 5 and 10 and which is told to substitute "at halftime" has been told about a
+        // break its tournament does not have.
+        return refuse(`Lineup changes are available ${substitutionOpportunityPhrase(procedure)}.`);
       }
       return allowed;
     }
@@ -241,10 +248,27 @@ export default function canApplyScoreEvent(
       return allowed;
     }
 
+    /**
+     * A break, scheduled or not.
+     *
+     * The event type still says `half-break` because that is what is already written into every saved
+     * game and every wire message; what it means is "the room stopped here". Where a room may stop is
+     * the procedure's business, and under scheduled breaks that is a narrower question than it used
+     * to be: a room allowed to substitute only after tossups 5 and 10 must not be able to open a
+     * break after tossup 7 and substitute there instead.
+     */
     case 'half-break': {
-      if (!procedure?.halves) return refuse('This room does not use halftime checkpoints.');
+      if (!roomTakesBreaks(procedure)) return refuse('This room does not take breaks.');
       if (game.awaitingScoreCheck) return refuse('The score check for this break is still open.');
       if (complete) return refuse('This game is over.');
+      if (!roomMayBreakNow(procedure, game.halfBreaks, lastPlayedQuestion(game))) {
+        const upcoming = roomBreakUpcoming(procedure, game.halfBreaks);
+        return refuse(
+          upcoming === undefined
+            ? 'This room has taken every break its procedure allows.'
+            : `The next break is after Tossup ${upcoming.afterTossup}.`,
+        );
+      }
       return allowed;
     }
 

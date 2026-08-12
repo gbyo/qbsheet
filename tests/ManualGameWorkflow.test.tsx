@@ -332,11 +332,11 @@ describe('the setup form', () => {
     await openApp();
     await press('Create game');
 
-    expect(screen.queryByLabelText('Half length in minutes')).toBeNull();
+    expect(screen.queryByLabelText('Minutes of play between breaks')).toBeNull();
     await act(async () => {
-      fireEvent.click(screen.getByLabelText('Play in halves'));
+      fireEvent.click(screen.getByLabelText('The round has breaks'));
     });
-    expect(screen.getByLabelText('Half length in minutes')).toBeInTheDocument();
+    expect(screen.getByLabelText('Minutes of play between breaks')).toBeInTheDocument();
 
     expect(screen.queryByLabelText('Timeout length in seconds')).toBeNull();
     await act(async () => {
