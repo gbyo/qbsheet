@@ -15,6 +15,17 @@ export default defineConfig({
   outputDir: 'test-results',
   use: {
     baseURL: 'http://127.0.0.1:4173',
+    // The browser suite exercises scoring workflows, not the one-time device setup prompt.
+    // Seed the acknowledgement so each isolated test context starts at the scoresheet entry point.
+    storageState: {
+      cookies: [],
+      origins: [
+        {
+          origin: 'http://127.0.0.1:4173',
+          localStorage: [{ name: 'qbsheet.operator-name-asked.v1', value: '1' }],
+        },
+      ],
+    },
     serviceWorkers: 'block',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',

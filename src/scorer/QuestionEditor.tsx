@@ -19,6 +19,21 @@
  * twice. Everything a scoresheet has in the margin — who was on the floor, protests, flags, the
  * replacement-question workflow — is behind More, where margins go.
  *
+ * # A rule means one thing
+ *
+ * This application is ruled rather than boxed, which only works while a rule is scarce enough to
+ * mean something. This dialog had drifted to twelve of them in six hundred pixels — under the table
+ * header, under each team's row, above every attempt, below the last one, around the disclosure —
+ * all drawn in the same 1px, so a row boundary looked exactly like the boundary between Tossup and
+ * Bonus and none of them said anything.
+ *
+ * There are two rules left. A full-width one opens a region: Tossup, Bonus, Question details, the
+ * footer. One under a column heading says the words above name the columns below, and the score
+ * table is the only thing that needs it, because it is the only part of the dialog made of bare
+ * text rather than bordered controls. Everything else is grouped by space and by column alignment.
+ * The attempt list is not ruled at all: it holds two rows at the most, and two rows do not need
+ * three lines to be told apart.
+ *
  * # Nothing here knows any format
  *
  * The rulings are `format.answerTypes`. The bonus buttons are `regularBonusTotals`. The number of
