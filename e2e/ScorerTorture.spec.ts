@@ -196,9 +196,13 @@ test('a real scorer session survives fast input, reload, correction, completion,
   const questionTwo = page.locator('.scorer-review-list > li').filter({ hasText: 'Q2' });
   await questionTwo.getByRole('button', { name: 'Edit question' }).click();
   await page.getByLabel('Player', { exact: true }).selectOption({ label: 'Jordan Blake' });
-  await page.getByLabel('Ruling', { exact: true }).selectOption({ label: '+15' });
+  // A format with four or fewer rulings renders them as a segmented group, not a select.
+  await page
+    .getByRole('group', { name: 'Ruling', exact: true })
+    .getByRole('button', { name: 'Power (+15)', exact: true })
+    .click();
   await page.getByRole('group', { name: 'Bonus points' }).getByRole('button', { name: '20' }).click();
-  await page.getByRole('button', { name: 'Save correction' }).click();
+  await page.getByRole('button', { name: 'Save changes' }).click();
   await page.getByRole('dialog', { name: 'Full scoresheet review' }).getByRole('button', { name: 'Close' }).click();
 
   await expect(page.getByLabel('Greenwood score')).toHaveText('35');

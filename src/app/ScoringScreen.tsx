@@ -113,6 +113,23 @@ export default function ScoringScreen(props: {
   }, [durable, storageDegraded]);
 
   /**
+   * Whether this screen is still on the page.
+   *
+   * The durable writes below are deliberately unwaited, so one can land after the room has ended the
+   * game and moved on and this screen is gone. Reporting durability into a tree that is no longer
+   * mounted is at best a no-op; under a test runner it is an unhandled rejection that fails a run
+   * where every assertion passed. The `cancelled` flag in `App` guards the same hazard from an
+   * effect; these writes start from callbacks, so the flag has to outlive a render.
+   */
+  const onScreen = useRef(true);
+  useEffect(() => {
+    onScreen.current = true;
+    return () => {
+      onScreen.current = false;
+    };
+  }, []);
+
+  /**
    * Whether this game has tournament control behind it.
    *
    * A game is connected because it was *started* connected, and the stored connection has to still
@@ -182,6 +199,7 @@ export default function ScoringScreen(props: {
   const mirror = useCallback(
     (events: ScoreEvent[], setup: IGameSetup) => {
       void store.update(record.id, { events, setup }).then((updated) => {
+        if (!onScreen.current) return;
         setRecordDurablyStored(updated !== null && store.durable && !store.storageDegraded);
       });
     },
@@ -195,6 +213,7 @@ export default function ScoringScreen(props: {
         const at = new Date().toISOString();
         setDownloadedAt(at);
         void store.update(record.id, { qbjDownloadedAt: at }).then((updated) => {
+          if (!onScreen.current) return;
           if (updated === null || !store.durable || store.storageDegraded) setRecordDurablyStored(false);
         });
       }
@@ -237,14 +256,14 @@ export default function ScoringScreen(props: {
         finalScore: scoreFromQbj(portable),
       });
       if (!saved) {
-        setRecordDurablyStored(false);
+        if (onScreen.current) setRecordDurablyStored(false);
         return {
           ok: false,
           message:
             'This device could not save the finished result. Do not close this tab. Download the QBJ backup now.',
         };
       }
-      setRecordDurablyStored(store.durable && !store.storageDegraded);
+      if (onScreen.current) setRecordDurablyStored(store.durable && !store.storageDegraded);
 
       if (live) {
         // The capability is device-only. If this write is refused, the live send still happens and

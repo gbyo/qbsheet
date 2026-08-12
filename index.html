@@ -10,7 +10,15 @@
       and from a copy on a USB stick. See vite.config.ts.
     -->
     <link rel="manifest" href="./manifest.webmanifest" />
-    <link rel="icon" type="image/svg+xml" sizes="any" href="./icon.svg" />
+    <!--
+      The .ico comes first and carries real 16/32/48 bitmaps because Safari does not render SVG
+      favicons; a tab there would otherwise fall back to a blank page glyph. Browsers that do
+      understand image/svg+xml prefer the vector below it, and iOS uses the touch icon when the
+      scoresheet is added to a home screen.
+    -->
+    <link rel="icon" href="./favicon.ico" sizes="48x48 32x32 16x16" />
+    <link rel="icon" type="image/svg+xml" href="./icon.svg" sizes="any" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
     <title>QBSheet</title>
   </head>
   <body>

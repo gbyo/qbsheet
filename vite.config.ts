@@ -83,7 +83,17 @@ function serviceWorkerPlugin(identity: IBuildIdentity): Plugin {
       const emitted = Object.keys(bundle).filter((name) => !name.endsWith('.map'));
       // Files copied straight from `public/` are not part of the bundle and have to be named. They
       // are also not content-hashed, which is why the cache name is derived from the whole list.
-      const staticFiles = ['index.html', 'manifest.webmanifest', 'icon.svg', 'icon-maskable.svg'];
+      const staticFiles = [
+        'index.html',
+        'manifest.webmanifest',
+        'favicon.ico',
+        'apple-touch-icon.png',
+        'icon.svg',
+        'icon-maskable.svg',
+        'icon-192.png',
+        'icon-512.png',
+        'icon-maskable-512.png',
+      ];
       const precache = [...new Set([...staticFiles, ...emitted])].sort();
       const buildId = createHash('sha256').update(precache.join('\n')).digest('hex').slice(0, 16);
       this.emitFile({
