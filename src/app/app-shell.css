@@ -55,7 +55,7 @@
 
 body {
   margin: 0;
-  font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-family: 'IBM Plex Sans', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   color: var(--room-text);
   background: var(--room-surface);
   font-size: 14px;
