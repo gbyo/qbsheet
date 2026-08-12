@@ -201,6 +201,7 @@
 
 .qbsheet-motion-number {
   --qbsheet-number-digits: 1;
+
   position: relative;
   display: inline-grid;
   min-width: calc(var(--qbsheet-number-digits) * 1ch);
@@ -349,23 +350,23 @@
 }
 
 @keyframes qbsheet-row-acknowledgement {
-  from,
+  0%,
   48% {
     background-color: var(--room-surface-sunken);
   }
 
-  to {
+  100% {
     background-color: transparent;
   }
 }
 
 @keyframes qbsheet-row-neg-acknowledgement {
-  from,
+  0%,
   48% {
     background-color: var(--room-error-bg);
   }
 
-  to {
+  100% {
     background-color: transparent;
   }
 }

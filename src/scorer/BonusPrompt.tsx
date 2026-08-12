@@ -141,6 +141,8 @@ function PartEntry(props: {
     ['scorer-choice', selected ? 'is-selected' : '', selectionMotion?.index === index && selectionMotion.outcome === outcome ? 'is-part-recorded' : '']
       .filter(Boolean)
       .join(' ');
+  const selectionToken = (index: number, outcome: 'controlled' | 'bounceback' | 'missed') =>
+    selectionMotion?.index === index && selectionMotion.outcome === outcome ? selectionMotion.token : undefined;
 
   const parts: IBonusPartResult[] = outcomes.map((outcome) => ({
     controlledPoints: outcome === 'controlled' ? perPart : 0,
@@ -162,11 +164,7 @@ function PartEntry(props: {
                 type="button"
                 aria-pressed={outcome === 'controlled'}
                 className={choiceClass(index, 'controlled', outcome === 'controlled')}
-                data-selection-token={
-                  selectionMotion?.index === index && selectionMotion.outcome === 'controlled'
-                    ? selectionMotion.token
-                    : undefined
-                }
+                data-selection-token={selectionToken(index, 'controlled')}
                 onClick={() => set(index, 'controlled')}
               >
                 +{perPart}
@@ -176,11 +174,7 @@ function PartEntry(props: {
                   type="button"
                   aria-pressed={outcome === 'bounceback'}
                   className={choiceClass(index, 'bounceback', outcome === 'bounceback')}
-                  data-selection-token={
-                    selectionMotion?.index === index && selectionMotion.outcome === 'bounceback'
-                      ? selectionMotion.token
-                      : undefined
-                  }
+                  data-selection-token={selectionToken(index, 'bounceback')}
                   onClick={() => set(index, 'bounceback')}
                 >
                   Bounce
@@ -190,11 +184,7 @@ function PartEntry(props: {
                 type="button"
                 aria-pressed={outcome === 'missed'}
                 className={choiceClass(index, 'missed', outcome === 'missed')}
-                data-selection-token={
-                  selectionMotion?.index === index && selectionMotion.outcome === 'missed'
-                    ? selectionMotion.token
-                    : undefined
-                }
+                data-selection-token={selectionToken(index, 'missed')}
                 onClick={() => set(index, 'missed')}
               >
                 Miss
