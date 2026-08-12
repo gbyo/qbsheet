@@ -6,10 +6,32 @@
   gap: 16px;
 }
 
+.shell-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
 .shell-button-quiet {
   padding: 6px 10px;
   font-size: 13px;
   font-weight: 400;
+}
+
+/*
+ * The cog beside "Check this device".
+ *
+ * Square, so the glyph is not floating in a button shaped for words, and sized to the same 32px the
+ * text button next to it ends up at so the pair reads as one control group rather than two.
+ */
+.shell-button-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
 }
 
 .readiness-shell {

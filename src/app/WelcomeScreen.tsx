@@ -17,6 +17,23 @@
  * the third row of that block and is styled like one — a rule and a button, not a promoted card,
  * because it is the least likely of the three at a tournament and the most likely everywhere else.
  *
+ * # The scorekeeper name is a setting, not a step
+ *
+ * It used to sit in a labelled block between the warnings and the game in progress, which put a
+ * question nobody has to answer above the two things everybody came here for. It is a device
+ * preference — set once, then never again on this Chromebook — so it lives behind a cog in the
+ * header next to the other device-level thing, and the homepage goes straight from "what is wrong"
+ * to "what are you scoring".
+ *
+ * Set once still has to happen once, so a device that has never been asked is asked, in a dialog,
+ * on the first load. Once. A blank answer is an answer and is remembered as one.
+ *
+ * Once it is set it is said back, under the logo, as a greeting with a "Not you?" underneath. This
+ * is the one part of it that is not a preference: a shared Chromebook that has been handed to the
+ * next room still carries the last person's name into every result it sends, and the only way to
+ * catch that is for the name to be on screen where somebody sitting down would read it. "Not you?"
+ * is the same dialog as the cog, phrased as the question the person reading it is already asking.
+ *
  * Guided practice is a different thing again and stays below: it is a tutorial with a script in it,
  * it invents its own teams, and its result is not a game anybody keeps. "Create a game" is scoring;
  * "Practice scoring" is learning where the buttons are.
@@ -42,9 +59,11 @@ import deriveGame from '../scoring/deriveGame';
 import { IUnreadableRecord } from '../game/GameRecordUpgrade';
 import { IPairedRoom } from './ConnectedSession';
 import UpdateNotice from '../pwa/UpdateNotice';
+import ControlIcon from '../scorer/ControlIcon';
 import GameFileOpen from './GameFileOpen';
 import RecentGames from './RecentGames';
 import NativeDialog from './NativeDialog';
+import { readOperatorNameAsked, writeOperatorNameAsked } from './OperatorIdentity';
 
 /** How far a saved game got, for the resume card. */
 export function progressLabel(record: IStoredGameRecord): string {
@@ -79,6 +98,78 @@ export function unreadableNotice(unreadable: IUnreadableRecord[]): string | null
     return `${games} on this device ${count === 1 ? 'is' : 'are'} in a format this version of QBSheet cannot read. Nothing has been deleted. Ask tournament control before scoring on this device.`;
   }
   return `${games} on this device cannot be opened by this version of QBSheet. Nothing has been deleted. Update this device or ask tournament control before scoring on it.`;
+}
+
+/**
+ * What to call the scorekeeper in the greeting.
+ *
+ * The first word of whatever they typed. A scoresheet that says "Hello, Gibson Bell." is reading a
+ * roster entry out loud; the greeting is there to confirm which person this device thinks it is,
+ * and a first name does that in less space. The full name is still what goes out with the result.
+ */
+export function greetingName(name: string): string {
+  return name.trim().split(/\s+/)[0] ?? '';
+}
+
+/**
+ * The scorekeeper name, in a dialog.
+ *
+ * Edited as a draft and committed on save, because a dialog with a Cancel in it has to mean it: a
+ * field that wrote through on every keystroke would leave a half-typed name behind on a device the
+ * scorekeeper thought they had backed out of.
+ */
+function ScorekeeperDialog(props: {
+  /** First load on this device. Changes the framing from "a setting" to "a question". */
+  firstRun: boolean;
+  name: string;
+  onSave: (value: string) => void;
+  onDismiss: () => void;
+}) {
+  const { firstRun, name, onSave, onDismiss } = props;
+  const [draft, setDraft] = useState(name);
+
+  return (
+    <NativeDialog
+      title={firstRun ? 'Who is scoring?' : 'Scorekeeper'}
+      onClose={onDismiss}
+      className="scorekeeper-dialog"
+    >
+      <form
+        className="operator-identity-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSave(draft);
+        }}
+      >
+        <p className="welcome-option-copy">
+          {firstRun
+            ? 'Put your name on this device once and it goes out with every result it sends. You can skip this and set it later from the cog in the header.'
+            : 'This name is stored on this device only.'}
+        </p>
+        <label className="shell-label" htmlFor="operator-name">
+          Name (optional)
+        </label>
+        <input
+          id="operator-name"
+          className="shell-input"
+          type="text"
+          autoComplete="name"
+          data-dialog-autofocus
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+        />
+        <p className="shell-hint">Included in saved results and connected tournament presence.</p>
+        <div className="shell-modal-actions">
+          <button type="submit" className="shell-button is-primary">
+            Save
+          </button>
+          <button type="button" className="shell-button" onClick={onDismiss}>
+            {firstRun ? 'Not now' : 'Cancel'}
+          </button>
+        </div>
+      </form>
+    </NativeDialog>
+  );
 }
 
 export default function WelcomeScreen(props: {
@@ -135,9 +226,32 @@ export default function WelcomeScreen(props: {
   const [alreadyPlayed, setAlreadyPlayed] = useState<{ record: IStoredGameRecord; opened: IGamePackage } | null>(
     null,
   );
+  const [scorekeeperOpen, setScorekeeperOpen] = useState(false);
+  /**
+   * The first-load ask, decided once at mount.
+   *
+   * Not asked if there is an unfinished game on this device: that device is a room that reloaded
+   * mid-round, and the first thing on its screen has to be the Resume button, not a modal about a
+   * name. It will be asked the next time it opens the site with nothing in progress.
+   */
+  const [firstRun, setFirstRun] = useState(
+    () =>
+      props.onOperatorNameChange !== undefined &&
+      (props.operatorName ?? '').trim() === '' &&
+      !props.records.some(isActive) &&
+      !readOperatorNameAsked(),
+  );
 
   const unfinished = records.filter(isActive);
   const completed = records.filter((record) => !isActive(record));
+
+  const closeScorekeeper = () => {
+    setScorekeeperOpen(false);
+    if (firstRun) {
+      setFirstRun(false);
+      writeOperatorNameAsked();
+    }
+  };
 
   const submitAddress = (event: FormEvent) => {
     event.preventDefault();
@@ -175,10 +289,35 @@ export default function WelcomeScreen(props: {
           <h1 className="shell-title shell-brand-title">
             <BrandLogo className="shell-brand-logo" />
           </h1>
+          {onOperatorNameChange && operatorName.trim() !== '' && (
+            <div className="welcome-greeting">
+              <p className="welcome-greeting-line">Hello, {greetingName(operatorName)}.</p>
+              <button
+                type="button"
+                className="welcome-greeting-link"
+                onClick={() => setScorekeeperOpen(true)}
+              >
+                Not you?
+              </button>
+            </div>
+          )}
         </div>
-        <button type="button" className="shell-button shell-button-quiet" onClick={onReadiness}>
-          Check this device
-        </button>
+        <div className="shell-header-actions">
+          <button type="button" className="shell-button shell-button-quiet" onClick={onReadiness}>
+            Check this device
+          </button>
+          {onOperatorNameChange && (
+            <button
+              type="button"
+              className="shell-button shell-button-quiet shell-button-icon"
+              onClick={() => setScorekeeperOpen(true)}
+              title={operatorName === '' ? 'Scorekeeper' : `Scorekeeper: ${operatorName}`}
+              aria-label={operatorName === '' ? 'Scorekeeper settings' : `Scorekeeper settings (${operatorName})`}
+            >
+              <ControlIcon name="settings" />
+            </button>
+          )}
+        </div>
       </header>
 
       {(!durable || storageDegraded) && (
@@ -195,26 +334,6 @@ export default function WelcomeScreen(props: {
         </p>
       )}
       {notice !== '' && <p className="shell-notice">{notice}</p>}
-
-      {onOperatorNameChange && (
-        <section className="shell-section operator-identity" aria-labelledby="operator-identity-heading">
-          <h2 id="operator-identity-heading" className="shell-heading">
-            Scorekeeper
-          </h2>
-          <label className="shell-label" htmlFor="operator-name">
-            Name (optional)
-          </label>
-          <input
-            id="operator-name"
-            className="shell-input"
-            type="text"
-            autoComplete="name"
-            value={operatorName}
-            onChange={(event) => onOperatorNameChange(event.target.value)}
-          />
-          <p className="shell-hint">Included in saved results and connected tournament presence.</p>
-        </section>
-      )}
 
       <UpdateNotice />
 
@@ -330,6 +449,18 @@ export default function WelcomeScreen(props: {
         onRetry={(record) => onRetryResult(record.id)}
         canRetry={canRetryResult}
       />
+
+      {onOperatorNameChange && (scorekeeperOpen || firstRun) && (
+        <ScorekeeperDialog
+          firstRun={firstRun && !scorekeeperOpen}
+          name={operatorName}
+          onSave={(value) => {
+            onOperatorNameChange(value);
+            closeScorekeeper();
+          }}
+          onDismiss={closeScorekeeper}
+        />
+      )}
 
       {alreadyPlayed && (
         <NativeDialog
