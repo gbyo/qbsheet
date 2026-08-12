@@ -433,12 +433,66 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-.operator-identity {
-  max-width: 520px;
+/*
+ * The greeting under the logo.
+ *
+ * Quiet on purpose. It is a confirmation, not a welcome — the job is to be readable by somebody
+ * glancing at a Chromebook they have just been handed, and to be ignorable by the person who set
+ * the name themselves and is here to score a game.
+ */
+.welcome-greeting {
+  margin-top: 10px;
 }
 
-.operator-identity .shell-input {
-  max-width: 360px;
+/*
+ * With a greeting under it the left column is two lines taller than the buttons, and centring the
+ * two against each other leaves the buttons floating below the wordmark. Aligned to the top the
+ * header reads as one line whether or not a name is set.
+ */
+.welcome-shell .shell-header-row {
+  align-items: flex-start;
+}
+
+.welcome-greeting-line {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.welcome-greeting-link {
+  display: inline-block;
+  margin-top: 2px;
+  padding: 0;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--room-muted);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.welcome-greeting-link:hover {
+  color: var(--room-text);
+  text-decoration: underline;
+}
+
+/*
+ * The scorekeeper dialog.
+ *
+ * Narrower than the scorer's dialogs because it holds one short field, and a name box stretched to
+ * 560px reads as a form with more of itself somewhere off screen.
+ */
+.scorekeeper-dialog {
+  max-width: 420px;
+}
+
+.operator-identity-form .shell-input {
+  width: 100%;
+}
+
+.operator-identity-form .welcome-option-copy {
+  margin: 0 0 12px;
 }
 
 .recent-list {
