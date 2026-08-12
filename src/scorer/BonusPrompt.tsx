@@ -28,11 +28,15 @@ import {
   regularBonusTotals,
 } from './bonusOptions';
 import { bonusOptionForCode, keystrokeBelongsToControl } from './KeyboardScoring';
+import MotionNumber from './ScoringMotion';
+import { LeftOrRight } from '../scoring/types';
 
 export interface IBonusPromptProps {
   format: IScorekeeperFormat;
   /** The team that converted the tossup. */
   controllingTeamName: string;
+  /** Explicit screen side: bounceback travel must not be guessed from a team name. */
+  controllingSide: LeftOrRight;
   opponentName: string;
   questionNumber: number;
   onRecord: (controlledPoints: number, bouncebackPoints?: number) => void;
@@ -111,9 +115,32 @@ function PartEntry(props: {
   const [outcomes, setOutcomes] = useState<Array<'controlled' | 'bounceback' | 'missed'>>(
     Array.from({ length: partCount }, () => 'missed' as const),
   );
+  const [selectionMotion, setSelectionMotion] = useState<{
+    index: number;
+    outcome: 'controlled' | 'bounceback' | 'missed';
+    token: number;
+  } | null>(null);
+  const selectionSequence = useRef(0);
 
-  const set = (index: number, value: 'controlled' | 'bounceback' | 'missed') =>
+  const set = (index: number, value: 'controlled' | 'bounceback' | 'missed') => {
     setOutcomes((current) => current.map((existing, position) => (position === index ? value : existing)));
+    selectionSequence.current += 1;
+    setSelectionMotion({ index, outcome: value, token: selectionSequence.current });
+  };
+  useEffect(() => {
+    if (!selectionMotion) return undefined;
+    const token = selectionMotion.token;
+    const timer = window.setTimeout(
+      () => setSelectionMotion((current) => (current?.token === token ? null : current)),
+      140,
+    );
+    return () => window.clearTimeout(timer);
+  }, [selectionMotion]);
+
+  const choiceClass = (index: number, outcome: 'controlled' | 'bounceback' | 'missed', selected: boolean) =>
+    ['scorer-choice', selected ? 'is-selected' : '', selectionMotion?.index === index && selectionMotion.outcome === outcome ? 'is-part-recorded' : '']
+      .filter(Boolean)
+      .join(' ');
 
   const parts: IBonusPartResult[] = outcomes.map((outcome) => ({
     controlledPoints: outcome === 'controlled' ? perPart : 0,
@@ -134,7 +161,12 @@ function PartEntry(props: {
               <button
                 type="button"
                 aria-pressed={outcome === 'controlled'}
-                className={outcome === 'controlled' ? 'scorer-choice is-selected' : 'scorer-choice'}
+                className={choiceClass(index, 'controlled', outcome === 'controlled')}
+                data-selection-token={
+                  selectionMotion?.index === index && selectionMotion.outcome === 'controlled'
+                    ? selectionMotion.token
+                    : undefined
+                }
                 onClick={() => set(index, 'controlled')}
               >
                 +{perPart}
@@ -143,7 +175,12 @@ function PartEntry(props: {
                 <button
                   type="button"
                   aria-pressed={outcome === 'bounceback'}
-                  className={outcome === 'bounceback' ? 'scorer-choice is-selected' : 'scorer-choice'}
+                  className={choiceClass(index, 'bounceback', outcome === 'bounceback')}
+                  data-selection-token={
+                    selectionMotion?.index === index && selectionMotion.outcome === 'bounceback'
+                      ? selectionMotion.token
+                      : undefined
+                  }
                   onClick={() => set(index, 'bounceback')}
                 >
                   Bounce
@@ -152,7 +189,12 @@ function PartEntry(props: {
               <button
                 type="button"
                 aria-pressed={outcome === 'missed'}
-                className={outcome === 'missed' ? 'scorer-choice is-selected' : 'scorer-choice'}
+                className={choiceClass(index, 'missed', outcome === 'missed')}
+                data-selection-token={
+                  selectionMotion?.index === index && selectionMotion.outcome === 'missed'
+                    ? selectionMotion.token
+                    : undefined
+                }
                 onClick={() => set(index, 'missed')}
               >
                 Miss
@@ -162,8 +204,19 @@ function PartEntry(props: {
         ))}
       </ol>
       <p className="scorer-part-total">
-        {controlledTotal}
-        {bouncesBack && bouncebackTotal > 0 && <> · {bouncebackTotal} bounced back</>}
+        <MotionNumber value={controlledTotal} minimumDigits={2} aria-label={`${controlledTotal} controlled points`} />
+        {bouncesBack && bouncebackTotal > 0 && (
+          <>
+            {' '}
+            ·{' '}
+            <MotionNumber
+              value={bouncebackTotal}
+              minimumDigits={2}
+              aria-label={`${bouncebackTotal} bounceback points`}
+            />{' '}
+            bounced back
+          </>
+        )}
       </p>
       <div className="scorer-choices">
         <button type="button" className="scorer-choice" onClick={() => onRecord(parts)}>
@@ -181,6 +234,7 @@ export default function BonusPrompt(props: IBonusPromptProps) {
   const {
     format,
     controllingTeamName,
+    controllingSide,
     opponentName,
     questionNumber,
     onRecord,
@@ -193,6 +247,8 @@ export default function BonusPrompt(props: IBonusPromptProps) {
   const [controlled, setControlled] = useState<number | null>(null);
   const [typed, setTyped] = useState('');
   const [byParts, setByParts] = useState(false);
+  const [handoff, setHandoff] = useState<{ token: number; controlledPoints: number } | null>(null);
+  const handoffSequence = useRef(0);
 
   const bouncesBack = format.bonus.bounceBack;
 
@@ -203,8 +259,16 @@ export default function BonusPrompt(props: IBonusPromptProps) {
       return;
     }
     setTyped('');
+    handoffSequence.current += 1;
+    setHandoff({ token: handoffSequence.current, controlledPoints });
     setControlled(controlledPoints);
   };
+
+  useEffect(() => {
+    if (handoff === null) return undefined;
+    const timer = window.setTimeout(() => setHandoff(null), 200);
+    return () => window.clearTimeout(timer);
+  }, [handoff]);
 
   const bounceStage = controlled !== null && bouncesBack;
   const bouncebackTyped = bounceStage && bouncebackNeedsTypedEntry(format.bonus, controlled as number);
@@ -279,15 +343,33 @@ export default function BonusPrompt(props: IBonusPromptProps) {
 
   if (controlled !== null && bouncesBack) {
     const availableBounceback = Math.max(0, format.bonus.maximumScore - controlled);
+    const handoffDirection = controllingSide === 'left' ? 'right' : 'left';
     return (
-      <section className="scorer-prompt" aria-label="Bounceback">
-        <p className="scorer-prompt-title">
-          <span className="scorer-prompt-team">{opponentName}</span> bounceback
-          <span className="scorer-prompt-context">
-            Q{questionNumber} · {controllingTeamName} took {controlled}
-          </span>
-        </p>
-        {stageOptions ? (
+      <section
+        className={`scorer-prompt scorer-bounceback-handoff is-to-${handoffDirection}`}
+        aria-label="Bounceback"
+        data-bounceback-direction={handoffDirection}
+        data-motion-token={handoff?.token}
+      >
+        {handoff && (
+          <div className="scorer-prompt-content is-outgoing" aria-hidden="true">
+            <p className="scorer-prompt-title">
+              <span className="scorer-prompt-team">{controllingTeamName}</span> bonus
+              <span className="scorer-prompt-context">Q{questionNumber}</span>
+            </p>
+            <div className="scorer-choices">
+              <span className="scorer-choice is-selected">{handoff.controlledPoints}</span>
+            </div>
+          </div>
+        )}
+        <div className={handoff ? 'scorer-prompt-content is-incoming' : 'scorer-prompt-content'}>
+          <p className="scorer-prompt-title">
+            <span className="scorer-prompt-team">{opponentName}</span> bounceback
+            <span className="scorer-prompt-context">
+              Q{questionNumber} · {controllingTeamName} took {controlled}
+            </span>
+          </p>
+          {stageOptions ? (
           <div className="scorer-choices">
             {stageOptions.map((points) => (
               <button key={points} type="button" className="scorer-choice" onClick={() => onRecord(controlled, points)}>
@@ -295,7 +377,7 @@ export default function BonusPrompt(props: IBonusPromptProps) {
               </button>
             ))}
           </div>
-        ) : (
+          ) : (
           <form
             className="scorer-inline-form"
             onSubmit={(submitEvent) => {
@@ -324,13 +406,15 @@ export default function BonusPrompt(props: IBonusPromptProps) {
             </button>
             {typedProblem && <p className="scorer-problem">{typedProblem}</p>}
           </form>
-        )}
+          )}
+        </div>
       </section>
     );
   }
 
   return (
     <section className="scorer-prompt" aria-label="Bonus">
+      <div className="scorer-prompt-content">
       <p className="scorer-prompt-title">
         <span className="scorer-prompt-team">{controllingTeamName}</span> bonus
         <span className="scorer-prompt-context">Q{questionNumber}</span>
@@ -385,6 +469,7 @@ export default function BonusPrompt(props: IBonusPromptProps) {
           )}
         </>
       )}
+      </div>
     </section>
   );
 }

@@ -59,6 +59,7 @@ interface IControlRequestTestOptions {
   onRetryControlRequest?: () => Promise<HelpRequestResult | null>;
   onCancelControlRequest?: () => Promise<HelpClearResult | null>;
   onEventsChanged?: (events: unknown[]) => void;
+  connection?: RoomConnectionState;
 }
 
 function renderScorer(
@@ -72,9 +73,10 @@ function renderScorer(
 ) {
   const submit = onSubmit ?? vi.fn().mockResolvedValue({ ok: true, message: 'Sent' });
   gameCounter += 1;
-  render(
+  const gameKey = `test-game-${gameCounter}`;
+  const scorer = (connection: RoomConnectionState) => (
     <ScorerHost
-      gameKey={`test-game-${gameCounter}`}
+      gameKey={gameKey}
       format={format}
       leftTeam={leftTeam}
       rightTeam={rightTeam}
@@ -83,7 +85,7 @@ function renderScorer(
       roomName="Room 204"
       packetName={packetName}
       procedure={procedure}
-      connection={RoomConnectionState.Connected}
+      connection={connection}
       onDownload={() => undefined}
       onSubmit={submit}
       onRequestControl={onRequestControl}
@@ -94,9 +96,13 @@ function renderScorer(
       authoritativeLeftTeam={rosterOptions.authoritativeLeftTeam}
       authoritativeRightTeam={rosterOptions.authoritativeRightTeam}
       onSyncRosterPlayer={rosterOptions.onSyncRosterPlayer}
-    />,
+    />
   );
-  return { onSubmit: submit };
+  const view = render(scorer(controlOptions.connection ?? RoomConnectionState.Connected));
+  return {
+    onSubmit: submit,
+    rerenderConnection: (connection: RoomConnectionState) => view.rerender(scorer(connection)),
+  };
 }
 
 /**
@@ -453,6 +459,130 @@ describe('no buzz', () => {
 
     expect(screen.getByText('Tossup 2 of 20')).toBeTruthy();
     expect(screen.getByText('No buzz', { selector: '.scorer-rail-what' })).toBeTruthy();
+  });
+});
+
+describe('scoring motion state', () => {
+  test('the question counter moves only for an actual question change and reverses on undo', () => {
+    renderScorer(formatFor());
+    const counter = () => document.querySelector('.scorer-progress .qbsheet-motion-number') as HTMLElement;
+
+    expect(counter().dataset.motionDirection).toBeUndefined();
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+    // Tossup -> bonus is a phase change on the same active question, not a counter change.
+    expect(counter().dataset.motionDirection).toBeUndefined();
+
+    fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('20'));
+    expect(counter().dataset.motionDirection).toBe('forward');
+    expect(counter().dataset.previousValue).toBe('1');
+    expect(document.querySelector('.scorer-bonus-exit')).toHaveAttribute('data-motion-token');
+
+    fireEvent.click(screen.getByText('Undo'));
+    expect(counter().dataset.motionDirection).toBe('backward');
+    expect(counter().dataset.previousValue).toBe('2');
+  });
+
+  test('a committed no-buzz creates the neutral acknowledgement over the already-advanced state', () => {
+    renderScorer(formatFor());
+
+    const noBuzz = screen.getByRole('button', { name: 'No buzz' });
+    fireEvent.pointerDown(noBuzz);
+    expect(document.querySelector('.scorer-no-buzz-sweep')).toBeNull();
+    fireEvent.click(noBuzz);
+
+    expect(screen.getByText('Tossup 2 of 20')).toBeTruthy();
+    const firstToken = document.querySelector('.scorer-no-buzz-sweep')?.getAttribute('data-motion-token');
+    expect(firstToken).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'No buzz' }));
+    expect(document.querySelector('.scorer-no-buzz-sweep')?.getAttribute('data-motion-token')).not.toBe(firstToken);
+  });
+
+  test('a pointer ruling identifies the actual player and format-defined answer type', () => {
+    renderScorer(
+      formatFor((rules) => {
+        rules.answerTypes = [new AnswerType(7), new AnswerType(-3)];
+      }),
+    );
+
+    const button = buttonsFor('Sarah Mitchell')[0];
+    fireEvent.click(button);
+
+    const row = button.closest('.scorer-player') as HTMLElement;
+    expect(button).toHaveClass('is-recorded');
+    expect(button).toHaveTextContent('+7');
+    expect(row).toHaveClass('is-ruling-recorded');
+    expect(buttonsFor('James Robinson')[0]).not.toHaveClass('is-recorded');
+  });
+
+  test.each([
+    ['left', 'Sarah Mitchell', 'right'],
+    ['right', 'Emma Turner', 'left'],
+  ] as const)('bounceback handoff from %s follows the actual screen side', (_side, player, direction) => {
+    renderScorer(
+      formatFor((rules) => {
+        rules.bonusesBounceBack = true;
+      }),
+    );
+    fireEvent.click(buttonsFor(player)[1]);
+    fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('20'));
+
+    const prompt = screen.getByLabelText('Bounceback');
+    expect(prompt).toHaveAttribute('data-bounceback-direction', direction);
+    expect(prompt.querySelector('.scorer-prompt-content.is-outgoing')).toBeTruthy();
+    expect(prompt.querySelector('.scorer-prompt-content.is-incoming')).toBeTruthy();
+  });
+
+  test('part selection rolls the running total from the actual old total in both directions', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+    fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('Parts…'));
+    const firstPart = screen.getByText('Part 1').closest('.scorer-part-row') as HTMLElement;
+
+    fireEvent.click(within(firstPart).getByRole('button', { name: '+10' }));
+    let total = screen.getByLabelText('10 controlled points');
+    expect(total).toHaveAttribute('data-motion-direction', 'forward');
+    expect(total).toHaveAttribute('data-previous-value', '0');
+    expect(within(firstPart).getByRole('button', { name: '+10' })).toHaveClass('is-part-recorded');
+
+    fireEvent.click(within(firstPart).getByRole('button', { name: 'Miss' }));
+    total = screen.getByLabelText('0 controlled points');
+    expect(total).toHaveAttribute('data-motion-direction', 'backward');
+    expect(total).toHaveAttribute('data-previous-value', '10');
+  });
+
+  test('clock motion tokens follow start and stop, while the clock state changes immediately', () => {
+    renderScorer(formatFor(), undefined, undefined, {
+      version: 1,
+      halves: true,
+      halfLengthMinutes: 10,
+      timeoutsPerTeam: 0,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    const clock = document.querySelector('.scorer-clock') as HTMLElement;
+    expect(clock).toHaveAttribute('data-clock-state', 'running');
+    expect(clock.querySelector('.scorer-clock-digits')).toHaveAttribute('data-motion-token');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pause' }));
+    expect(clock).toHaveAttribute('data-clock-state', 'paused');
+    expect(screen.getByRole('button', { name: 'Resume' })).toBeEnabled();
+  });
+
+  test('connection recovery is absent on an initially connected mount and retriggers on each real recovery', () => {
+    const view = renderScorer(formatFor());
+    const connection = () => screen.getByRole('button', { name: /Show connection detail/ });
+
+    expect(connection()).not.toHaveClass('is-recovered');
+    view.rerenderConnection(RoomConnectionState.Offline);
+    expect(connection()).not.toHaveClass('is-recovered');
+    view.rerenderConnection(RoomConnectionState.Connected);
+    const firstToken = connection().getAttribute('data-recovery-token');
+    expect(connection()).toHaveClass('is-recovered');
+    expect(firstToken).toBeTruthy();
+
+    view.rerenderConnection(RoomConnectionState.Offline);
+    view.rerenderConnection(RoomConnectionState.Connected);
+    expect(connection().getAttribute('data-recovery-token')).not.toBe(firstToken);
   });
 });
 
@@ -1131,6 +1261,8 @@ describe('finishing', () => {
 
     expect(screen.getByText('Game complete')).toBeTruthy();
     expect(screen.getByText('Final score')).toBeTruthy();
+    expect(document.querySelector('.scorer-complete')).toHaveClass('is-newly-complete');
+    expect(document.querySelector('.scorer-complete')).toHaveAttribute('data-completion-token');
     // The per-player lines are the point of the check: this is where a misattributed buzz shows up.
     expect(screen.getByLabelText('Ninety Six players')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Submit result' })).toBeTruthy();
@@ -1282,7 +1414,7 @@ describe('halves and timeouts, when the tournament asked for them', () => {
     fireEvent.click(screen.getByRole('button', { name: 'No buzz' }));
     pressControl('End first half');
 
-    expect(screen.getByLabelText('Halftime score check')).toBeTruthy();
+    expect(screen.getByLabelText('Halftime score check')).toHaveClass('scorer-score-check');
     fireEvent.click(screen.getByText('Score confirmed · Continue'));
 
     expect(screen.getByText('Tossup 2 of 20')).toBeTruthy();
@@ -1407,6 +1539,9 @@ describe('undo and redo say what they changed', () => {
 
     expect(notice()).toBe('Undid Q1 · Sarah Mitchell +10');
     expect(scoreOf('Ninety Six')).toBe('0');
+    const undoRow = document.querySelector('.scorer-rail-item.is-undoing');
+    expect(undoRow).toHaveTextContent('Q1');
+    expect(undoRow).toHaveAttribute('aria-hidden', 'true');
   });
 
   test('redo says the same thing the other way round', () => {
@@ -1418,6 +1553,7 @@ describe('undo and redo say what they changed', () => {
 
     expect(notice()).toBe('Redid Q1 · Sarah Mitchell +10');
     expect(scoreOf('Ninety Six')).toBe('10');
+    expect(document.querySelector('.scorer-rail-item.is-redoing')).toHaveTextContent('Q1');
   });
 
   /*

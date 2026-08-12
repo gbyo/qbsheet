@@ -172,6 +172,562 @@
   animation: qbsheet-fade-in var(--room-motion-standard) var(--room-ease-standard) both;
 }
 
+/* A shared mechanical counter for the active question and the local part-by-part bonus total. */
+.scorer-progress.has-motion-number {
+  position: relative;
+  display: inline-block;
+  white-space: nowrap;
+}
+
+/* Holds the exact label and its width for compatibility; the visual copy is painted over it. */
+.scorer-progress-copy {
+  color: transparent;
+  user-select: none;
+}
+
+.scorer-progress-visual {
+  position: absolute;
+  inset: 0;
+  white-space: nowrap;
+}
+
+.scorer-progress-visual::before {
+  content: attr(data-prefix);
+}
+
+.scorer-progress-visual::after {
+  content: attr(data-suffix);
+}
+
+.qbsheet-motion-number {
+  --qbsheet-number-digits: 1;
+  position: relative;
+  display: inline-grid;
+  min-width: calc(var(--qbsheet-number-digits) * 1ch);
+  overflow: hidden;
+  vertical-align: bottom;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.qbsheet-motion-number-current,
+.qbsheet-motion-number::before {
+  grid-area: 1 / 1;
+}
+
+.qbsheet-motion-number[data-motion-direction]::before {
+  content: attr(data-previous-value);
+  pointer-events: none;
+}
+
+@keyframes qbsheet-number-current-forward {
+  from {
+    opacity: 0;
+    transform: translateY(38%);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes qbsheet-number-old-forward {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(-38%);
+  }
+}
+
+@keyframes qbsheet-number-current-backward {
+  from {
+    opacity: 0;
+    transform: translateY(-38%);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes qbsheet-number-old-backward {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(38%);
+  }
+}
+
+.qbsheet-motion-number[data-motion-direction='forward'] .qbsheet-motion-number-current {
+  animation: qbsheet-number-current-forward var(--room-motion-standard) var(--room-ease-out) both;
+}
+
+.qbsheet-motion-number[data-motion-direction='forward']::before {
+  animation: qbsheet-number-old-forward var(--room-motion-standard) var(--room-ease-out) both;
+}
+
+.qbsheet-motion-number[data-motion-direction='backward'] .qbsheet-motion-number-current {
+  animation: qbsheet-number-current-backward var(--room-motion-standard) var(--room-ease-out) both;
+}
+
+.qbsheet-motion-number[data-motion-direction='backward']::before {
+  animation: qbsheet-number-old-backward var(--room-motion-standard) var(--room-ease-out) both;
+}
+
+/* Committed no-buzz: a neutral pencil-like pass over the action strip, never a loading bar. */
+.scorer-stage {
+  position: relative;
+  isolation: isolate;
+}
+
+.scorer-no-buzz-sweep {
+  position: absolute;
+  z-index: 4;
+  inset: 0;
+  pointer-events: none;
+  background: var(--room-border);
+  transform-origin: left center;
+  animation: qbsheet-no-buzz-sweep 160ms var(--room-ease-out) both;
+}
+
+@keyframes qbsheet-no-buzz-sweep {
+  0% {
+    opacity: 0;
+    transform: scaleX(0);
+  }
+
+  55% {
+    opacity: 0.32;
+    transform: scaleX(1);
+  }
+
+  100% {
+    opacity: 0;
+    transform: scaleX(1);
+  }
+}
+
+/* Pointer/touch rulings lock into the exact format-defined button and its owning row. */
+.scorer-player.is-ruling-recorded {
+  background: var(--room-surface-sunken);
+}
+
+.scorer-player.is-ruling-recorded.is-neg-recorded {
+  background: var(--room-error-bg);
+}
+
+.scorer-answer.is-recorded {
+  background: var(--room-surface-sunken);
+  border-color: var(--room-border-strong);
+}
+
+.scorer-answer-neg.is-recorded {
+  background: var(--room-error-bg);
+  border-color: var(--room-error);
+}
+
+@keyframes qbsheet-ruling-lock {
+  from {
+    transform: scale(0.98);
+    box-shadow: inset 0 0 0 1px var(--room-border-strong);
+  }
+
+  to {
+    transform: scale(1);
+    box-shadow: inset 0 0 0 0 transparent;
+  }
+}
+
+@keyframes qbsheet-row-acknowledgement {
+  from,
+  48% {
+    background-color: var(--room-surface-sunken);
+  }
+
+  to {
+    background-color: transparent;
+  }
+}
+
+@keyframes qbsheet-row-neg-acknowledgement {
+  from,
+  48% {
+    background-color: var(--room-error-bg);
+  }
+
+  to {
+    background-color: transparent;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .scorer-answer.is-recorded {
+    animation: qbsheet-ruling-lock 150ms var(--room-ease-out) both;
+  }
+
+  .scorer-player.is-ruling-recorded {
+    animation: qbsheet-row-acknowledgement 220ms var(--room-ease-out) both;
+  }
+
+  .scorer-player.is-ruling-recorded.is-neg-recorded {
+    animation-name: qbsheet-row-neg-acknowledgement;
+  }
+}
+
+/* The bonus is already recorded; this inert copy only lets the old prompt leave over the new state. */
+.scorer-bonus-exit {
+  position: absolute;
+  z-index: 3;
+  inset: 14px 16px;
+  pointer-events: none;
+  animation: qbsheet-bonus-exit var(--room-motion-standard) var(--room-ease-out) both;
+}
+
+@keyframes qbsheet-bonus-exit {
+  from {
+    opacity: 0.92;
+    transform: translateY(0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+/* Bonus control moving to the other side: only prompt content travels, never either team panel. */
+.scorer-bounceback-handoff {
+  position: relative;
+}
+
+.scorer-bounceback-handoff .scorer-prompt-content.is-outgoing {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.scorer-bounceback-handoff.is-to-right .is-outgoing {
+  animation: qbsheet-bounce-out-right 190ms var(--room-ease-standard) both;
+}
+
+.scorer-bounceback-handoff.is-to-right .is-incoming {
+  animation: qbsheet-bounce-in-right 190ms var(--room-ease-out) both;
+}
+
+.scorer-bounceback-handoff.is-to-left .is-outgoing {
+  animation: qbsheet-bounce-out-left 190ms var(--room-ease-standard) both;
+}
+
+.scorer-bounceback-handoff.is-to-left .is-incoming {
+  animation: qbsheet-bounce-in-left 190ms var(--room-ease-out) both;
+}
+
+@keyframes qbsheet-bounce-out-right {
+  to {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+}
+
+@keyframes qbsheet-bounce-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+}
+
+@keyframes qbsheet-bounce-out-left {
+  to {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+}
+
+@keyframes qbsheet-bounce-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+}
+
+.scorer-choice.is-part-recorded {
+  animation: qbsheet-part-lock 130ms var(--room-ease-out) both;
+}
+
+@keyframes qbsheet-part-lock {
+  from {
+    transform: scale(0.985);
+  }
+
+  to {
+    transform: scale(1);
+  }
+}
+
+/* Start/stop only. The digits do not receive a token when the displayed second changes. */
+.scorer-clock-digits {
+  display: inline-block;
+  transform-origin: center;
+}
+
+.scorer-clock-digits.is-running,
+.scorer-clock-digits.is-paused {
+  animation: qbsheet-clock-settle 170ms var(--room-ease-out) both;
+}
+
+@keyframes qbsheet-clock-settle {
+  from {
+    opacity: 0.75;
+    transform: scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.scorer-clock-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.scorer-clock-icons {
+  display: inline-grid;
+  width: 13px;
+  height: 13px;
+}
+
+.scorer-clock-icon {
+  display: inline-flex;
+  grid-area: 1 / 1;
+}
+
+.scorer-clock-icon .scorer-control-icon {
+  width: 13px;
+  height: 13px;
+}
+
+.scorer-clock-icon.is-outgoing {
+  animation: qbsheet-clock-icon-out 170ms var(--room-ease-standard) both;
+}
+
+.scorer-clock-icon.is-incoming {
+  animation: qbsheet-clock-icon-in 170ms var(--room-ease-out) both;
+}
+
+@keyframes qbsheet-clock-icon-out {
+  to {
+    opacity: 0;
+    transform: scale(0.82);
+  }
+}
+
+@keyframes qbsheet-clock-icon-in {
+  from {
+    opacity: 0;
+    transform: scale(0.82);
+  }
+}
+
+/* One ring per real recovery, painted from the existing connected semantic colour. */
+.scorer-dot {
+  position: relative;
+}
+
+.scorer-conn.is-recovered .scorer-dot::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border: 1px solid currentcolor;
+  border-radius: 50%;
+  pointer-events: none;
+  animation: qbsheet-connection-recovered 300ms var(--room-ease-out) both;
+}
+
+@keyframes qbsheet-connection-recovered {
+  from {
+    opacity: 0.55;
+    transform: scale(0.5);
+  }
+
+  to {
+    opacity: 0;
+    transform: scale(2);
+  }
+}
+
+/* Only the line named by the undo/redo frame moves. */
+.scorer-rail-item.is-undoing {
+  animation: qbsheet-recent-undo var(--room-motion-standard) var(--room-ease-standard) both;
+}
+
+.scorer-rail-item.is-motion-ghost.is-undoing {
+  animation-name: qbsheet-recent-undo-exit;
+}
+
+.scorer-rail-item.is-redoing {
+  animation: qbsheet-recent-redo var(--room-motion-standard) var(--room-ease-out) both;
+}
+
+.scorer-rail-item.is-motion-ghost {
+  pointer-events: none;
+}
+
+@keyframes qbsheet-recent-undo {
+  0%,
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+    background-color: transparent;
+  }
+
+  55% {
+    opacity: 0.76;
+    transform: translateY(4px);
+    background-color: var(--room-surface-sunken);
+  }
+}
+
+@keyframes qbsheet-recent-undo-exit {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+    background-color: var(--room-surface-sunken);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(4px);
+    background-color: transparent;
+  }
+}
+
+@keyframes qbsheet-recent-redo {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+    background-color: var(--room-surface-sunken);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    background-color: transparent;
+  }
+}
+
+/* A ruled break, then the existing halftime controls rise a few pixels into place. */
+.scorer-score-check {
+  position: relative;
+  animation: qbsheet-halftime-content 250ms var(--room-ease-out) both;
+}
+
+.scorer-score-check::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 100%;
+  border-top: 1px solid var(--room-border-strong);
+  transform: translateX(-50%) scaleX(0);
+  transform-origin: center;
+  animation: qbsheet-halftime-rule 250ms var(--room-ease-out) both;
+}
+
+@keyframes qbsheet-halftime-rule {
+  to {
+    transform: translateX(-50%) scaleX(1);
+  }
+}
+
+@keyframes qbsheet-halftime-content {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Completion means scoring is final, not that delivery has happened. */
+.scorer-complete.is-newly-complete .scorer-presubmit {
+  animation: qbsheet-final-review 250ms var(--room-ease-out) both;
+}
+
+.scorer-complete.is-newly-complete .scorer-complete-score strong {
+  animation: qbsheet-final-score 270ms var(--room-ease-out) both;
+}
+
+@keyframes qbsheet-final-review {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes qbsheet-final-score {
+  0% {
+    transform: scale(0.985);
+  }
+
+  58% {
+    transform: scale(1.018);
+  }
+
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* The post-submit screen only receives this class from a freshly server-accepted result. */
+.final-accepted.is-newly-accepted {
+  animation: qbsheet-accepted-settle 280ms var(--room-ease-out) both;
+}
+
+.final-accepted.is-newly-accepted .final-accepted-mark path {
+  stroke-dasharray: 18;
+  stroke-dashoffset: 18;
+  animation: qbsheet-accepted-check 240ms var(--room-ease-out) forwards;
+}
+
+@keyframes qbsheet-accepted-settle {
+  from {
+    opacity: 0.72;
+    transform: scale(0.96);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes qbsheet-accepted-check {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -195,7 +751,35 @@
       .scorer-replacement-choice,
       .scorer-submit,
       .scorer-danger
-    ):active:not(:disabled) {
+  ):active:not(:disabled) {
     transform: none;
+  }
+
+  .qbsheet-motion-number[data-motion-direction]::before,
+  .scorer-no-buzz-sweep,
+  .scorer-bonus-exit,
+  .scorer-prompt-content.is-outgoing,
+  .scorer-rail-item.is-motion-ghost,
+  .scorer-conn.is-recovered .scorer-dot::after {
+    display: none;
+  }
+
+  :where(
+      .qbsheet-motion-number-current,
+      .scorer-answer.is-recorded,
+      .scorer-player.is-ruling-recorded,
+      .scorer-prompt-content.is-incoming,
+      .scorer-choice.is-part-recorded,
+      .scorer-clock-digits,
+      .scorer-clock-icon,
+      .scorer-rail-item,
+      .scorer-score-check,
+      .scorer-score-check::before,
+      .scorer-presubmit,
+      .scorer-complete-score strong,
+      .final-accepted,
+      .final-accepted-mark path
+    ) {
+    transform: none !important;
   }
 }
