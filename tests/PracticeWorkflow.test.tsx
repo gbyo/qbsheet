@@ -3,9 +3,10 @@
  */
 
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import PracticeScreen, { practiceGameKey } from '../src/practice/PracticeScreen';
 import { clearGame } from '../src/scorer/GameSession';
+import { setKeyboardEnabled } from '../src/scorer/keyboardPreference';
 
 function installLocalStorage() {
   let store: Record<string, string> = {};
@@ -34,6 +35,9 @@ beforeEach(() => {
 afterEach(() => {
   clearGame(practiceGameKey);
   cleanup();
+  // Module state on purpose — one keyboard per device — so a case that turns it on must put it back.
+  // After the unmount, so the reset has no subscriber left to notify outside act().
+  setKeyboardEnabled(false);
 });
 
 test('practice requires its named starters, keeps mistakes editable, and advances after a correction', async () => {
@@ -69,12 +73,16 @@ test('practice requires its named starters, keeps mistakes editable, and advance
   await vi.waitFor(() => expect(screen.getByText('Reader: “Power, Gibson on Ninety Six.”')).toBeTruthy());
   // The situation is what the room did; the instruction is what to record. Both are on screen — a
   // guided step whose action has to be guessed at was the whole complaint about the old overlay.
-  expect(screen.getByText('Press 1, then P, for Gibson on the Ninety Six side.')).toBeTruthy();
+  // Named as the button it is. Keyboard scoring is off here, as it is for everybody who has not asked
+  // for it, and a first-lesson instruction reading "press 1, then P" was teaching a keyboard layout to
+  // somebody holding a mouse.
+  expect(screen.getByText('Press P on Gibson’s row, on the Ninety Six side.')).toBeTruthy();
+  expect(screen.queryByText(/Keyboard:/)).toBeNull();
   // The hint is the extra — which control, and what the neighbouring ones would have meant instead —
   // and it stays folded away until somebody asks for it.
   const hint = screen.getByText('Show me where').closest('details') as HTMLDetailsElement;
   expect(hint.open).toBe(false);
-  expect(within(hint).getByText(/P is power/)).toBeTruthy();
+  expect(within(hint).getByText(/P is a power/)).toBeTruthy();
   expect(screen.queryByLabelText('Starting lineups')).toBeNull();
 });
 
@@ -126,7 +134,7 @@ test('practice restores the guide checkpoint after the screen is remounted', asy
 
   expect(screen.queryByLabelText('Starting lineups')).toBeNull();
   expect(screen.getByText('Reader: “Power, Gibson on Ninety Six.”')).toBeTruthy();
-  expect(screen.getByText('Press 1, then P, for Gibson on the Ninety Six side.')).toBeTruthy();
+  expect(screen.getByText('Press P on Gibson’s row, on the Ninety Six side.')).toBeTruthy();
   expect(screen.getByText('Show me where')).toBeTruthy();
 });
 
@@ -144,6 +152,30 @@ test('restart and leave are protected from an accidental single click', () => {
   expect(onHome).not.toHaveBeenCalled();
   fireEvent.click(screen.getByText('Leave now'));
   expect(onHome).toHaveBeenCalledOnce();
+});
+
+test('the keystroke appears beside the button instruction only once keyboard scoring is on', async () => {
+  setKeyboardEnabled(true);
+  render(<PracticeScreen onHome={vi.fn()} />);
+  const prompt = screen.getByLabelText('Starting lineups');
+  const left = within(prompt).getByLabelText('Ninety Six starters');
+  const right = within(prompt).getByLabelText('Greenwood starters');
+  for (const name of ['Gibson', 'Jeremy', 'Owen', 'Lachlan'])
+    fireEvent.click(within(left).getByRole('button', { name: `Start ${name}` }));
+  for (const name of ['Tucker', 'Phillip', 'Efren', 'Valerie'])
+    fireEvent.click(within(right).getByRole('button', { name: `Start ${name}` }));
+  fireEvent.click(within(prompt).getByText('Start game'));
+
+  // Both halves of the same ruling: the button the instruction names, and the key that presses it.
+  await vi.waitFor(() =>
+    expect(screen.getByText('Press P on Gibson’s row, on the Ninety Six side.')).toBeTruthy(),
+  );
+  expect(screen.getByText('1 then P')).toBeTruthy();
+
+  // Turning it back off takes the key away and leaves the instruction alone.
+  act(() => setKeyboardEnabled(false));
+  await vi.waitFor(() => expect(screen.queryByText('1 then P')).toBeNull());
+  expect(screen.getByText('Press P on Gibson’s row, on the Ninety Six side.')).toBeTruthy();
 });
 
 test('the one word of status says Practice, and no banner repeats what the title says', () => {

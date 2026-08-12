@@ -35,7 +35,7 @@ const helpTopics = [
   {
     title: 'Wrong answer, neg, or no buzz?',
     answer:
-      'Use a negative ruling only when the rules assess a penalty. Keyboard scoring uses the seat number followed by C, P, N, or 0: 0 is an answer with no penalty. Use No buzz only when the remaining eligible team never answers.',
+      'Use a negative ruling only when the rules assess a penalty. The zero button at the end of a player’s row is an answer that was simply wrong: it scores nothing and spends that team’s chance at the tossup. Use No buzz only when the remaining eligible team never answers.',
   },
   {
     title: 'The question or ruling is disputed',
