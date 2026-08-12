@@ -62,6 +62,26 @@ async function chooseBonus(page: Page, points: number): Promise<void> {
     .click();
 }
 
+/**
+ * Set a ruling in the question editor, whichever control the editor is currently using.
+ *
+ * The editor's ruling picker has been a dropdown and a segmented button group and a dropdown again
+ * within one afternoon of UI work. Which one it is belongs to `RoomQuestionEditorUi`; this spec is
+ * here to prove a correction survives a real browser, so it accepts either and fails loudly if the
+ * ruling named is not offered by either.
+ */
+async function chooseRuling(page: Page, label: string): Promise<void> {
+  const dropdown = page.getByLabel('Ruling', { exact: true }).and(page.locator('select'));
+  if ((await dropdown.count()) > 0) {
+    await dropdown.selectOption({ label });
+    return;
+  }
+  await page
+    .getByRole('group', { name: 'Ruling', exact: true })
+    .getByRole('button', { name: label, exact: true })
+    .click();
+}
+
 async function enableKeyboardScoring(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'Game', exact: true }).click();
   await page.getByRole('menuitem', { name: 'Keyboard scoring: off' }).click();
@@ -196,11 +216,7 @@ test('a real scorer session survives fast input, reload, correction, completion,
   const questionTwo = page.locator('.scorer-review-list > li').filter({ hasText: 'Q2' });
   await questionTwo.getByRole('button', { name: 'Edit question' }).click();
   await page.getByLabel('Player', { exact: true }).selectOption({ label: 'Jordan Blake' });
-  // A format with four or fewer rulings renders them as a segmented group, not a select.
-  await page
-    .getByRole('group', { name: 'Ruling', exact: true })
-    .getByRole('button', { name: 'Power (+15)', exact: true })
-    .click();
+  await chooseRuling(page, 'Power (+15)');
   await page.getByRole('group', { name: 'Bonus points' }).getByRole('button', { name: '20' }).click();
   await page.getByRole('button', { name: 'Save changes' }).click();
   await page.getByRole('dialog', { name: 'Full scoresheet review' }).getByRole('button', { name: 'Close' }).click();
