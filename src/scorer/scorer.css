@@ -1108,11 +1108,14 @@ div.scorer-banner .scorer-text-action {
 .scorer-dialog-close {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
 }
 
 .scorer-dialog-close-glyph {
-  font-size: 13px;
+  font-size: 20px;
   line-height: 1;
 }
 
@@ -1775,6 +1778,13 @@ div.scorer-banner .scorer-text-action {
   font-variant-numeric: tabular-nums;
 }
 
+.scorer-question-score-impact {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+}
+
 .scorer-question-score-before,
 .scorer-question-score-arrow {
   color: var(--room-muted);
@@ -1787,6 +1797,11 @@ div.scorer-banner .scorer-text-action {
 
 .scorer-question-score-unchanged {
   font-size: 12px;
+  color: var(--room-muted);
+}
+
+.scorer-question-score-delta {
+  font-size: 11px;
   color: var(--room-muted);
 }
 
@@ -1867,7 +1882,7 @@ div.scorer-banner .scorer-text-action {
 }
 
 .scorer-question-bonus-head {
-  justify-content: flex-start;
+  justify-content: space-between;
 }
 
 .scorer-question-heading-line,
@@ -1878,12 +1893,34 @@ div.scorer-banner .scorer-text-action {
   flex-wrap: wrap;
 }
 
+.scorer-question-heading-line {
+  min-width: 0;
+}
+
 .scorer-question-bonus-head-actions {
   margin-left: auto;
 }
 
 .scorer-question-bonus-head-actions .scorer-checkbox {
   display: inline-flex;
+}
+
+.scorer-question-status-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.scorer-question-status-actions > span[aria-hidden='true'] {
+  color: var(--room-muted);
+}
+
+.scorer-question-remove-bonus {
+  margin-left: auto;
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .scorer-question-status {

@@ -124,23 +124,22 @@ describe('what the editor leads with', () => {
   test('the question, and what it did to the score', () => {
     renderScorer(formatFor());
     fireEvent.click(buttonsFor('Sarah Mitchell')[0]); // +15
-    fireEvent.click(screen.getByText('20'));
     openEditor();
 
     expect(screen.getByRole('heading', { name: 'Edit Question 1' })).toBeTruthy();
     expect(screen.getByText('Score impact')).toBeTruthy();
-    expect(within(screen.getByRole('table', { name: 'Question 1 score change' })).getByRole('row', {
-      name: 'Ninety Six 0 35',
-    })).toBeTruthy();
+    const score = screen.getByRole('table', { name: 'Question 1 score impact' });
+    chooseRuling('Neg (-5)');
+    expect(within(score).getByRole('row', { name: /Ninety Six: \+15 -5 20-point change/ })).toBeTruthy();
   });
 
-  test('the lineup and the technical explanation wait behind More', () => {
+  test('the lineup and the technical explanation wait behind Correction details', () => {
     renderScorer(formatFor());
     fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
     openEditor();
 
     expect(screen.queryByText(/On the floor/)).toBeNull();
-    fireEvent.click(screen.getByText('More context'));
+    fireEvent.click(screen.getByText('Correction details'));
     expect(screen.getByText(/On the floor/)).toBeTruthy();
   });
 
@@ -150,12 +149,12 @@ describe('what the editor leads with', () => {
     fireEvent.click(screen.getByText('20'));
     openEditor();
 
-    const score = screen.getByRole('table', { name: 'Question 1 score change' });
-    expect(within(score).getByRole('row', { name: 'Ninety Six 0 30' })).toBeTruthy();
+    const score = screen.getByRole('table', { name: 'Question 1 score impact' });
+    expect(within(score).getByRole('row', { name: /Ninety Six: unchanged at \+30/ })).toBeTruthy();
 
     chooseRuling('Power (+15)');
 
-    expect(within(score).getByRole('row', { name: 'Ninety Six 0 35' })).toBeTruthy();
+    expect(within(score).getByRole('row', { name: /Ninety Six: \+30 \+35 5-point change/ })).toBeTruthy();
   });
 
   test('a completed tossup does not offer an impossible second attempt', () => {
@@ -168,7 +167,7 @@ describe('what the editor leads with', () => {
 
     chooseRuling('Neg (-5)');
 
-    expect(screen.getByText('+ Add attempt')).toBeTruthy();
+    expect(within(screen.getByRole('region', { name: 'Tossup attempts' })).getByRole('button', { name: '+ Add attempt' })).toBeTruthy();
   });
 
   test('No buzz clears outcomes that cannot coexist with it', () => {
@@ -230,12 +229,12 @@ describe('leaving the editor', () => {
     expect(screen.getByText('Edit question')).toBeTruthy();
   });
 
-  test('the dialog head keeps a Close whatever the editor was opened from', () => {
+  test('the dialog head keeps a close icon whatever the editor was opened from', () => {
     renderScorer(formatFor());
     fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
     openEditorFromRecent(1);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close dialog' }));
 
     expect(screen.queryByText('Question 1')).toBeNull();
     expect(screen.getByLabelText('Ninety Six score')).toBeTruthy();
@@ -289,7 +288,7 @@ describe('the first time somebody opens a correction', () => {
 });
 
 describe('the ruling is one control', () => {
-  test('it offers exactly the format’s answer values plus the wrong answer that costs nothing', () => {
+  test('it offers exactly the format’s answer values plus the incorrect answer that costs nothing', () => {
     renderScorer(formatFor());
     fireEvent.click(buttonsFor('Sarah Mitchell')[1]); // +10
     openEditor();
@@ -297,8 +296,8 @@ describe('the ruling is one control', () => {
     expect(within(rulingGroup()).getAllByRole('button').map((button) => button.textContent)).toEqual([
       'Power (+15)',
       'Correct (+10)',
+      'Incorrect (0)',
       'Neg (-5)',
-      'Wrong (0)',
     ]);
   });
 
@@ -313,8 +312,8 @@ describe('the ruling is one control', () => {
 
     expect(within(rulingGroup()).getAllByRole('button').map((button) => button.textContent)).toEqual([
       'Correct (+7)',
+      'Incorrect (0)',
       'Neg (-3)',
-      'Wrong (0)',
     ]);
   });
 
@@ -336,7 +335,7 @@ describe('the ruling is one control', () => {
     fireEvent.click(buttonsFor('Sarah Mitchell')[2]); // -5
     openEditor();
 
-    chooseRuling('Wrong (0)');
+    chooseRuling('Incorrect (0)');
     fireEvent.click(screen.getByText('Save changes'));
 
     // The neg is gone, and nothing replaced it in the score.

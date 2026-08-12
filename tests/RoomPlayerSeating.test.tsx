@@ -173,7 +173,7 @@ describe('rearranging the rows', () => {
     const lineup = screen.getByLabelText('Ninety Six lineup');
     fireEvent.click(within(lineup).getByText('Reorder'));
     fireEvent.click(within(lineup).getByLabelText('Move Alex Brown up'));
-    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close dialog' }));
 
     expect(rosterOnScreen('Ninety Six')).toEqual(['Sarah Jones', 'Alex Brown', 'Michael Smith']);
   });

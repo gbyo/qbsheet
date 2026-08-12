@@ -25,7 +25,7 @@ const helpTopics = [
   {
     title: 'What is the question editor showing me?',
     answer:
-      'The whole of one question: every buzz on it, in order, and the bonus it earned — not just the action you selected. Team, Player and Ruling are the three things a scoresheet line records, and Ruling carries the points, so “+10” is one choice rather than two. The score table at the top previews what saving would do. Nothing changes until you choose Save changes, and Cancel, Close at the top right, or Escape leaves the question exactly as it was.',
+      'The whole of one question: every buzz on it, in order, and the bonus it earned — not just the action you selected. Team, Player and Ruling are the three things a scoresheet line records, and Ruling carries the points, so “+10” is one choice rather than two. The score table at the top previews what saving would do. Nothing changes until you choose Save changes, and Cancel, the × button at the top right, or Escape leaves the question exactly as it was.',
   },
   {
     title: 'A player is missing or substitutes',
