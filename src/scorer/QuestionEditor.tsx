@@ -27,7 +27,7 @@
  * all drawn in the same 1px, so a row boundary looked exactly like the boundary between Tossup and
  * Bonus and none of them said anything.
  *
- * There are two rules left. A full-width one opens a region: Tossup, Bonus, More context, the
+ * There are two rules left. A full-width one opens a region: Tossup, Bonus, Correction details, the
  * footer. One under a column heading says the words above name the columns below, and the score
  * table is the only thing that needs it, because it is the only part of the dialog made of bare
  * text rather than bordered controls. Everything else is grouped by space and by column alignment.
@@ -55,7 +55,7 @@ import { powerCorrect } from './tossupRulings';
 
 const noPenaltyValue = 'no-penalty';
 
-/** "Power (+15)" / "Correct (+10)" / "Neg (-5)". The editor should say what the ruling means. */
+/** "Power (+15)" / "Correct (+10)" / "Neg (-5)" / "Wrong (0)". The editor should say what the ruling means. */
 function rulingLabel(format: IScorekeeperFormat, index: number): string {
   const answerType = format.answerTypes[index];
   if (!answerType) return 'Choose…';
@@ -69,6 +69,24 @@ function rulingLabel(format: IScorekeeperFormat, index: number): string {
           : 'Wrong';
   const points = answerType.value > 0 ? `+${answerType.value}` : String(answerType.value);
   return `${name} (${points})`;
+}
+
+function orderedRulingTypes(format: IScorekeeperFormat) {
+  const powerIndex = powerCorrect(format)?.index;
+  const rank = (value: number, index: number) =>
+    value > 0 ? (index === powerIndex ? 0 : 1) : value === 0 ? 2 : 3;
+  return [...format.answerTypes].sort(
+    (first, second) => rank(first.value, first.index) - rank(second.value, second.index),
+  );
+}
+
+function pointsLabel(points: number): string {
+  return points > 0 ? `+${points}` : String(points);
+}
+
+function pointChangeLabel(before: number, after: number): string {
+  const difference = Math.abs(after - before);
+  return `${difference}-point change`;
 }
 
 /**
@@ -193,9 +211,6 @@ export default function QuestionEditor(props: {
   useEffect(() => setErrors([]), [model]);
 
   const question = game.questions.find((candidate) => candidate.questionNumber === model.questionNumber);
-  const scoreAfter = question?.scoreAfter ?? { left: game.left.points, right: game.right.points };
-  const previous = game.questions.find((candidate) => candidate.questionNumber === model.questionNumber - 1);
-  const scoreBefore = previous?.scoreAfter ?? { left: 0, right: 0 };
   const active = question?.activePlayers ?? { left: [], right: [] };
   const questionProtests = game.protests.filter((protest) => protest.questionNumber === model.questionNumber);
   const questionFlags = game.notes.filter((note) => note.questionNumber === model.questionNumber && note.flagged);
@@ -203,19 +218,41 @@ export default function QuestionEditor(props: {
   const teamPlayers = useMemo(() => ({ left: active.left, right: active.right }), [active.left, active.right]);
   const teamName = (team: 'left' | 'right') => (team === 'left' ? game.left.name : game.right.name);
   const quickTotals = regularBonusTotals(format.bonus);
+  const orderedTypes = orderedRulingTypes(format);
+  const rulingOption = (answerType: (typeof format.answerTypes)[number]) => ({
+    value: String(answerType.index),
+    label: rulingLabel(format, answerType.index),
+  });
   const rulingOptions = [
-    ...format.answerTypes.map((answerType) => ({
-      value: String(answerType.index),
-      label: rulingLabel(format, answerType.index),
-    })),
+    ...orderedTypes.map(rulingOption),
     { value: noPenaltyValue, label: 'Wrong (0)' },
   ];
-  const useRulingSegments = rulingOptions.length <= 4;
   const initialPoints = useMemo(() => questionPoints(initial, format), [format, initial]);
   const proposedPoints = useMemo(() => questionPoints(model, format), [format, model]);
-  const proposedScoreAfter = {
-    left: scoreAfter.left - initialPoints.left + proposedPoints.left,
-    right: scoreAfter.right - initialPoints.right + proposedPoints.right,
+
+  const scoreImpactRow = (name: string, before: number, after: number) => {
+    const changed = before !== after;
+    return (
+      <tr className={changed ? undefined : 'is-unchanged'} key={name}>
+        <th scope="row">{name}:</th>
+        <td>
+          {changed ? (
+            <span className="scorer-question-score-impact">
+              <span className="scorer-question-score-change">
+                <span className="scorer-question-score-before">{pointsLabel(before)}</span>
+                <span className="scorer-question-score-arrow" aria-hidden="true">
+                  →
+                </span>
+                <strong className="scorer-question-score-after">{pointsLabel(after)}</strong>
+              </span>
+              <span className="scorer-question-score-delta">{pointChangeLabel(before, after)}</span>
+            </span>
+          ) : (
+            <span className="scorer-question-score-unchanged">unchanged at {pointsLabel(after)}</span>
+          )}
+        </td>
+      </tr>
+    );
   };
 
   const updateAttempt = (index: number, next: Partial<IEditableAttempt>) => {
@@ -327,8 +364,8 @@ export default function QuestionEditor(props: {
             </li>
             <li>Nothing changes until you choose Save changes. Every later question is then worked out again.</li>
             <li>
-              To leave it exactly as it is, use <strong>Cancel</strong> below or <strong>Close</strong> at the top right.
-              Escape works too.
+              To leave it exactly as it is, use <strong>Cancel</strong> below or the <strong>×</strong> button at the top
+              right. Escape works too.
             </li>
           </ul>
           <button
@@ -343,54 +380,34 @@ export default function QuestionEditor(props: {
           </button>
         </aside>
       )}
-      <table className="scorer-question-score" aria-label={`Question ${model.questionNumber} score change`}>
+      <table className="scorer-question-score" aria-label={`Question ${model.questionNumber} score impact`}>
         <caption>Score impact</caption>
         <tbody>
-          <tr className={scoreBefore.left === proposedScoreAfter.left ? 'is-unchanged' : undefined}>
-            <th scope="row">{game.left.name}</th>
-            <td>
-              {scoreBefore.left === proposedScoreAfter.left ? (
-                <span className="scorer-question-score-unchanged">unchanged at {proposedScoreAfter.left}</span>
-              ) : (
-                <span className="scorer-question-score-change">
-                  <span className="scorer-question-score-before">{scoreBefore.left}</span>
-                  <span className="scorer-question-score-arrow" aria-hidden="true">
-                    →
-                  </span>
-                  <strong className="scorer-question-score-after">{proposedScoreAfter.left}</strong>
-                </span>
-              )}
-            </td>
-          </tr>
-          <tr className={scoreBefore.right === proposedScoreAfter.right ? 'is-unchanged' : undefined}>
-            <th scope="row">{game.right.name}</th>
-            <td>
-              {scoreBefore.right === proposedScoreAfter.right ? (
-                <span className="scorer-question-score-unchanged">unchanged at {proposedScoreAfter.right}</span>
-              ) : (
-                <span className="scorer-question-score-change">
-                  <span className="scorer-question-score-before">{scoreBefore.right}</span>
-                  <span className="scorer-question-score-arrow" aria-hidden="true">
-                    →
-                  </span>
-                  <strong className="scorer-question-score-after">{proposedScoreAfter.right}</strong>
-                </span>
-              )}
-            </td>
-          </tr>
+          {scoreImpactRow(game.left.name, initialPoints.left, proposedPoints.left)}
+          {scoreImpactRow(game.right.name, initialPoints.right, proposedPoints.right)}
         </tbody>
       </table>
 
       <section className="scorer-question-section" aria-label="Tossup attempts">
         <div className="scorer-question-section-head">
           <h4 className="scorer-question-heading">Tossup</h4>
-          <span className="scorer-question-status">
-            {model.dead
-              ? model.attempts.length === 0
-                ? 'No buzz'
-                : 'No conversion'
-              : `${model.attempts.length} ${model.attempts.length === 1 ? 'attempt' : 'attempts'}`}
-          </span>
+          <div className="scorer-question-status-actions">
+            <span className="scorer-question-status">
+              {model.dead
+                ? model.attempts.length === 0
+                  ? 'No buzz'
+                  : 'No conversion'
+                : `${model.attempts.length} ${model.attempts.length === 1 ? 'attempt' : 'attempts'}`}
+            </span>
+            {model.attempts.length < 2 && converted === undefined && (
+              <>
+                <span aria-hidden="true">·</span>
+                <button type="button" className="scorer-text-action" onClick={addAttempt}>
+                  + Add attempt
+                </button>
+              </>
+            )}
+          </div>
         </div>
         {model.attempts.length > 0 && (
           <div className="scorer-question-attempt-head" aria-hidden="true">
@@ -437,55 +454,24 @@ export default function QuestionEditor(props: {
                   ))}
                 </select>
               </label>
-              {useRulingSegments ? (
-                <div className="scorer-question-field scorer-question-field-ruling">
-                  <span>Ruling</span>
-                  <div
-                    className="scorer-question-ruling"
-                    role="group"
-                    aria-label={
-                      model.attempts.length === 1
-                        ? 'Ruling'
-                        : `Question ${model.questionNumber} attempt ${index + 1} ruling`
-                    }
-                  >
-                    {rulingOptions.map((option) => (
-                      <button
-                        key={option.value}
-                        type="button"
-                        className={
-                          rulingValue(attempt) === option.value
-                            ? 'scorer-choice scorer-question-ruling-choice is-selected'
-                            : 'scorer-choice scorer-question-ruling-choice'
-                        }
-                        aria-pressed={rulingValue(attempt) === option.value}
-                        onClick={() => setRuling(index, option.value)}
-                      >
-                        {option.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <label className="scorer-question-field">
-                  <span>Ruling</span>
-                  <select
-                    aria-label={
-                      model.attempts.length === 1
-                        ? 'Ruling'
-                        : `Question ${model.questionNumber} attempt ${index + 1} ruling`
-                    }
-                    value={rulingValue(attempt)}
-                    onChange={(event) => setRuling(index, event.target.value)}
-                  >
-                    {rulingOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
+              <label className="scorer-question-field scorer-question-field-ruling">
+                <span>Ruling</span>
+                <select
+                  aria-label={
+                    model.attempts.length === 1
+                      ? 'Ruling'
+                      : `Question ${model.questionNumber} attempt ${index + 1} ruling`
+                  }
+                  value={rulingValue(attempt)}
+                  onChange={(event) => setRuling(index, event.target.value)}
+                >
+                  {rulingOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <button
                 type="button"
                 className="scorer-text-action is-destructive"
@@ -511,18 +497,13 @@ export default function QuestionEditor(props: {
               : 'No team converted this tossup.'}
           </p>
         )}
-        <div className="scorer-question-actions">
-          {model.attempts.length < 2 && converted === undefined && (
-            <button type="button" className="scorer-action" onClick={addAttempt}>
-              + Add attempt
-            </button>
-          )}
-          {/*
-            One control instead of an Up and a Down on every row. Order matters — it decides which
-            team negged and which one answered afterwards — but with two attempts there is exactly
-            one other order.
-          */}
-          {model.attempts.length === 2 && (
+        {model.attempts.length === 2 && (
+          <div className="scorer-question-actions">
+            {/*
+              One control instead of an Up and a Down on every row. Order matters — it decides which
+              team negged and which one answered afterwards — but with two attempts there is exactly
+              one other order.
+            */}
             <button
               type="button"
               className="scorer-text-action"
@@ -532,8 +513,8 @@ export default function QuestionEditor(props: {
             >
               Swap order
             </button>
-          )}
-        </div>
+          </div>
+        )}
       </section>
 
       <section className="scorer-question-section" aria-label="Bonus correction">
@@ -542,17 +523,16 @@ export default function QuestionEditor(props: {
             <h4 className="scorer-question-heading">
               Bonus{bonusTeam ? ` — ${teamName(bonusTeam).toLocaleUpperCase()}` : ''}
             </h4>
-            {model.bonus && (
-              <button
-                type="button"
-                className="scorer-text-action is-destructive"
-                onClick={() => setModel((current) => ({ ...current, bonus: undefined }))}
-              >
-                Remove bonus
-              </button>
-            )}
           </div>
-          {!model.bonus && (
+          {model.bonus ? (
+            <button
+              type="button"
+              className="scorer-text-action is-destructive scorer-question-remove-bonus"
+              onClick={() => setModel((current) => ({ ...current, bonus: undefined }))}
+            >
+              Remove bonus
+            </button>
+          ) : (
             <div className="scorer-question-bonus-head-actions">
               <label className="scorer-checkbox" htmlFor={`question-${model.questionNumber}-dead`}>
                 <input
@@ -704,17 +684,17 @@ export default function QuestionEditor(props: {
         type="button"
         className="scorer-question-disclosure"
         aria-expanded={showMore}
-        aria-controls={`question-${model.questionNumber}-context`}
+        aria-controls={`question-${model.questionNumber}-correction-details`}
         onClick={() => setShowMore((current) => !current)}
       >
-        <span>More context</span>
+        <span>Correction details</span>
         <span aria-hidden="true">{showMore ? '−' : '+'}</span>
       </button>
       {showMore && (
         <section
-          id={`question-${model.questionNumber}-context`}
+          id={`question-${model.questionNumber}-correction-details`}
           className="scorer-question-more"
-          aria-label="Additional context"
+          aria-label="Correction details"
         >
           <p className="scorer-dialog-note">
             On the floor — {game.left.name}: {active.left.length > 0 ? active.left.join(', ') : 'none'};{' '}

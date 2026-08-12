@@ -179,7 +179,10 @@ function editReviewEvent(description: string) {
 }
 
 function chooseEditorRuling(label: string) {
-  fireEvent.click(within(screen.getByRole('group', { name: 'Ruling' })).getByRole('button', { name: label }));
+  const select = screen.getByLabelText('Ruling') as HTMLSelectElement;
+  const option = Array.from(select.options).find((candidate) => candidate.textContent === label);
+  if (!option) throw new Error(`No ruling option named "${label}"`);
+  fireEvent.change(select, { target: { value: option.value } });
 }
 
 /** Add somebody who turned up late, through the panel that keeps that separate from the lineup. */
@@ -587,7 +590,7 @@ describe('the game menu', () => {
     renderScorer(formatFor());
     openProtests();
     expect(screen.getByRole('dialog', { name: 'Protests' })).toBeTruthy();
-    fireEvent.click(within(screen.getByRole('dialog', { name: 'Protests' })).getByText('Close'));
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Protests' })).getByRole('button', { name: 'Close dialog' }));
 
     openIssue();
     expect(screen.getByRole('dialog', { name: 'Issue / tournament control' })).toBeTruthy();
@@ -942,7 +945,7 @@ describe('the game menu', () => {
     pressControl('Full scoresheet review');
     fireEvent.click(screen.getByText('Edit question'));
     // The replacement workflow is secondary information, so it lives behind the disclosure.
-    fireEvent.click(screen.getByText('More context'));
+    fireEvent.click(screen.getByText('Correction details'));
     fireEvent.click(screen.getByText('Edit full question\u2026'));
 
     const replacementDialog = screen.getByRole('dialog', { name: 'Replace question 1' });
@@ -1340,7 +1343,7 @@ describe('a protest is a thing with a state', () => {
     openProtests();
     fireEvent.change(screen.getByLabelText('Details'), { target: { value: 'The ruling was disputed.' } });
     fireEvent.click(screen.getByText('Record protest and keep playing'));
-    fireEvent.click(within(screen.getByLabelText('Protests')).getByText('Close'));
+    fireEvent.click(within(screen.getByLabelText('Protests')).getByRole('button', { name: 'Close dialog' }));
 
     // Scoring is untouched by it: the game is still on tossup one and still scoreable.
     expect(screen.getByText('Tossup 1 of 20')).toBeTruthy();
@@ -1557,8 +1560,10 @@ describe('a historical correction lands visibly', () => {
   function correctQ1To(label: string) {
     fireEvent.click(screen.getByRole('button', { name: 'Review question 1' }));
     const editor = screen.getByRole('dialog', { name: 'Edit Question 1' });
-    const ruling = within(editor).getByRole('group', { name: 'Ruling' });
-    fireEvent.click(within(ruling).getByRole('button', { name: label }));
+    const ruling = within(editor).getByLabelText('Ruling') as HTMLSelectElement;
+    const option = Array.from(ruling.options).find((candidate) => candidate.textContent === label);
+    if (!option) throw new Error(`No ruling option named "${label}"`);
+    fireEvent.change(ruling, { target: { value: option.value } });
     fireEvent.click(within(editor).getByRole('button', { name: 'Save changes' }));
   }
 
