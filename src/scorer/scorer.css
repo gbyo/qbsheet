@@ -1736,33 +1736,24 @@ div.scorer-banner .scorer-text-action {
   font-variant-numeric: tabular-nums;
 }
 
+.scorer-question-score caption {
+  padding-bottom: 4px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--room-muted);
+}
+
 .scorer-question-score th,
 .scorer-question-score td {
-  padding: 6px 10px;
+  padding: 3px 0;
   text-align: left;
 }
 
-.scorer-question-score th:not(:first-child),
-.scorer-question-score td:not(:first-child) {
-  text-align: center;
-}
-
-/*
- * The only rule inside the table, and it is the one a table earns: it says the words above it name
- * the columns below it. Ruling the two team rows as well drew three lines under six numbers and
- * made the summary look busier than the thing being corrected.
- */
-.scorer-question-score thead th {
-  padding-top: 0;
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--room-muted);
-  border-bottom: 1px solid var(--room-border);
-}
-
-.scorer-question-score tbody tr:first-child th,
-.scorer-question-score tbody tr:first-child td {
-  padding-top: 8px;
+.scorer-question-score td {
+  text-align: right;
 }
 
 .scorer-question-score th:first-child {
@@ -1777,9 +1768,31 @@ div.scorer-banner .scorer-text-action {
   font-weight: 500;
 }
 
-.scorer-question-score tbody td:last-child {
+.scorer-question-score-change {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+  font-variant-numeric: tabular-nums;
+}
+
+.scorer-question-score-before,
+.scorer-question-score-arrow {
+  color: var(--room-muted);
+}
+
+.scorer-question-score-after {
   font-size: 16px;
   font-weight: 600;
+}
+
+.scorer-question-score-unchanged {
+  font-size: 12px;
+  color: var(--room-muted);
+}
+
+.scorer-question-score tbody tr.is-unchanged th {
+  color: var(--room-muted);
+  font-weight: 450;
 }
 
 .scorer-question-heading {
@@ -1796,6 +1809,20 @@ div.scorer-banner .scorer-text-action {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.scorer-question-ruling {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px;
+  min-width: 0;
+}
+
+.scorer-question-ruling-choice {
+  min-width: 0;
+  padding: 5px 6px;
+  font-size: 11px;
+  line-height: 1.15;
 }
 
 /* Opens directly under its own disclosure, so the form's 16px gap is cancelled. */
@@ -1839,6 +1866,26 @@ div.scorer-banner .scorer-text-action {
   gap: 8px;
 }
 
+.scorer-question-bonus-head {
+  justify-content: flex-start;
+}
+
+.scorer-question-heading-line,
+.scorer-question-bonus-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.scorer-question-bonus-head-actions {
+  margin-left: auto;
+}
+
+.scorer-question-bonus-head-actions .scorer-checkbox {
+  display: inline-flex;
+}
+
 .scorer-question-status {
   font-size: 12px;
   color: var(--room-muted);
@@ -1847,7 +1894,7 @@ div.scorer-banner .scorer-text-action {
 .scorer-question-attempt-head,
 .scorer-question-attempt {
   display: grid;
-  grid-template-columns: 20px minmax(110px, 0.8fr) minmax(150px, 1.2fr) minmax(92px, 0.65fr) auto;
+  grid-template-columns: 20px minmax(110px, 0.8fr) minmax(150px, 1.2fr) minmax(150px, 0.95fr) auto;
   gap: 8px;
   align-items: center;
 }
@@ -2077,6 +2124,10 @@ div.scorer-banner .scorer-text-action {
   }
 
   .scorer-question-field:nth-of-type(3) {
+    grid-column: 2;
+  }
+
+  .scorer-question-field-ruling {
     grid-column: 2;
   }
 

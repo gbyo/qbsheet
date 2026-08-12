@@ -748,7 +748,7 @@ export function ScoresheetReviewDialog(props: {
   };
   return (
     <ScorerDialog
-      title={editingQuestion === null ? 'Full scoresheet review' : `Question ${editingQuestion} editor`}
+      title={editingQuestion === null ? 'Full scoresheet review' : `Edit Question ${editingQuestion}`}
       onClose={onClose}
       wide
     >

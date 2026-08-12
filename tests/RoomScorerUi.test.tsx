@@ -178,6 +178,10 @@ function editReviewEvent(description: string) {
   fireEvent.click(within(questionRow as HTMLElement).getByRole('button', { name: 'Edit question' }));
 }
 
+function chooseEditorRuling(label: string) {
+  fireEvent.click(within(screen.getByRole('group', { name: 'Ruling' })).getByRole('button', { name: label }));
+}
+
 /** Add somebody who turned up late, through the panel that keeps that separate from the lineup. */
 function addMissingPlayer(teamLabel: string, name: string) {
   const lineup = screen.getByLabelText(teamLabel);
@@ -822,7 +826,7 @@ describe('the game menu', () => {
     pressControl('Full scoresheet review');
     fireEvent.click(screen.getByText('Edit question'));
 
-    fireEvent.change(screen.getByLabelText('Ruling'), { target: { value: '0' } }); // +15
+    chooseEditorRuling('Power (+15)');
     fireEvent.click(screen.getByText('Save correction'));
 
     expect(scoreOf('Ninety Six')).toBe('15');
@@ -865,7 +869,7 @@ describe('the game menu', () => {
 
     // The quick totals cannot express an impossible bonus, so the per-part entry is where an
     // out-of-range total can still be typed — and it still has to be refused.
-    fireEvent.click(screen.getByText('Enter parts\u2026'));
+    fireEvent.click(screen.getByText('Edit parts\u2026'));
     fireEvent.change(screen.getByLabelText('Bonus part 1 controlled points'), { target: { value: '40' } });
     fireEvent.click(screen.getByText('Save correction'));
 
@@ -938,7 +942,7 @@ describe('the game menu', () => {
     pressControl('Full scoresheet review');
     fireEvent.click(screen.getByText('Edit question'));
     // The replacement workflow is secondary information, so it lives behind the disclosure.
-    fireEvent.click(screen.getByText('Question details'));
+    fireEvent.click(screen.getByText('More context'));
     fireEvent.click(screen.getByText('Replace question\u2026'));
 
     const replacementDialog = screen.getByRole('dialog', { name: 'Replace question 1' });
@@ -1366,7 +1370,7 @@ describe('the Recent rail is a way back into the scoresheet', () => {
 
     fireEvent.click(screen.getByLabelText('Review question 1'));
 
-    expect(screen.getByText('Question 1 editor')).toBeTruthy();
+    expect(screen.getByText('Edit Question 1')).toBeTruthy();
     expect(screen.getByLabelText('Ruling')).toBeTruthy();
   });
 
@@ -1552,10 +1556,9 @@ describe('a historical correction lands visibly', () => {
   /** Reopen question one from Recent and rescore the buzz on it as `label`. */
   function correctQ1To(label: string) {
     fireEvent.click(screen.getByRole('button', { name: 'Review question 1' }));
-    const editor = screen.getByRole('dialog', { name: 'Question 1 editor' });
-    const ruling = within(editor).getByLabelText('Ruling') as HTMLSelectElement;
-    const option = Array.from(ruling.options).find((candidate) => candidate.textContent === label);
-    fireEvent.change(ruling, { target: { value: option?.value } });
+    const editor = screen.getByRole('dialog', { name: 'Edit Question 1' });
+    const ruling = within(editor).getByRole('group', { name: 'Ruling' });
+    fireEvent.click(within(ruling).getByRole('button', { name: label }));
     fireEvent.click(within(editor).getByRole('button', { name: 'Save correction' }));
   }
 
@@ -1564,7 +1567,7 @@ describe('a historical correction lands visibly', () => {
     fireEvent.click(buttonsFor('Sarah Mitchell')[0]); // +15
     fireEvent.click(screen.getByText('20'));
 
-    correctQ1To('+10');
+    correctQ1To('Correct (+10)');
 
     expect(screen.getByText('Question 1 corrected.')).toBeTruthy();
     const emphasised = document.querySelectorAll('.scorer-rail-item.is-emphasized');
@@ -1578,12 +1581,12 @@ describe('a historical correction lands visibly', () => {
     renderScorer(formatFor());
     fireEvent.click(buttonsFor('Sarah Mitchell')[0]);
     fireEvent.click(screen.getByText('20'));
-    correctQ1To('+10');
+    correctQ1To('Correct (+10)');
 
     const emphasised = document.querySelector('.scorer-rail-item.is-emphasized') as HTMLElement;
     fireEvent.click(within(emphasised).getByRole('button', { name: 'Review question 1' }));
 
-    expect(screen.getByRole('dialog', { name: 'Question 1 editor' })).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: 'Edit Question 1' })).toBeTruthy();
   });
 
   test('a refused correction is not called a success', () => {
@@ -1592,7 +1595,7 @@ describe('a historical correction lands visibly', () => {
     fireEvent.click(screen.getByText('20'));
 
     fireEvent.click(screen.getByRole('button', { name: 'Review question 1' }));
-    const editor = screen.getByRole('dialog', { name: 'Question 1 editor' });
+    const editor = screen.getByRole('dialog', { name: 'Edit Question 1' });
     // Somebody who was not on the floor for this team cannot have buzzed on it.
     fireEvent.change(within(editor).getByLabelText('Player'), { target: { value: 'Emma Turner' } });
     fireEvent.click(within(editor).getByRole('button', { name: 'Save correction' }));
