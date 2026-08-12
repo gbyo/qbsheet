@@ -1691,13 +1691,7 @@ div.scorer-banner .scorer-text-action {
 .scorer-question-editor {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-}
-
-.scorer-question-title {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
+  gap: 12px;
 }
 
 /* Said once to somebody who has never opened a correction before, then dismissed for good. */
@@ -1740,8 +1734,13 @@ div.scorer-banner .scorer-text-action {
 .scorer-question-score th,
 .scorer-question-score td {
   padding: 7px 10px;
-  text-align: right;
+  text-align: left;
   border-bottom: 1px solid var(--room-border);
+}
+
+.scorer-question-score th:not(:first-child),
+.scorer-question-score td:not(:first-child) {
+  text-align: center;
 }
 
 .scorer-question-score thead th {

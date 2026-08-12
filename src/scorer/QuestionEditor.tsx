@@ -287,7 +287,6 @@ export default function QuestionEditor(props: {
         save();
       }}
     >
-      <h3 className="scorer-question-title">Question {model.questionNumber}</h3>
       {showIntro && (
         <aside className="scorer-question-intro" aria-label="About the question editor">
           <p className="scorer-question-intro-title">First time here?</p>
