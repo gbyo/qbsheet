@@ -84,6 +84,10 @@ export interface IDerivedQuestion {
   buzzes: IDerivedBuzz[];
   /** Teams that used their chance at this tossup for nothing, per `ITossupNoPenaltyEvent`. */
   noPenalty: IDerivedNoPenalty[];
+  /** The moderator resumed reading after an interruption before the remaining team answered. */
+  readingResumed: boolean;
+  /** The moderator reached the end of the question; no later negative answer is legal. */
+  readout: boolean;
   /** Recorded as read with nobody converting it. */
   dead: boolean;
   /**
@@ -241,8 +245,10 @@ export function teamsNeedingStartingLineup(
   return (['left', 'right'] as LeftOrRight[]).filter((side) => {
     const team = setup[side];
     if (team.startingLineup && team.startingLineup.length > 0) return false;
-    if (team.players.length <= format.players.maximumActive) return false;
-    return !events.some((event) => event.type === 'substitution' && event.team === side && event.questionNumber <= 1);
+    if (events.some((event) => event.type === 'substitution' && event.team === side && event.questionNumber <= 1)) {
+      return false;
+    }
+    return team.startingLineup !== undefined || team.players.length === 0 || team.players.length > format.players.maximumActive;
   });
 }
 
@@ -275,6 +281,8 @@ function effectiveCycleHasBegun(events: ScoreEvent[], questionNumber: number): b
     if (
       event.type === 'tossup-buzz' ||
       event.type === 'tossup-no-penalty' ||
+      event.type === 'tossup-reading-resumed' ||
+      event.type === 'tossup-readout' ||
       event.type === 'tossup-dead'
     ) {
       tossupBegun = true;
@@ -527,6 +535,8 @@ export default function deriveGame(format: IScorekeeperFormat, setup: IGameSetup
 
     const buzzes: IDerivedBuzz[] = [];
     const noPenalty: IDerivedNoPenalty[] = [];
+    let readingResumed = false;
+    let readout = false;
     /**
      * Which sides have already spent their chance at this tossup.
      *
@@ -537,6 +547,14 @@ export default function deriveGame(format: IScorekeeperFormat, setup: IGameSetup
      */
     const spent = new Set<LeftOrRight>();
     for (const event of cycleEvents) {
+      if (event.type === 'tossup-reading-resumed') {
+        readingResumed = true;
+        continue;
+      }
+      if (event.type === 'tossup-readout') {
+        readout = true;
+        continue;
+      }
       if (!usesTossupOpportunity(event)) continue;
       if (spent.has(event.team)) {
         integrityProblems.push({
@@ -642,6 +660,8 @@ export default function deriveGame(format: IScorekeeperFormat, setup: IGameSetup
       period,
       buzzes,
       noPenalty,
+      readingResumed,
+      readout,
       dead,
       bonus,
       resolved,

@@ -290,6 +290,8 @@ export function eventDescription(event: ScoreEvent, format: IScorekeeperFormat, 
     return `${event.playerName} ${value === undefined ? 'unknown ruling' : signed(value)}`;
   }
   if (event.type === 'tossup-no-penalty') return `${event.playerName ?? 'Answer'} wrong · 0 (no penalty)`;
+  if (event.type === 'tossup-reading-resumed') return 'Tossup reading resumed';
+  if (event.type === 'tossup-readout') return 'Tossup read out';
   if (event.type === 'tossup-dead') return 'No buzz';
   if (event.type === 'bonus')
     return `Bonus ${event.controlledPoints ?? 0}${
@@ -398,7 +400,14 @@ function SubstitutionLineupFields(props: {
 }
 
 /** The events one press produces that are all part of scoring a cycle. */
-const cycleEventTypes = new Set(['tossup-buzz', 'tossup-no-penalty', 'tossup-dead', 'bonus']);
+const cycleEventTypes = new Set([
+  'tossup-buzz',
+  'tossup-no-penalty',
+  'tossup-reading-resumed',
+  'tossup-readout',
+  'tossup-dead',
+  'bonus',
+]);
 
 /**
  * One line for what an undo or redo just changed.
@@ -813,9 +822,7 @@ export function ScoresheetReviewDialog(props: {
                     {events
                       .filter((event) => event.questionNumber === questionNumber)
                       .map((event) => {
-                        const cycleEvent = ['tossup-buzz', 'tossup-no-penalty', 'tossup-dead', 'bonus'].includes(
-                          event.type,
-                        );
+                        const cycleEvent = cycleEventTypes.has(event.type);
                         return (
                           <li key={event.id} className="scorer-review-event">
                             <span>{eventDescription(event, format, game)}</span>

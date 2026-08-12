@@ -48,20 +48,6 @@ export interface IScoreEventContext {
 }
 
 /**
- * Answers a team has already given on this tossup, whatever their value.
- *
- * A zero-point wrong answer spends a team's chance exactly as a buzz does, so both count here.
- */
-function teamsThatAnswered(events: ScoreEvent[], questionNumber: number): Set<LeftOrRight> {
-  const answered = new Set<LeftOrRight>();
-  for (const event of events) {
-    if (event.questionNumber !== questionNumber) continue;
-    if (usesTossupOpportunity(event)) answered.add(event.team);
-  }
-  return answered;
-}
-
-/**
  * May this be recorded against the game these events describe?
  *
  * @param game pass the already-derived game when the caller has one; it is recomputed otherwise.
@@ -99,6 +85,35 @@ export default function canApplyScoreEvent(
   switch (candidate.type) {
     // #region tossup
 
+    case 'tossup-reading-resumed':
+    case 'tossup-readout': {
+      if (openProtestStopsSuddenDeath) return refuse('Resolve the open protest before the next sudden-death tossup.');
+      if (phase.kind === 'lineup') return refuse('Choose who is starting before scoring the first tossup.');
+      if (phase.kind === 'score-check') return refuse('Confirm the score with the moderator before scoring again.');
+      if (phase.kind === 'bonus') return refuse('Score the bonus before the next tossup.');
+      if (phase.kind !== 'tossup') return refuse('Wait for the next tossup checkpoint.');
+      if (candidate.questionNumber !== phase.questionNumber) {
+        return refuse(`That action belongs to Tossup ${phase.questionNumber}.`);
+      }
+      const recordedQuestion = game.questions.find(
+        (question) => question.questionNumber === candidate.questionNumber,
+      );
+      const answered = new Set<LeftOrRight>([
+        ...(recordedQuestion?.buzzes.map((buzz) => buzz.team) ?? []),
+        ...(recordedQuestion?.noPenalty.map((missed) => missed.team) ?? []),
+      ]);
+      if (candidate.type === 'tossup-reading-resumed') {
+        if (recordedQuestion?.readout) return refuse('The question has already been read out.');
+        if (answered.size === 0) return refuse('Reading can resume only after a team has answered.');
+        if (recordedQuestion?.resolved || answered.size >= 2) return refuse('This tossup is already resolved.');
+        if (recordedQuestion?.readingResumed) return refuse('Reading has already resumed on this tossup.');
+        return allowed;
+      }
+      if (recordedQuestion?.readout) return refuse('This question has already been read out.');
+      if (recordedQuestion?.resolved) return refuse('This tossup is already resolved.');
+      return allowed;
+    }
+
     case 'tossup-buzz':
     case 'tossup-no-penalty': {
       if (openProtestStopsSuddenDeath) return refuse('Resolve the open protest before the next sudden-death tossup.');
@@ -122,7 +137,10 @@ export default function canApplyScoreEvent(
         }
       }
 
-      const answered = teamsThatAnswered(events, candidate.questionNumber);
+      const answered = new Set<LeftOrRight>([
+        ...(recordedQuestion?.buzzes.map((buzz) => buzz.team) ?? []),
+        ...(recordedQuestion?.noPenalty.map((missed) => missed.team) ?? []),
+      ]);
       if (answered.has(candidate.team)) {
         return refuse(`${game[candidate.team].name} has already answered this tossup.`);
       }
@@ -140,7 +158,10 @@ export default function canApplyScoreEvent(
        * all. This is not a rule about any one format: it is what "the question was read out" means
        * everywhere a neg is defined, and the second team's alternative is right here.
        */
-      if (answerType.isNeg && answered.size > 0) {
+      if (
+        answerType.isNeg &&
+        (recordedQuestion?.readout === true || (answered.size > 0 && recordedQuestion?.readingResumed !== true))
+      ) {
         return refuse(`${game[candidate.team].name} heard the whole question, so this cannot be a neg.`);
       }
       return allowed;

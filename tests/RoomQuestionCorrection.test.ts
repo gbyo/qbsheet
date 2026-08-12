@@ -147,6 +147,45 @@ describe('question-level corrections', () => {
     ]);
   });
 
+  test('correction round-trips an explicit resume and readout state', () => {
+    const format = formatFor();
+    const events: ScoreEvent[] = [
+      event({ type: 'tossup-buzz', questionNumber: 1, team: 'left', playerName: 'Sarah', answerTypeIndex: 2 }),
+      event({ type: 'tossup-reading-resumed', questionNumber: 1 }),
+      event({ type: 'tossup-buzz', questionNumber: 1, team: 'right', playerName: 'Emma', answerTypeIndex: 1 }),
+    ];
+    const model = editableQuestionFromEvents(events, 1);
+
+    expect(model.readingResumed).toBe(true);
+    expect(model.readout).toBe(false);
+    expect(validateEditableQuestion(format, deriveGame(format, setup, events), model)).toEqual([]);
+
+    const replacement = eventsFromEditableQuestion(model, (() => {
+      let next = 0;
+      return () => `resume-correction-${++next}`;
+    })());
+    expect(replacement.map((candidate) => candidate.type)).toEqual([
+      'tossup-buzz',
+      'tossup-reading-resumed',
+      'tossup-buzz',
+    ]);
+    expect(validateEditableQuestion(format, deriveGame(format, setup, replacement), editableQuestionFromEvents(replacement, 1))).toEqual(
+      [],
+    );
+
+    const readoutModel = {
+      ...model,
+      attempts: [
+        model.attempts[0],
+        { ...model.attempts[1], answerTypeIndex: 2 },
+      ],
+      readout: true,
+    };
+    expect(validateEditableQuestion(format, deriveGame(format, setup, events), readoutModel).join('\n')).toContain(
+      'cannot have a second-team neg',
+    );
+  });
+
   test('rejects every incompatible part of an atomic question correction', () => {
     const format = formatFor();
     const events: ScoreEvent[] = [

@@ -20,7 +20,7 @@ import { IScorekeeperAnswerType, IScorekeeperFormat } from '../scoring/Scorekeep
 import { IDerivedTeam } from '../scoring/deriveGame';
 import { orderBySeating } from './PlayerSeating';
 import { lineupMoveMs, lineupSettleMs } from './LineupMotion';
-import { availableAnswerTypes } from './tossupRulings';
+import { availableAnswerTypes, powerCorrect } from './tossupRulings';
 
 /**
  * How long the seat a substitution landed in keeps its emphasis.
@@ -102,9 +102,13 @@ function buttonLabel(answerType: IScorekeeperAnswerType): string {
   return answerType.value > 0 ? `+${answerType.value}` : String(answerType.value);
 }
 
-function answerButtonClass(answerType: IScorekeeperAnswerType): string {
+function answerButtonClass(format: IScorekeeperFormat, answerType: IScorekeeperAnswerType): string {
   if (answerType.isNeg) return 'scorer-answer scorer-answer-neg';
-  if (answerType.isPower) return 'scorer-answer scorer-answer-power';
+  // `isPower` is a value-derived compatibility flag (`value > 10`), not proof that this format
+  // offers a separate power ruling. Style only the structurally selected highest positive tier.
+  if (powerCorrect(format)?.index === answerType.index) {
+    return 'scorer-answer scorer-answer-power';
+  }
   return 'scorer-answer';
 }
 
@@ -250,7 +254,7 @@ export default function TeamPanel(props: ITeamPanelProps) {
                 <button
                   key={answerType.index}
                   type="button"
-                  className={answerButtonClass(answerType)}
+                  className={answerButtonClass(format, answerType)}
                   disabled={!scoringEnabled || !eligible}
                   onClick={() => onBuzz(player.name, answerType)}
                   aria-label={`${player.name} ${answerType.label}`}

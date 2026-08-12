@@ -72,7 +72,7 @@ function setupFor(definition: { left: { name: string; players: { name: string }[
 
 /** The ACF-with-powers format, read from its own standard QBJ rather than hand-built. */
 function acfFormat(): IScorekeeperFormat {
-  const read = readQbjScoringRules(acfPowersScoringRules());
+  const read = readQbjScoringRules(acfPowersScoringRules(), false);
   if (!read.ok) throw new Error('The fixture scoring rules should be readable');
   return read.format;
 }
@@ -136,7 +136,7 @@ describe('reading an official one-game assignment', () => {
 
 describe('scoring rules', () => {
   test('standard fields become the scorer format', () => {
-    const read = readQbjScoringRules(acfPowersScoringRules());
+    const read = readQbjScoringRules(acfPowersScoringRules(), false);
 
     expect(read.ok).toBe(true);
     if (!read.ok) return;
@@ -150,8 +150,8 @@ describe('scoring rules', () => {
   });
 
   test('nothing branches on the rule set name', () => {
-    const named = readQbjScoringRules(acfPowersScoringRules({ name: 'NAQT' }));
-    const unnamed = readQbjScoringRules(acfPowersScoringRules({ name: 'Some Local Format' }));
+    const named = readQbjScoringRules(acfPowersScoringRules({ name: 'NAQT' }), false);
+    const unnamed = readQbjScoringRules(acfPowersScoringRules({ name: 'Some Local Format' }), false);
 
     expect(named.ok && unnamed.ok).toBe(true);
     if (!named.ok || !unnamed.ok) return;
@@ -170,10 +170,9 @@ describe('scoring rules', () => {
 
   test('the timed flag comes from the extension, and its absence is stated rather than assumed', () => {
     const withoutTimed = readQbjScoringRules(acfPowersScoringRules());
-    expect(withoutTimed.ok).toBe(true);
-    if (!withoutTimed.ok) return;
-    expect(withoutTimed.format.regulation.timed).toBe(false);
-    expect(withoutTimed.assumptions.join(' ')).toContain('does not say whether rounds are timed');
+    expect(withoutTimed.ok).toBe(false);
+    if (withoutTimed.ok) return;
+    expect(withoutTimed.problems.join(' ')).toContain('do not say whether the round is timed');
 
     const timed = readQbjScoringRules(acfPowersScoringRules(), true);
     expect(timed.ok).toBe(true);
@@ -221,7 +220,14 @@ describe('incomplete QBJ', () => {
 
   test('a match naming the same team twice is refused', () => {
     const document = assignmentDocument({
-      matches: [matchObject({ id: 'Match_x', left: ninetySix, right: ninetySix })],
+      matches: [
+        matchObject({
+          id: 'Match_x',
+          left: ninetySix,
+          right: ninetySix,
+          qbtcp: { scorekeeper: { timed: false } },
+        }),
+      ],
     });
 
     const opened = openGameText(text(document));
