@@ -32,7 +32,7 @@
  * about itself, so a new screen is safe by default: it does not permit updates until somebody adds it
  * to the list that does. See `AppUpdate`.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { GameStore, IStoredGameRecord, isActive, needsHandoff } from '../game/GameStore';
 import { IUnreadableRecord } from '../game/GameRecordUpgrade';
 import { IGamePackage, gamePackageIdentity, gamePackageLabel } from '../game/GamePackage';
@@ -169,8 +169,6 @@ export default function App() {
   const [store, setStore] = useState<GameStore | null>(null);
   const [records, setRecords] = useState<IStoredGameRecord[]>([]);
   const [unreadable, setUnreadable] = useState<IUnreadableRecord[]>([]);
-  const [storageDegraded, setStorageDegraded] = useState(false);
-  const [storageError, setStorageError] = useState<string | undefined>(undefined);
   const [operatorName, setOperatorName] = useState(() => readOperatorName());
   const [screen, setScreen] = useState<Screen>({ kind: 'loading' });
   const [connection, setConnection] = useState<IConnectedSession | null>(null);
@@ -221,19 +219,20 @@ export default function App() {
     [],
   );
 
-  useEffect(() => {
-    if (!store) {
-      setStorageDegraded(false);
-      setStorageError(undefined);
-      return undefined;
-    }
-    const readStatus = () => {
-      setStorageDegraded(store.storageDegraded);
-      setStorageError(store.storageError);
-    };
-    readStatus();
-    return store.subscribeToStorageStatus(readStatus);
-  }, [store]);
+  /*
+   * Storage health is the store's, read from the store as the screens that report it render.
+   *
+   * It used to be copied into state by an effect, which meant re-reading on subscribe to cover the
+   * gap between the first render and that effect, and clearing the copy by hand whenever the store
+   * went away. Reading through leaves nothing to keep in step: no store is not degraded, and a
+   * store that becomes degraded says so on the next render.
+   */
+  const subscribeStorageStatus = useCallback(
+    (listener: () => void) => (store ? store.subscribeToStorageStatus(listener) : () => {}),
+    [store],
+  );
+  const storageDegraded = useSyncExternalStore(subscribeStorageStatus, () => store?.storageDegraded ?? false);
+  const storageError = useSyncExternalStore(subscribeStorageStatus, () => store?.storageError);
 
   const current = useMemo(
     () =>

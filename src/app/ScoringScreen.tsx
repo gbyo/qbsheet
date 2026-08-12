@@ -109,9 +109,14 @@ export default function ScoringScreen(props: {
   const [repairing, setRepairing] = useState(false);
   const update = useAppUpdate();
 
-  useEffect(() => {
+  // A store that has stopped being durable cannot still be holding this game durably. Applied when
+  // the answer changes rather than on every render, so a write that reports success against the
+  // store's own view is not overruled by a prop that has not caught up yet.
+  const [durability, setDurability] = useState({ durable, storageDegraded });
+  if (durability.durable !== durable || durability.storageDegraded !== storageDegraded) {
+    setDurability({ durable, storageDegraded });
     if (!durable || storageDegraded) setRecordDurablyStored(false);
-  }, [durable, storageDegraded]);
+  }
 
   /**
    * Whether this screen is still on the page.

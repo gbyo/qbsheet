@@ -205,7 +205,9 @@ export default function ScorerHost(props: IScorerHostProps) {
     if (recovered !== null || eventCount > 0) return undefined;
     lastServerRecoveryAttempt.current = serverRecoveryAttempt;
     recoveryFailed.current = false;
-    setServerRecoveryError('');
+    // The error is not cleared here. The only thing that raises the attempt counter is
+    // `retryServerRecovery`, which clears it before bumping, and the first attempt starts from the
+    // empty initial value — so this had nothing left to clear.
     let cancelled = false;
     onRecoverFromServer()
       .then((qbj) => {

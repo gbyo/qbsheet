@@ -207,9 +207,8 @@ export default function TeamPanel(props: ITeamPanelProps) {
 
   // The row the picker belongs to can leave the floor — by the substitution itself, or by a change
   // made in the Players dialog — and an open picker attached to nobody must not stay on screen.
-  useEffect(() => {
-    if (substituting !== null && !team.activePlayers.includes(substituting)) setSubstituting(null);
-  }, [substituting, team.activePlayers]);
+  // Closed as the render that would have drawn it happens, so it is never painted orphaned.
+  if (substituting !== null && !team.activePlayers.includes(substituting)) setSubstituting(null);
 
   return (
     <section className="scorer-team" aria-label={team.name}>

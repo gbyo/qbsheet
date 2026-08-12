@@ -41,11 +41,6 @@ export default tseslint.config(
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
       // Prop types are the TypeScript interface; the runtime checker would be a second, weaker copy.
       'react/prop-types': 'off',
-      // eslint-plugin-react-hooks 7 folded the React Compiler rules into its recommended set. Most
-      // of them pass here already and stay on; these three flag 21 existing sites whose fixes are
-      // real changes to how effects and refs behave, not lint noise, so they are deferred to their
-      // own change rather than smuggled into a dependency bump.
-      'react-hooks/set-state-in-effect': 'off',
     },
   },
   {

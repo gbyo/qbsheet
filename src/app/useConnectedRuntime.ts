@@ -764,10 +764,16 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     void repairSession();
   }, [sessionCredentialProblem, repairSession]);
 
-  // New credentials arrived, so whatever was wrong with the old ones is not a live problem.
+  // New credentials arrived, so whatever was wrong with the old ones is not a live problem. The
+  // problem is dropped as the new token renders; the ref that spends the one unattended reopen is
+  // re-armed from a committed effect, because that is the only place a ref may be written.
+  const [tokenSeen, setTokenSeen] = useState(credentials.token);
+  if (tokenSeen !== credentials.token) {
+    setTokenSeen(credentials.token);
+    setSessionCredentialProblem(false);
+  }
   useEffect(() => {
     autoRepairAttempted.current = false;
-    setSessionCredentialProblem(false);
   }, [credentials.token]);
 
   // The send itself is a callback rather than part of the `useMemo` below, because it reads the
