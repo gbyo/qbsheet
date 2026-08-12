@@ -144,12 +144,20 @@
 }
 
 .scorer-menu-list,
-.practice-coach {
+.practice-coach,
+.practice-coach-collapsed {
   transform-origin: bottom left;
   animation: qbsheet-pop-in var(--room-motion-standard) var(--room-ease-out) both;
 }
 
-.practice-coach {
+/*
+ * The two practice-guide states are the same object docked in the same corner, and Minimize is as
+ * much an entrance as Open guide is — the collapsed pill replaces the panel rather than the panel
+ * shrinking. Animating only the panel made maximizing feel deliberate and minimizing feel like a
+ * dropped frame, so both enter the same way from the corner they share.
+ */
+.practice-coach,
+.practice-coach-collapsed {
   transform-origin: bottom right;
 }
 

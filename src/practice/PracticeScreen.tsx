@@ -205,7 +205,7 @@ function unexpectedMessage(step: IPracticeStep): string {
   return 'Review the situation or open Show me where, then try again.';
 }
 
-export default function PracticeScreen({ onHome }: { onHome: () => void }) {
+export default function PracticeScreen({ onHome, operatorName }: { onHome: () => void; operatorName?: string }) {
   const [run, setRun] = useState(0);
   const [progress, setProgress] = useState(readPracticeProgress);
   const { stepIndex, acceptedEventCount } = progress;
@@ -358,6 +358,7 @@ export default function PracticeScreen({ onHome }: { onHome: () => void }) {
         tournamentName="QBSheet Practice"
         roundName="Guided game"
         roomName="Practice room"
+        operatorName={operatorName}
         connection={RoomConnectionState.Connected}
         /*
          * The header says Practice, not Connected. There is no tournament control behind a practice
