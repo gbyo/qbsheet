@@ -809,7 +809,7 @@ export function ScoresheetReviewDialog(props: {
                     <strong>Q{questionNumber}</strong>
                     <button
                       type="button"
-                      className="scorer-choice"
+                      className="scorer-text-action scorer-review-question-action"
                       onClick={() => {
                         setCameFromList(true);
                         setEditingQuestion(questionNumber);
