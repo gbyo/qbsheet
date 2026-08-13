@@ -38,8 +38,8 @@ describe('HelpTooltip', () => {
     expect(wrapper).not.toHaveAttribute('data-dismissed');
 
     fireEvent.keyDown(trigger, { key: 'Escape' });
-    trigger.blur();
-    trigger.focus();
+    fireEvent.blur(trigger);
+    fireEvent.focus(trigger);
     expect(wrapper).not.toHaveAttribute('data-dismissed');
 
     fireEvent.keyDown(trigger, { key: 'Escape' });
