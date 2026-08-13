@@ -132,13 +132,31 @@ export function newAdvancedAnswerType(
  * Switching a form from basic to advanced must not lose what was typed, and must not change what the
  * game is worth. So the conversion is mechanical: the power, correct and neg values become three rows
  * in the order the reference implementation would sort them, and every other field carries across.
+ *
+ * `awardsBonus` follows `useBonuses` rather than being true for every positive row, which is what
+ * `basicScoringRulesToQbj` writes for the same format. A bonus-free format whose rows still claim a
+ * bonus is not the same rule set read back: `bonusesAreUsed` takes one `awards_bonus: true` as
+ * evidence that bonuses are in play, so the advanced form would open on a format that cannot start a
+ * game, complaining about bonus fields for bonuses the scorekeeper turned off.
  */
 export function advancedFromBasic(basic: IBasicScoringRulesInput): IAdvancedScoringRulesInput {
   const answerTypes: IAdvancedAnswerTypeInput[] = [];
   if (basic.powerValue !== undefined) {
-    answerTypes.push(newAdvancedAnswerType({ value: basic.powerValue, ...basicAnswerTypeNames.power }));
+    answerTypes.push(
+      newAdvancedAnswerType({
+        value: basic.powerValue,
+        ...basicAnswerTypeNames.power,
+        awardsBonus: basic.useBonuses,
+      }),
+    );
   }
-  answerTypes.push(newAdvancedAnswerType({ value: basic.tossupValue, ...basicAnswerTypeNames.correct }));
+  answerTypes.push(
+    newAdvancedAnswerType({
+      value: basic.tossupValue,
+      ...basicAnswerTypeNames.correct,
+      awardsBonus: basic.useBonuses,
+    }),
+  );
   if (basic.negValue !== undefined) {
     answerTypes.push(newAdvancedAnswerType({ value: basic.negValue, ...basicAnswerTypeNames.neg, awardsBonus: false }));
   }
@@ -208,8 +226,12 @@ export function advancedFitsBasicForm(input: IAdvancedScoringRulesInput): boolea
   if (negatives.length > 1) return false;
   // One ordinary value and at most one power above it is the whole of what the basic grid holds.
   if (positives.length < 1 || positives.length > 2) return false;
-  // The basic form's `awardsBonus` is derived rather than stated: positive earns a bonus, negs do not.
-  if (!input.answerTypes.every((type) => type.awardsBonus === (type.value ?? 0) > 0)) return false;
+  // The basic form's `awardsBonus` is derived rather than stated: with bonuses on, a positive value
+  // earns one and a neg does not; with bonuses off, nothing does. So a row that disagrees is a rule
+  // the basic fields cannot state, and going back would rewrite it.
+  if (!input.answerTypes.every((type) => type.awardsBonus === (input.useBonuses && (type.value ?? 0) > 0))) {
+    return false;
+  }
 
   // The name each row would come back with, keyed by the value that decides its role. Descending, so
   // with two positives the larger is the power — the same reading `basicFromAdvanced` performs.
@@ -371,9 +393,11 @@ function fieldProblems(input: IAdvancedScoringRulesInput): string[] {
   if (input.answerTypes.length === 0) {
     problems.push('Add at least one way to answer a tossup.');
   }
+  const named = (type: IAdvancedAnswerTypeInput, position: number) =>
+    type.label.trim() !== '' ? `"${type.label.trim()}"` : `Answer type ${position + 1}`;
   const seenValues = new Set<number>();
   input.answerTypes.forEach((type, position) => {
-    const which = type.label.trim() !== '' ? `"${type.label.trim()}"` : `Answer type ${position + 1}`;
+    const which = named(type, position);
     if (type.value === undefined) {
       problems.push(`${which} needs a point value.`);
       return;
@@ -424,6 +448,17 @@ function fieldProblems(input: IAdvancedScoringRulesInput): string[] {
     if (!input.answerTypes.some((type) => type.awardsBonus)) {
       problems.push('This format uses bonuses but no answer type earns one.');
     }
+  } else {
+    // The other direction, which is the one a scorekeeper hits by accident: the bonus checkbox on a
+    // row is still there when bonuses are off. `advancedScoringRulesToQbj` writes no bonus fields but
+    // does write the flag, and `bonusesAreUsed` reads that flag as bonuses being in play — so without
+    // this the screen complains about missing bonus structure for bonuses nobody asked for, naming
+    // none of the rows that caused it.
+    input.answerTypes.forEach((type, position) => {
+      if (type.awardsBonus) {
+        problems.push(`${named(type, position)} earns a bonus, but this format does not use bonuses.`);
+      }
+    });
   }
 
   if (input.useLightning) {
