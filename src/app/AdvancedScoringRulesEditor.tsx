@@ -105,7 +105,8 @@ export default function AdvancedScoringRulesEditor(props: {
                   id={id(`value-${row.key}`)}
                   className="shell-input manual-number"
                   type="number"
-                  inputMode="numeric"
+                  inputMode="decimal"
+                  step={1}
                   value={row.value === undefined ? '' : String(row.value)}
                   onChange={(event) => setRow(position, { value: numberValue(event.target.value) })}
                 />
@@ -210,8 +211,10 @@ export default function AdvancedScoringRulesEditor(props: {
           <input
             id={id('tossup-count')}
             type="number"
-            value={String(value.tossupCount)}
-            onChange={(event) => set({ tossupCount: numberValue(event.target.value) ?? 0 })}
+            min={1}
+            step={1}
+            value={value.tossupCount === undefined ? '' : String(value.tossupCount)}
+            onChange={(event) => set({ tossupCount: numberValue(event.target.value) })}
           />
         </label>
         <div>
@@ -225,6 +228,8 @@ export default function AdvancedScoringRulesEditor(props: {
           <input
             id={id('max-tossup-count')}
             type="number"
+            min={1}
+            step={1}
             value={value.maximumTossupCount === undefined ? '' : String(value.maximumTossupCount)}
             onChange={(event) => set({ maximumTossupCount: numberValue(event.target.value) })}
           />
@@ -234,8 +239,10 @@ export default function AdvancedScoringRulesEditor(props: {
           <input
             id={id('max-active')}
             type="number"
+            min={1}
+            step={1}
             value={value.maximumPlayersPerTeam === undefined ? '' : String(value.maximumPlayersPerTeam)}
-            onChange={(event) => set({ maximumPlayersPerTeam: numberValue(event.target.value) ?? 0 })}
+            onChange={(event) => set({ maximumPlayersPerTeam: numberValue(event.target.value) })}
           />
         </label>
       </div>
@@ -248,7 +255,18 @@ export default function AdvancedScoringRulesEditor(props: {
           id={id('bonuses')}
           type="checkbox"
           checked={value.useBonuses}
-          onChange={(event) => set({ useBonuses: event.target.checked })}
+          onChange={(event) =>
+            set({
+              useBonuses: event.target.checked,
+              ...(event.target.checked
+                ? {}
+                : {
+                    bonusesBounceBack: false,
+                    overtimeIncludesBonuses: false,
+                    answerTypes: value.answerTypes.map((row) => ({ ...row, awardsBonus: false })),
+                  }),
+            })
+          }
         />
         Use bonuses
       </label>
@@ -285,7 +303,7 @@ export default function AdvancedScoringRulesEditor(props: {
             ))}
             <p className="shell-hint answer-types-hint">
               {value.bonusStructure === 'regular'
-                ? 'The scorer offers a button per part.'
+                ? 'The scorer offers fixed total-score buttons first; Parts opens an optional part-by-part view.'
                 : 'The scorer takes the bonus total as a number, because there is no fixed set of parts to offer.'}
             </p>
           </fieldset>
@@ -294,18 +312,22 @@ export default function AdvancedScoringRulesEditor(props: {
             <div className="rules-setup-grid">
               <label htmlFor={id('bonus-part')}>
                 Points per bonus part
-                <input
-                  id={id('bonus-part')}
-                  type="number"
+                  <input
+                    id={id('bonus-part')}
+                    type="number"
+                    min={1}
+                    step={1}
                   value={value.pointsPerBonusPart === undefined ? '' : String(value.pointsPerBonusPart)}
                   onChange={(event) => set({ pointsPerBonusPart: numberValue(event.target.value) })}
                 />
               </label>
               <label htmlFor={id('bonus-parts')}>
                 Parts per bonus
-                <input
-                  id={id('bonus-parts')}
-                  type="number"
+                  <input
+                    id={id('bonus-parts')}
+                    type="number"
+                    min={1}
+                    step={1}
                   value={value.partsPerBonus === undefined ? '' : String(value.partsPerBonus)}
                   onChange={(event) => set({ partsPerBonus: numberValue(event.target.value) })}
                 />
@@ -319,6 +341,8 @@ export default function AdvancedScoringRulesEditor(props: {
                   <input
                     id={id('bonus-max')}
                     type="number"
+                    min={1}
+                    step={1}
                     value={value.maximumBonusScore === undefined ? '' : String(value.maximumBonusScore)}
                     onChange={(event) => set({ maximumBonusScore: numberValue(event.target.value) })}
                   />
@@ -334,6 +358,8 @@ export default function AdvancedScoringRulesEditor(props: {
                   <input
                     id={id('bonus-divisor')}
                     type="number"
+                    min={1}
+                    step={1}
                     value={value.bonusDivisor === undefined ? '' : String(value.bonusDivisor)}
                     onChange={(event) => set({ bonusDivisor: numberValue(event.target.value) })}
                   />
@@ -343,6 +369,8 @@ export default function AdvancedScoringRulesEditor(props: {
                   <input
                     id={id('bonus-min-parts')}
                     type="number"
+                    min={1}
+                    step={1}
                     value={value.minimumPartsPerBonus === undefined ? '' : String(value.minimumPartsPerBonus)}
                     onChange={(event) => set({ minimumPartsPerBonus: numberValue(event.target.value) })}
                   />
@@ -352,6 +380,8 @@ export default function AdvancedScoringRulesEditor(props: {
                   <input
                     id={id('bonus-max-parts')}
                     type="number"
+                    min={1}
+                    step={1}
                     value={value.maximumPartsPerBonus === undefined ? '' : String(value.maximumPartsPerBonus)}
                     onChange={(event) => set({ maximumPartsPerBonus: numberValue(event.target.value) })}
                   />
@@ -414,6 +444,8 @@ export default function AdvancedScoringRulesEditor(props: {
             <input
               id={id('overtime-count')}
               type="number"
+              min={1}
+              step={1}
               value={value.overtimeQuestionCount === undefined ? '' : String(value.overtimeQuestionCount)}
               onChange={(event) => set({ overtimeQuestionCount: numberValue(event.target.value) })}
             />
@@ -421,15 +453,17 @@ export default function AdvancedScoringRulesEditor(props: {
         </div>
         <p className="shell-hint rules-fields-hint">One tossup means overtime is sudden death.</p>
 
-        <label className="rules-setup-check" htmlFor={id('overtime-bonuses')}>
-          <input
-            id={id('overtime-bonuses')}
-            type="checkbox"
-            checked={value.overtimeIncludesBonuses === true}
-            onChange={(event) => set({ overtimeIncludesBonuses: event.target.checked })}
-          />
-          Bonuses in overtime
-        </label>
+        {value.useBonuses && (
+          <label className="rules-setup-check" htmlFor={id('overtime-bonuses')}>
+            <input
+              id={id('overtime-bonuses')}
+              type="checkbox"
+              checked={value.overtimeIncludesBonuses === true}
+              onChange={(event) => set({ overtimeIncludesBonuses: event.target.checked })}
+            />
+            Bonuses in overtime
+          </label>
+        )}
 
         <label className="rules-setup-check" htmlFor={id('lightning')}>
           <input
@@ -448,6 +482,8 @@ export default function AdvancedScoringRulesEditor(props: {
               <input
                 id={id('lightning-count')}
                 type="number"
+                min={1}
+                step={1}
                 value={value.lightningCountPerTeam === undefined ? '' : String(value.lightningCountPerTeam)}
                 onChange={(event) => set({ lightningCountPerTeam: numberValue(event.target.value) })}
               />
@@ -457,6 +493,8 @@ export default function AdvancedScoringRulesEditor(props: {
               <input
                 id={id('lightning-divisor')}
                 type="number"
+                min={1}
+                step={1}
                 value={value.lightningDivisor === undefined ? '' : String(value.lightningDivisor)}
                 onChange={(event) => set({ lightningDivisor: numberValue(event.target.value) })}
               />

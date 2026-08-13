@@ -17,12 +17,32 @@ import { IStoredGameRecord, isDelivered, retentionMsFor } from '../game/GameStor
 import { gamePackageLabel, gamePackageMatchup } from '../game/GamePackage';
 import { isManualGame } from '../game/GameDefinition';
 import { useState } from 'react';
+import { downloadStoredGameQbj } from './FinishedGameDownload';
 
 function timeOfDay(iso: string | undefined): string {
   if (!iso) return '';
   const at = new Date(iso);
   if (!Number.isFinite(at.getTime())) return '';
   return at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
+function completedLabel(iso: string | undefined): string {
+  if (!iso) return '';
+  const at = new Date(iso);
+  if (!Number.isFinite(at.getTime())) return '';
+  const time = timeOfDay(iso);
+  const today = new Date();
+  const sameDay =
+    at.getFullYear() === today.getFullYear() &&
+    at.getMonth() === today.getMonth() &&
+    at.getDate() === today.getDate();
+  return sameDay
+    ? `today at ${time}`
+    : `${at.toLocaleDateString([], {
+        month: 'short',
+        day: 'numeric',
+        ...(at.getFullYear() !== today.getFullYear() ? { year: 'numeric' } : {}),
+      })} at ${time}`;
 }
 
 function attemptText(count: number): string {
@@ -93,11 +113,21 @@ export function ScoreLine(props: { record: IStoredGameRecord }) {
 
 export default function RecentGames(props: {
   records: IStoredGameRecord[];
-  onOpen: (record: IStoredGameRecord) => void;
+  onDownload?: (record: IStoredGameRecord) => boolean;
+  /** Compatibility for callers that only need to open a record; new callers should download directly. */
+  onOpen?: (record: IStoredGameRecord) => void;
   onRetry?: (record: IStoredGameRecord) => void | Promise<void>;
   canRetry?: (record: IStoredGameRecord) => boolean;
 }) {
-  const { records, onOpen, onRetry, canRetry } = props;
+  const { records, onDownload, onOpen, onRetry, canRetry } = props;
+  const download = (record: IStoredGameRecord) => {
+    if (onDownload) return onDownload(record);
+    if (onOpen) {
+      onOpen(record);
+      return true;
+    }
+    return downloadStoredGameQbj(record);
+  };
   const [retrying, setRetrying] = useState<string | null>(null);
   if (records.length === 0) return null;
 
@@ -117,7 +147,7 @@ export default function RecentGames(props: {
                 <ScoreLine record={record} />
               </p>
               <p className="recent-when">
-                Completed {timeOfDay(record.completedAt)}
+                Completed {completedLabel(record.completedAt)}
                 {retentionDate(record) && <> · Kept on this device until {retentionDate(record)}</>}
               </p>
             </div>
@@ -181,7 +211,7 @@ export default function RecentGames(props: {
                       : 'Try again'}
                 </button>
               )}
-              <button type="button" className="shell-button" onClick={() => onOpen(record)}>
+              <button type="button" className="shell-button" onClick={() => download(record)}>
                 Download QBJ again
               </button>
             </div>

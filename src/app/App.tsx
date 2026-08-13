@@ -594,9 +594,10 @@ export default function App() {
 
   const updateRecord = useCallback(
     async (recordId: string, change: Partial<IStoredGameRecord>) => {
-      if (!store) return;
-      await store.update(recordId, change);
+      if (!store) return false;
+      const updated = await store.update(recordId, change);
       await refresh(store);
+      return updated !== null;
     },
     [store, refresh],
   );

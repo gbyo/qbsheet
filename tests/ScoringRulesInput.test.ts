@@ -301,7 +301,8 @@ describe('moving between the two forms', () => {
         ],
       });
 
-      expect(advancedFitsBasicForm(named)).toBe(true);
+      expect(advancedFitsBasicForm(named)).toBe(false);
+      expect(basicFromAdvanced(named)).toBeNull();
       expect(advancedFitsBasicForm(bothOrdinary)).toBe(false);
       expect(basicFromAdvanced(bothOrdinary)).toBeNull();
       expect(scoringRulesInputAs(advancedRulesInput(bothOrdinary), 'basic').mode).toBe('advanced');

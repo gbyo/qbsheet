@@ -93,15 +93,17 @@ function useChoiceKeys(options: readonly number[], pick: (points: number) => voi
 function PartEntry(props: {
   format: IScorekeeperFormat;
   partCount: number;
+  controllingTeamName: string;
+  opponentName: string;
   onRecord: (parts: IBonusPartResult[]) => void;
   onCancel: () => void;
 }) {
-  const { format, partCount, onRecord, onCancel } = props;
+  const { format, partCount, controllingTeamName, opponentName, onRecord, onCancel } = props;
   const perPart = format.bonus.pointsPerPart ?? 0;
   const bouncesBack = format.bonus.bounceBack;
   /** Per part: who took it, if anybody. */
-  const [outcomes, setOutcomes] = useState<BonusPartOutcome[]>(
-    Array.from({ length: partCount }, () => 'missed' as const),
+  const [outcomes, setOutcomes] = useState<Array<BonusPartOutcome | null>>(
+    Array.from({ length: partCount }, () => null),
   );
   const [selectionMotion, setSelectionMotion] = useState<{
     index: number;
@@ -132,7 +134,9 @@ function PartEntry(props: {
   const selectionToken = (index: number, outcome: BonusPartOutcome) =>
     selectionMotion?.index === index && selectionMotion.outcome === outcome ? selectionMotion.token : undefined;
 
-  const parts: IBonusPartResult[] = outcomes.map((outcome) => bonusPartForOutcome(format.bonus, outcome));
+  const parts: IBonusPartResult[] = outcomes.map((outcome) =>
+    bonusPartForOutcome(format.bonus, outcome ?? 'missed'),
+  );
   const controlledTotal = parts.reduce((sum, part) => sum + part.controlledPoints, 0);
   const bouncebackTotal = parts.reduce((sum, part) => sum + (part.bouncebackPoints ?? 0), 0);
 
@@ -148,6 +152,7 @@ function PartEntry(props: {
               <button
                 type="button"
                 aria-pressed={outcome === 'controlled'}
+                aria-label={`Part ${index + 1}, ${controllingTeamName} +${perPart}`}
                 className={choiceClass(index, 'controlled', outcome === 'controlled')}
                 data-selection-token={selectionToken(index, 'controlled')}
                 onClick={() => set(index, 'controlled')}
@@ -158,6 +163,7 @@ function PartEntry(props: {
                 <button
                   type="button"
                   aria-pressed={outcome === 'bounceback'}
+                  aria-label={`Part ${index + 1}, ${opponentName} bounceback`}
                   className={choiceClass(index, 'bounceback', outcome === 'bounceback')}
                   data-selection-token={selectionToken(index, 'bounceback')}
                   onClick={() => set(index, 'bounceback')}
@@ -168,6 +174,7 @@ function PartEntry(props: {
               <button
                 type="button"
                 aria-pressed={outcome === 'missed'}
+                aria-label={`Part ${index + 1}, missed by both teams`}
                 className={choiceClass(index, 'missed', outcome === 'missed')}
                 data-selection-token={selectionToken(index, 'missed')}
                 onClick={() => set(index, 'missed')}
@@ -194,7 +201,12 @@ function PartEntry(props: {
         )}
       </p>
       <div className="scorer-choices">
-        <button type="button" className="scorer-choice" onClick={() => onRecord(parts)}>
+        <button
+          type="button"
+          className="scorer-choice"
+          disabled={outcomes.some((outcome) => outcome === null)}
+          onClick={() => onRecord(parts)}
+        >
           Record parts
         </button>
         <button type="button" className="scorer-action" onClick={onCancel}>
@@ -253,6 +265,7 @@ export default function BonusPrompt(props: IBonusPromptProps) {
       : bounceStage
         ? bonusScoreProblem(format.bonus, controlled as number, Number(typed))
         : bonusTotalProblem(format.bonus, Number(typed));
+  const typedErrorId = bounceStage ? 'scorer-bounceback-points-error' : 'scorer-bonus-points-error';
 
   /**
    * Which stage the keyboard is aimed at.
@@ -372,6 +385,8 @@ export default function BonusPrompt(props: IBonusPromptProps) {
                 max={availableBounceback}
                 value={typed}
                 onChange={(changeEvent) => setTyped(changeEvent.target.value)}
+                aria-invalid={typedProblem !== null}
+                aria-describedby={typedProblem ? typedErrorId : undefined}
                 // eslint-disable-next-line jsx-a11y/no-autofocus
                 autoFocus
               />
@@ -379,7 +394,11 @@ export default function BonusPrompt(props: IBonusPromptProps) {
             <button type="submit" className="scorer-choice" disabled={typed === '' || typedProblem !== null}>
               Record
             </button>
-            {typedProblem && <p className="scorer-problem">{typedProblem}</p>}
+            {typedProblem && (
+              <p id={typedErrorId} className="scorer-problem" role="alert" aria-live="polite">
+                {typedProblem}
+              </p>
+            )}
           </form>
           )}
           {/*
@@ -407,7 +426,14 @@ export default function BonusPrompt(props: IBonusPromptProps) {
       </p>
 
       {byParts && partCount !== null ? (
-        <PartEntry format={format} partCount={partCount} onRecord={onRecordParts} onCancel={() => setByParts(false)} />
+        <PartEntry
+          format={format}
+          partCount={partCount}
+          controllingTeamName={controllingTeamName}
+          opponentName={opponentName}
+          onRecord={onRecordParts}
+          onCancel={() => setByParts(false)}
+        />
       ) : (
         <>
           {totals ? (
@@ -438,6 +464,8 @@ export default function BonusPrompt(props: IBonusPromptProps) {
                   max={format.bonus.maximumScore}
                   value={typed}
                   onChange={(changeEvent) => setTyped(changeEvent.target.value)}
+                  aria-invalid={typedProblem !== null}
+                  aria-describedby={typedProblem ? typedErrorId : undefined}
                   // eslint-disable-next-line jsx-a11y/no-autofocus
                   autoFocus
                 />
@@ -445,7 +473,11 @@ export default function BonusPrompt(props: IBonusPromptProps) {
               <button type="submit" className="scorer-choice" disabled={typed === '' || typedProblem !== null}>
                 Record
               </button>
-              {typedProblem && <p className="scorer-problem">{typedProblem}</p>}
+              {typedProblem && (
+                <p id={typedErrorId} className="scorer-problem" role="alert" aria-live="polite">
+                  {typedProblem}
+                </p>
+              )}
             </form>
           )}
           {partCount !== null && (

@@ -15,7 +15,7 @@
  * them (see `PlayerSeating`). It is positional and not an identity — a substitute takes the seat of
  * the player they came on for — which is what keeps the third column the third column all game.
  */
-import { CSSProperties, useEffect, useRef, useState } from 'react';
+import { CSSProperties, useEffect, useId, useRef, useState } from 'react';
 import { IScorekeeperAnswerType, IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
 import { IDerivedTeam } from '../scoring/deriveGame';
 import { orderBySeating } from './PlayerSeating';
@@ -48,6 +48,8 @@ export interface ITeamPanelProps {
   negsAvailable: boolean;
   /** Whether a timeout has been used, when the tournament tracks them. */
   timeoutsUsed?: number;
+  /** Total timeout allowance, when the tournament tracks it. */
+  timeoutsPerTeam?: number;
   /** Returns true only when the scoring engine committed the ruling. */
   onBuzz: (playerName: string, answerType: IScorekeeperAnswerType) => boolean;
   /** An answer worth nothing that still spends this team's chance at the tossup. */
@@ -121,6 +123,7 @@ export default function TeamPanel(props: ITeamPanelProps) {
     eligible,
     negsAvailable,
     timeoutsUsed,
+    timeoutsPerTeam,
     onBuzz,
     onWrongNoPenalty,
     seatOrder,
@@ -133,6 +136,9 @@ export default function TeamPanel(props: ITeamPanelProps) {
   } = props;
   /** Which row, if any, has its replacement list open. One at a time, by name. */
   const [substituting, setSubstituting] = useState<string | null>(null);
+  const substitutionTrigger = useRef<HTMLButtonElement | null>(null);
+  const firstBenchChoice = useRef<HTMLButtonElement | null>(null);
+  const substitutionReasonId = useId();
   /**
    * The seat a substitution has just landed in.
    *
@@ -157,6 +163,20 @@ export default function TeamPanel(props: ITeamPanelProps) {
     { playerName: string; answerTypeIndex: number | 'zero'; isNeg: boolean; token: number } | null
   >(null);
   const recordedSequence = useRef(0);
+  useEffect(() => {
+    if (substituting !== null) firstBenchChoice.current?.focus();
+  }, [substituting]);
+  useEffect(() => {
+    if (substituting === null) return undefined;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.repeat) return;
+      event.preventDefault();
+      setSubstituting(null);
+      substitutionTrigger.current?.focus();
+    };
+    document.addEventListener('keydown', closeOnEscape);
+    return () => document.removeEventListener('keydown', closeOnEscape);
+  }, [substituting]);
   useEffect(() => {
     if (landed === null) return undefined;
     const timer = window.setTimeout(() => setLanded(null), seatChangeEmphasisMs);
@@ -213,7 +233,9 @@ export default function TeamPanel(props: ITeamPanelProps) {
   return (
     <section className="scorer-team" aria-label={team.name}>
       <header className="scorer-team-head">
-        <h2 className="scorer-team-name">{team.name}</h2>
+        <h2 className="scorer-team-name" title={team.name}>
+          {team.name}
+        </h2>
         <p className="scorer-team-score" aria-label={`${team.name} score`}>
           <span
             key={team.points}
@@ -223,8 +245,16 @@ export default function TeamPanel(props: ITeamPanelProps) {
           </span>
         </p>
       </header>
-      {timeoutsUsed !== undefined && timeoutsUsed > 0 && (
-        <p className="scorer-team-timeout">{timeoutsUsed === 1 ? 'Timeout used' : `${timeoutsUsed} timeouts used`}</p>
+      {timeoutsUsed !== undefined && timeoutsPerTeam !== undefined && timeoutsPerTeam > 0 && (
+        <p className="scorer-team-timeout">
+          {Math.max(0, timeoutsPerTeam - timeoutsUsed)} remaining
+          {timeoutsUsed > 0 && ` (${timeoutsUsed} used)`}
+        </p>
+      )}
+      {onSubstitute && !substitutionAllowed && (
+        <p id={substitutionReasonId} className="scorer-substitution-note">
+          {substitutionBlockedReason ?? 'Lineup changes are not available in this phase.'}
+        </p>
       )}
 
       {/*
@@ -253,9 +283,19 @@ export default function TeamPanel(props: ITeamPanelProps) {
             </span>
             {/* Keyed by the name so a substitution replaces the element rather than editing its text,
                 which is what lets the arriving name have an entrance and the seat around it not. */}
-            <span key={player.name} className="scorer-player-name">
+            <span key={player.name} className="scorer-player-name" title={player.name}>
               {player.name}
             </span>
+            {recorded?.playerName === player.name && (
+              <span className="visually-hidden" role="status">
+                {player.name}{' '}
+                {recorded.answerTypeIndex === 'zero'
+                  ? '0, wrong answer with no penalty'
+                  : answerTypes.find((answerType) => answerType.index === recorded.answerTypeIndex)?.label ??
+                    'ruling'}{' '}
+                recorded.
+              </span>
+            )}
             {/*
               Against the name, because that is whose substitution it is — not against the rulings,
               where it spent its time being a fifth target beside +10 for a thumb to find while a
@@ -273,8 +313,12 @@ export default function TeamPanel(props: ITeamPanelProps) {
                 aria-expanded={substituting === player.name}
                 aria-label={`Substitute for ${player.name}`}
                 disabled={!substitutionAllowed}
+                aria-describedby={!substitutionAllowed ? substitutionReasonId : undefined}
                 title={substitutionAllowed ? `Substitute for ${player.name}` : substitutionBlockedReason}
-                onClick={() => setSubstituting((current) => (current === player.name ? null : player.name))}
+                onClick={(event) => {
+                  substitutionTrigger.current = event.currentTarget;
+                  setSubstituting((current) => (current === player.name ? null : player.name));
+                }}
               >
                 &#8644;
               </button>
@@ -315,7 +359,7 @@ export default function TeamPanel(props: ITeamPanelProps) {
                 aria-label={`${player.name} ${negsAvailable ? '0 after readout' : '0'} wrong, no penalty`}
                 title={negsAvailable ? 'Wrong answer after readout, no penalty' : 'Wrong answer, no penalty'}
               >
-                {negsAvailable ? '0 after readout' : '0'}
+                0
               </button>
             </span>
             {/*
@@ -342,6 +386,7 @@ export default function TeamPanel(props: ITeamPanelProps) {
                         key={name}
                         type="button"
                         className="scorer-choice"
+                        ref={benchPlayers[0] === name ? firstBenchChoice : undefined}
                         onClick={() => {
                           setSubstituting(null);
                           // The seat this row is in, before the lineup changes and while the row it
@@ -357,7 +402,14 @@ export default function TeamPanel(props: ITeamPanelProps) {
                     ))}
                   </div>
                 )}
-                <button type="button" className="scorer-text-action" onClick={() => setSubstituting(null)}>
+                <button
+                  type="button"
+                  className="scorer-text-action"
+                  onClick={() => {
+                    setSubstituting(null);
+                    substitutionTrigger.current?.focus();
+                  }}
+                >
                   Cancel
                 </button>
               </div>

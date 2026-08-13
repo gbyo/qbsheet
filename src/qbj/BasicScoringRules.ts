@@ -30,7 +30,7 @@ import { QbjScoringRulesResult, readQbjScoringRules } from './QbjScoringRules';
 
 export interface IBasicScoringRulesInput {
   /** What an ordinary correct tossup is worth. */
-  tossupValue: number;
+  tossupValue?: number;
   /** The power value, when the tournament uses powers. */
   powerValue?: number;
   /** The neg value, as a negative number, when the tournament uses negs. */
@@ -43,8 +43,8 @@ export interface IBasicScoringRulesInput {
   partsPerBonus?: number;
   /** Whether missed parts bounce back to the other team. */
   bonusesBounceBack?: boolean;
-  tossupCount: number;
-  maximumPlayersPerTeam: number;
+  tossupCount?: number;
+  maximumPlayersPerTeam?: number;
   /**
    * Tossups in the first overtime period. 1 is sudden death under the existing engine.
    *
@@ -114,8 +114,8 @@ export function basicScoringRulesToQbj(input: IBasicScoringRulesInput): QbjObjec
   }
   answerTypes.push({
     type: 'AnswerType',
-    id: `AnswerType_${input.tossupValue}`,
-    value: input.tossupValue,
+    id: `AnswerType_${input.tossupValue ?? 0}`,
+    value: input.tossupValue ?? 0,
     label: basicAnswerTypeNames.correct.label,
     short_label: basicAnswerTypeNames.correct.shortLabel,
     awards_bonus: input.useBonuses,
@@ -139,9 +139,9 @@ export function basicScoringRulesToQbj(input: IBasicScoringRulesInput): QbjObjec
     id: 'ScoringRules_Entered',
     name: input.name ?? 'Scoring rules entered in the room',
     teams_per_match: 2,
-    maximum_players_per_team: input.maximumPlayersPerTeam,
-    regulation_tossup_count: input.tossupCount,
-    maximum_regulation_tossup_count: input.tossupCount,
+    maximum_players_per_team: input.maximumPlayersPerTeam ?? 0,
+    regulation_tossup_count: input.tossupCount ?? 0,
+    maximum_regulation_tossup_count: input.tossupCount ?? 0,
     minimum_overtime_question_count: input.overtimeQuestionCount ?? 1,
     overtime_includes_bonuses: input.overtimeIncludesBonuses === true,
     answer_types: answerTypes,
@@ -189,7 +189,19 @@ function fieldProblems(input: IBasicScoringRulesInput): string[] {
     if (value === undefined || !Number.isInteger(value) || value < 1) problems.push(complaint);
   };
 
+  wholeAtLeastOne(input.tossupValue, 'Correct tossup must be a positive whole number.');
+  wholeAtLeastOne(input.tossupCount, 'Tossups in regulation must be at least 1.');
   wholeAtLeastOne(input.maximumPlayersPerTeam, 'Players playing at once must be at least 1.');
+  if (input.powerValue !== undefined) {
+    if (!Number.isInteger(input.powerValue)) problems.push('Power must be a whole number.');
+    else if (input.tossupValue !== undefined && input.powerValue <= input.tossupValue) {
+      problems.push('Power must be worth more than Correct tossup.');
+    }
+  }
+  if (input.negValue !== undefined) {
+    if (!Number.isInteger(input.negValue)) problems.push('Neg must be a whole number.');
+    else if (input.negValue >= 0) problems.push('Neg must be negative.');
+  }
   if (input.useBonuses) {
     wholeAtLeastOne(input.partsPerBonus, 'Parts per bonus must be at least 1.');
     wholeAtLeastOne(input.pointsPerBonusPart, 'Points per bonus part must be at least 1.');
@@ -205,7 +217,13 @@ function fieldProblems(input: IBasicScoringRulesInput): string[] {
 export function basicScoringRulesProblems(input: IBasicScoringRulesInput): string[] {
   const fields = fieldProblems(input);
   const result = readBasicScoringRules(input);
-  return [...fields, ...(result.ok ? [] : result.problems)];
+  // The basic form identifies an equal Power/Correct pair in its own vocabulary. The QBJ reader
+  // only sees the generated value-based ids and would otherwise add an internal identity error
+  // beside the useful field complaint.
+  const parserProblems = result.ok
+    ? []
+    : result.problems.filter((problem) => !problem.includes("reuses another answer type's QBJ identity"));
+  return [...fields, ...parserProblems];
 }
 
 /**
