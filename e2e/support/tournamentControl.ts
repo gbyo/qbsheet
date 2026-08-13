@@ -444,6 +444,12 @@ export async function startTournamentControl(protocol: ControlProtocol): Promise
             blocked_message: null,
             session: open ? { session_id: open[0], resumable: true } : null,
             hold_new_starts: false,
+            next:
+              assigned === 4
+                ? {
+                    label: `${rounds[5].label} · ${rounds[5].left.name} vs ${rounds[5].right.name}`,
+                  }
+                : null,
           });
           return;
         }

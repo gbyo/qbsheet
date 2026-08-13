@@ -233,22 +233,38 @@ export function advancedFitsBasicForm(input: IAdvancedScoringRulesInput): boolea
     return false;
   }
 
-  // The name each row would come back with, keyed by the value that decides its role. Descending, so
-  // with two positives the larger is the power — the same reading `basicFromAdvanced` performs.
+  // The rows the basic form would come back with. Descending, so with two positives the larger is the
+  // power — the same reading `basicFromAdvanced` performs.
+  //
+  // Matched as a multiset rather than looked up by value, because a value is not an identity here. Two
+  // rows worth the same collapse into one entry in a value-keyed map, and the entry that survives is
+  // the ordinary one — so a second `Correct / C` matched the reconstructed `Power`, and a rename this
+  // function exists to refuse was called lossless. `fieldProblems` does complain about two rows worth
+  // the same, but that complaint and this check are independent: the simpler screen is offered on this
+  // answer alone, so a row somebody is halfway through editing must not be the way past it.
   const descending = [...values].sort((a, b) => b - a);
   const positivesDescending = descending.filter((value) => value > 0);
-  const namesByValue = new Map<number, { label: string; shortLabel: string }>();
-  if (positivesDescending.length === 2) namesByValue.set(positivesDescending[0], basicAnswerTypeNames.power);
-  namesByValue.set(positivesDescending[positivesDescending.length - 1], basicAnswerTypeNames.correct);
-  const negative = descending.find((value) => value < 0);
-  if (negative !== undefined) namesByValue.set(negative, basicAnswerTypeNames.neg);
+  // Trimmed, because that is what `advancedScoringRulesToQbj` writes; trailing space in a text box is
+  // not a rule anybody stated and must not be the thing that refuses the conversion.
+  const rowKey = (value: number, names: { label: string; shortLabel: string }) =>
+    JSON.stringify([value, names.label.trim(), names.shortLabel.trim()]);
 
+  const expected: string[] = [];
+  if (positivesDescending.length === 2) expected.push(rowKey(positivesDescending[0], basicAnswerTypeNames.power));
+  expected.push(rowKey(positivesDescending[positivesDescending.length - 1], basicAnswerTypeNames.correct));
+  const negative = descending.find((value) => value < 0);
+  if (negative !== undefined) expected.push(rowKey(negative, basicAnswerTypeNames.neg));
+  // Counted both ways: a row matching nothing refuses below, and a row the reconstruction would add
+  // would otherwise leave `every` passing on the rows that happen to be there.
+  if (input.answerTypes.length !== expected.length) return false;
+
+  const unmatched = [...expected];
   return input.answerTypes.every((type) => {
-    const reconstructed = namesByValue.get(type.value as number);
-    if (reconstructed === undefined) return false;
-    // Trimmed, because that is what `advancedScoringRulesToQbj` writes; trailing space in a text box
-    // is not a rule anybody stated and must not be the thing that refuses the conversion.
-    return type.label.trim() === reconstructed.label && type.shortLabel.trim() === reconstructed.shortLabel;
+    const position = unmatched.indexOf(rowKey(type.value as number, type));
+    if (position === -1) return false;
+    // Consumed, so two rows cannot both claim the same reconstructed one.
+    unmatched.splice(position, 1);
+    return true;
   });
 }
 

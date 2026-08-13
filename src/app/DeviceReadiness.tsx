@@ -50,6 +50,7 @@ interface IReadinessSnapshot {
   localNetworkPermission: LocalNetworkPermissionState;
   online: boolean;
   safari: boolean;
+  probeFailures: string[];
 }
 
 interface IReadinessCheck {
@@ -186,13 +187,21 @@ export default function DeviceReadiness(props: {
     }
 
     try {
-      const [worker, permission, reportedBuild] = await Promise.all([
+      const [workerResult, permissionResult, buildResult] = await Promise.allSettled([
         serviceWorkerState(),
         localNetworkPermission(),
         // Asks the worker actually serving this page what it is. A page running new code off the network
         // while an old worker still owns the cache is a real state and this is the only way to see it.
         serviceWorkerBuild(),
       ]);
+      const worker = workerResult.status === 'fulfilled' ? workerResult.value : 'missing';
+      const permission = permissionResult.status === 'fulfilled' ? permissionResult.value : 'unsupported';
+      const reportedBuild = buildResult.status === 'fulfilled' ? buildResult.value : null;
+      const probeFailures = [
+        ...(workerResult.status === 'rejected' ? ['offline app status'] : []),
+        ...(permissionResult.status === 'rejected' ? ['local network permission'] : []),
+        ...(buildResult.status === 'rejected' ? ['offline worker build'] : []),
+      ];
       setWorkerBuild(reportedBuild);
       setSnapshot({
         localStorage: localStorageWorks(),
@@ -206,6 +215,7 @@ export default function DeviceReadiness(props: {
         localNetworkPermission: permission,
         online: navigator.onLine,
         safari: isSafariBrowser(),
+        probeFailures,
       });
     } finally {
       // Always, even if one of the probes above threw. This screen exists to be used on a locked-down
@@ -391,7 +401,18 @@ export default function DeviceReadiness(props: {
               kind: 'required',
             };
 
+    const probeFailureCheck: IReadinessCheck[] = snapshot.probeFailures.length > 0
+      ? [{
+          id: 'readiness-probes',
+          title: 'Device check details',
+          detail: `QBSheet could not check ${snapshot.probeFailures.join(' or ')}. The other results are still shown; retry this check before the tournament.`,
+          state: 'warn',
+          kind: 'recommended',
+        }]
+      : [];
+
     return [
+      ...probeFailureCheck,
       {
         id: 'game-storage',
         title: 'Game storage',

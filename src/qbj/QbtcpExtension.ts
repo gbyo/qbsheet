@@ -96,7 +96,9 @@ export interface IQbtcpExtension {
  *
  * `procedure` is the one field that does not degrade quietly, because it is the one field whose
  * absence is *more* permissive than its presence. A version this build does not know is reported as
- * `unsupportedProcedureVersion` and left for the caller to refuse rather than dropped here.
+ * `unsupportedProcedureVersion` and left for the caller to refuse rather than dropped here — and so is
+ * a `procedure` that is present but unreadable in any other way, since "no rules were sent" and "the
+ * rules were unreadable" must not arrive at the caller as the same thing.
  */
 export function readQbtcpExtension(value: unknown): IQbtcpExtension | null {
   if (!isPlainObject(value)) return null;
@@ -124,6 +126,12 @@ export function readQbtcpExtension(value: unknown): IQbtcpExtension | null {
       const stated = raw.procedure.version;
       extension.unsupportedProcedureVersion = typeof stated === 'number' && Number.isFinite(stated) ? stated : 0;
     }
+  } else if (raw.procedure !== undefined) {
+    // Present but not an object at all — null, an array, a string. Every other field here degrades to
+    // absent when it arrives malformed, and this is the one field where that is the wrong trade: rules
+    // were sent, this build cannot read a word of them, and dropping the block leaves the room with the
+    // permissive no-procedure defaults. The same zero an unversioned procedure reports.
+    extension.unsupportedProcedureVersion = 0;
   }
   if (isPlainObject(raw.scorekeeper) && typeof raw.scorekeeper.timed === 'boolean') {
     extension.scorekeeper = { timed: raw.scorekeeper.timed };

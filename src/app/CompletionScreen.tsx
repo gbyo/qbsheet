@@ -126,8 +126,9 @@ export default function CompletionScreen(props: {
           )}
           {record.serverDelivery === 'pending' && (
             <p className="final-pending">
-              Tournament control did not receive the result yet. It is saved on this device; retry it from
-              Recent Games when control is available.
+              Tournament control has not received the result yet. It is saved on this device, and QBSheet
+              will keep trying automatically while it is open. You can also retry from Recent Games or hand
+              over the QBJ file.
             </p>
           )}
           {record.serverDelivery === 'rejected' && (
