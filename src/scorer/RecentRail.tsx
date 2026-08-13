@@ -93,15 +93,16 @@ function QuestionBody(props: {
   question: IDerivedQuestion;
   teamNames: { left: string; right: string };
   marked: boolean;
+  statusText?: string;
 }) {
-  const { question, teamNames, marked } = props;
+  const { question, teamNames, marked, statusText } = props;
   return (
     <>
       <span className="scorer-rail-q">
         Q{question.questionNumber}
         {question.period === 'overtime' && <span className="scorer-rail-ot">OT</span>}
         {question.replaced && (
-          <span className="scorer-rail-mark" title="Replaced question">
+          <span className="scorer-rail-mark" title="Replaced question" aria-hidden="true">
             R
           </span>
         )}
@@ -109,10 +110,12 @@ function QuestionBody(props: {
           <span
             className="scorer-rail-mark is-flagged"
             title={question.openProtests > 0 ? 'Protest outstanding' : 'Flagged for tournament control'}
+            aria-hidden="true"
           >
             !
           </span>
         )}
+        {statusText && <span className="visually-hidden"> {statusText}</span>}
       </span>
       <span className="scorer-rail-lines">
         {questionLines(question, teamNames).map((line, index) => (
@@ -156,7 +159,16 @@ export default function RecentRail(props: IRecentRailProps) {
             )}
           {recent.map((question) => {
             const marked = question.openProtests > 0 || flaggedQuestions.has(question.questionNumber);
-            const body = <QuestionBody question={question} teamNames={teamNames} marked={marked} />;
+            const status = [
+              question.replaced ? 'replaced question' : '',
+              question.openProtests > 0 ? 'protest outstanding' : '',
+              flaggedQuestions.has(question.questionNumber) && question.openProtests === 0
+                ? 'flagged for tournament control'
+                : '',
+            ]
+              .filter(Boolean)
+              .join(', ');
+            const body = <QuestionBody question={question} teamNames={teamNames} marked={marked} statusText={status} />;
             const isMotionTarget = question.questionNumber === motion?.questionNumber;
 
             return (
@@ -178,7 +190,7 @@ export default function RecentRail(props: IRecentRailProps) {
                     type="button"
                     className="scorer-rail-open"
                     onClick={() => onInspect(question.questionNumber)}
-                    aria-label={`Review question ${question.questionNumber}`}
+                    aria-label={`Review question ${question.questionNumber}${status ? `, ${status}` : ''}`}
                   >
                     {body}
                   </button>

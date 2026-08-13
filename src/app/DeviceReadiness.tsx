@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import FruityServerClient, { normalizeBaseUrl } from '../integrations/fruity/FruityServerClient';
 import { buildLabel } from '../pwa/BuildVersion';
 import { IWorkerBuild, serviceWorkerBuild } from '../pwa/AppUpdate';
@@ -158,10 +158,26 @@ export default function DeviceReadiness(props: {
   const [requestingPersistence, setRequestingPersistence] = useState(false);
   const [serverAddress, setServerAddress] = useState(rememberedServer);
   const [serverTest, setServerTest] = useState<ServerTestState>({ kind: 'untested' });
+  const serverTestSequence = useRef(0);
   const [downloadState, setDownloadState] = useState<DownloadState>('untested');
   const [workerBuild, setWorkerBuild] = useState<IWorkerBuild | null>(null);
   const [diagnostics, setDiagnostics] = useState<DiagnosticsOutcome | null>(null);
   const update = useAppUpdate();
+
+  // `navigator.onLine` is only a snapshot. Keep the readiness result honest while the page remains
+  // open, because an offline transition is exactly when somebody is deciding whether file scoring
+  // is still available.
+  useEffect(() => {
+    const syncNetwork = () => {
+      setSnapshot((current) => (current ? { ...current, online: navigator.onLine } : current));
+    };
+    window.addEventListener('online', syncNetwork);
+    window.addEventListener('offline', syncNetwork);
+    return () => {
+      window.removeEventListener('online', syncNetwork);
+      window.removeEventListener('offline', syncNetwork);
+    };
+  }, []);
 
   const runChecks = useCallback(async () => {
     setChecking(true);
@@ -248,6 +264,7 @@ export default function DeviceReadiness(props: {
 
   const testServer = async (event: FormEvent) => {
     event.preventDefault();
+    const sequence = ++serverTestSequence.current;
     const normalized = normalizeBaseUrl(serverAddress);
     if (!normalized.ok) {
       setServerTest({ kind: 'failed', message: normalized.error });
@@ -265,21 +282,29 @@ export default function DeviceReadiness(props: {
 
     setServerTest({ kind: 'testing' });
     const client = new FruityServerClient(normalized.value);
-    // The client discovers on its first call, exactly as it does for a live room, so the protocol
-    // this reports is the one a scorekeeper would actually get at this address.
-    const result = await client.verify();
-    await runChecks();
-    if (result.ok) {
-      setServerAddress(normalized.value);
-      setServerTest({
-        kind: 'passed',
-        message: `Tournament control answered at ${normalized.value}.`,
-        protocol: protocolLabel(client),
-        canonical: client.isQbtcp,
-        server: { ...client.describeProtocol(), address: safeAddress(normalized.value) },
-      });
-    } else {
-      setServerTest({ kind: 'failed', message: result.error });
+    try {
+      // The client discovers on its first call, exactly as it does for a live room, so the protocol
+      // this reports is the one a scorekeeper would actually get at this address.
+      const result = await client.verify();
+      await runChecks();
+      // A slower test for an old address must not overwrite the result for the address now on screen.
+      if (serverTestSequence.current !== sequence) return;
+      if (result.ok) {
+        setServerAddress(normalized.value);
+        setServerTest({
+          kind: 'passed',
+          message: `Tournament control answered at ${normalized.value}.`,
+          protocol: protocolLabel(client),
+          canonical: client.isQbtcp,
+          server: { ...client.describeProtocol(), address: safeAddress(normalized.value) },
+        });
+      } else {
+        setServerTest({ kind: 'failed', message: result.error });
+      }
+    } catch {
+      if (serverTestSequence.current === sequence) {
+        setServerTest({ kind: 'failed', message: 'Tournament control could not be tested from this browser.' });
+      }
     }
   };
 
@@ -531,6 +556,28 @@ export default function DeviceReadiness(props: {
   const recommendations = checks.filter((check) => check.kind === 'recommended' && check.state === 'warn').length;
   const requiredUntested = checks.some((check) => check.kind === 'required' && check.state === 'info');
   const connectedBlocked = connectedIntent && connectedFailures > 0;
+  const summaryHeadline =
+    requiredFailures > 0
+      ? 'Fix before scoring'
+      : connectedBlocked
+        ? 'Not ready for connected scoring'
+        : requiredUntested
+          ? 'One check still needs you'
+          : connectedFailures > 0
+            ? 'File scoring is ready'
+            : 'This device is ready';
+  const summaryDetail =
+    requiredFailures > 0
+      ? `${requiredFailures} required ${requiredFailures === 1 ? 'check needs' : 'checks need'} attention.`
+      : connectedBlocked
+        ? `${connectedFailures} connected-scoring ${connectedFailures === 1 ? 'check needs' : 'checks need'} attention. File scoring can still be used.`
+        : requiredUntested
+          ? 'Run the backup download test below.'
+          : connectedFailures > 0
+            ? 'File scoring is ready. Connected scoring needs attention below.'
+            : recommendations > 0
+              ? `${recommendations} ${recommendations === 1 ? 'recommendation' : 'recommendations'} remain.`
+              : 'All device checks passed.';
 
   const sections: Array<{ kind: CheckKind; title: string }> = [
     { kind: 'required', title: 'Required for a safe game' },
@@ -562,26 +609,10 @@ export default function DeviceReadiness(props: {
           aria-live="polite"
         >
           <strong>
-            {requiredFailures > 0
-              ? 'Fix before scoring'
-              : connectedBlocked
-                ? 'Not ready for connected scoring'
-                : requiredUntested
-                  ? 'One check still needs you'
-                  : 'This device is ready'}
+            {summaryHeadline}
           </strong>
           <span>
-            {requiredFailures > 0
-              ? `${requiredFailures} required ${requiredFailures === 1 ? 'check needs' : 'checks need'} attention.`
-              : connectedBlocked
-                ? `${connectedFailures} connected-scoring ${connectedFailures === 1 ? 'check needs' : 'checks need'} attention. File scoring can still be used.`
-                : requiredUntested
-                  ? 'Run the backup download test below.'
-                  : connectedFailures > 0
-                    ? 'Ready for file scoring. Connected scoring needs attention below.'
-                    : recommendations > 0
-                      ? `${recommendations} ${recommendations === 1 ? 'recommendation' : 'recommendations'} remain.`
-                      : 'All device checks passed.'}
+            {summaryDetail}
           </span>
         </section>
       )}
@@ -655,6 +686,7 @@ export default function DeviceReadiness(props: {
             placeholder="http://192.168.1.24:8787"
             value={serverAddress}
             onChange={(event) => {
+              serverTestSequence.current += 1;
               setServerAddress(event.target.value);
               setServerTest({ kind: 'untested' });
             }}
@@ -665,7 +697,7 @@ export default function DeviceReadiness(props: {
         </form>
         {serverTest.kind === 'passed' && (
           <>
-            <p className="readiness-test-result is-pass">✓ {serverTest.message}</p>
+            <p className="readiness-test-result is-pass" role="status">✓ {serverTest.message}</p>
             <p className="readiness-detail">
               Protocol: {serverTest.protocol}.{' '}
               {serverTest.canonical
@@ -674,7 +706,11 @@ export default function DeviceReadiness(props: {
             </p>
           </>
         )}
-        {serverTest.kind === 'failed' && <p className="readiness-test-result is-fail">× {serverTest.message}</p>}
+        {serverTest.kind === 'failed' && (
+          <p className="readiness-test-result is-fail" role="alert">
+            × {serverTest.message}
+          </p>
+        )}
       </section>
 
       <section className="shell-section">

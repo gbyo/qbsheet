@@ -94,10 +94,10 @@ export interface IAdvancedScoringRulesInput {
   maximumPartsPerBonus?: number;
   bonusesBounceBack: boolean;
 
-  tossupCount: number;
+  tossupCount?: number;
   /** The longest a regulation can run, where that differs from the planned length. */
   maximumTossupCount?: number;
-  maximumPlayersPerTeam: number;
+  maximumPlayersPerTeam?: number;
 
   overtimeQuestionCount?: number;
   overtimeIncludesBonuses?: boolean;
@@ -218,6 +218,7 @@ export function advancedFitsBasicForm(input: IAdvancedScoringRulesInput): boolea
 
   const values = input.answerTypes.map((type) => type.value).filter((value): value is number => value !== undefined);
   if (values.length !== input.answerTypes.length) return false;
+  if (new Set(values).size !== values.length) return false;
 
   const positives = values.filter((value) => value > 0);
   const negatives = values.filter((value) => value < 0);
@@ -369,9 +370,9 @@ export function advancedScoringRulesToQbj(input: IAdvancedScoringRulesInput): Qb
     id: 'ScoringRules_Entered',
     name: input.name ?? 'Scoring rules entered in the room',
     teams_per_match: 2,
-    maximum_players_per_team: input.maximumPlayersPerTeam,
-    regulation_tossup_count: input.tossupCount,
-    maximum_regulation_tossup_count: input.maximumTossupCount ?? input.tossupCount,
+    maximum_players_per_team: input.maximumPlayersPerTeam ?? 0,
+    regulation_tossup_count: input.tossupCount ?? 0,
+    maximum_regulation_tossup_count: input.maximumTossupCount ?? input.tossupCount ?? 0,
     minimum_overtime_question_count: input.overtimeQuestionCount ?? 1,
     overtime_includes_bonuses: input.overtimeIncludesBonuses === true,
     answer_types: answerTypes,
@@ -431,10 +432,15 @@ function fieldProblems(input: IAdvancedScoringRulesInput): string[] {
     seenValues.add(type.value);
   });
 
+  wholeAtLeastOne(input.tossupCount, 'Tossups in regulation must be at least 1.');
   wholeAtLeastOne(input.maximumPlayersPerTeam, 'Players playing at once must be at least 1.');
 
-  if (input.maximumTossupCount !== undefined && input.maximumTossupCount < input.tossupCount) {
-    problems.push('The maximum tossup count cannot be below the regulation tossup count.');
+  if (input.maximumTossupCount !== undefined) {
+    if (!Number.isInteger(input.maximumTossupCount) || input.maximumTossupCount < 1) {
+      problems.push('The maximum tossup count must be at least 1.');
+    } else if (input.tossupCount !== undefined && input.maximumTossupCount < input.tossupCount) {
+      problems.push('The maximum tossup count cannot be below the regulation tossup count.');
+    }
   }
 
   // --- bonuses --------------------------------------------------------------------------------
@@ -489,7 +495,10 @@ function fieldProblems(input: IAdvancedScoringRulesInput): string[] {
 export function advancedScoringRulesProblems(input: IAdvancedScoringRulesInput): string[] {
   const fields = fieldProblems(input);
   const result = readAdvancedScoringRules(input);
-  return [...fields, ...(result.ok ? [] : result.problems)];
+  const parserProblems = result.ok
+    ? []
+    : result.problems.filter((problem) => !problem.includes("reuses another answer type's QBJ identity"));
+  return [...fields, ...parserProblems];
 }
 
 /**

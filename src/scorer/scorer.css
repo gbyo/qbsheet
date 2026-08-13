@@ -336,6 +336,8 @@ div.scorer-banner .scorer-text-action {
   list-style: none;
   margin: 0;
   padding: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
 
 .scorer-player {
@@ -345,6 +347,7 @@ div.scorer-banner .scorer-text-action {
   gap: 10px;
   padding: 7px 0;
   border-bottom: 1px solid var(--room-border);
+  min-width: max-content;
 }
 
 /*
@@ -362,9 +365,9 @@ div.scorer-banner .scorer-text-action {
  */
 .scorer-sub-action {
   flex: none;
-  min-width: 28px;
-  min-height: 28px;
-  padding: 0 4px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 8px;
   font: inherit;
   font-size: 17px;
   line-height: 1;
@@ -411,6 +414,12 @@ div.scorer-banner .scorer-text-action {
 .scorer-sub-picker-empty {
   margin: 0 0 8px;
   font-size: 13px;
+  color: var(--room-muted);
+}
+
+.scorer-substitution-note {
+  margin: 6px 0 0;
+  font-size: 12px;
   color: var(--room-muted);
 }
 
@@ -477,8 +486,7 @@ div.scorer-banner .scorer-text-action {
   margin-left: auto;
   justify-content: end;
   gap: 4px;
-  overflow-x: auto;
-  scrollbar-width: thin;
+  overflow: visible;
 }
 
 .scorer-empty-roster {
@@ -498,7 +506,8 @@ div.scorer-banner .scorer-text-action {
  */
 .scorer-answer {
   min-width: 46px;
-  padding: 7px 8px;
+  min-height: 44px;
+  padding: 8px;
   font: inherit;
   font-variant-numeric: tabular-nums;
   color: var(--room-text);
@@ -1030,6 +1039,15 @@ div.scorer-banner .scorer-text-action {
   background: var(--room-surface-sunken);
 }
 
+.scorer-menu-item:disabled {
+  color: var(--room-faint);
+  cursor: default;
+}
+
+.scorer-menu-item:disabled:hover {
+  background: none;
+}
+
 /*
  * The rules between groups.
  *
@@ -1285,7 +1303,9 @@ div.scorer-banner .scorer-text-action {
 }
 
 .scorer-lineup-move .scorer-text-action {
-  min-width: 20px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 8px;
 }
 
 .scorer-lineup-actions {

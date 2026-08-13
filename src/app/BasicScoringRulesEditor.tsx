@@ -66,8 +66,10 @@ export default function BasicScoringRulesEditor(props: {
           <input
             id={id('tossup')}
             type="number"
-            value={String(value.tossupValue)}
-            onChange={(event) => set({ tossupValue: numberValue(event.target.value) ?? 0 })}
+            min={1}
+            step={1}
+            value={value.tossupValue === undefined ? '' : String(value.tossupValue)}
+            onChange={(event) => set({ tossupValue: numberValue(event.target.value) })}
           />
         </label>
         <div>
@@ -81,6 +83,8 @@ export default function BasicScoringRulesEditor(props: {
           <input
             id={id('power')}
             type="number"
+            step={1}
+            inputMode="decimal"
             value={value.powerValue === undefined ? '' : String(value.powerValue)}
             onChange={(event) => set({ powerValue: numberValue(event.target.value) })}
           />
@@ -96,6 +100,8 @@ export default function BasicScoringRulesEditor(props: {
           <input
             id={id('neg')}
             type="number"
+            step={1}
+            inputMode="decimal"
             value={value.negValue === undefined ? '' : String(value.negValue)}
             onChange={(event) => set({ negValue: numberValue(event.target.value) })}
           />
@@ -105,8 +111,10 @@ export default function BasicScoringRulesEditor(props: {
           <input
             id={id('tossup-count')}
             type="number"
-            value={String(value.tossupCount)}
-            onChange={(event) => set({ tossupCount: numberValue(event.target.value) ?? 0 })}
+            min={1}
+            step={1}
+            value={value.tossupCount === undefined ? '' : String(value.tossupCount)}
+            onChange={(event) => set({ tossupCount: numberValue(event.target.value) })}
           />
         </label>
         {variant === 'full' && (
@@ -120,8 +128,10 @@ export default function BasicScoringRulesEditor(props: {
             <input
               id={id('max-active')}
               type="number"
+              min={1}
+              step={1}
               value={value.maximumPlayersPerTeam === undefined ? '' : String(value.maximumPlayersPerTeam)}
-              onChange={(event) => set({ maximumPlayersPerTeam: numberValue(event.target.value) ?? 0 })}
+              onChange={(event) => set({ maximumPlayersPerTeam: numberValue(event.target.value) })}
             />
           </div>
         )}
@@ -132,7 +142,12 @@ export default function BasicScoringRulesEditor(props: {
           id={id('bonuses')}
           type="checkbox"
           checked={value.useBonuses}
-          onChange={(event) => set({ useBonuses: event.target.checked })}
+          onChange={(event) =>
+            set({
+              useBonuses: event.target.checked,
+              ...(event.target.checked ? {} : { bonusesBounceBack: false, overtimeIncludesBonuses: false }),
+            })
+          }
         />
         {variant === 'full' ? 'Use bonuses' : 'This tournament uses bonuses'}
       </label>
@@ -145,6 +160,8 @@ export default function BasicScoringRulesEditor(props: {
               <input
                 id={id('bonus-part')}
                 type="number"
+                min={1}
+                step={1}
                 value={value.pointsPerBonusPart === undefined ? '' : String(value.pointsPerBonusPart)}
                 onChange={(event) => set({ pointsPerBonusPart: numberValue(event.target.value) })}
               />
@@ -154,6 +171,8 @@ export default function BasicScoringRulesEditor(props: {
               <input
                 id={id('bonus-parts')}
                 type="number"
+                min={1}
+                step={1}
                 value={value.partsPerBonus === undefined ? '' : String(value.partsPerBonus)}
                 onChange={(event) => set({ partsPerBonus: numberValue(event.target.value) })}
               />
@@ -212,6 +231,8 @@ export default function BasicScoringRulesEditor(props: {
               <input
                 id={id('overtime-count')}
                 type="number"
+                min={1}
+                step={1}
                 value={value.overtimeQuestionCount === undefined ? '' : String(value.overtimeQuestionCount)}
                 onChange={(event) => set({ overtimeQuestionCount: numberValue(event.target.value) })}
               />
@@ -219,15 +240,17 @@ export default function BasicScoringRulesEditor(props: {
           </div>
           <p className="shell-hint rules-fields-hint">One tossup means overtime is sudden death.</p>
 
-          <label className="rules-setup-check" htmlFor={id('overtime-bonuses')}>
-            <input
-              id={id('overtime-bonuses')}
-              type="checkbox"
-              checked={value.overtimeIncludesBonuses === true}
-              onChange={(event) => set({ overtimeIncludesBonuses: event.target.checked })}
-            />
-            Bonuses in overtime
-          </label>
+          {value.useBonuses && (
+            <label className="rules-setup-check" htmlFor={id('overtime-bonuses')}>
+              <input
+                id={id('overtime-bonuses')}
+                type="checkbox"
+                checked={value.overtimeIncludesBonuses === true}
+                onChange={(event) => set({ overtimeIncludesBonuses: event.target.checked })}
+              />
+              Bonuses in overtime
+            </label>
+          )}
 
           <div className="rules-check-with-help">
             <label className="rules-setup-check" htmlFor={id('lightning')}>
@@ -252,6 +275,8 @@ export default function BasicScoringRulesEditor(props: {
                 <input
                   id={id('lightning-count')}
                   type="number"
+                  min={1}
+                  step={1}
                   value={value.lightningCountPerTeam === undefined ? '' : String(value.lightningCountPerTeam)}
                   onChange={(event) => set({ lightningCountPerTeam: numberValue(event.target.value) })}
                 />
@@ -261,6 +286,8 @@ export default function BasicScoringRulesEditor(props: {
                 <input
                   id={id('lightning-divisor')}
                   type="number"
+                  min={1}
+                  step={1}
                   value={value.lightningDivisor === undefined ? '' : String(value.lightningDivisor)}
                   onChange={(event) => set({ lightningDivisor: numberValue(event.target.value) })}
                 />

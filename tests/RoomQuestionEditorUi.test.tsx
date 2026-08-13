@@ -108,7 +108,13 @@ function recordBonusParts(outcomes: string[]) {
   fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('Parts…'));
   outcomes.forEach((outcome, index) => {
     const row = screen.getByText(`Part ${index + 1}`).closest('.scorer-part-row') as HTMLElement;
-    fireEvent.click(within(row).getByRole('button', { name: outcome }));
+    const name =
+      outcome === '+10'
+        ? new RegExp(`^Part ${index + 1}, .*\\+10$`)
+        : outcome === 'Bounce'
+          ? new RegExp(`^Part ${index + 1}, .*bounceback$`)
+          : new RegExp(`^Part ${index + 1}, .*missed by both teams$`);
+    fireEvent.click(within(row).getByRole('button', { name }));
   });
   fireEvent.click(screen.getByRole('button', { name: 'Record parts' }));
 }

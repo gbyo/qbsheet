@@ -66,6 +66,7 @@ import RecentGames from './RecentGames';
 import NativeDialog from './NativeDialog';
 import { readOperatorNameAsked, writeOperatorNameAsked } from './OperatorIdentity';
 import SettingsDialog, { ISettingsConnection } from './SettingsDialog';
+import { downloadStoredGameQbj } from './FinishedGameDownload';
 
 /** How far a saved game got, for the resume card. */
 export function progressLabel(record: IStoredGameRecord): string {
@@ -287,20 +288,6 @@ export default function WelcomeScreen(props: {
 
       <UpdateNotice />
 
-      {pairedRoom && (
-        <section className="shell-section resume-card welcome-room">
-          <div>
-            <p className="resume-context">{pairedRoom.roomName} · Connected</p>
-            <p className="welcome-option-copy">
-              This device is paired for the tournament. Its next game comes from tournament control.
-            </p>
-          </div>
-          <button type="button" className="shell-button is-primary" onClick={onOpenRoom}>
-            Go to this room
-          </button>
-        </section>
-      )}
-
       {unfinished.length > 0 && (
         <section className="shell-section">
           <h2 className="shell-heading">Unfinished game</h2>
@@ -316,6 +303,20 @@ export default function WelcomeScreen(props: {
               </button>
             </div>
           ))}
+        </section>
+      )}
+
+      {pairedRoom && (
+        <section className="shell-section resume-card welcome-room">
+          <div>
+            <p className="resume-context">{pairedRoom.roomName} · Connected</p>
+            <p className="welcome-option-copy">
+              This device is paired for the tournament. Its next game comes from tournament control.
+            </p>
+          </div>
+          <button type="button" className="shell-button is-primary" onClick={onOpenRoom}>
+            Go to this room
+          </button>
         </section>
       )}
 
@@ -395,7 +396,7 @@ export default function WelcomeScreen(props: {
 
       <RecentGames
         records={completed}
-        onOpen={(record) => void onOpenRecord(record)}
+        onDownload={(record) => downloadStoredGameQbj(record)}
         onRetry={(record) => onRetryResult(record.id)}
         canRetry={canRetryResult}
       />
@@ -433,7 +434,7 @@ export default function WelcomeScreen(props: {
               onClick={() => {
                 const record = alreadyPlayed.record;
                 setAlreadyPlayed(null);
-                void onOpenRecord(record);
+                downloadStoredGameQbj(record);
               }}
             >
               Download previous QBJ

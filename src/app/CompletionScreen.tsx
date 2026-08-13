@@ -38,7 +38,7 @@
  * the record does, because the second most common thing that goes wrong with a downloads folder is
  * that somebody cleared it.
  */
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { IStoredGameRecord, gameRequiresHandoff, isDelivered, needsHandoff } from '../game/GameStore';
 import { isManualGame } from '../game/GameDefinition';
 import { gamePackageLabel } from '../game/GamePackage';
@@ -54,7 +54,7 @@ function timeOfDay(iso: string | undefined): string {
 
 export default function CompletionScreen(props: {
   record: IStoredGameRecord;
-  onUpdate: (recordId: string, change: Partial<IStoredGameRecord>) => void | Promise<void>;
+  onUpdate: (recordId: string, change: Partial<IStoredGameRecord>) => boolean | void | Promise<boolean | void>;
   /** What leaving this screen is called. A connected room is going back to its room, not home. */
   continueLabel?: string;
   onHome: () => void | Promise<void>;
@@ -65,8 +65,15 @@ export default function CompletionScreen(props: {
 }) {
   const { record, onUpdate, continueLabel = 'Done', onHome, onRematch, acceptedJustNow = false } = props;
   const [writeFailed, setWriteFailed] = useState(false);
+  const [qbjRecordFailed, setQbjRecordFailed] = useState(false);
+  const [qbjRecordPending, setQbjRecordPending] = useState(false);
+  const [qbjAttemptAt, setQbjAttemptAt] = useState<string | undefined>(record.qbjDownloadedAt);
   const [excelDownloaded, setExcelDownloaded] = useState(false);
   const [rematchFailed, setRematchFailed] = useState(false);
+  const [handoffPending, setHandoffPending] = useState(false);
+  const [handoffFailed, setHandoffFailed] = useState(false);
+  const [rematching, setRematching] = useState(false);
+  const rematchInFlight = useRef(false);
   const score = record.finalScore;
   const connected = record.serverDelivery !== 'none';
   /** Tournament control has it, and did not ask for anything else. */
@@ -78,11 +85,28 @@ export default function CompletionScreen(props: {
   const backupDownloaded = record.qbjDownloadedAt !== undefined;
   const canLeave = !needsHandoff(record);
 
+  const recordQbjDownload = async (at: string) => {
+    setQbjRecordPending(true);
+    setQbjRecordFailed(false);
+    try {
+      const persisted = await onUpdate(record.id, { qbjDownloadedAt: at });
+      if (persisted === false) setQbjRecordFailed(true);
+    } catch {
+      setQbjRecordFailed(true);
+    } finally {
+      setQbjRecordPending(false);
+    }
+  };
+
   const download = () => {
     if (!record.finalQbj) return;
     const written = downloadFile(qbjFileContents(record.finalQbj), qbjFileName(record.package));
     setWriteFailed(!written);
-    if (written) void onUpdate(record.id, { qbjDownloadedAt: new Date().toISOString() });
+    if (written) {
+      const at = new Date().toISOString();
+      setQbjAttemptAt(at);
+      void recordQbjDownload(at);
+    }
   };
 
   const downloadExcel = () => {
@@ -204,22 +228,53 @@ export default function CompletionScreen(props: {
           <div className="final-handoff">
             <p className="shell-hint">Downloaded at {timeOfDay(record.qbjDownloadedAt)}</p>
             {optionalCopy ? (
-              <p className="final-ok">A copy of this result is in your downloads.</p>
+              <p className="final-ok" role="status">A copy of this result is in your downloads.</p>
             ) : !requiresHandoffAcknowledgement ? (
-              <p className="final-ok">The QBJ is ready to hand over.</p>
+              <p className="final-ok" role="status">The QBJ is ready to hand over.</p>
             ) : record.handoffAcknowledgedAt ? (
-              <p className="final-ok">Handoff confirmed at {timeOfDay(record.handoffAcknowledgedAt)}</p>
+              <p className="final-ok" role="status">Handoff confirmed at {timeOfDay(record.handoffAcknowledgedAt)}</p>
             ) : (
               <>
                 <p>After you upload the file:</p>
                 <button
                   type="button"
                   className="shell-button"
-                  onClick={() => void onUpdate(record.id, { handoffAcknowledgedAt: new Date().toISOString() })}
+                  disabled={handoffPending}
+                  onClick={async () => {
+                    if (handoffPending) return;
+                    setHandoffPending(true);
+                    setHandoffFailed(false);
+                    try {
+                      const persisted = await onUpdate(record.id, {
+                        handoffAcknowledgedAt: new Date().toISOString(),
+                      });
+                      if (persisted === false) setHandoffFailed(true);
+                    } catch {
+                      setHandoffFailed(true);
+                    } finally {
+                      setHandoffPending(false);
+                    }
+                  }}
                 >
-                  I uploaded the result
+                  {handoffPending ? 'Saving…' : 'I uploaded the result'}
                 </button>
+                {handoffFailed && (
+                  <p className="shell-warning" role="alert">
+                    QBSheet could not save that confirmation. Try again; finishing remains locked until it is recorded.
+                  </p>
+                )}
               </>
+            )}
+          </div>
+        )}
+        {qbjRecordPending && <p className="shell-hint" role="status">Recording the QBJ download…</p>}
+        {qbjRecordFailed && (
+          <div className="shell-warning" role="alert">
+            <p>The QBJ was downloaded, but QBSheet could not record that durable backup.</p>
+            {qbjAttemptAt && (
+              <button type="button" className="shell-button" onClick={() => void recordQbjDownload(qbjAttemptAt)}>
+                Retry recording the download
+              </button>
             )}
           </div>
         )}
@@ -245,12 +300,21 @@ export default function CompletionScreen(props: {
           <button
             type="button"
             className="shell-button"
+            disabled={rematching}
             onClick={() => {
+              if (rematchInFlight.current) return;
+              rematchInFlight.current = true;
               setRematchFailed(false);
-              void Promise.resolve(onRematch()).catch(() => setRematchFailed(true));
+              setRematching(true);
+              void Promise.resolve(onRematch())
+                .catch(() => setRematchFailed(true))
+                .finally(() => {
+                  rematchInFlight.current = false;
+                  setRematching(false);
+                });
             }}
           >
-            Rematch
+            {rematching ? 'Starting…' : 'Rematch'}
           </button>
         )}
       </div>

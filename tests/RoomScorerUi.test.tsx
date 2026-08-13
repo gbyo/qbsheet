@@ -302,7 +302,7 @@ describe('scoring buttons come from the format', () => {
    * be — a fabricated 0-point AnswerType would appear in every player's P/TU/I line — so it is
    * checked as the constant it is rather than mixed into the format's own values.
    */
-  const wrong = '0 after readout';
+  const wrong = '0';
 
   test('mACF gives each player +15 / +10 / -5', () => {
     renderScorer(formatFor());
@@ -589,13 +589,15 @@ describe('scoring motion state', () => {
     fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('Parts…'));
     const firstPart = screen.getByText('Part 1').closest('.scorer-part-row') as HTMLElement;
 
-    fireEvent.click(within(firstPart).getByRole('button', { name: '+10' }));
+    fireEvent.click(within(firstPart).getByRole('button', { name: /Part 1, Ninety Six \+10/ }));
     let total = screen.getByLabelText('10 controlled points');
     expect(total).toHaveAttribute('data-motion-direction', 'forward');
     expect(total).toHaveAttribute('data-previous-value', '0');
-    expect(within(firstPart).getByRole('button', { name: '+10' })).toHaveClass('is-part-recorded');
+    expect(within(firstPart).getByRole('button', { name: /Part 1, Ninety Six \+10/ })).toHaveClass(
+      'is-part-recorded',
+    );
 
-    fireEvent.click(within(firstPart).getByRole('button', { name: 'Miss' }));
+    fireEvent.click(within(firstPart).getByRole('button', { name: /Part 1, missed by both teams/ }));
     total = screen.getByLabelText('0 controlled points');
     expect(total).toHaveAttribute('data-motion-direction', 'backward');
     expect(total).toHaveAttribute('data-previous-value', '10');
@@ -606,7 +608,11 @@ describe('scoring motion state', () => {
     fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
     fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('Parts…'));
     const firstPart = screen.getByText('Part 1').closest('.scorer-part-row') as HTMLElement;
-    fireEvent.click(within(firstPart).getByRole('button', { name: '+10' }));
+    fireEvent.click(within(firstPart).getByRole('button', { name: /Part 1, Ninety Six \+10/ }));
+    const secondPart = screen.getByText('Part 2').closest('.scorer-part-row') as HTMLElement;
+    fireEvent.click(within(secondPart).getByRole('button', { name: /Part 2, Ninety Six \+10/ }));
+    const thirdPart = screen.getByText('Part 3').closest('.scorer-part-row') as HTMLElement;
+    fireEvent.click(within(thirdPart).getByRole('button', { name: /Part 3, Ninety Six \+10/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Record parts' }));
 
     const exit = document.querySelector('.scorer-bonus-exit') as HTMLElement;
@@ -1529,7 +1535,7 @@ describe('halves and timeouts, when the tournament asked for them', () => {
     pressControl('Timeout');
     fireEvent.click(within(screen.getByLabelText('Timeout')).getByText('Ninety Six'));
 
-    expect(screen.getByText('Timeout used')).toBeTruthy();
+    expect(screen.getByText('0 remaining (1 used)')).toBeTruthy();
   });
 });
 
