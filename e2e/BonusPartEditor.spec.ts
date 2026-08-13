@@ -114,13 +114,13 @@ test('the part editor lays out as columns on a scorer screen and as blocks on a 
   expect(narrow.right).toBeLessThanOrEqual(360);
 
   await expect(
-    page.getByRole('button', { name: 'Part 2: Greenwood Consolidated Regional bounceback +10' }),
+    page.getByRole('button', { name: 'Bonus part 2 bounced back to Greenwood Consolidated Regional' }),
   ).toContainText('Greenwood Consolidated Regional');
 
   // And it still works down there: answering all three parts commits the breakdown.
-  await page.getByRole('button', { name: 'Part 1: Ninety Six A +10' }).click();
-  await page.getByRole('button', { name: 'Part 2: Greenwood Consolidated Regional bounceback +10' }).click();
-  await page.getByRole('button', { name: 'Part 3: Ninety Six A +10' }).click();
+  await page.getByRole('button', { name: 'Bonus part 1 to Ninety Six A' }).click();
+  await page.getByRole('button', { name: 'Bonus part 2 bounced back to Greenwood Consolidated Regional' }).click();
+  await page.getByRole('button', { name: 'Bonus part 3 to Ninety Six A' }).click();
   await expect(page.getByText('Ninety Six A +20 · Greenwood Consolidated Regional +10 bounceback')).toBeVisible();
   await page.getByRole('button', { name: 'Save changes' }).click();
   await expect(page.getByLabel('Ninety Six A score')).toHaveText('30');

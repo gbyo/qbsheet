@@ -2016,11 +2016,15 @@ div.scorer-banner .scorer-text-action {
   color: var(--room-muted);
 }
 
-.scorer-question-actions {
+.scorer-question-actions,
+.scorer-question-parts {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.scorer-question-actions {
   margin-top: 10px;
 }
 
@@ -2043,6 +2047,28 @@ div.scorer-banner .scorer-text-action {
   margin-top: 10px;
 }
 
+.scorer-question-total-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+/*
+ * Says whose points these are. The same 12px muted label the number fields carry, so a row of
+ * buttons and a typed field read as the same kind of thing.
+ */
+.scorer-question-total-label {
+  font-size: 12px;
+  color: var(--room-muted);
+}
+
+/* The mode switch is a link-sized action, not a full-width control the column would stretch it into. */
+.scorer-question-bonus > .scorer-text-action,
+.scorer-question-bonus > label {
+  align-self: flex-start;
+}
+
 .scorer-question-bonus label {
   display: flex;
   flex-direction: column;
@@ -2056,71 +2082,61 @@ div.scorer-banner .scorer-text-action {
   width: 84px;
 }
 
-.scorer-question-total-group {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-
-/* The mode switch is a link-sized action, not a full-width control the column would stretch it into. */
-.scorer-question-bonus > .scorer-text-action,
-.scorer-question-bonus > label {
-  align-self: flex-start;
-}
-
 /*
- * Says whose points these are. The same 12px muted label the number fields carry, so a row of
- * buttons and a typed field read as the same kind of thing.
- */
-.scorer-question-total-label {
-  font-size: 12px;
-  color: var(--room-muted);
-}
-
-/*
- * The part grid: Part N, then one column per outcome, under a heading naming the team that column
- * belongs to.
+ * Its own line under the bonus row rather than a column standing beside it.
  *
- * Every row is its own grid, so the tracks have to be described in units that come out the same on
- * each of them — a content-sized column would make Part 1 wider than Part 2 the moment one of them
- * was ticked, and the heading would then name the wrong column. Hence a fixed label column and
- * outcome columns that share the row evenly up to a readable maximum.
+ * The parts block is a flex item of a wrapping row, so without a full basis it packed itself into
+ * whatever space was left next to Points and Use total and the three parts came out staggered down
+ * the middle of the dialog. They are a short column of small numbers; they belong under the total
+ * they add up to.
  */
 .scorer-question-parts {
-  display: flex;
+  flex-basis: 100%;
   flex-direction: column;
   align-items: stretch;
   gap: 6px;
-  --scorer-part-columns: 56px repeat(2, minmax(0, 11rem));
+  margin-top: 2px;
 }
 
-.scorer-question-parts.has-bounceback {
-  --scorer-part-columns: 56px repeat(3, minmax(0, 11rem));
-}
-
+/*
+ * Part rows and the headings over them share one grid, because the headings are the only thing
+ * saying which of two identical `+10` buttons belongs to which team. A flex row with a fixed label
+ * width could not keep them lined up once the team names were the widest thing in the column.
+ */
 .scorer-question-part-head,
 .scorer-question-part {
   display: grid;
-  grid-template-columns: var(--scorer-part-columns);
-  gap: 6px;
+  grid-template-columns: 48px repeat(3, minmax(0, 1fr));
+  gap: 8px;
   align-items: center;
+  font-size: 12px;
+  color: var(--room-muted);
+}
+
+/* Without bouncebacks a part is taken or missed, and the third column has nothing to hold. */
+.scorer-question-part-head.is-two-way,
+.scorer-question-part.is-two-way {
+  grid-template-columns: 48px repeat(2, minmax(0, 1fr));
 }
 
 .scorer-question-part-head {
-  font-size: 11px;
-  color: var(--room-muted);
+  padding-bottom: 2px;
 }
 
-.scorer-question-part-label {
-  font-size: 12px;
+.scorer-question-part-head > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--room-muted);
 }
 
-.scorer-question-part-choice {
+.scorer-question-part > span {
   min-width: 0;
-  padding: 7px 10px;
+}
+
+/* Sized to the row rather than to the live prompt, where a bonus button is the primary action. */
+.scorer-question-part .scorer-choice {
+  min-width: 0;
+  padding: 6px 8px;
   font-size: 13px;
 }
 
@@ -2128,12 +2144,12 @@ div.scorer-banner .scorer-text-action {
  * Selected is a filled button, a heavier weight and a tick — three cues, so the one part that was
  * bounced back is still obvious to a scorekeeper who cannot tell the accent from the surface.
  */
-.scorer-question-part-choice.is-selected {
+.scorer-question-part .scorer-choice.is-selected {
   font-weight: 600;
 }
 
 /* A non-breaking space: a trailing one in `content` collapses and the tick lands on the number. */
-.scorer-question-part-choice.is-selected::before {
+.scorer-question-part .scorer-choice.is-selected::before {
   content: '✓\00a0';
 }
 
@@ -2171,13 +2187,14 @@ div.scorer-banner .scorer-text-action {
     display: none;
   }
 
-  .scorer-question-part {
+  .scorer-question-part,
+  .scorer-question-part.is-two-way {
     grid-template-columns: minmax(0, 1fr);
     gap: 4px;
     padding-bottom: 6px;
   }
 
-  .scorer-question-part-choice {
+  .scorer-question-part .scorer-choice {
     justify-self: stretch;
     text-align: left;
   }
@@ -2350,6 +2367,18 @@ div.scorer-banner .scorer-text-action {
   flex-shrink: 0;
   font-size: 13px;
   color: var(--room-muted);
+}
+
+/*
+ * Under the bounceback choices, not beside them.
+ *
+ * It is the way out of a stage whose buttons are the primary action, so it must not sit in the row
+ * a scorekeeper is aiming at — a mispress there records a bounceback instead of going back, which is
+ * the mistake this control exists to fix.
+ */
+.scorer-prompt-back {
+  display: block;
+  margin-top: 12px;
 }
 
 .scorer-part-total {

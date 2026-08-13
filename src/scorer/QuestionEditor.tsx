@@ -51,8 +51,9 @@
  *
  * A bonus recorded as 20 says nothing about *which* two parts were got. Opening part entry on one
  * therefore starts every part unanswered and leaves the recorded total alone until the scorekeeper
- * has said what happened to each; save is refused in between. The old behaviour — filling the parts
- * with zeroes — silently turned a 20-point bonus into a 0-point one.
+ * has said what happened to each; save is refused in between. Filling the parts with zeroes turned
+ * a 20-point bonus into a 0-point one; filling them in order from the total keeps the figures but
+ * puts an answer on screen that nothing recorded.
  *
  * # Nothing here knows any format
  *
@@ -61,7 +62,7 @@
  * number of attempts a cycle may hold is the engine's, checked by `validateEditableQuestion`. There
  * is no +15, no −5, no 0/10/20/30, no three parts and no notion of which rule set this is.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { ReactNode, useMemo, useState } from 'react';
 import { IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
 import { IDerivedGame } from '../scoring/deriveGame';
 import {
@@ -70,6 +71,8 @@ import {
   IEditableQuestion,
   bonusFromParts,
   conversion,
+  expectsBonus,
+  settleBonus,
   validateEditableQuestion,
 } from '../scoring/questionCorrection';
 import {
@@ -84,6 +87,7 @@ import {
 import { powerCorrect } from './tossupRulings';
 
 const noPenaltyValue = 'no-penalty';
+const unchosenValue = '';
 
 /** The format's own ruling label plus its value. */
 function rulingLabel(format: IScorekeeperFormat, index: number): string {
@@ -99,8 +103,26 @@ function rulingLabel(format: IScorekeeperFormat, index: number): string {
         ? 'Power'
         : answerType.value > 0
           ? 'Correct'
-          : 'Wrong';
+          : // A tournament-defined answer type worth nothing is not the no-penalty wrong answer below:
+            // it is a ruling the format lists, it records a buzz of that type, and it counts in the
+            // stats as one. Naming both of them "Wrong" put two options in this list that read
+            // identically and behaved differently.
+            'No points';
   return `${name} (${points})`;
+}
+
+/**
+ * The wrong answer that costs nothing, named so it cannot be mistaken for an answer type.
+ *
+ * It is a ruling rather than a member of `format.answerTypes` — it records `tossup-no-penalty`, not a
+ * buzz — and a format is allowed to define a real zero-point answer type alongside it. The collision
+ * check is not decoration: a tournament may label its own zero answer with these very words, and two
+ * identical options in one dropdown is the defect this is here to prevent.
+ */
+function noPenaltyLabel(format: IScorekeeperFormat): string {
+  const preferred = 'Wrong, no penalty (0)';
+  const taken = format.answerTypes.some((answerType) => rulingLabel(format, answerType.index) === preferred);
+  return taken ? 'Wrong, no penalty — not a scored answer (0)' : preferred;
 }
 
 function orderedRulingTypes(format: IScorekeeperFormat) {
@@ -137,23 +159,6 @@ function firstActive(game: IDerivedGame, team: 'left' | 'right'): string {
   return game.questions.find((question) => question.activePlayers[team].length > 0)?.activePlayers[team][0] ?? '';
 }
 
-function defaultAnswerType(format: IScorekeeperFormat): number {
-  return format.answerTypes.find((answerType) => answerType.value > 0)?.index ?? format.answerTypes[0]?.index ?? -1;
-}
-
-/**
- * What is in the number fields while somebody is still typing in them.
- *
- * A controlled number input coerced straight to `Number` turns an empty field into 0 and a
- * half-typed "-" into NaN, so clearing a box to retype it silently rewrites the bonus. The raw text
- * is kept here until it parses, and a field left unparseable is refused at save rather than saved
- * as a number nobody entered.
- */
-interface IBonusDrafts {
-  controlled?: string;
-  bounceback?: string;
-}
-
 /**
  * Who got each part while the parts are being edited, `null` for one nobody has answered yet.
  *
@@ -167,6 +172,19 @@ function joinParts(numbers: number[]): string {
   const named = numbers.map((number) => `part ${number}`);
   if (named.length <= 1) return named.join('');
   return `${named.slice(0, -1).join(', ')} and ${named[named.length - 1]}`;
+}
+
+/**
+ * What is in the number fields while somebody is still typing in them.
+ *
+ * A controlled number input coerced straight to `Number` turns an empty field into 0 and a
+ * half-typed "-" into NaN, so clearing a box to retype it silently rewrites the bonus. The raw text
+ * is kept here until it parses, and a field left unparseable is refused at save rather than saved
+ * as a number nobody entered.
+ */
+interface IBonusDrafts {
+  controlled?: string;
+  bounceback?: string;
 }
 
 /**
@@ -202,6 +220,25 @@ function conversionTeam(model: IEditableQuestion, format: IScorekeeperFormat): '
   return conversion(model, format)?.team;
 }
 
+/**
+ * Why this cycle has no bonus to record.
+ *
+ * `expectsBonus` says whether one is owed; this says which of the four reasons it is not, because
+ * "Bonus not applicable" on its own reads like a fault in the dialog. The clauses are in the same
+ * order the engine tests them, and only reached when the engine has already said no — so this
+ * explains the answer rather than deciding it, and cannot drift into being a second opinion.
+ */
+function noBonusReason(format: IScorekeeperFormat, model: IEditableQuestion, overtime: boolean): string {
+  if (!format.bonus.enabled) return 'This format does not use bonuses.';
+  if (overtime && !format.overtime.includesBonuses) return 'Overtime does not include bonuses in this format.';
+  const converted = conversion(model, format);
+  if (!converted) return 'A bonus follows a converted tossup. No team converted this one.';
+  const index = converted.answerTypeIndex;
+  return index === undefined
+    ? 'A bonus follows a converted tossup.'
+    : `${rulingLabel(format, index)} does not earn a bonus in this format.`;
+}
+
 /** The points this question contributes, independent of the running score around it. */
 function questionPoints(model: IEditableQuestion, format: IScorekeeperFormat): { left: number; right: number } {
   const points = { left: 0, right: 0 };
@@ -227,6 +264,16 @@ export default function QuestionEditor(props: {
   onOpenReplacement?: () => void;
 }) {
   const { game, format, initial, onSave, onCancel, onOpenReplacement } = props;
+  /*
+   * Part-by-part entry, and only where a part has a value to be worth.
+   *
+   * The same condition the live prompt's `regularPartCount` uses. A format that calls its bonuses
+   * regular but names no part value has no three-way outcome to offer, so it keeps its total — and
+   * must not open in a parts view it has no control for and no way out of.
+   */
+  const perPart = format.bonus.pointsPerPart ?? 0;
+  const partCount = regularBonusPartCount(format.bonus);
+  const partOutcomesAvailable = partCount !== null;
   const [model, setModel] = useState<IEditableQuestion>(() => ({
     ...initial,
     attempts: initial.attempts.map((attempt) => ({ ...attempt })),
@@ -242,16 +289,24 @@ export default function QuestionEditor(props: {
    * outcome buttons for it would have to invent a per-part value.
    */
   const [partDraft, setPartDraft] = useState<IPartDraft | null>(() =>
-    regularBonusPartCount(format.bonus) === null
-      ? null
-      : (initial.bonus?.parts?.map((part) => bonusPartOutcome(format.bonus, part)) ?? null),
+    partOutcomesAvailable
+      ? (initial.bonus?.parts?.map((part) => bonusPartOutcome(format.bonus, part)) ?? null)
+      : null,
   );
   const [showIntro, setShowIntro] = useState(() => !readIntroSeen());
 
   // A correction makes an old validation message stale. Clear it as soon as the scorekeeper edits —
-  // including answering one more part, which is progress against the message even though the bonus
-  // itself does not change until the last part is answered.
-  useEffect(() => setErrors([]), [model, partDraft]);
+  // in the render the edit produces, so the complaint and the corrected field are never shown
+  // together for a frame. Answering one more part counts: it is progress against the complaint even
+  // though the bonus itself does not change until the last part is answered.
+  const [validated, setValidated] = useState<{ model: IEditableQuestion; parts: IPartDraft | null }>({
+    model,
+    parts: partDraft,
+  });
+  if (validated.model !== model || validated.parts !== partDraft) {
+    setValidated({ model, parts: partDraft });
+    setErrors([]);
+  }
 
   const question = game.questions.find((candidate) => candidate.questionNumber === model.questionNumber);
   const active = question?.activePlayers ?? { left: [], right: [] };
@@ -266,9 +321,18 @@ export default function QuestionEditor(props: {
     value: String(answerType.index),
     label: rulingLabel(format, answerType.index),
   });
+  /*
+   * A new attempt starts with no ruling chosen, so the blank option has to be selectable — but only
+   * while something is actually on it. An existing cycle does not grow an empty choice in its
+   * dropdown just because one could be added later.
+   */
+  const awaitingRuling = model.attempts.some(
+    (attempt) => attempt.kind === 'buzz' && attempt.answerTypeIndex === undefined,
+  );
   const rulingOptions = [
+    ...(awaitingRuling ? [{ value: unchosenValue, label: 'Choose ruling…' }] : []),
     ...orderedTypes.map(rulingOption),
-    { value: noPenaltyValue, label: 'Wrong (0)' },
+    { value: noPenaltyValue, label: noPenaltyLabel(format) },
   ];
   const initialPoints = useMemo(() => questionPoints(initial, format), [format, initial]);
   const proposedPoints = useMemo(() => questionPoints(model, format), [format, model]);
@@ -298,8 +362,19 @@ export default function QuestionEditor(props: {
     );
   };
 
+  /**
+   * Every edit to the tossup, with everything that depends on it brought along.
+   *
+   * `settleBonus` is the whole point of routing them through one place: a bonus follows the team that
+   * converted and stops existing when the conversion stops earning one, and both of those used to be
+   * discovered by the validator at Save rather than by the screen at the moment of the edit.
+   */
+  const reviseTossup = (revise: (current: IEditableQuestion) => IEditableQuestion) => {
+    setModel((current) => settleBonus(revise(current), format, game));
+  };
+
   const updateAttempt = (index: number, next: Partial<IEditableAttempt>) => {
-    setModel((current) => ({
+    reviseTossup((current) => ({
       ...current,
       attempts: current.attempts.map((attempt, attemptIndex) => {
         if (attemptIndex !== index) return attempt;
@@ -318,9 +393,14 @@ export default function QuestionEditor(props: {
       updateAttempt(index, { kind: 'no-penalty', answerTypeIndex: undefined });
       return;
     }
+    // Back to no choice at all, which `Number('')` would otherwise read as answer type 0.
+    if (value === unchosenValue) {
+      updateAttempt(index, { kind: 'buzz', answerTypeIndex: undefined });
+      return;
+    }
     const answerTypeIndex = Number(value);
     const converts = (format.answerTypes[answerTypeIndex]?.value ?? 0) > 0;
-    setModel((current) => ({
+    reviseTossup((current) => ({
       ...current,
       dead: converts ? false : current.dead,
       attempts: current.attempts.map((attempt, attemptIndex) =>
@@ -329,16 +409,24 @@ export default function QuestionEditor(props: {
     }));
   };
 
+  /*
+   * A new attempt has no ruling, and is not given one.
+   *
+   * It used to open on `format.answerTypes.find(value > 0)`, and answer types are ordered
+   * highest-value first — so adding an attempt under 15/10/−5 rules silently proposed a power, and
+   * under a three-tier format the top tier. A default that is wrong more often than it is right is
+   * worse than no default: the ruling is the one thing on this row nothing can infer.
+   */
   const addAttempt = () => {
     const team = model.attempts.some((attempt) => attempt.team === 'left') ? 'right' : 'left';
-    setModel((current) => ({
+    reviseTossup((current) => ({
       ...current,
       dead: false,
       attempts: current.attempts.concat({
         kind: 'buzz',
         team,
         playerName: teamPlayers[team][0] ?? firstActive(game, team),
-        answerTypeIndex: defaultAnswerType(format),
+        answerTypeIndex: undefined,
       }),
     }));
   };
@@ -359,8 +447,6 @@ export default function QuestionEditor(props: {
     setBonus({ [field]: parsed, parts: undefined });
   };
 
-  const partCount = regularBonusPartCount(format.bonus);
-  const perPart = format.bonus.pointsPerPart ?? 0;
   const unanswered = partDraft
     ? partDraft.map((outcome, index) => (outcome === null ? index + 1 : 0)).filter((number) => number > 0)
     : [];
@@ -370,7 +456,8 @@ export default function QuestionEditor(props: {
    *
    * Recorded parts open as they were recorded. A bonus that only ever had a total opens with every
    * part unanswered, because a 20 does not say which two parts made it and this screen will not
-   * decide that on the scorekeeper's behalf.
+   * decide that on the scorekeeper's behalf — the alternative, filling them in order, puts an answer
+   * on screen that nothing recorded.
    */
   const editParts = () => {
     const existing = model.bonus?.parts;
@@ -388,11 +475,15 @@ export default function QuestionEditor(props: {
   };
 
   /**
-   * Record who got one part.
+   * Who took one part: the same three outcomes the live prompt offers, written to the same model.
    *
-   * The whole part is rewritten, so it cannot come to rest holding points for both teams, and the
-   * breakdown reaches the question only once every part has an answer — until then the bonus keeps
-   * the total it was recorded with.
+   * There is deliberately no typed part entry to go with this. A regular bonus part is worth exactly
+   * `pointsPerPart` or nothing, so the three buttons cover every outcome the rules allow — and the
+   * pair of number boxes they replace was the only way to enter a part value the format forbids.
+   *
+   * `bonusPartForOutcome` writes the whole part rather than one field of it, so a part can never come
+   * to rest holding points for both teams, and the breakdown reaches the question only once every
+   * part has an answer — until then the bonus keeps the total it was recorded with.
    */
   const setPartOutcome = (index: number, outcome: BonusPartOutcome) => {
     if (!partDraft) return;
@@ -419,7 +510,7 @@ export default function QuestionEditor(props: {
       bounceback: bonusDrafts.bounceback,
     })
       .filter(([, value]) => value !== undefined && (value.trim() === '' || !Number.isFinite(Number(value))))
-      .map(([field]) => `Enter a valid number for ${field}.`);
+      .map(([field]) => `Enter a valid number for ${field.replace(/-/g, ' ')}.`);
     // An unfinished breakdown is not a bonus worth nothing, and saving one as though it were is the
     // silent rescore this screen exists to prevent.
     if (unanswered.length > 0) {
@@ -430,12 +521,15 @@ export default function QuestionEditor(props: {
     if (nextErrors.length === 0 && onSave(model)) onCancel();
   };
 
+  const convertedAttempt = conversion(model, format);
   const converted = conversionTeam(model, format);
   const bonusTeam = model.bonus?.team ?? converted;
-  const opponentTeam = bonusTeam === 'left' ? 'right' : 'left';
-  /** With bouncebacks on, every points control belongs to a named team; without them there is one side. */
+  const earnsBonus = expectsBonus(format, game, model);
+  const overtime = question?.period === 'overtime';
+  const opponentOf = (team: 'left' | 'right') => (team === 'left' ? 'right' : 'left');
+  /* With bouncebacks on, every points control belongs to a named team; without them there is one side. */
   const controllingName = bonusTeam ? teamName(bonusTeam) : '';
-  const opponentName = teamName(opponentTeam);
+  const opponentName = bonusTeam ? teamName(opponentOf(bonusTeam)) : '';
   const controlledLabel = format.bonus.bounceBack && bonusTeam ? `${controllingName} bonus` : 'Bonus points';
   const bouncebackLabel = `${opponentName} bounceback`;
   const controlledId = `question-${model.questionNumber}-bonus-controlled`;
@@ -593,13 +687,39 @@ export default function QuestionEditor(props: {
         {model.attempts.length === 0 && !model.dead && (
           <p className="scorer-question-empty">No tossup ruling recorded.</p>
         )}
-        {model.dead && (
-          <p className="scorer-question-empty">
-            {model.attempts.length === 0
-              ? 'This tossup was recorded with no buzz.'
-              : 'No team converted this tossup.'}
-          </p>
-        )}
+        {/*
+          The tossup's own outcome, on the tossup.
+
+          This control used to live in the Bonus section and rename itself to "End question without a
+          bonus" as soon as an attempt existed — a label that described the smallest thing it could
+          do. With a conversion on the question, ticking it deleted the correct answer and killed the
+          tossup, which is not what "without a bonus" says and not a thing a checkbox should do
+          silently. So it says what it does: with nothing on the question, No buzz; with attempts on
+          it, No team converted. It is never the way to remove a correct answer — that is the ruling
+          control's job, one row up, where the correct answer is.
+
+          The third concept the old label conflated is not a control at all: whether a bonus applies
+          is derived from the ruling and the format, and the Bonus section says so in words.
+        */}
+        <div className="scorer-question-actions">
+          <label className="scorer-checkbox" htmlFor={`question-${model.questionNumber}-dead`}>
+            <input
+              id={`question-${model.questionNumber}-dead`}
+              type="checkbox"
+              checked={model.dead}
+              disabled={converted !== undefined}
+              onChange={(event) =>
+                reviseTossup((current) => ({ ...current, dead: event.target.checked }))
+              }
+            />
+            {model.attempts.length === 0 ? 'No buzz' : 'No team converted'}
+          </label>
+          {converted !== undefined && (
+            <span className="scorer-question-status">
+              {teamName(converted)} converted this tossup. Change that ruling to record one nobody converted.
+            </span>
+          )}
+        </div>
         {model.attempts.length === 2 && (
           <div className="scorer-question-actions">
             {/*
@@ -625,13 +745,14 @@ export default function QuestionEditor(props: {
           {/*
             Two lines, not one shouted one. "BONUS — NINETY SIX" put the controlling team in the
             heading and left the other team — which can score here — unnamed anywhere. The heading
-            says what this is; the line under it says who converted, as settled context rather than
-            something that looks like a field.
+            says what this is; the line under it says who converted, as settled context. It is never
+            a field: `settleBonus` takes the team from the conversion, which is the only thing that
+            can earn a bonus in the first place.
           */}
           <div className="scorer-question-heading-line">
             <h4 className="scorer-question-heading">Bonus</h4>
-            {bonusTeam && converted !== undefined && (
-              <p className="scorer-question-bonus-context">Controlled by {teamName(bonusTeam)}</p>
+            {model.bonus && bonusTeam && (
+              <p className="scorer-question-bonus-context">Controlled by {controllingName}</p>
             )}
           </div>
           {model.bonus ? (
@@ -646,55 +767,55 @@ export default function QuestionEditor(props: {
               Remove bonus
             </button>
           ) : (
-            <div className="scorer-question-bonus-head-actions">
-              <label className="scorer-checkbox" htmlFor={`question-${model.questionNumber}-dead`}>
-                <input
-                  id={`question-${model.questionNumber}-dead`}
-                  type="checkbox"
-                  checked={model.dead}
-                  onChange={(event) =>
-                    setModel((current) => ({
-                      ...current,
-                      dead: event.target.checked,
-                      attempts: event.target.checked && conversion(current, format) ? [] : current.attempts,
-                      bonus: event.target.checked ? undefined : current.bonus,
-                    }))
-                  }
-                />
-                {model.attempts.length === 0 ? 'No buzz' : 'End question without a bonus'}
-              </label>
-              {/* Offered rather than drawn: a blank bonus form should not fill every correction. */}
-              {!model.dead && format.bonus.enabled && (
+            /*
+              Offered only when the rules say this conversion earns one.
+
+              `expectsBonus` is the engine's rule, the same one the validator applies at Save, so the
+              button cannot appear for an answer type with `awardsBonus: false` or for an overtime
+              tossup in a format whose overtime excludes bonuses. It used to appear whenever the
+              format used bonuses at all, which meant the dialog could invite an action its own
+              validator would then refuse.
+            */
+            earnsBonus &&
+            convertedAttempt !== undefined && (
+              <div className="scorer-question-bonus-head-actions">
                 <button
                   type="button"
                   className="scorer-action"
                   onClick={() => {
                     setPartDraft(null);
-                    setBonus({ team: converted ?? 'left', controlledPoints: 0, bouncebackPoints: 0 });
+                    // The converting team, taken from the conversion itself: there is no bonus without
+                    // one, which is why this dialog has no controlling-team selector any more.
+                    setBonus({ team: convertedAttempt.team, controlledPoints: 0, bouncebackPoints: 0 });
                   }}
                 >
                   Add bonus
                 </button>
-              )}
-            </div>
+              </div>
+            )
           )}
         </div>
-        {model.bonus && (
+        {/*
+          Why there is nothing to record, rather than a button that leads to a refusal.
+
+          Also where a bonus that has just stopped being earned is accounted for: `settleBonus`
+          removes it the moment the ruling changes, and this says so instead of letting the figure
+          disappear out of the dialog unremarked.
+        */}
+        {!earnsBonus && !model.bonus && (
+          <p className="scorer-question-empty">
+            {noBonusReason(format, model, overtime)}
+            {initial.bonus ? ' The bonus recorded here will be removed when you save.' : ''}
+          </p>
+        )}
+        {model.bonus && !earnsBonus && (
+          <p className="scorer-question-empty">
+            {noBonusReason(format, model, overtime)} Remove this bonus, or change the tossup ruling that should have
+            earned it.
+          </p>
+        )}
+        {model.bonus && earnsBonus && (
           <div className="scorer-question-bonus">
-            {converted === undefined && (
-              <label htmlFor={`question-${model.questionNumber}-bonus-team`}>
-                Controlled by
-                <select
-                  id={`question-${model.questionNumber}-bonus-team`}
-                  aria-label="Bonus controlling team"
-                  value={model.bonus.team}
-                  onChange={(event) => setBonus({ team: event.target.value as 'left' | 'right' })}
-                >
-                  <option value="left">{game.left.name}</option>
-                  <option value="right">{game.right.name}</option>
-                </select>
-              </label>
-            )}
             {partDraft === null ? (
               <>
                 {quickTotals !== null ? (
@@ -730,7 +851,13 @@ export default function QuestionEditor(props: {
                     />
                   </label>
                 )}
-                {/* Only where the format actually has bouncebacks; otherwise there is nothing to enter. */}
+                {/*
+                  Only where the format actually has bouncebacks; otherwise there is nothing to enter.
+
+                  A row of buttons under the opponent's name rather than a dropdown labelled
+                  "Bounceback", because the question is whose points these are, and a select answers
+                  it in a place nobody looks until they open it.
+                */}
                 {format.bonus.bounceBack &&
                   (bouncebackNeedsTypedEntry(format.bonus, model.bonus.controlledPoints) ? (
                     <label htmlFor={bouncebackId}>
@@ -770,87 +897,85 @@ export default function QuestionEditor(props: {
                   ))}
               </>
             ) : (
-              <div
-                className={
-                  format.bonus.bounceBack ? 'scorer-question-parts has-bounceback' : 'scorer-question-parts'
-                }
-              >
-                <div className="scorer-question-part-head" aria-hidden="true">
-                  <span />
-                  <span>{controllingName}</span>
-                  {format.bonus.bounceBack && <span>{opponentName}</span>}
-                  <span />
-                </div>
-                {partDraft.map((outcome, index) => (
-                  // Parts have no persisted identity in QBJ; their position is their identity, and it
-                  // is kept: Part 1 stays Part 1 however its outcome changes.
+              /*
+                The same question the live prompt asks, asked the same way.
 
+                This was two unlabelled number boxes per part, so a bounceback format showed `Part 1
+                [0] [10]` and left the scorekeeper to work out from the accessible names which column
+                was which team. A part has three outcomes, not two numbers: the controlling team took
+                it, it bounced, or nobody got it. The columns are named after the teams because in a
+                correction — unlike in the live prompt, which has just come from that team's own
+                buttons — there is nothing else on screen saying which side is which.
+              */
+              bonusTeam !== undefined && (
+                <div className="scorer-question-parts">
                   <div
-                    key={`part-${index}`}
-                    className={outcome === null ? 'scorer-question-part is-unanswered' : 'scorer-question-part'}
-                    role="group"
-                    aria-label={`Bonus part ${index + 1} outcome`}
+                    className={
+                      format.bonus.bounceBack ? 'scorer-question-part-head' : 'scorer-question-part-head is-two-way'
+                    }
+                    aria-hidden="true"
                   >
-                    <span className="scorer-question-part-label">Part {index + 1}</span>
-                    <button
-                      type="button"
-                      className={
-                        outcome === 'controlled'
-                          ? 'scorer-choice scorer-question-part-choice is-selected'
-                          : 'scorer-choice scorer-question-part-choice'
-                      }
-                      aria-pressed={outcome === 'controlled'}
-                      aria-label={`Part ${index + 1}: ${controllingName} +${perPart}`}
-                      onClick={() => setPartOutcome(index, 'controlled')}
-                    >
-                      {/* Named on narrow screens, where the column heading above has folded away. */}
-                      <span className="scorer-question-part-team">{controllingName} </span>+{perPart}
-                    </button>
-                    {format.bonus.bounceBack && (
+                    <span />
+                    <span>{controllingName}</span>
+                    {format.bonus.bounceBack && <span>{opponentName} bounceback</span>}
+                    <span />
+                  </div>
+                  {partDraft.map((outcome, index) => {
+                    // Parts have no persisted identity in QBJ; their position is their identity, and
+                    // it is kept: Part 1 stays Part 1 however its outcome changes.
+                    const choice = (value: BonusPartOutcome, label: ReactNode, accessibleName: string) => (
                       <button
                         type="button"
-                        className={
-                          outcome === 'bounceback'
-                            ? 'scorer-choice scorer-question-part-choice is-selected'
-                            : 'scorer-choice scorer-question-part-choice'
-                        }
-                        aria-pressed={outcome === 'bounceback'}
-                        aria-label={`Part ${index + 1}: ${opponentName} bounceback +${perPart}`}
-                        onClick={() => setPartOutcome(index, 'bounceback')}
+                        aria-label={accessibleName}
+                        aria-pressed={outcome === value}
+                        className={outcome === value ? 'scorer-choice is-selected' : 'scorer-choice'}
+                        onClick={() => setPartOutcome(index, value)}
                       >
-                        <span className="scorer-question-part-team">{opponentName} </span>Bounce +{perPart}
+                        {label}
                       </button>
-                    )}
-                    <button
-                      type="button"
-                      className={
-                        outcome === 'missed'
-                          ? 'scorer-choice scorer-question-part-choice is-selected'
-                          : 'scorer-choice scorer-question-part-choice'
-                      }
-                      aria-pressed={outcome === 'missed'}
-                      aria-label={`Part ${index + 1}: nobody`}
-                      onClick={() => setPartOutcome(index, 'missed')}
-                    >
-                      Miss
-                    </button>
-                  </div>
-                ))}
-                {/*
-                  What the parts come to, as a sentence rather than a number field nobody can type
-                  in. While parts are still unanswered this is the total the bonus is still recorded
-                  with — the breakdown has not replaced it and will not until it is complete.
-                */}
-                <p className="scorer-question-part-summary">{bonusSummary}</p>
-                {unanswered.length > 0 && (
-                  <p className="scorer-question-part-pending">
-                    Still to answer: {joinParts(unanswered)}. The bonus keeps the total above until every part has an
-                    outcome.
-                  </p>
-                )}
-              </div>
+                    );
+                    const row = ['scorer-question-part', format.bonus.bounceBack ? '' : 'is-two-way', outcome === null ? 'is-unanswered' : '']
+                      .filter(Boolean)
+                      .join(' ');
+                    return (
+                      <div key={`part-${index}`} className={row} role="group" aria-label={`Bonus part ${index + 1} outcome`}>
+                        <span className="scorer-question-part-label">Part {index + 1}</span>
+                        {choice(
+                          'controlled',
+                          /* The team span shows on narrow screens, where the column heading has folded away. */
+                          <>
+                            <span className="scorer-question-part-team">{controllingName} </span>+{perPart}
+                          </>,
+                          `Bonus part ${index + 1} to ${controllingName}`,
+                        )}
+                        {format.bonus.bounceBack &&
+                          choice(
+                            'bounceback',
+                            <>
+                              <span className="scorer-question-part-team">{opponentName} </span>+{perPart}
+                            </>,
+                            `Bonus part ${index + 1} bounced back to ${opponentName}`,
+                          )}
+                        {choice('missed', 'Miss', `Bonus part ${index + 1} missed`)}
+                      </div>
+                    );
+                  })}
+                  {/*
+                    What the parts come to, as a sentence rather than a number field nobody can type
+                    in. While parts are still unanswered this is the total the bonus is recorded with
+                    — the breakdown has not replaced it, and will not until it is complete.
+                  */}
+                  <p className="scorer-question-part-summary">{bonusSummary}</p>
+                  {unanswered.length > 0 && (
+                    <p className="scorer-question-part-pending">
+                      Still to answer: {joinParts(unanswered)}. The bonus keeps the total above until every part has
+                      an outcome.
+                    </p>
+                  )}
+                </div>
+              )
             )}
-            {partCount !== null && (
+            {partOutcomesAvailable && (
               <button type="button" className="scorer-text-action" onClick={partDraft ? editTotals : editParts}>
                 {partDraft ? 'Enter totals instead' : 'Edit individual parts…'}
               </button>

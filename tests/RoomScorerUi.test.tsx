@@ -550,6 +550,39 @@ describe('scoring motion state', () => {
     expect(prompt.querySelector('.scorer-prompt-content.is-incoming')).toBeTruthy();
   });
 
+  /**
+   * Correcting the controlling team's total before the bounceback is recorded.
+   *
+   * Escape has always done this and remains bound, but Escape was the only way in: a scorekeeper who
+   * pressed 20 instead of 10 on a touchscreen had to finish the bounceback and then correct the whole
+   * question. Nothing is written until both halves are known, so this is a cancel rather than an undo.
+   */
+  test('the bounceback stage offers a visible way back to the bonus total', () => {
+    renderScorer(
+      formatFor((rules) => {
+        rules.bonusesBounceBack = true;
+      }),
+    );
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]); // +10 for Ninety Six
+    fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('20'));
+
+    const back = within(screen.getByLabelText('Bounceback')).getByRole('button', {
+      name: '← Change Ninety Six bonus (20)',
+    });
+    fireEvent.click(back);
+
+    // Back on the controlling team's own stage, with nothing recorded and the tossup untouched.
+    expect(screen.getByLabelText('Bonus')).toBeTruthy();
+    expect(screen.queryByLabelText('Bounceback')).toBeNull();
+    expect(scoreOf('Ninety Six')).toBe('10');
+
+    fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('10'));
+    fireEvent.click(within(screen.getByLabelText('Bounceback')).getByText('0'));
+
+    expect(scoreOf('Ninety Six')).toBe('20');
+    expect(scoreOf('Greenwood')).toBe('0');
+  });
+
   test('part selection rolls the running total from the actual old total in both directions', () => {
     renderScorer(formatFor());
     fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
@@ -1050,9 +1083,13 @@ describe('the game menu', () => {
   });
 
   test('an invalid bonus correction stays open with an explanation', () => {
-    // Neither the quick totals nor the part outcomes can express an impossible bonus, so the typed
-    // total an irregular format asks for is the one place an out-of-range figure can still be
-    // entered — and it still has to be refused.
+    /*
+     * An irregular format, because it is the only one that can still express an impossible bonus.
+     *
+     * A regular format's correction offers quick totals for the whole bonus and three fixed outcomes
+     * per part, and neither can name an out-of-range figure. The typed field an irregular bonus has
+     * no alternative to can, and it still has to be refused rather than saved.
+     */
     renderScorer(
       formatFor((rules) => {
         rules.minimumPartsPerBonus = 1;

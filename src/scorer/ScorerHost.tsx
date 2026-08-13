@@ -185,8 +185,13 @@ export default function ScorerHost(props: IScorerHostProps) {
     if (onEventsChanged) onEventsChanged(eventList, activeSetup);
   }, [onEventsChanged, eventList, activeSetup]);
   const lastServerRecoveryAttempt = useRef(-1);
+  // Mirrored from a committed effect rather than during render: the only reader is the retry button,
+  // which runs long after the commit, and a render that React throws away must not leave a count
+  // behind from a pass that never happened.
   const localEventCount = useRef(eventCount);
-  localEventCount.current = eventCount;
+  useEffect(() => {
+    localEventCount.current = eventCount;
+  }, [eventCount]);
   const recoveryFailed = useRef(false);
 
   const retryServerRecovery = useCallback(() => {
@@ -200,7 +205,9 @@ export default function ScorerHost(props: IScorerHostProps) {
     if (recovered !== null || eventCount > 0) return undefined;
     lastServerRecoveryAttempt.current = serverRecoveryAttempt;
     recoveryFailed.current = false;
-    setServerRecoveryError('');
+    // The error is not cleared here. The only thing that raises the attempt counter is
+    // `retryServerRecovery`, which clears it before bumping, and the first attempt starts from the
+    // empty initial value — so this had nothing left to clear.
     let cancelled = false;
     onRecoverFromServer()
       .then((qbj) => {
