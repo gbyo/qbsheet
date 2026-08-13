@@ -296,7 +296,20 @@ export default function App() {
     claim.current?.release();
     const taken = await claimGame(recordId, tabId.current);
     claim.current = taken;
-    return taken.held;
+    if (taken.held) {
+      const disableScoring = () => {
+        // A released or superseded claim cannot move a later game off screen.
+        if (claim.current !== taken) return;
+        claim.current = null;
+        setScreen({ kind: 'duplicate', recordId });
+      };
+      taken.lost.addEventListener('abort', disableScoring, { once: true });
+      // A channel event normally cannot run between claimGame resolving and this listener being
+      // attached, but checking closes that boundary for synchronous channel-like test doubles and
+      // unusual implementations.
+      if (taken.lost.aborted) disableScoring();
+    }
+    return taken.held && !taken.lost.aborted;
   }, []);
 
   /**

@@ -524,6 +524,15 @@ body {
   background: var(--room-surface-sunken);
 }
 
+.resume-card > div {
+  min-width: 0;
+}
+
+/* More than one interrupted game is unusual, but each one still needs to read as its own target. */
+.resume-card + .resume-card {
+  margin-top: 8px;
+}
+
 .resume-context,
 .recent-context {
   margin: 0;
@@ -541,7 +550,13 @@ body {
   margin: 2px 0 0;
   font-size: 13px;
   color: var(--room-muted);
+  overflow-wrap: anywhere;
   font-variant-numeric: tabular-nums;
+}
+
+.resume-context,
+.resume-matchup {
+  overflow-wrap: anywhere;
 }
 
 /*
@@ -831,11 +846,26 @@ body {
 
 .recent-item {
   display: grid;
+  grid-template-areas:
+    'main actions'
+    'details details';
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
-  gap: 16px;
-  padding: 12px 0;
+  column-gap: 16px;
+  row-gap: 12px;
+  padding: 16px 0;
   border-top: 1px solid var(--room-border);
+}
+
+.recent-main {
+  grid-area: main;
+  min-width: 0;
+}
+
+.recent-context,
+.recent-primary,
+.recent-when {
+  overflow-wrap: anywhere;
 }
 
 .recent-primary {
@@ -879,7 +909,8 @@ body {
 }
 
 .recent-details {
-  grid-column: 1 / -1;
+  grid-area: details;
+  min-width: 0;
   font-size: 12px;
 }
 
@@ -899,8 +930,11 @@ body {
   color: var(--room-muted);
 }
 
-.recent-status dd {
+.recent-item .recent-status dd {
+  min-width: 0;
   margin: 0;
+  overflow-wrap: anywhere;
+  text-align: right;
   font-variant-numeric: tabular-nums;
 }
 
@@ -934,6 +968,7 @@ body {
 }
 
 .recent-actions {
+  grid-area: actions;
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
@@ -942,18 +977,27 @@ body {
 
 @media (max-width: 760px) {
   .recent-item {
-    grid-template-columns: 1fr auto;
-  }
-
-  .recent-details {
-    grid-column: 1 / -1;
-    grid-row: 2;
+    grid-template-areas:
+      'main'
+      'details'
+      'actions';
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .recent-actions {
-    grid-column: 1 / -1;
-    grid-row: 3;
     justify-content: flex-start;
+  }
+}
+
+@media (max-width: 420px) {
+  .recent-item .recent-status div {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .recent-item .recent-status dd {
+    text-align: left;
   }
 }
 

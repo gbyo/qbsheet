@@ -17,7 +17,7 @@
  */
 
 export const databaseName = 'qbsheet';
-/** The old database is read once so a deployed rename cannot strand an in-progress game. */
+/** The old database remains a recovery source until every record has safely reached the new one. */
 const legacyDatabaseName = 'standalone-scorekeeper';
 export const databaseVersion = 1;
 export const gameStoreName = 'games';
@@ -258,18 +258,22 @@ export async function openRecordStore<T extends { id: string }>(
   if (!database) return new MemoryRecordStore<T>();
   const store = new IndexedDbRecordStore<T>(database, storeName);
 
-  // The product was renamed after the first public build. Copy the old game records into the new
-  // database before the app starts looking for an unfinished game, and never delete the old copy:
-  // it is a recoverable fallback if a browser interrupts this one-time migration.
+  // The product was renamed after the first public build. Reconcile the old game records into the
+  // new database before the app starts looking for an unfinished game, and never delete the old
+  // copy. This must be idempotent: if the browser closes after one put, the next startup copies every
+  // still-missing id instead of mistaking a partially populated new database for a completed move.
   if (storeName === gameStoreName && !store.storageDegraded) {
     const current = await store.list();
-    if (!store.storageDegraded && current.length === 0) {
+    if (!store.storageDegraded) {
       const legacy = await openDatabaseNamed(legacyDatabaseName);
       if (legacy) {
         const legacyStore = new IndexedDbRecordStore<T>(legacy, gameStoreName, legacyDatabaseName);
         const records = await legacyStore.list();
         if (!legacyStore.storageDegraded) {
-          for (const record of records) await store.put(record);
+          const currentIds = new Set(current.map((record) => record.id));
+          for (const record of records) {
+            if (!currentIds.has(record.id)) await store.put(record);
+          }
         }
         legacy.close();
       }
