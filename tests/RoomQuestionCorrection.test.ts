@@ -7,8 +7,10 @@ import toQbjMatch from '../src/scoring/toQbjMatch';
 import {
   editableQuestionFromEvents,
   eventsFromEditableQuestion,
+  expectsBonus,
   IEditableQuestion,
   replaceQuestionEvents,
+  settleBonus,
   validateEditableQuestion,
 } from '../src/scoring/questionCorrection';
 import { ScoreEvent } from '../src/scoring/ScoreEvents';
@@ -283,6 +285,136 @@ describe('question-level corrections', () => {
         },
       }),
     ).toContain('Each regular bonus part');
+  });
+
+  /**
+   * One rule about whether a bonus follows, asked by everything.
+   *
+   * `expectsBonus` is the engine's `bonusFollows` applied to an edit in progress, which is what makes
+   * the correction dialog's Bonus section and this validator incapable of disagreeing. Both of the
+   * clauses checked here were previously restated inline in three places, and the copy that drew the
+   * dialog's Add bonus button was the one that had neither of them.
+   */
+  describe('whether a conversion earns a bonus', () => {
+    const converted = (): IEditableQuestion => ({
+      questionNumber: 1,
+      attempts: [{ kind: 'buzz', team: 'left', playerName: 'Sarah', answerTypeIndex: 1 }],
+      dead: false,
+    });
+    const events: ScoreEvent[] = [
+      event({ type: 'tossup-buzz', questionNumber: 1, team: 'left', playerName: 'Sarah', answerTypeIndex: 1 }),
+      event({ type: 'bonus', questionNumber: 1, team: 'left', controlledPoints: 20 }),
+      event({ type: 'tossup-dead', questionNumber: 2 }),
+    ];
+
+    test('an ordinary conversion in regulation owes one', () => {
+      const format = formatFor();
+      const game = deriveGame(format, setup, events);
+
+      expect(expectsBonus(format, game, converted())).toBe(true);
+    });
+
+    test('an answer type with awardsBonus false owes none', () => {
+      const format = formatFor();
+      format.answerTypes[1] = { ...format.answerTypes[1], awardsBonus: false };
+      const game = deriveGame(format, setup, events);
+      const model = converted();
+
+      expect(expectsBonus(format, game, model)).toBe(false);
+      expect(
+        validateEditableQuestion(format, game, {
+          ...model,
+          bonus: { team: 'left', controlledPoints: 20, bouncebackPoints: 0 },
+        }).join('\n'),
+      ).toContain('does not have a valid bonus conversion');
+    });
+
+    test('an overtime conversion owes none when the format excludes overtime bonuses', () => {
+      const format = formatFor();
+      expect(format.overtime.includesBonuses).toBe(false);
+      // Reach overtime the way the engine does: regulation ends, and the next cycle is overtime.
+      const overtimeEvents: ScoreEvent[] = [
+        event({ type: 'end-regulation', questionNumber: 1 }),
+        event({ type: 'tossup-buzz', questionNumber: 2, team: 'left', playerName: 'Sarah', answerTypeIndex: 1 }),
+      ];
+      const game = deriveGame(format, setup, overtimeEvents);
+      expect(game.questions.find((question) => question.questionNumber === 2)?.period).toBe('overtime');
+      const model: IEditableQuestion = { ...converted(), questionNumber: 2 };
+
+      expect(expectsBonus(format, game, model)).toBe(false);
+      expect(
+        validateEditableQuestion(format, game, {
+          ...model,
+          bonus: { team: 'left', controlledPoints: 20, bouncebackPoints: 0 },
+        }).join('\n'),
+      ).toContain('does not have a valid bonus conversion');
+    });
+
+    test('the same overtime conversion owes one when the format includes them', () => {
+      const format = formatFor();
+      format.overtime = { ...format.overtime, includesBonuses: true };
+      const overtimeEvents: ScoreEvent[] = [
+        event({ type: 'end-regulation', questionNumber: 1 }),
+        event({ type: 'tossup-buzz', questionNumber: 2, team: 'left', playerName: 'Sarah', answerTypeIndex: 1 }),
+      ];
+      const game = deriveGame(format, setup, overtimeEvents);
+
+      expect(expectsBonus(format, game, { ...converted(), questionNumber: 2 })).toBe(true);
+    });
+  });
+
+  /**
+   * State that depends on the tossup follows the edit, not the Save.
+   *
+   * The correction dialog hides the controlling-team selector whenever a conversion exists, so a
+   * bonus left owned by a team that no longer converted anything was invisible until the validator
+   * refused the whole correction.
+   */
+  describe('settling the bonus after a tossup edit', () => {
+    const withBonus: IEditableQuestion = {
+      questionNumber: 1,
+      attempts: [{ kind: 'buzz', team: 'left', playerName: 'Sarah', answerTypeIndex: 1 }],
+      dead: false,
+      bonus: { team: 'left', controlledPoints: 20, bouncebackPoints: 0 },
+    };
+    const events: ScoreEvent[] = [
+      event({ type: 'tossup-buzz', questionNumber: 1, team: 'left', playerName: 'Sarah', answerTypeIndex: 1 }),
+      event({ type: 'bonus', questionNumber: 1, team: 'left', controlledPoints: 20 }),
+    ];
+
+    test('the bonus moves to whichever team now converted', () => {
+      const format = formatFor();
+      const game = deriveGame(format, setup, events);
+      const moved = settleBonus(
+        { ...withBonus, attempts: [{ kind: 'buzz', team: 'right', playerName: 'Emma', answerTypeIndex: 1 }] },
+        format,
+        game,
+      );
+
+      expect(moved.bonus?.team).toBe('right');
+      expect(moved.bonus?.controlledPoints).toBe(20);
+      expect(validateEditableQuestion(format, game, moved)).toEqual([]);
+    });
+
+    test('a ruling that earns no bonus removes the one that was there', () => {
+      const format = formatFor();
+      const game = deriveGame(format, setup, events);
+      const negged = settleBonus(
+        { ...withBonus, attempts: [{ kind: 'buzz', team: 'left', playerName: 'Sarah', answerTypeIndex: 2 }] },
+        format,
+        game,
+      );
+
+      expect(negged.bonus).toBeUndefined();
+      expect(validateEditableQuestion(format, game, negged)).toEqual([]);
+    });
+
+    test('a question that already agrees with the rules is returned untouched', () => {
+      const format = formatFor();
+      const game = deriveGame(format, setup, events);
+
+      expect(settleBonus(withBonus, format, game)).toBe(withBonus);
+    });
   });
 
   test('preserves existing event ids and creates ids only for new correction events', () => {

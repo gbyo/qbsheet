@@ -1,5 +1,5 @@
 import { IScorekeeperFormat } from './ScorekeeperFormat';
-import { IDerivedGame } from './deriveGame';
+import { bonusFollows, GamePeriod, IDerivedGame } from './deriveGame';
 import { IBonusPartResult, ScoreEvent } from './ScoreEvents';
 import { effectiveQuestionEvents } from './validateScoresheet';
 import { bonusPartProblem, bonusScoreProblem } from '../scorer/bonusOptions';
@@ -110,6 +110,56 @@ export function conversion(model: IEditableQuestion, format: IScorekeeperFormat)
   );
 }
 
+/** Which period the cycle being edited belongs to. Unknown reads as regulation. */
+function editedPeriod(game: IDerivedGame, model: IEditableQuestion): GamePeriod {
+  return game.questions.find((candidate) => candidate.questionNumber === model.questionNumber)?.period ?? 'regulation';
+}
+
+/**
+ * Whether this proposed cycle owes a bonus.
+ *
+ * The engine's `bonusFollows`, asked of an edit in progress rather than of a recorded question, so
+ * the correction dialog and the validator cannot disagree about it. That disagreement was a real
+ * defect and not a theoretical one: the dialog offered Add bonus whenever the format used bonuses at
+ * all, so a scorekeeper could be invited to add a bonus to an answer type with `awardsBonus: false`,
+ * or to an overtime tossup in a format whose overtime excludes bonuses, and only find out at Save.
+ */
+export function expectsBonus(
+  format: IScorekeeperFormat,
+  game: IDerivedGame,
+  model: IEditableQuestion,
+): boolean {
+  const converted = conversion(model, format);
+  const answerType =
+    converted?.answerTypeIndex === undefined ? undefined : format.answerTypes[converted.answerTypeIndex];
+  if (!answerType) return false;
+  return bonusFollows(format, answerType, editedPeriod(game, model));
+}
+
+/**
+ * Make the bonus follow the tossup it depends on, at the moment of the edit.
+ *
+ * A bonus belongs to whoever converted and exists only while that conversion earns one. Both of
+ * those used to be checked only by `validateEditableQuestion` at Save, so changing the converting
+ * team left the bonus owned by a team that no longer converted anything, and changing to a ruling
+ * that awards no bonus left the old bonus sitting in the dialog — in both cases silently, until Save
+ * refused the whole correction. Applying the rule to the model instead means the screen can never
+ * show a combination the validator would reject.
+ */
+export function settleBonus(
+  model: IEditableQuestion,
+  format: IScorekeeperFormat,
+  game: IDerivedGame,
+): IEditableQuestion {
+  if (!model.bonus) return model;
+  if (!expectsBonus(format, game, model)) return { ...model, bonus: undefined };
+  const converted = conversion(model, format);
+  if (converted && model.bonus.team !== converted.team) {
+    return { ...model, bonus: { ...model.bonus, team: converted.team } };
+  }
+  return model;
+}
+
 /** Validate one proposed question without mutating the event history. */
 export function validateEditableQuestion(
   format: IScorekeeperFormat,
@@ -163,8 +213,6 @@ export function validateEditableQuestion(
   const converted = conversion(model, format);
   if (model.dead && converted)
     errors.push(`Question ${model.questionNumber} cannot have both a correct answer and no conversion.`);
-  const convertedType =
-    converted?.answerTypeIndex === undefined ? undefined : format.answerTypes[converted.answerTypeIndex];
   const firstAttemptType =
     model.attempts[0]?.kind === 'buzz' && model.attempts[0].answerTypeIndex !== undefined
       ? format.answerTypes[model.attempts[0].answerTypeIndex]
@@ -172,17 +220,13 @@ export function validateEditableQuestion(
   if (model.readingResumed === true && firstAttemptType !== undefined && firstAttemptType.value > 0) {
     errors.push(`Question ${model.questionNumber} cannot resume reading after a conversion.`);
   }
-  const expectsBonus =
-    converted !== undefined &&
-    convertedType?.awardsBonus === true &&
-    format.bonus.enabled &&
-    (question?.period !== 'overtime' || format.overtime.includesBonuses);
+  const owesBonus = expectsBonus(format, game, model);
   const isCurrentQuestion =
     (game.phase.kind === 'tossup' || game.phase.kind === 'bonus' || game.phase.kind === 'timeout') &&
     game.phase.questionNumber === model.questionNumber;
-  if (expectsBonus && !model.bonus && !isCurrentQuestion)
+  if (owesBonus && !model.bonus && !isCurrentQuestion)
     errors.push(`Question ${model.questionNumber} needs a bonus for this conversion.`);
-  if (!expectsBonus && model.bonus)
+  if (!owesBonus && model.bonus)
     errors.push(`Question ${model.questionNumber} does not have a valid bonus conversion.`);
   if (model.bonus && converted && model.bonus.team !== converted.team) {
     errors.push(`The bonus on Question ${model.questionNumber} belongs to the converting team.`);

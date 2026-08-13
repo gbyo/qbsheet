@@ -257,8 +257,14 @@ export function teamsNeedingStartingLineup(
  *
  * Three things have to hold, and the last is the one that is easy to forget: a format can use
  * bonuses in regulation and not in overtime, which is what `overtimeIncludesBonuses` is for.
+ *
+ * Exported because it is the only copy. The scoresheet validator and the correction editor both used
+ * to restate these three clauses inline, which is how the editor came to offer an Add bonus button
+ * for a conversion the validator would then refuse at Save: two statements of one rule, and only one
+ * of them consulted before the button was drawn. Everything that needs to know whether a bonus
+ * follows a conversion asks this.
  */
-function bonusFollows(format: IScorekeeperFormat, answerType: IScorekeeperAnswerType, period: GamePeriod): boolean {
+export function bonusFollows(format: IScorekeeperFormat, answerType: IScorekeeperAnswerType, period: GamePeriod): boolean {
   if (!format.bonus.enabled) return false;
   if (!answerType.awardsBonus) return false;
   if (period === 'overtime' && !format.overtime.includesBonuses) return false;

@@ -397,6 +397,17 @@ export default function BonusPrompt(props: IBonusPromptProps) {
             {typedProblem && <p className="scorer-problem">{typedProblem}</p>}
           </form>
           )}
+          {/*
+            The way back to the controlling team's total.
+
+            Escape has always done this, and Escape is the wrong and only answer for a scorekeeper
+            working a touchscreen: the total they mistyped is on screen, in the subtitle, and until
+            now there was nothing to press. Nothing is recorded until both halves are known, so this
+            is a genuine cancel rather than an undo — it takes the same path the key does.
+          */}
+          <button type="button" className="scorer-text-action scorer-prompt-back" onClick={() => setControlled(null)}>
+            ← Change {controllingTeamName} bonus ({controlled})
+          </button>
         </div>
       </section>
     );
