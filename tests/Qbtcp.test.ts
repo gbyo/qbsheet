@@ -14,6 +14,7 @@ import {
   supports,
 } from '../src/qbtcp/QbtcpRoutes';
 import FruityServerClient, { qbjMediaType } from '../src/integrations/fruity/FruityServerClient';
+import { readAssignmentStatus } from '../src/integrations/fruity/ProtocolAdapters';
 import { classifyPoll, classifyWrite } from '../src/app/useConnectedRuntime';
 import { RoomConnectionState } from '../src/app/ConnectionState';
 import { IStoredGameRecord, needsHandoff } from '../src/game/GameStore';
@@ -69,6 +70,37 @@ describe('discovery', () => {
 
   test('a version 1 server gets the canonical surface', () => {
     expect(routesFor(readDiscovery(discoveryBody))).toBe(qbtcpRoutes);
+  });
+});
+
+describe('assignment status', () => {
+  test('reads the existing opaque next-game label', () => {
+    expect(
+      readAssignmentStatus({
+        state: 'none',
+        session: null,
+        next: { label: 'Round 5 · Clinton vs Greenwood', future_field: true },
+      }),
+    ).toMatchObject({ state: 'none', nextAssignmentLabel: 'Round 5 · Clinton vs Greenwood' });
+  });
+
+  test('does not reinterpret or rewrite nonblank server copy', () => {
+    expect(
+      readAssignmentStatus({ state: 'none', session: null, next: { label: '  Court opens after lunch  ' } })
+        ?.nextAssignmentLabel,
+    ).toBe('  Court opens after lunch  ');
+  });
+
+  test.each([
+    {},
+    { next: null },
+    { next: {} },
+    { next: { label: '' } },
+    { next: { label: '   ' } },
+    { next: { label: 5 } },
+    { next: 'Round 5' },
+  ])('omits a missing or malformed next-game label %#', (nextShape) => {
+    expect(readAssignmentStatus({ state: 'none', session: null, ...nextShape })?.nextAssignmentLabel).toBeUndefined();
   });
 });
 
@@ -188,6 +220,7 @@ describe('what the client puts on the wire', () => {
 
     expect(client.isQbtcp).toBe(false);
     expect(result.ok).toBe(true);
+    expect(result.ok && result.value.nextAssignmentLabel).toBeUndefined();
     expect(calls.map((call) => call.path)).toContain('/api/v1/rooms/room-204/assignment');
   });
 
@@ -446,7 +479,11 @@ describe('what the client puts on the wire', () => {
   });
 
   test('an assignment and its operational state arrive as one normalized answer', async () => {
-    const { fetchImpl } = qbtcpServer();
+    const { fetchImpl } = qbtcpServer({
+      '/qbtcp/v1/assignment/status': {
+        body: { state: 'assigned', session: null, next: { label: 'Round 5 · Clinton vs Greenwood' } },
+      },
+    });
 
     const result = await new FruityServerClient('http://control.test', fetchImpl).assignment(identity);
 
@@ -456,19 +493,26 @@ describe('what the client puts on the wire', () => {
     // The QBJ parser produced it, so the standard identities came with it.
     expect(result.ok && result.value.definition?.origin).toBe('qbj');
     expect(result.ok && result.value.tournamentKey).toBe('Tournament_spring-2026');
+    expect(result.ok && result.value.nextAssignmentLabel).toBe('Round 5 · Clinton vs Greenwood');
   });
 
-  test('a status of none is answered without fetching a document there is no point reading', async () => {
-    const { calls, fetchImpl } = qbtcpServer({
-      '/qbtcp/v1/assignment/status': { body: { state: 'none', session: null } },
-    });
+  test.each(['none', 'held', 'blocked'] as const)(
+    'a status of %s carries Up next without fetching a game document',
+    async (state) => {
+      const { calls, fetchImpl } = qbtcpServer({
+        '/qbtcp/v1/assignment/status': {
+          body: { state, session: null, next: { label: 'Round 5 · Clinton vs Greenwood' } },
+        },
+      });
 
-    const result = await new FruityServerClient('http://control.test', fetchImpl).assignment(identity);
+      const result = await new FruityServerClient('http://control.test', fetchImpl).assignment(identity);
 
-    expect(result.ok && result.value.state).toBe('none');
-    expect(result.ok && result.value.definition).toBeNull();
-    expect(calls.some((call) => call.path === '/qbtcp/v1/assignment')).toBe(false);
-  });
+      expect(result.ok && result.value.state).toBe(state);
+      expect(result.ok && result.value.definition).toBeNull();
+      expect(result.ok && result.value.nextAssignmentLabel).toBe('Round 5 · Clinton vs Greenwood');
+      expect(calls.some((call) => call.path === '/qbtcp/v1/assignment')).toBe(false);
+    },
+  );
 
   test('a 204 is nothing assigned, not an empty game and not an error', async () => {
     // No status endpoint — an early server that shipped the assignment route first — so the body is
