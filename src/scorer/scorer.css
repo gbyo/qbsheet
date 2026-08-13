@@ -23,6 +23,7 @@
 .scorer {
   display: flex;
   flex-direction: column;
+  height: 100dvh;
   min-height: 100vh;
   font-size: 14px;
   line-height: 1.4;
@@ -211,13 +212,16 @@ div.scorer-banner .scorer-text-action {
   display: flex;
   flex: 1;
   min-height: 0;
+  overflow: hidden;
 }
 
 .scorer-main {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
 }
 
 /* One sheet in two columns, divided by a rule. Not two cards with a gutter between them. */
@@ -847,6 +851,7 @@ div.scorer-banner .scorer-text-action {
 .scorer-footer {
   display: flex;
   align-items: center;
+  flex-shrink: 0;
   gap: 8px;
   padding: 8px 16px;
   border-top: 1px solid var(--room-border-strong);
