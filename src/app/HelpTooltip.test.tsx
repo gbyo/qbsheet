@@ -13,14 +13,37 @@ describe('HelpTooltip', () => {
     expect(screen.getByRole('tooltip')).toHaveTextContent('A neg is a penalty for an incorrect early buzz.');
   });
 
-  test('Escape dismisses a keyboard-open tooltip by returning focus', () => {
+  test('Escape dismisses a keyboard-open tooltip without moving focus', () => {
     render(<HelpTooltip label="About timed rounds">The moderator calls time.</HelpTooltip>);
 
     const trigger = screen.getByRole('button', { name: 'About timed rounds' });
+    const wrapper = trigger.closest('.help-tooltip');
     trigger.focus();
     expect(trigger).toHaveFocus();
 
     fireEvent.keyDown(trigger, { key: 'Escape' });
-    expect(trigger).not.toHaveFocus();
+    expect(trigger).toHaveFocus();
+    expect(wrapper).toHaveAttribute('data-dismissed', 'true');
+  });
+
+  test('the next focus, click, or pointer entry clears dismissal', () => {
+    render(<HelpTooltip label="About timed rounds">The moderator calls time.</HelpTooltip>);
+
+    const trigger = screen.getByRole('button', { name: 'About timed rounds' });
+    const wrapper = trigger.closest('.help-tooltip');
+    trigger.focus();
+
+    fireEvent.keyDown(trigger, { key: 'Escape' });
+    fireEvent.click(trigger);
+    expect(wrapper).not.toHaveAttribute('data-dismissed');
+
+    fireEvent.keyDown(trigger, { key: 'Escape' });
+    trigger.blur();
+    trigger.focus();
+    expect(wrapper).not.toHaveAttribute('data-dismissed');
+
+    fireEvent.keyDown(trigger, { key: 'Escape' });
+    fireEvent.pointerEnter(wrapper!);
+    expect(wrapper).not.toHaveAttribute('data-dismissed');
   });
 });
