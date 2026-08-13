@@ -14,8 +14,9 @@
  *
  * # State transitions never come from the network
  *
- * Every transition in this file is caused by somebody pressing something. The connected runtime
- * produces connection state and alerts; it cannot cause a screen change. See `useConnectedRuntime`.
+ * After startup has restored durable local state, every transition in this file is caused by somebody
+ * pressing something. The connected runtime produces connection state and alerts; it cannot cause a
+ * screen change. See `useConnectedRuntime`.
  *
  * # A paired room outlives the game it was paired for
  *
@@ -68,6 +69,7 @@ import { connectionTimeline } from './ConnectionTimeline';
 import { useReplaceable } from '../pwa/useAppUpdate';
 import { ResultDeliveryCapabilityStore } from './ResultDeliveryCapability';
 import { ResultDeliveryService } from './ResultDelivery';
+import useAutomaticResultDelivery from './useAutomaticResultDelivery';
 import { clearOperatorIdentity, readOperatorName, writeOperatorName } from './OperatorIdentity';
 import { clearKeyboardPreference } from '../scorer/keyboardPreference';
 import { safeAddress } from './Diagnostics';
@@ -155,6 +157,25 @@ export type Screen =
   /** Another live tab on this device is already scoring the game that was asked for. */
   | { kind: 'duplicate'; recordId: string };
 
+/**
+ * Where durable local state puts the application after its loading screen.
+ *
+ * An unfinished game remains a deliberate Resume rather than opening itself. A completed connected
+ * result whose handoff is still outstanding likewise returns to the completion screen that owns that
+ * safety gate. Only an otherwise-idle paired device goes straight to its room.
+ */
+export function screenAfterLoad(connection: IConnectedSession | null, records: IStoredGameRecord[]): Screen {
+  if (records.some(isActive)) return { kind: 'home' };
+  if (!connection) return { kind: 'home' };
+  const connectedRecord = connection.gameRecordId
+    ? records.find((record) => record.id === connection.gameRecordId)
+    : undefined;
+  if (connectedRecord && needsHandoff(connectedRecord)) {
+    return { kind: 'completed', recordId: connectedRecord.id };
+  }
+  return { kind: 'connect', fresh: false };
+}
+
 /** The starting lineup a package named, turned into the engine's setup. */
 export function setupFromPackage(packageValue: IGamePackage): IGameSetup {
   const side = (team: IGamePackage['left']) => ({
@@ -192,6 +213,16 @@ export default function App() {
     setUnreadable(openStore.unreadable);
   }, [resultDeliveryCapabilities]);
 
+  const refreshCurrentStore = useCallback(async () => {
+    if (store) await refresh(store);
+  }, [store, refresh]);
+
+  useAutomaticResultDelivery({
+    records,
+    service: resultDelivery,
+    onAttemptFinished: refreshCurrentStore,
+  });
+
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -201,11 +232,12 @@ export default function App() {
       const listed = await opened.list();
       resultDeliveryCapabilities.prune(new Set(listed.map((record) => record.id)));
       if (cancelled) return;
+      const restoredConnection = readConnection();
       setStore(opened);
       setRecords(listed);
       setUnreadable(opened.unreadable);
-      setConnection(readConnection());
-      setScreen({ kind: 'home' });
+      setConnection(restoredConnection);
+      setScreen(screenAfterLoad(restoredConnection, listed));
     })();
     return () => {
       cancelled = true;
