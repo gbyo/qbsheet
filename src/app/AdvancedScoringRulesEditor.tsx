@@ -179,7 +179,11 @@ export default function AdvancedScoringRulesEditor(props: {
           <button
             type="button"
             className="shell-button answer-type-add"
-            onClick={() => set({ answerTypes: [...value.answerTypes, newAdvancedAnswerType()] })}
+            // A new row follows the format it is being added to, so a bonus-free one does not open
+            // with a bonus checked and a complaint about it.
+            onClick={() =>
+              set({ answerTypes: [...value.answerTypes, newAdvancedAnswerType({ awardsBonus: value.useBonuses })] })
+            }
           >
             Add an answer type
           </button>
