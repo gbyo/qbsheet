@@ -35,7 +35,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GameStore, IStoredGameRecord, isActive, needsHandoff } from '../game/GameStore';
 import { IUnreadableRecord } from '../game/GameRecordUpgrade';
-import { IGamePackage, gamePackageIdentity } from '../game/GamePackage';
+import { IGamePackage, gamePackageIdentity, gamePackageLabel } from '../game/GamePackage';
 import { IGameDefinition, isManualGame } from '../game/GameDefinition';
 import { newManualRecordIdentity } from '../game/ManualGame';
 import { openRecordStore } from '../persistence/GameDatabase';
@@ -68,7 +68,9 @@ import { connectionTimeline } from './ConnectionTimeline';
 import { useReplaceable } from '../pwa/useAppUpdate';
 import { ResultDeliveryCapabilityStore } from './ResultDeliveryCapability';
 import { ResultDeliveryService } from './ResultDelivery';
-import { readOperatorName, writeOperatorName } from './OperatorIdentity';
+import { clearOperatorIdentity, readOperatorName, writeOperatorName } from './OperatorIdentity';
+import { clearKeyboardPreference } from '../scorer/keyboardPreference';
+import { safeAddress } from './Diagnostics';
 
 /**
  * Whether the application may be replaced by a newer build while this screen is up.
@@ -100,6 +102,24 @@ export function updatesAllowedOn(screen: Screen): boolean {
  */
 export function needsAssignmentConfirmation(record: IStoredGameRecord): boolean {
   return isActive(record) && record.events.length === 0;
+}
+
+/**
+ * Whether removing the current pairing would take credentials away from an unfinished game.
+ *
+ * New connections name the record directly and older stored connections use the session id as the
+ * record's game key. The room and tournament are a conservative fallback: a long-lived room token
+ * may still be needed to repair another unfinished game from that same room even when the most
+ * recently stored session points at a different record.
+ */
+export function unfinishedGameDependsOnConnection(
+  connection: IConnectedSession | null,
+  record: IStoredGameRecord,
+): boolean {
+  if (!connection || !record.connected || !isActive(record)) return false;
+  if (connection.gameRecordId === record.id || connection.sessionId === record.gameKey) return true;
+  if (record.package.room?.id !== connection.roomId) return false;
+  return connection.tournamentKey === undefined || record.package.tournament.key === connection.tournamentKey;
 }
 
 export type Screen =
@@ -437,6 +457,42 @@ export default function App() {
 
   /** The room this device is paired with, if the pairing is still held. */
   const pairedRoom = useMemo(() => pairedRoomOf(connection), [connection]);
+  const pairingDependentGame = useMemo(
+    () => records.find((record) => unfinishedGameDependsOnConnection(connection, record)) ?? null,
+    [connection, records],
+  );
+  const settingsConnection = useMemo(
+    () =>
+      pairedRoom
+        ? {
+            roomName: pairedRoom.roomName,
+            address: safeAddress(connection?.baseUrl),
+          }
+        : null,
+    [connection?.baseUrl, pairedRoom],
+  );
+  const pairingProtection = pairingDependentGame
+    ? `QBSheet cannot remove ${pairedRoom?.roomName ?? 'this room'} while ${gamePackageLabel(pairingDependentGame.package)} is unfinished and still uses this pairing. Resume and finish the game, or ask tournament control for help first.`
+    : undefined;
+
+  const forgetPairing = useCallback(() => {
+    if (pairingDependentGame) return;
+    clearConnection();
+    connectionRef.current = null;
+    setConnection(null);
+  }, [pairingDependentGame]);
+
+  const resetDevicePreferences = useCallback(() => {
+    // Reset is all-or-nothing when pairing is protected. Clearing the harmless preferences first
+    // would leave a half-reset device while the confirmation says the operation was blocked.
+    if (pairingDependentGame) return;
+    clearOperatorIdentity();
+    clearKeyboardPreference();
+    clearConnection();
+    setOperatorName('');
+    connectionRef.current = null;
+    setConnection(null);
+  }, [pairingDependentGame]);
 
   const onComplete = useCallback(
     async (recordId: string, acceptedJustNow = false) => {
@@ -660,6 +716,10 @@ export default function App() {
       operatorName={operatorName}
       onOperatorNameChange={updateOperatorName}
       pairedRoom={pairedRoom}
+      settingsConnection={settingsConnection}
+      pairingProtection={pairingProtection}
+      onForgetPairing={forgetPairing}
+      onResetDevicePreferences={resetDevicePreferences}
       practiceInProgress={(loadGame(practiceGameKey)?.events.length ?? 0) > 0}
       onReadiness={() => setScreen({ kind: 'readiness' })}
       onPractice={() => {
