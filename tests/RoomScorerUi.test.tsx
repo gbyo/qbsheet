@@ -16,7 +16,8 @@ import scoringRulesToScorekeeperFormat from './rules';
 import { CommonRuleSets, ScoringRules } from './rules';
 import AnswerType from './AnswerType';
 import ScorerHost from '../src/scorer/ScorerHost';
-import { operationNoticeMs } from '../src/scorer/Scorer';
+import { operationNoticeMs, recoveryNoticeMs } from '../src/scorer/Scorer';
+import { saveGame } from '../src/scorer/GameSession';
 import { IRoomProcedure } from '../src/scoring/RoomProcedure';
 import { ITeamRoster } from '../src/game/Roster';
 import { RoomConnectionState } from '../src/app/ConnectionState';
@@ -70,10 +71,23 @@ function renderScorer(
   packetName?: string,
   rosterOptions: IRosterSyncTestOptions = {},
   controlOptions: IControlRequestTestOptions = {},
+  recovered = false,
 ) {
   const submit = onSubmit ?? vi.fn().mockResolvedValue({ ok: true, message: 'Sent' });
   gameCounter += 1;
   const gameKey = `test-game-${gameCounter}`;
+  if (recovered) {
+    saveGame(
+      gameKey,
+      {
+        left: { name: leftTeam.name, players: leftTeam.players.map((player) => player.name) },
+        right: { name: rightTeam.name, players: rightTeam.players.map((player) => player.name) },
+      },
+      [{ id: 'recovered-event', type: 'tossup-dead', questionNumber: 1 }],
+      new Date(),
+      window.localStorage,
+    );
+  }
   const scorer = (connection: RoomConnectionState) => (
     <ScorerHost
       gameKey={gameKey}
@@ -1868,6 +1882,37 @@ describe('operation notices', () => {
   function notice(): string | null {
     return document.querySelector('.scorer-banner.is-info')?.textContent ?? null;
   }
+
+  test('the local recovery notice can be closed with its X', () => {
+    renderScorer(formatFor(), undefined, undefined, undefined, undefined, {}, {}, true);
+
+    expect(screen.getByText('Recovered the in-progress game saved on this device.')).toBeTruthy();
+    const dismiss = screen.getByRole('button', { name: 'Dismiss recovery notice' });
+    expect(dismiss).toHaveTextContent('×');
+
+    fireEvent.click(dismiss);
+
+    expect(screen.queryByText('Recovered the in-progress game saved on this device.')).toBeNull();
+  });
+
+  test('the local recovery notice dismisses itself after fifteen seconds', () => {
+    vi.useFakeTimers();
+    try {
+      renderScorer(formatFor(), undefined, undefined, undefined, undefined, {}, {}, true);
+
+      act(() => {
+        vi.advanceTimersByTime(recoveryNoticeMs - 1);
+      });
+      expect(screen.getByText('Recovered the in-progress game saved on this device.')).toBeTruthy();
+
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(screen.queryByText('Recovered the in-progress game saved on this device.')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   test('an acknowledgement goes away on its own', () => {
     vi.useFakeTimers();
