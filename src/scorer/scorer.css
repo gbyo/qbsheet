@@ -212,7 +212,8 @@ div.scorer-banner .scorer-text-action {
   display: flex;
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .scorer-main {
@@ -221,7 +222,6 @@ div.scorer-banner .scorer-text-action {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
 }
 
 /* One sheet in two columns, divided by a rule. Not two cards with a gutter between them. */
