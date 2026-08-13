@@ -54,12 +54,19 @@ import {
 import {
   SubstitutionPolicy,
   maximumRoomBreakLabelLength,
+  maximumRoomBreakTossup,
   maximumRoomBreaks,
+  maximumHalfLengthMinutes,
+  maximumTimeoutDurationSeconds,
+  maximumTimeoutsPerTeam,
   substitutionOpportunityPhrase,
 } from '../scoring/RoomProcedure';
 import { numberValue } from './BasicScoringRulesEditor';
 import ScoringRulesEditor from './ScoringRulesEditor';
 import useLeaveWarning from './useLeaveWarning';
+import HelpTooltip from './HelpTooltip';
+
+type DraftSaveState = 'not-saved' | 'saved' | 'failed';
 
 /** The form as it opens: common rules, no round options, nothing typed. */
 function emptyInput(): IManualGameInput {
@@ -265,6 +272,9 @@ export default function ManualGameSetup(props: {
    */
   const [submissions, setSubmissions] = useState(0);
   const [startError, setStartError] = useState('');
+  const [starting, setStarting] = useState(false);
+  const startInFlight = useRef(false);
+  const [draftSaveState, setDraftSaveState] = useState<DraftSaveState>('not-saved');
   const [presets, setPresets] = useState<IManualGamePreset[]>(() => readManualGamePresets());
   const [rosterPresetId, setRosterPresetId] = useState('');
   const [rulePresetId, setRulePresetId] = useState('defaults');
@@ -302,17 +312,35 @@ export default function ManualGameSetup(props: {
   const problemsIn = (section: ManualGameSection) =>
     problems.filter((problem) => problem.section === section).map((problem) => problem.message);
 
-  useLeaveWarning({ gameInProgress: false, localSaveFailed: false, handoffOutstanding: false, setupDirty: dirty });
+  useLeaveWarning({
+    gameInProgress: false,
+    localSaveFailed: draftSaveState === 'failed',
+    handoffOutstanding: false,
+    setupDirty: dirty,
+  });
 
   useEffect(() => {
-    const storage = manualDraftStorage();
-    if (!storage) return;
-    try {
-      if (dirty) storage.setItem(manualDraftStorageKey, JSON.stringify(input));
-      else storage.removeItem(manualDraftStorageKey);
-    } catch {
-      // The before-unload warning still protects a draft when local storage is unavailable.
-    }
+    const timer = window.setTimeout(() => {
+      const storage = manualDraftStorage();
+      if (!storage) {
+        setDraftSaveState(dirty ? 'failed' : 'not-saved');
+        return;
+      }
+      try {
+        if (dirty) {
+          storage.setItem(manualDraftStorageKey, JSON.stringify(input));
+          setDraftSaveState('saved');
+        } else {
+          storage.removeItem(manualDraftStorageKey);
+          setDraftSaveState('not-saved');
+        }
+      } catch {
+        // The before-unload warning still protects a draft when local storage is unavailable, and
+        // the visible status below keeps this form from claiming a write it did not make.
+        setDraftSaveState('failed');
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [dirty, input]);
 
   // One ref each rather than an object of them, so handing one to a section is handing over the ref
@@ -339,10 +367,13 @@ export default function ManualGameSetup(props: {
 
   const submit = async (event?: FormEvent<HTMLFormElement>) => {
     event?.preventDefault();
+    if (startInFlight.current) return;
     setSubmissions((count) => count + 1);
     setStartError('');
     const defined = defineManualGame(input);
     if (!defined.ok) return;
+    startInFlight.current = true;
+    setStarting(true);
     try {
       await onStart(defined.definition);
       setPresets(rememberManualGamePreset(input));
@@ -351,6 +382,9 @@ export default function ManualGameSetup(props: {
       setStartError(
         'This game could not be saved locally. Your setup is still here; try again after storage is repaired.',
       );
+    } finally {
+      startInFlight.current = false;
+      setStarting(false);
     }
   };
 
@@ -365,12 +399,23 @@ export default function ManualGameSetup(props: {
   const loadRosters = () => {
     const preset = presets.find((candidate) => candidate.id === rosterPresetId);
     if (!preset) return;
+    const hasRosterDraft =
+      input.left.name.trim() !== '' ||
+      input.left.players.trim() !== '' ||
+      input.right.name.trim() !== '' ||
+      input.right.players.trim() !== '';
+    if (hasRosterDraft && !window.confirm('Replace the teams and rosters in this draft?')) return;
     setInput((current) => ({ ...current, left: { ...preset.left }, right: { ...preset.right } }));
   };
 
   const loadRules = () => {
     const preset = rulePresets.find((candidate) => candidate.id === rulePresetId);
     if (!preset) return;
+    const defaults = emptyInput();
+    const hasRuleDraft =
+      JSON.stringify(input.rules) !== JSON.stringify(defaults.rules) ||
+      JSON.stringify(input.options) !== JSON.stringify(defaults.options);
+    if (hasRuleDraft && !window.confirm('Replace the scoring rules and round options in this draft?')) return;
     setInput((current) => ({ ...current, rules: cloneRules(preset.rules), options: { ...preset.options } }));
   };
 
@@ -460,7 +505,7 @@ export default function ManualGameSetup(props: {
             </div>
             <div className="manual-preset-field">
               <label className="shell-label" htmlFor="manual-rule-preset">
-                Rule preset
+                Rules and round options preset
               </label>
               <select
                 id="manual-rule-preset"
@@ -475,7 +520,7 @@ export default function ManualGameSetup(props: {
                 ))}
               </select>
               <button type="button" className="shell-button" onClick={loadRules}>
-                Load rules
+                Load rules and round options
               </button>
             </div>
           </div>
@@ -483,7 +528,7 @@ export default function ManualGameSetup(props: {
         </details>
       </section>
 
-      <form aria-label="Create a game" onSubmit={submit}>
+      <form aria-label="Create a game" noValidate onSubmit={submit}>
       <section className="shell-section">
         <h2 className="shell-heading">This game</h2>
         <div className="manual-field">
@@ -568,6 +613,9 @@ export default function ManualGameSetup(props: {
                 id="manual-half-length"
                 className="shell-input manual-number"
                 type="number"
+                min={1}
+                max={maximumHalfLengthMinutes}
+                step={1}
                 value={input.options.halfLengthMinutes === undefined ? '' : String(input.options.halfLengthMinutes)}
                 onChange={(event) => setOptions({ halfLengthMinutes: numberValue(event.target.value) })}
               />
@@ -590,6 +638,9 @@ export default function ManualGameSetup(props: {
             id="manual-timeouts"
             className="shell-input manual-number"
             type="number"
+            min={0}
+            max={maximumTimeoutsPerTeam}
+            step={1}
             value={String(input.options.timeoutsPerTeam)}
             onChange={(event) => setOptions({ timeoutsPerTeam: numberValue(event.target.value) ?? 0 })}
           />
@@ -604,6 +655,9 @@ export default function ManualGameSetup(props: {
               id="manual-timeout-length"
               className="shell-input manual-number"
               type="number"
+              min={1}
+              max={maximumTimeoutDurationSeconds}
+              step={1}
               value={
                 input.options.timeoutDurationSeconds === undefined
                   ? ''
@@ -615,8 +669,16 @@ export default function ManualGameSetup(props: {
           </div>
         )}
 
-        <fieldset className="manual-fieldset">
-          <legend className="shell-label">Substitutions</legend>
+        <fieldset className="manual-fieldset" aria-labelledby="manual-substitutions-legend">
+          <legend className="shell-label">
+            <span className="label-with-help">
+              <span id="manual-substitutions-legend">Substitutions</span>
+              <HelpTooltip label="About substitution timing">
+                A phase checkpoint is a format-defined pause, such as halftime or the end of regulation. The
+                stricter option only offers lineup changes at those pauses, configured breaks, and timeouts.
+              </HelpTooltip>
+            </span>
+          </legend>
           {(
             [
               ['any-boundary', 'Between any tossups'],
@@ -649,10 +711,15 @@ export default function ManualGameSetup(props: {
       </section>
 
       {startError !== '' && <p className="shell-warning" role="alert">{startError}</p>}
-      {dirty && <p className="shell-hint">Draft saved on this device while you type.</p>}
+      {draftSaveState === 'saved' && <p className="shell-hint">Draft saved on this device while you type.</p>}
+      {draftSaveState === 'failed' && (
+        <p className="shell-warning" role="status">
+          This browser could not save the draft while you type. Keep this tab open or repair storage before leaving.
+        </p>
+      )}
       <div className="shell-actions manual-actions">
-        <button type="submit" className="shell-button is-primary">
-          Start game
+        <button type="submit" className="shell-button is-primary" disabled={starting}>
+          {starting ? 'Starting…' : 'Start game'}
         </button>
         <button type="button" className="shell-button" onClick={cancel}>
           Cancel
@@ -696,8 +763,16 @@ function ManualBreaksEditor(props: {
   };
 
   return (
-    <fieldset className="manual-fieldset manual-breaks">
-      <legend className="shell-label">Scheduled breaks</legend>
+    <fieldset className="manual-fieldset manual-breaks" aria-labelledby="manual-breaks-legend">
+      <legend className="shell-label">
+        <span className="label-with-help">
+          <span id="manual-breaks-legend">Scheduled breaks</span>
+          <HelpTooltip label="Explain automatic break timing">
+            Add the exact tossup numbers where QBSheet should pause automatically. Leave the list empty when the
+            moderator decides when to call the break.
+          </HelpTooltip>
+        </span>
+      </legend>
       <p className="shell-hint manual-breaks-hint">
         The tossups this round stops after. Leave this empty for a single break the moderator calls.
         {policy === 'breaks-timeouts-overtime' && ' These are the points the lineup may change at.'}
@@ -717,6 +792,8 @@ function ManualBreaksEditor(props: {
               type="number"
               inputMode="numeric"
               min={1}
+              max={maximumRoomBreakTossup}
+              step={1}
               value={row.afterTossup === undefined ? '' : String(row.afterTossup)}
               onChange={(event) => replace(position, { afterTossup: numberValue(event.target.value) })}
             />

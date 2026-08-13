@@ -39,6 +39,79 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+class ControllableBroadcastChannel {
+  static latest: ControllableBroadcastChannel | null = null;
+
+  private listeners = new Set<(event: MessageEvent) => void>();
+
+  closed = false;
+  readonly sent: unknown[] = [];
+
+  constructor(readonly name: string) {
+    ControllableBroadcastChannel.latest = this;
+  }
+
+  postMessage(message: unknown): void {
+    this.sent.push(message);
+  }
+
+  addEventListener(_type: 'message', listener: (event: MessageEvent) => void): void {
+    this.listeners.add(listener);
+  }
+
+  removeEventListener(_type: 'message', listener: (event: MessageEvent) => void): void {
+    this.listeners.delete(listener);
+  }
+
+  close(): void {
+    this.closed = true;
+    this.listeners.clear();
+  }
+
+  receive(data: unknown): void {
+    for (const listener of this.listeners) listener({ data } as MessageEvent);
+  }
+}
+
+describe('a duplicate tab discovered after scoring opens', () => {
+  test('a late lower-id holder immediately removes the writable scorer', async () => {
+    const original = globalThis.BroadcastChannel;
+    ControllableBroadcastChannel.latest = null;
+    Object.defineProperty(globalThis, 'BroadcastChannel', {
+      configurable: true,
+      writable: true,
+      value: ControllableBroadcastChannel,
+    });
+
+    try {
+      await openApp();
+      // This waits beyond the real 300 ms election timeout. At this point claimGame has already
+      // returned held:true and the scorer is writable.
+      await openGameFile();
+      expect(screen.getByRole('button', { name: 'Sarah Mitchell 15' })).toBeInTheDocument();
+
+      const channel = ControllableBroadcastChannel.latest as ControllableBroadcastChannel | null;
+      if (!channel) throw new Error('claimGame did not open its fallback channel');
+      const announcement = channel.sent.find(
+        (message) => (message as { kind?: string }).kind === 'candidate',
+      ) as { gameId: string } | undefined;
+      expect(announcement).toBeDefined();
+      await act(async () => {
+        channel.receive({ kind: 'holding', gameId: announcement?.gameId, from: '' });
+      });
+
+      expect(
+        screen.getByRole('heading', { name: 'This game is already open in another tab.' }),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Sarah Mitchell 15' })).toBeNull();
+      expect(channel.closed).toBe(true);
+    } finally {
+      if (original === undefined) Reflect.deleteProperty(globalThis, 'BroadcastChannel');
+      else globalThis.BroadcastChannel = original;
+    }
+  });
+});
+
 describe('a Chromebook that keeps being reloaded', () => {
   test('ten reloads mid-round, and the score is the score', async () => {
     await openApp();

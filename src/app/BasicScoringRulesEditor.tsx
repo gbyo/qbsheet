@@ -25,6 +25,7 @@
  * "NAQT" would mis-score the first tournament that edited its powers.
  */
 import { IBasicScoringRulesInput } from '../qbj/BasicScoringRules';
+import HelpTooltip from './HelpTooltip';
 
 /** A number field that tolerates being empty while it is being typed in. */
 export function numberValue(raw: string): number | undefined {
@@ -65,47 +66,74 @@ export default function BasicScoringRulesEditor(props: {
           <input
             id={id('tossup')}
             type="number"
-            value={String(value.tossupValue)}
-            onChange={(event) => set({ tossupValue: numberValue(event.target.value) ?? 0 })}
+            min={1}
+            step={1}
+            value={value.tossupValue === undefined ? '' : String(value.tossupValue)}
+            onChange={(event) => set({ tossupValue: numberValue(event.target.value) })}
           />
         </label>
-        <label htmlFor={id('power')}>
-          Power (blank for none)
+        <div>
+          <div className="label-with-help">
+            <label htmlFor={id('power')}>Power (blank for none)</label>
+            <HelpTooltip label="What is a power?">
+              A power is a tossup answered before the power mark for extra points. Leave this blank if the format
+              does not use powers.
+            </HelpTooltip>
+          </div>
           <input
             id={id('power')}
             type="number"
+            step={1}
+            inputMode="decimal"
             value={value.powerValue === undefined ? '' : String(value.powerValue)}
             onChange={(event) => set({ powerValue: numberValue(event.target.value) })}
           />
-        </label>
-        <label htmlFor={id('neg')}>
-          Neg (blank for none)
+        </div>
+        <div>
+          <div className="label-with-help">
+            <label htmlFor={id('neg')}>Neg (blank for none)</label>
+            <HelpTooltip label="What is a neg?">
+              A neg is the penalty for an incorrect buzz before the tossup ends. Enter the value as a negative
+              number, or leave it blank when there is no penalty.
+            </HelpTooltip>
+          </div>
           <input
             id={id('neg')}
             type="number"
+            step={1}
+            inputMode="decimal"
             value={value.negValue === undefined ? '' : String(value.negValue)}
             onChange={(event) => set({ negValue: numberValue(event.target.value) })}
           />
-        </label>
+        </div>
         <label htmlFor={id('tossup-count')}>
           Tossups in regulation
           <input
             id={id('tossup-count')}
             type="number"
-            value={String(value.tossupCount)}
-            onChange={(event) => set({ tossupCount: numberValue(event.target.value) ?? 0 })}
+            min={1}
+            step={1}
+            value={value.tossupCount === undefined ? '' : String(value.tossupCount)}
+            onChange={(event) => set({ tossupCount: numberValue(event.target.value) })}
           />
         </label>
         {variant === 'full' && (
-          <label htmlFor={id('max-active')}>
-            Players playing at once
+          <div>
+            <div className="label-with-help">
+              <label htmlFor={id('max-active')}>Players playing at once</label>
+              <HelpTooltip label="Explain the player limit">
+                The maximum number of active players per team. Additional rostered players begin on the bench.
+              </HelpTooltip>
+            </div>
             <input
               id={id('max-active')}
               type="number"
+              min={1}
+              step={1}
               value={value.maximumPlayersPerTeam === undefined ? '' : String(value.maximumPlayersPerTeam)}
-              onChange={(event) => set({ maximumPlayersPerTeam: numberValue(event.target.value) ?? 0 })}
+              onChange={(event) => set({ maximumPlayersPerTeam: numberValue(event.target.value) })}
             />
-          </label>
+          </div>
         )}
       </div>
 
@@ -114,7 +142,12 @@ export default function BasicScoringRulesEditor(props: {
           id={id('bonuses')}
           type="checkbox"
           checked={value.useBonuses}
-          onChange={(event) => set({ useBonuses: event.target.checked })}
+          onChange={(event) =>
+            set({
+              useBonuses: event.target.checked,
+              ...(event.target.checked ? {} : { bonusesBounceBack: false, overtimeIncludesBonuses: false }),
+            })
+          }
         />
         {variant === 'full' ? 'Use bonuses' : 'This tournament uses bonuses'}
       </label>
@@ -127,6 +160,8 @@ export default function BasicScoringRulesEditor(props: {
               <input
                 id={id('bonus-part')}
                 type="number"
+                min={1}
+                step={1}
                 value={value.pointsPerBonusPart === undefined ? '' : String(value.pointsPerBonusPart)}
                 onChange={(event) => set({ pointsPerBonusPart: numberValue(event.target.value) })}
               />
@@ -136,34 +171,47 @@ export default function BasicScoringRulesEditor(props: {
               <input
                 id={id('bonus-parts')}
                 type="number"
+                min={1}
+                step={1}
                 value={value.partsPerBonus === undefined ? '' : String(value.partsPerBonus)}
                 onChange={(event) => set({ partsPerBonus: numberValue(event.target.value) })}
               />
             </label>
           </div>
           {variant === 'full' && (
-            <label className="rules-setup-check" htmlFor={id('bounce-back')}>
-              <input
-                id={id('bounce-back')}
-                type="checkbox"
-                checked={value.bonusesBounceBack === true}
-                onChange={(event) => set({ bonusesBounceBack: event.target.checked })}
-              />
-              Missed parts bounce back
-            </label>
+            <div className="rules-check-with-help">
+              <label className="rules-setup-check" htmlFor={id('bounce-back')}>
+                <input
+                  id={id('bounce-back')}
+                  type="checkbox"
+                  checked={value.bonusesBounceBack === true}
+                  onChange={(event) => set({ bonusesBounceBack: event.target.checked })}
+                />
+                Missed parts bounce back
+              </label>
+              <HelpTooltip label="What does bonus bounceback mean?">
+                When the team controlling a bonus misses a part, the other team gets a chance to answer that part.
+              </HelpTooltip>
+            </div>
           )}
         </>
       )}
 
-      <label className="rules-setup-check" htmlFor={id('timed')}>
-        <input
-          id={id('timed')}
-          type="checkbox"
-          checked={value.timed === true}
-          onChange={(event) => set({ timed: event.target.checked })}
-        />
-        {variant === 'full' ? 'Round is timed' : 'Rounds run on a clock'}
-      </label>
+      <div className="rules-check-with-help">
+        <label className="rules-setup-check" htmlFor={id('timed')}>
+          <input
+            id={id('timed')}
+            type="checkbox"
+            checked={value.timed === true}
+            onChange={(event) => set({ timed: event.target.checked })}
+          />
+          {variant === 'full' ? 'Round is timed' : 'Rounds run on a clock'}
+        </label>
+        <HelpTooltip label="About timed rounds">
+          In a timed round, regulation ends when the moderator calls time; the tossup count is still used as a
+          maximum.
+        </HelpTooltip>
+      </div>
       {timedHint && <p className="shell-hint rules-fields-hint">{timedHint}</p>}
 
       {variant === 'full' && (
@@ -172,37 +220,53 @@ export default function BasicScoringRulesEditor(props: {
             Overtime and lightning
           </h3>
           <div className="rules-setup-grid">
-            <label htmlFor={id('overtime-count')}>
-              Initial overtime tossups
+            <div>
+              <div className="label-with-help">
+                <label htmlFor={id('overtime-count')}>Initial overtime tossups</label>
+                <HelpTooltip label="Explain the overtime length">
+                  The number of tossups guaranteed when regulation ends tied. If the game remains tied, QBSheet
+                  continues with sudden-death tossups.
+                </HelpTooltip>
+              </div>
               <input
                 id={id('overtime-count')}
                 type="number"
+                min={1}
+                step={1}
                 value={value.overtimeQuestionCount === undefined ? '' : String(value.overtimeQuestionCount)}
                 onChange={(event) => set({ overtimeQuestionCount: numberValue(event.target.value) })}
               />
-            </label>
+            </div>
           </div>
           <p className="shell-hint rules-fields-hint">One tossup means overtime is sudden death.</p>
 
-          <label className="rules-setup-check" htmlFor={id('overtime-bonuses')}>
-            <input
-              id={id('overtime-bonuses')}
-              type="checkbox"
-              checked={value.overtimeIncludesBonuses === true}
-              onChange={(event) => set({ overtimeIncludesBonuses: event.target.checked })}
-            />
-            Bonuses in overtime
-          </label>
+          {value.useBonuses && (
+            <label className="rules-setup-check" htmlFor={id('overtime-bonuses')}>
+              <input
+                id={id('overtime-bonuses')}
+                type="checkbox"
+                checked={value.overtimeIncludesBonuses === true}
+                onChange={(event) => set({ overtimeIncludesBonuses: event.target.checked })}
+              />
+              Bonuses in overtime
+            </label>
+          )}
 
-          <label className="rules-setup-check" htmlFor={id('lightning')}>
-            <input
-              id={id('lightning')}
-              type="checkbox"
-              checked={value.useLightning === true}
-              onChange={(event) => set({ useLightning: event.target.checked })}
-            />
-            Use lightning
-          </label>
+          <div className="rules-check-with-help">
+            <label className="rules-setup-check" htmlFor={id('lightning')}>
+              <input
+                id={id('lightning')}
+                type="checkbox"
+                checked={value.useLightning === true}
+                onChange={(event) => set({ useLightning: event.target.checked })}
+              />
+              Use lightning
+            </label>
+            <HelpTooltip label="What is lightning?">
+              A lightning round is a separate timed or worksheet-style scoring phase. Its points are added outside
+              the tossup-and-bonus cycle.
+            </HelpTooltip>
+          </div>
 
           {value.useLightning === true && (
             <div className="rules-setup-grid">
@@ -211,6 +275,8 @@ export default function BasicScoringRulesEditor(props: {
                 <input
                   id={id('lightning-count')}
                   type="number"
+                  min={1}
+                  step={1}
                   value={value.lightningCountPerTeam === undefined ? '' : String(value.lightningCountPerTeam)}
                   onChange={(event) => set({ lightningCountPerTeam: numberValue(event.target.value) })}
                 />
@@ -220,6 +286,8 @@ export default function BasicScoringRulesEditor(props: {
                 <input
                   id={id('lightning-divisor')}
                   type="number"
+                  min={1}
+                  step={1}
                   value={value.lightningDivisor === undefined ? '' : String(value.lightningDivisor)}
                   onChange={(event) => set({ lightningDivisor: numberValue(event.target.value) })}
                 />

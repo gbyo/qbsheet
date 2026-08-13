@@ -15,6 +15,8 @@ export interface IGameMenuItem {
   label: string;
   icon: ControlIconName;
   onSelect: () => void;
+  /** A mutation that is temporarily unavailable, e.g. while a result is being submitted. */
+  disabled?: boolean;
   /** Rendered in red and separated from the rest. */
   destructive?: boolean;
   /**
@@ -135,6 +137,13 @@ export default function GameMenu(props: { items: IGameMenuItem[] }) {
                   }}
                   role="menuitem"
                   className={item.destructive ? 'scorer-menu-item is-destructive' : 'scorer-menu-item'}
+                  disabled={item.disabled}
+                  aria-disabled={item.disabled || undefined}
+                  onBlur={(event) => {
+                    if (!event.currentTarget.parentElement?.parentElement?.contains(event.relatedTarget as Node | null)) {
+                      setOpen(false);
+                    }
+                  }}
                   onKeyDown={(event) => {
                     if (event.key === 'ArrowDown') {
                       event.preventDefault();
@@ -155,6 +164,7 @@ export default function GameMenu(props: { items: IGameMenuItem[] }) {
                     }
                   }}
                   onClick={() => {
+                    if (item.disabled) return;
                     setOpen(false);
                     trigger.current?.focus();
                     item.onSelect();

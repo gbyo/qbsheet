@@ -94,10 +94,10 @@ export interface IAdvancedScoringRulesInput {
   maximumPartsPerBonus?: number;
   bonusesBounceBack: boolean;
 
-  tossupCount: number;
+  tossupCount?: number;
   /** The longest a regulation can run, where that differs from the planned length. */
   maximumTossupCount?: number;
-  maximumPlayersPerTeam: number;
+  maximumPlayersPerTeam?: number;
 
   overtimeQuestionCount?: number;
   overtimeIncludesBonuses?: boolean;
@@ -132,13 +132,31 @@ export function newAdvancedAnswerType(
  * Switching a form from basic to advanced must not lose what was typed, and must not change what the
  * game is worth. So the conversion is mechanical: the power, correct and neg values become three rows
  * in the order the reference implementation would sort them, and every other field carries across.
+ *
+ * `awardsBonus` follows `useBonuses` rather than being true for every positive row, which is what
+ * `basicScoringRulesToQbj` writes for the same format. A bonus-free format whose rows still claim a
+ * bonus is not the same rule set read back: `bonusesAreUsed` takes one `awards_bonus: true` as
+ * evidence that bonuses are in play, so the advanced form would open on a format that cannot start a
+ * game, complaining about bonus fields for bonuses the scorekeeper turned off.
  */
 export function advancedFromBasic(basic: IBasicScoringRulesInput): IAdvancedScoringRulesInput {
   const answerTypes: IAdvancedAnswerTypeInput[] = [];
   if (basic.powerValue !== undefined) {
-    answerTypes.push(newAdvancedAnswerType({ value: basic.powerValue, ...basicAnswerTypeNames.power }));
+    answerTypes.push(
+      newAdvancedAnswerType({
+        value: basic.powerValue,
+        ...basicAnswerTypeNames.power,
+        awardsBonus: basic.useBonuses,
+      }),
+    );
   }
-  answerTypes.push(newAdvancedAnswerType({ value: basic.tossupValue, ...basicAnswerTypeNames.correct }));
+  answerTypes.push(
+    newAdvancedAnswerType({
+      value: basic.tossupValue,
+      ...basicAnswerTypeNames.correct,
+      awardsBonus: basic.useBonuses,
+    }),
+  );
   if (basic.negValue !== undefined) {
     answerTypes.push(newAdvancedAnswerType({ value: basic.negValue, ...basicAnswerTypeNames.neg, awardsBonus: false }));
   }
@@ -200,6 +218,7 @@ export function advancedFitsBasicForm(input: IAdvancedScoringRulesInput): boolea
 
   const values = input.answerTypes.map((type) => type.value).filter((value): value is number => value !== undefined);
   if (values.length !== input.answerTypes.length) return false;
+  if (new Set(values).size !== values.length) return false;
 
   const positives = values.filter((value) => value > 0);
   const negatives = values.filter((value) => value < 0);
@@ -208,25 +227,45 @@ export function advancedFitsBasicForm(input: IAdvancedScoringRulesInput): boolea
   if (negatives.length > 1) return false;
   // One ordinary value and at most one power above it is the whole of what the basic grid holds.
   if (positives.length < 1 || positives.length > 2) return false;
-  // The basic form's `awardsBonus` is derived rather than stated: positive earns a bonus, negs do not.
-  if (!input.answerTypes.every((type) => type.awardsBonus === (type.value ?? 0) > 0)) return false;
+  // The basic form's `awardsBonus` is derived rather than stated: with bonuses on, a positive value
+  // earns one and a neg does not; with bonuses off, nothing does. So a row that disagrees is a rule
+  // the basic fields cannot state, and going back would rewrite it.
+  if (!input.answerTypes.every((type) => type.awardsBonus === (input.useBonuses && (type.value ?? 0) > 0))) {
+    return false;
+  }
 
-  // The name each row would come back with, keyed by the value that decides its role. Descending, so
-  // with two positives the larger is the power — the same reading `basicFromAdvanced` performs.
+  // The rows the basic form would come back with. Descending, so with two positives the larger is the
+  // power — the same reading `basicFromAdvanced` performs.
+  //
+  // Matched as a multiset rather than looked up by value, because a value is not an identity here. Two
+  // rows worth the same collapse into one entry in a value-keyed map, and the entry that survives is
+  // the ordinary one — so a second `Correct / C` matched the reconstructed `Power`, and a rename this
+  // function exists to refuse was called lossless. `fieldProblems` does complain about two rows worth
+  // the same, but that complaint and this check are independent: the simpler screen is offered on this
+  // answer alone, so a row somebody is halfway through editing must not be the way past it.
   const descending = [...values].sort((a, b) => b - a);
   const positivesDescending = descending.filter((value) => value > 0);
-  const namesByValue = new Map<number, { label: string; shortLabel: string }>();
-  if (positivesDescending.length === 2) namesByValue.set(positivesDescending[0], basicAnswerTypeNames.power);
-  namesByValue.set(positivesDescending[positivesDescending.length - 1], basicAnswerTypeNames.correct);
-  const negative = descending.find((value) => value < 0);
-  if (negative !== undefined) namesByValue.set(negative, basicAnswerTypeNames.neg);
+  // Trimmed, because that is what `advancedScoringRulesToQbj` writes; trailing space in a text box is
+  // not a rule anybody stated and must not be the thing that refuses the conversion.
+  const rowKey = (value: number, names: { label: string; shortLabel: string }) =>
+    JSON.stringify([value, names.label.trim(), names.shortLabel.trim()]);
 
+  const expected: string[] = [];
+  if (positivesDescending.length === 2) expected.push(rowKey(positivesDescending[0], basicAnswerTypeNames.power));
+  expected.push(rowKey(positivesDescending[positivesDescending.length - 1], basicAnswerTypeNames.correct));
+  const negative = descending.find((value) => value < 0);
+  if (negative !== undefined) expected.push(rowKey(negative, basicAnswerTypeNames.neg));
+  // Counted both ways: a row matching nothing refuses below, and a row the reconstruction would add
+  // would otherwise leave `every` passing on the rows that happen to be there.
+  if (input.answerTypes.length !== expected.length) return false;
+
+  const unmatched = [...expected];
   return input.answerTypes.every((type) => {
-    const reconstructed = namesByValue.get(type.value as number);
-    if (reconstructed === undefined) return false;
-    // Trimmed, because that is what `advancedScoringRulesToQbj` writes; trailing space in a text box
-    // is not a rule anybody stated and must not be the thing that refuses the conversion.
-    return type.label.trim() === reconstructed.label && type.shortLabel.trim() === reconstructed.shortLabel;
+    const position = unmatched.indexOf(rowKey(type.value as number, type));
+    if (position === -1) return false;
+    // Consumed, so two rows cannot both claim the same reconstructed one.
+    unmatched.splice(position, 1);
+    return true;
   });
 }
 
@@ -331,9 +370,9 @@ export function advancedScoringRulesToQbj(input: IAdvancedScoringRulesInput): Qb
     id: 'ScoringRules_Entered',
     name: input.name ?? 'Scoring rules entered in the room',
     teams_per_match: 2,
-    maximum_players_per_team: input.maximumPlayersPerTeam,
-    regulation_tossup_count: input.tossupCount,
-    maximum_regulation_tossup_count: input.maximumTossupCount ?? input.tossupCount,
+    maximum_players_per_team: input.maximumPlayersPerTeam ?? 0,
+    regulation_tossup_count: input.tossupCount ?? 0,
+    maximum_regulation_tossup_count: input.maximumTossupCount ?? input.tossupCount ?? 0,
     minimum_overtime_question_count: input.overtimeQuestionCount ?? 1,
     overtime_includes_bonuses: input.overtimeIncludesBonuses === true,
     answer_types: answerTypes,
@@ -371,9 +410,11 @@ function fieldProblems(input: IAdvancedScoringRulesInput): string[] {
   if (input.answerTypes.length === 0) {
     problems.push('Add at least one way to answer a tossup.');
   }
+  const named = (type: IAdvancedAnswerTypeInput, position: number) =>
+    type.label.trim() !== '' ? `"${type.label.trim()}"` : `Answer type ${position + 1}`;
   const seenValues = new Set<number>();
   input.answerTypes.forEach((type, position) => {
-    const which = type.label.trim() !== '' ? `"${type.label.trim()}"` : `Answer type ${position + 1}`;
+    const which = named(type, position);
     if (type.value === undefined) {
       problems.push(`${which} needs a point value.`);
       return;
@@ -391,10 +432,15 @@ function fieldProblems(input: IAdvancedScoringRulesInput): string[] {
     seenValues.add(type.value);
   });
 
+  wholeAtLeastOne(input.tossupCount, 'Tossups in regulation must be at least 1.');
   wholeAtLeastOne(input.maximumPlayersPerTeam, 'Players playing at once must be at least 1.');
 
-  if (input.maximumTossupCount !== undefined && input.maximumTossupCount < input.tossupCount) {
-    problems.push('The maximum tossup count cannot be below the regulation tossup count.');
+  if (input.maximumTossupCount !== undefined) {
+    if (!Number.isInteger(input.maximumTossupCount) || input.maximumTossupCount < 1) {
+      problems.push('The maximum tossup count must be at least 1.');
+    } else if (input.tossupCount !== undefined && input.maximumTossupCount < input.tossupCount) {
+      problems.push('The maximum tossup count cannot be below the regulation tossup count.');
+    }
   }
 
   // --- bonuses --------------------------------------------------------------------------------
@@ -424,6 +470,17 @@ function fieldProblems(input: IAdvancedScoringRulesInput): string[] {
     if (!input.answerTypes.some((type) => type.awardsBonus)) {
       problems.push('This format uses bonuses but no answer type earns one.');
     }
+  } else {
+    // The other direction, which is the one a scorekeeper hits by accident: the bonus checkbox on a
+    // row is still there when bonuses are off. `advancedScoringRulesToQbj` writes no bonus fields but
+    // does write the flag, and `bonusesAreUsed` reads that flag as bonuses being in play — so without
+    // this the screen complains about missing bonus structure for bonuses nobody asked for, naming
+    // none of the rows that caused it.
+    input.answerTypes.forEach((type, position) => {
+      if (type.awardsBonus) {
+        problems.push(`${named(type, position)} earns a bonus, but this format does not use bonuses.`);
+      }
+    });
   }
 
   if (input.useLightning) {
@@ -438,7 +495,10 @@ function fieldProblems(input: IAdvancedScoringRulesInput): string[] {
 export function advancedScoringRulesProblems(input: IAdvancedScoringRulesInput): string[] {
   const fields = fieldProblems(input);
   const result = readAdvancedScoringRules(input);
-  return [...fields, ...(result.ok ? [] : result.problems)];
+  const parserProblems = result.ok
+    ? []
+    : result.problems.filter((problem) => !problem.includes("reuses another answer type's QBJ identity"));
+  return [...fields, ...parserProblems];
 }
 
 /**

@@ -765,7 +765,7 @@ describe('a procedure that does not allow substitutions right now', () => {
         .getAllByText('Replace')
         .every((button) => button.hasAttribute('disabled')),
     ).toBe(true);
-    expect(screen.getByText(/at a break, at a timeout, or at a phase checkpoint/)).toBeTruthy();
+    expect(screen.getAllByText(/at a break, at a timeout, or at a phase checkpoint/).length).toBeGreaterThan(0);
   });
 });
 

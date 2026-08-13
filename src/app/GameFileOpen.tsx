@@ -12,7 +12,13 @@ import { DragEvent, useRef, useState } from 'react';
 import { FileGameSource, fileFromDrop, gameFileAccept } from '../integrations/file/FileGameSource';
 import { IGameDefinition } from '../game/GameDefinition';
 import { chooseGame } from '../game/OpenGameDefinition';
-import { IGameDefinitionOverrides, IQbjMatchCandidate, IQbjSource, orderCandidates } from '../qbj/ParseQbjAssignment';
+import {
+  IGameDefinitionOverrides,
+  IQbjMatchCandidate,
+  IQbjSource,
+  MatchPlayState,
+  orderCandidates,
+} from '../qbj/ParseQbjAssignment';
 import { IRosterPlayer } from '../game/Roster';
 import { IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
 import ScoringRulesSetup from './ScoringRulesSetup';
@@ -38,6 +44,12 @@ interface IPendingSetup {
   overrides: IGameDefinitionOverrides;
   /** Which teams still need a roster. Empty for the rules question. */
   teams: string[];
+  state: MatchPlayState;
+}
+
+interface IPendingPlayedGame {
+  definition: IGameDefinition;
+  state: Exclude<MatchPlayState, 'unplayed'>;
 }
 
 export default function GameFileOpen(props: {
@@ -53,6 +65,8 @@ export default function GameFileOpen(props: {
   const [choice, setChoice] = useState<IPendingChoice | null>(null);
   const [needsRules, setNeedsRules] = useState<IPendingSetup | null>(null);
   const [needsRoster, setNeedsRoster] = useState<IPendingSetup | null>(null);
+  const [playedGame, setPlayedGame] = useState<IPendingPlayedGame | null>(null);
+  const readInFlight = useRef(false);
 
   /*
    * Provenance notices are deliberately not shown here. Opening a game replaces this screen, so
@@ -66,12 +80,15 @@ export default function GameFileOpen(props: {
 
   const read = async (file: File | null) => {
     if (!file) return;
+    if (readInFlight.current) return;
+    readInFlight.current = true;
     setBusy(true);
     setErrors([]);
     setDiagnostic('');
     setChoice(null);
     setNeedsRules(null);
     setNeedsRoster(null);
+    setPlayedGame(null);
     try {
       const result = await new FileGameSource(file).open();
       if (!result.ok) {
@@ -88,12 +105,17 @@ export default function GameFileOpen(props: {
         setChoice({ source: result.source, candidates: orderCandidates(result.source.candidates) });
         return;
       }
-      await accept(result.definition);
+      if (result.state === 'unplayed') {
+        await accept(result.definition);
+      } else {
+        setPlayedGame({ definition: result.definition, state: result.state });
+      }
     } catch (error: unknown) {
       const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
       setErrors(['QBSheet encountered an unexpected error while opening this file. Try another copy or ask tournament staff for the original file.']);
       setDiagnostic(detail);
     } finally {
+      readInFlight.current = false;
       setBusy(false);
     }
   };
@@ -105,16 +127,22 @@ export default function GameFileOpen(props: {
    * the rules form, answering the roster form — so an answerable gap is asked about the same way
    * whichever route uncovered it, and the accumulated answers are carried forward.
    */
-  const resolve = async (source: IQbjSource, index: number, overrides: IGameDefinitionOverrides) => {
+  const resolve = async (
+    source: IQbjSource,
+    index: number,
+    overrides: IGameDefinitionOverrides,
+    state: MatchPlayState = source.candidates.find((candidate) => candidate.index === index)?.state ?? 'unplayed',
+  ) => {
     const defined = chooseGame(source, index, overrides);
     if (defined.ok) {
       setChoice(null);
       setNeedsRules(null);
       setNeedsRoster(null);
-      await accept(defined.definition);
+      if (state === 'unplayed') await accept(defined.definition);
+      else setPlayedGame({ definition: defined.definition, state });
       return;
     }
-    const pending: IPendingSetup = { source, index, reason: defined.errors, overrides, teams: [] };
+    const pending: IPendingSetup = { source, index, reason: defined.errors, overrides, teams: [], state };
     if (defined.needsScoringRules) {
       setChoice(null);
       setNeedsRoster(null);
@@ -132,7 +160,7 @@ export default function GameFileOpen(props: {
 
   const pick = async (candidate: IQbjMatchCandidate) => {
     if (!choice) return;
-    await resolve(choice.source, candidate.index, {});
+    await resolve(choice.source, candidate.index, {}, candidate.state);
   };
 
   const applyRules = async (format: IScorekeeperFormat) => {
@@ -141,7 +169,7 @@ export default function GameFileOpen(props: {
       ...needsRules.overrides,
       scorekeeperFormat: format,
       timed: format.regulation.timed,
-    });
+    }, needsRules.state);
   };
 
   const applyRosters = async (rosters: Record<string, IRosterPlayer[]>) => {
@@ -149,7 +177,14 @@ export default function GameFileOpen(props: {
     await resolve(needsRoster.source, needsRoster.index, {
       ...needsRoster.overrides,
       rosters: { ...needsRoster.overrides.rosters, ...rosters },
-    });
+    }, needsRoster.state);
+  };
+
+  const restorePicker = (pending: IPendingSetup) => {
+    setNeedsRules(null);
+    setNeedsRoster(null);
+    setErrors([]);
+    setChoice({ source: pending.source, candidates: orderCandidates(pending.source.candidates) });
   };
 
   const onDrop = (event: DragEvent<HTMLDivElement>) => {
@@ -187,7 +222,7 @@ export default function GameFileOpen(props: {
         <ScoringRulesSetup
           reason={needsRules.reason}
           onUse={(format) => void applyRules(format)}
-          onCancel={() => setNeedsRules(null)}
+          onCancel={() => restorePicker(needsRules)}
         />
       )}
       {needsRoster && (
@@ -195,7 +230,18 @@ export default function GameFileOpen(props: {
           teams={needsRoster.teams}
           reason={needsRoster.reason}
           onUse={(rosters) => void applyRosters(rosters)}
-          onCancel={() => setNeedsRoster(null)}
+          onCancel={() => restorePicker(needsRoster)}
+        />
+      )}
+      {playedGame && (
+        <PlayedGamePrompt
+          state={playedGame.state}
+          onStart={() => {
+            const definition = playedGame.definition;
+            setPlayedGame(null);
+            void accept(definition);
+          }}
+          onCancel={() => setPlayedGame(null)}
         />
       )}
       {errors.length > 0 && (
@@ -231,14 +277,16 @@ export default function GameFileOpen(props: {
 function GamePicker(props: { choice: IPendingChoice; onPick: (candidate: IQbjMatchCandidate) => void }) {
   const { choice, onPick } = props;
 
-  const groups: { label: string; candidates: IQbjMatchCandidate[] }[] = [];
+  const groups: { label: string; key: string; candidates: IQbjMatchCandidate[] }[] = [];
   for (const candidate of choice.candidates) {
-    const label = candidate.roundName
+    const roundLabel = candidate.roundName
       ? `Round ${candidate.roundName}`.replace(/^Round Round /, 'Round ')
-      : candidate.phaseName ?? 'Games';
-    const existing = groups.find((group) => group.label === label);
+      : 'Games';
+    const label = candidate.phaseName ? `${candidate.phaseName} · ${roundLabel}` : roundLabel;
+    const groupKey = `${candidate.phaseName ?? ''}\u001f${candidate.roundName ?? ''}`;
+    const existing = groups.find((group) => group.label === label && group.key === groupKey);
     if (existing) existing.candidates.push(candidate);
-    else groups.push({ label, candidates: [candidate] });
+    else groups.push({ label, key: groupKey, candidates: [candidate] });
   }
 
   return (
@@ -267,5 +315,31 @@ function GamePicker(props: { choice: IPendingChoice; onPick: (candidate: IQbjMat
         </section>
       ))}
     </div>
+  );
+}
+
+function PlayedGamePrompt(props: {
+  state: Exclude<MatchPlayState, 'unplayed'>;
+  onStart: () => void;
+  onCancel: () => void;
+}) {
+  const { state, onStart, onCancel } = props;
+  const description = state === 'complete' ? 'completed result' : 'partially scored game';
+  return (
+    <section className="file-played-warning" aria-labelledby="file-played-title">
+      <h2 id="file-played-title">This file already has a {description}</h2>
+      <p>
+        QBSheet can read the assignment, but it cannot import the file&apos;s event history into a live
+        scoresheet. Starting here creates a new scoresheet; the original file is unchanged.
+      </p>
+      <div className="shell-actions">
+        <button type="button" className="shell-button is-primary" onClick={onStart}>
+          Start a new scoresheet
+        </button>
+        <button type="button" className="shell-button" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </section>
   );
 }

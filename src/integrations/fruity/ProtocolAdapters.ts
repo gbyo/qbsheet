@@ -102,15 +102,22 @@ export function readAssignmentStatus(value: unknown): {
   session: IResumableSession | null;
   blockedReason?: string;
   blockedMessage?: string;
+  nextAssignmentLabel?: string;
 } | null {
   if (!isRecord(value)) return null;
   const rawSession = isRecord(value.session) ? value.session : null;
   const sessionId = rawSession ? stringOf(rawSession.session_id) : undefined;
+  const rawNext = isRecord(value.next) ? value.next : null;
+  const nextAssignmentLabel =
+    rawNext && typeof rawNext.label === 'string' && rawNext.label.trim() !== ''
+      ? rawNext.label
+      : undefined;
   return {
     state: readAssignmentState(value.state),
     session: sessionId ? { sessionId, resumable: rawSession?.resumable !== false } : null,
     ...(stringOf(value.blocked_reason) ? { blockedReason: stringOf(value.blocked_reason) } : {}),
     ...(stringOf(value.blocked_message) ? { blockedMessage: stringOf(value.blocked_message) } : {}),
+    ...(nextAssignmentLabel !== undefined ? { nextAssignmentLabel } : {}),
   };
 }
 
@@ -391,6 +398,7 @@ export class QbtcpAdapter extends BaseAdapter {
           session: operational.session,
           ...(operational.blockedReason ? { blockedReason: operational.blockedReason } : {}),
           ...(operational.blockedMessage ? { blockedMessage: operational.blockedMessage } : {}),
+          ...(operational.nextAssignmentLabel ? { nextAssignmentLabel: operational.nextAssignmentLabel } : {}),
         },
       };
     }
@@ -404,13 +412,29 @@ export class QbtcpAdapter extends BaseAdapter {
     if (body.value === null || body.value === undefined) {
       return {
         ok: true,
-        value: { ...base, state: operational?.state ?? 'none', definition: null, session: operational?.session ?? null },
+        value: {
+          ...base,
+          state: operational?.state ?? 'none',
+          definition: null,
+          session: operational?.session ?? null,
+          ...(operational?.nextAssignmentLabel ? { nextAssignmentLabel: operational.nextAssignmentLabel } : {}),
+        },
       };
     }
 
     const opened = qbtcpAssignmentToDefinition(body.value);
     if (!opened.ok) {
-      return { ok: true, value: { ...base, state: 'assigned', definition: null, session: operational?.session ?? null, errors: opened.errors } };
+      return {
+        ok: true,
+        value: {
+          ...base,
+          state: 'assigned',
+          definition: null,
+          session: operational?.session ?? null,
+          ...(operational?.nextAssignmentLabel ? { nextAssignmentLabel: operational.nextAssignmentLabel } : {}),
+          errors: opened.errors,
+        },
+      };
     }
     if (opened.kind === 'choice') {
       return {
@@ -420,6 +444,7 @@ export class QbtcpAdapter extends BaseAdapter {
           state: 'assigned',
           definition: null,
           session: operational?.session ?? null,
+          ...(operational?.nextAssignmentLabel ? { nextAssignmentLabel: operational.nextAssignmentLabel } : {}),
           errors: ['Tournament control sent more than one game for this room. Ask tournament control to reissue the assignment.'],
         },
       };
@@ -437,6 +462,7 @@ export class QbtcpAdapter extends BaseAdapter {
         definition,
         ...(scheduledMatchIdOf(definition) ? { scheduledMatchId: scheduledMatchIdOf(definition) } : {}),
         session: operational?.session ?? null,
+        ...(operational?.nextAssignmentLabel ? { nextAssignmentLabel: operational.nextAssignmentLabel } : {}),
       },
     };
   }

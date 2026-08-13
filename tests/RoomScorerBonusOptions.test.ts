@@ -5,12 +5,15 @@ import { describe, expect, test } from 'vitest';
 import scoringRulesToScorekeeperFormat from './rules';
 import { CommonRuleSets, ScoringRules } from './rules';
 import {
+  bonusPartForOutcome,
+  bonusPartOutcome,
   bonusPartProblem,
   bonusScoreProblem,
   bonusTotalProblem,
   bouncebackNeedsTypedEntry,
   bouncebackOptions,
   lightningTotalProblem,
+  regularBonusPartCount,
   regularBonusTotals,
 } from '../src/scorer/bonusOptions';
 
@@ -248,5 +251,87 @@ describe('validating a lightning total', () => {
   test('fractional and non-finite totals are refused', () => {
     expect(lightningTotalProblem(5, 12.5)).toContain('whole number');
     expect(lightningTotalProblem(5, Number.NaN)).toContain('whole number');
+  });
+});
+
+/**
+ * The part vocabulary both bonus screens share.
+ *
+ * The live prompt and the correction editor each render their own controls, but what "the other
+ * team got part 2" means as stored points is decided here, once. If these two functions ever stop
+ * being each other's inverse, one screen starts reading back something the other did not record.
+ */
+describe('who got one bonus part', () => {
+  test('an outcome becomes a whole part, never a half-written one', () => {
+    const bonus = bonusFor((rules) => {
+      rules.bonusesBounceBack = true;
+    });
+
+    expect(bonusPartForOutcome(bonus, 'controlled')).toEqual({ controlledPoints: 10 });
+    expect(bonusPartForOutcome(bonus, 'bounceback')).toEqual({ controlledPoints: 0, bouncebackPoints: 10 });
+    expect(bonusPartForOutcome(bonus, 'missed')).toEqual({ controlledPoints: 0 });
+  });
+
+  test(`what a part is worth is the format’s, not ten`, () => {
+    const bonus = bonusFor((rules) => {
+      rules.pointsPerBonusPart = 5;
+      rules.maximumBonusScore = 15;
+      rules.bonusDivisor = 5;
+    });
+
+    expect(bonusPartForOutcome(bonus, 'controlled')).toEqual({ controlledPoints: 5 });
+  });
+
+  test('a stored part reads back as the outcome that produced it', () => {
+    const bonus = bonusFor((rules) => {
+      rules.bonusesBounceBack = true;
+    });
+
+    for (const outcome of ['controlled', 'bounceback', 'missed'] as const) {
+      expect(bonusPartOutcome(bonus, bonusPartForOutcome(bonus, outcome))).toBe(outcome);
+    }
+  });
+
+  test('a part the format cannot explain is not guessed at', () => {
+    const bonus = bonusFor((rules) => {
+      rules.bonusesBounceBack = true;
+    });
+
+    // Half a part, and a part paying both teams: neither is one of the three outcomes.
+    expect(bonusPartOutcome(bonus, { controlledPoints: 5 })).toBeNull();
+    expect(bonusPartOutcome(bonus, { controlledPoints: 10, bouncebackPoints: 10 })).toBeNull();
+  });
+
+  test('a bounceback part in a format that does not bounce is not an outcome either', () => {
+    expect(bonusPartOutcome(bonusFor(), { controlledPoints: 0, bouncebackPoints: 10 })).toBeNull();
+  });
+});
+
+describe('how many parts a bonus has', () => {
+  test('the count falls out of the maximum and what a part is worth', () => {
+    expect(regularBonusPartCount(bonusFor())).toBe(3);
+    expect(
+      regularBonusPartCount(
+        bonusFor((rules) => {
+          rules.minimumPartsPerBonus = 4;
+          rules.maximumPartsPerBonus = 4;
+          rules.maximumBonusScore = 20;
+          rules.pointsPerBonusPart = 5;
+          rules.bonusDivisor = 5;
+        }),
+      ),
+    ).toBe(4);
+  });
+
+  test('an irregular bonus has no count to offer', () => {
+    expect(
+      regularBonusPartCount(
+        bonusFor((rules) => {
+          rules.minimumPartsPerBonus = 1;
+          rules.maximumPartsPerBonus = 5;
+          rules.pointsPerBonusPart = 0;
+        }),
+      ),
+    ).toBeNull();
   });
 });

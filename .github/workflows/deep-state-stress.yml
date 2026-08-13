@@ -32,10 +32,10 @@ jobs:
       QBSHEET_STRESS_ACTIONS: ${{ inputs.actions || '120' }}
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm

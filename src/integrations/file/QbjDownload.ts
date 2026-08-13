@@ -71,12 +71,13 @@ function defaultDownloadEnvironment(): IDownloadEnvironment | null {
 
 /** Write a file to the scorekeeper's downloads folder. */
 export function downloadFile(
-  contents: string,
+  contents: BlobPart,
   fileName: string,
   environment: IDownloadEnvironment | null = defaultDownloadEnvironment(),
+  mediaType = 'application/json',
 ): boolean {
   if (!environment) return false;
-  const blob = new Blob([contents], { type: 'application/json' });
+  const blob = new Blob([contents], { type: mediaType });
   const url = environment.createObjectURL(blob);
   try {
     const anchor = environment.createAnchor();

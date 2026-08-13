@@ -1,0 +1,24 @@
+# QBSheet
+
+> QBSheet is an open-source, offline-first electronic scoresheet for quiz bowl tournaments, practices, and scrimmages.
+
+QBSheet runs in the browser and can be used standalone, with QBJ game files, or connected to compatible tournament-control software using QBTCP.
+
+QBJ is the file format used for quiz bowl game and tournament data. QBSheet reads and writes ordinary QBJ and defines no format of its own. QBTCP is an open application-layer protocol for communication between electronic scoresheets and tournament-control software; QBSheet is one scoresheet implementation of it, and no product owns the protocol.
+
+A scoresheet and tournament-control software do different jobs. QBSheet scores a single room: it owns the game in front of it, and it keeps working with no network and no server. Tournament-control software owns the tournament around that room — the schedule, room assignments, and collected results.
+
+## Website
+
+- [About QBSheet](https://qbsheet.com/about/): Overview of QBSheet and its scoring workflows.
+- [Open QBSheet](https://qbsheet.com/): Launch the scorekeeper.
+
+## Documentation
+
+- [GitHub repository](https://github.com/gbyo/qbsheet): Source code and project documentation.
+- [QBTCP](https://github.com/gbyo/qbsheet/blob/main/docs/QBTCP.md): Protocol for communication between electronic scoresheets and tournament-control software.
+- [QBJ Assignment Profile](https://github.com/gbyo/qbsheet/blob/main/docs/QBJ_ASSIGNMENT_PROFILE.md): How QBSheet interprets QBJ documents used to initialize games.
+
+## Source
+
+- [QBSheet on GitHub](https://github.com/gbyo/qbsheet)

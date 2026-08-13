@@ -336,6 +336,8 @@ div.scorer-banner .scorer-text-action {
   list-style: none;
   margin: 0;
   padding: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
 
 .scorer-player {
@@ -345,6 +347,7 @@ div.scorer-banner .scorer-text-action {
   gap: 10px;
   padding: 7px 0;
   border-bottom: 1px solid var(--room-border);
+  min-width: max-content;
 }
 
 /*
@@ -362,9 +365,9 @@ div.scorer-banner .scorer-text-action {
  */
 .scorer-sub-action {
   flex: none;
-  min-width: 28px;
-  min-height: 28px;
-  padding: 0 4px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 8px;
   font: inherit;
   font-size: 17px;
   line-height: 1;
@@ -411,6 +414,12 @@ div.scorer-banner .scorer-text-action {
 .scorer-sub-picker-empty {
   margin: 0 0 8px;
   font-size: 13px;
+  color: var(--room-muted);
+}
+
+.scorer-substitution-note {
+  margin: 6px 0 0;
+  font-size: 12px;
   color: var(--room-muted);
 }
 
@@ -477,8 +486,7 @@ div.scorer-banner .scorer-text-action {
   margin-left: auto;
   justify-content: end;
   gap: 4px;
-  overflow-x: auto;
-  scrollbar-width: thin;
+  overflow: visible;
 }
 
 .scorer-empty-roster {
@@ -498,7 +506,8 @@ div.scorer-banner .scorer-text-action {
  */
 .scorer-answer {
   min-width: 46px;
-  padding: 7px 8px;
+  min-height: 44px;
+  padding: 8px;
   font: inherit;
   font-variant-numeric: tabular-nums;
   color: var(--room-text);
@@ -1030,6 +1039,15 @@ div.scorer-banner .scorer-text-action {
   background: var(--room-surface-sunken);
 }
 
+.scorer-menu-item:disabled {
+  color: var(--room-faint);
+  cursor: default;
+}
+
+.scorer-menu-item:disabled:hover {
+  background: none;
+}
+
 /*
  * The rules between groups.
  *
@@ -1285,7 +1303,9 @@ div.scorer-banner .scorer-text-action {
 }
 
 .scorer-lineup-move .scorer-text-action {
-  min-width: 20px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 8px;
 }
 
 .scorer-lineup-actions {
@@ -1897,8 +1917,23 @@ div.scorer-banner .scorer-text-action {
   flex-wrap: wrap;
 }
 
+/* A heading with a line of context under it, rather than one long shouted line. */
 .scorer-question-heading-line {
   min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+}
+
+/*
+ * Who converted, as context rather than a control. Below the heading and in the ordinary text
+ * colour: the heading says what this section is, this says whose bonus it is, and neither of them
+ * is something to fill in when the tossup already settled it.
+ */
+.scorer-question-bonus-context {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: var(--room-text);
 }
 
 .scorer-question-bonus-head-actions {
@@ -1975,8 +2010,7 @@ div.scorer-banner .scorer-text-action {
 
 .scorer-question-attempt select,
 .scorer-question-bonus select,
-.scorer-question-bonus input,
-.scorer-question-part input {
+.scorer-question-bonus input {
   min-width: 0;
   padding: 6px 7px;
   font: inherit;
@@ -2003,7 +2037,6 @@ div.scorer-banner .scorer-text-action {
 }
 
 .scorer-question-actions,
-.scorer-question-bonus,
 .scorer-question-parts {
   display: flex;
   align-items: center;
@@ -2019,9 +2052,41 @@ div.scorer-banner .scorer-text-action {
   display: inline-flex;
 }
 
+/*
+ * A column, not a row of controls jostling for the same line.
+ *
+ * With bouncebacks on there are two named sides to enter and a mode switch under them, and packing
+ * those across one wrapping row put the opponent's choices wherever there happened to be room. Each
+ * thing here is a labelled block on its own line, in the order the bonus is scored.
+ */
 .scorer-question-bonus {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
   margin-top: 10px;
-  align-items: flex-end;
+}
+
+.scorer-question-total-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+/*
+ * Says whose points these are. The same 12px muted label the number fields carry, so a row of
+ * buttons and a typed field read as the same kind of thing.
+ */
+.scorer-question-total-label {
+  font-size: 12px;
+  color: var(--room-muted);
+}
+
+/* The mode switch is a link-sized action, not a full-width control the column would stretch it into. */
+.scorer-question-bonus > .scorer-text-action,
+.scorer-question-bonus > label {
+  align-self: flex-start;
 }
 
 .scorer-question-bonus label {
@@ -2035,16 +2100,6 @@ div.scorer-banner .scorer-text-action {
 /* Two or three digits. Sized to what goes in it, so it does not read as a field for a sentence. */
 .scorer-question-bonus input {
   width: 84px;
-}
-
-/*
- * While the parts are open the total is their sum, not something to type in. Sunken and muted so it
- * reads as a figure being shown rather than a box that has stopped accepting what is typed into it.
- */
-.scorer-question-bonus input:disabled {
-  color: var(--room-muted);
-  background: var(--room-surface-sunken);
-  border-color: var(--room-border);
 }
 
 /*
@@ -2106,6 +2161,70 @@ div.scorer-banner .scorer-text-action {
 }
 
 /*
+ * Selected is a filled button, a heavier weight and a tick — three cues, so the one part that was
+ * bounced back is still obvious to a scorekeeper who cannot tell the accent from the surface.
+ */
+.scorer-question-part .scorer-choice.is-selected {
+  font-weight: 600;
+}
+
+/* A non-breaking space: a trailing one in `content` collapses and the tick lands on the number. */
+.scorer-question-part .scorer-choice.is-selected::before {
+  content: '✓\00a0';
+}
+
+/* The column heading names the team on wide screens; this repeats it once the heading folds away. */
+.scorer-question-part-team {
+  display: none;
+}
+
+/* A part nobody has answered yet: marked, so an unfinished breakdown cannot look finished. */
+.scorer-question-part.is-unanswered .scorer-question-part-label::after {
+  content: ' •';
+  color: var(--room-warning);
+}
+
+.scorer-question-part-summary {
+  margin: 4px 0 0;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--room-text);
+}
+
+.scorer-question-part-pending {
+  margin: 0;
+  font-size: 12px;
+  color: var(--room-muted);
+}
+
+/*
+ * Narrow enough that four columns would be four slivers: the heading row goes, each part becomes a
+ * block, and the buttons name their own team instead of relying on a heading that is no longer
+ * there. Part N still leads the block, so which outcomes belong to which part stays obvious.
+ */
+@media (max-width: 560px) {
+  .scorer-question-part-head {
+    display: none;
+  }
+
+  .scorer-question-part,
+  .scorer-question-part.is-two-way {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+    padding-bottom: 6px;
+  }
+
+  .scorer-question-part .scorer-choice {
+    justify-self: stretch;
+    text-align: left;
+  }
+
+  .scorer-question-part-team {
+    display: inline;
+  }
+}
+
+/*
  * Ruled off the section above it exactly as Tossup and Bonus are, and closed by the footer's rule
  * rather than one of its own — a line above, a line below and the footer's line made three rules
  * inside forty pixels for a control that is one word and a plus sign.
@@ -2132,8 +2251,7 @@ div.scorer-banner .scorer-text-action {
 .scorer-question-disclosure:focus-visible,
 .scorer-question-attempt select:focus-visible,
 .scorer-question-bonus select:focus-visible,
-.scorer-question-bonus input:focus-visible,
-.scorer-question-part input:focus-visible {
+.scorer-question-bonus input:focus-visible {
   outline: 2px solid var(--room-accent);
   outline-offset: 1px;
 }

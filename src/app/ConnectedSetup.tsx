@@ -62,7 +62,13 @@ export interface IConnectedStart {
 
 type Stage =
   | { kind: 'address' }
-  | { kind: 'pair'; client: FruityServerClient; tournamentName: string; rooms: IRoomListEntry[] }
+  | {
+      kind: 'pair';
+      client: FruityServerClient;
+      tournamentName: string;
+      rooms: IRoomListEntry[];
+      roomsError?: string;
+    }
   | { kind: 'room'; client: FruityServerClient; room: IPairedRoom };
 
 /** The room capability as an identity the client can use. Never rendered; see `ConnectedSession`. */
@@ -79,7 +85,10 @@ function stateLine(assignment: INormalizedAssignment | null, busy: boolean): str
   if (assignment.state === 'blocked') {
     return assignment.blockedMessage ?? 'Tournament control is holding this room.';
   }
-  if (assignment.state === 'none' || !assignment.definition) {
+  if (assignment.state === 'assigned' && !assignment.definition) {
+    return 'Tournament control assigned a game, but its details are not ready. Check again or ask tournament control.';
+  }
+  if (assignment.state === 'none') {
     return 'Waiting for the next assignment.';
   }
   return '';
@@ -99,7 +108,10 @@ export function assignmentStateKey(assignment: INormalizedAssignment | null): st
   if (!assignment) return 'none';
   if (assignment.state === 'held') return 'held';
   if (assignment.state === 'blocked') return 'blocked';
-  if (assignment.state === 'none' || !assignment.definition) return 'none';
+  if (assignment.state === 'assigned' && !assignment.definition) {
+    return `assigned-incomplete:${assignment.scheduledMatchId ?? 'unknown'}`;
+  }
+  if (assignment.state === 'none') return 'none';
   return `assigned:${assignment.scheduledMatchId ?? 'unknown'}`;
 }
 
@@ -206,9 +218,19 @@ export default function ConnectedSetup(props: {
    * without a second interval — and without anything on screen that ticks.
    */
   const [now, setNow] = useState(() => Date.now());
+  const assignmentRequest = useRef<{ key: string; sequence: number } | null>(null);
+  const assignmentSequence = useRef(0);
+  const currentRoomKey =
+    stage.kind === 'room' ? `${stage.client.baseUrl}|${stage.room.roomId}|${stage.room.roomToken}` : null;
+  const currentRoomKeyRef = useRef<string | null>(currentRoomKey);
+
+  useEffect(() => {
+    currentRoomKeyRef.current = currentRoomKey;
+  }, [currentRoomKey]);
 
   const connect = async (event: FormEvent) => {
     event.preventDefault();
+    if (busy) return;
     const normalized = normalizeBaseUrl(address);
     if (!normalized.ok) {
       setError(normalized.error);
@@ -257,12 +279,19 @@ export default function ConnectedSetup(props: {
       client,
       tournamentName: identified.value.name,
       rooms: rooms.ok ? rooms.value : [],
+      ...(rooms.ok
+        ? {}
+        : {
+            roomsError: `Room list could not be loaded (${rooms.error}). You can still enter a pairing code manually.`,
+          }),
     });
+    setRoomId('');
   };
 
   const pair = async (event: FormEvent) => {
     event.preventDefault();
     if (stage.kind !== 'pair') return;
+    if (busy) return;
     const trimmedCode = code.trim();
     if (trimmedCode === '') {
       setError('Enter the pairing code for this room.');
@@ -291,6 +320,7 @@ export default function ConnectedSetup(props: {
     // The room name, never the code or the token. See `ConnectionTimeline`.
     connectionTimeline.record('room-repaired', room.roomName);
     setCode('');
+    setRoomId('');
     setAssignment(null);
     // Nothing has been checked yet under this pairing. The assignment is already cleared here for
     // the same reason, and a check-status line inherited across a re-pair would spend the seconds
@@ -316,35 +346,50 @@ export default function ConnectedSetup(props: {
 
   const loadAssignment = useCallback(async () => {
     if (stage.kind !== 'room') return;
+    const key = `${stage.client.baseUrl}|${stage.room.roomId}|${stage.room.roomToken}`;
+    if (assignmentRequest.current?.key === key) return;
+    const sequence = ++assignmentSequence.current;
+    assignmentRequest.current = { key, sequence };
     setBusy(true);
     setError('');
-    const result = await stage.client.assignment(identityFor(stage.room));
-    setBusy(false);
-    setNow(Date.now());
-    setAssignmentFailed(!result.ok);
-    if (!result.ok) {
-      // A refused room token is the one thing that sends a scorekeeper back to a pairing code. Any
-      // other failure is the network's problem and the room keeps its capability.
-      if (result.status === 401) {
-        onRoomLost();
-        setAssignment(null);
-        setError('Tournament control no longer recognizes this room. Pair it again with a new code.');
-        setStage({ kind: 'pair', client: stage.client, tournamentName: '', rooms: [] });
+    try {
+      const result = await stage.client.assignment(identityFor(stage.room));
+      // A room can be re-paired while an older request is in flight. That response belongs to the
+      // old capability and must not overwrite the newly paired room's state.
+      if (currentRoomKeyRef.current !== key || assignmentRequest.current?.sequence !== sequence) return;
+      setBusy(false);
+      setNow(Date.now());
+      setAssignmentFailed(!result.ok);
+      if (!result.ok) {
+        // A refused room token is the one thing that sends a scorekeeper back to a pairing code. Any
+        // other failure is the network's problem and the room keeps its capability.
+        if (result.status === 401) {
+          onRoomLost();
+          setAssignment(null);
+          setRoomId('');
+          setError('Tournament control no longer recognizes this room. Pair it again with a new code.');
+          setStage({ kind: 'pair', client: stage.client, tournamentName: '', rooms: [] });
+          return;
+        }
+        // A credential control accepts and will not act on — most often this page's origin is not on
+        // the server's allowlist. The pairing is fine, so it is kept and the server's own explanation
+        // is shown; asking for a new code here would be asking for work that cannot help.
+        if (noteForbidden(result)) return;
+        setError(result.error);
         return;
       }
-      // A credential control accepts and will not act on — most often this page's origin is not on
-      // the server's allowlist. The pairing is fine, so it is kept and the server's own explanation
-      // is shown; asking for a new code here would be asking for work that cannot help.
-      if (noteForbidden(result)) return;
-      setError(result.error);
-      return;
+      setForbidden('');
+      // Tournament control answered about this room. Recorded here and nowhere else, so the status
+      // line below can only ever be reporting a request that actually completed.
+      setLastSuccessfulCheckAt(Date.now());
+      setAssignment(result.value);
+      if (result.value.errors?.length) setError(result.value.errors.join(' '));
+    } finally {
+      if (assignmentRequest.current?.sequence === sequence) {
+        assignmentRequest.current = null;
+        if (currentRoomKeyRef.current === key) setBusy(false);
+      }
     }
-    setForbidden('');
-    // Tournament control answered about this room. Recorded here and nowhere else, so the status
-    // line below can only ever be reporting a request that actually completed.
-    setLastSuccessfulCheckAt(Date.now());
-    setAssignment(result.value);
-    if (result.value.errors?.length) setError(result.value.errors.join(' '));
   }, [stage, onRoomLost, noteForbidden]);
 
   const loadRef = useRef(loadAssignment);
@@ -366,8 +411,9 @@ export default function ConnectedSetup(props: {
   }, [forbidden]);
 
   // The room screen keeps itself current, so a scorekeeper who finishes a game and comes back here
-  // sees the next assignment appear rather than having to ask for it. Only ever reached by a press,
-  // which is what satisfies the browser's local-network gesture requirement.
+  // sees the next assignment appear rather than having to ask for it. A restored room may make its
+  // first check without a gesture; if local-network permission blocks that request, the room stays
+  // here and Check now supplies the explicit gesture instead of sending anybody through pairing.
   useEffect(() => {
     if (stage.kind !== 'room') return undefined;
     void loadRef.current();
@@ -391,43 +437,48 @@ export default function ConnectedSetup(props: {
 
   const start = async () => {
     if (stage.kind !== 'room' || !assignment?.definition || !assignment.scheduledMatchId) return;
+    if (starting) return;
     setStarting(true);
     setError('');
     const identity = identityFor(stage.room);
-    // The same call whether this is a new game or the one already open: both surfaces return the
-    // existing session rather than creating a second one, which is what makes resume free.
-    const session = await stage.client.openSession(identity, assignment.scheduledMatchId);
-    if (!session.ok) {
+    try {
+      // The same call whether this is a new game or the one already open: both surfaces return the
+      // existing session rather than creating a second one, which is what makes resume free.
+      const session = await stage.client.openSession(identity, assignment.scheduledMatchId);
+      if (!session.ok) {
+        if (!noteForbidden(session)) setError(session.error);
+        return;
+      }
+      // Re-read the assignment so the game is built from the rosters as they stand at kickoff rather
+      // than as they stood when the room paired, which may have been an hour ago.
+      const current = await stage.client.assignment(identity);
+      if (!current.ok) {
+        if (!noteForbidden(current)) setError(current.error);
+        return;
+      }
+      if (!current.value.definition) {
+        setError('Tournament control started the game but did not say what to play.');
+        return;
+      }
+      // The session was opened against one game and this is the answer about another, which means
+      // control moved the room between the two calls. Starting anyway would file the new game's
+      // scoresheet under the old game's session. Pressing Start again picks up the current one.
+      if (current.value.scheduledMatchId !== assignment.scheduledMatchId) {
+        setError('Tournament control changed this room’s game while it was starting. Check the game shown and start again.');
+        return;
+      }
+      await onStart({
+        room: stage.room,
+        identity,
+        credentials: { sessionId: session.value.sessionId, token: session.value.token },
+        ...(current.value.tournamentKey ? { tournamentKey: current.value.tournamentKey } : {}),
+        definition: current.value.definition,
+      });
+    } catch {
+      setError('This game could not be started. Check the connection and try again.');
+    } finally {
       setStarting(false);
-      if (!noteForbidden(session)) setError(session.error);
-      return;
     }
-    // Re-read the assignment so the game is built from the rosters as they stand at kickoff rather
-    // than as they stood when the room paired, which may have been an hour ago.
-    const current = await stage.client.assignment(identity);
-    setStarting(false);
-    if (!current.ok) {
-      if (!noteForbidden(current)) setError(current.error);
-      return;
-    }
-    if (!current.value.definition) {
-      setError('Tournament control started the game but did not say what to play.');
-      return;
-    }
-    // The session was opened against one game and this is the answer about another, which means
-    // control moved the room between the two calls. Starting anyway would file the new game's
-    // scoresheet under the old game's session. Pressing Start again picks up the current one.
-    if (current.value.scheduledMatchId !== assignment.scheduledMatchId) {
-      setError('Tournament control changed this room’s game while it was starting. Check the game shown and start again.');
-      return;
-    }
-    await onStart({
-      room: stage.room,
-      identity,
-      credentials: { sessionId: session.value.sessionId, token: session.value.token },
-      ...(current.value.tournamentKey ? { tournamentKey: current.value.tournamentKey } : {}),
-      definition: current.value.definition,
-    });
   };
 
   const resumable = assignment?.session?.resumable === true && assignment.session.finalReceived !== true;
@@ -482,6 +533,7 @@ export default function ConnectedSetup(props: {
       {stage.kind === 'pair' && (
         <section className="shell-section">
           <h2 className="shell-heading">{stage.tournamentName || 'Pair this room'}</h2>
+          {stage.roomsError && <p className="shell-warning" role="status">{stage.roomsError}</p>}
           <form className="connect-form" onSubmit={pair}>
             {stage.rooms.length > 0 && (
               <>
@@ -552,6 +604,12 @@ export default function ConnectedSetup(props: {
             being interrupted by the one thing on this screen that is never news.
           */}
           <p className="assignment-check">{checkStatus}</p>
+          {assignment?.nextAssignmentLabel && (
+            <aside className="assignment-next" aria-label="Up next">
+              <span className="assignment-next-label">Up next</span>
+              <span>{assignment.nextAssignmentLabel}</span>
+            </aside>
+          )}
           {forbidden !== '' && (
             <p className="shell-warning" role="alert">
               {forbidden} This room is still paired — this is not something a new code fixes.

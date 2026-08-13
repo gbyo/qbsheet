@@ -181,6 +181,59 @@ describe('bounded result-delivery ledger and private retry capability', () => {
     expect(postFinal).toHaveBeenCalledTimes(2);
   });
 
+  test('only retryable pending records qualify for unattended delivery', async () => {
+    const { store, record } = await completedStore();
+    const capabilities = new ResultDeliveryCapabilityStore(new MemoryStorage());
+    capabilities.remember(record.id, capability, record.completedAt!);
+    const service = new ResultDeliveryService(store, capabilities, () => fakeClient(vi.fn(async () => accepted())));
+    const pending = await store.update(record.id, {
+      serverDelivery: 'pending',
+      serverDeliveryLedger: { attemptCount: 1, retryable: true, outcome: 'pending' },
+    });
+    expect(service.canAutoRetry(pending!)).toBe(true);
+    expect(service.canAutoRetry({ ...pending!, connected: false })).toBe(false);
+    expect(service.canAutoRetry({ ...pending!, finalQbj: undefined })).toBe(false);
+    expect(
+      service.canAutoRetry({
+        ...pending!,
+        serverDeliveryLedger: { attemptCount: 1, retryable: false, outcome: 'pending' },
+      }),
+    ).toBe(false);
+    const withoutCapability = new ResultDeliveryService(
+      store,
+      new ResultDeliveryCapabilityStore(new MemoryStorage()),
+    );
+    expect(withoutCapability.canAutoRetry(pending!)).toBe(false);
+
+    const rejected = await store.update(record.id, {
+      serverDelivery: 'rejected',
+      serverDeliveryLedger: { attemptCount: 1, retryable: true, outcome: 'rejected' },
+    });
+    expect(service.canRetry(rejected!)).toBe(true);
+    expect(service.canAutoRetry(rejected!)).toBe(false);
+  });
+
+  test('manual and automatic retries share one in-flight delivery', async () => {
+    const { store, record } = await completedStore();
+    const capabilities = new ResultDeliveryCapabilityStore(new MemoryStorage());
+    capabilities.remember(record.id, capability, record.completedAt!);
+    let release: ((value: ReturnType<typeof accepted>) => void) | undefined;
+    const response = new Promise<ReturnType<typeof accepted>>((resolve) => {
+      release = resolve;
+    });
+    const postFinal = vi.fn(() => response);
+    const service = new ResultDeliveryService(store, capabilities, () => fakeClient(postFinal));
+
+    const automatic = service.retry(record.id);
+    const manual = service.retry(record.id);
+    await vi.waitFor(() => expect(postFinal).toHaveBeenCalledOnce());
+
+    release?.(accepted());
+    await Promise.all([automatic, manual]);
+    expect((await store.get(record.id))?.serverDelivery).toBe('sent');
+    expect((await store.get(record.id))?.serverDeliveryLedger?.attemptCount).toBe(1);
+  });
+
   test('first-send acceptance is recorded as one attempt and does not mark the QBJ as downloaded', async () => {
     const { store, record } = await completedStore();
     const storage = new MemoryStorage();
