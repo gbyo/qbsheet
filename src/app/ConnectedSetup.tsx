@@ -381,10 +381,13 @@ export default function ConnectedSetup(props: {
     return () => clearInterval(timer);
   }, [stage]);
 
-  // Nothing to start against a server that will not answer for this room.
-  useEffect(() => {
+  // Nothing to start against a server that will not answer for this room. Dropped as the refusal
+  // arrives, so a Start button for a game this room cannot open is never drawn.
+  const [refusalSeen, setRefusalSeen] = useState(forbidden);
+  if (refusalSeen !== forbidden) {
+    setRefusalSeen(forbidden);
     if (forbidden !== '') setAssignment(null);
-  }, [forbidden]);
+  }
 
   const start = async () => {
     if (stage.kind !== 'room' || !assignment?.definition || !assignment.scheduledMatchId) return;

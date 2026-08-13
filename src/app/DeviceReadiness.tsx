@@ -216,8 +216,12 @@ export default function DeviceReadiness(props: {
     }
   }, []);
 
+  // Started by the effect, not performed in it. The probes are asynchronous and report as they
+  // finish; the spinner they raise belongs to that work rather than to this commit.
   useEffect(() => {
-    void runChecks();
+    void (async () => {
+      await runChecks();
+    })();
   }, [runChecks]);
 
   const requestPersistence = async () => {

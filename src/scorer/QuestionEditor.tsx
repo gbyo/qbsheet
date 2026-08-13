@@ -40,7 +40,7 @@
  * attempts a cycle may hold is the engine's, checked by `validateEditableQuestion`. There is no
  * +15, no −5, no 0/10/20/30 and no notion of which rule set this is.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
 import { IDerivedGame } from '../scoring/deriveGame';
 import {
@@ -209,8 +209,14 @@ export default function QuestionEditor(props: {
   const [showParts, setShowParts] = useState(() => initial.bonus?.parts !== undefined);
   const [showIntro, setShowIntro] = useState(() => !readIntroSeen());
 
-  // A correction makes an old validation message stale. Clear it as soon as the scorekeeper edits.
-  useEffect(() => setErrors([]), [model]);
+  // A correction makes an old validation message stale. Clear it as soon as the scorekeeper edits —
+  // in the render the edit produces, so the complaint and the corrected field are never shown
+  // together for a frame.
+  const [validatedModel, setValidatedModel] = useState(model);
+  if (validatedModel !== model) {
+    setValidatedModel(model);
+    setErrors([]);
+  }
 
   const question = game.questions.find((candidate) => candidate.questionNumber === model.questionNumber);
   const active = question?.activePlayers ?? { left: [], right: [] };
