@@ -235,6 +235,32 @@ describe('moving between the two forms', () => {
       expect(basicFromAdvanced(renamed)).toBeNull();
     });
 
+    test('two positives worth the same are told apart by name, not collapsed into one role', () => {
+      // A row somebody is halfway through editing: added, and still worth what the row above it is
+      // worth. The simple form is offered on the fit check alone, so this is a reachable way past it.
+      //
+      // Power / P beside Correct / C is what coming back writes, so nothing is lost by going. Two
+      // Correct / C rows is the same two values and a different format — one of them comes back called
+      // Power — and a check that keys the reconstruction by value cannot tell those two apart.
+      const named = handEntered({
+        answerTypes: [
+          newAdvancedAnswerType({ value: 15, label: 'Power', shortLabel: 'P' }),
+          newAdvancedAnswerType({ value: 15, label: 'Correct', shortLabel: 'C' }),
+        ],
+      });
+      const bothOrdinary = handEntered({
+        answerTypes: [
+          newAdvancedAnswerType({ value: 15, label: 'Correct', shortLabel: 'C' }),
+          newAdvancedAnswerType({ value: 15, label: 'Correct', shortLabel: 'C' }),
+        ],
+      });
+
+      expect(advancedFitsBasicForm(named)).toBe(true);
+      expect(advancedFitsBasicForm(bothOrdinary)).toBe(false);
+      expect(basicFromAdvanced(bothOrdinary)).toBeNull();
+      expect(scoringRulesInputAs(advancedRulesInput(bothOrdinary), 'basic').mode).toBe('advanced');
+    });
+
     test('a short label alone is enough, and an unnamed row is too', () => {
       const shortLabelOnly = handEntered({
         answerTypes: [
