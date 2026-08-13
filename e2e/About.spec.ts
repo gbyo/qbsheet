@@ -24,7 +24,7 @@ test('the about page introduces QBSheet and links to the real product', async ({
   await expect(page.getByRole('img', { name: /QBSheet scoring a tied practice game/ })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Built around how you actually score' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Made for tournament day' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Open and straightforward' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: "Your games aren't locked into QBSheet." })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Ready to score?' })).toBeVisible();
 
   const openLinks = page.getByRole('link', { name: 'Open QBSheet' });
@@ -68,7 +68,7 @@ test.describe('without JavaScript', () => {
     await expect(page.getByRole('heading', { name: 'Built around how you actually score' })).toBeVisible();
     await expect(page.getByText('Start with a game.')).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Made for tournament day' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Open and straightforward' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: "Your games aren't locked into QBSheet." })).toBeVisible();
     await expect(page.getByRole('link', { name: 'Read the protocol overview' })).toHaveAttribute(
       'href',
       'https://github.com/gbyo/qbsheet/blob/main/docs/QBTCP.md',

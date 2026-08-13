@@ -227,29 +227,32 @@ export default function About() {
 
         <section className="about-section about-open" aria-labelledby="open-heading">
           <div className="about-section-heading about-section-heading-narrow">
-            <p className="about-kicker">Interoperable by design</p>
-            <h2 id="open-heading">Open and straightforward</h2>
-            <p>One scoresheet, built around established quiz bowl formats and a readable source codebase.</p>
+            <p className="about-kicker">OPEN BY DESIGN</p>
+            <h2 id="open-heading">Your games aren&apos;t locked into QBSheet.</h2>
+            <p>
+              QBSheet uses open formats and an open protocol, so tournament data can move between the scoresheet and
+              compatible tournament software.
+            </p>
           </div>
           <dl className="about-definition-list">
             <div>
               <dt>QBJ</dt>
               <dd>
-                QBSheet reads and writes Quiz Bowl JSON files.{' '}
+                Portable files for assignments, games, and results.{' '}
                 <a href={qbjDocsUrl}>Read the QBJ documentation</a>.
               </dd>
             </div>
             <div>
               <dt>QBTCP</dt>
               <dd>
-                QBSheet uses QBTCP for live communication with compatible tournament-control software.{' '}
+                Live communication with compatible tournament-control software.{' '}
                 <a href={qbtcpDocsUrl}>Read the protocol overview</a>.
               </dd>
             </div>
             <div>
               <dt>Open source</dt>
               <dd>
-                QBSheet is available under the GNU AGPL. <a href={githubUrl}>View the source on GitHub</a>.
+                QBSheet is licensed under the GNU AGPL. <a href={githubUrl}>View the source on GitHub</a>.
               </dd>
             </div>
           </dl>

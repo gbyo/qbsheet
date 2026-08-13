@@ -83,14 +83,23 @@ describe('the product page', () => {
     expect(bands[0].querySelector('.about-assurance-grid')).not.toBeNull();
   });
 
-  test('keeps the open and straightforward section and its documentation links', () => {
+  test('explains the open-by-design promise and keeps its documentation links', () => {
     render(<About />);
 
-    expect(screen.getByRole('heading', { level: 2, name: 'Open and straightforward' })).toBeInTheDocument();
+    expect(screen.getByText('OPEN BY DESIGN')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: "Your games aren't locked into QBSheet." })).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'QBSheet uses open formats and an open protocol, so tournament data can move between the scoresheet and compatible tournament software.',
+      ),
+    ).toBeInTheDocument();
     // Still a definition list, which is the presentation this section is kept for.
     for (const term of ['QBJ', 'QBTCP', 'Open source']) {
       expect(screen.getByText(term, { selector: 'dt' })).toBeInTheDocument();
     }
+    expect(screen.getByText(/Portable files for assignments, games, and results\./)).toBeInTheDocument();
+    expect(screen.getByText(/Live communication with compatible tournament-control software\./)).toBeInTheDocument();
+    expect(screen.getByText(/QBSheet is licensed under the GNU AGPL\./)).toBeInTheDocument();
 
     expect(screen.getByRole('link', { name: 'Read the QBJ documentation' })).toHaveAttribute(
       'href',
