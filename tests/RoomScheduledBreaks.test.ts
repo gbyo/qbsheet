@@ -25,9 +25,9 @@ import {
   maximumRoomBreakTossup,
   maximumRoomBreaks,
   readRoomProcedure,
-  roomBreakAt,
   roomBreakDue,
   roomBreakLabel,
+  roomBreakTaken,
   roomBreakUpcoming,
   roomBreaks,
   roomBreaksAreScheduled,
@@ -221,18 +221,32 @@ describe('which break the room is at', () => {
     expect(roomBreakUpcoming(procedure, [5, 10, 15])).toBeUndefined();
   });
 
+  test('one late break spends one scheduled break, not every one it overran', () => {
+    // The room owed a break after tossup 5 and played to 12 before taking it. That is one break
+    // taken and two still owed. Matching the recorded tossup against the schedule instead would
+    // let this single stop swallow the break after 10 as well — a break the tournament scheduled,
+    // the room never took, and nobody would be told had gone missing.
+    expect(roomBreakDue(procedure, [12], 12)).toEqual({ afterTossup: 10 });
+    expect(roomBreakUpcoming(procedure, [12])).toEqual({ afterTossup: 10 });
+    // And the second is spent by the second stop, whatever tossup that one lands on.
+    expect(roomBreakUpcoming(procedure, [12, 13])).toEqual({ afterTossup: 15 });
+  });
+
   test('a break is named by its label, or numbered by its place in the schedule', () => {
     const named = scheduled([5, 10], { breaks: [{ afterTossup: 5, label: 'End of set 1' }, { afterTossup: 10 }] });
 
-    expect(roomBreakLabel(named, roomBreakAt(named, 5))).toBe('End of set 1');
-    expect(roomBreakLabel(named, roomBreakAt(named, 10))).toBe('Break 2');
+    expect(roomBreakLabel(named, roomBreakTaken(named, 1))).toBe('End of set 1');
+    expect(roomBreakLabel(named, roomBreakTaken(named, 2))).toBe('Break 2');
     // One break needs no number to tell it apart from anything.
-    expect(roomBreakLabel(scheduled([10]), roomBreakAt(scheduled([10]), 10))).toBe('Break');
+    expect(roomBreakLabel(scheduled([10]), roomBreakTaken(scheduled([10]), 1))).toBe('Break');
   });
 
-  test('the break a score check belongs to is the last one at or before it', () => {
-    expect(roomBreakAt(procedure, 7)).toEqual({ afterTossup: 5 });
-    expect(roomBreakAt(procedure, 4)).toBeUndefined();
+  test('the break a score check belongs to is the nth one, not the one nearest its tossup', () => {
+    expect(roomBreakTaken(procedure, 1)).toEqual({ afterTossup: 5 });
+    expect(roomBreakTaken(procedure, 2)).toEqual({ afterTossup: 10 });
+    expect(roomBreakTaken(procedure, 0)).toBeUndefined();
+    // Nothing left in the schedule to be at. A room cannot record more breaks than it was given.
+    expect(roomBreakTaken(procedure, 4)).toBeUndefined();
   });
 });
 
@@ -288,6 +302,51 @@ describe('a scheduled room may only stop where it was told to', () => {
     const events = [...deadTossups(5), event({ type: 'half-break', questionNumber: 5, lastQuestion: 5 })];
 
     expect(deriveGame(format, setup, events).phase).toEqual({ kind: 'score-check', afterQuestion: 5 });
+  });
+
+  /*
+   * The overrun, end to end.
+   *
+   * The room is told to stop after tossups 5, 10 and 15. Nobody calls the first break and it plays
+   * through tossup 12. What must not happen is the one stop it then takes counting as two: the
+   * break after 10 was scheduled, was never taken, and — under the restrictive policy — is a
+   * substitution window. The recorded tossup is 12 because that is where the room physically
+   * stopped, and that fact belongs in the history; it is not what decides which break was spent.
+   */
+  test('a room that overran its first break takes that break, and still owes the second', () => {
+    const named = scheduled([5, 10, 15], {
+      breaks: [
+        { afterTossup: 5, label: 'End of set 1' },
+        { afterTossup: 10, label: 'End of set 2' },
+        { afterTossup: 15, label: 'End of set 3' },
+      ],
+    });
+    const nameOf = (breaksTaken: readonly number[]) =>
+      roomBreakLabel(named, roomBreakTaken(named, breaksTaken.length));
+
+    // Twelve tossups read, no break taken. The oldest owed one is still the break after 5.
+    const played = deadTossups(12);
+    expect(roomBreakDue(named, [], 12)).toEqual({ afterTossup: 5, label: 'End of set 1' });
+    expect(breakVerdict(named, played).ok).toBe(true);
+
+    const broke = [...played, event({ type: 'half-break', questionNumber: 12, lastQuestion: 12 })];
+    const atBreak = deriveGame(format, setup, broke);
+    // Recorded where the room stopped...
+    expect(atBreak.phase).toEqual({ kind: 'score-check', afterQuestion: 12 });
+    // ...and still the first break on the score-check screen, not the one nearest tossup 12.
+    expect(nameOf(atBreak.halfBreaks)).toBe('End of set 1');
+
+    const resumed = [...broke, event({ type: 'half-resume', questionNumber: 12 })];
+    const afterResume = deriveGame(format, setup, resumed);
+    // The break after tossup 10 was never taken, so it is owed the moment play resumes.
+    expect(roomBreakDue(named, afterResume.halfBreaks, 12)).toEqual({ afterTossup: 10, label: 'End of set 2' });
+    expect(breakVerdict(named, resumed).ok).toBe(true);
+
+    const second = [...resumed, event({ type: 'half-break', questionNumber: 12, lastQuestion: 12 })];
+    const atSecond = deriveGame(format, setup, second);
+    expect(nameOf(atSecond.halfBreaks)).toBe('End of set 2');
+    // And the third is still ahead of the room rather than swallowed with the rest.
+    expect(roomBreakUpcoming(named, atSecond.halfBreaks)).toEqual({ afterTossup: 15, label: 'End of set 3' });
   });
 });
 

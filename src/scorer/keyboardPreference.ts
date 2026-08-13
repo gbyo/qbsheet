@@ -19,11 +19,12 @@
 
 export const keyboardPreferenceVersion = 1;
 
-const storageKey = `qbsheet.scorer.keyboard.v${keyboardPreferenceVersion}`;
+export const keyboardPreferenceStorageKey = `qbsheet.scorer.keyboard.v${keyboardPreferenceVersion}`;
 
 interface IPreferenceStorage {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
+  removeItem(key: string): void;
 }
 
 function browserStorage(): IPreferenceStorage | null {
@@ -38,7 +39,7 @@ function browserStorage(): IPreferenceStorage | null {
 
 export function loadKeyboardEnabled(storage: IPreferenceStorage | null = browserStorage()): boolean {
   try {
-    return storage?.getItem(storageKey) === 'on';
+    return storage?.getItem(keyboardPreferenceStorageKey) === 'on';
   } catch {
     return false;
   }
@@ -46,7 +47,7 @@ export function loadKeyboardEnabled(storage: IPreferenceStorage | null = browser
 
 export function saveKeyboardEnabled(enabled: boolean, storage: IPreferenceStorage | null = browserStorage()): boolean {
   try {
-    storage?.setItem(storageKey, enabled ? 'on' : 'off');
+    storage?.setItem(keyboardPreferenceStorageKey, enabled ? 'on' : 'off');
     return true;
   } catch {
     // Nothing depends on this sticking. The toggle still works for this tab.
@@ -84,6 +85,26 @@ export function subscribeKeyboardEnabled(listener: (value: boolean) => void): ()
   return () => {
     listeners.delete(listener);
   };
+}
+
+/**
+ * Remove the persisted choice and make the live device preference OFF in the same turn.
+ *
+ * Removing storage alone is not enough: the module singleton may already be ON and every mounted
+ * subscriber has to agree with Settings immediately rather than waiting for a reload.
+ */
+export function clearKeyboardPreference(storage: IPreferenceStorage | null = browserStorage()): boolean {
+  let cleared = storage !== null;
+  try {
+    storage?.removeItem(keyboardPreferenceStorageKey);
+  } catch {
+    cleared = false;
+  }
+  if (enabled) {
+    enabled = false;
+    listeners.forEach((listener) => listener(enabled));
+  }
+  return cleared;
 }
 
 /** Re-read storage. For tests, which clear it between cases. */

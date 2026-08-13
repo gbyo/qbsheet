@@ -219,6 +219,106 @@ describe('moving between the two forms', () => {
     ).toBe(false);
   });
 
+  /*
+   * The cases a format built by `advancedFromBasic` cannot reach.
+   *
+   * Every test above starts from the simple form, so its rows arrive already named Power / Correct /
+   * Neg and its regulation length is already a single number. Those are exactly the two properties
+   * the fit check has to police, which means a conversion test that starts from basic can never fail
+   * when the check is wrong about them. So these formats are written out by hand, the way a director
+   * entering unusual rules — or a stored draft from the advanced form — actually produces them.
+   */
+  describe('what "nothing is lost" has to cover, from a format the advanced form built', () => {
+    /** An ordinary powers-and-negs format stated directly in the advanced form. */
+    const handEntered = (
+      overrides: Partial<Parameters<typeof advancedRulesInput>[0]> = {},
+    ): Parameters<typeof advancedRulesInput>[0] => ({
+      answerTypes: [
+        newAdvancedAnswerType({ value: 15, label: 'Power', shortLabel: 'P' }),
+        newAdvancedAnswerType({ value: 10, label: 'Correct', shortLabel: 'C' }),
+        newAdvancedAnswerType({ value: -5, label: 'Neg', shortLabel: 'N', awardsBonus: false }),
+      ],
+      useBonuses: true,
+      bonusStructure: 'regular',
+      pointsPerBonusPart: 10,
+      partsPerBonus: 3,
+      bonusesBounceBack: false,
+      tossupCount: 20,
+      maximumPlayersPerTeam: 4,
+      overtimeQuestionCount: 1,
+      overtimeIncludesBonuses: false,
+      ...overrides,
+    });
+
+    test('the hand-entered baseline does fit, so the refusals below are about one field each', () => {
+      expect(advancedFitsBasicForm(handEntered())).toBe(true);
+      // Stating the same number twice is not an extension, so it is not a loss.
+      expect(advancedFitsBasicForm(handEntered({ maximumTossupCount: 20 }))).toBe(true);
+    });
+
+    test('a regulation that may be extended does not fit, because the simple form flattens it', () => {
+      // "Twenty tossups, up to twenty-four if the round runs long." Going back writes
+      // maximum_regulation_tossup_count = tossupCount, which silently makes that 20/20.
+      const extendable = handEntered({ maximumTossupCount: 24 });
+
+      expect(advancedFitsBasicForm(extendable)).toBe(false);
+      expect(basicFromAdvanced(extendable)).toBeNull();
+      expect(scoringRulesInputAs(advancedRulesInput(extendable), 'basic').mode).toBe('advanced');
+    });
+
+    test('answer types the simple form would rename do not fit, even at identical point values', () => {
+      // Worth 15 and 10 exactly as powers and correct answers are, and called something else. The
+      // simple form has no field for a name, so coming back would relabel these Power / P and
+      // Correct / C — the identity work in #91 undone on a screen that promised it would not be.
+      const renamed = handEntered({
+        answerTypes: [
+          newAdvancedAnswerType({ value: 15, label: 'Early correct', shortLabel: 'E' }),
+          newAdvancedAnswerType({ value: 10, label: 'Correct', shortLabel: 'C' }),
+        ],
+      });
+
+      expect(advancedFitsBasicForm(renamed)).toBe(false);
+      expect(basicFromAdvanced(renamed)).toBeNull();
+    });
+
+    test('a short label alone is enough, and an unnamed row is too', () => {
+      const shortLabelOnly = handEntered({
+        answerTypes: [
+          newAdvancedAnswerType({ value: 15, label: 'Power', shortLabel: 'PW' }),
+          newAdvancedAnswerType({ value: 10, label: 'Correct', shortLabel: 'C' }),
+        ],
+      });
+      // A row nobody named is not a row called "Correct"; the conversion would be inventing the name.
+      const unnamed = handEntered({
+        answerTypes: [newAdvancedAnswerType({ value: 10 }), newAdvancedAnswerType({ value: -5, awardsBonus: false })],
+      });
+
+      expect(advancedFitsBasicForm(shortLabelOnly)).toBe(false);
+      expect(advancedFitsBasicForm(unnamed)).toBe(false);
+    });
+
+    test('surrounding whitespace is not a rule, and does not refuse the conversion', () => {
+      const padded = handEntered({
+        answerTypes: [
+          newAdvancedAnswerType({ value: 10, label: ' Correct ', shortLabel: ' C ' }),
+          newAdvancedAnswerType({ value: -5, label: 'Neg', shortLabel: 'N', awardsBonus: false }),
+        ],
+      });
+
+      expect(advancedFitsBasicForm(padded)).toBe(true);
+    });
+
+    test('a format that does fit round-trips to exactly the same scoring rules', () => {
+      // The claim the hint on screen makes, checked against the format rather than the fields: the
+      // point of the whole check is that going back cannot change what comes out of the reader.
+      const input = advancedRulesInput(handEntered());
+      const back = scoringRulesInputAs(input, 'basic');
+
+      expect(back.mode).toBe('basic');
+      expect(scoringRulesInputFormat(back)).toEqual(scoringRulesInputFormat(input));
+    });
+  });
+
   test('the two power values come back the right way round', () => {
     const advanced = advancedFromBasic(basic({ tossupValue: 10, powerValue: 15 }));
     const back = basicFromAdvanced(advanced);

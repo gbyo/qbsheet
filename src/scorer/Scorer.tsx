@@ -35,9 +35,9 @@ import {
   protestBlocksCheckpoint,
   protestBlocksSuddenDeathTossup,
   protestCheckpointPolicy,
-  roomBreakAt,
   roomBreakDue,
   roomBreakLabel,
+  roomBreakTaken,
   roomBreaksAreScheduled,
   roomMayBreakNow,
   roomTakesBreaks,
@@ -1347,9 +1347,13 @@ export default function Scorer(props: IScorerProps) {
    *
    * Named from the schedule where there is one. A room breaking after tossup 5 of 24 is not at
    * halftime, and telling it that it is makes the scoresheet look like it has lost the round.
+   *
+   * By how many breaks have been taken rather than by the tossup this one was recorded at — see
+   * `roomBreakTaken`. A room that overran its first break and stopped after tossup 12 is at its
+   * first break, not at whichever scheduled break happens to sit nearest to 12.
    */
   const currentBreakName = roomBreaksAreScheduled(procedure)
-    ? roomBreakLabel(procedure, roomBreakAt(procedure, phase.kind === 'score-check' ? phase.afterQuestion : 0))
+    ? roomBreakLabel(procedure, roomBreakTaken(procedure, phase.kind === 'score-check' ? game.halfBreaks.length : 0))
     : 'Halftime';
   const progressText = (() => {
     if (phase.kind === 'complete') return 'Game complete';

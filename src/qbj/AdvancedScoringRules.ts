@@ -35,7 +35,7 @@
  */
 import { IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
 import { QbjObject } from './QbjSerialization';
-import { IBasicScoringRulesInput, basicScoringRulesDefaults } from './BasicScoringRules';
+import { IBasicScoringRulesInput, basicAnswerTypeNames, basicScoringRulesDefaults } from './BasicScoringRules';
 import { QbjScoringRulesResult, readQbjScoringRules } from './QbjScoringRules';
 
 /**
@@ -145,8 +145,7 @@ export function advancedFromBasic(basic: IBasicScoringRulesInput): IAdvancedScor
     answerTypes.push(
       newAdvancedAnswerType({
         value: basic.powerValue,
-        label: 'Power',
-        shortLabel: 'P',
+        ...basicAnswerTypeNames.power,
         awardsBonus: basic.useBonuses,
       }),
     );
@@ -154,15 +153,12 @@ export function advancedFromBasic(basic: IBasicScoringRulesInput): IAdvancedScor
   answerTypes.push(
     newAdvancedAnswerType({
       value: basic.tossupValue,
-      label: 'Correct',
-      shortLabel: 'C',
+      ...basicAnswerTypeNames.correct,
       awardsBonus: basic.useBonuses,
     }),
   );
   if (basic.negValue !== undefined) {
-    answerTypes.push(
-      newAdvancedAnswerType({ value: basic.negValue, label: 'Neg', shortLabel: 'N', awardsBonus: false }),
-    );
+    answerTypes.push(newAdvancedAnswerType({ value: basic.negValue, ...basicAnswerTypeNames.neg, awardsBonus: false }));
   }
 
   return {
@@ -195,9 +191,31 @@ export function advancedScoringRulesDefaults(): IAdvancedScoringRulesInput {
  * Asked before offering to go back, because going back has to either preserve the format or refuse.
  * Silently discarding a second power tier on the way to a simpler screen would be the worst of the
  * three options: the form would then be showing a format nobody entered.
+ *
+ * # The question is "will `basicFromAdvanced` reproduce this", not "is the total the same"
+ *
+ * That distinction is the whole of why this function is longer than the point values it started by
+ * checking. The basic form has three fields for three answer types and no field for anything else an
+ * answer type carries, so every property it cannot hold is a property the round trip rewrites — and
+ * a rewrite the screen has promised does not happen is worse than a refusal, because nobody looks.
+ *
+ * Two of those properties are not about arithmetic at all:
+ *
+ *   - **The extended regulation length.** `maximumTossupCount` says a 20-tossup regulation may run to
+ *     24. The simple form's QBJ always writes `maximum_regulation_tossup_count = tossupCount`, so
+ *     going back turns 20/24 into 20/20 — a rule about when the round ends, not about what it scores.
+ *   - **What the answer types are called.** `15 / "Early correct" / E` is worth exactly what
+ *     `15 / "Power" / P` is worth, and it is not the same answer type: the label and short label are
+ *     what a scorekeeper reads on the button and what the exported document carries. Coming back here
+ *     renames them to `basicAnswerTypeNames`, so a format whose names are already those three is the
+ *     only one this can honestly call lossless.
  */
 export function advancedFitsBasicForm(input: IAdvancedScoringRulesInput): boolean {
   if (input.bonusStructure !== 'regular') return false;
+  // A regulation that may be extended is a rule the simple form has nowhere to put. Equal to the
+  // planned count is not an extension, and is therefore not a loss.
+  if (input.maximumTossupCount !== undefined && input.maximumTossupCount !== input.tossupCount) return false;
+
   const values = input.answerTypes.map((type) => type.value).filter((value): value is number => value !== undefined);
   if (values.length !== input.answerTypes.length) return false;
 
@@ -210,8 +228,28 @@ export function advancedFitsBasicForm(input: IAdvancedScoringRulesInput): boolea
   if (positives.length < 1 || positives.length > 2) return false;
   // The basic form's `awardsBonus` is derived rather than stated: with bonuses on, a positive value
   // earns one and a neg does not; with bonuses off, nothing does. So a row that disagrees is a rule
-  // the basic fields cannot state, and going back would change what a game is worth.
-  return input.answerTypes.every((type) => type.awardsBonus === (input.useBonuses && (type.value ?? 0) > 0));
+  // the basic fields cannot state, and going back would rewrite it.
+  if (!input.answerTypes.every((type) => type.awardsBonus === (input.useBonuses && (type.value ?? 0) > 0))) {
+    return false;
+  }
+
+  // The name each row would come back with, keyed by the value that decides its role. Descending, so
+  // with two positives the larger is the power — the same reading `basicFromAdvanced` performs.
+  const descending = [...values].sort((a, b) => b - a);
+  const positivesDescending = descending.filter((value) => value > 0);
+  const namesByValue = new Map<number, { label: string; shortLabel: string }>();
+  if (positivesDescending.length === 2) namesByValue.set(positivesDescending[0], basicAnswerTypeNames.power);
+  namesByValue.set(positivesDescending[positivesDescending.length - 1], basicAnswerTypeNames.correct);
+  const negative = descending.find((value) => value < 0);
+  if (negative !== undefined) namesByValue.set(negative, basicAnswerTypeNames.neg);
+
+  return input.answerTypes.every((type) => {
+    const reconstructed = namesByValue.get(type.value as number);
+    if (reconstructed === undefined) return false;
+    // Trimmed, because that is what `advancedScoringRulesToQbj` writes; trailing space in a text box
+    // is not a rule anybody stated and must not be the thing that refuses the conversion.
+    return type.label.trim() === reconstructed.label && type.shortLabel.trim() === reconstructed.shortLabel;
+  });
 }
 
 /**

@@ -84,6 +84,21 @@ export const basicScoringRulesDefaults: IBasicScoringRulesInput = {
   timed: false,
 };
 
+/**
+ * What the simple form calls each of its three rows.
+ *
+ * Stated once and exported because two other things have to agree with it exactly: `advancedFromBasic`,
+ * which spells these rules out as advanced rows, and `advancedFitsBasicForm`, which decides whether an
+ * advanced format can go back without losing anything. This form has no field for an answer type's
+ * name, so coming back here *is* being renamed to these three strings — and a check that hard-coded
+ * its own copy of them would start passing formats this file would then quietly relabel.
+ */
+export const basicAnswerTypeNames = {
+  power: { label: 'Power', shortLabel: 'P' },
+  correct: { label: 'Correct', shortLabel: 'C' },
+  neg: { label: 'Neg', shortLabel: 'N' },
+} as const;
+
 /** The typed-in values as a standard `ScoringRules` object. */
 export function basicScoringRulesToQbj(input: IBasicScoringRulesInput): QbjObject {
   const answerTypes: QbjObject[] = [];
@@ -92,8 +107,8 @@ export function basicScoringRulesToQbj(input: IBasicScoringRulesInput): QbjObjec
       type: 'AnswerType',
       id: `AnswerType_${input.powerValue}`,
       value: input.powerValue,
-      label: 'Power',
-      short_label: 'P',
+      label: basicAnswerTypeNames.power.label,
+      short_label: basicAnswerTypeNames.power.shortLabel,
       awards_bonus: input.useBonuses,
     });
   }
@@ -101,8 +116,8 @@ export function basicScoringRulesToQbj(input: IBasicScoringRulesInput): QbjObjec
     type: 'AnswerType',
     id: `AnswerType_${input.tossupValue}`,
     value: input.tossupValue,
-    label: 'Correct',
-    short_label: 'C',
+    label: basicAnswerTypeNames.correct.label,
+    short_label: basicAnswerTypeNames.correct.shortLabel,
     awards_bonus: input.useBonuses,
   });
   if (input.negValue !== undefined) {
@@ -110,8 +125,8 @@ export function basicScoringRulesToQbj(input: IBasicScoringRulesInput): QbjObjec
       type: 'AnswerType',
       id: `AnswerType_${input.negValue}`,
       value: input.negValue,
-      label: 'Neg',
-      short_label: 'N',
+      label: basicAnswerTypeNames.neg.label,
+      short_label: basicAnswerTypeNames.neg.shortLabel,
       awards_bonus: false,
     });
   }
