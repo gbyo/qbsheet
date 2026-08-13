@@ -37,14 +37,14 @@ describe('the product page', () => {
 
     // The stage numerals are decoration next to the name, so the heading a screen reader reaches is the
     // stage itself. A numeral that stopped being `aria-hidden` would fail this by name.
-    const stages = ['Assign', 'Score', 'Return'].map((name) =>
+    const stages = ['Start', 'Score', 'Finish'].map((name) =>
       screen.getByRole('heading', { level: 3, name }),
     );
     expect(stages).toHaveLength(3);
 
-    expect(screen.getByText('Set up the game once.')).toBeInTheDocument();
+    expect(screen.getByText('Start with a game.')).toBeInTheDocument();
     expect(screen.getByText('Score the game.')).toBeInTheDocument();
-    expect(screen.getByText('Turn in the result.')).toBeInTheDocument();
+    expect(screen.getByText('Keep the finished result.')).toBeInTheDocument();
   });
 
   test('ends the workflow section at the three stages', () => {
@@ -58,16 +58,15 @@ describe('the product page', () => {
     expect(flow?.textContent).not.toContain('No internet required');
   });
 
-  test('offers tournament control as one way in rather than as a requirement', () => {
+  test('offers three ways in and keeps tournament control optional', () => {
     render(<About />);
 
-    // Both halves of "a file or a server" have to be present at each end of the workflow. A page that
-    // named only QBTCP would be telling the tournaments that run on files that they need software they
-    // do not.
+    // A file, a server, and self-created games all have to be present. Tournament control is useful,
+    // but a practice, scrimmage, or tryout has no assignment to receive and no result to send back.
     expect(
-      screen.getByText(/Open a QBJ assignment or connect QBSheet to tournament control/),
+      screen.getByText(/Open a QBJ assignment, connect QBSheet to tournament control, or create a game yourself/),
     ).toBeInTheDocument();
-    expect(screen.getByText(/If not, the result can be saved as QBJ/)).toBeInTheDocument();
+    expect(screen.getByText(/Connected games can be sent back to tournament control; any game can be downloaded as QBJ/)).toBeInTheDocument();
   });
 
   test('answers the four things a director asks in a section of their own', () => {

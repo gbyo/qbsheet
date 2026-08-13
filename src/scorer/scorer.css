@@ -175,6 +175,39 @@ div.scorer-banner .scorer-text-action {
   text-decoration: underline;
 }
 
+div.scorer-banner .scorer-banner-message {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.scorer-banner-dismiss {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin: -4px -8px -4px 0;
+  padding: 0;
+  font: inherit;
+  font-size: 20px;
+  line-height: 1;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.scorer-banner-dismiss:hover {
+  background: var(--room-surface-sunken);
+}
+
+.scorer-banner-dismiss:focus-visible {
+  outline: 2px solid var(--room-accent);
+  outline-offset: 1px;
+}
+
 /* #endregion */
 
 /* #region Connection detail */
