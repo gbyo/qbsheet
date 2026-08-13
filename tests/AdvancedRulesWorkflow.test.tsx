@@ -146,7 +146,7 @@ describe('switching between the simple and advanced rule forms', () => {
     // Two power tiers. Going back would have to discard one, so the control is not offered.
     const simplify = screen.getByRole('button', { name: 'Simple rules' });
     expect(simplify.hasAttribute('disabled')).toBe(true);
-    expect(screen.getByText(/would change what this game is worth/)).toBeTruthy();
+    expect(screen.getByText(/going back would change them/)).toBeTruthy();
     expect(screen.queryByLabelText('Correct tossup')).toBeNull();
   });
 
@@ -348,6 +348,40 @@ describe('scheduled breaks, through the real screens', () => {
     await pressControl('End of set 1 · after tossup 2');
     const check = screen.getByLabelText('End of set 1 score check');
     expect(within(check).getByText('End of set 1 · after tossup 2')).toBeTruthy();
+  });
+
+  test('a break taken late is still the break it was, and the next one is still owed', async () => {
+    await openApp();
+    await openSetup();
+    await turnBreaksOn();
+    await scheduleBreak('2', 'End of set 1');
+    await scheduleBreak('4', 'End of set 2');
+    await startGame();
+    await startLineups();
+
+    // Nobody calls the break after tossup 2 and the room plays on past the break after 4 as well.
+    await convert('Sarah');
+    await convert('Emma');
+    await convert('Sarah');
+    await convert('Emma');
+    await convert('Sarah');
+
+    // The oldest owed break is still the first one, and it is what the control offers.
+    await pressControl('End of set 1 · after tossup 2');
+
+    // The score check is that same break. Naming it from the tossup the room physically stopped at
+    // would head this screen "End of set 2" — the break the room has just been told it is *not* at.
+    const check = screen.getByLabelText('End of set 1 score check');
+    expect(within(check).getByText('End of set 1 · after tossup 5')).toBeTruthy();
+    expect(screen.queryByLabelText('End of set 2 score check')).toBeNull();
+
+    await press('Score confirmed · Continue');
+
+    // And the second break was not swallowed by the first. It is owed the moment play resumes.
+    await act(async () => {
+      fireEvent.click(screen.getByText('Game'));
+    });
+    expect(screen.getByRole('menuitem', { name: /End of set 2 · after tossup 4/ })).toBeTruthy();
   });
 
   test('a break the schedule does not have is not offered between two that it does', async () => {

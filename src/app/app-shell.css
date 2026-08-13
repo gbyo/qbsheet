@@ -523,6 +523,215 @@ body {
   margin: 0 0 12px;
 }
 
+/*
+ * Device Settings uses the scorer's native dialog shell and the homepage's compact type rhythm.
+ * Rows stay flat: this is one short system panel, not a collection of dashboard cards.
+ */
+.settings-dialog {
+  max-width: 540px;
+}
+
+.settings-section {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--room-border);
+}
+
+.settings-section:first-of-type {
+  padding-top: 0;
+}
+
+.settings-section-title {
+  margin: 0 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--room-muted);
+}
+
+.settings-row,
+.settings-navigation-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 46px;
+  padding: 7px 0;
+}
+
+.settings-row + .settings-row {
+  border-top: 1px solid var(--room-surface-sunken);
+}
+
+.settings-row-label,
+.settings-row-detail {
+  display: block;
+}
+
+.settings-row-label {
+  font-weight: 500;
+}
+
+.settings-row-detail {
+  margin-top: 1px;
+  color: var(--room-muted);
+  font-size: 12px;
+}
+
+.settings-action,
+.settings-inline-action {
+  padding: 4px 0;
+  font: inherit;
+  font-size: 13px;
+  color: var(--room-accent);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.settings-action:hover,
+.settings-inline-action:hover {
+  text-decoration: underline;
+}
+
+.settings-action:focus-visible,
+.settings-inline-action:focus-visible,
+.settings-navigation-row:focus-visible,
+.settings-switch input:focus-visible + .settings-switch-track {
+  outline: 2px solid var(--room-accent);
+  outline-offset: 2px;
+}
+
+.settings-switch {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  cursor: pointer;
+}
+
+.settings-switch input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.settings-switch-track {
+  position: relative;
+  display: block;
+  width: 38px;
+  height: 22px;
+  background: var(--room-border-strong);
+  border-radius: 11px;
+  transition: background 120ms ease;
+}
+
+.settings-switch-track::after {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  content: '';
+  background: var(--room-surface);
+  border-radius: 50%;
+  transition: transform 120ms ease;
+}
+
+.settings-switch input:checked + .settings-switch-track {
+  background: var(--room-accent);
+}
+
+.settings-switch input:checked + .settings-switch-track::after {
+  transform: translateX(16px);
+}
+
+.settings-facts,
+.settings-shortcuts {
+  margin: 0;
+}
+
+.settings-facts > div,
+.settings-shortcuts > div {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.8fr) minmax(0, 1.2fr);
+  gap: 16px;
+  padding: 7px 0;
+}
+
+.settings-facts dt,
+.settings-shortcuts dt {
+  color: var(--room-muted);
+}
+
+.settings-facts dd,
+.settings-shortcuts dd {
+  margin: 0;
+}
+
+.settings-address {
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.settings-navigation-row {
+  width: 100%;
+  padding-right: 2px;
+  font: inherit;
+  font-weight: 500;
+  color: var(--room-text);
+  background: none;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.settings-navigation-row span:last-child {
+  color: var(--room-muted);
+  font-size: 22px;
+  line-height: 1;
+}
+
+.settings-build {
+  padding-top: 14px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--room-faint);
+  text-align: center;
+}
+
+.settings-acknowledgement {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  color: var(--room-success);
+  background: var(--room-success-bg);
+  font-size: 13px;
+}
+
+.settings-detail-view > p:first-child,
+.settings-detail-intro {
+  margin-top: 0;
+}
+
+.settings-detail-note {
+  color: var(--room-muted);
+  font-size: 13px;
+}
+
+@media (max-width: 420px) {
+  .settings-dialog {
+    width: calc(100% - 24px);
+    max-height: calc(100% - 24px);
+  }
+
+  .settings-facts > div,
+  .settings-shortcuts > div {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}
+
 .recent-list {
   margin: 0;
   padding: 0;

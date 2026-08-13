@@ -178,7 +178,7 @@ candidate for that rewrite. See the compatibility note in `QbtcpExtension`.
 
 `breaks` is the field worth sending. It states the tossups the round stops after, and those stops are
 what the room uses for its score checks, its clock segments, and — under
-`substitution_policy: "breaks-timeouts-overtime"` — the only points at which the lineup may change. A
+`substitutionPolicy: "breaks-timeouts-overtime"` — the only points at which the lineup may change. A
 room with `halves: true` and no `breaks` takes one break wherever the moderator calls it, which is all
 a version 1 or 2 procedure could say; that remains supported and unchanged.
 
@@ -190,6 +190,18 @@ Reading is deliberately forgiving in one direction and strict in the other. A ma
 dropped, because a room that will not load is worse than a room missing a break. A `version` this
 build does not recognise is not interpreted at all, because a room that silently ignored a break it
 did not understand would permit substitutions the tournament forbade.
+
+Not interpreting it means **refusing the game**, not scoring it without procedural rules. Those are
+different outcomes and only one of them is safe. No `procedure` at all is a tournament that stated no
+procedural rules, and the room scores with none enforced. A `procedure` whose `version` is from the
+future is a tournament that stated rules the room could not read, and falling back to no procedure
+would silently restore `substitutionPolicy: "any-boundary"` — more permissive than what was sent. So a
+room given a procedure it cannot interpret says so, names the version, and does not start until
+QBSheet is updated or control sends an assignment this build can enforce.
+
+The consequence for producers: bumping the procedure version stops older rooms scoring assignments
+that carry one. That is intended, and it is why the version is bumped only for a shape change. A
+tournament that needs older clients to keep working should send a procedure they can read.
 
 ### `scorekeeper.timed`
 
