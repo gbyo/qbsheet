@@ -12,12 +12,14 @@
  * to rewrite `/repository/game/42` back onto `index.html`, and a reload of such a URL is a Pages
  * 404. Application state lives in the URL fragment (see `Routing`), which no server ever sees.
  */
-import { defineConfig, type Plugin } from 'vite';
+import { defineConfig, type Plugin, type Rollup } from 'vite';
 import react from '@vitejs/plugin-react';
+import { createElement, type ReactElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { posix, resolve, sep } from 'node:path';
 
 /**
  * Which build this is, in a form somebody can read out loud over a radio.
@@ -69,6 +71,145 @@ function buildIdentity(): IBuildIdentity {
 /** Marketing-page output is deployed beside the scorer, but is not part of its offline shell. */
 export function isScorerPrecacheAsset(fileName: string): boolean {
   return !fileName.endsWith('.map') && fileName !== 'about/index.html' && !fileName.startsWith('about/');
+}
+
+/** The element in `about/index.html` that the rendered page is placed inside, and the only edit made to it. */
+const aboutRootDiv = '<div id="about-root"></div>';
+
+/** The product page's own copy of the screenshot, which nothing in the client bundle imports any more. */
+const aboutScreenshot = 'src/assets/about-qbsheet-practice.webp';
+
+/**
+ * The assets the rendered markup names by their development URL.
+ *
+ * Both are ordinary Vite asset imports inside components — the wordmark in `BrandLogo`, the screenshot
+ * in `About` — so a server-side render produces `/src/assets/…` for each, and the build has to swap in
+ * the content-hashed file it actually emitted.
+ */
+const aboutAssetSources = ['src/assets/qbsheet-black-logo.svg', aboutScreenshot];
+
+/** Path comparison that does not care which kind of slash the host uses. */
+function toPosix(path: string): string {
+  return path.split(sep).join('/');
+}
+
+/**
+ * Render the product page to static HTML at build time.
+ *
+ * # Why this page is not a single-page application
+ *
+ * `about/index.html` used to ship an empty `<div id="about-root">` and mount React into it, which meant
+ * a static marketing page — no state, no interactivity beyond links — could not show a word of itself
+ * until a JavaScript bundle had downloaded, parsed and run. That cost is paid by exactly the readers
+ * least able to afford it, it hides the copy from anything that does not execute scripts, and it keeps
+ * the largest image on the page out of the HTML where the preload scanner would have found it.
+ *
+ * So the component is rendered here instead, once, and the deployment serves the result. The page needs
+ * React at build time and none at run time.
+ *
+ * # Why it is still a React component
+ *
+ * Because the alternative is a hand-written HTML file holding a second copy of the wordmark, the type
+ * scale, the tokens and the button, with nothing keeping that copy in step with the scorer it advertises.
+ * Rendering the real component costs one build step and makes the drift impossible.
+ *
+ * # How the module is loaded
+ *
+ * Through a throwaway Vite development server, which is the supported way to load a `.tsx` module in
+ * Node using the project's own resolution, and which resolves the asset imports to development URLs
+ * that `transformIndexHtml` then rewrites against the real bundle. `configFile: false` is what stops it
+ * loading this file and recursing.
+ */
+function aboutPrerenderPlugin(): Plugin {
+  let base = './';
+  let root = '';
+  let building = false;
+  let markup: string | null = null;
+  let loadModule: ((id: string) => Promise<Record<string, unknown>>) | null = null;
+
+  async function render(): Promise<string> {
+    if (loadModule === null) throw new Error('The product page renderer is not available.');
+    const loaded = await loadModule('/src/about/About.tsx');
+    const About = loaded.default as () => ReactElement;
+    return renderToStaticMarkup(createElement(About));
+  }
+
+  /** An emitted file's URL as `about/index.html`, one directory deep, has to write it. */
+  function assetUrl(fileName: string): string {
+    if (!base.startsWith('.')) return `${base}${fileName}`;
+    const url = posix.relative('about', fileName);
+    return url.startsWith('.') ? url : `./${url}`;
+  }
+
+  function emittedUrl(bundle: Rollup.OutputBundle, source: string): string {
+    for (const output of Object.values(bundle)) {
+      if (output.type !== 'asset') continue;
+      if ((output.originalFileNames ?? []).some((name) => toPosix(name).endsWith(source))) {
+        return assetUrl(output.fileName);
+      }
+    }
+    // Shipping the page with a development URL in it would 404 the wordmark or the screenshot on a
+    // deployed site, which is the one class of failure prerendering is supposed to make impossible.
+    throw new Error(`The product page needs ${source}, and the build emitted no such asset.`);
+  }
+
+  return {
+    name: 'qbsheet-about-prerender',
+    configResolved(resolved) {
+      base = resolved.base;
+      root = resolved.root;
+      building = resolved.command === 'build';
+    },
+    configureServer(server) {
+      // Rendered per request in development, where the component's own asset URLs already resolve.
+      loadModule = (id) => server.ssrLoadModule(id);
+    },
+    async buildStart() {
+      if (!building) return;
+      // Nothing in the client graph imports the screenshot now that no React reaches the browser, so
+      // the asset is emitted here. `originalFileName` is what routes it below `about/` and what lets
+      // the markup's development URL be matched to it.
+      this.emitFile({
+        type: 'asset',
+        name: 'about-qbsheet-practice.webp',
+        originalFileName: aboutScreenshot,
+        source: readFileSync(new URL(aboutScreenshot, import.meta.url)),
+      });
+      const { createServer } = await import('vite');
+      const server = await createServer({
+        configFile: false,
+        root,
+        logLevel: 'warn',
+        appType: 'custom',
+        server: { middlewareMode: true, hmr: false },
+        // Only `ssrLoadModule` is ever called on this server, and the client dependency scan it would
+        // otherwise start reads both HTML entries and then reports being cancelled when the server is
+        // closed a few milliseconds later. Nothing needs it.
+        optimizeDeps: { noDiscovery: true, include: [] },
+      });
+      try {
+        loadModule = (id) => server.ssrLoadModule(id);
+        markup = await render();
+      } finally {
+        loadModule = null;
+        await server.close();
+      }
+    },
+    async transformIndexHtml(html, ctx) {
+      if (!toPosix(ctx.filename).endsWith('about/index.html')) return;
+      const rendered = building ? markup : await render();
+      if (rendered === null) throw new Error('The product page was not rendered.');
+      const bundle = ctx.bundle;
+      const resolved =
+        bundle === undefined
+          ? rendered
+          : aboutAssetSources.reduce(
+              (current, source) => current.replaceAll(`/${source}`, emittedUrl(bundle, source)),
+              rendered,
+            );
+      return html.replace(aboutRootDiv, `<div id="about-root">${resolved}</div>`);
+    },
+  };
 }
 
 /**
@@ -229,7 +370,7 @@ const identity = buildIdentity();
 
 export default defineConfig({
   base: process.env.BASE_PATH ?? './',
-  plugins: [react(), serviceWorkerPlugin(identity)],
+  plugins: [react(), aboutPrerenderPlugin(), serviceWorkerPlugin(identity)],
   // Added to `import.meta.env` rather than as a bare global so that a context which never went
   // through this config — the library build, a unit test — reads `undefined` instead of throwing a
   // ReferenceError. See `BuildVersion`.
