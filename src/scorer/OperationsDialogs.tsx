@@ -805,28 +805,34 @@ export function ScoresheetReviewDialog(props: {
                       : undefined
                   }
                 >
-                  <div className="scorer-review-question-head">
-                    <strong>Q{questionNumber}</strong>
-                    <button
-                      type="button"
-                      className="scorer-text-action scorer-review-question-action"
-                      onClick={() => {
-                        setCameFromList(true);
-                        setEditingQuestion(questionNumber);
-                      }}
-                    >
-                      Edit question
-                    </button>
-                  </div>
                   <ul>
                     {events
                       .filter((event) => event.questionNumber === questionNumber)
-                      .map((event) => {
+                      .map((event, eventIndex) => {
                         const cycleEvent = cycleEventTypes.has(event.type);
                         return (
                           <li key={event.id} className="scorer-review-event">
-                            <span>{eventDescription(event, format, game)}</span>
+                            {eventIndex === 0 ? (
+                              <strong className="scorer-review-question-number">Q{questionNumber}</strong>
+                            ) : (
+                              <span className="scorer-review-question-gutter" aria-hidden="true" />
+                            )}
+                            <span className="scorer-review-event-description">
+                              {eventDescription(event, format, game)}
+                            </span>
                             <span className="scorer-review-actions">
+                              {eventIndex === 0 && (
+                                <button
+                                  type="button"
+                                  className="scorer-text-action scorer-review-question-action"
+                                  onClick={() => {
+                                    setCameFromList(true);
+                                    setEditingQuestion(questionNumber);
+                                  }}
+                                >
+                                  Edit question
+                                </button>
+                              )}
                               {['substitution', 'adjustment', 'lightning', 'note'].includes(event.type) && (
                                 <button
                                   type="button"

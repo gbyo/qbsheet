@@ -1546,9 +1546,6 @@ div.scorer-banner .scorer-text-action {
 }
 
 .scorer-review-list > li {
-  display: grid;
-  grid-template-columns: 44px minmax(0, 1fr);
-  column-gap: 12px;
   min-width: 0;
   padding: 10px 0 11px;
   border-bottom: 1px solid var(--room-border);
@@ -1558,40 +1555,31 @@ div.scorer-banner .scorer-text-action {
   border-bottom: none;
 }
 
-.scorer-review-question-head {
-  display: grid;
-  grid-column: 1 / -1;
-  grid-template-columns: 44px minmax(0, 1fr);
-  column-gap: 12px;
-  align-items: baseline;
+.scorer-review-question-number,
+.scorer-review-question-gutter {
+  grid-column: 1;
   min-width: 0;
 }
 
-.scorer-review-question-head strong {
-  grid-column: 1;
-  min-width: 0;
+.scorer-review-question-number {
   font-variant-numeric: tabular-nums;
   font-weight: 600;
   color: var(--room-muted);
 }
 
 .scorer-review-question-action {
-  grid-column: 2;
-  justify-self: end;
-  min-width: 0;
   font-size: 13px;
   white-space: nowrap;
 }
 
 .scorer-review-list > li > ul {
-  grid-column: 2;
+  margin: 0;
   min-width: 0;
-  margin-top: 6px;
 }
 
 .scorer-review-event {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
   gap: 8px;
   align-items: baseline;
   min-width: 0;
@@ -1599,7 +1587,8 @@ div.scorer-banner .scorer-text-action {
   font-size: 13px;
 }
 
-.scorer-review-event > span:first-child {
+.scorer-review-event-description {
+  grid-column: 2;
   min-width: 0;
   overflow-wrap: anywhere;
 }
@@ -1612,6 +1601,7 @@ div.scorer-banner .scorer-text-action {
 }
 
 .scorer-review-actions {
+  grid-column: 3;
   justify-content: flex-end;
   min-width: max-content;
   white-space: nowrap;
@@ -1639,23 +1629,13 @@ div.scorer-banner .scorer-text-action {
 }
 
 @media (max-width: 520px) {
-  .scorer-review-list > li,
-  .scorer-review-question-head {
-    grid-template-columns: 44px minmax(0, 1fr);
-    column-gap: 8px;
-  }
-
-  .scorer-review-list > li > ul {
-    margin-top: 5px;
-  }
-
   .scorer-review-event {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: 44px minmax(0, 1fr);
     row-gap: 2px;
   }
 
   .scorer-review-actions {
-    grid-column: 1;
+    grid-column: 2;
     justify-self: start;
     flex-wrap: wrap;
   }
