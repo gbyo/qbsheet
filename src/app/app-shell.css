@@ -471,6 +471,26 @@ body {
   flex: 0 0 auto;
 }
 
+.welcome-footer {
+  padding-top: 20px;
+  text-align: center;
+}
+
+.welcome-footer a {
+  color: var(--room-muted);
+  font-size: 12px;
+  text-underline-offset: 2px;
+}
+
+.welcome-footer a:hover {
+  color: var(--room-text);
+}
+
+.welcome-footer a:focus-visible {
+  outline: 2px solid var(--room-accent);
+  outline-offset: 3px;
+}
+
 .file-open-input {
   display: none;
 }

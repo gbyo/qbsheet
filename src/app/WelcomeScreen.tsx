@@ -400,6 +400,10 @@ export default function WelcomeScreen(props: {
         canRetry={canRetryResult}
       />
 
+      <footer className="welcome-footer">
+        <a href="about/">About QBSheet</a>
+      </footer>
+
       {onOperatorNameChange && (settingsView !== null || firstRun) && (
         <SettingsDialog
           initialView={settingsView ?? 'scorekeeper'}

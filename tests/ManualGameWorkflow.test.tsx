@@ -167,6 +167,7 @@ describe('the front door', () => {
     expect(screen.getByText('Create a game')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Create game' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Practice scoring' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'About QBSheet' })).toHaveAttribute('href', 'about/');
   });
 
   test('creating a game is stated as scoring, not as a tutorial', async () => {
