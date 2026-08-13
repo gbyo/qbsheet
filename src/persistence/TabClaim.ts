@@ -89,9 +89,11 @@ async function claimWithWebLock(gameId: string): Promise<IGameClaim | null> {
   }
 
   const held = await acquired;
-  if (!held) return { held: false, release: () => undefined };
+  const lost = new AbortController();
+  if (!held) return { held: false, lost: lost.signal, release: () => undefined };
   return {
     held: true,
+    lost: lost.signal,
     release: () => {
       if (released) return;
       released = true;
@@ -103,6 +105,8 @@ async function claimWithWebLock(gameId: string): Promise<IGameClaim | null> {
 export interface IGameClaim {
   /** False when another live tab answered that it already holds this game. */
   readonly held: boolean;
+  /** Aborted if a fallback election later discovers that this tab is not the owner. */
+  readonly lost: AbortSignal;
   release(): void;
 }
 
@@ -123,7 +127,8 @@ export async function claimGame(
   if (webLockClaim) return webLockClaim;
 
   const claimChannel = channel === undefined ? defaultChannel() : channel;
-  if (!claimChannel) return { held: true, release: () => undefined };
+  const lost = new AbortController();
+  if (!claimChannel) return { held: true, lost: lost.signal, release: () => undefined };
 
   let heldByAnother = false;
   let lostElection = false;
@@ -148,6 +153,16 @@ export async function claimGame(
     claimChannel.close();
   };
 
+  const lose = () => {
+    if (!claimed || lost.signal.aborted) return;
+    claimed = false;
+    close();
+    // Abort listeners run synchronously, so the host can remove the scorer before another user
+    // action is handled. Closing the election channel alone is not enough: the tab may already have
+    // rendered writable scoring controls after the initial response timeout.
+    lost.abort();
+  };
+
   const listener = (event: MessageEvent) => {
     const message = event.data as ClaimMessage | undefined;
     if (!message || message.gameId !== gameId || message.from === tabId) return;
@@ -161,7 +176,7 @@ export async function claimGame(
         heldByAnother = true;
       } else if (message.from < tabId) {
         // Two tabs that crossed the election boundary still converge on one deterministic winner.
-        close();
+        lose();
       } else {
         post({ kind: 'holding', gameId, from: tabId });
       }
@@ -171,7 +186,7 @@ export async function claimGame(
       candidates.add(message.from);
       if (message.from < tabId) {
         lostElection = true;
-        if (claimed) close();
+        if (claimed) lose();
       } else if (claimed) {
         post({ kind: 'holding', gameId, from: tabId });
       }
@@ -195,7 +210,7 @@ export async function claimGame(
 
   if (heldByAnother || lostElection || [...candidates].some((candidate) => candidate < tabId)) {
     close();
-    return { held: false, release: () => undefined };
+    return { held: false, lost: lost.signal, release: () => undefined };
   }
 
   claimed = true;
@@ -207,6 +222,7 @@ export async function claimGame(
 
   return {
     held: true,
+    lost: lost.signal,
     release: () => {
       if (closed) return;
       claimed = false;
