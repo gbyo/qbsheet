@@ -81,6 +81,56 @@ function chooseRuling(label: string) {
   fireEvent.change(select, { target: { value: option.value } });
 }
 
+/** The correction form itself. A bonus prompt on its way off the scoresheet behind the dialog
+ * carries controls with the same names, and this suite is about the dialog. */
+function editor(): HTMLElement {
+  return document.querySelector('.scorer-question-editor') as HTMLElement;
+}
+
+function bounceFormat(): IScorekeeperFormat {
+  return formatFor((rules) => {
+    rules.bonusesBounceBack = true;
+  });
+}
+
+/** Q1 to Ninety Six, its bonus recorded as totals — the shape that has no part history. */
+function recordBonusTotals(controlled: number, bounceback?: number) {
+  fireEvent.click(buttonsFor('Sarah Mitchell')[1]); // +10
+  fireEvent.click(within(screen.getByLabelText('Bonus')).getByText(String(controlled)));
+  if (bounceback !== undefined) {
+    fireEvent.click(within(screen.getByLabelText('Bounceback')).getByText(String(bounceback)));
+  }
+}
+
+/** Q1 to Ninety Six, its bonus recorded part by part on the live prompt. */
+function recordBonusParts(outcomes: string[]) {
+  fireEvent.click(buttonsFor('Sarah Mitchell')[1]); // +10
+  fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('Parts…'));
+  outcomes.forEach((outcome, index) => {
+    const row = screen.getByText(`Part ${index + 1}`).closest('.scorer-part-row') as HTMLElement;
+    fireEvent.click(within(row).getByRole('button', { name: outcome }));
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Record parts' }));
+}
+
+function partOutcomes(partNumber: number): HTMLElement {
+  return within(editor()).getByRole('group', { name: `Bonus part ${partNumber} outcome` });
+}
+
+function outcomeButton(partNumber: number, name: string): HTMLElement {
+  return within(partOutcomes(partNumber)).getByRole('button', { name });
+}
+
+/** Which outcome each part is showing as chosen, and `none` for one nobody has answered. */
+function chosenOutcomes(partCount: number): string[] {
+  return Array.from({ length: partCount }, (_unused, index) => {
+    const pressed = within(partOutcomes(index + 1))
+      .getAllByRole('button')
+      .find((button) => button.getAttribute('aria-pressed') === 'true');
+    return pressed?.getAttribute('aria-label') ?? 'none';
+  });
+}
+
 function installLocalStorage() {
   let store: Record<string, string> = {};
   Object.defineProperty(window, 'localStorage', {
@@ -393,25 +443,33 @@ describe('the bonus', () => {
     expect(totals.map((button) => button.textContent)).toEqual(['0', '5', '10', '15', '20']);
   });
 
-  test('bouncebacks appear only when the format has them', () => {
+  test('bouncebacks appear only when the format has them, and name both teams', () => {
     renderScorer(formatFor());
     fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
     fireEvent.click(screen.getByText('20'));
     openEditor();
-    expect(screen.queryByLabelText('Bonus bounceback points')).toBeNull();
+    // Nothing bounces, so there is one side to enter and no reason to name it in every control.
+    expect(within(editor()).getByRole('group', { name: 'Bonus points' })).toBeTruthy();
+    expect(within(editor()).queryByRole('group', { name: /bounceback/i })).toBeNull();
     cleanup();
 
-    renderScorer(
-      formatFor((rules) => {
-        rules.bonusesBounceBack = true;
-      }),
-    );
-    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
-    fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('20'));
-    // With bouncebacks the scorer asks the opponent's share before the cycle is finished.
-    fireEvent.click(within(screen.getByLabelText('Bounceback')).getByText('10'));
+    renderScorer(bounceFormat());
+    recordBonusTotals(20, 10);
     openEditor();
-    expect(screen.getByLabelText('Bonus bounceback points')).toBeTruthy();
+
+    // Two sides, each named, rather than "Points" and "Bounceback" saying nothing about who scores.
+    const bonus = within(editor()).getByRole('group', { name: 'Ninety Six bonus' });
+    expect(within(bonus).getAllByRole('button').map((button) => button.textContent)).toEqual([
+      '0',
+      '10',
+      '20',
+      '30',
+    ]);
+    expect(within(bonus).getByRole('button', { name: '20' })).toHaveAttribute('aria-pressed', 'true');
+    // The opponent is offered only what the controlling team left on the bonus.
+    const bounceback = within(editor()).getByRole('group', { name: 'Greenwood bounceback' });
+    expect(within(bounceback).getAllByRole('button').map((button) => button.textContent)).toEqual(['0', '10']);
+    expect(within(bounceback).getByRole('button', { name: '10' })).toHaveAttribute('aria-pressed', 'true');
   });
 
   test('an irregular bonus asks for a number, because its parts are not enumerable', () => {
@@ -429,7 +487,9 @@ describe('the bonus', () => {
     openEditor();
 
     expect(screen.queryByRole('group', { name: 'Bonus points' })).toBeNull();
-    expect(screen.getByLabelText('Points')).toBeTruthy();
+    expect(within(editor()).getByLabelText('Bonus points')).toBeTruthy();
+    // Nothing here knows what one part of an irregular bonus is worth, so no part outcomes are offered.
+    expect(screen.queryByText('Edit individual parts\u2026')).toBeNull();
   });
 
   test('a correction that creates a conversion can add the bonus it earns', () => {
@@ -442,6 +502,247 @@ describe('the bonus', () => {
 
     // The bonus control is present and attributed to the team that converted.
     expect(screen.getByRole('group', { name: 'Bonus points' })).toBeTruthy();
-    expect(screen.getByText(/Bonus — GREENWOOD/)).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Bonus' })).toBeTruthy();
+    expect(screen.getByText('Controlled by Greenwood')).toBeTruthy();
+  });
+});
+
+/**
+ * The bonus, asked the way the live prompt asks it.
+ *
+ * The correction editor used to expose the storage: two unlabelled number boxes per part, the first
+ * of them the controlling team's points and the second the bounceback's, with nothing on screen
+ * saying so. A scorekeeper cannot answer that question. They can answer "who got part 2?", which is
+ * what `BonusPrompt` has always asked, so that is what this asks too — in the same three outcomes,
+ * from the same format-derived helpers, with the same meaning.
+ */
+describe('who got each bonus part', () => {
+  test('a bounceback bonus opens as outcomes, not as pairs of numbers', () => {
+    renderScorer(bounceFormat());
+    recordBonusParts(['+10', 'Bounce', 'Miss']);
+    openEditorFromRecent(1);
+
+    // Both teams are identified: the one that converted, and the one that can take the rest.
+    expect(screen.getByRole('heading', { name: 'Bonus' })).toBeTruthy();
+    expect(screen.getByText('Controlled by Ninety Six')).toBeTruthy();
+    const head = editor().querySelector('.scorer-question-part-head') as HTMLElement;
+    expect(Array.from(head.querySelectorAll('span'), (span) => span.textContent).filter(Boolean)).toEqual([
+      'Ninety Six',
+      'Greenwood',
+    ]);
+
+    // One control per outcome, each saying whose points it is and what it is worth.
+    expect(within(partOutcomes(2)).getAllByRole('button').map((button) => button.getAttribute('aria-label'))).toEqual([
+      'Part 2: Ninety Six +10',
+      'Part 2: Greenwood bounceback +10',
+      'Part 2: nobody',
+    ]);
+
+    // Nothing left of the storage: no unexplained number pairs, and no dead "Points" box.
+    expect(within(editor()).queryAllByRole('spinbutton')).toHaveLength(0);
+    expect(within(editor()).queryByLabelText('Points')).toBeNull();
+    expect(within(editor()).queryByLabelText('Bonus part 1 controlled points')).toBeNull();
+  });
+
+  test('the recorded outcomes are the ones showing, in the parts they were recorded on', () => {
+    renderScorer(bounceFormat());
+    recordBonusParts(['+10', 'Bounce', 'Miss']);
+    openEditorFromRecent(1);
+
+    expect(chosenOutcomes(3)).toEqual([
+      'Part 1: Ninety Six +10',
+      'Part 2: Greenwood bounceback +10',
+      'Part 3: nobody',
+    ]);
+    expect(within(editor()).getByText('Ninety Six +10 · Greenwood +10 bounceback')).toBeTruthy();
+  });
+
+  test('changing a part moves the whole part, so no part can pay both teams', () => {
+    renderScorer(bounceFormat());
+    recordBonusParts(['+10', 'Bounce', 'Miss']);
+    openEditorFromRecent(1);
+
+    fireEvent.click(outcomeButton(1, 'Part 1: Greenwood bounceback +10'));
+    expect(outcomeButton(1, 'Part 1: Ninety Six +10')).toHaveAttribute('aria-pressed', 'false');
+    expect(outcomeButton(1, 'Part 1: Greenwood bounceback +10')).toHaveAttribute('aria-pressed', 'true');
+    expect(outcomeButton(1, 'Part 1: nobody')).toHaveAttribute('aria-pressed', 'false');
+    expect(within(editor()).getByText('Ninety Six 0 · Greenwood +20 bounceback')).toBeTruthy();
+
+    fireEvent.click(outcomeButton(2, 'Part 2: nobody'));
+    expect(chosenOutcomes(3)).toEqual(['Part 1: Greenwood bounceback +10', 'Part 2: nobody', 'Part 3: nobody']);
+    expect(within(editor()).getByText('Ninety Six 0 · Greenwood +10 bounceback')).toBeTruthy();
+  });
+
+  test('a bonus nobody scored says so rather than showing a row of zeroes', () => {
+    renderScorer(bounceFormat());
+    recordBonusParts(['+10', 'Bounce', 'Miss']);
+    openEditorFromRecent(1);
+
+    fireEvent.click(outcomeButton(1, 'Part 1: nobody'));
+    fireEvent.click(outcomeButton(2, 'Part 2: nobody'));
+
+    expect(within(editor()).getByText('Nobody scored this bonus.')).toBeTruthy();
+  });
+
+  test('the totals, the score preview and the saved game all follow the parts', () => {
+    renderScorer(bounceFormat());
+    recordBonusParts(['+10', 'Bounce', 'Miss']);
+    expect(scoreOf('Ninety Six')).toBe('20');
+    expect(scoreOf('Greenwood')).toBe('10');
+    openEditorFromRecent(1);
+
+    fireEvent.click(outcomeButton(3, 'Part 3: Ninety Six +10'));
+
+    expect(within(editor()).getByText('Ninety Six +20 · Greenwood +10 bounceback')).toBeTruthy();
+    const score = screen.getByRole('table', { name: 'Question 1 score impact' });
+    expect(within(score).getByRole('row', { name: /Ninety Six: \+20 \+30 10-point change/ })).toBeTruthy();
+    expect(within(score).getByRole('row', { name: /Greenwood: unchanged at \+10/ })).toBeTruthy();
+
+    fireEvent.click(screen.getByText('Save changes'));
+
+    expect(scoreOf('Ninety Six')).toBe('30');
+    expect(scoreOf('Greenwood')).toBe('10');
+  });
+
+  test('a regular bonus without bouncebacks asks the two questions it has', () => {
+    renderScorer(formatFor());
+    recordBonusTotals(20);
+    openEditorFromRecent(1);
+    fireEvent.click(screen.getByText('Edit individual parts…'));
+
+    expect(within(partOutcomes(1)).getAllByRole('button').map((button) => button.getAttribute('aria-label'))).toEqual([
+      'Part 1: Ninety Six +10',
+      'Part 1: nobody',
+    ]);
+    expect(editor().querySelector('.scorer-question-part-head')?.textContent).toBe('Ninety Six');
+
+    fireEvent.click(outcomeButton(1, 'Part 1: Ninety Six +10'));
+    fireEvent.click(outcomeButton(2, 'Part 2: Ninety Six +10'));
+    fireEvent.click(outcomeButton(3, 'Part 3: nobody'));
+
+    expect(within(editor()).getByText('Ninety Six +20')).toBeTruthy();
+    fireEvent.click(screen.getByText('Save changes'));
+    expect(scoreOf('Ninety Six')).toBe('30');
+  });
+
+  test('what a part is worth and how many there are come from the format', () => {
+    renderScorer(
+      formatFor((rules) => {
+        rules.bonusesBounceBack = true;
+        rules.maximumBonusScore = 20;
+        rules.pointsPerBonusPart = 5;
+        rules.bonusDivisor = 5;
+        rules.minimumPartsPerBonus = 4;
+        rules.maximumPartsPerBonus = 4;
+      }),
+    );
+    recordBonusTotals(10, 5);
+    openEditorFromRecent(1);
+    fireEvent.click(screen.getByText('Edit individual parts…'));
+
+    expect(within(editor()).getAllByRole('group', { name: /^Bonus part \d+ outcome$/ })).toHaveLength(4);
+    expect(outcomeButton(4, 'Part 4: Ninety Six +5')).toBeTruthy();
+    expect(outcomeButton(4, 'Part 4: Greenwood bounceback +5')).toBeTruthy();
+    // No outcome is worth ten points here, however familiar a ten-point part is elsewhere.
+    const parts = editor().querySelector('.scorer-question-parts') as HTMLElement;
+    const awards = within(parts)
+      .getAllByRole('button')
+      .map((button) => button.getAttribute('aria-label') ?? '')
+      .filter((label) => label.includes('+'));
+    expect(awards).toHaveLength(8);
+    expect(awards.every((label) => label.endsWith('+5'))).toBe(true);
+
+    fireEvent.click(outcomeButton(1, 'Part 1: Ninety Six +5'));
+    fireEvent.click(outcomeButton(2, 'Part 2: Ninety Six +5'));
+    fireEvent.click(outcomeButton(3, 'Part 3: Greenwood bounceback +5'));
+    fireEvent.click(outcomeButton(4, 'Part 4: nobody'));
+
+    expect(within(editor()).getByText('Ninety Six +10 · Greenwood +5 bounceback')).toBeTruthy();
+  });
+});
+
+/**
+ * The one thing this screen must never do quietly.
+ *
+ * A bonus recorded as a total of 20 does not say which two parts made it. Opening part entry used
+ * to answer that question by writing three zero parts, which replaced a 20-point bonus with a
+ * 0-point one and told nobody. Neither half of the fix is optional: it may not reset the bonus, and
+ * it may not guess a part history either.
+ */
+describe('turning a recorded total into parts', () => {
+  test('the recorded total stands until every part has been answered', () => {
+    renderScorer(bounceFormat());
+    recordBonusTotals(20, 10);
+    expect(scoreOf('Ninety Six')).toBe('30');
+    expect(scoreOf('Greenwood')).toBe('10');
+    openEditorFromRecent(1);
+
+    fireEvent.click(screen.getByText('Edit individual parts…'));
+
+    // Nothing invented: no part claims to know what happened to it.
+    expect(chosenOutcomes(3)).toEqual(['none', 'none', 'none']);
+    // And nothing lost: the bonus is still the one that was recorded.
+    expect(within(editor()).getByText('Ninety Six +20 · Greenwood +10 bounceback')).toBeTruthy();
+    expect(within(editor()).getByText(/Still to answer: part 1, part 2 and part 3/)).toBeTruthy();
+    const score = screen.getByRole('table', { name: 'Question 1 score impact' });
+    expect(within(score).getByRole('row', { name: /Ninety Six: unchanged at \+30/ })).toBeTruthy();
+  });
+
+  test('an unfinished breakdown cannot be saved, and says which parts are missing', () => {
+    renderScorer(bounceFormat());
+    recordBonusTotals(20, 10);
+    openEditorFromRecent(1);
+    fireEvent.click(screen.getByText('Edit individual parts…'));
+
+    fireEvent.click(outcomeButton(1, 'Part 1: Ninety Six +10'));
+    fireEvent.click(screen.getByText('Save changes'));
+
+    expect(screen.getByText('Choose who got bonus part 2 and part 3, or enter totals instead.')).toBeTruthy();
+    // Still open, and the game is untouched.
+    expect(screen.getByRole('heading', { name: 'Edit Question 1' })).toBeTruthy();
+    expect(scoreOf('Ninety Six')).toBe('30');
+    expect(scoreOf('Greenwood')).toBe('10');
+  });
+
+  test('once every part is answered the breakdown replaces the total', () => {
+    renderScorer(bounceFormat());
+    recordBonusTotals(20, 10);
+    openEditorFromRecent(1);
+    fireEvent.click(screen.getByText('Edit individual parts…'));
+
+    fireEvent.click(outcomeButton(1, 'Part 1: Ninety Six +10'));
+    fireEvent.click(outcomeButton(2, 'Part 2: Greenwood bounceback +10'));
+    fireEvent.click(outcomeButton(3, 'Part 3: nobody'));
+
+    expect(within(editor()).queryByText(/Still to answer/)).toBeNull();
+    expect(within(editor()).getByText('Ninety Six +10 · Greenwood +10 bounceback')).toBeTruthy();
+
+    fireEvent.click(screen.getByText('Save changes'));
+
+    expect(scoreOf('Ninety Six')).toBe('20');
+    expect(scoreOf('Greenwood')).toBe('10');
+  });
+
+  test('going back to totals keeps what the bonus is worth and drops only the detail', () => {
+    renderScorer(bounceFormat());
+    recordBonusParts(['+10', 'Bounce', '+10']);
+    openEditorFromRecent(1);
+
+    fireEvent.click(screen.getByText('Enter totals instead'));
+
+    expect(within(editor()).queryByRole('group', { name: 'Bonus part 1 outcome' })).toBeNull();
+    const bonus = within(editor()).getByRole('group', { name: 'Ninety Six bonus' });
+    expect(within(bonus).getByRole('button', { name: '20' })).toHaveAttribute('aria-pressed', 'true');
+    const bounceback = within(editor()).getByRole('group', { name: 'Greenwood bounceback' });
+    expect(within(bounceback).getByRole('button', { name: '10' })).toHaveAttribute('aria-pressed', 'true');
+
+    const score = screen.getByRole('table', { name: 'Question 1 score impact' });
+    expect(within(score).getByRole('row', { name: /Ninety Six: unchanged at \+30/ })).toBeTruthy();
+    expect(within(score).getByRole('row', { name: /Greenwood: unchanged at \+10/ })).toBeTruthy();
+
+    fireEvent.click(screen.getByText('Save changes'));
+
+    expect(scoreOf('Ninety Six')).toBe('30');
+    expect(scoreOf('Greenwood')).toBe('10');
   });
 });

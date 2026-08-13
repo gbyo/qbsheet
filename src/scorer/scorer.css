@@ -1897,8 +1897,23 @@ div.scorer-banner .scorer-text-action {
   flex-wrap: wrap;
 }
 
+/* A heading with a line of context under it, rather than one long shouted line. */
 .scorer-question-heading-line {
   min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+}
+
+/*
+ * Who converted, as context rather than a control. Below the heading and in the ordinary text
+ * colour: the heading says what this section is, this says whose bonus it is, and neither of them
+ * is something to fill in when the tossup already settled it.
+ */
+.scorer-question-bonus-context {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: var(--room-text);
 }
 
 .scorer-question-bonus-head-actions {
@@ -1975,8 +1990,7 @@ div.scorer-banner .scorer-text-action {
 
 .scorer-question-attempt select,
 .scorer-question-bonus select,
-.scorer-question-bonus input,
-.scorer-question-part input {
+.scorer-question-bonus input {
   min-width: 0;
   padding: 6px 7px;
   font: inherit;
@@ -2002,16 +2016,11 @@ div.scorer-banner .scorer-text-action {
   color: var(--room-muted);
 }
 
-.scorer-question-actions,
-.scorer-question-bonus,
-.scorer-question-parts {
+.scorer-question-actions {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-}
-
-.scorer-question-actions {
   margin-top: 10px;
 }
 
@@ -2019,9 +2028,19 @@ div.scorer-banner .scorer-text-action {
   display: inline-flex;
 }
 
+/*
+ * A column, not a row of controls jostling for the same line.
+ *
+ * With bouncebacks on there are two named sides to enter and a mode switch under them, and packing
+ * those across one wrapping row put the opponent's choices wherever there happened to be room. Each
+ * thing here is a labelled block on its own line, in the order the bonus is scored.
+ */
 .scorer-question-bonus {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
   margin-top: 10px;
-  align-items: flex-end;
 }
 
 .scorer-question-bonus label {
@@ -2037,47 +2056,135 @@ div.scorer-banner .scorer-text-action {
   width: 84px;
 }
 
-/*
- * While the parts are open the total is their sum, not something to type in. Sunken and muted so it
- * reads as a figure being shown rather than a box that has stopped accepting what is typed into it.
- */
-.scorer-question-bonus input:disabled {
-  color: var(--room-muted);
-  background: var(--room-surface-sunken);
-  border-color: var(--room-border);
-}
-
-/*
- * Its own line under the bonus row rather than a column standing beside it.
- *
- * The parts block is a flex item of a wrapping row, so without a full basis it packed itself into
- * whatever space was left next to Points and Use total and the three parts came out staggered down
- * the middle of the dialog. They are a short column of small numbers; they belong under the total
- * they add up to.
- */
-.scorer-question-parts {
-  flex-basis: 100%;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 6px;
-  margin-top: 2px;
-}
-
-.scorer-question-part {
+.scorer-question-total-group {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* The mode switch is a link-sized action, not a full-width control the column would stretch it into. */
+.scorer-question-bonus > .scorer-text-action,
+.scorer-question-bonus > label {
+  align-self: flex-start;
+}
+
+/*
+ * Says whose points these are. The same 12px muted label the number fields carry, so a row of
+ * buttons and a typed field read as the same kind of thing.
+ */
+.scorer-question-total-label {
   font-size: 12px;
   color: var(--room-muted);
 }
 
-.scorer-question-part > span {
-  flex: 0 0 auto;
-  width: 48px;
+/*
+ * The part grid: Part N, then one column per outcome, under a heading naming the team that column
+ * belongs to.
+ *
+ * Every row is its own grid, so the tracks have to be described in units that come out the same on
+ * each of them — a content-sized column would make Part 1 wider than Part 2 the moment one of them
+ * was ticked, and the heading would then name the wrong column. Hence a fixed label column and
+ * outcome columns that share the row evenly up to a readable maximum.
+ */
+.scorer-question-parts {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  --scorer-part-columns: 56px repeat(2, minmax(0, 11rem));
 }
 
-.scorer-question-part input {
-  width: 84px;
+.scorer-question-parts.has-bounceback {
+  --scorer-part-columns: 56px repeat(3, minmax(0, 11rem));
+}
+
+.scorer-question-part-head,
+.scorer-question-part {
+  display: grid;
+  grid-template-columns: var(--scorer-part-columns);
+  gap: 6px;
+  align-items: center;
+}
+
+.scorer-question-part-head {
+  font-size: 11px;
+  color: var(--room-muted);
+}
+
+.scorer-question-part-label {
+  font-size: 12px;
+  white-space: nowrap;
+  color: var(--room-muted);
+}
+
+.scorer-question-part-choice {
+  min-width: 0;
+  padding: 7px 10px;
+  font-size: 13px;
+}
+
+/*
+ * Selected is a filled button, a heavier weight and a tick — three cues, so the one part that was
+ * bounced back is still obvious to a scorekeeper who cannot tell the accent from the surface.
+ */
+.scorer-question-part-choice.is-selected {
+  font-weight: 600;
+}
+
+/* A non-breaking space: a trailing one in `content` collapses and the tick lands on the number. */
+.scorer-question-part-choice.is-selected::before {
+  content: '✓\00a0';
+}
+
+/* The column heading names the team on wide screens; this repeats it once the heading folds away. */
+.scorer-question-part-team {
+  display: none;
+}
+
+/* A part nobody has answered yet: marked, so an unfinished breakdown cannot look finished. */
+.scorer-question-part.is-unanswered .scorer-question-part-label::after {
+  content: ' •';
+  color: var(--room-warning);
+}
+
+.scorer-question-part-summary {
+  margin: 4px 0 0;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--room-text);
+}
+
+.scorer-question-part-pending {
+  margin: 0;
+  font-size: 12px;
+  color: var(--room-muted);
+}
+
+/*
+ * Narrow enough that four columns would be four slivers: the heading row goes, each part becomes a
+ * block, and the buttons name their own team instead of relying on a heading that is no longer
+ * there. Part N still leads the block, so which outcomes belong to which part stays obvious.
+ */
+@media (max-width: 560px) {
+  .scorer-question-part-head {
+    display: none;
+  }
+
+  .scorer-question-part {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+    padding-bottom: 6px;
+  }
+
+  .scorer-question-part-choice {
+    justify-self: stretch;
+    text-align: left;
+  }
+
+  .scorer-question-part-team {
+    display: inline;
+  }
 }
 
 /*
@@ -2107,8 +2214,7 @@ div.scorer-banner .scorer-text-action {
 .scorer-question-disclosure:focus-visible,
 .scorer-question-attempt select:focus-visible,
 .scorer-question-bonus select:focus-visible,
-.scorer-question-bonus input:focus-visible,
-.scorer-question-part input:focus-visible {
+.scorer-question-bonus input:focus-visible {
   outline: 2px solid var(--room-accent);
   outline-offset: 1px;
 }

@@ -101,6 +101,25 @@ export function editableQuestionFromEvents(events: readonly ScoreEvent[], questi
   };
 }
 
+/**
+ * A bonus carrying these parts, with its totals worked out from them.
+ *
+ * The one place the two representations are reconciled. A screen that edited parts and totals
+ * separately would eventually save a bonus whose parts said 20 and whose total said 30 — which
+ * `validateEditableQuestion` refuses, correctly, and which no scorekeeper could be expected to
+ * diagnose. Passing `undefined` drops the part detail and leaves the totals exactly as they were,
+ * because what the bonus was worth is not what the scorekeeper asked to change.
+ */
+export function bonusFromParts(bonus: IEditableBonus, parts: IBonusPartResult[] | undefined): IEditableBonus {
+  if (!parts) return { ...bonus, parts: undefined };
+  return {
+    ...bonus,
+    parts: parts.map((part) => ({ ...part })),
+    controlledPoints: parts.reduce((sum, part) => sum + part.controlledPoints, 0),
+    bouncebackPoints: parts.reduce((sum, part) => sum + (part.bouncebackPoints ?? 0), 0),
+  };
+}
+
 export function conversion(model: IEditableQuestion, format: IScorekeeperFormat): IEditableAttempt | undefined {
   return model.attempts.find(
     (attempt) =>
