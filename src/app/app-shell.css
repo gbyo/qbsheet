@@ -1017,6 +1017,24 @@ body {
   color: var(--room-faint);
 }
 
+.assignment-next {
+  display: flex;
+  gap: 8px;
+  margin: 14px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--room-border);
+  color: var(--room-muted);
+}
+
+.assignment-next-label {
+  flex: none;
+  color: var(--room-faint);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 /* #endregion */
 
 /* #region Modal */

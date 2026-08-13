@@ -141,6 +141,11 @@ export class ResultDeliveryService {
     return this.capabilities.has(record.id);
   }
 
+  /** Network/server pending outcomes are safe to retry unattended; refusals remain a person's job. */
+  canAutoRetry(record: IStoredGameRecord): boolean {
+    return record.serverDelivery === 'pending' && record.serverDeliveryLedger?.retryable === true && this.canRetry(record);
+  }
+
   async recordOutcome(recordId: string, delivery: IFinalDelivery, now: Date = new Date()): Promise<IStoredGameRecord | null> {
     const updated = await recordFinalDelivery(this.store, recordId, delivery, now);
     if (delivery.delivery === 'sent' || !delivery.retryable || delivery.unsupported) this.capabilities.remove(recordId);
