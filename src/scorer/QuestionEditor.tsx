@@ -447,9 +447,17 @@ export default function QuestionEditor(props: {
     setBonus({ [field]: parsed, parts: undefined });
   };
 
-  const unanswered = partDraft
-    ? partDraft.map((outcome, index) => (outcome === null ? index + 1 : 0)).filter((number) => number > 0)
-    : [];
+  /*
+   * Which parts are still unanswered — and none, once there is no bonus to answer them for.
+   *
+   * `settleBonus` removes the bonus the moment the ruling stops earning one, and it can do that
+   * while a part draft is open. Without the `model.bonus` guard the draft outlives the bonus and
+   * save is refused over parts of a bonus that is no longer in the question.
+   */
+  const unanswered =
+    partDraft && model.bonus
+      ? partDraft.map((outcome, index) => (outcome === null ? index + 1 : 0)).filter((number) => number > 0)
+      : [];
 
   /**
    * Open part entry.

@@ -957,6 +957,25 @@ describe('turning a recorded total into parts', () => {
     expect(scoreOf('Greenwood')).toBe('10');
   });
 
+  test('a bonus that stops being earned takes its unfinished breakdown with it', () => {
+    // `settleBonus` removes the bonus the moment the ruling stops earning one. A part draft left
+    // open over it must not go on refusing to save parts of a bonus the question no longer has.
+    renderScorer(bounceFormat());
+    recordBonusTotals(20, 10);
+    openEditorFromRecent(1);
+    fireEvent.click(screen.getByText('Edit individual parts…'));
+    expect(chosenOutcomes(3)).toEqual(['none', 'none', 'none']);
+
+    chooseRuling('Neg (-5)');
+
+    expect(within(editor()).queryByRole('group', { name: 'Bonus part 1 outcome' })).toBeNull();
+    fireEvent.click(screen.getByText('Save changes'));
+
+    expect(screen.queryByText(/Choose who got bonus/)).toBeNull();
+    expect(scoreOf('Ninety Six')).toBe('-5');
+    expect(scoreOf('Greenwood')).toBe('0');
+  });
+
   test('going back to totals keeps what the bonus is worth and drops only the detail', () => {
     renderScorer(bounceFormat());
     recordBonusParts(['+10', 'Bounce', '+10']);
