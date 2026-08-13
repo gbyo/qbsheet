@@ -315,17 +315,19 @@ export default function ManualGameSetup(props: {
     }
   }, [dirty, input]);
 
-  const errorRefs = {
-    teams: useRef<HTMLDivElement>(null),
-    rules: useRef<HTMLDivElement>(null),
-    options: useRef<HTMLDivElement>(null),
-  };
+  // One ref each rather than an object of them, so handing one to a section is handing over the ref
+  // itself. The section-to-ref lookup belongs in the effect below, which is the only thing that
+  // reads through it.
+  const teamsErrors = useRef<HTMLDivElement>(null);
+  const rulesErrors = useRef<HTMLDivElement>(null);
+  const optionsErrors = useRef<HTMLDivElement>(null);
 
   // After a refused submission, put the cursor on the first group that has something wrong with it.
   // A form that scrolls is a form where the complaint can be off screen, and an alert nobody sees is
   // indistinguishable from a button that did nothing.
   useEffect(() => {
     if (submissions === 0 || problems.length === 0) return;
+    const errorRefs = { teams: teamsErrors, rules: rulesErrors, options: optionsErrors };
     const first = (['teams', 'rules', 'options'] as const).find(
       (section) => problems.some((problem) => problem.section === section),
     );
@@ -512,7 +514,7 @@ export default function ManualGameSetup(props: {
         <p className="shell-hint">
           The teams do not have to be the same size, and substitutes can be added during the game.
         </p>
-        <SectionErrors problems={problemsIn('teams')} show={showErrors} anchor={errorRefs.teams} />
+        <SectionErrors problems={problemsIn('teams')} show={showErrors} anchor={teamsErrors} />
       </section>
 
       <section className="shell-section" aria-labelledby="manual-rules-heading">
@@ -526,7 +528,7 @@ export default function ManualGameSetup(props: {
           onChange={(rules: IScoringRulesInput) => set({ rules })}
           timedHint="A timed round ends when the moderator calls time rather than after a fixed count. QBSheet can show a clock for each play segment if breaks are configured below; otherwise the moderator keeps time."
         />
-        <SectionErrors problems={problemsIn('rules')} show={showErrors} anchor={errorRefs.rules} />
+        <SectionErrors problems={problemsIn('rules')} show={showErrors} anchor={rulesErrors} />
       </section>
 
       <section className="shell-section" aria-labelledby="manual-options-heading">
@@ -643,7 +645,7 @@ export default function ManualGameSetup(props: {
           )}
         </fieldset>
 
-        <SectionErrors problems={problemsIn('options')} show={showErrors} anchor={errorRefs.options} />
+        <SectionErrors problems={problemsIn('options')} show={showErrors} anchor={optionsErrors} />
       </section>
 
       {startError !== '' && <p className="shell-warning" role="alert">{startError}</p>}

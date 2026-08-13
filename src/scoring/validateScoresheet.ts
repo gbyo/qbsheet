@@ -4,7 +4,7 @@ import {
   protestBlocksCheckpoint,
   protestCheckpointPolicy,
 } from './RoomProcedure';
-import deriveGame, { IGameSetup, IDerivedGame, IDerivedQuestion } from './deriveGame';
+import deriveGame, { bonusFollows, IGameSetup, IDerivedGame, IDerivedQuestion } from './deriveGame';
 import { bonusEventPoints, ScoreEvent, usesTossupOpportunity } from './ScoreEvents';
 import { bonusPartProblem, bonusScoreProblem } from '../scorer/bonusOptions';
 
@@ -501,11 +501,10 @@ function validateQuestion(
   }
   const conversion = conversions[0];
   const answerType = conversion ? format.answerTypes[conversion.answerTypeIndex] : undefined;
+  // The engine's own rule, not a restatement of it. A question whose period is not yet derived is
+  // read as regulation, which is what the three inline clauses here did before.
   const expectedBonus =
-    conversion !== undefined &&
-    answerType?.awardsBonus === true &&
-    format.bonus.enabled &&
-    (question?.period !== 'overtime' || format.overtime.includesBonuses);
+    answerType !== undefined && bonusFollows(format, answerType, question?.period ?? 'regulation');
   const bonus = bonuses[0];
   if (bonus && !conversion) {
     addUnique(
