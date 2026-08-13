@@ -188,20 +188,27 @@ export default function TeamPanel(props: ITeamPanelProps) {
   const answerTypes = availableAnswerTypes(format, negsAvailable);
   // One extra column for the zero, so the values stay in the same place down every row.
   const columns = answerTypes.length + 1;
-  const previousPoints = useRef(team.points);
-  const hasRendered = useRef(false);
-  const scoreDirection = team.points < previousPoints.current ? 'is-down' : 'is-up';
-
-  useEffect(() => {
-    previousPoints.current = team.points;
-    hasRendered.current = true;
-  }, [team.points]);
+  /*
+   * Which way the score last moved, recorded when it moves.
+   *
+   * The direction has to be readable while rendering, and a ref read during render is the one place
+   * React will not promise a value. Recording it as state at the moment the points change says the
+   * same thing without the promise: `started` keeps the first paint still, because a score that has
+   * not moved yet has no direction to roll in.
+   */
+  const [scoreMotion, setScoreMotion] = useState({ points: team.points, direction: 'is-up', started: false });
+  if (scoreMotion.points !== team.points) {
+    setScoreMotion({
+      points: team.points,
+      direction: team.points < scoreMotion.points ? 'is-down' : 'is-up',
+      started: true,
+    });
+  }
 
   // The row the picker belongs to can leave the floor — by the substitution itself, or by a change
   // made in the Players dialog — and an open picker attached to nobody must not stay on screen.
-  useEffect(() => {
-    if (substituting !== null && !team.activePlayers.includes(substituting)) setSubstituting(null);
-  }, [substituting, team.activePlayers]);
+  // Closed as the render that would have drawn it happens, so it is never painted orphaned.
+  if (substituting !== null && !team.activePlayers.includes(substituting)) setSubstituting(null);
 
   return (
     <section className="scorer-team" aria-label={team.name}>
@@ -210,7 +217,7 @@ export default function TeamPanel(props: ITeamPanelProps) {
         <p className="scorer-team-score" aria-label={`${team.name} score`}>
           <span
             key={team.points}
-            className={`scorer-team-score-value${hasRendered.current ? ` ${scoreDirection}` : ''}`}
+            className={`scorer-team-score-value${scoreMotion.started ? ` ${scoreMotion.direction}` : ''}`}
           >
             {team.points}
           </span>

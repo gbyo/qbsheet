@@ -2063,21 +2063,46 @@ div.scorer-banner .scorer-text-action {
   margin-top: 2px;
 }
 
+/*
+ * Part rows and the headings over them share one grid, because the headings are the only thing
+ * saying which of two identical `+10` buttons belongs to which team. A flex row with a fixed label
+ * width could not keep them lined up once the team names were the widest thing in the column.
+ */
+.scorer-question-part-head,
 .scorer-question-part {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: 48px repeat(3, minmax(0, 1fr));
   gap: 8px;
+  align-items: center;
   font-size: 12px;
   color: var(--room-muted);
 }
 
-.scorer-question-part > span {
-  flex: 0 0 auto;
-  width: 48px;
+/* Without bouncebacks a part is taken or missed, and the third column has nothing to hold. */
+.scorer-question-part-head.is-two-way,
+.scorer-question-part.is-two-way {
+  grid-template-columns: 48px repeat(2, minmax(0, 1fr));
 }
 
-.scorer-question-part input {
-  width: 84px;
+.scorer-question-part-head {
+  padding-bottom: 2px;
+}
+
+.scorer-question-part-head > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scorer-question-part > span {
+  min-width: 0;
+}
+
+/* Sized to the row rather than to the live prompt, where a bonus button is the primary action. */
+.scorer-question-part .scorer-choice {
+  min-width: 0;
+  padding: 6px 8px;
+  font-size: 13px;
 }
 
 /*
@@ -2244,6 +2269,18 @@ div.scorer-banner .scorer-text-action {
   flex-shrink: 0;
   font-size: 13px;
   color: var(--room-muted);
+}
+
+/*
+ * Under the bounceback choices, not beside them.
+ *
+ * It is the way out of a stage whose buttons are the primary action, so it must not sit in the row
+ * a scorekeeper is aiming at — a mispress there records a bounceback instead of going back, which is
+ * the mistake this control exists to fix.
+ */
+.scorer-prompt-back {
+  display: block;
+  margin-top: 12px;
 }
 
 .scorer-part-total {
