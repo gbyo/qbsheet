@@ -1,9 +1,103 @@
+/**
+ * The public product page.
+ *
+ * # This component never runs in a browser
+ *
+ * It is rendered to static HTML at build time by `aboutPrerenderPlugin` in `vite.config.ts`, and the
+ * deployed page ships that HTML with no React behind it. So it holds no state, no effects and no
+ * event handlers: everything interactive about this page is a link, and the one piece of behaviour —
+ * the scroll reveals — is thirty lines of `reveal.ts` that finds its targets by class name.
+ *
+ * Keeping it a React component anyway is worth it for one reason. The wordmark, the type scale, the
+ * tokens and the button are the scorer's, and a hand-written HTML file would be a second copy of all
+ * of them that nothing keeps in step. Rendering the real component means the page cannot drift from
+ * the application it is advertising, and it means the copy below is unit-testable.
+ *
+ * # Written for the person who hands out the games
+ *
+ * The reader this page is composed for is a tournament director deciding whether sixteen rooms can be
+ * asked to use it, so the middle of the page is the tournament workflow in the order that person meets
+ * it: the game goes out, the room scores it, the result comes back. That is one sequence rather than a
+ * feature list, and it is laid out as one — three stages on a rule — because a director reading a grid
+ * of capabilities still has to work out which of them happen in what order.
+ *
+ * What follows it is the set of properties that decision actually turns on, and it is a section of its
+ * own rather than a fourth stage of the sequence.
+ *
+ * # No claim here is aspirational
+ *
+ * Every sentence below describes behaviour this repository implements today, and the ones that name a
+ * format name it as narrowly as the code does. Nothing on this page may assume powers, negs, a bonus
+ * shape, a roster size, or a substitution model, because `IScorekeeperFormat` assumes none of them and
+ * a tournament whose format the copy quietly excluded is a tournament that reads this page and leaves.
+ */
 import BrandLogo from '../BrandLogo';
 import productImage from '../assets/about-qbsheet-practice.webp';
 
 const githubUrl = 'https://github.com/gbyo/qbsheet';
 const qbjDocsUrl = `${githubUrl}/blob/main/docs/QBJ_ASSIGNMENT_PROFILE.md`;
 const qbtcpDocsUrl = `${githubUrl}/blob/main/docs/QBTCP.md`;
+
+/**
+ * React 18 does not recognise `fetchPriority` and drops it with a warning, so it is spread in as the
+ * lower-case HTML attribute. It matters more now than it did: the image is in the served HTML, where
+ * the preload scanner finds it before any script runs, and it is this page's largest paint.
+ */
+const highFetchPriority = { fetchpriority: 'high' };
+
+/**
+ * The three stages of a tournament game, in the order the room meets them.
+ *
+ * `detail` is deliberately conditional where the implementation is. An assignment carries whatever the
+ * producer put in it, and QBSheet asks for the rest (`RosterSetup`, `ScoringRulesSetup`), so the copy
+ * says the room "can start with" those fields rather than promising a roster a generic QBJ may not have.
+ * Tournament control is offered as one of two ways in at both ends of the sequence, never as a
+ * requirement: a tournament that runs on files is the common case, and this page must not read as though
+ * that case were the fallback.
+ */
+const stages = [
+  {
+    number: '01',
+    name: 'Assign',
+    idea: 'Set up the game once.',
+    detail:
+      'Open a QBJ assignment or connect QBSheet to tournament control. The room can start with the teams, players, and scoring rules already filled in.',
+  },
+  {
+    number: '02',
+    name: 'Score',
+    idea: 'Score the game.',
+    detail:
+      'The scorekeeper gets a scoresheet built around the game they were assigned, without having to recreate the setup at the table.',
+  },
+  {
+    number: '03',
+    name: 'Return',
+    idea: 'Turn in the result.',
+    detail:
+      'If QBSheet is connected to tournament control, the finished game can be sent back directly. If not, the result can be saved as QBJ.',
+  },
+];
+
+/** The four things a director asks about a scoresheet before putting it in sixteen rooms. */
+const assurances = [
+  {
+    title: 'No internet required',
+    body: 'Scoring happens on the device. Once a game is open, losing the network does not stop the room, and a reload restores from local state rather than from a server.',
+  },
+  {
+    title: 'Less setup at the table',
+    body: 'QBSheet asks only for what the assignment left out. A document that named the teams, the players and the rules leaves nothing for the room to re-enter.',
+  },
+  {
+    title: 'Your format, not ours',
+    body: 'Configure scoring and lineup rules around the tournament instead of forcing the tournament around the scoresheet. QBSheet never infers a format from the name of a rule set.',
+  },
+  {
+    title: 'Recovery built in',
+    body: 'Every accepted question is written to the device as it is scored, and a finished game stays there, downloadable as QBJ, for days after it was handed over.',
+  },
+];
 
 function ActionLinks() {
   return (
@@ -14,6 +108,78 @@ function ActionLinks() {
       <a className="about-button" href={githubUrl}>
         View on GitHub
       </a>
+    </div>
+  );
+}
+
+/**
+ * The workflow, which is the one sequence on the page.
+ *
+ * The rule above each stage is drawn before that stage's words appear, and the three are sequenced, so
+ * the section is read left to right once rather than landing all at once. It is the only place here
+ * where the motion carries an idea — direction — and it is still under 700ms. `about.css` owns the
+ * timing; `reveal.ts` only decides when it starts.
+ */
+function WorkflowStages() {
+  return (
+    <ol className="about-stages">
+      {stages.map((stage) => (
+        <li key={stage.number}>
+          <h3 className="about-stage-name">
+            <span className="about-stage-number" aria-hidden="true">
+              {stage.number}
+            </span>
+            {stage.name}
+          </h3>
+          <p className="about-stage-idea">{stage.idea}</p>
+          <p className="about-stage-detail">{stage.detail}</p>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/** The workflow, and nothing else. It ends where the three stages end. */
+function WorkflowSection() {
+  return (
+    <section className="about-section about-flow" aria-labelledby="scoring-heading">
+      <div className="about-section-heading about-flow-heading about-reveal">
+        <p className="about-kicker">From assignment to result</p>
+        <h2 id="scoring-heading">Built around how you actually score</h2>
+        <p>From room assignments to final results, QBSheet fits into the tournament you already run.</p>
+      </div>
+      <WorkflowStages />
+    </section>
+  );
+}
+
+/**
+ * The four things a director asks, on their own.
+ *
+ * These used to sit under the workflow, and sharing a section with it made both harder to read: a
+ * sequence and a set of properties are different kinds of thing, and a reader arriving at a ruled grid
+ * immediately below three numbered stages has to work out that the grid is not a fourth stage. So they
+ * are a section, and the tint is what says so before anybody reads a word of them.
+ *
+ * No rules between them either. They are four independent claims with nothing to compare across, and a
+ * table grid on a set like that is a border doing the work whitespace already did.
+ */
+function AssuranceSection() {
+  return (
+    <div className="about-band">
+      <section className="about-section about-assurances" aria-labelledby="tournament-day-heading">
+        <div className="about-section-heading about-reveal">
+          <h2 id="tournament-day-heading">Made for tournament day</h2>
+        </div>
+        <div className="about-assurance-grid about-reveal">
+          {assurances.map((assurance) => (
+            <article key={assurance.title}>
+              <h3>{assurance.title}</h3>
+              <p>{assurance.body}</p>
+            </article>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }
@@ -49,71 +215,14 @@ export default function About() {
             width="2200"
             height="1430"
             alt="QBSheet scoring a tied practice game between Ninety Six and Greenwood"
-            fetchPriority="high"
+            {...highFetchPriority}
           />
           <figcaption>The real QBSheet scoring interface, shown during a guided practice game.</figcaption>
         </figure>
 
-        <section className="about-section" aria-labelledby="rooms-heading">
-          <div className="about-section-heading">
-            <p className="about-kicker">At the table</p>
-            <h2 id="rooms-heading">Built for real tournament rooms</h2>
-          </div>
-          <div className="about-feature-grid">
-            <article>
-              <h3>Works offline</h3>
-              <p>Once loaded, QBSheet keeps working even if the network drops.</p>
-            </article>
-            <article>
-              <h3>Flexible setup</h3>
-              <p>Open a game file, connect to tournament control, or create a game manually.</p>
-            </article>
-            <article>
-              <h3>Made for quiz bowl</h3>
-              <p>Supports powers, negs, bonuses, substitutions, and configurable scoring rules.</p>
-            </article>
-            <article>
-              <h3>Safe and dependable</h3>
-              <p>Games are saved locally as you score, with QBJ backups and recovery support.</p>
-            </article>
-          </div>
-        </section>
+        <WorkflowSection />
 
-        <section className="about-section" aria-labelledby="workflows-heading">
-          <div className="about-section-heading about-section-heading-narrow">
-            <p className="about-kicker">Three ways in</p>
-            <h2 id="workflows-heading">Use it your way</h2>
-            <p>
-              Run QBSheet standalone, open assigned games from QBJ files, or connect live to compatible
-              tournament-control software using QBTCP.
-            </p>
-          </div>
-          <div className="about-workflows">
-            <article>
-              <h3>Create a game</h3>
-              <p>Enter the teams, players, and rules directly in QBSheet.</p>
-            </article>
-            <article>
-              <h3>Open QBJ</h3>
-              <p>Open a game assignment or tournament file supplied by tournament staff.</p>
-            </article>
-            <article>
-              <h3>Connect to tournament control</h3>
-              <p>Receive assignments and return results through compatible QBTCP software.</p>
-            </article>
-          </div>
-        </section>
-
-        <section className="about-section about-editorial" aria-labelledby="standalone-heading">
-          <div>
-            <p className="about-kicker">Standalone scoring</p>
-            <h2 id="standalone-heading">Not just for tournaments</h2>
-          </div>
-          <p className="about-editorial-copy">
-            Enter teams, players, and scoring rules yourself for practices, scrimmages, tryouts, or pickup
-            games. No tournament-control software required.
-          </p>
-        </section>
+        <AssuranceSection />
 
         <section className="about-section about-open" aria-labelledby="open-heading">
           <div className="about-section-heading about-section-heading-narrow">
