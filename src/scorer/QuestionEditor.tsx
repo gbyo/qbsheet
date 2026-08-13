@@ -34,26 +34,56 @@
  * The attempt list is not ruled at all: it holds two rows at the most, and two rows do not need
  * three lines to be told apart.
  *
+ * # The bonus asks who got each part, not what to put in which field
+ *
+ * A bonus part used to be two unlabelled number boxes per row, which is the storage — controlled
+ * points, bounceback points — offered as though it were the question. It is not. The question is
+ * the one the live prompt already asks: who got this part, the team that took the tossup, the other
+ * team on the bounce, or nobody. `BonusPartOutcome` is that vocabulary, shared with `BonusPrompt`
+ * so the two screens cannot drift, and `bonusPartForOutcome` writes the whole part at once so no
+ * part can ever hold points for both teams.
+ *
+ * Totals are the same idea one level up: with bouncebacks on, the row of buttons belongs to a named
+ * team and the opponent gets a row of its own, rather than a "Points" box and a "Bounceback" box
+ * that say nothing about who scores what.
+ *
+ * # Turning a total into parts cannot invent history
+ *
+ * A bonus recorded as 20 says nothing about *which* two parts were got. Opening part entry on one
+ * therefore starts every part unanswered and leaves the recorded total alone until the scorekeeper
+ * has said what happened to each; save is refused in between. Filling the parts with zeroes turned
+ * a 20-point bonus into a 0-point one; filling them in order from the total keeps the figures but
+ * puts an answer on screen that nothing recorded.
+ *
  * # Nothing here knows any format
  *
- * The rulings are `format.answerTypes`. The bonus buttons are `regularBonusTotals`. The number of
- * attempts a cycle may hold is the engine's, checked by `validateEditableQuestion`. There is no
- * +15, no −5, no 0/10/20/30 and no notion of which rule set this is.
+ * The rulings are `format.answerTypes`. The bonus buttons are `regularBonusTotals`. What a part is
+ * worth is `format.bonus.pointsPerPart` and how many there are is `regularBonusPartCount`. The
+ * number of attempts a cycle may hold is the engine's, checked by `validateEditableQuestion`. There
+ * is no +15, no −5, no 0/10/20/30, no three parts and no notion of which rule set this is.
  */
-import { useMemo, useState } from 'react';
+import { ReactNode, useMemo, useState } from 'react';
 import { IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
 import { IDerivedGame } from '../scoring/deriveGame';
-import { IBonusPartResult } from '../scoring/ScoreEvents';
 import {
   IEditableAttempt,
   IEditableBonus,
   IEditableQuestion,
+  bonusFromParts,
   conversion,
   expectsBonus,
   settleBonus,
   validateEditableQuestion,
 } from '../scoring/questionCorrection';
-import { bouncebackNeedsTypedEntry, bouncebackOptions, regularBonusTotals } from './bonusOptions';
+import {
+  BonusPartOutcome,
+  bonusPartForOutcome,
+  bonusPartOutcome,
+  bouncebackNeedsTypedEntry,
+  bouncebackOptions,
+  regularBonusPartCount,
+  regularBonusTotals,
+} from './bonusOptions';
 import { powerCorrect } from './tossupRulings';
 
 const noPenaltyValue = 'no-penalty';
@@ -130,33 +160,18 @@ function firstActive(game: IDerivedGame, team: 'left' | 'right'): string {
 }
 
 /**
- * Parts that add up to the bonus already recorded.
+ * Who got each part while the parts are being edited, `null` for one nobody has answered yet.
  *
- * Opening the parts view used to fill it with zeros, so pressing `Edit parts…` on a recorded 20 quietly
- * rewrote the bonus to 0 — and with the parts drawn as three chosen outcomes rather than three empty
- * boxes, that also put a wrong answer on screen: three Misses on a bonus that scored 20.
- *
- * A regular bonus's parts are interchangeable, all worth the same, so which of them were taken is
- * precisely what a total does not record. Filling them in order is the only decomposition available,
- * and it keeps the figures — the scorekeeper opened this to say which parts they belong to.
+ * Distinct from the bonus itself on purpose. A part breakdown is only written to the question once
+ * it is complete, so an in-progress answer can never be mistaken for a recorded one.
  */
-function partsFromTotal(format: IScorekeeperFormat, bonus: IEditableBonus): IBonusPartResult[] {
-  const count = Math.max(1, format.bonus.minimumParts);
-  const perPart = format.bonus.pointsPerPart ?? 0;
-  if (perPart <= 0) return Array.from({ length: count }, () => ({ controlledPoints: 0, bouncebackPoints: 0 }));
-  let controlled = Math.max(0, Math.floor(bonus.controlledPoints / perPart));
-  let bounced = Math.max(0, Math.floor(bonus.bouncebackPoints / perPart));
-  return Array.from({ length: count }, () => {
-    if (controlled > 0) {
-      controlled -= 1;
-      return { controlledPoints: perPart, bouncebackPoints: 0 };
-    }
-    if (bounced > 0) {
-      bounced -= 1;
-      return { controlledPoints: 0, bouncebackPoints: perPart };
-    }
-    return { controlledPoints: 0, bouncebackPoints: 0 };
-  });
+type IPartDraft = (BonusPartOutcome | null)[];
+
+/** "part 2", "part 2 and part 3", "part 1, part 2 and part 3" — for one readable sentence. */
+function joinParts(numbers: number[]): string {
+  const named = numbers.map((number) => `part ${number}`);
+  if (named.length <= 1) return named.join('');
+  return `${named.slice(0, -1).join(', ')} and ${named[named.length - 1]}`;
 }
 
 /**
@@ -170,26 +185,6 @@ function partsFromTotal(format: IScorekeeperFormat, bonus: IEditableBonus): IBon
 interface IBonusDrafts {
   controlled?: string;
   bounceback?: string;
-}
-
-/** Who took a bonus part, as the live prompt asks it. */
-type PartOutcome = 'controlled' | 'bounceback' | 'missed';
-
-/** Which of the three a stored part result is. */
-function partOutcome(part: IBonusPartResult): PartOutcome {
-  if (part.controlledPoints > 0) return 'controlled';
-  if ((part.bouncebackPoints ?? 0) > 0) return 'bounceback';
-  return 'missed';
-}
-
-function syncBonus(bonus: IEditableBonus, parts: IEditableBonus['parts']): IEditableBonus {
-  if (!parts) return { ...bonus, parts: undefined };
-  return {
-    ...bonus,
-    parts: parts.map((part) => ({ ...part })),
-    controlledPoints: parts.reduce((sum, part) => sum + part.controlledPoints, 0),
-    bouncebackPoints: parts.reduce((sum, part) => sum + (part.bouncebackPoints ?? 0), 0),
-  };
 }
 
 /**
@@ -277,7 +272,8 @@ export default function QuestionEditor(props: {
    * must not open in a parts view it has no control for and no way out of.
    */
   const perPart = format.bonus.pointsPerPart ?? 0;
-  const partOutcomesAvailable = format.bonus.regular && perPart > 0;
+  const partCount = regularBonusPartCount(format.bonus);
+  const partOutcomesAvailable = partCount !== null;
   const [model, setModel] = useState<IEditableQuestion>(() => ({
     ...initial,
     attempts: initial.attempts.map((attempt) => ({ ...attempt })),
@@ -286,15 +282,29 @@ export default function QuestionEditor(props: {
   const [errors, setErrors] = useState<string[]>([]);
   const [bonusDrafts, setBonusDrafts] = useState<IBonusDrafts>({});
   const [showMore, setShowMore] = useState(false);
-  const [showParts, setShowParts] = useState(() => initial.bonus?.parts !== undefined && partOutcomesAvailable);
+  /*
+   * A bonus that already has parts opens on them, with every outcome already selected — there is no
+   * ambiguity about what happened, so there is nothing to ask. Only where the format says what one
+   * part is worth: an irregular bonus that somehow carries parts is left to its total, because
+   * outcome buttons for it would have to invent a per-part value.
+   */
+  const [partDraft, setPartDraft] = useState<IPartDraft | null>(() =>
+    partOutcomesAvailable
+      ? (initial.bonus?.parts?.map((part) => bonusPartOutcome(format.bonus, part)) ?? null)
+      : null,
+  );
   const [showIntro, setShowIntro] = useState(() => !readIntroSeen());
 
   // A correction makes an old validation message stale. Clear it as soon as the scorekeeper edits —
   // in the render the edit produces, so the complaint and the corrected field are never shown
-  // together for a frame.
-  const [validatedModel, setValidatedModel] = useState(model);
-  if (validatedModel !== model) {
-    setValidatedModel(model);
+  // together for a frame. Answering one more part counts: it is progress against the complaint even
+  // though the bonus itself does not change until the last part is answered.
+  const [validated, setValidated] = useState<{ model: IEditableQuestion; parts: IPartDraft | null }>({
+    model,
+    parts: partDraft,
+  });
+  if (validated.model !== model || validated.parts !== partDraft) {
+    setValidated({ model, parts: partDraft });
     setErrors([]);
   }
 
@@ -437,26 +447,60 @@ export default function QuestionEditor(props: {
     setBonus({ [field]: parsed, parts: undefined });
   };
 
+  const unanswered = partDraft
+    ? partDraft.map((outcome, index) => (outcome === null ? index + 1 : 0)).filter((number) => number > 0)
+    : [];
+
+  /**
+   * Open part entry.
+   *
+   * Recorded parts open as they were recorded. A bonus that only ever had a total opens with every
+   * part unanswered, because a 20 does not say which two parts made it and this screen will not
+   * decide that on the scorekeeper's behalf — the alternative, filling them in order, puts an answer
+   * on screen that nothing recorded.
+   */
+  const editParts = () => {
+    const existing = model.bonus?.parts;
+    setPartDraft(
+      existing
+        ? existing.map((part) => bonusPartOutcome(format.bonus, part))
+        : Array.from({ length: partCount ?? 0 }, () => null),
+    );
+  };
+
+  /** Back to totals: the part detail goes, what the bonus is worth stays. */
+  const editTotals = () => {
+    setPartDraft(null);
+    if (model.bonus?.parts) setBonus({ parts: undefined });
+  };
+
   /**
    * Who took one part: the same three outcomes the live prompt offers, written to the same model.
    *
    * There is deliberately no typed part entry to go with this. A regular bonus part is worth exactly
    * `pointsPerPart` or nothing, so the three buttons cover every outcome the rules allow — and the
    * pair of number boxes they replace was the only way to enter a part value the format forbids.
+   *
+   * `bonusPartForOutcome` writes the whole part rather than one field of it, so a part can never come
+   * to rest holding points for both teams, and the breakdown reaches the question only once every
+   * part has an answer — until then the bonus keeps the total it was recorded with.
    */
-  const setBonusPartOutcome = (index: number, outcome: PartOutcome) => {
-    setModel((current) => {
-      if (!current.bonus?.parts) return current;
-      const parts = current.bonus.parts.map((part, partIndex) =>
-        partIndex === index
-          ? {
-              controlledPoints: outcome === 'controlled' ? perPart : 0,
-              bouncebackPoints: outcome === 'bounceback' ? perPart : 0,
-            }
-          : part,
-      );
-      return { ...current, bonus: syncBonus(current.bonus, parts) };
-    });
+  const setPartOutcome = (index: number, outcome: BonusPartOutcome) => {
+    if (!partDraft) return;
+    const next = partDraft.map((existing, position) => (position === index ? outcome : existing));
+    setPartDraft(next);
+    if (next.some((entry) => entry === null)) return;
+    setModel((current) =>
+      current.bonus
+        ? {
+            ...current,
+            bonus: bonusFromParts(
+              current.bonus,
+              next.map((entry) => bonusPartForOutcome(format.bonus, entry as BonusPartOutcome)),
+            ),
+          }
+        : current,
+    );
   };
 
   const save = () => {
@@ -467,6 +511,11 @@ export default function QuestionEditor(props: {
     })
       .filter(([, value]) => value !== undefined && (value.trim() === '' || !Number.isFinite(Number(value))))
       .map(([field]) => `Enter a valid number for ${field.replace(/-/g, ' ')}.`);
+    // An unfinished breakdown is not a bonus worth nothing, and saving one as though it were is the
+    // silent rescore this screen exists to prevent.
+    if (unanswered.length > 0) {
+      draftErrors.push(`Choose who got bonus ${joinParts(unanswered)}, or enter totals instead.`);
+    }
     const nextErrors = [...draftErrors, ...validateEditableQuestion(format, game, model)];
     setErrors(nextErrors);
     if (nextErrors.length === 0 && onSave(model)) onCancel();
@@ -478,6 +527,21 @@ export default function QuestionEditor(props: {
   const earnsBonus = expectsBonus(format, game, model);
   const overtime = question?.period === 'overtime';
   const opponentOf = (team: 'left' | 'right') => (team === 'left' ? 'right' : 'left');
+  /* With bouncebacks on, every points control belongs to a named team; without them there is one side. */
+  const controllingName = bonusTeam ? teamName(bonusTeam) : '';
+  const opponentName = bonusTeam ? teamName(opponentOf(bonusTeam)) : '';
+  const controlledLabel = format.bonus.bounceBack && bonusTeam ? `${controllingName} bonus` : 'Bonus points';
+  const bouncebackLabel = `${opponentName} bounceback`;
+  const controlledId = `question-${model.questionNumber}-bonus-controlled`;
+  const bouncebackId = `question-${model.questionNumber}-bonus-bounceback`;
+  /** What the parts come to, in words. A bonus nobody scored says so rather than reading "0 · 0". */
+  const bonusSummary = !model.bonus
+    ? ''
+    : model.bonus.controlledPoints === 0 && model.bonus.bouncebackPoints === 0
+      ? 'Nobody scored this bonus.'
+      : `${controllingName} ${pointsLabel(model.bonus.controlledPoints)}${
+          format.bonus.bounceBack ? ` · ${opponentName} ${pointsLabel(model.bonus.bouncebackPoints)} bounceback` : ''
+        }`;
 
   return (
     <form
@@ -678,16 +742,27 @@ export default function QuestionEditor(props: {
 
       <section className="scorer-question-section" aria-label="Bonus correction">
         <div className="scorer-question-section-head scorer-question-bonus-head">
+          {/*
+            Two lines, not one shouted one. "BONUS — NINETY SIX" put the controlling team in the
+            heading and left the other team — which can score here — unnamed anywhere. The heading
+            says what this is; the line under it says who converted, as settled context. It is never
+            a field: `settleBonus` takes the team from the conversion, which is the only thing that
+            can earn a bonus in the first place.
+          */}
           <div className="scorer-question-heading-line">
-            <h4 className="scorer-question-heading">
-              Bonus{bonusTeam ? ` — ${teamName(bonusTeam).toLocaleUpperCase()}` : ''}
-            </h4>
+            <h4 className="scorer-question-heading">Bonus</h4>
+            {model.bonus && bonusTeam && (
+              <p className="scorer-question-bonus-context">Controlled by {controllingName}</p>
+            )}
           </div>
           {model.bonus ? (
             <button
               type="button"
               className="scorer-text-action is-destructive scorer-question-remove-bonus"
-              onClick={() => setModel((current) => ({ ...current, bonus: undefined }))}
+              onClick={() => {
+                setPartDraft(null);
+                setModel((current) => ({ ...current, bonus: undefined }));
+              }}
             >
               Remove bonus
             </button>
@@ -708,7 +783,7 @@ export default function QuestionEditor(props: {
                   type="button"
                   className="scorer-action"
                   onClick={() => {
-                    setShowParts(false);
+                    setPartDraft(null);
                     // The converting team, taken from the conversion itself: there is no bonus without
                     // one, which is why this dialog has no controlling-team selector any more.
                     setBonus({ team: convertedAttempt.team, controlledPoints: 0, bouncebackPoints: 0 });
@@ -741,150 +816,169 @@ export default function QuestionEditor(props: {
         )}
         {model.bonus && earnsBonus && (
           <div className="scorer-question-bonus">
-            {quickTotals !== null && !showParts ? (
-              <div className="scorer-question-totals" role="group" aria-label="Bonus points">
-                {quickTotals.map((total) => (
-                  <button
-                    key={total}
-                    type="button"
-                    className={model.bonus?.controlledPoints === total ? 'scorer-choice is-selected' : 'scorer-choice'}
-                    aria-pressed={model.bonus?.controlledPoints === total}
-                    onClick={() => setBonus({ controlledPoints: total, parts: undefined })}
-                  >
-                    {total}
-                  </button>
-                ))}
-              </div>
+            {partDraft === null ? (
+              <>
+                {quickTotals !== null ? (
+                  <div className="scorer-question-total-group">
+                    <span className="scorer-question-total-label" id={`${controlledId}-label`}>
+                      {controlledLabel}
+                    </span>
+                    <div className="scorer-question-totals" role="group" aria-labelledby={`${controlledId}-label`}>
+                      {quickTotals.map((total) => (
+                        <button
+                          key={total}
+                          type="button"
+                          className={
+                            model.bonus?.controlledPoints === total ? 'scorer-choice is-selected' : 'scorer-choice'
+                          }
+                          aria-pressed={model.bonus?.controlledPoints === total}
+                          onClick={() => setBonus({ controlledPoints: total, parts: undefined })}
+                        >
+                          {total}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  /* Irregular bonuses have no enumerable totals: the only honest control is a number. */
+                  <label htmlFor={controlledId}>
+                    {controlledLabel}
+                    <input
+                      id={controlledId}
+                      type="number"
+                      value={bonusDrafts.controlled ?? String(model.bonus.controlledPoints)}
+                      onChange={(event) => updateBonusTotal('controlledPoints', event.target.value)}
+                    />
+                  </label>
+                )}
+                {/*
+                  Only where the format actually has bouncebacks; otherwise there is nothing to enter.
+
+                  A row of buttons under the opponent's name rather than a dropdown labelled
+                  "Bounceback", because the question is whose points these are, and a select answers
+                  it in a place nobody looks until they open it.
+                */}
+                {format.bonus.bounceBack &&
+                  (bouncebackNeedsTypedEntry(format.bonus, model.bonus.controlledPoints) ? (
+                    <label htmlFor={bouncebackId}>
+                      {bouncebackLabel}
+                      <input
+                        id={bouncebackId}
+                        type="number"
+                        min={0}
+                        max={Math.max(0, format.bonus.maximumScore - model.bonus.controlledPoints)}
+                        step={format.bonus.divisor || 1}
+                        value={bonusDrafts.bounceback ?? String(model.bonus.bouncebackPoints)}
+                        onChange={(event) => updateBonusTotal('bouncebackPoints', event.target.value)}
+                      />
+                    </label>
+                  ) : (
+                    <div className="scorer-question-total-group">
+                      <span className="scorer-question-total-label" id={`${bouncebackId}-label`}>
+                        {bouncebackLabel}
+                      </span>
+                      {/* Bounded by what the controlling team left: `bouncebackOptions` is the rule. */}
+                      <div className="scorer-question-totals" role="group" aria-labelledby={`${bouncebackId}-label`}>
+                        {bouncebackOptions(format.bonus, model.bonus.controlledPoints).map((points) => (
+                          <button
+                            key={points}
+                            type="button"
+                            className={
+                              model.bonus?.bouncebackPoints === points ? 'scorer-choice is-selected' : 'scorer-choice'
+                            }
+                            aria-pressed={model.bonus?.bouncebackPoints === points}
+                            onClick={() => setBonus({ bouncebackPoints: points, parts: undefined })}
+                          >
+                            {points}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+              </>
             ) : (
-              /* Irregular bonuses have no enumerable totals: the only honest control is a number. */
-              <label htmlFor={`question-${model.questionNumber}-bonus-controlled`}>
-                Points
-                <input
-                  id={`question-${model.questionNumber}-bonus-controlled`}
-                  aria-label="Points"
-                  type="number"
-                  value={bonusDrafts.controlled ?? String(model.bonus.controlledPoints)}
-                  disabled={showParts}
-                  onChange={(event) => updateBonusTotal('controlledPoints', event.target.value)}
-                />
-              </label>
-            )}
-            {/* Only where the format actually has bouncebacks; otherwise there is nothing to enter. */}
-            {format.bonus.bounceBack && !showParts && (
-              bouncebackNeedsTypedEntry(format.bonus, model.bonus.controlledPoints) ? (
-                <label htmlFor={`question-${model.questionNumber}-bonus-bounceback`}>
-                  Bounceback
-                  <input
-                    id={`question-${model.questionNumber}-bonus-bounceback`}
-                    aria-label="Bonus bounceback points"
-                    type="number"
-                    min={0}
-                    max={Math.max(0, format.bonus.maximumScore - model.bonus.controlledPoints)}
-                    step={format.bonus.divisor || 1}
-                    value={bonusDrafts.bounceback ?? String(model.bonus.bouncebackPoints)}
-                    onChange={(event) => updateBonusTotal('bouncebackPoints', event.target.value)}
-                  />
-                </label>
-              ) : (
-                <label htmlFor={`question-${model.questionNumber}-bonus-bounceback`}>
-                  Bounceback
-                  <select
-                    id={`question-${model.questionNumber}-bonus-bounceback`}
-                    aria-label="Bonus bounceback points"
-                    value={String(model.bonus.bouncebackPoints)}
-                    onChange={(event) => setBonus({ bouncebackPoints: Number(event.target.value), parts: undefined })}
+              /*
+                The same question the live prompt asks, asked the same way.
+
+                This was two unlabelled number boxes per part, so a bounceback format showed `Part 1
+                [0] [10]` and left the scorekeeper to work out from the accessible names which column
+                was which team. A part has three outcomes, not two numbers: the controlling team took
+                it, it bounced, or nobody got it. The columns are named after the teams because in a
+                correction — unlike in the live prompt, which has just come from that team's own
+                buttons — there is nothing else on screen saying which side is which.
+              */
+              bonusTeam !== undefined && (
+                <div className="scorer-question-parts">
+                  <div
+                    className={
+                      format.bonus.bounceBack ? 'scorer-question-part-head' : 'scorer-question-part-head is-two-way'
+                    }
+                    aria-hidden="true"
                   >
-                    {bouncebackOptions(format.bonus, model.bonus.controlledPoints).map((points) => (
-                      <option key={points} value={points}>
-                        {points}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                    <span />
+                    <span>{controllingName}</span>
+                    {format.bonus.bounceBack && <span>{opponentName} bounceback</span>}
+                    <span />
+                  </div>
+                  {partDraft.map((outcome, index) => {
+                    // Parts have no persisted identity in QBJ; their position is their identity, and
+                    // it is kept: Part 1 stays Part 1 however its outcome changes.
+                    const choice = (value: BonusPartOutcome, label: ReactNode, accessibleName: string) => (
+                      <button
+                        type="button"
+                        aria-label={accessibleName}
+                        aria-pressed={outcome === value}
+                        className={outcome === value ? 'scorer-choice is-selected' : 'scorer-choice'}
+                        onClick={() => setPartOutcome(index, value)}
+                      >
+                        {label}
+                      </button>
+                    );
+                    const row = ['scorer-question-part', format.bonus.bounceBack ? '' : 'is-two-way', outcome === null ? 'is-unanswered' : '']
+                      .filter(Boolean)
+                      .join(' ');
+                    return (
+                      <div key={`part-${index}`} className={row} role="group" aria-label={`Bonus part ${index + 1} outcome`}>
+                        <span className="scorer-question-part-label">Part {index + 1}</span>
+                        {choice(
+                          'controlled',
+                          /* The team span shows on narrow screens, where the column heading has folded away. */
+                          <>
+                            <span className="scorer-question-part-team">{controllingName} </span>+{perPart}
+                          </>,
+                          `Bonus part ${index + 1} to ${controllingName}`,
+                        )}
+                        {format.bonus.bounceBack &&
+                          choice(
+                            'bounceback',
+                            <>
+                              <span className="scorer-question-part-team">{opponentName} </span>+{perPart}
+                            </>,
+                            `Bonus part ${index + 1} bounced back to ${opponentName}`,
+                          )}
+                        {choice('missed', 'Miss', `Bonus part ${index + 1} missed`)}
+                      </div>
+                    );
+                  })}
+                  {/*
+                    What the parts come to, as a sentence rather than a number field nobody can type
+                    in. While parts are still unanswered this is the total the bonus is recorded with
+                    — the breakdown has not replaced it, and will not until it is complete.
+                  */}
+                  <p className="scorer-question-part-summary">{bonusSummary}</p>
+                  {unanswered.length > 0 && (
+                    <p className="scorer-question-part-pending">
+                      Still to answer: {joinParts(unanswered)}. The bonus keeps the total above until every part has
+                      an outcome.
+                    </p>
+                  )}
+                </div>
               )
             )}
             {partOutcomesAvailable && (
-              <button
-                type="button"
-                className="scorer-text-action"
-                onClick={() => {
-                  if (showParts) {
-                    setShowParts(false);
-                    setBonus({ parts: undefined });
-                    return;
-                  }
-                  setShowParts(true);
-                  setModel((current) =>
-                    current.bonus
-                      ? { ...current, bonus: syncBonus(current.bonus, partsFromTotal(format, current.bonus)) }
-                      : current,
-                  );
-                }}
-              >
-                {showParts ? 'Use total' : 'Edit parts…'}
+              <button type="button" className="scorer-text-action" onClick={partDraft ? editTotals : editParts}>
+                {partDraft ? 'Enter totals instead' : 'Edit individual parts…'}
               </button>
-            )}
-            {/*
-              The same question the live prompt asks, asked the same way.
-
-              This was two unlabelled number boxes per part, so a bounceback format showed `Part 1
-              [0] [10]` and left the scorekeeper to work out from the accessible names which column
-              was which team. A part has three outcomes, not two numbers: the controlling team took
-              it, it bounced, or nobody got it. The columns are named after the teams because in a
-              correction — unlike in the live prompt, which has just come from that team's own
-              buttons — there is nothing else on screen saying which side is which.
-            */}
-            {showParts && model.bonus.parts && bonusTeam !== undefined && (
-              <div className="scorer-question-parts">
-                <div
-                  className={
-                    format.bonus.bounceBack
-                      ? 'scorer-question-part-head'
-                      : 'scorer-question-part-head is-two-way'
-                  }
-                  aria-hidden="true"
-                >
-                  <span />
-                  <span>{teamName(bonusTeam)}</span>
-                  {format.bonus.bounceBack && <span>{teamName(opponentOf(bonusTeam))} bounceback</span>}
-                  <span />
-                </div>
-                {model.bonus.parts.map((part, index) => {
-                  // Parts have no persisted identity in QBJ; their position is their identity.
-                  const outcome = partOutcome(part);
-                  const choice = (
-                    value: PartOutcome,
-                    label: string,
-                    accessibleName: string,
-                  ) => (
-                    <button
-                      type="button"
-                      aria-label={accessibleName}
-                      aria-pressed={outcome === value}
-                      className={outcome === value ? 'scorer-choice is-selected' : 'scorer-choice'}
-                      onClick={() => setBonusPartOutcome(index, value)}
-                    >
-                      {label}
-                    </button>
-                  );
-                  return (
-                    <div
-                      key={`part-${index}`}
-                      className={format.bonus.bounceBack ? 'scorer-question-part' : 'scorer-question-part is-two-way'}
-                    >
-                      <span>Part {index + 1}</span>
-                      {choice('controlled', `+${perPart}`, `Bonus part ${index + 1} to ${teamName(bonusTeam)}`)}
-                      {format.bonus.bounceBack &&
-                        choice(
-                          'bounceback',
-                          `+${perPart}`,
-                          `Bonus part ${index + 1} bounced back to ${teamName(opponentOf(bonusTeam))}`,
-                        )}
-                      {choice('missed', 'Miss', `Bonus part ${index + 1} missed`)}
-                    </div>
-                  );
-                })}
-              </div>
             )}
           </div>
         )}

@@ -1103,7 +1103,10 @@ describe('the game menu', () => {
     pressControl('Full scoresheet review');
     fireEvent.click(screen.getByText('Edit question'));
 
-    fireEvent.change(screen.getByLabelText('Points'), { target: { value: '40' } });
+    // Scoped to the editor: the bonus prompt this correction is about is still on its way off the
+    // scoresheet behind the dialog, and it carries a field by the same name.
+    const editor = document.querySelector('.scorer-question-editor') as HTMLElement;
+    fireEvent.change(within(editor).getByLabelText('Bonus points'), { target: { value: '40' } });
     fireEvent.click(screen.getByText('Save changes'));
 
     expect(screen.getByText('The most a bonus can be worth is 30.')).toBeTruthy();
@@ -1124,7 +1127,8 @@ describe('the game menu', () => {
     pressControl('Full scoresheet review');
     fireEvent.click(screen.getByText('Edit question'));
 
-    const points = screen.getByLabelText('Points') as HTMLInputElement;
+    const editor = document.querySelector('.scorer-question-editor') as HTMLElement;
+    const points = within(editor).getByLabelText('Bonus points') as HTMLInputElement;
     fireEvent.change(points, { target: { value: '' } });
     expect(points.value).toBe('');
     fireEvent.click(screen.getByText('Save changes'));
