@@ -69,7 +69,7 @@ export default function AdvancedScoringRulesEditor(props: {
         <legend className="shell-label">
           <span className="label-with-help">
             <span id={id('answer-types-legend')}>Answer types</span>
-            <HelpTooltip label="About answer types">
+            <HelpTooltip label="Explain tossup ruling choices">
               An answer type is one possible tossup ruling, such as power, correct, or neg. Each row becomes a
               scoring choice during the game.
             </HelpTooltip>
@@ -131,7 +131,7 @@ export default function AdvancedScoringRulesEditor(props: {
                   <label className="shell-label" htmlFor={id(`short-${row.key}`)}>
                     Short
                   </label>
-                  <HelpTooltip label="About short answer-type labels">
+                  <HelpTooltip label="Explain compact ruling labels">
                     The compact label shown on scoring buttons and in the keyboard guide, such as P for Power.
                   </HelpTooltip>
                 </div>
@@ -217,7 +217,7 @@ export default function AdvancedScoringRulesEditor(props: {
         <div>
           <div className="label-with-help">
             <label htmlFor={id('max-tossup-count')}>Most tossups possible</label>
-            <HelpTooltip label="About the most tossups possible">
+            <HelpTooltip label="Explain the extended-regulation limit">
               A hard cap for formats where regulation may extend beyond its usual count. Leave it blank if
               regulation can never run long.
             </HelpTooltip>
@@ -259,7 +259,7 @@ export default function AdvancedScoringRulesEditor(props: {
             <legend className="shell-label">
               <span className="label-with-help">
                 <span id={id('bonus-structure-legend')}>Bonus structure</span>
-                <HelpTooltip label="About bonus structure">
+                <HelpTooltip label="Explain regular and irregular bonuses">
                   Choose regular when every bonus has the same number of equally valued parts. Otherwise QBSheet
                   records the total directly.
                 </HelpTooltip>
@@ -326,7 +326,7 @@ export default function AdvancedScoringRulesEditor(props: {
                 <div>
                   <div className="label-with-help">
                     <label htmlFor={id('bonus-divisor')}>Bonus score increment</label>
-                    <HelpTooltip label="About the bonus score increment">
+                    <HelpTooltip label="Explain valid bonus-total steps">
                       The smallest step between possible bonus totals. For example, use 10 when totals can be 0,
                       10, 20, 30, and so on.
                     </HelpTooltip>
@@ -406,7 +406,7 @@ export default function AdvancedScoringRulesEditor(props: {
           <div>
             <div className="label-with-help">
               <label htmlFor={id('overtime-count')}>Initial overtime tossups</label>
-              <HelpTooltip label="About initial overtime tossups">
+              <HelpTooltip label="Explain the overtime length">
                 The number of tossups guaranteed when regulation ends tied. If the game remains tied, QBSheet
                 continues with sudden-death tossups.
               </HelpTooltip>

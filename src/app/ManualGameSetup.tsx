@@ -709,7 +709,7 @@ function ManualBreaksEditor(props: {
       <legend className="shell-label">
         <span className="label-with-help">
           <span id="manual-breaks-legend">Scheduled breaks</span>
-          <HelpTooltip label="About scheduled breaks">
+          <HelpTooltip label="Explain automatic break timing">
             Add the exact tossup numbers where QBSheet should pause automatically. Leave the list empty when the
             moderator decides when to call the break.
           </HelpTooltip>

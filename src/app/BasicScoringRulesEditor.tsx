@@ -113,7 +113,7 @@ export default function BasicScoringRulesEditor(props: {
           <div>
             <div className="label-with-help">
               <label htmlFor={id('max-active')}>Players playing at once</label>
-              <HelpTooltip label="About players playing at once">
+              <HelpTooltip label="Explain the player limit">
                 The maximum number of active players per team. Additional rostered players begin on the bench.
               </HelpTooltip>
             </div>
@@ -204,7 +204,7 @@ export default function BasicScoringRulesEditor(props: {
             <div>
               <div className="label-with-help">
                 <label htmlFor={id('overtime-count')}>Initial overtime tossups</label>
-                <HelpTooltip label="About initial overtime tossups">
+                <HelpTooltip label="Explain the overtime length">
                   The number of tossups guaranteed when regulation ends tied. If the game remains tied, QBSheet
                   continues with sudden-death tossups.
                 </HelpTooltip>
