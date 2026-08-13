@@ -16,7 +16,8 @@ import { defineGame, orderCandidates, readQbjSource } from '../src/qbj/ParseQbjA
 import { readQbjScoringRules } from '../src/qbj/QbjScoringRules';
 import { buildResultDocument, buildLegacyMatchOnly, qbjFileName } from '../src/qbj/QbjResult';
 import { qbjSerializationVersion, isPlainObject, QbjObject } from '../src/qbj/QbjSerialization';
-import { qbtcpExtensionKey } from '../src/qbj/QbtcpExtension';
+import { qbtcpExtensionKey, qbtcpExtensionVersion, readQbtcpExtension } from '../src/qbj/QbtcpExtension';
+import { roomProcedureVersion } from '../src/scoring/RoomProcedure';
 import {
   acfPowersScoringRules,
   assignmentDocument,
@@ -216,6 +217,95 @@ describe('incomplete QBJ', () => {
 
     expect(definition.procedure).toBeUndefined();
     expect(definition.assumptions?.join(' ')).toContain('will not enforce');
+  });
+
+  /*
+   * A procedure from a build newer than this one.
+   *
+   * The dangerous outcome is not the refusal, it is the alternative: dropping the block leaves no
+   * procedure, and no procedure means `substitutionPolicy: 'any-boundary'` — a room *more* free than
+   * the tournament that sent the rules intended. So the two absences have to stay distinguishable
+   * all the way from the reader to the game that does or does not open.
+   */
+  describe('procedure rules from a version this build does not know', () => {
+    const fromTheFuture = (procedure: object) =>
+      assignmentDocument({
+        matches: [
+          matchObject({
+            id: 'Match_sm-4471',
+            left: ninetySix,
+            right: greenwood,
+            location: 'Room 204',
+            qbtcp: { procedure, scorekeeper: { timed: false } },
+          }),
+        ],
+      });
+
+    test('the reader reports the version rather than dropping the block', () => {
+      const extension = readQbtcpExtension({
+        [qbtcpExtensionKey]: {
+          version: qbtcpExtensionVersion,
+          procedure: { version: roomProcedureVersion + 1, halves: true, timeoutsPerTeam: 0 },
+        },
+      });
+
+      expect(extension?.procedure).toBeUndefined();
+      expect(extension?.unsupportedProcedureVersion).toBe(roomProcedureVersion + 1);
+    });
+
+    test('a procedure with no usable version is the same problem, and is reported too', () => {
+      const extension = readQbtcpExtension({
+        [qbtcpExtensionKey]: { version: qbtcpExtensionVersion, procedure: { halves: true } },
+      });
+
+      expect(extension?.unsupportedProcedureVersion).toBe(0);
+    });
+
+    test('the game does not open, and the room is told which version and what to do', () => {
+      const opened = openGameText(
+        text(fromTheFuture({ version: roomProcedureVersion + 1, halves: true, timeoutsPerTeam: 0, newRule: 'unknown' })),
+      );
+
+      expect(opened.ok).toBe(false);
+      if (opened.ok) return;
+      const message = opened.errors.join(' ');
+      expect(message).toContain(`version ${roomProcedureVersion + 1}`);
+      expect(message).toContain('Update QBSheet');
+      // Not answerable in the room: neither a format nor a roster makes an unreadable rule readable.
+      expect(opened.needsScoringRules).toBeUndefined();
+      expect(opened.needsRoster).toBeUndefined();
+    });
+
+    test('choosing it from the picker refuses too, rather than the picker being the way past it', () => {
+      const source = readQbjSource(fromTheFuture({ version: roomProcedureVersion + 1, halves: true }));
+      if (!source.ok) throw new Error('Expected a readable document');
+
+      const defined = defineGame(source.value, source.value.candidates[0].index);
+      expect(defined.ok).toBe(false);
+      if (!defined.ok) expect(defined.errors.join(' ')).toContain('does not know how to read');
+    });
+
+    test('a version this build does know still opens and is enforced', () => {
+      const { definition } = openOne(
+        fromTheFuture({
+          version: roomProcedureVersion,
+          halves: true,
+          timeoutsPerTeam: 0,
+          substitutionPolicy: 'breaks-timeouts-overtime',
+        }),
+      );
+
+      expect(definition.procedure?.substitutionPolicy).toBe('breaks-timeouts-overtime');
+    });
+
+    test('a document carrying no procedure at all is untouched by any of this', () => {
+      // The refusal is for rules that were stated and could not be read. A generic QBJ states none,
+      // and making it unreadable over an optional extension it does not have would be absurd.
+      const { definition } = openOne(assignmentDocument());
+
+      expect(definition.procedure).toBeUndefined();
+      expect(definition.assumptions?.join(' ')).toContain('will not enforce');
+    });
   });
 
   test('a match naming the same team twice is refused', () => {
