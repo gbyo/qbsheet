@@ -18,18 +18,15 @@ export default function HelpTooltip(props: { label: string; children: string }) 
   const clearDismissal = () => setDismissed(false);
 
   return (
-    <span
-      className="help-tooltip"
-      data-dismissed={dismissed ? 'true' : undefined}
-      onFocus={clearDismissal}
-      onClick={clearDismissal}
-      onPointerEnter={clearDismissal}
-    >
+    <span className="help-tooltip" data-dismissed={dismissed ? 'true' : undefined}>
       <button
         type="button"
         className="help-tooltip-trigger"
         aria-label={label}
         aria-describedby={tooltipId}
+        onFocus={clearDismissal}
+        onClick={clearDismissal}
+        onPointerEnter={clearDismissal}
         onKeyDown={dismiss}
       >
         <span aria-hidden="true">?</span>
