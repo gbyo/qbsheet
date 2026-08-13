@@ -199,6 +199,8 @@ export interface INormalizedAssignment {
   session: IResumableSession | null;
   blockedReason?: string;
   blockedMessage?: string;
+  /** Opaque room-facing copy supplied by assignment/status for the following game. */
+  nextAssignmentLabel?: string;
   /**
    * Why an assignment that arrived could not be turned into a game.
    *
