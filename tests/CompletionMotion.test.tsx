@@ -42,6 +42,13 @@ function show(candidate: IStoredGameRecord, acceptedJustNow = false) {
 afterEach(cleanup);
 
 describe('accepted-result acknowledgement', () => {
+  test('offers a clearly separate Excel scoresheet after completion', () => {
+    show(record());
+
+    expect(screen.getByRole('button', { name: 'Download Excel scoresheet' })).toBeInTheDocument();
+    expect(screen.getByText(/Excel is a readable scoresheet for review/)).toBeInTheDocument();
+  });
+
   test('the existing accepted status receives the stamp only for a freshly accepted result', () => {
     show(record(), true);
 

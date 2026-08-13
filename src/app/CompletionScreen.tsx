@@ -42,6 +42,7 @@ import { useState } from 'react';
 import { IStoredGameRecord, gameRequiresHandoff, isDelivered, needsHandoff } from '../game/GameStore';
 import { isManualGame } from '../game/GameDefinition';
 import { gamePackageLabel } from '../game/GamePackage';
+import { downloadExcelScoresheet } from '../integrations/file/ExcelDownload';
 import { downloadFile, qbjFileContents, qbjFileName } from '../integrations/file/QbjDownload';
 
 function timeOfDay(iso: string | undefined): string {
@@ -64,6 +65,7 @@ export default function CompletionScreen(props: {
 }) {
   const { record, onUpdate, continueLabel = 'Done', onHome, onRematch, acceptedJustNow = false } = props;
   const [writeFailed, setWriteFailed] = useState(false);
+  const [excelDownloaded, setExcelDownloaded] = useState(false);
   const [rematchFailed, setRematchFailed] = useState(false);
   const score = record.finalScore;
   const connected = record.serverDelivery !== 'none';
@@ -81,6 +83,12 @@ export default function CompletionScreen(props: {
     const written = downloadFile(qbjFileContents(record.finalQbj), qbjFileName(record.package));
     setWriteFailed(!written);
     if (written) void onUpdate(record.id, { qbjDownloadedAt: new Date().toISOString() });
+  };
+
+  const downloadExcel = () => {
+    const written = downloadExcelScoresheet(record);
+    setWriteFailed(!written);
+    setExcelDownloaded(written);
   };
 
   return (
@@ -169,7 +177,21 @@ export default function CompletionScreen(props: {
                   ? 'Download QBJ backup'
                   : 'Download QBJ'}
           </button>
+          <button type="button" className="shell-button" onClick={downloadExcel}>
+            {excelDownloaded ? 'Download Excel again' : 'Download Excel scoresheet'}
+          </button>
         </div>
+
+        <p className="shell-hint">
+          Excel is a readable scoresheet for review. QBJ remains the portable result used for tournament
+          handoff and recovery.
+        </p>
+
+        {excelDownloaded && (
+          <p className="final-ok" role="status">
+            Excel scoresheet downloaded.
+          </p>
+        )}
 
         {writeFailed && (
           <p className="shell-warning" role="alert">
