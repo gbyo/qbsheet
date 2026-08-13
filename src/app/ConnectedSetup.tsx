@@ -366,8 +366,9 @@ export default function ConnectedSetup(props: {
   }, [forbidden]);
 
   // The room screen keeps itself current, so a scorekeeper who finishes a game and comes back here
-  // sees the next assignment appear rather than having to ask for it. Only ever reached by a press,
-  // which is what satisfies the browser's local-network gesture requirement.
+  // sees the next assignment appear rather than having to ask for it. A restored room may make its
+  // first check without a gesture; if local-network permission blocks that request, the room stays
+  // here and Check now supplies the explicit gesture instead of sending anybody through pairing.
   useEffect(() => {
     if (stage.kind !== 'room') return undefined;
     void loadRef.current();
@@ -552,6 +553,12 @@ export default function ConnectedSetup(props: {
             being interrupted by the one thing on this screen that is never news.
           */}
           <p className="assignment-check">{checkStatus}</p>
+          {assignment?.nextAssignmentLabel && (
+            <aside className="assignment-next" aria-label="Up next">
+              <span className="assignment-next-label">Up next</span>
+              <span>{assignment.nextAssignmentLabel}</span>
+            </aside>
+          )}
           {forbidden !== '' && (
             <p className="shell-warning" role="alert">
               {forbidden} This room is still paired — this is not something a new code fixes.

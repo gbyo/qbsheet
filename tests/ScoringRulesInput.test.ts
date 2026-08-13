@@ -25,6 +25,7 @@ import {
   advancedFitsBasicForm,
   advancedFromBasic,
   advancedScorekeeperFormat,
+  advancedScoringRulesProblems,
   basicFromAdvanced,
   newAdvancedAnswerType,
 } from '../src/qbj/AdvancedScoringRules';
@@ -131,6 +132,50 @@ describe('moving between the two forms', () => {
     expect(scoringRulesInputAs(advanced, 'basic')).toBe(advanced);
   });
 
+  test('a format with no bonuses in it arrives playable, and goes back unchanged', () => {
+    // The bug this covers: the rows carried `awardsBonus: true` regardless, `bonusesAreUsed` reads one
+    // such flag as bonuses being in play, and `advancedScoringRulesToQbj` writes no bonus fields when
+    // they are off — so pressing "Advanced rules" on a bonus-free format landed on a screen that could
+    // not start a game, complaining about bonuses the scorekeeper had just turned off.
+    const rules = basic({ useBonuses: false });
+    const advanced = advancedFromBasic(rules);
+
+    expect(advanced.answerTypes.map((type) => type.awardsBonus)).toEqual([false, false]);
+    expect(advancedScoringRulesProblems(advanced)).toEqual([]);
+    // The same game, not merely a form that stopped complaining.
+    expect(advancedScorekeeperFormat(advanced)).toEqual(basicScorekeeperFormat(rules));
+    expect(advancedScorekeeperFormat(advanced)?.bonus.enabled).toBe(false);
+
+    expect(advancedFitsBasicForm(advanced)).toBe(true);
+    expect(basicFromAdvanced(advanced)).toEqual(rules);
+  });
+
+  test('a row that earns a bonus in a bonus-free format is named as the row that caused it', () => {
+    const advanced = {
+      ...advancedFromBasic(basic({ useBonuses: false })),
+      answerTypes: [
+        newAdvancedAnswerType({ value: 10, label: 'Correct', shortLabel: 'C', awardsBonus: true }),
+        newAdvancedAnswerType({ value: -5, label: 'Neg', shortLabel: 'N', awardsBonus: false }),
+      ],
+    };
+
+    const problems = advancedScoringRulesProblems(advanced);
+    // The reader still reports the bonus structure it now believes is missing, because one stated
+    // flag is all `bonusesAreUsed` needs. The point is that the list opens with the row to untick
+    // rather than five complaints about fields the form is not showing.
+    expect(problems[0]).toBe('"Correct" earns a bonus, but this format does not use bonuses.');
+
+    // Untick it and the format is playable, which is what says the complaint was about the right row.
+    const fixed = {
+      ...advanced,
+      answerTypes: advanced.answerTypes.map((type) => ({ ...type, awardsBonus: false })),
+    };
+    expect(advancedScoringRulesProblems(fixed)).toEqual([]);
+    // And a row disagreeing with the bonus setting is not something the basic fields can state.
+    expect(advancedFitsBasicForm(advanced)).toBe(false);
+    expect(advancedFitsBasicForm(fixed)).toBe(true);
+  });
+
   test('what does and does not fit the basic form', () => {
     const fits = (overrides: Parameters<typeof advancedRulesInput>[0]) => advancedFitsBasicForm(overrides);
     const from = (rules: IBasicScoringRulesInput) => advancedFromBasic(rules);
@@ -138,6 +183,7 @@ describe('moving between the two forms', () => {
     expect(fits(from(basic()))).toBe(true);
     expect(fits(from(basic({ powerValue: 15 })))).toBe(true);
     expect(fits(from(basic({ negValue: undefined })))).toBe(true);
+    expect(fits(from(basic({ useBonuses: false })))).toBe(true);
 
     // An irregular bonus, a second neg, a zero-point answer, and a row with nothing in it.
     expect(fits({ ...from(basic()), bonusStructure: 'irregular' })).toBe(false);
@@ -233,6 +279,32 @@ describe('moving between the two forms', () => {
 
       expect(advancedFitsBasicForm(renamed)).toBe(false);
       expect(basicFromAdvanced(renamed)).toBeNull();
+    });
+
+    test('two positives worth the same are told apart by name, not collapsed into one role', () => {
+      // A row somebody is halfway through editing: added, and still worth what the row above it is
+      // worth. The simple form is offered on the fit check alone, so this is a reachable way past it.
+      //
+      // Power / P beside Correct / C is what coming back writes, so nothing is lost by going. Two
+      // Correct / C rows is the same two values and a different format — one of them comes back called
+      // Power — and a check that keys the reconstruction by value cannot tell those two apart.
+      const named = handEntered({
+        answerTypes: [
+          newAdvancedAnswerType({ value: 15, label: 'Power', shortLabel: 'P' }),
+          newAdvancedAnswerType({ value: 15, label: 'Correct', shortLabel: 'C' }),
+        ],
+      });
+      const bothOrdinary = handEntered({
+        answerTypes: [
+          newAdvancedAnswerType({ value: 15, label: 'Correct', shortLabel: 'C' }),
+          newAdvancedAnswerType({ value: 15, label: 'Correct', shortLabel: 'C' }),
+        ],
+      });
+
+      expect(advancedFitsBasicForm(named)).toBe(true);
+      expect(advancedFitsBasicForm(bothOrdinary)).toBe(false);
+      expect(basicFromAdvanced(bothOrdinary)).toBeNull();
+      expect(scoringRulesInputAs(advancedRulesInput(bothOrdinary), 'basic').mode).toBe('advanced');
     });
 
     test('a short label alone is enough, and an unnamed row is too', () => {

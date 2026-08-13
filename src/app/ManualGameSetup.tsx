@@ -60,6 +60,7 @@ import {
 import { numberValue } from './BasicScoringRulesEditor';
 import ScoringRulesEditor from './ScoringRulesEditor';
 import useLeaveWarning from './useLeaveWarning';
+import HelpTooltip from './HelpTooltip';
 
 /** The form as it opens: common rules, no round options, nothing typed. */
 function emptyInput(): IManualGameInput {
@@ -615,8 +616,16 @@ export default function ManualGameSetup(props: {
           </div>
         )}
 
-        <fieldset className="manual-fieldset">
-          <legend className="shell-label">Substitutions</legend>
+        <fieldset className="manual-fieldset" aria-labelledby="manual-substitutions-legend">
+          <legend className="shell-label">
+            <span className="label-with-help">
+              <span id="manual-substitutions-legend">Substitutions</span>
+              <HelpTooltip label="About substitution timing">
+                A phase checkpoint is a format-defined pause, such as halftime or the end of regulation. The
+                stricter option only offers lineup changes at those pauses, configured breaks, and timeouts.
+              </HelpTooltip>
+            </span>
+          </legend>
           {(
             [
               ['any-boundary', 'Between any tossups'],
@@ -696,8 +705,16 @@ function ManualBreaksEditor(props: {
   };
 
   return (
-    <fieldset className="manual-fieldset manual-breaks">
-      <legend className="shell-label">Scheduled breaks</legend>
+    <fieldset className="manual-fieldset manual-breaks" aria-labelledby="manual-breaks-legend">
+      <legend className="shell-label">
+        <span className="label-with-help">
+          <span id="manual-breaks-legend">Scheduled breaks</span>
+          <HelpTooltip label="Explain automatic break timing">
+            Add the exact tossup numbers where QBSheet should pause automatically. Leave the list empty when the
+            moderator decides when to call the break.
+          </HelpTooltip>
+        </span>
+      </legend>
       <p className="shell-hint manual-breaks-hint">
         The tossups this round stops after. Leave this empty for a single break the moderator calls.
         {policy === 'breaks-timeouts-overtime' && ' These are the points the lineup may change at.'}

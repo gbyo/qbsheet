@@ -158,6 +158,34 @@ describe('a room that is waiting', () => {
     expect(checkLine()).toBe('QBSheet checks automatically · checked just now');
   });
 
+  test('shows the server supplied next game without interpreting it', async () => {
+    answer = ok(assignmentOf({ nextAssignmentLabel: 'Round 5 · Clinton vs Greenwood' }));
+    renderRoom();
+    await settle();
+
+    const next = screen.getByLabelText('Up next');
+    expect(next.textContent).toContain('Round 5 · Clinton vs Greenwood');
+  });
+
+  test('omits Up next when control supplied no label', async () => {
+    renderRoom();
+    await settle();
+
+    expect(screen.queryByLabelText('Up next')).toBeNull();
+  });
+
+  test('updates Up next through the existing assignment poll', async () => {
+    answer = ok(assignmentOf({ nextAssignmentLabel: 'Round 5 · Clinton vs Greenwood' }));
+    renderRoom();
+    await settle();
+    expect(screen.getByLabelText('Up next').textContent).toContain('Round 5');
+
+    answer = ok(assignmentOf({ nextAssignmentLabel: 'Round 6 · Central vs Lakeside' }));
+    await poll();
+
+    expect(screen.getByLabelText('Up next').textContent).toContain('Round 6 · Central vs Lakeside');
+  });
+
   test('before the first answer it says it is asking rather than claiming a check', async () => {
     // A promise that never settles: this is the state during the very first request.
     answer = () => new Promise(() => undefined);

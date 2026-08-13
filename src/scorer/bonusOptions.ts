@@ -8,7 +8,12 @@
  * When the format's bonuses are irregular there is nothing to enumerate: the parts need not be worth
  * the same, and there need not be a fixed number of them, so the only honest interface is a number
  * the scorekeeper types. `bonusTotalProblem` is what checks it.
+ *
+ * The part-level vocabulary lives here too — `BonusPartOutcome` and the two functions that turn one
+ * into stored points and back — because both the live bonus prompt and the correction editor ask
+ * the same question about a part (who got it?) and must not drift on what the answer means.
  */
+import { IBonusPartResult } from '../scoring/ScoreEvents';
 import { IScorekeeperBonus } from '../scoring/ScorekeeperFormat';
 
 /** A malformed or merely enormous format must not make the browser build unbounded button lists. */
@@ -118,6 +123,63 @@ export function bonusPartProblem(
   }
   const pairProblem = bonusScoreProblem(bonus, controlledPoints, bouncebackPoints);
   if (pairProblem) return pairProblem;
+  return null;
+}
+
+/**
+ * Who got one bonus part.
+ *
+ * The three things that can happen to a part, and the only vocabulary either bonus screen uses.
+ * `controlledPoints` and `bouncebackPoints` are how it is *stored*; a scorekeeper is answering
+ * something else, and asking them for the storage is what made the correction editor two unlabelled
+ * number boxes.
+ */
+export type BonusPartOutcome = 'controlled' | 'bounceback' | 'missed';
+
+/**
+ * How many parts a regular bonus has.
+ *
+ * Only meaningful for a regular bonus, where every part is worth the same and the count follows from
+ * the maximum. An irregular one has no fixed count, which is why fixed part outcomes are not offered
+ * for it: nothing here knows what one of its parts would be worth.
+ */
+export function regularBonusPartCount(bonus: IScorekeeperBonus): number | null {
+  const { pointsPerPart, maximumScore, regular, minimumParts, maximumParts } = bonus;
+  if (!regular || !pointsPerPart || pointsPerPart <= 0) return null;
+  const count = Math.round(maximumScore / pointsPerPart);
+  if (count < 1) return null;
+  // Trust the rules' own bounds over the division when they disagree.
+  return Math.min(Math.max(count, minimumParts), Math.max(maximumParts, minimumParts));
+}
+
+/**
+ * What one part is worth to each team, given who got it.
+ *
+ * Written as a whole part rather than a field at a time, so a part can never be caught halfway
+ * between two outcomes holding points for both teams. `bouncebackPoints` is left off when it is
+ * zero, which is the shape the live scorer has always recorded and the one QBJ export expects.
+ */
+export function bonusPartForOutcome(bonus: IScorekeeperBonus, outcome: BonusPartOutcome): IBonusPartResult {
+  const perPart = bonus.pointsPerPart ?? 0;
+  if (outcome === 'bounceback') return { controlledPoints: 0, bouncebackPoints: perPart };
+  return { controlledPoints: outcome === 'controlled' ? perPart : 0 };
+}
+
+/**
+ * Who got this stored part, or null when its numbers do not describe one outcome.
+ *
+ * Null is not a failure to be papered over: a part holding something other than nothing or one
+ * whole part's worth came from somewhere this screen cannot explain, and guessing an outcome for it
+ * would rewrite what was recorded. The caller asks for it to be answered instead.
+ */
+export function bonusPartOutcome(bonus: IScorekeeperBonus, part: IBonusPartResult): BonusPartOutcome | null {
+  const perPart = bonus.pointsPerPart;
+  const controlled = part.controlledPoints;
+  const bounceback = part.bouncebackPoints ?? 0;
+  if (controlled === 0 && bounceback === 0) return 'missed';
+  if (typeof perPart !== 'number' || perPart <= 0) return null;
+  if (controlled === perPart && bounceback === 0) return 'controlled';
+  if (controlled === 0 && bounceback === perPart) return bonus.bounceBack ? 'bounceback' : null;
   return null;
 }
 

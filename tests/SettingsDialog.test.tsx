@@ -98,6 +98,10 @@ function KeyboardSubscriber() {
 }
 
 async function openSettings(): Promise<HTMLElement> {
+  // Paired idle devices now land in their room. Back remains the deliberate path to file/manual
+  // workflows and device settings, so connection-setting tests exercise that path first.
+  const back = screen.queryByRole('button', { name: 'Back' });
+  if (back) fireEvent.click(back);
   const cog = await screen.findByRole('button', { name: 'Settings' });
   fireEvent.click(cog);
   return screen.getByRole('dialog', { name: 'Settings' });
@@ -304,6 +308,11 @@ describe('device navigation, reset, build identity, and dialog behavior', () => 
     writeOperatorNameAsked();
     setKeyboardEnabled(true);
     const saved = await seedGame({ connected: true, completed: true });
+    const store = new GameStore(await openRecordStore<IStoredGameRecord>());
+    await store.update(saved.id, {
+      qbjDownloadedAt: '2026-08-12T12:01:00.000Z',
+      handoffAcknowledgedAt: '2026-08-12T12:02:00.000Z',
+    });
     rememberConnection({ gameRecordId: saved.id });
     const capabilities = new ResultDeliveryCapabilityStore();
     capabilities.remember(

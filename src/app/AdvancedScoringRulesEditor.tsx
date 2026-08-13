@@ -30,6 +30,7 @@ import {
   newAdvancedAnswerType,
 } from '../qbj/AdvancedScoringRules';
 import { numberValue } from './BasicScoringRulesEditor';
+import HelpTooltip from './HelpTooltip';
 
 /** Above this a table is a data-entry problem, not a rule set. `readQbjScoringRules` caps at 50. */
 const maximumAnswerTypeRows = 20;
@@ -64,8 +65,16 @@ export default function AdvancedScoringRulesEditor(props: {
 
   return (
     <div className="rules-fields">
-      <fieldset className="manual-fieldset answer-types">
-        <legend className="shell-label">Answer types</legend>
+      <fieldset className="manual-fieldset answer-types" aria-labelledby={id('answer-types-legend')}>
+        <legend className="shell-label">
+          <span className="label-with-help">
+            <span id={id('answer-types-legend')}>Answer types</span>
+            <HelpTooltip label="Explain tossup ruling choices">
+              An answer type is one possible tossup ruling, such as power, correct, or neg. Each row becomes a
+              scoring choice during the game.
+            </HelpTooltip>
+          </span>
+        </legend>
         <p className="shell-hint answer-types-hint">
           Every way a tossup can be answered, and what each is worth. Use a negative value for a neg.
           The scorer shows them highest value first, whatever order they are in here.
@@ -118,9 +127,14 @@ export default function AdvancedScoringRulesEditor(props: {
               </div>
 
               <div className="answer-type-field answer-type-short">
-                <label className="shell-label" htmlFor={id(`short-${row.key}`)}>
-                  Short
-                </label>
+                <div className="label-with-help">
+                  <label className="shell-label" htmlFor={id(`short-${row.key}`)}>
+                    Short
+                  </label>
+                  <HelpTooltip label="Explain compact ruling labels">
+                    The compact label shown on scoring buttons and in the keyboard guide, such as P for Power.
+                  </HelpTooltip>
+                </div>
                 <input
                   id={id(`short-${row.key}`)}
                   className="shell-input"
@@ -179,7 +193,11 @@ export default function AdvancedScoringRulesEditor(props: {
           <button
             type="button"
             className="shell-button answer-type-add"
-            onClick={() => set({ answerTypes: [...value.answerTypes, newAdvancedAnswerType()] })}
+            // A new row follows the format it is being added to, so a bonus-free one does not open
+            // with a bonus checked and a complaint about it.
+            onClick={() =>
+              set({ answerTypes: [...value.answerTypes, newAdvancedAnswerType({ awardsBonus: value.useBonuses })] })
+            }
           >
             Add an answer type
           </button>
@@ -196,15 +214,21 @@ export default function AdvancedScoringRulesEditor(props: {
             onChange={(event) => set({ tossupCount: numberValue(event.target.value) ?? 0 })}
           />
         </label>
-        <label htmlFor={id('max-tossup-count')}>
-          Most tossups possible
+        <div>
+          <div className="label-with-help">
+            <label htmlFor={id('max-tossup-count')}>Most tossups possible</label>
+            <HelpTooltip label="Explain the extended-regulation limit">
+              A hard cap for formats where regulation may extend beyond its usual count. Leave it blank if
+              regulation can never run long.
+            </HelpTooltip>
+          </div>
           <input
             id={id('max-tossup-count')}
             type="number"
             value={value.maximumTossupCount === undefined ? '' : String(value.maximumTossupCount)}
             onChange={(event) => set({ maximumTossupCount: numberValue(event.target.value) })}
           />
-        </label>
+        </div>
         <label htmlFor={id('max-active')}>
           Players playing at once
           <input
@@ -231,8 +255,16 @@ export default function AdvancedScoringRulesEditor(props: {
 
       {value.useBonuses && (
         <div className="manual-field-inset">
-          <fieldset className="manual-fieldset">
-            <legend className="shell-label">Bonus structure</legend>
+          <fieldset className="manual-fieldset" aria-labelledby={id('bonus-structure-legend')}>
+            <legend className="shell-label">
+              <span className="label-with-help">
+                <span id={id('bonus-structure-legend')}>Bonus structure</span>
+                <HelpTooltip label="Explain regular and irregular bonuses">
+                  Choose regular when every bonus has the same number of equally valued parts. Otherwise QBSheet
+                  records the total directly.
+                </HelpTooltip>
+              </span>
+            </legend>
             {(
               [
                 ['regular', 'Every bonus is the same: fixed parts, each worth the same'],
@@ -291,15 +323,21 @@ export default function AdvancedScoringRulesEditor(props: {
                     onChange={(event) => set({ maximumBonusScore: numberValue(event.target.value) })}
                   />
                 </label>
-                <label htmlFor={id('bonus-divisor')}>
-                  Bonus score increment
+                <div>
+                  <div className="label-with-help">
+                    <label htmlFor={id('bonus-divisor')}>Bonus score increment</label>
+                    <HelpTooltip label="Explain valid bonus-total steps">
+                      The smallest step between possible bonus totals. For example, use 10 when totals can be 0,
+                      10, 20, 30, and so on.
+                    </HelpTooltip>
+                  </div>
                   <input
                     id={id('bonus-divisor')}
                     type="number"
                     value={value.bonusDivisor === undefined ? '' : String(value.bonusDivisor)}
                     onChange={(event) => set({ bonusDivisor: numberValue(event.target.value) })}
                   />
-                </label>
+                </div>
                 <label htmlFor={id('bonus-min-parts')}>
                   Fewest parts
                   <input
@@ -326,27 +364,38 @@ export default function AdvancedScoringRulesEditor(props: {
             </>
           )}
 
-          <label className="rules-setup-check" htmlFor={id('bounce-back')}>
-            <input
-              id={id('bounce-back')}
-              type="checkbox"
-              checked={value.bonusesBounceBack}
-              onChange={(event) => set({ bonusesBounceBack: event.target.checked })}
-            />
-            Missed parts bounce back
-          </label>
+          <div className="rules-check-with-help">
+            <label className="rules-setup-check" htmlFor={id('bounce-back')}>
+              <input
+                id={id('bounce-back')}
+                type="checkbox"
+                checked={value.bonusesBounceBack}
+                onChange={(event) => set({ bonusesBounceBack: event.target.checked })}
+              />
+              Missed parts bounce back
+            </label>
+            <HelpTooltip label="What does bonus bounceback mean?">
+              When the team controlling a bonus misses a part, the other team gets a chance to answer that part.
+            </HelpTooltip>
+          </div>
         </div>
       )}
 
-      <label className="rules-setup-check" htmlFor={id('timed')}>
-        <input
-          id={id('timed')}
-          type="checkbox"
-          checked={value.timed === true}
-          onChange={(event) => set({ timed: event.target.checked })}
-        />
-        Round is timed
-      </label>
+      <div className="rules-check-with-help">
+        <label className="rules-setup-check" htmlFor={id('timed')}>
+          <input
+            id={id('timed')}
+            type="checkbox"
+            checked={value.timed === true}
+            onChange={(event) => set({ timed: event.target.checked })}
+          />
+          Round is timed
+        </label>
+        <HelpTooltip label="About timed rounds">
+          In a timed round, regulation ends when the moderator calls time; the tossup count is still used as a
+          maximum.
+        </HelpTooltip>
+      </div>
       {timedHint && <p className="shell-hint rules-fields-hint">{timedHint}</p>}
 
       <section className="rules-advanced" aria-labelledby={id('advanced-heading')}>
@@ -354,15 +403,21 @@ export default function AdvancedScoringRulesEditor(props: {
           Overtime and lightning
         </h3>
         <div className="rules-setup-grid">
-          <label htmlFor={id('overtime-count')}>
-            Initial overtime tossups
+          <div>
+            <div className="label-with-help">
+              <label htmlFor={id('overtime-count')}>Initial overtime tossups</label>
+              <HelpTooltip label="Explain the overtime length">
+                The number of tossups guaranteed when regulation ends tied. If the game remains tied, QBSheet
+                continues with sudden-death tossups.
+              </HelpTooltip>
+            </div>
             <input
               id={id('overtime-count')}
               type="number"
               value={value.overtimeQuestionCount === undefined ? '' : String(value.overtimeQuestionCount)}
               onChange={(event) => set({ overtimeQuestionCount: numberValue(event.target.value) })}
             />
-          </label>
+          </div>
         </div>
         <p className="shell-hint rules-fields-hint">One tossup means overtime is sudden death.</p>
 

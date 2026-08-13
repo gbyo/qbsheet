@@ -38,6 +38,7 @@
   },
   "dependencies": {
     "@fontsource/ibm-plex-sans": "^5.2.5",
+    "fflate": "^0.8.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

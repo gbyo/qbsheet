@@ -42,6 +42,13 @@ function show(candidate: IStoredGameRecord, acceptedJustNow = false) {
 afterEach(cleanup);
 
 describe('accepted-result acknowledgement', () => {
+  test('offers a clearly separate Excel scoresheet after completion', () => {
+    show(record());
+
+    expect(screen.getByRole('button', { name: 'Download Excel scoresheet' })).toBeInTheDocument();
+    expect(screen.getByText(/Excel is a readable scoresheet for review/)).toBeInTheDocument();
+  });
+
   test('the existing accepted status receives the stamp only for a freshly accepted result', () => {
     show(record(), true);
 
@@ -61,5 +68,49 @@ describe('accepted-result acknowledgement', () => {
     show(record({ connected: false, serverDelivery: 'none' }), true);
 
     expect(document.querySelector('.final-accepted')).toBeNull();
+  });
+});
+
+describe('pending-result delivery', () => {
+  test('explains automatic retry while keeping the handoff gate closed', () => {
+    show(
+      record({
+        serverDelivery: 'pending',
+        serverDeliveryLedger: { attemptCount: 2, retryable: true, outcome: 'pending' },
+      }),
+    );
+
+    expect(screen.getByText(/QBSheet will keep trying automatically while it is open/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Done' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /^Download QBJ$/ })).toBeTruthy();
+  });
+
+  test('acceptance updates the receipt and unlocks continuation', () => {
+    const view = show(
+      record({
+        serverDelivery: 'pending',
+        serverDeliveryLedger: { attemptCount: 1, retryable: true, outcome: 'pending' },
+      }),
+    );
+
+    view.rerender(
+      <CompletionScreen
+        record={record({
+          serverDelivery: 'sent',
+          serverDeliveryLedger: {
+            attemptCount: 2,
+            retryable: false,
+            outcome: 'accepted',
+            acceptedAt: '2026-08-12T12:31:00.000Z',
+          },
+        })}
+        acceptedJustNow={false}
+        onUpdate={vi.fn()}
+        onHome={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Result sent')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Done' })).toBeEnabled();
   });
 });

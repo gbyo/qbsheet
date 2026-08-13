@@ -114,6 +114,9 @@ test.describe('a server that speaks only QBTCP', () => {
     await pairRoom(page, control);
     expect(control.requests.some((entry) => entry.path === '/qbtcp/v1')).toBe(true);
     expect(control.requests.some((entry) => entry.path === '/qbtcp/v1/pair')).toBe(true);
+    await expect(page.getByLabel('Up next')).toHaveText(
+      `Up next${rounds[5].label} · ${rounds[5].left.name} vs ${rounds[5].right.name}`,
+    );
 
     await startAssignedGame(page, 4);
     // The assignment came as a QBJ document, and its operational state came from the sibling
@@ -263,7 +266,7 @@ test.describe('a server that speaks only QBTCP', () => {
     await expect(page.getByText('Flagged note: Question / packet issue: A failure that must stay on the scoresheet.')).toBeVisible();
   });
 
-  test('keeps a retryable final intact through handoff, reload, and the next assignment', async ({ page }) => {
+  test('automatically retries a pending final and releases the room after acceptance', async ({ page }) => {
     await pairRoom(page, control);
     await startAssignedGame(page, 4);
     await scoreTossup(page, 'Sarah', 'Power', 20);
@@ -271,49 +274,37 @@ test.describe('a server that speaks only QBTCP', () => {
     // The request reached the fixture but its retryable server failure means no result was accepted.
     control.failNextResult(503, 'Tournament control is temporarily unavailable.');
     await endGameAndSubmit(page);
-    await expect(page.getByText(/did not receive the result yet/)).toBeVisible();
+    await expect(page.getByText(/will keep trying automatically while it is open/)).toBeVisible();
     await expect.poll(() => control.resultAttempts.length).toBe(1);
     const firstAttempt = JSON.stringify(control.resultAttempts[0]);
     expect(control.results).toHaveLength(0);
     expect(control.resultAttempts[0]).not.toHaveProperty('_yf_scorekeeper_recovery');
 
-    // Pending delivery still needs the independent human/file handoff before this screen can close.
-    await page.getByRole('button', { name: 'Download QBJ', exact: true }).click();
-    await page.getByRole('button', { name: 'I uploaded the result', exact: true }).click();
+    // The existing handoff gate remains closed until the automatic retry is accepted.
     const next = page.getByRole('button', { name: `Next game in ${roomName}` });
-    await expect(next).toBeEnabled();
-
-    // Move the room on. The earlier result's private capability is keyed to its record, not to the
-    // one current connection that now points at the next session.
-    control.assign(5);
-    await next.click();
-    await startAssignedGame(page, 5);
-    await page.reload();
-    await expect(page.getByRole('heading', { name: 'Recent' })).toBeVisible();
-
-    const oldGame = page.locator('.recent-item').filter({ hasText: 'Ninety Six' });
-    await expect(oldGame).toContainText('Not delivered yet');
-    await expect(oldGame.getByText('Ninety Six 35–0 Greenwood')).toBeVisible();
-    await oldGame.getByRole('button', { name: 'Retry sending result', exact: true }).click();
+    await expect(next).toBeDisabled();
 
     await expect.poll(() => control.results.length, { timeout: 20_000 }).toBe(1);
     await expect.poll(() => control.resultAttempts.length, { timeout: 20_000 }).toBe(2);
     expect(JSON.stringify(control.resultAttempts[1])).toBe(firstAttempt);
-    await expect(oldGame).toContainText('Accepted');
-    await expect(oldGame).toContainText('2 attempts');
-    await expect(oldGame.getByText('Ninety Six 35–0 Greenwood')).toBeVisible();
+    await expect(page.getByText('Result sent ✓')).toBeVisible();
+    await expect(next).toBeEnabled();
+
+    // No reconnect, re-pair, QBJ handoff, or manual retry is needed before the next assignment.
+    control.assign(5);
+    await next.click();
+    await expect(page.getByRole('heading', { name: `${roomName} · Connected` })).toBeVisible();
+    expect(control.requests.filter((entry) => entry.path === '/qbtcp/v1/pair')).toHaveLength(1);
   });
 
   test('a room that has paired once goes straight back to its room after a reload', async ({ page }) => {
     await pairRoom(page, control);
 
     await page.goto('/');
-    // The stored room is offered by name, ahead of the address box it replaces.
-    await expect(page.getByText(`${roomName} · Connected`)).toBeVisible();
-    await page.getByRole('button', { name: 'Go to this room' }).click();
-
+    // Durable pairing is enough to enter the existing room; there is no reconnect interstitial.
     await expect(page.getByRole('heading', { name: `${roomName} · Connected` })).toBeVisible();
     await expect(page.getByText(`${rounds[4].label} · Ninety Six vs Greenwood`)).toBeVisible();
+    await expect(page.getByLabel('Up next')).toContainText(rounds[5].label);
     expect(control.requests.filter((entry) => entry.path === '/qbtcp/v1/pair')).toHaveLength(1);
   });
 

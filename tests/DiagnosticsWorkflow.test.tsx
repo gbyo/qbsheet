@@ -104,6 +104,28 @@ describe('the readiness screen', () => {
     expect(screen.getByRole('button', { name: 'Download diagnostics' })).toBeInTheDocument();
     expect(screen.getByText(/no pairing code, no room or session token/i)).toBeInTheDocument();
   });
+
+  test('shows the other results and a warning when an individual probe rejects', async () => {
+    const ownDescriptor = Object.getOwnPropertyDescriptor(navigator, 'serviceWorker');
+    Object.defineProperty(navigator, 'serviceWorker', {
+      configurable: true,
+      get() {
+        throw new Error('broken browser probe');
+      },
+    });
+
+    try {
+      await openReadiness();
+
+      expect(screen.queryByText('Checking this device…')).toBeNull();
+      expect(screen.getByText('Device check details')).toBeInTheDocument();
+      expect(screen.getByText(/could not check offline app status/i)).toBeInTheDocument();
+      expect(screen.getByText('Game storage')).toBeInTheDocument();
+    } finally {
+      if (ownDescriptor) Object.defineProperty(navigator, 'serviceWorker', ownDescriptor);
+      else Reflect.deleteProperty(navigator, 'serviceWorker');
+    }
+  });
 });
 
 describe('the file it produces', () => {

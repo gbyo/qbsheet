@@ -228,7 +228,9 @@ describe('incomplete QBJ', () => {
    * all the way from the reader to the game that does or does not open.
    */
   describe('procedure rules from a version this build does not know', () => {
-    const fromTheFuture = (procedure: object) =>
+    // `unknown` rather than `object`, because a `procedure` that is not an object at all is one of the
+    // cases under test: what arrives is whatever the producer wrote, not whatever the type says.
+    const fromTheFuture = (procedure: unknown) =>
       assignmentDocument({
         matches: [
           matchObject({
@@ -259,6 +261,32 @@ describe('incomplete QBJ', () => {
       });
 
       expect(extension?.unsupportedProcedureVersion).toBe(0);
+    });
+
+    test('a procedure that is not an object at all is present, not absent', () => {
+      // The failure this guards is not the malformed value, it is which of the two absences it becomes.
+      // Every other field in the extension degrades to absent when it arrives unreadable, and here that
+      // would hand the room `substitutionPolicy: 'any-boundary'` — more freedom than the tournament that
+      // sent the rules, granted on the strength of the rules being unreadable.
+      for (const procedure of [null, [], 'halves', 7, true]) {
+        const extension = readQbtcpExtension({
+          [qbtcpExtensionKey]: { version: qbtcpExtensionVersion, procedure },
+        });
+
+        expect(extension?.procedure).toBeUndefined();
+        expect(extension?.unsupportedProcedureVersion).toBe(0);
+      }
+    });
+
+    test('an assignment whose procedure is unreadable refuses, the way an unknown version does', () => {
+      for (const procedure of [null, [], 'halves']) {
+        const source = readQbjSource(fromTheFuture(procedure));
+        if (!source.ok) throw new Error('Expected a readable document');
+
+        const defined = defineGame(source.value, source.value.candidates[0].index);
+        expect(defined.ok).toBe(false);
+        if (!defined.ok) expect(defined.errors.join(' ')).toContain('does not know how to read');
+      }
     });
 
     test('the game does not open, and the room is told which version and what to do', () => {
