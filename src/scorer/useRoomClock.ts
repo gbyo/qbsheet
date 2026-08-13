@@ -46,14 +46,21 @@ export default function useRoomClock(
   const [loadedIdentity, setLoadedIdentity] = useState(() => (configured ? identity : ''));
   const [now, setNow] = useState(() => Date.now());
 
-  useEffect(() => {
-    setLoadedIdentity('');
+  /*
+   * A new clock identity means a different stored clock, loaded as that identity renders.
+   *
+   * Done here rather than from an effect so no frame is ever painted showing the previous segment's
+   * time under the new one's heading. The read of storage and of the wall clock stays inside the
+   * updater, which is where it is asked for rather than performed as a side effect of rendering.
+   */
+  const wantedIdentity = configured ? identity : '';
+  if (loadedIdentity !== wantedIdentity) {
     setState(() => {
       if (!configured) return idleRoomClock(0);
       return expireRoomClock(loadRoomClock(gameKey, durationMs, undefined, segment), Date.now());
     });
-    setLoadedIdentity(configured ? identity : '');
-  }, [configured, durationMs, gameKey, identity, segment]);
+    setLoadedIdentity(wantedIdentity);
+  }
 
   useEffect(() => {
     if (!configured || loadedIdentity !== identity) return undefined;

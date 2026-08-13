@@ -86,9 +86,13 @@ export default function PracticeCoach(props: IPracticeCoachProps) {
       ? undefined
       : ({ '--practice-control-bar-block-size': `${controlBarBlockSize}px` } as CSSProperties);
 
-  useEffect(() => {
+  // A confirmation belongs to the step that raised it. Dropped as the new step renders rather than
+  // after it has been painted, so the old question is never briefly on screen over the new step.
+  const [confirmingStep, setConfirmingStep] = useState(step.id);
+  if (confirmingStep !== step.id) {
+    setConfirmingStep(step.id);
     setConfirming(null);
-  }, [step.id]);
+  }
 
   useEffect(() => {
     const controlBar = document.querySelector<HTMLElement>('.practice-mode > .scorer > .scorer-footer');

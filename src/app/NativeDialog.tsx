@@ -16,8 +16,12 @@ export default function NativeDialog(props: {
 }) {
   const { title, onClose, children, className = '', bodyClassName = '' } = props;
   const panel = useRef<HTMLDialogElement>(null);
+  // Kept current by a committed effect. Every reader is an event — Escape, the close button, the
+  // dialog's own close event — so none of them can run before the effect that last wrote this.
   const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   useEffect(() => {
     const dialog = panel.current;
