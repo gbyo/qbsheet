@@ -1,4 +1,4 @@
-import { KeyboardEvent, useId } from 'react';
+import { KeyboardEvent, useId, useState } from 'react';
 
 /**
  * A compact explanation for a term that is useful to some scorekeepers but noise to everyone else.
@@ -9,13 +9,22 @@ import { KeyboardEvent, useId } from 'react';
 export default function HelpTooltip(props: { label: string; children: string }) {
   const { label, children } = props;
   const tooltipId = useId();
+  const [dismissed, setDismissed] = useState(false);
 
   const dismiss = (event: KeyboardEvent<HTMLButtonElement>) => {
-    if (event.key === 'Escape') event.currentTarget.blur();
+    if (event.key === 'Escape') setDismissed(true);
   };
 
+  const clearDismissal = () => setDismissed(false);
+
   return (
-    <span className="help-tooltip">
+    <span
+      className="help-tooltip"
+      data-dismissed={dismissed ? 'true' : undefined}
+      onFocus={clearDismissal}
+      onClick={clearDismissal}
+      onPointerEnter={clearDismissal}
+    >
       <button
         type="button"
         className="help-tooltip-trigger"
