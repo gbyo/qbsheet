@@ -43,7 +43,7 @@ describe('HelpTooltip', () => {
     expect(wrapper).not.toHaveAttribute('data-dismissed');
 
     fireEvent.keyDown(trigger, { key: 'Escape' });
-    fireEvent.pointerEnter(wrapper!);
+    fireEvent.pointerEnter(trigger);
     expect(wrapper).not.toHaveAttribute('data-dismissed');
   });
 });
