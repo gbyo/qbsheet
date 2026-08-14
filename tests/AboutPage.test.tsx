@@ -141,7 +141,15 @@ describe('the product page', () => {
     const open = screen.getAllByRole('link', { name: 'Open QBSheet' });
     expect(open).toHaveLength(3);
     for (const link of open) expect(link).toHaveAttribute('href', '../');
-    expect(screen.getAllByRole('link', { name: 'View on GitHub' })).toHaveLength(2);
+
+    const github = screen.getAllByRole('link', { name: /^View on GitHub/ });
+    expect(github).toHaveLength(2);
+    for (const link of github) {
+      expect(link).toHaveAttribute('target', '_blank');
+      expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+      expect(link.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+      expect(link.textContent).toContain('(opens in a new tab)');
+    }
   });
 
   test('assumes no quiz bowl format', () => {
