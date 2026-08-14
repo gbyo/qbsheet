@@ -257,6 +257,21 @@ div.scorer-banner .scorer-banner-message {
   flex-direction: column;
 }
 
+/* Completion is a full scoresheet review, not the contextual row used during live play. */
+.scorer-completion {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 24px 32px 32px;
+  border-top: 1px solid var(--room-border-strong);
+}
+
+.scorer-completion > .scorer-complete {
+  max-width: 1120px;
+  margin: 0 auto;
+}
+
 /* One sheet in two columns, divided by a rule. Not two cards with a gutter between them. */
 .scorer-teams {
   flex: 1;
@@ -681,9 +696,8 @@ div.scorer-banner .scorer-banner-message {
  * The contextual row: whatever the game is asking for right now.
  *
  * A bar ruled off from the sheet above it, not a card sitting on it. The fixed height is doing real
- * work — this area swaps between a No buzz row, a set of bonus buttons and the completion summary,
- * and if it resized on each swap the scoring buttons above would move under the scorekeeper's hand
- * between one tossup and the next. 96px is what the tallest of those three needs.
+ * work — if it resized on each live-play swap, the scoring buttons above would move under the
+ * scorekeeper's hand between one tossup and the next. 96px is what the tallest live prompt needs.
  */
 .scorer-stage {
   display: flex;
@@ -703,9 +717,7 @@ div.scorer-banner .scorer-banner-message {
  * or a short window, where the sheet scrolls and an unpinned row would take No buzz off screen
  * mid-question.
  *
- * Not applied while the game is complete: that phase fills this row with the whole pre-submit
- * review, and pinning the bottom edge of a block taller than the window puts its top out of reach
- * above the viewport, where no amount of scrolling brings it back.
+ * Completion has its own scrollable presentation and never mounts this row.
  */
 .scorer-stage.is-pinned {
   position: sticky;
@@ -792,6 +804,25 @@ div.scorer-banner .scorer-banner-message {
   font-size: 13px;
   color: var(--room-muted);
   font-variant-numeric: tabular-nums;
+}
+
+.scorer-completion .scorer-complete-title {
+  font-size: 20px;
+}
+
+.scorer-completion .scorer-complete-score {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 8px;
+}
+
+.scorer-completion .scorer-complete-score span:last-child {
+  text-align: right;
+}
+
+.scorer-completion .scorer-complete-actions {
+  flex-wrap: wrap;
 }
 
 /* #endregion */
@@ -2801,8 +2832,20 @@ div.scorer-banner .scorer-banner-message {
 /* #endregion */
 
 @media (max-width: 700px) {
+  .scorer-completion {
+    padding: 16px;
+  }
+
   .scorer-check-teams {
     grid-template-columns: 1fr;
+  }
+
+  .scorer-completion .scorer-complete-score {
+    grid-template-columns: 1fr;
+  }
+
+  .scorer-completion .scorer-complete-score span:last-child {
+    text-align: left;
   }
 }
 
