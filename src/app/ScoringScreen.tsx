@@ -330,6 +330,15 @@ export default function ScoringScreen(props: {
         operatorName={operatorName}
         procedure={record.package.procedure}
         connection={live ? runtime.connection : RoomConnectionState.Connected}
+        /*
+         * A game opened from a file, or typed in on this device, has no tournament control behind
+         * it — so the one word the header spends on status must not be "Connected". It was never a
+         * fact about this game: the value above is a placeholder that exists only because the pill
+         * is always rendered, and a green "Connected" over a game whose result has to be carried
+         * out on a USB stick is the single most expensive thing this screen could get wrong. The
+         * practice screen already says "Practice" here for exactly this reason.
+         */
+        statusLabel={live ? undefined : 'On this device'}
         recordDurablyStored={recordDurablyStored}
         degradedMessage={live ? runtime.degradedMessage : undefined}
         onSubmit={submit}
@@ -353,6 +362,7 @@ export default function ScoringScreen(props: {
           snapshotError: live ? runtime.snapshotError : undefined,
           // A file game is not waiting for anything and must never be told a result will be sent.
           automaticDelivery: live !== null && runtime.automaticDelivery,
+          tournamentControl: live !== null,
           delivery: downloadedAt ? 'hand-over' : undefined,
         }}
       />

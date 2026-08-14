@@ -6,7 +6,7 @@
  * file that comes out be an ordinary QBJ with the right numbers in it.
  */
 import { afterEach, describe, expect, test } from 'vitest';
-import { cleanup, screen, waitFor } from '@testing-library/react';
+import { cleanup, screen, waitFor, within } from '@testing-library/react';
 import { bonus, openApp, openGameFile, press, score, pressControl, startLineups } from './appHarness';
 
 /**
@@ -179,5 +179,49 @@ describe('the leave-site warning', () => {
     await score('Sarah Mitchell', '+15');
 
     await waitFor(() => expect(wouldWarn()).toBe(true));
+  });
+});
+
+/**
+ * What the one word of status is allowed to say when nothing is on the other end of it.
+ *
+ * A file game is the case this application exists for: no server, no session, and a result that
+ * leaves on a USB stick or not at all. The scoring header spends one word on status, and for years
+ * that word was "Connected" — not because anything had answered, but because the pill is always
+ * rendered and something had to go in it. That is the most expensive sentence on the screen to get
+ * wrong: a scorekeeper who believes the result is going out on its own does not download the QBJ,
+ * and the game reaches nobody. The practice screen already said "Practice" here for the same reason.
+ */
+describe('the status word on a game with no tournament control', () => {
+  test('the header says where the game actually is, and does not claim a connection', async () => {
+    await openApp();
+    await openGameFile();
+    await startLineups();
+
+    const status = screen.getByLabelText('On this device. Show connection detail');
+    expect(status.textContent).toBe('On this device');
+    expect(screen.queryByText('Connected')).toBeNull();
+  });
+
+  test('the connection detail reports no server rather than a snapshot that failed to send', async () => {
+    await openApp();
+    await openGameFile();
+    await startLineups();
+
+    await press('On this device. Show connection detail');
+
+    // The dialog agrees with the header instead of answering the same question a second way.
+    const dialog = screen.getByLabelText('Connection');
+    expect(within(dialog).getByText('On this device')).toBeInTheDocument();
+    // "Server snapshot — Not yet sent", in the colour this dialog paints problems, is a report of a
+    // failure. Nothing failed: there is no server, and a room sent looking for the fault would be
+    // looking for something that was never there.
+    expect(within(dialog).queryByText('Server snapshot')).toBeNull();
+    expect(within(dialog).queryByText('Not yet sent')).toBeNull();
+    expect(within(dialog).getByText('Tournament control')).toBeInTheDocument();
+    expect(within(dialog).getByText('None for this game')).toBeInTheDocument();
+    // The rows that are about this device, and are true, stay.
+    expect(within(dialog).getByText('Game record')).toBeInTheDocument();
+    expect(within(dialog).getByText('Not automatic')).toBeInTheDocument();
   });
 });

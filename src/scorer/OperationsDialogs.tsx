@@ -224,10 +224,16 @@ export function IssueDialog(props: {
             </button>
           </p>
         )}
+        {/*
+          Focused on open. The category above is stated rather than asked in the ordinary case — it
+          came from the Flag list that opened this — so the description is the first thing being
+          asked for, and the dialog shell would otherwise start on the close button.
+        */}
         <label htmlFor="scorer-issue-details">
           What happened?
           <textarea
             id="scorer-issue-details"
+            data-dialog-autofocus
             rows={4}
             maxLength={500}
             value={details}

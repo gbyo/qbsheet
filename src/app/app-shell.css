@@ -1511,6 +1511,19 @@ body {
   background: var(--room-surface);
 }
 
+/*
+ * The price of that bar is that it floats over the end of the form, and the browser does not know it
+ * is there. Anything scrolled to automatically — the error block a refused submission moves focus
+ * to, or a field reached by Tab — is brought only just into view, which puts it under the bar. A
+ * complaint nobody can see is indistinguishable from a Start game button that did nothing, which is
+ * the exact failure the focus move exists to prevent. Reserve the bar's height beneath every target
+ * the browser might scroll to; the bar's own buttons are left out because they are sticky and asking
+ * to scroll clear of themselves would drag the form to its end.
+ */
+.manual-shell :is(input, textarea, select, .shell-errors) {
+  scroll-margin-bottom: 84px;
+}
+
 .manual-field {
   max-width: 420px;
   margin-top: 12px;

@@ -2420,6 +2420,7 @@ export default function Scorer(props: IScorerProps) {
         <ConnectionDetailDialog
           connection={connection}
           recovery={recoveryStatus}
+          statusLabel={statusLabel}
           now={detailNow}
           // Read when the dialog opens rather than subscribed to. A history that grew a line under
           // somebody reading it would move the rest of the list, and nothing in here is urgent.
