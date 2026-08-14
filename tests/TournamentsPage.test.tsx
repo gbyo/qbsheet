@@ -148,6 +148,13 @@ describe('the tournaments page', () => {
       'https://github.com/gbyo/qbsheet/blob/main/docs/QBTCP.md',
     );
 
+    const protocol = screen.getByRole('link', { name: /^Read the protocol/ });
+    expect(protocol).toHaveAttribute('href', 'https://github.com/gbyo/qbsheet/blob/main/docs/QBTCP.md');
+    expect(protocol).toHaveAttribute('target', '_blank');
+    expect(protocol).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(protocol.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+    expect(protocol.textContent).toContain('(opens in a new tab)');
+
     for (const region of ['.about-nav', '.about-footer nav']) {
       const nav = container.querySelector(region);
       const self = within(nav as HTMLElement).getByRole('link', { name: 'Tournaments' });
