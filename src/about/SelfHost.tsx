@@ -88,7 +88,7 @@ const steps: { number: string; name: string; idea: string; detail: ReactNode }[]
 const absences = [
   {
     title: 'No routing rules',
-    body: 'QBSheet keeps its state in the URL fragment, which never reaches the server. Nothing needs routing and there’s no single-page-app fallback to configure. Default static hosting settings work.',
+    body: 'QBSheet keeps its state on the device, not in the address bar. Every screen lives at one URL, so nothing needs routing and there’s no single-page-app fallback to configure. Default static hosting settings work.',
   },
   {
     title: 'No database',

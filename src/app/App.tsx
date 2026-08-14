@@ -12,6 +12,13 @@
  * That also makes the back button harmless, which matters more here than it looks: the single most
  * likely accidental gesture on a Chromebook mid-game is a two-finger swipe.
  *
+ * There is one exception, and it is deliberately not navigation. A QBTCP pairing launch link carries
+ * an address and a short pairing code in the URL *fragment*, which `main.tsx` reads and removes
+ * before this file renders anything. It is a bootstrap message, consumed once, and by the time the
+ * application is on screen the URL is the ordinary QBSheet address again. No screen, no game and no
+ * connection state is ever addressable, and a reload still lands somewhere valid and finds the game.
+ * See `PairingLaunch`.
+ *
  * # State transitions never come from the network
  *
  * After startup has restored durable local state, every transition in this file is caused by somebody
@@ -53,6 +60,7 @@ import {
   readConnection,
   writeConnection,
 } from './ConnectedSession';
+import { IPairingLaunchIntent, PairingLaunchResult, takePairingLaunch } from './PairingLaunch';
 import useLeaveWarning from './useLeaveWarning';
 import WelcomeScreen from './WelcomeScreen';
 import ConnectedSetup, { IConnectedStart } from './ConnectedSetup';
@@ -133,8 +141,12 @@ export type Screen =
    * `fresh` means start at the address box even though a pairing is stored — the scorekeeper is
    * moving this device to a different tournament, which is the one case where the remembered room
    * is the wrong answer.
+   *
+   * `launch` is a scanned or tapped pairing link that has not been spent yet. It lives here, on the
+   * screen it belongs to, rather than in a field of its own: leaving this screen by any route is
+   * what discards it, which is the lifetime a short bootstrap secret should have.
    */
-  | { kind: 'connect'; fresh: boolean }
+  | { kind: 'connect'; fresh: boolean; launch?: IPairingLaunchIntent }
   | { kind: 'readiness' }
   | { kind: 'practice' }
   /**
@@ -176,6 +188,46 @@ export function screenAfterLoad(connection: IConnectedSession | null, records: I
   return { kind: 'connect', fresh: false };
 }
 
+/**
+ * Why a pairing link is being refused, said without saying anything it contained.
+ *
+ * A device holding an unfinished game that still depends on its pairing cannot be moved to another
+ * tournament, and a link is not an exception to that: the link arrived from across the room, the
+ * game did not, and replacing a room capability the scoresheet on this device is still using would
+ * strand a game somebody is in the middle of. The link is discarded rather than queued, because a
+ * pairing code that sat in memory until the round ended would be a secret kept for no good reason —
+ * scanning it again afterwards costs one press.
+ */
+export function pairingLaunchBlockedNotice(roomName: string | undefined, gameLabel: string): string {
+  return `This device cannot switch tournament control while ${gameLabel} is unfinished and still uses the pairing for ${roomName ?? 'the current room'}. Finish that game, then open the pairing link again.`;
+}
+
+/**
+ * Where a pairing launch link puts the application, and what it says about it.
+ *
+ * Separate from `screenAfterLoad` and layered on top of it, so every path that does not involve a
+ * link is provably the behaviour that shipped before there were links. A valid link on a device with
+ * nothing to protect goes straight to the ready-to-connect card; everything else falls back to the
+ * ordinary startup screen with a sentence explaining why.
+ */
+export function screenAfterLaunch(
+  launch: PairingLaunchResult,
+  connection: IConnectedSession | null,
+  records: IStoredGameRecord[],
+): { screen: Screen; notice: string } {
+  const ordinary = screenAfterLoad(connection, records);
+  if (launch.kind === 'problem') return { screen: ordinary, notice: launch.message };
+  if (launch.kind === 'none') return { screen: ordinary, notice: '' };
+  const dependent = records.find((record) => unfinishedGameDependsOnConnection(connection, record));
+  if (dependent) {
+    return {
+      screen: ordinary,
+      notice: pairingLaunchBlockedNotice(connection?.roomName, gamePackageLabel(dependent.package)),
+    };
+  }
+  return { screen: { kind: 'connect', fresh: true, launch: launch.intent }, notice: '' };
+}
+
 /** The starting lineup a package named, turned into the engine's setup. */
 export function setupFromPackage(packageValue: IGamePackage): IGameSetup {
   const side = (team: IGamePackage['left']) => ({
@@ -195,6 +247,15 @@ export default function App() {
   const [connection, setConnection] = useState<IConnectedSession | null>(null);
   const [pendingBaseUrl, setPendingBaseUrl] = useState('');
   const [notice, setNotice] = useState('');
+  /**
+   * The pairing link this page was opened with, read exactly once.
+   *
+   * The fragment itself is already gone — `main.tsx` removed it before this component existed — and
+   * this is the in-memory answer it left behind. Read in a state initializer rather than an effect
+   * so it cannot be read twice by a re-render, and so nothing else can arrive first and act on a
+   * device whose situation has not been decided yet.
+   */
+  const [launched] = useState<PairingLaunchResult>(() => takePairingLaunch());
   const tabId = useRef(newTabId());
   const claim = useRef<IGameClaim | null>(null);
   const resultDeliveryCapabilities = useMemo(() => new ResultDeliveryCapabilityStore(), []);
@@ -237,11 +298,19 @@ export default function App() {
       setRecords(listed);
       setUnreadable(opened.unreadable);
       setConnection(restoredConnection);
-      setScreen(screenAfterLoad(restoredConnection, listed));
+      // A launch link is only allowed to decide this once durable local state has been read, because
+      // the questions it has to answer — is this device already paired, is there an unfinished game
+      // depending on that pairing — are questions about storage. Nothing has touched the network yet.
+      const start = screenAfterLaunch(launched, restoredConnection, listed);
+      setScreen(start.screen);
+      if (start.notice !== '') setNotice(start.notice);
     })();
     return () => {
       cancelled = true;
     };
+    // `launched` is read once at mount and never changes; it is deliberately not a dependency of a
+    // startup effect that must run exactly one time.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resultDeliveryCapabilities]);
 
   useEffect(
@@ -473,6 +542,12 @@ export default function App() {
     const stored: Omit<IConnectedSession, 'version' | 'updatedAt'> = { ...room };
     writeConnection(stored);
     setConnection({ ...stored, version: connectionVersion, updatedAt: new Date().toISOString() });
+    // The launch link has been spent. Dropped here so that the only copy of a short pairing code
+    // left anywhere is the one the exchange already consumed, and so a later return to this screen
+    // is the ordinary room rather than a card offering to pair again.
+    setScreen((current) =>
+      current.kind === 'connect' && current.launch ? { kind: 'connect', fresh: current.fresh } : current,
+    );
   }, []);
 
   const onConnected = useCallback(
@@ -518,6 +593,26 @@ export default function App() {
   const pairingProtection = pairingDependentGame
     ? `QBSheet cannot remove ${pairedRoom?.roomName ?? 'this room'} while ${gamePackageLabel(pairingDependentGame.package)} is unfinished and still uses this pairing. Resume and finish the game, or ask tournament control for help first.`
     : undefined;
+
+  /**
+   * A pairing link read off a QR code while the application is already running.
+   *
+   * The same two decisions the startup path makes, so a link cannot get a different answer for
+   * having arrived through the camera rather than through the address bar.
+   */
+  const beginPairingLaunch = useCallback(
+    (intent: IPairingLaunchIntent) => {
+      if (pairingDependentGame) {
+        setNotice(
+          pairingLaunchBlockedNotice(pairedRoom?.roomName, gamePackageLabel(pairingDependentGame.package)),
+        );
+        return;
+      }
+      setNotice('');
+      setScreen({ kind: 'connect', fresh: true, launch: intent });
+    },
+    [pairedRoom?.roomName, pairingDependentGame],
+  );
 
   const forgetPairing = useCallback(() => {
     if (pairingDependentGame) return;
@@ -642,6 +737,7 @@ export default function App() {
       <ConnectedSetup
         initialBaseUrl={pendingBaseUrl || (connection?.baseUrl ?? '')}
         pairedRoom={screen.fresh ? null : pairedRoom}
+        launch={screen.launch ?? null}
         onPaired={onPaired}
         onStart={onConnected}
         onRoomLost={() => {
@@ -790,6 +886,7 @@ export default function App() {
         setPendingBaseUrl(baseUrl);
         setScreen({ kind: 'connect', fresh: true });
       }}
+      onPairingLaunch={beginPairingLaunch}
       onOpenPackage={async (packageValue, attempt) => {
         await startFromPackage(packageValue, { connected: false, attempt });
       }}

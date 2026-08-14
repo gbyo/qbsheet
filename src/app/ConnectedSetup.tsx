@@ -34,6 +34,16 @@
  * The first thing a client does with an address is ask what protocol it speaks. Everything after
  * that — pairing, the assignment, opening a session — goes through whichever surface it answered
  * with, and no code below this line knows which one that was.
+ *
+ * # A QR code and a tapped link arrive here too
+ *
+ * A pairing launch link supplies the address and the code that this screen otherwise asks for, and
+ * that is the whole of what it supplies: it does not reach the network, skip the capability check,
+ * or store anything of its own. It lands on a stage that states the address and waits for a press,
+ * because that press is where the browser's local-network permission prompt comes from, and it then
+ * runs `openControl` and `exchangePairingCode` — the same two functions the typed form runs, in the
+ * same order, producing the same `IPairedRoom` through the same `onPaired`. After the exchange there
+ * is nothing left that could tell the two apart. See `PairingLaunch` and `ControlPairing`.
  */
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import BrandLogo from '../BrandLogo';
@@ -43,11 +53,12 @@ import FruityServerClient, {
   IRoomIdentity,
   IRoomListEntry,
   ISessionCredentials,
-  normalizeBaseUrl,
 } from '../integrations/fruity/FruityServerClient';
 import { IGameDefinition } from '../game/GameDefinition';
 import { gamePackageMatchup } from '../game/GamePackage';
-import { IPairedRoom, newDeviceId } from './ConnectedSession';
+import { IPairedRoom } from './ConnectedSession';
+import { IControlConnection, exchangePairingCode, openControl } from './ControlPairing';
+import { IPairingLaunchIntent } from './PairingLaunch';
 import { connectionTimeline } from './ConnectionTimeline';
 import UpdateNotice from '../pwa/UpdateNotice';
 import { assignmentPollIntervalMs, forbiddenIn } from './useConnectedRuntime';
@@ -62,6 +73,13 @@ export interface IConnectedStart {
 
 type Stage =
   | { kind: 'address' }
+  /**
+   * A launch link, waiting for the press that spends it.
+   *
+   * Deliberately inert. Nothing has been sent, the previous pairing is untouched, and pressing Back
+   * leaves this device exactly as it was.
+   */
+  | { kind: 'launch'; intent: IPairingLaunchIntent }
   | {
       kind: 'pair';
       client: FruityServerClient;
@@ -113,6 +131,17 @@ export function assignmentStateKey(assignment: INormalizedAssignment | null): st
   }
   if (assignment.state === 'none') return 'none';
   return `assigned:${assignment.scheduledMatchId ?? 'unknown'}`;
+}
+
+/**
+ * The address on the ready-to-connect card.
+ *
+ * `http://` is dropped because it is noise on a card whose whole content is one local address, and
+ * because it is what a scheme-less address in the box would have become anyway. `https://` is kept:
+ * that one is a real difference between two servers and worth stating.
+ */
+export function launchAddressLabel(server: string): string {
+  return server.replace(/^http:\/\//i, '');
 }
 
 /** How recent a successful check was, in the words a person would use about it. */
@@ -167,6 +196,13 @@ export default function ConnectedSetup(props: {
   initialBaseUrl: string;
   /** A room this device is already paired with. Present means the address and the code are settled. */
   pairedRoom: IPairedRoom | null;
+  /**
+   * A pairing link that has been read and scrubbed, waiting for a gesture.
+   *
+   * Read once, when this screen mounts. It holds a short bootstrap code and is dropped as soon as
+   * the exchange consumes it; nothing else on this screen ever reads it again.
+   */
+  launch?: IPairingLaunchIntent | null;
   /** Called the moment a code is exchanged, so the capability survives a reload before any game. */
   onPaired: (room: IPairedRoom) => void;
   onStart: (start: IConnectedStart) => void | Promise<void>;
@@ -174,12 +210,17 @@ export default function ConnectedSetup(props: {
   onRoomLost: () => void;
   onCancel: () => void;
 }) {
-  const { initialBaseUrl, pairedRoom, onPaired, onStart, onRoomLost, onCancel } = props;
-  const [address, setAddress] = useState(pairedRoom?.baseUrl ?? initialBaseUrl);
+  const { initialBaseUrl, pairedRoom, launch = null, onPaired, onStart, onRoomLost, onCancel } = props;
+  const [address, setAddress] = useState(launch?.server ?? pairedRoom?.baseUrl ?? initialBaseUrl);
+  // A launch link outranks a stored pairing, because a device being pointed at a different
+  // tournament is precisely what one is for. The stored pairing is not touched by that: it is still
+  // in storage, still valid, and still what this device is until a new exchange succeeds.
   const [stage, setStage] = useState<Stage>(() =>
-    pairedRoom
-      ? { kind: 'room', client: new FruityServerClient(pairedRoom.baseUrl), room: pairedRoom }
-      : { kind: 'address' },
+    launch
+      ? { kind: 'launch', intent: launch }
+      : pairedRoom
+        ? { kind: 'room', client: new FruityServerClient(pairedRoom.baseUrl), room: pairedRoom }
+        : { kind: 'address' },
   );
   const [busy, setBusy] = useState(false);
   const [starting, setStarting] = useState(false);
@@ -228,92 +269,25 @@ export default function ConnectedSetup(props: {
     currentRoomKeyRef.current = currentRoomKey;
   }, [currentRoomKey]);
 
-  const connect = async (event: FormEvent) => {
-    event.preventDefault();
-    if (busy) return;
-    const normalized = normalizeBaseUrl(address);
-    if (!normalized.ok) {
-      setError(normalized.error);
-      return;
-    }
-    setBusy(true);
-    setError('');
-    setUnreachable(false);
-    const client = new FruityServerClient(normalized.value);
-    // The client discovers on its first call, so this also settles which surface everything below
-    // will use. Nothing here or later needs to know which one that turned out to be.
-    const verified = await client.verify();
-    if (!verified.ok) {
-      setBusy(false);
-      // No status at all is the shape of both "nothing is there" and "this browser refused to go
-      // there", and the room can act on either the same way.
-      setUnreachable(verified.status === undefined);
-      setError(
-        verified.status === undefined
-          ? 'Tournament control could not be reached from this browser.'
-          : verified.error,
-      );
-      return;
-    }
-    // Discovery is the authoritative statement of what this server does, so a server that cannot do
-    // the job says so here rather than at the end of a round. Naming what is missing matters: it is
-    // the difference between a director who can go and fix their server and one who cannot.
-    const missing = client.missingCapabilities();
-    if (missing.length > 0) {
-      setBusy(false);
-      setError(
-        `Tournament control at this address does not offer ${missing.join(', ')}. This room cannot score against it. A game file works with no server at all.`,
-      );
-      setUnreachable(true);
-      return;
-    }
-    const identified = await client.identify();
-    const rooms = await client.listRooms();
-    setBusy(false);
-    if (!identified.ok) {
-      setError(identified.error);
-      return;
-    }
+  /** The pairing form, against a server that has already answered for itself. */
+  const askForCode = (connection: IControlConnection, suggestedRoomId = '') => {
     setStage({
       kind: 'pair',
-      client,
-      tournamentName: identified.value.name,
-      rooms: rooms.ok ? rooms.value : [],
-      ...(rooms.ok
-        ? {}
-        : {
-            roomsError: `Room list could not be loaded (${rooms.error}). You can still enter a pairing code manually.`,
-          }),
+      client: connection.client,
+      tournamentName: connection.tournamentName,
+      rooms: connection.rooms,
+      ...(connection.roomsError === undefined ? {} : { roomsError: connection.roomsError }),
     });
-    setRoomId('');
+    setRoomId(suggestedRoomId);
   };
 
-  const pair = async (event: FormEvent) => {
-    event.preventDefault();
-    if (stage.kind !== 'pair') return;
-    if (busy) return;
-    const trimmedCode = code.trim();
-    if (trimmedCode === '') {
-      setError('Enter the pairing code for this room.');
-      return;
-    }
-    setBusy(true);
-    setError('');
-    const joined = await stage.client.join(trimmedCode, roomId === '' ? undefined : roomId);
-    setBusy(false);
-    if (!joined.ok) {
-      setError(joined.error);
-      return;
-    }
-    const room: IPairedRoom = {
-      baseUrl: stage.client.baseUrl,
-      roomId: joined.value.roomId,
-      roomName: joined.value.roomName,
-      roomToken: joined.value.accessToken,
-      // A device identity is stable for as long as the pairing is, so a re-pair of the same browser
-      // keeps the identity tournament control has been arbitrating writer ownership with.
-      deviceId: pairedRoom?.deviceId ?? newDeviceId(),
-    };
+  /**
+   * A room capability, however it was obtained.
+   *
+   * The tail of every pairing on this screen: typed, scanned, or tapped. Keeping it in one place is
+   * what makes "indistinguishable after the exchange" a property of the code rather than a claim.
+   */
+  const adoptRoom = (client: FruityServerClient, room: IPairedRoom) => {
     // Written before anything else can fail. A room that paired and then lost the tab must not have
     // to find the code again.
     onPaired(room);
@@ -327,7 +301,75 @@ export default function ConnectedSetup(props: {
     // before the first answer saying a room whose token was just refused had been reached just now.
     setLastSuccessfulCheckAt(null);
     setAssignmentFailed(false);
-    setStage({ kind: 'room', client: stage.client, room });
+    setStage({ kind: 'room', client, room });
+  };
+
+  const connect = async (event: FormEvent) => {
+    event.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    setError('');
+    setUnreachable(false);
+    // The client discovers on its first call, so this also settles which surface everything below
+    // will use. Nothing here or later needs to know which one that turned out to be.
+    const opened = await openControl(address);
+    setBusy(false);
+    if (!opened.ok) {
+      setUnreachable(opened.unreachable);
+      setError(opened.error);
+      return;
+    }
+    askForCode(opened.value);
+  };
+
+  const pair = async (event: FormEvent) => {
+    event.preventDefault();
+    if (stage.kind !== 'pair') return;
+    if (busy) return;
+    setBusy(true);
+    setError('');
+    // A device identity is stable for as long as the pairing is, so a re-pair of the same browser
+    // keeps the identity tournament control has been arbitrating writer ownership with.
+    const paired = await exchangePairingCode(stage.client, code, roomId, pairedRoom?.deviceId);
+    setBusy(false);
+    if (!paired.ok) {
+      setError(paired.error);
+      return;
+    }
+    adoptRoom(stage.client, paired.value);
+  };
+
+  /**
+   * Spend a launch link.
+   *
+   * Both halves in one press, because the link already contains both answers and stopping in between
+   * to show a code somebody did not type would be showing them a secret for no reason. The failures
+   * are handled differently on purpose: a server that will not answer leaves this on the launch card
+   * so the same press can be tried again once the laptop is awake, while a code control refused
+   * hands over to the ordinary pairing form against that same server — which is where somebody with
+   * a fresh code from the desk needs to be, and is the existing behaviour for a refused code.
+   */
+  const connectAndPair = async () => {
+    if (stage.kind !== 'launch' || busy) return;
+    const intent = stage.intent;
+    setBusy(true);
+    setError('');
+    setUnreachable(false);
+    const opened = await openControl(intent.server);
+    if (!opened.ok) {
+      setBusy(false);
+      setUnreachable(opened.unreachable);
+      setError(opened.error);
+      return;
+    }
+    const paired = await exchangePairingCode(opened.value.client, intent.code, intent.roomId, pairedRoom?.deviceId);
+    setBusy(false);
+    if (!paired.ok) {
+      setError(paired.error);
+      askForCode(opened.value, intent.roomId ?? '');
+      return;
+    }
+    adoptRoom(opened.value.client, paired.value);
   };
 
   /**
@@ -504,6 +546,32 @@ export default function ConnectedSetup(props: {
           <BrandLogo className="shell-brand-logo" />
         </h1>
       </header>
+
+      {/*
+        Everything the link said, minus the one thing it must never say.
+
+        The address and the room identifier are on the projector at the front of the room and are
+        useful for catching a link that points at last week's tournament. The pairing code is not
+        here, is not in the address bar any more, and is not anywhere a screenshot of this screen
+        could reach.
+      */}
+      {stage.kind === 'launch' && (
+        <section className="shell-section">
+          <h2 className="shell-heading">Ready to connect</h2>
+          {stage.intent.roomId !== undefined && <p className="shell-subtitle">{stage.intent.roomId}</p>}
+          <p className="shell-hint">{launchAddressLabel(stage.intent.server)}</p>
+          <div className="shell-actions">
+            <button
+              type="button"
+              className="shell-button is-primary"
+              disabled={busy}
+              onClick={() => void connectAndPair()}
+            >
+              {busy ? 'Connecting…' : 'Connect and pair'}
+            </button>
+          </div>
+        </section>
+      )}
 
       {stage.kind === 'address' && (
         <section className="shell-section">

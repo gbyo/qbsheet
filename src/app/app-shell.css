@@ -421,6 +421,20 @@ body {
 }
 
 /*
+ * The empty-field state of that same button.
+ *
+ * Identical to it in every respect a layout notices — same class, same padding, same height, same
+ * place — and different only in that it carries a glyph. `inline-flex` rather than the default so
+ * the icon sits on the text's own baseline row instead of pushing the label off centre.
+ */
+.welcome-scan-button {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+}
+
+/*
  * The third way into a game.
  *
  * Attached to the bottom of the two-column block rather than beside it: it shares that block's
@@ -1213,6 +1227,40 @@ body {
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 16px;
+}
+
+/*
+ * The QR scanner.
+ *
+ * Narrower than the shared dialog's 560px, because the useful thing on it is a camera preview and a
+ * preview wider than a phone held at arm's length is a lot of ceiling. The frame keeps a fixed
+ * aspect so the dialog does not resize under somebody's hand when the camera settles on its real
+ * resolution, and the dark ground means the moment before the first frame is a black rectangle
+ * rather than a flash of white.
+ */
+.qr-dialog {
+  max-width: 420px;
+}
+
+.qr-preview {
+  overflow: hidden;
+  background: #16171a;
+  border: 1px solid var(--room-border-strong);
+  border-radius: 3px;
+}
+
+.qr-preview-video {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+}
+
+.qr-status {
+  margin: 8px 0 0;
+  min-height: 1.4em;
+  font-size: 13px;
+  color: var(--room-muted);
 }
 
 /* #endregion */
