@@ -39,6 +39,8 @@ import productImage from '../assets/about-qbsheet-practice.webp';
 const githubUrl = 'https://github.com/gbyo/qbsheet';
 const qbjDocsUrl = `${githubUrl}/blob/main/docs/QBJ_ASSIGNMENT_PROFILE.md`;
 const qbtcpDocsUrl = `${githubUrl}/blob/main/docs/QBTCP.md`;
+/** Relative, because this page does not know what directory the deployment put it in. */
+const selfHostUrl = './self-host/';
 
 /**
  * React 18 does not recognise `fetchPriority` and drops it with a warning, so it is spread in as the
@@ -195,6 +197,7 @@ export default function About() {
           </a>
           <nav className="about-nav" aria-label="Primary navigation">
             <a href="../">Open QBSheet</a>
+            <a href={selfHostUrl}>Self-host</a>
             <a href={githubUrl}>GitHub</a>
           </nav>
         </div>
@@ -255,6 +258,12 @@ export default function About() {
                 QBSheet is licensed under the GNU AGPL. <a href={githubUrl}>View the source on GitHub</a>.
               </dd>
             </div>
+            <div>
+              <dt>Self-hosting</dt>
+              <dd>
+                Run your own copy on any static host. <a href={selfHostUrl}>Read the self-hosting guide</a>.
+              </dd>
+            </div>
           </dl>
         </section>
 
@@ -269,6 +278,7 @@ export default function About() {
         <nav aria-label="Footer navigation">
           <a href="../">QBSheet</a>
           <a href="./" aria-current="page">About</a>
+          <a href={selfHostUrl}>Self-host</a>
           <a href={`${githubUrl}#documentation`}>Documentation</a>
           <a href={githubUrl}>GitHub</a>
         </nav>

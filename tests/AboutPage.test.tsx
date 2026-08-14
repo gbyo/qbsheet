@@ -14,7 +14,7 @@
  * assumes none of them, and a tournament whose format this page silently excluded is a tournament that
  * reads it and leaves. So the assumptions are asserted absent by name.
  */
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { describe, expect, test } from 'vitest';
 import About from '../src/about/About';
 
@@ -94,7 +94,7 @@ describe('the product page', () => {
       ),
     ).toBeInTheDocument();
     // Still a definition list, which is the presentation this section is kept for.
-    for (const term of ['QBJ', 'QBTCP', 'Open source']) {
+    for (const term of ['QBJ', 'QBTCP', 'Open source', 'Self-hosting']) {
       expect(screen.getByText(term, { selector: 'dt' })).toBeInTheDocument();
     }
     expect(screen.getByText(/Portable files for assignments, games, and results\./)).toBeInTheDocument();
@@ -113,6 +113,25 @@ describe('the product page', () => {
       'href',
       'https://github.com/gbyo/qbsheet',
     );
+    // Relative, because this page does not know which directory the deployment served it from.
+    expect(screen.getByRole('link', { name: 'Read the self-hosting guide' })).toHaveAttribute(
+      'href',
+      './self-host/',
+    );
+  });
+
+  test('offers self-hosting from both navigations', () => {
+    const { container } = render(<About />);
+
+    // Three ways to the page from here: the header, the footer, and the open-by-design list. The
+    // first two are what make it reachable from anywhere on the page rather than only from the middle.
+    for (const region of ['.about-nav', '.about-footer nav']) {
+      const nav = container.querySelector(region);
+      expect(within(nav as HTMLElement).getByRole('link', { name: 'Self-host' })).toHaveAttribute(
+        'href',
+        './self-host/',
+      );
+    }
   });
 
   test('keeps the closing call to action and both ways into the application', () => {

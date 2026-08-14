@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import { describe, expect, test, vi } from 'vitest';
 import { isScorerPrecacheAsset, serviceWorkerSource } from '../vite.config';
@@ -62,15 +63,40 @@ describe('the generated scorer service worker', () => {
     expect(isScorerPrecacheAsset('about/index.html')).toBe(false);
     expect(isScorerPrecacheAsset('about/assets/about-a1b2.js')).toBe(false);
     expect(isScorerPrecacheAsset('about/assets/about-a1b2.css')).toBe(false);
+    // Every marketing page, however deep. The rule is the `about/` prefix and not a list of files,
+    // so a page added below it is outside the scorer's shell without anybody remembering to say so.
+    expect(isScorerPrecacheAsset('about/self-host/index.html')).toBe(false);
+  });
+
+  /**
+   * The isolation above is a path rule, and the path is decided by a filename.
+   *
+   * Rollup hoists a module shared by two entries into its own chunk and names that chunk after the
+   * module. Vite names the extracted stylesheet after the chunk, and that stylesheet reaches
+   * `assetFileNames` carrying no `originalFileNames`, so the chunk's name is the only evidence that
+   * the CSS belongs to the marketing pages. Named anything but `about`, it is written to `assets/`,
+   * `isScorerPrecacheAsset` returns true for it, and the page's stylesheet is precached into the
+   * offline shell whose activation is coordinated around an active game.
+   *
+   * This is not hypothetical: adding the second page renamed the chunk from `about` to `main` and did
+   * exactly that. So the shared entry module's name is asserted, not assumed.
+   */
+  test('every marketing page loads the one entry module the chunk is named for', () => {
+    for (const page of ['about/index.html', 'about/self-host/index.html']) {
+      const html = readFileSync(new URL(`../${page}`, import.meta.url), 'utf8');
+      expect(html).toContain('src="/src/about/pages.ts"');
+    }
   });
 
   test('leaves /about/ navigation and assets entirely to the network', () => {
     const harness = workerHarness({ scope: 'https://qbsheet.com/qbsheet/' });
 
     const navigation = harness.dispatchFetch('https://qbsheet.com/qbsheet/about/');
+    const nested = harness.dispatchFetch('https://qbsheet.com/qbsheet/about/self-host/');
     const asset = harness.dispatchFetch('https://qbsheet.com/qbsheet/about/assets/about-a1b2.js', 'cors');
 
     expect(navigation.respondWith).not.toHaveBeenCalled();
+    expect(nested.respondWith).not.toHaveBeenCalled();
     expect(asset.respondWith).not.toHaveBeenCalled();
     expect(harness.fetch).not.toHaveBeenCalled();
     expect(harness.caches.open).not.toHaveBeenCalled();

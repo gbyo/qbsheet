@@ -88,9 +88,72 @@ const aboutScreenshot = 'src/assets/about-qbsheet-practice.webp';
  */
 const aboutAssetSources = ['src/assets/qbsheet-black-logo.svg', aboutScreenshot];
 
+/**
+ * The documents rendered to static HTML at build time, and the component each one is.
+ *
+ * Adding an entry here and a matching `input` below is the whole of adding a page. The HTML path is
+ * also the statement of how deep the document sits, because a relative asset URL has to be written
+ * against the directory that names it: `about/index.html` and `about/self-host/index.html` need
+ * different numbers of `../` for the same emitted file.
+ */
+const prerenderedPages = [
+  { html: 'about/index.html', module: '/src/about/About.tsx' },
+  { html: 'about/self-host/index.html', module: '/src/about/SelfHost.tsx' },
+];
+
+/**
+ * The name of the chunk every marketing page shares, which is the name of the module they all load.
+ *
+ * # Why a constant, and why the module is not called `main.ts`
+ *
+ * Rollup hoists a module imported by more than one entry into a chunk of its own and names that chunk
+ * after the module. Vite then names the stylesheet it extracts after the chunk. That stylesheet is the
+ * one output here that arrives at `assetFileNames` with an empty `originalFileNames`, so its name is
+ * the only evidence connecting it to these pages — and an unrecognised name is written to `assets/`,
+ * where `isScorerPrecacheAsset` sweeps it into the offline shell coordinated around an active game.
+ *
+ * With one page the chunk was the `about` entry and the name fell out for free. With two it did not:
+ * the shared module was `src/about/main.ts`, so the chunk became `main`, and the page's CSS landed in
+ * the scorer's precache list. Naming it here, once, is what ties the module, the chunk and the
+ * stylesheet together. `ServiceWorkerIsolation.test.ts` asserts the pages still load it.
+ */
+const aboutChunkName = 'pages';
+
 /** Path comparison that does not care which kind of slash the host uses. */
 function toPosix(path: string): string {
   return path.split(sep).join('/');
+}
+
+/**
+ * Whether a source path is one of the marketing pages' own files.
+ *
+ * The leading slash is added so that this answers the same for an absolute module id and for the
+ * repository-relative `originalFileNames` Rollup reports on an asset, which are the two forms the
+ * same file arrives in below.
+ */
+function isAboutSource(path: string | null | undefined): boolean {
+  return typeof path === 'string' && `/${toPosix(path)}`.includes('/src/about/');
+}
+
+/**
+ * Whether a chunk is marketing-page output rather than scorer output.
+ *
+ * # Why this is not `chunk.name === 'about'`
+ *
+ * It was, and one entry is all that held it up. Two pages share `src/about/main.ts`, so Rollup hoists
+ * that module out of both entries into a single shared chunk of its own — named after the module,
+ * `main`, and routed by `chunkFileNames` rather than `entryFileNames`. A name comparison misses it,
+ * the chunk lands in the scorer's `assets/`, and `isScorerPrecacheAsset` then sweeps the marketing
+ * page's JavaScript and stylesheet into the offline shell that is coordinated around an active game.
+ *
+ * So the question is asked of the modules a chunk actually contains. An HTML entry has none of them,
+ * because its facade is the document, which is why the pages are checked by name as well.
+ */
+function isAboutChunk(chunk: Rollup.PreRenderedChunk): boolean {
+  if (chunk.moduleIds.some(isAboutSource)) return true;
+  const facade = chunk.facadeModuleId;
+  if (typeof facade !== 'string') return false;
+  return prerenderedPages.some((page) => toPosix(facade).endsWith(`/${page.html}`));
 }
 
 /**
@@ -124,28 +187,28 @@ function aboutPrerenderPlugin(): Plugin {
   let base = './';
   let root = '';
   let building = false;
-  let markup: string | null = null;
+  const markup = new Map<string, string>();
   let loadModule: ((id: string) => Promise<Record<string, unknown>>) | null = null;
 
-  async function render(): Promise<string> {
+  async function render(module: string): Promise<string> {
     if (loadModule === null) throw new Error('The product page renderer is not available.');
-    const loaded = await loadModule('/src/about/About.tsx');
-    const About = loaded.default as () => ReactElement;
-    return renderToStaticMarkup(createElement(About));
+    const loaded = await loadModule(module);
+    const Page = loaded.default as () => ReactElement;
+    return renderToStaticMarkup(createElement(Page));
   }
 
-  /** An emitted file's URL as `about/index.html`, one directory deep, has to write it. */
-  function assetUrl(fileName: string): string {
+  /** An emitted file's URL as the document that names it, sitting in `directory`, has to write it. */
+  function assetUrl(fileName: string, directory: string): string {
     if (!base.startsWith('.')) return `${base}${fileName}`;
-    const url = posix.relative('about', fileName);
+    const url = posix.relative(directory, fileName);
     return url.startsWith('.') ? url : `./${url}`;
   }
 
-  function emittedUrl(bundle: Rollup.OutputBundle, source: string): string {
+  function emittedUrl(bundle: Rollup.OutputBundle, source: string, directory: string): string {
     for (const output of Object.values(bundle)) {
       if (output.type !== 'asset') continue;
       if ((output.originalFileNames ?? []).some((name) => toPosix(name).endsWith(source))) {
-        return assetUrl(output.fileName);
+        return assetUrl(output.fileName, directory);
       }
     }
     // Shipping the page with a development URL in it would 404 the wordmark or the screenshot on a
@@ -189,22 +252,34 @@ function aboutPrerenderPlugin(): Plugin {
       });
       try {
         loadModule = (id) => server.ssrLoadModule(id);
-        markup = await render();
+        for (const page of prerenderedPages) {
+          markup.set(page.html, await render(page.module));
+        }
       } finally {
         loadModule = null;
         await server.close();
       }
     },
     async transformIndexHtml(html, ctx) {
-      if (!toPosix(ctx.filename).endsWith('about/index.html')) return;
-      const rendered = building ? markup : await render();
-      if (rendered === null) throw new Error('The product page was not rendered.');
+      const filename = toPosix(ctx.filename);
+      // `about/self-host/index.html` does not end with `about/index.html`, so neither page can be
+      // mistaken for the other and the deeper one does not need to be tested first.
+      const page = prerenderedPages.find((candidate) => filename.endsWith(`/${candidate.html}`));
+      if (page === undefined) return;
+      const rendered = building ? markup.get(page.html) : await render(page.module);
+      if (rendered === undefined) throw new Error(`The ${page.html} page was not rendered.`);
       const bundle = ctx.bundle;
+      const directory = posix.dirname(page.html);
       const resolved =
         bundle === undefined
           ? rendered
           : aboutAssetSources.reduce(
-              (current, source) => current.replaceAll(`/${source}`, emittedUrl(bundle, source)),
+              // Only assets this page actually names. Resolving the others would demand that every
+              // page emit every asset, and the self-hosting page has no screenshot.
+              (current, source) =>
+                current.includes(`/${source}`)
+                  ? current.replaceAll(`/${source}`, emittedUrl(bundle, source, directory))
+                  : current,
               rendered,
             );
       return html.replace(aboutRootDiv, `<div id="about-root">${resolved}</div>`);
@@ -380,20 +455,27 @@ export default defineConfig({
       input: {
         scorer: resolve(import.meta.dirname, 'index.html'),
         about: resolve(import.meta.dirname, 'about/index.html'),
+        'about-self-host': resolve(import.meta.dirname, 'about/self-host/index.html'),
       },
       output: {
-        // Keeping page-only assets below /about/ lets the scorer worker ignore the entire surface
+        // Keeping page-only output below /about/ lets the scorer worker ignore the entire surface
         // with one path rule. Shared assets, such as the real wordmark, remain ordinary scorer
         // assets and keep their usual content-hashed location.
+        //
+        // All three of these have to agree. The marketing pages' code reaches the bundle as an entry
+        // chunk, as the shared chunk the two pages hoist between them, and as the stylesheet that
+        // chunk carries, and a rule that catches two of the three still leaves the third inside the
+        // scorer's precache list.
         entryFileNames: (chunk) =>
-          chunk.name === 'about' ? 'about/assets/[name]-[hash].js' : 'assets/[name]-[hash].js',
+          isAboutChunk(chunk) ? 'about/assets/[name]-[hash].js' : 'assets/[name]-[hash].js',
+        chunkFileNames: (chunk) =>
+          isAboutChunk(chunk) ? 'about/assets/[name]-[hash].js' : 'assets/[name]-[hash].js',
         assetFileNames: (asset) => {
           const sourceNames = asset.originalFileNames ?? [];
           const belongsToAbout =
-            asset.name === 'about.css' ||
-            sourceNames.some(
-              (name) => name.includes('/src/about/') || name.includes('about-qbsheet-practice.webp'),
-            );
+            // The extracted stylesheet, which has no sources to be recognised by. See `aboutChunkName`.
+            asset.name === `${aboutChunkName}.css` ||
+            sourceNames.some((name) => isAboutSource(name) || toPosix(name).endsWith(aboutScreenshot));
           return belongsToAbout ? 'about/assets/[name]-[hash][extname]' : 'assets/[name]-[hash][extname]';
         },
       },
