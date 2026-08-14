@@ -26,7 +26,6 @@
  * it is — a fact about itself rather than an arithmetic result, so there is still no count to get
  * wrong. See `depthOf`.
  */
-import { useId } from 'react';
 import BrandLogo from '../BrandLogo';
 
 export const githubUrl = 'https://github.com/gbyo/qbsheet';
@@ -142,17 +141,8 @@ function ExternalLink({
   children: string;
   className?: string;
 }) {
-  const descriptionId = useId();
-
   return (
-    <a
-      className={className}
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      aria-label={children}
-      aria-describedby={descriptionId}
-    >
+    <a className={className} href={href} target="_blank" rel="noopener noreferrer">
       {children}
       <svg
         className="about-external-icon"
@@ -171,10 +161,7 @@ function ExternalLink({
         <path d="M20 4 11 13" />
         <path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" />
       </svg>
-      <span id={descriptionId} className="visually-hidden">
-        {' '}
-        (opens in a new tab)
-      </span>
+      <span className="visually-hidden"> (opens in a new tab)</span>
     </a>
   );
 }
