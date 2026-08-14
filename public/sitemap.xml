@@ -21,9 +21,6 @@
   <url>
     <loc>https://qbsheet.com/about/privacy/</loc>
   </url>
-  <url>
-    <loc>https://qbsheet.com/about/wiki/</loc>
-  </url>
   <!-- The wiki's own pages, written by scripts/generate-wiki-pages.mjs. Do not edit by hand: the
        sync workflow regenerates this region whenever the wiki changes. -->
   <!-- wiki:start pages -->

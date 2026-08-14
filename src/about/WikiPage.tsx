@@ -27,7 +27,7 @@
  * synced duplicate — an edit made here would be overwritten by the next sync and would leave the two
  * disagreeing. `.github/workflows/sync-wiki.yml` is the other half of that arrangement.
  */
-import { PageFooter, PageHeader, pageUrl } from './PageChrome';
+import { PageFooter, PageHeader } from './PageChrome';
 import type { IWikiPage, IWikiSection } from './wikiContent';
 
 const slug = 'wiki' as const;
@@ -38,16 +38,7 @@ const slug = 'wiki' as const;
  * Marked `aria-current` on the page being read, the same as the site navigation above it, so the two
  * behave alike for somebody moving through this section with a screen reader.
  */
-export function WikiNav({
-  sections,
-  current,
-  base,
-}: {
-  sections: IWikiSection[];
-  current?: string;
-  /** `../` from an article, `./` from the section index. The two sit at different depths. */
-  base: string;
-}) {
+export function WikiNav({ sections, current }: { sections: IWikiSection[]; current?: string }) {
   return (
     <nav className="about-wiki-nav" aria-label="Wiki navigation">
       {sections.map((section) => (
@@ -57,7 +48,7 @@ export function WikiNav({
             {section.links.map((link) => (
               <li key={link.slug}>
                 <a
-                  href={link.slug === current ? './' : `${base}${link.slug}/`}
+                  href={link.slug === current ? './' : `../${link.slug}/`}
                   {...(link.slug === current ? { 'aria-current': 'page' as const } : {})}
                 >
                   {link.label}
@@ -111,12 +102,14 @@ export default function WikiPage({
 
       <main className="about-wiki">
         <div className="about-wiki-inner">
-          <WikiNav sections={sections} current={page.slug} base="../" />
+          <WikiNav sections={sections} current={page.slug} />
 
           <article className="about-wiki-body">
             <div className="about-wiki-heading">
+              {/* The wiki's own `Home`, which is its front page. There is no index page above these
+                  articles: the section is the wiki, and the wiki already has one. */}
               <p className="about-kicker">
-                <a href={pageUrl(slug, 'wiki', true)}>Wiki</a>
+                <a href="../home/">Wiki</a>
               </p>
               <h1>{page.title}</h1>
               <EditLink href={editUrl} />

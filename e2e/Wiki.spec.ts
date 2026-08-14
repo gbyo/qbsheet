@@ -20,11 +20,14 @@ async function fits(page: Page): Promise<boolean> {
   );
 }
 
-test('the wiki index lists the sections and reaches a page', async ({ page }) => {
-  await page.goto('/about/wiki/');
+test('the site navigation enters the wiki at its own front page', async ({ page }) => {
+  await page.goto('/about/');
 
-  await expect(page).toHaveTitle('Wiki | QBSheet');
-  await expect(page.getByRole('heading', { level: 1, name: 'Wiki' })).toBeVisible();
+  // There is no index page above the articles. The wiki's `Home` is its front page, so that is what
+  // the navigation entry has to reach — and a link to `about/wiki/` would be served by nothing.
+  await page.getByRole('navigation', { name: 'Primary navigation' }).getByRole('link', { name: 'Wiki' }).click();
+  await expect(page).toHaveURL(/\/about\/wiki\/home\/$/);
+  await expect(page.getByRole('heading', { level: 1, name: 'QBSheet' })).toBeVisible();
 
   await page.getByRole('navigation', { name: 'Wiki navigation' }).getByRole('link', { name: 'Start here' }).click();
   await expect(page).toHaveURL(/\/about\/wiki\/start-here\/$/);

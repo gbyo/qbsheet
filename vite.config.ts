@@ -25,7 +25,6 @@ import {
   readWikiPage,
   readWikiSections,
   slugFor,
-  wikiBaseUrl,
   wikiPageNames,
 } from './src/about/wikiContent';
 import { readFileSync } from 'node:fs';
@@ -140,11 +139,6 @@ const prerenderedPages: IPrerenderedPage[] = [
   { html: 'about/self-host/index.html', module: '/src/about/SelfHost.tsx' },
   { html: 'about/faq/index.html', module: '/src/about/Faq.tsx' },
   { html: 'about/privacy/index.html', module: '/src/about/Privacy.tsx' },
-  {
-    html: 'about/wiki/index.html',
-    module: '/src/about/Wiki.tsx',
-    props: { sections: readWikiSections(import.meta.dirname), wikiUrl: wikiBaseUrl },
-  },
   ...wikiPages(),
 ];
 
@@ -510,7 +504,6 @@ export default defineConfig({
         'about-self-host': resolve(import.meta.dirname, 'about/self-host/index.html'),
         'about-faq': resolve(import.meta.dirname, 'about/faq/index.html'),
         'about-privacy': resolve(import.meta.dirname, 'about/privacy/index.html'),
-        'about-wiki': resolve(import.meta.dirname, 'about/wiki/index.html'),
         // Derived from the same list that produced the entries, so a page added to the wiki needs no
         // edit here. `generate-wiki-pages.mjs` writes the documents these names point at.
         ...Object.fromEntries(

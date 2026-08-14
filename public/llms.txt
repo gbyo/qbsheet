@@ -16,7 +16,7 @@ A scoresheet and tournament-control software do different jobs. QBSheet scores a
 - [Host QBSheet yourself](https://qbsheet.com/about/self-host/): Building QBSheet and serving it from any static host.
 - [Frequently asked questions](https://qbsheet.com/about/faq/): Supported devices and browsers, format and scoring configuration, files and local storage, and licensing.
 - [Privacy](https://qbsheet.com/about/privacy/): What QBSheet stores on a device, what a connected room transmits and to whom, and the absence of accounts and analytics.
-- [Wiki](https://qbsheet.com/about/wiki/): Contents page for the QBSheet wiki, which is published here from GitHub.
+- [Wiki](https://qbsheet.com/about/wiki/home/): Front page of the QBSheet wiki, which is published here from GitHub.
 - [Open QBSheet](https://qbsheet.com/): Launch the scorekeeper.
 
 ## Wiki

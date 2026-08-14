@@ -21,10 +21,9 @@
  * dev server put it — appears nowhere in a unit test of that page. The depth is computed from the
  * slug, which is the same value that decides where the document is written.
  *
- * The wiki adds the one case a slug cannot answer on its own, because a section index and the articles
- * under it share a slug and sit at different depths. `nested` is how an article says which of the two
- * it is — a fact about itself rather than an arithmetic result, so there is still no count to get
- * wrong. See `depthOf`.
+ * The wiki adds the one case a slug cannot answer on its own: its articles sit a directory deeper than
+ * every other page. `nested` is how an article says so — a fact about itself rather than an arithmetic
+ * result, so there is still no count to get wrong. See `depthOf`.
  */
 import BrandLogo from '../BrandLogo';
 
@@ -39,7 +38,8 @@ export const buildStepsUrl = `${githubUrl}#deployment`;
  * The pages of this site, named by the directory each is served from.
  *
  * The empty slug is the product page, which is `about/` itself. Everything else names a directory
- * below it. `wiki` names both the section index and every article under it; see `depthOf`.
+ * below it. `wiki` names the section as a whole, whose articles each sit a directory below that; see
+ * `depthOf`.
  */
 export type PageSlug = '' | 'scoring' | 'tournaments' | 'self-host' | 'faq' | 'privacy' | 'wiki';
 
@@ -47,8 +47,8 @@ export type PageSlug = '' | 'scoring' | 'tournaments' | 'self-host' | 'faq' | 'p
  * How many directories below `about/` a document sits.
  *
  * The product page is `about/` itself, so it is zero. Every other section is one. `nested` is the one
- * exception the site has: a wiki article lives at `about/wiki/<page>/`, one below the section index it
- * shares a slug with, and it is the only kind of document that does.
+ * exception the site has: a wiki article lives at `about/wiki/<page>/`, one below its section, and it
+ * is the only kind of document that does.
  *
  * Kept as a flag rather than a free-form number so the count still cannot be passed wrongly — a caller
  * says whether it is an article, not how many `../` it believes it needs.
@@ -90,7 +90,20 @@ export function pageUrl(slug: PageSlug, target: PageSlug, nested = false): strin
  * search, so it is carried in the footer where a legal-adjacent page is looked for anyway, and the
  * header stays at a length that still wraps to two lines rather than three on a narrow phone.
  */
-const primaryPages: { slug: PageSlug; label: string }[] = [
+interface INavPage {
+  slug: PageSlug;
+  label: string;
+  /**
+   * Where the link goes, when that is not the slug's own directory.
+   *
+   * The wiki is the only entry needing one. It has no index page of its own — the wiki's `Home` is
+   * its front page, written by the same people who write the rest of it — so the navigation points
+   * at that article rather than at a directory nothing would be served from.
+   */
+  path?: string;
+}
+
+const primaryPages: INavPage[] = [
   { slug: '', label: 'About' },
   { slug: 'scoring', label: 'Scoring' },
   { slug: 'tournaments', label: 'Tournaments' },
@@ -98,14 +111,18 @@ const primaryPages: { slug: PageSlug; label: string }[] = [
   { slug: 'faq', label: 'FAQ' },
   // One entry for the whole wiki, whose own sidebar carries its sixteen pages. A section that
   // navigates itself does not need the site navigation to enumerate it.
-  { slug: 'wiki', label: 'Wiki' },
+  { slug: 'wiki', label: 'Wiki', path: 'wiki/home' },
 ];
 
+/** Where a navigation entry points, which is the slug's directory unless it names another. */
+function navHref(from: PageSlug, page: INavPage, nested: boolean): string {
+  if (page.path === undefined) return pageUrl(from, page.slug, nested);
+  const depth = depthOf(from, nested);
+  return `${depth === 0 ? './' : '../'.repeat(depth)}${page.path}/`;
+}
+
 /** The footer carries everything, including the page the header leaves out. */
-const footerPages: { slug: PageSlug; label: string }[] = [
-  ...primaryPages,
-  { slug: 'privacy', label: 'Privacy' },
-];
+const footerPages: INavPage[] = [...primaryPages, { slug: 'privacy', label: 'Privacy' }];
 
 /** `aria-current` belongs on the link to the page you are already on, and nowhere else. */
 function current(slug: PageSlug, target: PageSlug): { 'aria-current'?: 'page' } {
@@ -171,7 +188,7 @@ export function PageHeader({ slug, nested = false }: { slug: PageSlug; nested?: 
         <nav className="about-nav" aria-label="Primary navigation">
           <a href={scorerUrl(slug, nested)}>Open QBSheet</a>
           {primaryPages.map((page) => (
-            <a key={page.slug} href={pageUrl(slug, page.slug, nested)} {...current(slug, page.slug)}>
+            <a key={page.slug} href={navHref(slug, page, nested)} {...current(slug, page.slug)}>
               {page.label}
             </a>
           ))}
@@ -188,7 +205,7 @@ export function PageFooter({ slug, nested = false }: { slug: PageSlug; nested?: 
       <nav aria-label="Footer navigation">
         <a href={scorerUrl(slug, nested)}>QBSheet</a>
         {footerPages.map((page) => (
-          <a key={page.slug} href={pageUrl(slug, page.slug, nested)} {...current(slug, page.slug)}>
+          <a key={page.slug} href={navHref(slug, page, nested)} {...current(slug, page.slug)}>
             {page.label}
           </a>
         ))}

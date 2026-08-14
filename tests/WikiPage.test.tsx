@@ -6,14 +6,13 @@
  * directory deeper than every other page on the site, and that the edit link exists and leaves.
  *
  * The depth is the interesting half. A wiki article is the only document here at `about/wiki/<page>/`,
- * so it is the only one needing three `../` to reach the scorer, and it shares a slug with the section
- * index sitting one level above it — which is exactly the case that would make a self-link resolve to
- * the wrong document. Both are asserted by name.
+ * so it is the only one needing three `../` to reach the scorer, and its own navigation entry points at
+ * a sibling article rather than at its directory — which is exactly the case a self-link shortcut would
+ * resolve to the wrong document. Both are asserted by name.
  */
 import { render, screen, within } from '@testing-library/react';
 import { describe, expect, test } from 'vitest';
 import WikiPage from '../src/about/WikiPage';
-import Wiki from '../src/about/Wiki';
 import type { IWikiPage, IWikiSection } from '../src/about/wikiContent';
 
 const page: IWikiPage = {
@@ -70,11 +69,11 @@ describe('a wiki article', () => {
     expect(within(nav).getByRole('link', { name: 'About' })).toHaveAttribute('href', '../../');
     expect(within(nav).getByRole('link', { name: 'FAQ' })).toHaveAttribute('href', '../../faq/');
 
-    // The section index is a real directory above this one, so it must not be written as `./` — the
-    // shortcut every other page takes for a link to itself.
-    const wikiLinks = within(nav).getByRole('link', { name: 'Wiki' });
-    expect(wikiLinks).toHaveAttribute('href', '../../wiki/');
-    expect(wikiLinks).toHaveAttribute('aria-current', 'page');
+    // The wiki has no index page: its own `Home` is the front page, so that is where the navigation
+    // entry goes. It must not be written as `./`, the shortcut every other page takes for itself.
+    const wikiLink = within(nav).getByRole('link', { name: 'Wiki' });
+    expect(wikiLink).toHaveAttribute('href', '../../wiki/home/');
+    expect(wikiLink).toHaveAttribute('aria-current', 'page');
   });
 
   test('marks the current page in the wiki navigation and points at its siblings', () => {
@@ -92,30 +91,3 @@ describe('a wiki article', () => {
   });
 });
 
-describe('the wiki index', () => {
-  test('lists the sections and links down into them', () => {
-    const { container } = render(<Wiki sections={sections} wikiUrl="https://github.com/gbyo/qbsheet/wiki" />);
-
-    expect(screen.getByRole('heading', { level: 1, name: 'Wiki' })).toBeInTheDocument();
-    // Sitting at `about/wiki/`, its articles are below it rather than beside it.
-    const wikiNav = container.querySelector('.about-wiki-nav') as HTMLElement;
-    expect(within(wikiNav).getByRole('link', { name: 'Start here' })).toHaveAttribute(
-      'href',
-      './start-here/',
-    );
-    // And it is an ordinary section page, so the scorer is two levels up.
-    for (const link of screen.getAllByRole('link', { name: 'Open QBSheet' })) {
-      expect(link).toHaveAttribute('href', '../../');
-    }
-  });
-
-  test('says the specifications rather than the wiki are normative', () => {
-    const { container } = render(<Wiki sections={sections} wikiUrl="https://github.com/gbyo/qbsheet/wiki" />);
-
-    // The wiki's own footer says this, and it matters enough to repeat: somebody implementing QBTCP
-    // against a guide rather than the specification will get it subtly wrong.
-    const words = (container.textContent ?? '').replace(/\s+/g, ' ');
-    expect(words).toContain('The specifications in docs/ are the normative ones');
-    expect(words).toContain('where the two disagree the specification wins');
-  });
-});
