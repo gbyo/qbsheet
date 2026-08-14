@@ -1472,6 +1472,14 @@ body {
  */
 .manual-shell {
   padding-bottom: 32px;
+
+  /*
+   * How far the sticky action bar's foot extends below its buttons. On a phone whose gesture bar
+   * eats the bottom of the viewport this is the inset rather than the default, which makes the bar
+   * that much taller — and the clearance reserved beneath scroll targets has to grow with it.
+   * Named here because two rules need the same number and they must not drift apart.
+   */
+  --manual-actions-foot: max(10px, env(safe-area-inset-bottom, 0px));
 }
 
 .manual-presets details > summary {
@@ -1506,7 +1514,7 @@ body {
   position: sticky;
   bottom: 0;
   z-index: 2;
-  padding: 10px 0 max(10px, env(safe-area-inset-bottom));
+  padding: 10px 0 var(--manual-actions-foot);
   border-top: 1px solid var(--room-border-strong);
   background: var(--room-surface);
 }
@@ -1519,9 +1527,13 @@ body {
  * the exact failure the focus move exists to prevent. Reserve the bar's height beneath every target
  * the browser might scroll to; the bar's own buttons are left out because they are sticky and asking
  * to scroll clear of themselves would drag the form to its end.
+ *
+ * 84px is that height with the foot at its 10px default, so the reservation is the rest of the bar
+ * plus whatever the foot actually resolves to. A flat 84px would come up short by the difference on
+ * any phone with a gesture bar, and coming up short here puts the complaint back under the bar.
  */
 .manual-shell :is(input, textarea, select, .shell-errors) {
-  scroll-margin-bottom: 84px;
+  scroll-margin-bottom: calc(84px - 10px + var(--manual-actions-foot));
 }
 
 .manual-field {

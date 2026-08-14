@@ -176,19 +176,42 @@ test('a refused Start game leaves the complaint where it can be read', async ({ 
   await page.getByRole('button', { name: 'Create game' }).click();
   await expect(page.getByRole('heading', { name: 'Create a game' })).toBeVisible();
 
-  await page.getByRole('button', { name: 'Start game' }).click();
-
   const errors = page.locator('.shell-errors').first();
-  await expect(errors).toContainText('Enter a name for the left team.');
-  // The form put the cursor on it, which is the behaviour the visibility below has to hold up.
-  await expect(errors).toBeFocused();
+  const bar = page.locator('.manual-actions');
 
-  const errorBox = await errors.boundingBox();
-  const barBox = await page.locator('.manual-actions').boundingBox();
-  if (!errorBox || !barBox) throw new Error('The error block and the action bar should both be laid out.');
+  // Each refusal re-runs the focus move, so this can be asked more than once of the same form.
+  const refuse = async () => {
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.getByRole('button', { name: 'Start game' }).click();
+    await expect(errors).toContainText('Enter a name for the left team.');
+    // The form put the cursor on it, which is the behaviour the visibility below has to hold up.
+    await expect(errors).toBeFocused();
 
+    const errorBox = await errors.boundingBox();
+    const barBox = await bar.boundingBox();
+    if (!errorBox || !barBox) throw new Error('The error block and the action bar should both be laid out.');
+    return { errorBox, barBox };
+  };
+
+  const flat = await refuse();
   // Every line of it, not just the first: four complaints scrolled to the bottom edge lose the last
   // two under the bar, and the last two are as load-bearing as the first.
-  expect(errorBox.y).toBeGreaterThanOrEqual(0);
-  expect(errorBox.y + errorBox.height).toBeLessThanOrEqual(barBox.y);
+  expect(flat.errorBox.y).toBeGreaterThanOrEqual(0);
+  expect(flat.errorBox.y + flat.errorBox.height).toBeLessThanOrEqual(flat.barBox.y);
+
+  /*
+   * And again on a handset whose gesture bar takes the bottom of the viewport, which is where a
+   * clearance written as a flat number comes apart: the bar grows by the inset and the reserved
+   * space does not, so the last line of the complaint ends up back underneath it.
+   *
+   * env(safe-area-inset-bottom) cannot be driven from a test, so the foot both rules are derived
+   * from is overridden instead. 48px is past the ~34px a phone with a home indicator reports, so a
+   * bar measured at the old flat 84px is comfortably too short here.
+   */
+  await page.addStyleTag({ content: '.manual-shell { --manual-actions-foot: 48px; }' });
+
+  const inset = await refuse();
+  expect(inset.barBox.height).toBeGreaterThan(84);
+  expect(inset.errorBox.y).toBeGreaterThanOrEqual(0);
+  expect(inset.errorBox.y + inset.errorBox.height).toBeLessThanOrEqual(inset.barBox.y);
 });
