@@ -41,6 +41,7 @@
   "dependencies": {
     "@fontsource/ibm-plex-sans": "^5.2.5",
     "fflate": "^0.8.3",
+    "jsqr": "^1.4.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

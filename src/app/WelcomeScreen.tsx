@@ -28,6 +28,15 @@
  * Set once still has to happen once, so a device that has never been asked is asked, in a dialog,
  * on the first load. Once. A blank answer is an answer and is remembered as one.
  *
+ * # The address box has one button, and it has two jobs
+ *
+ * Typing an address and pressing Connect is still the whole of connecting, and nothing about it has
+ * moved. But an empty address box has an action that is not "Connect", because there is nothing to
+ * connect to yet — so that same button offers to read the QR code tournament control is showing,
+ * which is where the address was going to come from anyway. One control, two states, decided by
+ * whether the field has anything in it. There is no second button, no mode picker, and no way for a
+ * scorekeeper who has an address on a projector to be sent through a camera to use it.
+ *
  * Once it is set it is said back, under the logo, as a greeting with a "Not you?" underneath. This
  * is the one part of it that is not a preference: a shared Chromebook that has been handed to the
  * next room still carries the last person's name into every result it sends, and the only way to
@@ -64,6 +73,8 @@ import ControlIcon from '../scorer/ControlIcon';
 import GameFileOpen from './GameFileOpen';
 import RecentGames from './RecentGames';
 import NativeDialog from './NativeDialog';
+import QrScannerDialog from './QrScannerDialog';
+import { IPairingLaunchIntent, parsePairingLaunchUrl } from './PairingLaunch';
 import { readOperatorNameAsked, writeOperatorNameAsked } from './OperatorIdentity';
 import SettingsDialog, { ISettingsConnection } from './SettingsDialog';
 import { downloadStoredGameQbj } from './FinishedGameDownload';
@@ -140,6 +151,13 @@ export default function WelcomeScreen(props: {
   /** Back into the room this device is already paired with. No address, no code. */
   onOpenRoom: () => void;
   onConnect: (baseUrl: string) => void;
+  /**
+   * A pairing link this device just read off a QR code.
+   *
+   * Carries a short bootstrap code, so it goes straight out of this component to the connection flow
+   * and is never held in state here, never rendered, and never written anywhere. See `PairingLaunch`.
+   */
+  onPairingLaunch: (intent: IPairingLaunchIntent) => void;
   onOpenPackage: (packageValue: IGamePackage, attempt?: number) => void | Promise<void>;
   onOpenRecord: (record: IStoredGameRecord) => void | Promise<void>;
   onRetryResult: (recordId: string) => void | Promise<void>;
@@ -166,6 +184,7 @@ export default function WelcomeScreen(props: {
     onCreateGame,
     onOpenRoom,
     onConnect,
+    onPairingLaunch,
     onOpenPackage,
     onOpenRecord,
     onRetryResult,
@@ -178,6 +197,7 @@ export default function WelcomeScreen(props: {
     null,
   );
   const [settingsView, setSettingsView] = useState<'settings' | 'scorekeeper' | null>(null);
+  const [scanning, setScanning] = useState(false);
   /**
    * The first-load ask, decided once at mount.
    *
@@ -213,6 +233,26 @@ export default function WelcomeScreen(props: {
     }
     setAddressError('');
     onConnect(trimmed);
+  };
+
+  /** Nothing typed yet, so the button beside the field offers to go and find the address. */
+  const addressEmpty = address.trim() === '';
+
+  /**
+   * A QR code the camera read.
+   *
+   * The scanner knows nothing about pairing, so the judgement is made here and the answer goes back
+   * to it: null closes this down, a sentence keeps the camera up with an explanation. A QR code that
+   * is simply not a pairing link — a Wi-Fi code taped to the wall, a URL on a packet — gets a plainer
+   * sentence than a pairing link that is broken, because those are different mistakes.
+   */
+  const readScannedCode = (text: string): string | null => {
+    const parsed = parsePairingLaunchUrl(text);
+    if (parsed.kind === 'problem') return parsed.message;
+    if (parsed.kind === 'none') return 'That is not a QBSheet pairing code. Look for the QR code tournament control is showing.';
+    setScanning(false);
+    onPairingLaunch(parsed.intent);
+    return null;
   };
 
   /**
@@ -352,9 +392,26 @@ export default function WelcomeScreen(props: {
                     if (event.target.value.trim() !== '') setAddressError('');
                   }}
                 />
-                <button type="submit" className="shell-button is-primary" disabled={address.trim() === ''}>
-                  Connect
-                </button>
+                {/*
+                  One control in one place, whose label and job change with the field beside it. Two
+                  buttons rendered at the same position rather than one with a conditional handler,
+                  because `type` is half of what makes each of them correct: Connect must submit the
+                  form so Enter in the address field works, and Scan QR must not.
+                */}
+                {addressEmpty ? (
+                  <button
+                    type="button"
+                    className="shell-button is-primary welcome-scan-button"
+                    onClick={() => setScanning(true)}
+                  >
+                    <ControlIcon name="qr" />
+                    Scan QR
+                  </button>
+                ) : (
+                  <button type="submit" className="shell-button is-primary">
+                    Connect
+                  </button>
+                )}
               </div>
               {addressError !== '' && <p className="shell-errors" role="alert">{addressError}</p>}
             </form>
@@ -419,6 +476,8 @@ export default function WelcomeScreen(props: {
           onClose={closeSettings}
         />
       )}
+
+      {scanning && <QrScannerDialog onClose={() => setScanning(false)} onDecoded={readScannedCode} />}
 
       {alreadyPlayed && (
         <NativeDialog

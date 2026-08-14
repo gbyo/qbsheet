@@ -10,7 +10,10 @@
  *
  * The consequence is that the application must never rely on path-based routing: there is no server
  * to rewrite `/repository/game/42` back onto `index.html`, and a reload of such a URL is a Pages
- * 404. Application state lives in the URL fragment (see `Routing`), which no server ever sees.
+ * 404. So there are no route paths, and no screen, game or connection is addressable — which screen
+ * is on is decided from local storage. The one thing the URL ever carries is a QBTCP pairing launch
+ * fragment, which is a bootstrap message consumed and removed before the application renders rather
+ * than state anything reloads into. See `PairingLaunch`.
  */
 import { defineConfig, type Plugin, type Rollup } from 'vite';
 import react from '@vitejs/plugin-react';

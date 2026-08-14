@@ -71,7 +71,7 @@ describe('the self-hosting page', () => {
     expect(bands[0]?.querySelector('.about-assurance-grid')).not.toBeNull();
 
     // Why there are no rewrite rules to write, which is the claim a host operator will check first.
-    expect(screen.getByText(/keeps its state in the URL fragment, which never reaches the server/)).toBeInTheDocument();
+    expect(screen.getByText(/Every screen lives at one URL, so nothing needs routing/)).toBeInTheDocument();
   });
 
   test('lists the kinds of host it runs on as a definition list', () => {
