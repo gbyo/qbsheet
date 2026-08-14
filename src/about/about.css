@@ -125,6 +125,25 @@ a:focus-visible {
   color: var(--about-accent);
 }
 
+/*
+ * The mark on a link that leaves the site.
+ *
+ * Inline rather than absolutely placed, so it occupies real width and cannot land on the text of a
+ * link that wrapped. The gap is a margin instead of a space character for the same reason: a space
+ * is a break opportunity, and the one place the arrow must not go is the start of the next line.
+ *
+ * Sized in `em` so it tracks the 14px navigation text and the 13px it becomes on a narrow phone, and
+ * nudged up by a fraction because the glyph's mass sits below its own box.
+ */
+.about-external-icon {
+  display: inline-block;
+  width: 0.82em;
+  height: 0.82em;
+  margin-left: 0.28em;
+  vertical-align: -0.06em;
+  flex: none;
+}
+
 .about-hero {
   width: min(800px, calc(100% - 48px));
   margin: 0 auto;

@@ -132,7 +132,9 @@ describe('the tournaments page', () => {
     for (const link of screen.getAllByRole('link', { name: 'Open QBSheet' })) {
       expect(link).toHaveAttribute('href', '../../');
     }
-    expect(container.querySelector('.about-brand')).toHaveAttribute('href', '../../');
+    // The wordmark returns to this site's front page, which is the product page one level up,
+    // not the scorer two levels up. "Open QBSheet" is the way into the application.
+    expect(container.querySelector('.about-brand')).toHaveAttribute('href', '../');
     for (const link of screen.getAllByRole('link', { name: 'About' })) {
       expect(link).toHaveAttribute('href', '../');
     }
@@ -152,6 +154,41 @@ describe('the tournaments page', () => {
       expect(self).toHaveAttribute('href', './');
       expect(self).toHaveAttribute('aria-current', 'page');
     }
+  });
+
+  /**
+   * The shared chrome, asserted once rather than on all six pages.
+   *
+   * `PageChrome` renders the header and footer for every page here, so its behaviour is a property of
+   * the module and not of this page. It is checked from a page that is not the product page, because
+   * the depth-dependent halves — the wordmark's `../` — are the ones that go wrong.
+   */
+  test('marks the links that leave the site, and lands the wordmark on this site', () => {
+    const { container } = render(<Tournaments />);
+
+    // The wordmark is the way back to the front page of the site, not into the application.
+    expect(container.querySelector('.about-brand')).toHaveAttribute('href', '../');
+
+    for (const region of ['.about-nav', '.about-footer nav']) {
+      const github = within(container.querySelector(region) as HTMLElement).getByRole('link', {
+        name: /^GitHub/,
+      });
+      expect(github).toHaveAttribute('href', 'https://github.com/gbyo/qbsheet');
+      expect(github).toHaveAttribute('target', '_blank');
+      // Without this a new tab holds a handle on this one through `window.opener`.
+      expect(github).toHaveAttribute('rel', 'noopener noreferrer');
+      // The arrow is decoration, so the behaviour is announced in words as well. A screen reader
+      // saying "graphic" after the link text would tell nobody anything.
+      expect(github.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+      expect(github.textContent).toContain('(opens in a new tab)');
+    }
+
+    // A page link is not an external one, and must not have grown either attribute.
+    const selfHost = within(container.querySelector('.about-nav') as HTMLElement).getByRole('link', {
+      name: 'Self-host',
+    });
+    expect(selfHost).not.toHaveAttribute('target');
+    expect(selfHost).not.toHaveAttribute('rel');
   });
 
   test('assumes no quiz bowl format', () => {

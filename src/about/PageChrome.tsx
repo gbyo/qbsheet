@@ -89,11 +89,60 @@ function current(slug: PageSlug, target: PageSlug): { 'aria-current'?: 'page' } 
   return slug === target ? { 'aria-current': 'page' } : {};
 }
 
+/**
+ * A link that leaves the site, marked as one.
+ *
+ * # Why the icon and the new tab arrive together
+ *
+ * The arrow is the convention readers already know, and what it conventionally promises is that the
+ * current page will still be there afterwards. An icon on a link that replaces the page is a small
+ * lie, so the two are one component rather than two decisions: anything wearing the mark opens in a
+ * new tab, and anything opening in a new tab wears the mark.
+ *
+ * `rel="noopener noreferrer"` because a new tab otherwise gets a handle on this one through
+ * `window.opener`. `noreferrer` is what this project's lint rule asks for, and it covers the older
+ * browsers where `noopener` alone was not honoured.
+ *
+ * # Why the arrow is not the whole announcement
+ *
+ * The glyph is `aria-hidden`, because a screen reader saying "graphic" after the link text tells
+ * nobody anything. The behaviour is announced in words instead, by the visually-hidden span, so the
+ * two audiences are told the same thing in the form each can use.
+ */
+function ExternalLink({ href, children }: { href: string; children: string }) {
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer">
+      {children}
+      <svg
+        className="about-external-icon"
+        viewBox="0 0 24 24"
+        width="12"
+        height="12"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+        focusable="false"
+      >
+        <path d="M14 4h6v6" />
+        <path d="M20 4 11 13" />
+        <path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" />
+      </svg>
+      <span className="visually-hidden"> (opens in a new tab)</span>
+    </a>
+  );
+}
+
 export function PageHeader({ slug }: { slug: PageSlug }) {
   return (
     <header className="about-header">
       <div className="about-header-inner">
-        <a className="about-brand" href={scorerUrl(slug)} aria-label="QBSheet home">
+        {/* The wordmark returns to this site's own front page, which is the product page rather than
+            the scorer. "Open QBSheet" is the way into the application, and it is a button-shaped
+            thing in the hero and the closing action of every page. */}
+        <a className="about-brand" href={pageUrl(slug, '')} aria-label="QBSheet home">
           <BrandLogo className="about-brand-logo" />
         </a>
         <nav className="about-nav" aria-label="Primary navigation">
@@ -103,7 +152,7 @@ export function PageHeader({ slug }: { slug: PageSlug }) {
               {page.label}
             </a>
           ))}
-          <a href={githubUrl}>GitHub</a>
+          <ExternalLink href={githubUrl}>GitHub</ExternalLink>
         </nav>
       </div>
     </header>
@@ -120,8 +169,10 @@ export function PageFooter({ slug }: { slug: PageSlug }) {
             {page.label}
           </a>
         ))}
-        <a href={documentationUrl}>Documentation</a>
-        <a href={githubUrl}>GitHub</a>
+        {/* Both of these leave the site, and a marked link in the header beside an unmarked one in
+            the footer reads as an oversight rather than as a distinction. */}
+        <ExternalLink href={documentationUrl}>Documentation</ExternalLink>
+        <ExternalLink href={githubUrl}>GitHub</ExternalLink>
       </nav>
     </footer>
   );

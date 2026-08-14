@@ -94,7 +94,9 @@ describe('the questions page', () => {
     for (const link of screen.getAllByRole('link', { name: 'Open QBSheet' })) {
       expect(link).toHaveAttribute('href', '../../');
     }
-    expect(container.querySelector('.about-brand')).toHaveAttribute('href', '../../');
+    // The wordmark returns to this site's front page, which is the product page one level up,
+    // not the scorer two levels up. "Open QBSheet" is the way into the application.
+    expect(container.querySelector('.about-brand')).toHaveAttribute('href', '../');
     for (const link of screen.getAllByRole('link', { name: 'About' })) {
       expect(link).toHaveAttribute('href', '../');
     }
