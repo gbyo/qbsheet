@@ -1626,9 +1626,9 @@ describe('ending a game short', () => {
  * the shell's header — one wasted keystroke for a scorekeeper, and, for anybody listening to the
  * screen instead of looking at it, a dialog that announces itself as "Close dialog".
  *
- * Replace question is deliberately not in this list. It asks which scope to void before it asks
- * why, and putting the cursor past that decision would make the default the only choice a keyboard
- * reaches without going backwards.
+ * Replace question asks for something other than typing. It wants a scope voided before it wants a
+ * reason, so the cursor stops on that decision rather than past it — putting it in the reason box
+ * would make the default the only scope a keyboard reaches without going backwards.
  */
 describe('a dialog opens on the thing it is asking for', () => {
   test('Notes starts in the note', () => {
@@ -1655,12 +1655,16 @@ describe('a dialog opens on the thing it is asking for', () => {
     expect(screen.getByLabelText('Moderator / reader')).toHaveFocus();
   });
 
-  test('Replace question keeps the scope choice ahead of the reason', () => {
+  test('Replace question starts on the scope it would void, ahead of the reason', () => {
     renderScorer(formatFor());
     fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
 
     pressControl(/^Replace question/);
 
+    // Landing anywhere else means landing on the header's close button, which is the fallback and
+    // announces itself as "Close dialog" — the thing every other dialog here was fixed to stop.
+    const dialog = screen.getByRole('dialog', { name: /^Replace question/ });
+    expect(within(dialog).getByRole('button', { pressed: true })).toHaveFocus();
     expect(screen.getByLabelText('What went wrong?')).not.toHaveFocus();
   });
 });
