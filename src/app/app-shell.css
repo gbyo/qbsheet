@@ -987,12 +987,47 @@ body {
   overflow-wrap: anywhere;
 }
 
+/*
+ * One narrow column at the right edge of every row, so the download sits in the same place on all of
+ * them. Stacked rather than side by side, because the retry that occasionally joins it would
+ * otherwise shove that row's download inward and break the line the eye follows down the list.
+ */
 .recent-actions {
   grid-area: actions;
   display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
+  flex-direction: column;
+  align-items: flex-end;
   gap: 8px;
+}
+
+/*
+ * Downloading the file again is a repeat action on a list, not the thing to press on this screen.
+ * Several of them one under another as outlined boxes read as a wall of buttons and compete with
+ * Connect and Create above, so this keeps the button and its icon and drops the box. Muted, not
+ * blue: the accent stays with the screen's primary actions.
+ */
+.recent-download {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  font: inherit;
+  font-size: 13px;
+  color: var(--room-muted);
+  white-space: nowrap;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.recent-download:hover {
+  color: var(--room-text);
+  text-decoration: underline;
+}
+
+.recent-download:focus-visible {
+  outline: 2px solid var(--room-accent);
+  outline-offset: 2px;
 }
 
 @media (max-width: 760px) {
@@ -1005,7 +1040,7 @@ body {
   }
 
   .recent-actions {
-    justify-content: flex-start;
+    align-items: flex-start;
   }
 }
 

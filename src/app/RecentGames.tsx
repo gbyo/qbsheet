@@ -9,14 +9,16 @@
  * hide exactly the case that matters — a result the server accepted whose file never reached the
  * folder it was supposed to.
  *
- * Nothing here deletes a game. `Download QBJ again` stays available for as long as the record does,
+ * Nothing here deletes a game. `Download QBJ` stays available for as long as the record does,
  * because the second most common thing that goes wrong with a downloads folder is that somebody
- * cleared it.
+ * cleared it. It is a repeat action on a list, so it is drawn quietly; the screen's own primary
+ * actions are the ones above this section.
  */
 import { IStoredGameRecord, isDelivered, retentionMsFor } from '../game/GameStore';
 import { gamePackageLabel, gamePackageMatchup } from '../game/GamePackage';
 import { isManualGame } from '../game/GameDefinition';
 import { useState } from 'react';
+import ControlIcon from '../scorer/ControlIcon';
 import { downloadStoredGameQbj } from './FinishedGameDownload';
 
 function timeOfDay(iso: string | undefined): string {
@@ -211,8 +213,9 @@ export default function RecentGames(props: {
                       : 'Try again'}
                 </button>
               )}
-              <button type="button" className="shell-button" onClick={() => download(record)}>
-                Download QBJ again
+              <button type="button" className="recent-download" onClick={() => download(record)}>
+                <ControlIcon name="download" />
+                Download QBJ
               </button>
             </div>
           </li>
