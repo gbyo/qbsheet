@@ -149,9 +149,17 @@ function current(slug: PageSlug, target: PageSlug): { 'aria-current'?: 'page' } 
  * nobody anything. The behaviour is announced in words instead, by the visually-hidden span, so the
  * two audiences are told the same thing in the form each can use.
  */
-function ExternalLink({ href, children }: { href: string; children: string }) {
+function ExternalLink({
+  href,
+  children,
+  className,
+}: {
+  href: string;
+  children: string;
+  className?: string;
+}) {
   return (
-    <a href={href} target="_blank" rel="noopener noreferrer">
+    <a className={className} href={href} target="_blank" rel="noopener noreferrer">
       {children}
       <svg
         className="about-external-icon"
@@ -230,7 +238,7 @@ export function ActionLinks({
   nested = false,
 }: {
   slug: PageSlug;
-  primary?: { href: string; label: string };
+  primary?: { href: string; label: string; external?: boolean };
   nested?: boolean;
 }) {
   return (
@@ -240,15 +248,21 @@ export function ActionLinks({
           <a className="about-button is-primary" href={scorerUrl(slug, nested)}>
             Open QBSheet
           </a>
-          <a className="about-button" href={githubUrl}>
+          <ExternalLink className="about-button" href={githubUrl}>
             View on GitHub
-          </a>
+          </ExternalLink>
         </>
       ) : (
         <>
-          <a className="about-button is-primary" href={primary.href}>
-            {primary.label}
-          </a>
+          {primary.external ? (
+            <ExternalLink className="about-button is-primary" href={primary.href}>
+              {primary.label}
+            </ExternalLink>
+          ) : (
+            <a className="about-button is-primary" href={primary.href}>
+              {primary.label}
+            </a>
+          )}
           <a className="about-button" href={scorerUrl(slug, nested)}>
             Open QBSheet
           </a>

@@ -70,7 +70,10 @@ describe('the privacy page', () => {
     const said = words(storage);
     expect(said).toContain('Retained for seven days');
     expect(said).toContain('retained for thirty days');
-    expect(said).toContain('No copy is retained anywhere else');
+    expect(said).toContain("Clearing the browser's data for the site removes the local copy from that browser");
+    expect(said).toContain(
+      'Connected tournament servers may retain data they have received under their operators’ policies',
+    );
   });
 
   test('discloses what a connected room sends and who receives it', () => {

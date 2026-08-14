@@ -196,7 +196,10 @@ export default function Tournaments() {
             QBSheet connects to tournament-control software over QBTCP. Rooms score in a browser,
             continue scoring when the server is unreachable, and return results as QBJ.
           </p>
-          <ActionLinks slug={slug} primary={{ href: qbtcpDocsUrl, label: 'Read the protocol' }} />
+          <ActionLinks
+            slug={slug}
+            primary={{ href: qbtcpDocsUrl, label: 'Read the protocol', external: true }}
+          />
         </section>
 
         <ScopeSection />

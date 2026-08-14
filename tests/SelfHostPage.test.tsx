@@ -132,8 +132,12 @@ describe('the self-hosting page', () => {
     // not the scorer two levels up. "Open QBSheet" is the way into the application.
     expect(container.querySelector('.about-brand')).toHaveAttribute('href', '../');
 
-    for (const link of screen.getAllByRole('link', { name: 'Read the build steps' })) {
+    for (const link of screen.getAllByRole('link', { name: /^Read the build steps/ })) {
       expect(link).toHaveAttribute('href', 'https://github.com/gbyo/qbsheet#deployment');
+      expect(link).toHaveAttribute('target', '_blank');
+      expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+      expect(link.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+      expect(link.textContent).toContain('(opens in a new tab)');
     }
 
     // Both navigations mark this page as the current one, and both point at the directory it is

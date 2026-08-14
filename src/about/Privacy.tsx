@@ -118,8 +118,9 @@ export default function Privacy() {
             <div>
               <dt>Removal</dt>
               <dd>
-                Clearing the browser&apos;s data for the site removes all of it. No copy is retained
-                anywhere else.
+                Clearing the browser&apos;s data for the site removes the local copy from that browser.
+                Connected tournament servers may retain data they have received under their operators’
+                policies.
               </dd>
             </div>
           </dl>
