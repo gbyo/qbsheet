@@ -86,6 +86,8 @@ function defaultSettingsProps(overrides: Partial<React.ComponentProps<typeof Set
     connection: null,
     onForgetPairing: () => undefined,
     onResetDevicePreferences: () => undefined,
+    practiceInProgress: false,
+    onPractice: () => undefined,
     onReadiness: () => undefined,
     onClose: () => undefined,
     ...overrides,
@@ -121,6 +123,24 @@ describe('homepage Settings entry and scorekeeper identity', () => {
     expect(within(dialog).getByText('Scoring')).toBeInTheDocument();
     expect(within(dialog).getByText('Device')).toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: 'Scorekeeper' })).toBeNull();
+  });
+
+  test('practice stays on the homepage only until the device has game history', async () => {
+    writeOperatorNameAsked();
+    await openApp();
+
+    expect(screen.getByRole('button', { name: 'Practice scoring' })).toBeInTheDocument();
+    let dialog = await openSettings();
+    expect(within(dialog).getByRole('button', { name: 'Practice scoring' })).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close dialog' }));
+
+    cleanup();
+    await seedGame({ completed: true });
+    await openApp();
+
+    expect(screen.queryByRole('button', { name: 'Practice scoring' })).toBeNull();
+    dialog = await openSettings();
+    expect(within(dialog).getByRole('button', { name: 'Practice scoring' })).toBeInTheDocument();
   });
 
   test('a never-asked device still asks once, while an unfinished game keeps Resume in front', async () => {
@@ -291,16 +311,17 @@ describe('tournament connection safety', () => {
 });
 
 describe('device navigation, reset, build identity, and dialog behavior', () => {
-  test('both Settings and the homepage reach the existing readiness screen', async () => {
+  test('device readiness is only available from Settings', async () => {
     writeOperatorNameAsked();
     await openApp();
+    expect(screen.queryByRole('button', { name: 'Check this device' })).toBeNull();
+
     const dialog = await openSettings();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Check this device' }));
     expect(await screen.findByText('Device readiness')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /QBSheet/ }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Check this device' }));
-    expect(await screen.findByText('Device readiness')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Check this device' })).toBeNull();
   });
 
   test('reset is confirmed, clears only device preferences live, preserves games and retry capability, and restores first-run on reload', async () => {
@@ -395,6 +416,7 @@ describe('device navigation, reset, build identity, and dialog behavior', () => 
     expect(within(dialog).getByRole('button', { name: /Set name/ })).toBeInTheDocument();
     expect(within(dialog).getByRole('switch', { name: 'Keyboard scoring' })).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'View' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Practice scoring' })).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Forget pairing…' })).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Check this device' })).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Reset device preferences…' })).toBeInTheDocument();
