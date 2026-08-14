@@ -146,7 +146,7 @@ export type Screen =
    * screen it belongs to, rather than in a field of its own: leaving this screen by any route is
    * what discards it, which is the lifetime a short bootstrap secret should have.
    */
-  | { kind: 'connect'; fresh: boolean; launch?: IPairingLaunchIntent }
+  | { kind: 'connect'; fresh: boolean; launch?: IPairingLaunchIntent; launchKey?: number }
   | { kind: 'readiness' }
   | { kind: 'practice' }
   /**
@@ -257,6 +257,7 @@ export default function App() {
    */
   const [launched] = useState<PairingLaunchResult>(() => takePairingLaunch());
   const tabId = useRef(newTabId());
+  const pairingLaunchSequence = useRef(0);
   const claim = useRef<IGameClaim | null>(null);
   const resultDeliveryCapabilities = useMemo(() => new ResultDeliveryCapabilityStore(), []);
   const resultDelivery = useMemo(
@@ -302,7 +303,11 @@ export default function App() {
       // the questions it has to answer — is this device already paired, is there an unfinished game
       // depending on that pairing — are questions about storage. Nothing has touched the network yet.
       const start = screenAfterLaunch(launched, restoredConnection, listed);
-      setScreen(start.screen);
+      setScreen(
+        start.screen.kind === 'connect' && start.screen.launch
+          ? { ...start.screen, launchKey: ++pairingLaunchSequence.current }
+          : start.screen,
+      );
       if (start.notice !== '') setNotice(start.notice);
     })();
     return () => {
@@ -546,7 +551,13 @@ export default function App() {
     // left anywhere is the one the exchange already consumed, and so a later return to this screen
     // is the ordinary room rather than a card offering to pair again.
     setScreen((current) =>
-      current.kind === 'connect' && current.launch ? { kind: 'connect', fresh: current.fresh } : current,
+      current.kind === 'connect' && current.launch
+        ? {
+            kind: 'connect',
+            fresh: false,
+            ...(current.launchKey === undefined ? {} : { launchKey: current.launchKey }),
+          }
+        : current,
     );
   }, []);
 
@@ -609,7 +620,12 @@ export default function App() {
         return;
       }
       setNotice('');
-      setScreen({ kind: 'connect', fresh: true, launch: intent });
+      setScreen({
+        kind: 'connect',
+        fresh: true,
+        launch: intent,
+        launchKey: ++pairingLaunchSequence.current,
+      });
     },
     [pairedRoom?.roomName, pairingDependentGame],
   );
@@ -735,6 +751,7 @@ export default function App() {
   if (screen.kind === 'connect') {
     return (
       <ConnectedSetup
+        key={screen.launchKey ?? 'connected'}
         initialBaseUrl={pendingBaseUrl || (connection?.baseUrl ?? '')}
         pairedRoom={screen.fresh ? null : pairedRoom}
         launch={screen.launch ?? null}

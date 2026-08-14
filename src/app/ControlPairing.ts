@@ -83,7 +83,7 @@ export async function openControl(address: string): Promise<ControlOpenResult> {
   if (missing.length > 0) {
     return {
       ok: false,
-      unreachable: true,
+      unreachable: false,
       error: `Tournament control at this address does not offer ${missing.join(', ')}. This room cannot score against it. A game file works with no server at all.`,
     };
   }
