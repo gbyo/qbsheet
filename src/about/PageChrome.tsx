@@ -26,6 +26,7 @@
  * it is — a fact about itself rather than an arithmetic result, so there is still no count to get
  * wrong. See `depthOf`.
  */
+import { useId } from 'react';
 import BrandLogo from '../BrandLogo';
 
 export const githubUrl = 'https://github.com/gbyo/qbsheet';
@@ -132,9 +133,26 @@ function current(slug: PageSlug, target: PageSlug): { 'aria-current'?: 'page' } 
  * nobody anything. The behaviour is announced in words instead, by the visually-hidden span, so the
  * two audiences are told the same thing in the form each can use.
  */
-function ExternalLink({ href, children }: { href: string; children: string }) {
+function ExternalLink({
+  href,
+  children,
+  className,
+}: {
+  href: string;
+  children: string;
+  className?: string;
+}) {
+  const descriptionId = useId();
+
   return (
-    <a href={href} target="_blank" rel="noopener noreferrer">
+    <a
+      className={className}
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label={children}
+      aria-describedby={descriptionId}
+    >
       {children}
       <svg
         className="about-external-icon"
@@ -153,7 +171,10 @@ function ExternalLink({ href, children }: { href: string; children: string }) {
         <path d="M20 4 11 13" />
         <path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" />
       </svg>
-      <span className="visually-hidden"> (opens in a new tab)</span>
+      <span id={descriptionId} className="visually-hidden">
+        {' '}
+        (opens in a new tab)
+      </span>
     </a>
   );
 }
@@ -213,7 +234,7 @@ export function ActionLinks({
   nested = false,
 }: {
   slug: PageSlug;
-  primary?: { href: string; label: string };
+  primary?: { href: string; label: string; external?: boolean };
   nested?: boolean;
 }) {
   return (
@@ -223,15 +244,21 @@ export function ActionLinks({
           <a className="about-button is-primary" href={scorerUrl(slug, nested)}>
             Open QBSheet
           </a>
-          <a className="about-button" href={githubUrl}>
+          <ExternalLink className="about-button" href={githubUrl}>
             View on GitHub
-          </a>
+          </ExternalLink>
         </>
       ) : (
         <>
-          <a className="about-button is-primary" href={primary.href}>
-            {primary.label}
-          </a>
+          {primary.external ? (
+            <ExternalLink className="about-button is-primary" href={primary.href}>
+              {primary.label}
+            </ExternalLink>
+          ) : (
+            <a className="about-button is-primary" href={primary.href}>
+              {primary.label}
+            </a>
+          )}
           <a className="about-button" href={scorerUrl(slug, nested)}>
             Open QBSheet
           </a>
