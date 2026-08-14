@@ -310,16 +310,21 @@ export default function ConnectedSetup(props: {
     setBusy(true);
     setError('');
     setUnreachable(false);
-    // The client discovers on its first call, so this also settles which surface everything below
-    // will use. Nothing here or later needs to know which one that turned out to be.
-    const opened = await openControl(address);
-    setBusy(false);
-    if (!opened.ok) {
-      setUnreachable(opened.unreachable);
-      setError(opened.error);
-      return;
+    try {
+      // The client discovers on its first call, so this also settles which surface everything below
+      // will use. Nothing here or later needs to know which one that turned out to be.
+      const opened = await openControl(address);
+      if (!opened.ok) {
+        setUnreachable(opened.unreachable);
+        setError(opened.error);
+        return;
+      }
+      askForCode(opened.value);
+    } catch {
+      setError('Tournament control could not be reached. Check the connection and try again.');
+    } finally {
+      setBusy(false);
     }
-    askForCode(opened.value);
   };
 
   const pair = async (event: FormEvent) => {
@@ -328,15 +333,20 @@ export default function ConnectedSetup(props: {
     if (busy) return;
     setBusy(true);
     setError('');
-    // A device identity is stable for as long as the pairing is, so a re-pair of the same browser
-    // keeps the identity tournament control has been arbitrating writer ownership with.
-    const paired = await exchangePairingCode(stage.client, code, roomId, pairedRoom?.deviceId);
-    setBusy(false);
-    if (!paired.ok) {
-      setError(paired.error);
-      return;
+    try {
+      // A device identity is stable for as long as the pairing is, so a re-pair of the same browser
+      // keeps the identity tournament control has been arbitrating writer ownership with.
+      const paired = await exchangePairingCode(stage.client, code, roomId, pairedRoom?.deviceId);
+      if (!paired.ok) {
+        setError(paired.error);
+        return;
+      }
+      adoptRoom(stage.client, paired.value);
+    } catch {
+      setError('This room could not be paired. Check the connection and try again.');
+    } finally {
+      setBusy(false);
     }
-    adoptRoom(stage.client, paired.value);
   };
 
   /**
@@ -355,21 +365,25 @@ export default function ConnectedSetup(props: {
     setBusy(true);
     setError('');
     setUnreachable(false);
-    const opened = await openControl(intent.server);
-    if (!opened.ok) {
+    try {
+      const opened = await openControl(intent.server);
+      if (!opened.ok) {
+        setUnreachable(opened.unreachable);
+        setError(opened.error);
+        return;
+      }
+      const paired = await exchangePairingCode(opened.value.client, intent.code, intent.roomId, pairedRoom?.deviceId);
+      if (!paired.ok) {
+        setError(paired.error);
+        askForCode(opened.value, intent.roomId ?? '');
+        return;
+      }
+      adoptRoom(opened.value.client, paired.value);
+    } catch {
+      setError('This room could not be paired. Check the connection and try again.');
+    } finally {
       setBusy(false);
-      setUnreachable(opened.unreachable);
-      setError(opened.error);
-      return;
     }
-    const paired = await exchangePairingCode(opened.value.client, intent.code, intent.roomId, pairedRoom?.deviceId);
-    setBusy(false);
-    if (!paired.ok) {
-      setError(paired.error);
-      askForCode(opened.value, intent.roomId ?? '');
-      return;
-    }
-    adoptRoom(opened.value.client, paired.value);
   };
 
   /**
