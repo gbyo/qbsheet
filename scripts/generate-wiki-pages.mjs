@@ -126,7 +126,7 @@ mkdirSync(outputDirectory, { recursive: true });
 
 const wanted = new Set(names.map(slugFor));
 for (const entry of readdirSync(outputDirectory, { withFileTypes: true })) {
-  // `about/wiki/index.html` is the section index and is hand-written, so only directories are swept.
+  // Only directories: the wiki has no index page of its own, and `Home` is an ordinary article.
   if (!entry.isDirectory() || wanted.has(entry.name)) continue;
   rmSync(join(outputDirectory, entry.name), { recursive: true, force: true });
   console.log(`removed about/wiki/${entry.name}/`);

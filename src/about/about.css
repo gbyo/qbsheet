@@ -776,20 +776,6 @@ a:focus-visible {
   border-top: 1px solid var(--about-border);
 }
 
-/* The contents list on the section index, which is the same component in a two-column grid rather
-   than a sticky rail. */
-.about-wiki-index .about-wiki-nav {
-  position: static;
-  display: grid;
-  max-height: none;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 32px 56px;
-}
-
-.about-wiki-index .about-wiki-nav > div + div {
-  margin-top: 0;
-}
-
 .about-final {
   width: min(680px, calc(100% - 48px));
   margin: 0 auto;
@@ -835,12 +821,6 @@ a:focus-visible {
     max-height: none;
     padding-bottom: 32px;
     border-bottom: 1px solid var(--about-border);
-  }
-
-  .about-wiki-index .about-wiki-nav {
-    grid-template-columns: minmax(0, 1fr);
-    padding-bottom: 0;
-    border-bottom: 0;
   }
 
   .about-band .about-section {
