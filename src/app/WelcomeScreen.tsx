@@ -44,9 +44,10 @@
  * opens that same editor directly through Settings, phrased as the question the person reading it is
  * already asking.
  *
- * Guided practice is a different thing again and stays below: it is a tutorial with a script in it,
- * it invents its own teams, and its result is not a game anybody keeps. "Create a game" is scoring;
- * "Practice scoring" is learning where the buttons are.
+ * Guided practice is a tutorial with a script in it, it invents its own teams, and its result is not
+ * a game anybody keeps. A device with no game history still gets that invitation on the homepage;
+ * after it has been used for real scoring, the same action lives quietly in Settings instead.
+ * "Create a game" is scoring; "Practice scoring" is learning where the buttons are.
  *
  * # An unfinished game comes before either
  *
@@ -215,6 +216,7 @@ export default function WelcomeScreen(props: {
 
   const unfinished = records.filter(isActive);
   const completed = records.filter((record) => !isActive(record));
+  const hasGameHistory = records.length > 0 || unreadable.length > 0;
 
   const closeSettings = () => {
     setSettingsView(null);
@@ -294,9 +296,6 @@ export default function WelcomeScreen(props: {
           )}
         </div>
         <div className="shell-header-actions">
-          <button type="button" className="shell-button shell-button-quiet" onClick={onReadiness}>
-            Check this device
-          </button>
           {onOperatorNameChange && (
             <button
               type="button"
@@ -437,19 +436,21 @@ export default function WelcomeScreen(props: {
         </div>
       </section>
 
-      <section className="shell-section welcome-practice">
-        <div>
-          <h2 className="shell-heading">{practiceInProgress ? 'Practice game in progress' : 'New to QBSheet?'}</h2>
-          <p className="welcome-practice-copy">
-            {practiceInProgress
-              ? 'Continue where you left off. Your practice scoresheet and guide position are saved on this device.'
-              : 'Learn the workflow with a guided game using the real scoresheet. No setup needed.'}
-          </p>
-        </div>
-        <button type="button" className="shell-button" onClick={onPractice}>
-          {practiceInProgress ? 'Resume practice' : 'Practice scoring'}
-        </button>
-      </section>
+      {!hasGameHistory && (
+        <section className="shell-section welcome-practice">
+          <div>
+            <h2 className="shell-heading">{practiceInProgress ? 'Practice game in progress' : 'New to QBSheet?'}</h2>
+            <p className="welcome-practice-copy">
+              {practiceInProgress
+                ? 'Continue where you left off. Your practice scoresheet and guide position are saved on this device.'
+                : 'Learn the workflow with a guided game using the real scoresheet. No setup needed.'}
+            </p>
+          </div>
+          <button type="button" className="shell-button" onClick={onPractice}>
+            {practiceInProgress ? 'Resume practice' : 'Practice scoring'}
+          </button>
+        </section>
+      )}
 
       <RecentGames
         records={completed}
@@ -472,6 +473,8 @@ export default function WelcomeScreen(props: {
           pairingProtection={pairingProtection}
           onForgetPairing={onForgetPairing}
           onResetDevicePreferences={onResetDevicePreferences}
+          practiceInProgress={practiceInProgress}
+          onPractice={onPractice}
           onReadiness={onReadiness}
           onClose={closeSettings}
         />
