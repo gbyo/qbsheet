@@ -35,6 +35,8 @@ export default function SettingsDialog(props: {
   pairingProtection?: string;
   onForgetPairing: () => void;
   onResetDevicePreferences: () => void;
+  practiceInProgress: boolean;
+  onPractice: () => void;
   onReadiness: () => void;
   onClose: () => void;
   initialView?: Extract<SettingsView, 'settings' | 'scorekeeper'>;
@@ -47,6 +49,8 @@ export default function SettingsDialog(props: {
     pairingProtection,
     onForgetPairing,
     onResetDevicePreferences,
+    practiceInProgress,
+    onPractice,
     onReadiness,
     onClose,
     initialView = 'settings',
@@ -138,6 +142,17 @@ export default function SettingsDialog(props: {
                   View
                 </button>
               </div>
+              <button
+                type="button"
+                className="settings-navigation-row"
+                onClick={() => {
+                  onClose();
+                  onPractice();
+                }}
+              >
+                <span>{practiceInProgress ? 'Resume practice' : 'Practice scoring'}</span>
+                <span aria-hidden="true">›</span>
+              </button>
             </section>
 
             {connection && (
