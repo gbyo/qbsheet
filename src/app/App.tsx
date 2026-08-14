@@ -556,6 +556,19 @@ export default function App() {
     setScreen({ kind: 'home' });
   }, [store, refresh]);
 
+  /** Reopen a finished result in the scorer so a scorekeeper can inspect or correct it. */
+  const backToScorekeeper = useCallback(
+    async (recordId: string) => {
+      const held = await takeClaim(recordId);
+      if (!held) {
+        setScreen({ kind: 'duplicate', recordId });
+        return;
+      }
+      setScreen({ kind: 'scoring', recordId });
+    },
+    [takeClaim],
+  );
+
   /**
    * Tell tournament control that the assignment is wrong.
    *
@@ -734,6 +747,7 @@ export default function App() {
         record={current}
         acceptedJustNow={screen.acceptedJustNow === true}
         onUpdate={updateRecord}
+        onBackToScorekeeper={() => backToScorekeeper(current.id)}
           continueLabel={backToRoom ? `Next game in ${pairedRoom.roomName}` : 'Done'}
           onRematch={
             isManualGame(current.package)

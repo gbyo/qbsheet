@@ -57,13 +57,23 @@ export default function CompletionScreen(props: {
   onUpdate: (recordId: string, change: Partial<IStoredGameRecord>) => boolean | void | Promise<boolean | void>;
   /** What leaving this screen is called. A connected room is going back to its room, not home. */
   continueLabel?: string;
+  /** Reopen the saved game in the scorer so the result can be checked or corrected. */
+  onBackToScorekeeper: () => void | Promise<void>;
   onHome: () => void | Promise<void>;
   /** Start another local game with the same manual setup, when this was a manual game. */
   onRematch?: () => void | Promise<void>;
   /** True only on the navigation caused by a server-accepted submission. */
   acceptedJustNow?: boolean;
 }) {
-  const { record, onUpdate, continueLabel = 'Done', onHome, onRematch, acceptedJustNow = false } = props;
+  const {
+    record,
+    onUpdate,
+    continueLabel = 'Done',
+    onBackToScorekeeper,
+    onHome,
+    onRematch,
+    acceptedJustNow = false,
+  } = props;
   const [writeFailed, setWriteFailed] = useState(false);
   const [qbjRecordFailed, setQbjRecordFailed] = useState(false);
   const [qbjRecordPending, setQbjRecordPending] = useState(false);
@@ -288,6 +298,9 @@ export default function CompletionScreen(props: {
               : `Download the QBJ${requiresHandoffAcknowledgement ? ' and confirm the handoff' : ''} before finishing.`}
           </p>
         )}
+        <button type="button" className="shell-button" onClick={() => void onBackToScorekeeper()}>
+          Back to scorekeeper
+        </button>
         <button
           type="button"
           className={`shell-button${canLeave ? ' is-primary' : ''}`}

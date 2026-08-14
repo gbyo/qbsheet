@@ -103,6 +103,15 @@ test('a practice game is created, scored, reloaded, finished and kept', async ({
   await expect(page.getByRole('button', { name: 'I uploaded the result' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Done' })).toBeEnabled();
 
+  // A finished result must remain editable. Return to the scorer, verify the completed review is
+  // still the active presentation, then submit it again so the original exit path remains covered.
+  await page.getByRole('button', { name: 'Back to scorekeeper' }).click();
+  await expect(page.locator('.scorer-completion')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Full scoresheet review' })).toBeVisible();
+  await page.getByLabel('Final score confirmed with both teams').check();
+  await page.getByRole('button', { name: 'Submit result' }).click();
+  await expect(page.getByRole('heading', { name: 'Final' })).toBeVisible();
+
   await page.getByRole('button', { name: 'Done' }).click();
 
   await expect(page.getByRole('heading', { name: 'Start scoring' })).toBeVisible();
