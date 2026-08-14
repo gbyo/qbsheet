@@ -179,10 +179,11 @@ test.describe('the homepage button', () => {
 });
 
 test.describe('the scanner dialog', () => {
-  test('opens as a real modal, decodes, and hands the result to the pairing flow', async ({ page }) => {
+  test('opens as a real modal, decodes, and hands the result to the pairing flow', async ({ page, baseURL }) => {
+    if (baseURL === undefined) throw new Error('Pairing launch e2e requires a configured Playwright baseURL.');
     await stubCamera(
       page,
-      `http://127.0.0.1:4173/#qbtcp-pair?v=1&server=${encodeURIComponent(control.origin)}&code=${pairingCode}&room=room-204`,
+      `${new URL(baseURL).origin}/#qbtcp-pair?v=1&server=${encodeURIComponent(control.origin)}&code=${pairingCode}&room=room-204`,
     );
     await page.goto('/');
 
@@ -191,9 +192,13 @@ test.describe('the scanner dialog', () => {
     const dialog = page.getByRole('dialog', { name: 'Scan tournament QR code' });
     await expect(dialog).toBeVisible();
     // The rear camera is asked for by preference, and never demanded.
-    expect(await page.evaluate(() => (window as unknown as { cameraConstraints: unknown }).cameraConstraints)).toEqual({
-      video: { facingMode: { ideal: 'environment' } },
-    });
+    await expect
+      .poll(() =>
+        page.evaluate(() => (window as unknown as { cameraConstraints?: unknown }).cameraConstraints),
+      )
+      .toEqual({
+        video: { facingMode: { ideal: 'environment' } },
+      });
 
     // The decoded link goes through the same parser and the same state machine as a tapped one.
     await expect(page.getByRole('heading', { name: 'Ready to connect' })).toBeVisible();
