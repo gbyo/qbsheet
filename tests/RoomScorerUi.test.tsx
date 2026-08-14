@@ -1591,6 +1591,78 @@ describe('ending a game short', () => {
     await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect((onSubmit.mock.calls[0][0] as { notes: string }).notes).toContain('Director stopped the round');
   });
+
+  /**
+   * A required box, said out loud, with the cursor already in it.
+   *
+   * The dialog shell focuses the first thing it finds, which is the close button in its own header,
+   * so every one of these opened one Tab away from the only field it has. And the primary action is
+   * disabled until that field has something in it — which, with nothing next to it saying so, is a
+   * screen that knows what it is waiting for and will not say. A room ending a round early is doing
+   * it because somebody is standing there waiting, which is the worst moment to make them guess.
+   */
+  test('the reason box has the cursor, and the greyed-out button says what it is waiting for', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+    fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('20'));
+
+    pressControl('End game early…');
+
+    expect(screen.getByLabelText('Why is the game ending early?')).toHaveFocus();
+    expect(screen.getByText(/^Required\./)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'End the game now' })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText('Why is the game ending early?'), {
+      target: { value: 'Packet ran out' },
+    });
+    expect(screen.getByRole('button', { name: 'End the game now' })).toBeEnabled();
+  });
+});
+
+/**
+ * Where the cursor lands when a dialog opens.
+ *
+ * Each of these exists to have something typed into it, and each used to open on the close button in
+ * the shell's header — one wasted keystroke for a scorekeeper, and, for anybody listening to the
+ * screen instead of looking at it, a dialog that announces itself as "Close dialog".
+ *
+ * Replace question is deliberately not in this list. It asks which scope to void before it asks
+ * why, and putting the cursor past that decision would make the default the only choice a keyboard
+ * reaches without going backwards.
+ */
+describe('a dialog opens on the thing it is asking for', () => {
+  test('Notes starts in the note', () => {
+    renderScorer(formatFor());
+
+    pressControl('Notes');
+
+    expect(screen.getByLabelText(/^Note on question/)).toHaveFocus();
+  });
+
+  test('Issue starts in the description', () => {
+    renderScorer(formatFor());
+
+    openIssue();
+
+    expect(screen.getByLabelText('What happened?')).toHaveFocus();
+  });
+
+  test('Game details starts in the moderator name', () => {
+    renderScorer(formatFor());
+
+    pressControl('Game details');
+
+    expect(screen.getByLabelText('Moderator / reader')).toHaveFocus();
+  });
+
+  test('Replace question keeps the scope choice ahead of the reason', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+
+    pressControl(/^Replace question/);
+
+    expect(screen.getByLabelText('What went wrong?')).not.toHaveFocus();
+  });
 });
 
 describe('a protest is a thing with a state', () => {

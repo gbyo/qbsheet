@@ -373,7 +373,7 @@ export default function PracticeScreen({ onHome, operatorName }: { onHome: () =>
         onDownload={() => undefined}
         onEventsChanged={observe}
         alerts={[]}
-        recovery={{ automaticDelivery: false }}
+        recovery={{ automaticDelivery: false, tournamentControl: false }}
       />
       {coach}
     </div>

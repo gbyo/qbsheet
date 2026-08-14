@@ -156,3 +156,39 @@ test('a second practice between the same two teams is a second game', async ({ p
   const recent = page.locator('.shell-section').filter({ has: page.getByRole('heading', { name: 'Recent' }) });
   await expect(recent).toContainText('First practice');
 });
+
+/**
+ * A refused submission, and whether anybody can read the refusal.
+ *
+ * Start game is always pressable, and a form that will not start says why next to the fields that
+ * caused it and moves focus onto the first such complaint. That whole design is worth nothing if the
+ * complaint is behind something. The action bar at the foot of this form is sticky, so it floats
+ * over the end of the page, and the browser's own "scroll this into view" does not know it is there:
+ * it brings the error block only just onto the screen, which is exactly where the bar is. What the
+ * scorekeeper then sees is a primary button that did nothing — which is the failure the focus move
+ * was added to prevent, arriving by a different route.
+ *
+ * Checked in a real browser because there is nothing to check anywhere else: the fix is the reserved
+ * space a browser leaves when it scrolls, and jsdom neither lays out nor scrolls.
+ */
+test('a refused Start game leaves the complaint where it can be read', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Create game' }).click();
+  await expect(page.getByRole('heading', { name: 'Create a game' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Start game' }).click();
+
+  const errors = page.locator('.shell-errors').first();
+  await expect(errors).toContainText('Enter a name for the left team.');
+  // The form put the cursor on it, which is the behaviour the visibility below has to hold up.
+  await expect(errors).toBeFocused();
+
+  const errorBox = await errors.boundingBox();
+  const barBox = await page.locator('.manual-actions').boundingBox();
+  if (!errorBox || !barBox) throw new Error('The error block and the action bar should both be laid out.');
+
+  // Every line of it, not just the first: four complaints scrolled to the bottom edge lose the last
+  // two under the bar, and the last two are as load-bearing as the first.
+  expect(errorBox.y).toBeGreaterThanOrEqual(0);
+  expect(errorBox.y + errorBox.height).toBeLessThanOrEqual(barBox.y);
+});
