@@ -33,14 +33,21 @@
  * shape, a roster size, or a substitution model, because `IScorekeeperFormat` assumes none of them and
  * a tournament whose format the copy quietly excluded is a tournament that reads this page and leaves.
  */
-import BrandLogo from '../BrandLogo';
 import productImage from '../assets/about-qbsheet-practice.webp';
+import {
+  ActionLinks,
+  PageFooter,
+  PageHeader,
+  githubUrl,
+  pageUrl,
+  qbjDocsUrl,
+  qbtcpDocsUrl,
+} from './PageChrome';
 
-const githubUrl = 'https://github.com/gbyo/qbsheet';
-const qbjDocsUrl = `${githubUrl}/blob/main/docs/QBJ_ASSIGNMENT_PROFILE.md`;
-const qbtcpDocsUrl = `${githubUrl}/blob/main/docs/QBTCP.md`;
+const slug = '' as const;
+
 /** Relative, because this page does not know what directory the deployment put it in. */
-const selfHostUrl = './self-host/';
+const selfHostUrl = pageUrl(slug, 'self-host');
 
 /**
  * React 18 does not recognise `fetchPriority` and drops it with a warning, so it is spread in as the
@@ -101,19 +108,6 @@ const assurances = [
     body: 'Every accepted question is written to the device as it is scored, and a finished game stays there, downloadable as QBJ, for days after it was handed over.',
   },
 ];
-
-function ActionLinks() {
-  return (
-    <div className="about-actions">
-      <a className="about-button is-primary" href="../">
-        Open QBSheet
-      </a>
-      <a className="about-button" href={githubUrl}>
-        View on GitHub
-      </a>
-    </div>
-  );
-}
 
 /**
  * The workflow, which is the one sequence on the page.
@@ -190,18 +184,7 @@ function AssuranceSection() {
 export default function About() {
   return (
     <div className="about-page">
-      <header className="about-header">
-        <div className="about-header-inner">
-          <a className="about-brand" href="../" aria-label="QBSheet home">
-            <BrandLogo className="about-brand-logo" />
-          </a>
-          <nav className="about-nav" aria-label="Primary navigation">
-            <a href="../">Open QBSheet</a>
-            <a href={selfHostUrl}>Self-host</a>
-            <a href={githubUrl}>GitHub</a>
-          </nav>
-        </div>
-      </header>
+      <PageHeader slug={slug} />
 
       <main>
         <section className="about-hero" aria-labelledby="about-title">
@@ -210,7 +193,7 @@ export default function About() {
             QBSheet keeps quiz bowl scoring fast, flexible, and out of your way, whether you’re connected or
             offline.
           </p>
-          <ActionLinks />
+          <ActionLinks slug={slug} />
         </section>
 
         <figure className="about-product-visual">
@@ -270,19 +253,11 @@ export default function About() {
         <section className="about-final" aria-labelledby="ready-heading">
           <h2 id="ready-heading">Ready to score?</h2>
           <p>Open QBSheet and start with the game in front of you.</p>
-          <ActionLinks />
+          <ActionLinks slug={slug} />
         </section>
       </main>
 
-      <footer className="about-footer">
-        <nav aria-label="Footer navigation">
-          <a href="../">QBSheet</a>
-          <a href="./" aria-current="page">About</a>
-          <a href={selfHostUrl}>Self-host</a>
-          <a href={`${githubUrl}#documentation`}>Documentation</a>
-          <a href={githubUrl}>GitHub</a>
-        </nav>
-      </footer>
+      <PageFooter slug={slug} />
     </div>
   );
 }

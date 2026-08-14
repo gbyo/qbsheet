@@ -7,6 +7,73 @@
     <loc>https://qbsheet.com/about/</loc>
   </url>
   <url>
+    <loc>https://qbsheet.com/about/scoring/</loc>
+  </url>
+  <url>
+    <loc>https://qbsheet.com/about/tournaments/</loc>
+  </url>
+  <url>
     <loc>https://qbsheet.com/about/self-host/</loc>
   </url>
+  <url>
+    <loc>https://qbsheet.com/about/faq/</loc>
+  </url>
+  <url>
+    <loc>https://qbsheet.com/about/privacy/</loc>
+  </url>
+  <url>
+    <loc>https://qbsheet.com/about/wiki/</loc>
+  </url>
+  <!-- The wiki's own pages, written by scripts/generate-wiki-pages.mjs. Do not edit by hand: the
+       sync workflow regenerates this region whenever the wiki changes. -->
+  <!-- wiki:start pages -->
+  <url>
+    <loc>https://qbsheet.com/about/wiki/develop-and-contribute/</loc>
+  </url>
+  <url>
+    <loc>https://qbsheet.com/about/wiki/during-the-game/</loc>
+  </url>
+  <url>
+    <loc>https://qbsheet.com/about/wiki/files-and-formats/</loc>
+  </url>
+  <url>
+    <loc>https://qbsheet.com/about/wiki/finish-a-game/</loc>
+  </url>
+  <url>
+    <loc>https://qbsheet.com/about/wiki/glossary/</loc>
+  </url>
+  <url>
+    <loc>https://qbsheet.com/about/wiki/home/</loc>
+  </url>
+  <url>
+    <loc>https://qbsheet.com/about/wiki/install-and-host/</loc>
+  </url>
+  <url>
+    <loc>https://qbsheet.com/about/wiki/move-from-qbg-and-api-v1/</loc>
+  </url>
+  <url>
+    <loc>https://qbsheet.com/about/wiki/prepare-a-device/</loc>
+  </url>
+  <url>
+    <loc>https://qbsheet.com/about/wiki/qbtcp-for-implementers/</loc>
+  </url>
+  <url>
+    <loc>https://qbsheet.com/about/wiki/recovery-and-backups/</loc>
+  </url>
+  <url>
+    <loc>https://qbsheet.com/about/wiki/score-a-connected-game/</loc>
+  </url>
+  <url>
+    <loc>https://qbsheet.com/about/wiki/score-a-game-from-a-file/</loc>
+  </url>
+  <url>
+    <loc>https://qbsheet.com/about/wiki/start-here/</loc>
+  </url>
+  <url>
+    <loc>https://qbsheet.com/about/wiki/troubleshooting/</loc>
+  </url>
+  <url>
+    <loc>https://qbsheet.com/about/wiki/writing-rules-for-this-wiki/</loc>
+  </url>
+<!-- wiki:end pages -->
 </urlset>

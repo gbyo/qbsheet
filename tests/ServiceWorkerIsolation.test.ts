@@ -82,7 +82,14 @@ describe('the generated scorer service worker', () => {
    * exactly that. So the shared entry module's name is asserted, not assumed.
    */
   test('every marketing page loads the one entry module the chunk is named for', () => {
-    for (const page of ['about/index.html', 'about/self-host/index.html']) {
+    for (const page of [
+      'about/index.html',
+      'about/scoring/index.html',
+      'about/tournaments/index.html',
+      'about/self-host/index.html',
+      'about/faq/index.html',
+      'about/privacy/index.html',
+    ]) {
       const html = readFileSync(new URL(`../${page}`, import.meta.url), 'utf8');
       expect(html).toContain('src="/src/about/pages.ts"');
     }

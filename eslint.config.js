@@ -52,7 +52,9 @@ export default tseslint.config(
       'eslint.config.js',
       'tests/**/*.{ts,tsx}',
       'e2e/**/*.{ts,tsx}',
-      'scripts/**/*.ts',
+      // `.mjs` as well as `.ts`: the scripts here are run by `node` directly rather than compiled,
+      // and one that reports what it wrote needs `console` to exist.
+      'scripts/**/*.{ts,mjs}',
     ],
     languageOptions: { globals: { ...globals.node } },
   },

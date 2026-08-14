@@ -18,6 +18,16 @@ import { createElement, type ReactElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+// Build-time only. Nothing in the client graph imports these, so neither the wiki content nor the
+// Markdown renderer reaches any bundle. See the note at the top of `wikiContent`.
+import {
+  editUrlFor,
+  readWikiPage,
+  readWikiSections,
+  slugFor,
+  wikiBaseUrl,
+  wikiPageNames,
+} from './src/about/wikiContent';
 import { readFileSync } from 'node:fs';
 import { posix, resolve, sep } from 'node:path';
 
@@ -96,9 +106,46 @@ const aboutAssetSources = ['src/assets/qbsheet-black-logo.svg', aboutScreenshot]
  * against the directory that names it: `about/index.html` and `about/self-host/index.html` need
  * different numbers of `../` for the same emitted file.
  */
-const prerenderedPages = [
+interface IPrerenderedPage {
+  html: string;
+  module: string;
+  /** Passed to the component when it is rendered. Only the wiki needs any. */
+  props?: Record<string, unknown>;
+}
+
+/**
+ * The wiki, which is content rather than a set of hand-written pages.
+ *
+ * Every article shares one component and differs only by the props computed here, so a page added to
+ * the wiki on GitHub becomes a page on this site with nothing written in this repository beyond the
+ * synced Markdown and the entry `scripts/generate-wiki-pages.mjs` writes for it.
+ *
+ * Read once, at module load, because `readWikiSections` is the same answer for all sixteen and the
+ * config is evaluated once per build.
+ */
+function wikiPages(): IPrerenderedPage[] {
+  const root = import.meta.dirname;
+  const sections = readWikiSections(root);
+  return wikiPageNames(root).map((name) => ({
+    html: `about/wiki/${slugFor(name)}/index.html`,
+    module: '/src/about/WikiPage.tsx',
+    props: { page: readWikiPage(root, name), sections, editUrl: editUrlFor(name) },
+  }));
+}
+
+const prerenderedPages: IPrerenderedPage[] = [
   { html: 'about/index.html', module: '/src/about/About.tsx' },
+  { html: 'about/scoring/index.html', module: '/src/about/Scoring.tsx' },
+  { html: 'about/tournaments/index.html', module: '/src/about/Tournaments.tsx' },
   { html: 'about/self-host/index.html', module: '/src/about/SelfHost.tsx' },
+  { html: 'about/faq/index.html', module: '/src/about/Faq.tsx' },
+  { html: 'about/privacy/index.html', module: '/src/about/Privacy.tsx' },
+  {
+    html: 'about/wiki/index.html',
+    module: '/src/about/Wiki.tsx',
+    props: { sections: readWikiSections(import.meta.dirname), wikiUrl: wikiBaseUrl },
+  },
+  ...wikiPages(),
 ];
 
 /**
@@ -190,11 +237,14 @@ function aboutPrerenderPlugin(): Plugin {
   const markup = new Map<string, string>();
   let loadModule: ((id: string) => Promise<Record<string, unknown>>) | null = null;
 
-  async function render(module: string): Promise<string> {
+  async function render(page: IPrerenderedPage): Promise<string> {
     if (loadModule === null) throw new Error('The product page renderer is not available.');
-    const loaded = await loadModule(module);
-    const Page = loaded.default as () => ReactElement;
-    return renderToStaticMarkup(createElement(Page));
+    const loaded = await loadModule(page.module);
+    // Props exist for the wiki, whose sixteen articles are one component and sixteen sets of content.
+    // Every hand-written page takes none and is called with an empty object, which React treats the
+    // same as no props at all.
+    const Page = loaded.default as (props: Record<string, unknown>) => ReactElement;
+    return renderToStaticMarkup(createElement(Page, page.props ?? {}));
   }
 
   /** An emitted file's URL as the document that names it, sitting in `directory`, has to write it. */
@@ -253,7 +303,7 @@ function aboutPrerenderPlugin(): Plugin {
       try {
         loadModule = (id) => server.ssrLoadModule(id);
         for (const page of prerenderedPages) {
-          markup.set(page.html, await render(page.module));
+          markup.set(page.html, await render(page));
         }
       } finally {
         loadModule = null;
@@ -262,11 +312,11 @@ function aboutPrerenderPlugin(): Plugin {
     },
     async transformIndexHtml(html, ctx) {
       const filename = toPosix(ctx.filename);
-      // `about/self-host/index.html` does not end with `about/index.html`, so neither page can be
-      // mistaken for the other and the deeper one does not need to be tested first.
+      // A nested page's path — `about/self-host/index.html` — does not end with `about/index.html`,
+      // so no page can be mistaken for another and the deeper ones need no priority in this search.
       const page = prerenderedPages.find((candidate) => filename.endsWith(`/${candidate.html}`));
       if (page === undefined) return;
-      const rendered = building ? markup.get(page.html) : await render(page.module);
+      const rendered = building ? markup.get(page.html) : await render(page);
       if (rendered === undefined) throw new Error(`The ${page.html} page was not rendered.`);
       const bundle = ctx.bundle;
       const directory = posix.dirname(page.html);
@@ -455,7 +505,20 @@ export default defineConfig({
       input: {
         scorer: resolve(import.meta.dirname, 'index.html'),
         about: resolve(import.meta.dirname, 'about/index.html'),
+        'about-scoring': resolve(import.meta.dirname, 'about/scoring/index.html'),
+        'about-tournaments': resolve(import.meta.dirname, 'about/tournaments/index.html'),
         'about-self-host': resolve(import.meta.dirname, 'about/self-host/index.html'),
+        'about-faq': resolve(import.meta.dirname, 'about/faq/index.html'),
+        'about-privacy': resolve(import.meta.dirname, 'about/privacy/index.html'),
+        'about-wiki': resolve(import.meta.dirname, 'about/wiki/index.html'),
+        // Derived from the same list that produced the entries, so a page added to the wiki needs no
+        // edit here. `generate-wiki-pages.mjs` writes the documents these names point at.
+        ...Object.fromEntries(
+          wikiPageNames(import.meta.dirname).map((name) => [
+            `about-wiki-${slugFor(name)}`,
+            resolve(import.meta.dirname, `about/wiki/${slugFor(name)}/index.html`),
+          ]),
+        ),
       },
       output: {
         // Keeping page-only output below /about/ lets the scorer worker ignore the entire surface
@@ -463,7 +526,7 @@ export default defineConfig({
         // assets and keep their usual content-hashed location.
         //
         // All three of these have to agree. The marketing pages' code reaches the bundle as an entry
-        // chunk, as the shared chunk the two pages hoist between them, and as the stylesheet that
+        // chunk, as the shared chunk every page hoists between them, and as the stylesheet that
         // chunk carries, and a rule that catches two of the three still leaves the third inside the
         // scorer's precache list.
         entryFileNames: (chunk) =>

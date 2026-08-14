@@ -1,0 +1,72 @@
+# Copy the GitHub wiki into this repository, so the site can publish it.
+#
+# The wiki is its own git repository and the site is a static build. Something has to move the
+# Markdown from one to the other, and this is it: the wiki stays the place people edit, and `wiki/`
+# here is a copy the build reads.
+#
+# Why a commit rather than a fetch during the build: a build that reached the network for its content
+# would stop being reproducible, would fail without one, and would make every self-hoster's build
+# depend on GitHub being up. It would also contradict a claim the self-hosting page makes in as many
+# words. See the note at the top of `src/about/wikiContent.ts`.
+name: Sync wiki
+
+on:
+  # Fires when anybody edits the wiki, which is the trigger that makes this a sync rather than a chore.
+  gollum:
+  # A safety net. `gollum` does not fire for every way a wiki can change — a direct push to the wiki
+  # repository is the common one — and a day is a tolerable lag for documentation.
+  schedule:
+    - cron: '17 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  # A burst of wiki edits should produce one commit, not one per edit, and two runs racing each other
+  # would both try to push to the same branch.
+  group: sync-wiki
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+
+      - name: Check out the wiki
+        run: git clone --depth 1 https://github.com/${{ github.repository }}.wiki.git .wiki-checkout
+
+      - name: Copy the wiki into the repository
+        run: |
+          set -euo pipefail
+          # Deleted first, so a page removed from the wiki is removed from the site rather than
+          # lingering as a document nothing links to.
+          rm -rf wiki
+          mkdir -p wiki
+          cp .wiki-checkout/*.md wiki/
+          rm -rf .wiki-checkout
+
+      - name: Regenerate the page entries
+        # Writes an HTML entry per wiki page and removes the directories of pages that are gone.
+        # Kept in the same commit as the Markdown, because a build with one and not the other fails.
+        run: node scripts/generate-wiki-pages.mjs
+
+      - name: Commit the result
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- wiki about/wiki; then
+            echo "The wiki has not changed."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add wiki about/wiki
+          git commit -m "Sync wiki"
+          git push
