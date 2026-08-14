@@ -171,7 +171,10 @@ export default function SelfHost() {
             own working copy, with no application server behind it and no accounts for the people scoring
             with it.
           </p>
-          <ActionLinks slug={slug} primary={{ href: buildStepsUrl, label: 'Read the build steps' }} />
+          <ActionLinks
+            slug={slug}
+            primary={{ href: buildStepsUrl, label: 'Read the build steps', external: true }}
+          />
         </section>
 
         <StepSection />
@@ -258,7 +261,10 @@ export default function SelfHost() {
           <p>
             The whole setup is four commands, and the first one is <code>git clone</code>.
           </p>
-          <ActionLinks slug={slug} primary={{ href: buildStepsUrl, label: 'Read the build steps' }} />
+          <ActionLinks
+            slug={slug}
+            primary={{ href: buildStepsUrl, label: 'Read the build steps', external: true }}
+          />
         </section>
       </main>
 
