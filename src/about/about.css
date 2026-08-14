@@ -521,6 +521,275 @@ a:focus-visible {
   white-space: nowrap;
 }
 
+/*
+ * The wiki.
+ *
+ * # A different shape from the rest of the site
+ *
+ * Every other page here is composed: a hero, then sections arranged in the two-column grid. A wiki
+ * page is a document — headings, lists, tables, code — and it arrives as HTML this stylesheet did not
+ * write the classes for. So it gets a documentation layout instead: a persistent contents column and
+ * a single measured column of prose, which is the arrangement a reader looking something up expects.
+ *
+ * The prose rules below are element selectors on purpose. `marked` emits plain tags, and adding a
+ * class to each would mean post-processing the rendered HTML to style it — a transform whose only
+ * job would be to avoid element selectors that are correct here anyway, scoped as they are to one
+ * container.
+ */
+.about-wiki-inner {
+  display: grid;
+  width: min(1120px, calc(100% - 48px));
+  grid-template-columns: 232px minmax(0, 1fr);
+  gap: 64px;
+  margin: 0 auto;
+  padding: 56px 0 96px;
+}
+
+/*
+ * The contents column, which stays put while a long page scrolls past it.
+ *
+ * `sticky` rather than `fixed` so it still scrolls when the list is taller than the viewport, and
+ * bounded by `max-height` with its own overflow so a wiki that grows to fifty pages cannot produce a
+ * navigation whose bottom is unreachable.
+ */
+.about-wiki-nav {
+  position: sticky;
+  top: 32px;
+  align-self: start;
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
+}
+
+.about-wiki-nav > div + div {
+  margin-top: 28px;
+}
+
+.about-wiki-nav h2 {
+  margin: 0 0 10px;
+  color: var(--about-faint);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+
+.about-wiki-nav ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.about-wiki-nav li + li {
+  margin-top: 2px;
+}
+
+.about-wiki-nav a {
+  display: block;
+  padding: 4px 0;
+  color: var(--about-muted);
+  font-size: 15px;
+  line-height: 1.4;
+  text-decoration: none;
+}
+
+.about-wiki-nav a:hover {
+  color: var(--about-accent);
+}
+
+/* The page you are on, marked by weight and colour rather than by a rule down the side, because the
+   contents column has no rule of its own for one to align with. */
+.about-wiki-nav a[aria-current='page'] {
+  color: var(--about-text);
+  font-weight: 600;
+}
+
+.about-wiki-body {
+  min-width: 0;
+}
+
+.about-wiki-heading {
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--about-border);
+}
+
+.about-wiki-heading h1 {
+  margin: 0;
+  font-size: clamp(30px, 3.4vw, 38px);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+
+.about-wiki-heading .about-kicker {
+  margin-bottom: 10px;
+}
+
+.about-wiki-heading .about-kicker a {
+  color: var(--about-muted);
+  text-decoration: none;
+}
+
+.about-wiki-heading .about-kicker a:hover {
+  color: var(--about-accent);
+}
+
+/* Set as a control rather than a link, because it does something rather than continuing the reading. */
+.about-wiki-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 18px;
+  padding: 7px 13px;
+  border: 1px solid var(--about-border-strong);
+  border-radius: 3px;
+  color: var(--about-text);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.4;
+  text-decoration: none;
+}
+
+.about-wiki-edit:hover {
+  border-color: var(--about-accent);
+  background: var(--about-sunken);
+  color: var(--about-accent);
+}
+
+/* The measure is the point of this column: documentation read at the full 1120px is documentation
+   nobody finishes a paragraph of. */
+.about-wiki-prose {
+  max-width: 720px;
+  padding-top: 8px;
+}
+
+.about-wiki-prose h2 {
+  margin: 40px 0 0;
+  font-size: 23px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+}
+
+.about-wiki-prose h3 {
+  margin: 32px 0 0;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.about-wiki-prose p,
+.about-wiki-prose ul,
+.about-wiki-prose ol {
+  margin: 14px 0 0;
+  color: var(--about-muted);
+}
+
+.about-wiki-prose li + li {
+  margin-top: 6px;
+}
+
+.about-wiki-prose a {
+  color: var(--about-text);
+}
+
+.about-wiki-prose a:hover {
+  color: var(--about-accent);
+}
+
+.about-wiki-prose strong {
+  color: var(--about-text);
+  font-weight: 600;
+}
+
+/*
+ * Wiki code, which is not the site's inline `code`.
+ *
+ * `.about-page code` is set `nowrap`, which is right for `npm run build` in a sentence and wrong for
+ * a wiki: these pages quote JSON bodies, header names and long paths, and one of those inside a
+ * table cell would push the document sideways. So it wraps here, and the fenced blocks scroll.
+ */
+.about-wiki-prose code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.about-wiki-prose pre {
+  margin: 18px 0 0;
+  padding: 14px 16px;
+  overflow-x: auto;
+  border: 1px solid var(--about-border);
+  border-radius: 3px;
+  background: var(--about-sunken);
+  line-height: 1.5;
+}
+
+/* The fence owns the frame, so the code inside it does not draw a second one. */
+.about-wiki-prose pre code {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 13px;
+  white-space: pre;
+}
+
+/*
+ * Tables, which this wiki uses heavily — the QBTCP page alone has a dozen.
+ *
+ * Wrapped in their own scroll rather than allowed to shrink: a status-code table squeezed onto a
+ * phone becomes one word per line, which is less readable than a sideways scroll the reader controls.
+ */
+.about-wiki-prose table {
+  display: block;
+  width: 100%;
+  margin: 18px 0 0;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 15px;
+}
+
+.about-wiki-prose th,
+.about-wiki-prose td {
+  padding: 9px 14px 9px 0;
+  border-bottom: 1px solid var(--about-border);
+  color: var(--about-muted);
+  text-align: left;
+  vertical-align: top;
+}
+
+.about-wiki-prose th {
+  color: var(--about-text);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.about-wiki-prose blockquote {
+  margin: 18px 0 0;
+  padding-left: 16px;
+  border-left: 2px solid var(--about-border-strong);
+  color: var(--about-muted);
+}
+
+.about-wiki-prose hr {
+  margin: 36px 0 0;
+  border: 0;
+  border-top: 1px solid var(--about-border);
+}
+
+/* The contents list on the section index, which is the same component in a two-column grid rather
+   than a sticky rail. */
+.about-wiki-index .about-wiki-nav {
+  position: static;
+  display: grid;
+  max-height: none;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 32px 56px;
+}
+
+.about-wiki-index .about-wiki-nav > div + div {
+  margin-top: 0;
+}
+
 .about-final {
   width: min(680px, calc(100% - 48px));
   margin: 0 auto;
@@ -545,6 +814,33 @@ a:focus-visible {
     grid-template-columns: 1fr;
     gap: 40px;
     padding: 64px 0;
+  }
+
+  /*
+   * The contents column stops being a column.
+   *
+   * A 232px rail beside prose needs about a thousand pixels to be worth its width; below that the
+   * prose is the narrower of the two and the rail is taking space from the thing being read. So the
+   * list moves above the article, stops sticking, and stops being the first thing between the reader
+   * and the page they navigated to.
+   */
+  .about-wiki-inner {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 40px;
+    padding: 36px 0 72px;
+  }
+
+  .about-wiki-nav {
+    position: static;
+    max-height: none;
+    padding-bottom: 32px;
+    border-bottom: 1px solid var(--about-border);
+  }
+
+  .about-wiki-index .about-wiki-nav {
+    grid-template-columns: minmax(0, 1fr);
+    padding-bottom: 0;
+    border-bottom: 0;
   }
 
   .about-band .about-section {
@@ -598,7 +894,8 @@ a:focus-visible {
   .about-section,
   .about-product-visual,
   .about-hero,
-  .about-final {
+  .about-final,
+  .about-wiki-inner {
     width: min(100% - 32px, 1120px);
   }
 

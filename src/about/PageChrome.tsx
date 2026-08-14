@@ -9,18 +9,22 @@
  * components rather than hand-written HTML — see the note at the top of `About` — applies once more
  * here, one level down.
  *
- * # Depth is derived, never passed
+ * # Depth is computed, never counted by a caller
  *
  * Every path on these pages is relative, because the deployment chooses the directory: the same build
  * is served from a domain root, from `/qbsheet/` on GitHub Pages, and from a folder on a venue laptop.
  * A relative URL therefore has to be written against the directory of the document that names it, and
  * `about/index.html` and `about/faq/index.html` need different numbers of `../` for the same target.
  *
- * That count is not a parameter. A page passing its own depth is a page that can pass the wrong one,
- * and the symptom — a link that 404s only once the site is deployed a directory deeper than the dev
- * server put it — appears nowhere in a unit test of that page. So the depth is computed from the slug,
- * which is the same value that decides where the document is written, and there is nothing to get out
- * of step.
+ * No caller states that count. A page passing its own `../` depth is a page that can pass the wrong
+ * one, and the symptom — a link that 404s only once the site is deployed a directory deeper than the
+ * dev server put it — appears nowhere in a unit test of that page. The depth is computed from the
+ * slug, which is the same value that decides where the document is written.
+ *
+ * The wiki adds the one case a slug cannot answer on its own, because a section index and the articles
+ * under it share a slug and sit at different depths. `nested` is how an article says which of the two
+ * it is — a fact about itself rather than an arithmetic result, so there is still no count to get
+ * wrong. See `depthOf`.
  */
 import BrandLogo from '../BrandLogo';
 
@@ -34,25 +38,41 @@ export const buildStepsUrl = `${githubUrl}#deployment`;
 /**
  * The pages of this site, named by the directory each is served from.
  *
- * The empty slug is the product page at `about/`, which is the one document at depth 1. Everything
- * else sits one directory below it.
+ * The empty slug is the product page, which is `about/` itself. Everything else names a directory
+ * below it. `wiki` names both the section index and every article under it; see `depthOf`.
  */
-export type PageSlug = '' | 'scoring' | 'tournaments' | 'self-host' | 'faq' | 'privacy';
+export type PageSlug = '' | 'scoring' | 'tournaments' | 'self-host' | 'faq' | 'privacy' | 'wiki';
 
-/** The scorer, from a page at `slug`. The product page is one level down from it; the rest are two. */
-export function scorerUrl(slug: PageSlug): string {
-  return slug === '' ? '../' : '../../';
+/**
+ * How many directories below `about/` a document sits.
+ *
+ * The product page is `about/` itself, so it is zero. Every other section is one. `nested` is the one
+ * exception the site has: a wiki article lives at `about/wiki/<page>/`, one below the section index it
+ * shares a slug with, and it is the only kind of document that does.
+ *
+ * Kept as a flag rather than a free-form number so the count still cannot be passed wrongly — a caller
+ * says whether it is an article, not how many `../` it believes it needs.
+ */
+function depthOf(slug: PageSlug, nested: boolean): number {
+  return (slug === '' ? 0 : 1) + (nested ? 1 : 0);
+}
+
+/** The scorer, which is one directory above `about/` whatever the document's own depth is. */
+export function scorerUrl(slug: PageSlug, nested = false): string {
+  return '../'.repeat(depthOf(slug, nested) + 1);
 }
 
 /**
  * A link from the page at `slug` to the page at `target`.
  *
- * A page always names itself as `./` rather than by its own directory name, because the deployment
- * owns that name and a self-link written as `./faq/` from inside `faq/` is wrong twice over.
+ * A page names itself as `./` rather than by its own directory name, because the deployment owns that
+ * name and a self-link written as `./faq/` from inside `faq/` is wrong twice over. A wiki article is
+ * not its section index, so that shortcut is exactly what it must not take.
  */
-export function pageUrl(slug: PageSlug, target: PageSlug): string {
-  if (target === slug) return './';
-  const base = slug === '' ? './' : '../';
+export function pageUrl(slug: PageSlug, target: PageSlug, nested = false): string {
+  if (target === slug && !nested) return './';
+  const depth = depthOf(slug, nested);
+  const base = depth === 0 ? './' : '../'.repeat(depth);
   return target === '' ? base : `${base}${target}/`;
 }
 
@@ -76,6 +96,9 @@ const primaryPages: { slug: PageSlug; label: string }[] = [
   { slug: 'tournaments', label: 'Tournaments' },
   { slug: 'self-host', label: 'Self-host' },
   { slug: 'faq', label: 'FAQ' },
+  // One entry for the whole wiki, whose own sidebar carries its sixteen pages. A section that
+  // navigates itself does not need the site navigation to enumerate it.
+  { slug: 'wiki', label: 'Wiki' },
 ];
 
 /** The footer carries everything, including the page the header leaves out. */
@@ -135,20 +158,20 @@ function ExternalLink({ href, children }: { href: string; children: string }) {
   );
 }
 
-export function PageHeader({ slug }: { slug: PageSlug }) {
+export function PageHeader({ slug, nested = false }: { slug: PageSlug; nested?: boolean }) {
   return (
     <header className="about-header">
       <div className="about-header-inner">
         {/* The wordmark returns to this site's own front page, which is the product page rather than
             the scorer. "Open QBSheet" is the way into the application, and it is a button-shaped
             thing in the hero and the closing action of every page. */}
-        <a className="about-brand" href={pageUrl(slug, '')} aria-label="QBSheet home">
+        <a className="about-brand" href={pageUrl(slug, '', nested)} aria-label="QBSheet home">
           <BrandLogo className="about-brand-logo" />
         </a>
         <nav className="about-nav" aria-label="Primary navigation">
-          <a href={scorerUrl(slug)}>Open QBSheet</a>
+          <a href={scorerUrl(slug, nested)}>Open QBSheet</a>
           {primaryPages.map((page) => (
-            <a key={page.slug} href={pageUrl(slug, page.slug)} {...current(slug, page.slug)}>
+            <a key={page.slug} href={pageUrl(slug, page.slug, nested)} {...current(slug, page.slug)}>
               {page.label}
             </a>
           ))}
@@ -159,13 +182,13 @@ export function PageHeader({ slug }: { slug: PageSlug }) {
   );
 }
 
-export function PageFooter({ slug }: { slug: PageSlug }) {
+export function PageFooter({ slug, nested = false }: { slug: PageSlug; nested?: boolean }) {
   return (
     <footer className="about-footer">
       <nav aria-label="Footer navigation">
-        <a href={scorerUrl(slug)}>QBSheet</a>
+        <a href={scorerUrl(slug, nested)}>QBSheet</a>
         {footerPages.map((page) => (
-          <a key={page.slug} href={pageUrl(slug, page.slug)} {...current(slug, page.slug)}>
+          <a key={page.slug} href={pageUrl(slug, page.slug, nested)} {...current(slug, page.slug)}>
             {page.label}
           </a>
         ))}
@@ -187,15 +210,17 @@ export function PageFooter({ slug }: { slug: PageSlug }) {
 export function ActionLinks({
   slug,
   primary,
+  nested = false,
 }: {
   slug: PageSlug;
   primary?: { href: string; label: string };
+  nested?: boolean;
 }) {
   return (
     <div className="about-actions">
       {primary === undefined ? (
         <>
-          <a className="about-button is-primary" href={scorerUrl(slug)}>
+          <a className="about-button is-primary" href={scorerUrl(slug, nested)}>
             Open QBSheet
           </a>
           <a className="about-button" href={githubUrl}>
@@ -207,7 +232,7 @@ export function ActionLinks({
           <a className="about-button is-primary" href={primary.href}>
             {primary.label}
           </a>
-          <a className="about-button" href={scorerUrl(slug)}>
+          <a className="about-button" href={scorerUrl(slug, nested)}>
             Open QBSheet
           </a>
         </>
