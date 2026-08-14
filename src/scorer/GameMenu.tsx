@@ -140,9 +140,8 @@ export default function GameMenu(props: { items: IGameMenuItem[] }) {
                   disabled={item.disabled}
                   aria-disabled={item.disabled || undefined}
                   onBlur={(event) => {
-                    if (!event.currentTarget.parentElement?.parentElement?.contains(event.relatedTarget as Node | null)) {
-                      setOpen(false);
-                    }
+                    const next = event.relatedTarget as Node | null;
+                    if (next !== null && !container.current?.contains(next)) setOpen(false);
                   }}
                   onKeyDown={(event) => {
                     if (event.key === 'ArrowDown') {
