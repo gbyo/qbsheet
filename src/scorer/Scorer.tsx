@@ -1786,7 +1786,47 @@ export default function Scorer(props: IScorerProps) {
         />
       )}
 
-      {phase.kind !== 'lineup' && (
+      {phase.kind === 'complete' && (
+        <div className="scorer-completion">
+          <div
+            className={`scorer-complete${completionMotion ? ' is-newly-complete' : ''}`}
+            data-completion-token={completionMotion?.token}
+          >
+            <PreSubmitReview
+              format={format}
+              game={game}
+              unsyncedRosterAdditions={unsyncedRosterAdditions}
+              warnings={warnings}
+              blockers={blockers}
+              submitting={submitting}
+              onSubmit={submit}
+              onDownload={downloadQbj}
+              onReview={() => openReviewAt(undefined)}
+            />
+            {submitResult && (
+              <div className={submitResult.ok ? 'scorer-complete-ok' : 'scorer-complete-warning'}>
+                {/**
+                  A finished game that could not be handed over is the one moment where the
+                  difference between "wait" and "carry this file to the director" decides
+                  whether the game reaches the standings. Both are said, and which one is
+                  said depends on whether there is a delivery path at all.
+                */}
+                {!submitResult.ok && connection === RoomConnectionState.Offline && (
+                  <strong>Result saved on this Chromebook</strong>
+                )}
+                <p>{submitResult.message}</p>
+                {!submitResult.ok && (
+                  <button type="button" className="scorer-action" onClick={downloadQbj}>
+                    Download QBJ backup
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {phase.kind !== 'lineup' && phase.kind !== 'complete' && (
         <div className="scorer-body">
           <main className="scorer-main">
             <div className="scorer-teams">
@@ -1832,12 +1872,8 @@ export default function Scorer(props: IScorerProps) {
                 without joining the two-column grid they are laid out in. */}
             {keyboardEnabled && <KeyboardMap context={keyboardContext} />}
 
-            {/*
-              Pinned to the control bar for every phase but the last. See `.scorer-stage.is-pinned`:
-              the completion review is the one thing put in here that can outgrow the window, and a
-              pinned block taller than the window loses its top edge off the top of the screen.
-            */}
-            <div className={phase.kind === 'complete' ? 'scorer-stage' : 'scorer-stage is-pinned'}>
+            {/* Pinned to the control bar during live play so the current scoring action stays in view. */}
+            <div className="scorer-stage is-pinned">
               {noBuzzAcknowledgement && (
                 <span
                   key={`no-buzz-${noBuzzAcknowledgement.token}`}
@@ -1992,43 +2028,6 @@ export default function Scorer(props: IScorerProps) {
                 />
               )}
 
-              {phase.kind === 'complete' && (
-                <div
-                  className={`scorer-complete${completionMotion ? ' is-newly-complete' : ''}`}
-                  data-completion-token={completionMotion?.token}
-                >
-                  <PreSubmitReview
-                    format={format}
-                    game={game}
-                    unsyncedRosterAdditions={unsyncedRosterAdditions}
-                    warnings={warnings}
-                    blockers={blockers}
-                    submitting={submitting}
-                    onSubmit={submit}
-                    onDownload={downloadQbj}
-                    onReview={() => openReviewAt(undefined)}
-                  />
-                  {submitResult && (
-                    <div className={submitResult.ok ? 'scorer-complete-ok' : 'scorer-complete-warning'}>
-                      {/*
-                        A finished game that could not be handed over is the one moment where the
-                        difference between "wait" and "carry this file to the director" decides
-                        whether the game reaches the standings. Both are said, and which one is
-                        said depends on whether there is a delivery path at all.
-                      */}
-                      {!submitResult.ok && connection === RoomConnectionState.Offline && (
-                        <strong>Result saved on this Chromebook</strong>
-                      )}
-                      <p>{submitResult.message}</p>
-                      {!submitResult.ok && (
-                        <button type="button" className="scorer-action" onClick={downloadQbj}>
-                          Download QBJ backup
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
             </div>
           </main>
 
