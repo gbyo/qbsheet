@@ -70,7 +70,7 @@ test.describe('without JavaScript', () => {
     await expect(page.getByRole('heading', { level: 3, name: 'Build' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'What you don’t have to run' })).toBeVisible();
     await expect(page.getByText('browsers only install one on a secure origin')).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Read the license' })).toHaveAttribute(
+    await expect(page.getByRole('link', { name: 'GNU AGPL, version 3 or later' })).toHaveAttribute(
       'href',
       'https://github.com/gbyo/qbsheet/blob/main/LICENSE',
     );

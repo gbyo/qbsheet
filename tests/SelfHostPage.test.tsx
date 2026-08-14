@@ -101,7 +101,6 @@ describe('the self-hosting page', () => {
     const { container } = render(<SelfHost />);
 
     expect(screen.getByRole('heading', { level: 2, name: 'Yours to change' })).toBeInTheDocument();
-    expect(screen.getByText(/licensed under the GNU AGPL, version 3 or later/)).toBeInTheDocument();
 
     const license = container.querySelector('.about-license');
     const words = license?.textContent ?? '';
@@ -109,10 +108,10 @@ describe('the self-hosting page', () => {
     expect(words).toContain('let other people use your changed version over a network');
     expect(words).toContain('offer them the source');
     expect(words).toContain('Hosting an unmodified build doesn’t involve that step');
-    // And the page never claims to be the authority on it.
-    expect(words).toContain('What governs here is the license text, not this page');
 
-    expect(screen.getByRole('link', { name: 'Read the license' })).toHaveAttribute(
+    // The license text is what governs, so the page has to reach it. The link is the licence name
+    // itself rather than a sentence about the page's own authority.
+    expect(screen.getByRole('link', { name: 'GNU AGPL, version 3 or later' })).toHaveAttribute(
       'href',
       'https://github.com/gbyo/qbsheet/blob/main/LICENSE',
     );

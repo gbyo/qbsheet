@@ -271,6 +271,34 @@ a:focus-visible {
   list-style: none;
 }
 
+/*
+ * The four-stage variant, which only the tournaments page uses.
+ *
+ * A connected round has a step before scoring — the room has to become a room the tournament knows
+ * about — so that sequence is four rather than three, and four of these at 1120px is about 250px of
+ * measure each, which a two-line stage detail still reads at.
+ *
+ * It does not stay four all the way down. Between the full width and the point where every sequence
+ * on the site goes vertical, four columns would be under 190px each, which is a column of two-word
+ * lines. Two by two is the honest arrangement in that range, and the arrowheads come off there because
+ * the one after the second stage would be pointing at the right-hand edge rather than at stage three.
+ */
+.about-stages-wide {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 32px;
+}
+
+@media (max-width: 1000px) and (min-width: 821px) {
+  .about-stages-wide {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 40px 56px;
+  }
+
+  .about-stages-wide li:not(:last-child)::after {
+    display: none;
+  }
+}
+
 .about-stages li {
   position: relative;
   min-width: 0;
@@ -414,6 +442,26 @@ a:focus-visible {
 
 .about-definition-list a:hover {
   color: var(--about-accent);
+}
+
+/*
+ * The questions page, which is the same definition list with the columns taken out.
+ *
+ * A term column works when the term is a word — `QBJ`, `Cloudflare Pages`, `No database`. A question
+ * is a sentence, and 120px of it wraps to four lines beside a two-line answer, which puts the reader's
+ * eye in the wrong place and wastes the measure. So a question sits above its answer and takes the
+ * full width, and the row rule stays exactly what it was: the separation between one question and the
+ * next is the only thing this list needed a border for.
+ */
+.about-faq-list > div {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  padding: 22px 0;
+}
+
+.about-faq-list dt {
+  font-size: 17px;
+  line-height: 1.4;
 }
 
 /*
@@ -648,6 +696,11 @@ a:focus-visible {
   /* Headline, copy, actions, screenshot: one pass, finished inside 530ms, and then the hero is exactly
      the hero. Deliberately short — a first-load animation that is still going when somebody reaches
      for a button has become an obstacle. */
+  /* The pages that open on a kicker rise it with the headline rather than leaving one line of the
+     hero already in place while the rest of it arrives. Deliberately not a fourth step in the
+     stagger: it is a label on the headline, and the 530ms budget below is worth more than the
+     sequencing would be. */
+  .about-hero .about-kicker,
   .about-hero h1 {
     animation: about-rise 360ms var(--about-ease) both;
   }
@@ -748,6 +801,21 @@ a:focus-visible {
 
   .about-stages li:nth-child(3) > * {
     transition-delay: 420ms;
+  }
+
+  /* The fourth stage exists only on the tournaments page. Without these it would have no delay at
+     all, arrive first, and break the left-to-right reading the sequence is drawn for. The arrowhead
+     after stage three lands as stage four's rule starts, exactly as the earlier pairs do. */
+  .about-stages li:nth-child(3)::after {
+    transition-delay: 500ms;
+  }
+
+  .about-stages li:nth-child(4)::before {
+    transition-delay: 510ms;
+  }
+
+  .about-stages li:nth-child(4) > * {
+    transition-delay: 590ms;
   }
 
   /* A press should feel like a press. One pixel, and it comes back down on the way in. */

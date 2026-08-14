@@ -11,7 +11,11 @@ A scoresheet and tournament-control software do different jobs. QBSheet scores a
 ## Website
 
 - [About QBSheet](https://qbsheet.com/about/): Overview of QBSheet and its scoring workflows.
+- [Scoring with QBSheet](https://qbsheet.com/about/scoring/): The per-question sequence, keyboard shortcuts, corrections and lineup changes, local recovery, and the guided practice game.
+- [QBSheet for tournaments](https://qbsheet.com/about/tournaments/): Pairing a room over QBTCP, receiving assignments as QBJ, behaviour when the connection fails, and returning results.
 - [Host QBSheet yourself](https://qbsheet.com/about/self-host/): Building QBSheet and serving it from any static host.
+- [Frequently asked questions](https://qbsheet.com/about/faq/): Supported devices and browsers, format and scoring configuration, files and local storage, and licensing.
+- [Privacy](https://qbsheet.com/about/privacy/): What QBSheet stores on a device, what a connected room transmits and to whom, and the absence of accounts and analytics.
 - [Open QBSheet](https://qbsheet.com/): Launch the scorekeeper.
 
 ## Documentation

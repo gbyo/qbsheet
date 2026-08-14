@@ -28,12 +28,16 @@
  * self-hosting in order to get offline scoring, which is the one failure this page must not cause.
  */
 import type { ReactNode } from 'react';
-import BrandLogo from '../BrandLogo';
+import {
+  ActionLinks,
+  PageFooter,
+  PageHeader,
+  buildStepsUrl,
+  licenseUrl,
+  qbtcpDocsUrl,
+} from './PageChrome';
 
-const githubUrl = 'https://github.com/gbyo/qbsheet';
-const buildStepsUrl = `${githubUrl}#deployment`;
-const licenseUrl = `${githubUrl}/blob/main/LICENSE`;
-const qbtcpDocsUrl = `${githubUrl}/blob/main/docs/QBTCP.md`;
+const slug = 'self-host' as const;
 
 /**
  * The three commands, in the order somebody runs them.
@@ -100,19 +104,6 @@ const absences = [
   },
 ];
 
-function ActionLinks() {
-  return (
-    <div className="about-actions">
-      <a className="about-button is-primary" href={buildStepsUrl}>
-        Read the build steps
-      </a>
-      <a className="about-button" href="../../">
-        Open QBSheet
-      </a>
-    </div>
-  );
-}
-
 /** The three commands, laid out as the one sequence on the page. */
 function StepSection() {
   return (
@@ -170,21 +161,7 @@ function AbsenceSection() {
 export default function SelfHost() {
   return (
     <div className="about-page">
-      <header className="about-header">
-        <div className="about-header-inner">
-          <a className="about-brand" href="../../" aria-label="QBSheet home">
-            <BrandLogo className="about-brand-logo" />
-          </a>
-          <nav className="about-nav" aria-label="Primary navigation">
-            <a href="../../">Open QBSheet</a>
-            <a href="../">About</a>
-            <a href="./" aria-current="page">
-              Self-host
-            </a>
-            <a href={githubUrl}>GitHub</a>
-          </nav>
-        </div>
-      </header>
+      <PageHeader slug={slug} />
 
       <main>
         <section className="about-hero" aria-labelledby="self-host-title">
@@ -194,7 +171,7 @@ export default function SelfHost() {
             own working copy, with no application server behind it and no accounts for the people scoring
             with it.
           </p>
-          <ActionLinks />
+          <ActionLinks slug={slug} primary={{ href: buildStepsUrl, label: 'Read the build steps' }} />
         </section>
 
         <StepSection />
@@ -262,7 +239,8 @@ export default function SelfHost() {
             <p className="about-kicker">Open by design</p>
             <h2 id="license-heading">Yours to change</h2>
             <p>
-              QBSheet is licensed under the GNU AGPL, version 3 or later. You can host it, modify it, and
+              QBSheet is licensed under the{' '}
+              <a href={licenseUrl}>GNU AGPL, version 3 or later</a>. You can host it, modify it, and
               run your league’s own version of it.
             </p>
           </div>
@@ -272,9 +250,6 @@ export default function SelfHost() {
               changed version over a network, the AGPL asks you to offer them the source for what they’re
               using. Hosting an unmodified build doesn’t involve that step.
             </p>
-            <p>
-              What governs here is the license text, not this page. <a href={licenseUrl}>Read the license</a>.
-            </p>
           </div>
         </section>
 
@@ -283,21 +258,11 @@ export default function SelfHost() {
           <p>
             The whole setup is four commands, and the first one is <code>git clone</code>.
           </p>
-          <ActionLinks />
+          <ActionLinks slug={slug} primary={{ href: buildStepsUrl, label: 'Read the build steps' }} />
         </section>
       </main>
 
-      <footer className="about-footer">
-        <nav aria-label="Footer navigation">
-          <a href="../../">QBSheet</a>
-          <a href="../">About</a>
-          <a href="./" aria-current="page">
-            Self-host
-          </a>
-          <a href={`${githubUrl}#documentation`}>Documentation</a>
-          <a href={githubUrl}>GitHub</a>
-        </nav>
-      </footer>
+      <PageFooter slug={slug} />
     </div>
   );
 }

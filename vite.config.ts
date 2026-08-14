@@ -98,7 +98,11 @@ const aboutAssetSources = ['src/assets/qbsheet-black-logo.svg', aboutScreenshot]
  */
 const prerenderedPages = [
   { html: 'about/index.html', module: '/src/about/About.tsx' },
+  { html: 'about/scoring/index.html', module: '/src/about/Scoring.tsx' },
+  { html: 'about/tournaments/index.html', module: '/src/about/Tournaments.tsx' },
   { html: 'about/self-host/index.html', module: '/src/about/SelfHost.tsx' },
+  { html: 'about/faq/index.html', module: '/src/about/Faq.tsx' },
+  { html: 'about/privacy/index.html', module: '/src/about/Privacy.tsx' },
 ];
 
 /**
@@ -262,8 +266,8 @@ function aboutPrerenderPlugin(): Plugin {
     },
     async transformIndexHtml(html, ctx) {
       const filename = toPosix(ctx.filename);
-      // `about/self-host/index.html` does not end with `about/index.html`, so neither page can be
-      // mistaken for the other and the deeper one does not need to be tested first.
+      // A nested page's path — `about/self-host/index.html` — does not end with `about/index.html`,
+      // so no page can be mistaken for another and the deeper ones need no priority in this search.
       const page = prerenderedPages.find((candidate) => filename.endsWith(`/${candidate.html}`));
       if (page === undefined) return;
       const rendered = building ? markup.get(page.html) : await render(page.module);
@@ -455,7 +459,11 @@ export default defineConfig({
       input: {
         scorer: resolve(import.meta.dirname, 'index.html'),
         about: resolve(import.meta.dirname, 'about/index.html'),
+        'about-scoring': resolve(import.meta.dirname, 'about/scoring/index.html'),
+        'about-tournaments': resolve(import.meta.dirname, 'about/tournaments/index.html'),
         'about-self-host': resolve(import.meta.dirname, 'about/self-host/index.html'),
+        'about-faq': resolve(import.meta.dirname, 'about/faq/index.html'),
+        'about-privacy': resolve(import.meta.dirname, 'about/privacy/index.html'),
       },
       output: {
         // Keeping page-only output below /about/ lets the scorer worker ignore the entire surface
@@ -463,7 +471,7 @@ export default defineConfig({
         // assets and keep their usual content-hashed location.
         //
         // All three of these have to agree. The marketing pages' code reaches the bundle as an entry
-        // chunk, as the shared chunk the two pages hoist between them, and as the stylesheet that
+        // chunk, as the shared chunk every page hoists between them, and as the stylesheet that
         // chunk carries, and a rule that catches two of the three still leaves the third inside the
         // scorer's precache list.
         entryFileNames: (chunk) =>
