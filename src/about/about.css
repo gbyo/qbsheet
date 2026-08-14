@@ -98,9 +98,12 @@ a:focus-visible {
   height: auto;
 }
 
+/* Wrapping, because the primary nav is no longer two links: a narrow phone has to be allowed to put
+   the run of them onto a second line rather than push the document sideways. */
 .about-nav,
 .about-footer nav {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 24px;
 }
@@ -413,6 +416,44 @@ a:focus-visible {
   color: var(--about-accent);
 }
 
+/*
+ * A section whose content column is prose rather than a grid or a list.
+ *
+ * The self-hosting page has two of these, and both are there because the thing being explained is a
+ * caveat rather than a set of items. A caveat forced into cards reads as a feature, which is the
+ * opposite of what "this will not cache over plain HTTP" is.
+ */
+.about-prose {
+  max-width: 620px;
+}
+
+.about-prose p {
+  margin: 0;
+  color: var(--about-muted);
+}
+
+.about-prose p + p {
+  margin-top: 16px;
+}
+
+/*
+ * Commands and paths named in running text.
+ *
+ * Somebody is going to copy `npm run build` out of a sentence, so the boundaries of it have to be
+ * visible. Kept from wrapping for the same reason: a command broken across two lines is a command
+ * that gets pasted wrong. Everything the page names is short enough that this cannot push the
+ * narrowest layout sideways.
+ */
+.about-page code {
+  padding: 1px 5px;
+  border: 1px solid var(--about-border);
+  border-radius: 3px;
+  background: var(--about-sunken);
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.88em;
+  white-space: nowrap;
+}
+
 .about-final {
   width: min(680px, calc(100% - 48px));
   margin: 0 auto;
@@ -431,9 +472,6 @@ a:focus-visible {
   border-top: 1px solid var(--about-border);
 }
 
-.about-footer nav {
-  flex-wrap: wrap;
-}
 
 @media (max-width: 820px) {
   .about-section {

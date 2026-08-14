@@ -11,6 +11,7 @@ A scoresheet and tournament-control software do different jobs. QBSheet scores a
 ## Website
 
 - [About QBSheet](https://qbsheet.com/about/): Overview of QBSheet and its scoring workflows.
+- [Host QBSheet yourself](https://qbsheet.com/about/self-host/): Building QBSheet and serving it from any static host.
 - [Open QBSheet](https://qbsheet.com/): Launch the scorekeeper.
 
 ## Documentation
