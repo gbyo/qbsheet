@@ -69,6 +69,7 @@ import { IGamePackage, gamePackageIdentity, gamePackageLabel, gamePackageMatchup
 import deriveGame from '../scoring/deriveGame';
 import { IUnreadableRecord } from '../game/GameRecordUpgrade';
 import { IPairedRoom } from './ConnectedSession';
+import { ControlOpenResult } from './ControlPairing';
 import UpdateNotice from '../pwa/UpdateNotice';
 import ControlIcon from '../scorer/ControlIcon';
 import GameFileOpen from './GameFileOpen';
@@ -151,7 +152,7 @@ export default function WelcomeScreen(props: {
   onCreateGame: () => void;
   /** Back into the room this device is already paired with. No address, no code. */
   onOpenRoom: () => void;
-  onConnect: (baseUrl: string) => void;
+  onConnect: (baseUrl: string) => Promise<ControlOpenResult>;
   /**
    * A pairing link this device just read off a QR code.
    *
@@ -194,6 +195,8 @@ export default function WelcomeScreen(props: {
   } = props;
   const [address, setAddress] = useState('');
   const [addressError, setAddressError] = useState('');
+  const [addressUnreachable, setAddressUnreachable] = useState(false);
+  const [addressBusy, setAddressBusy] = useState(false);
   const [alreadyPlayed, setAlreadyPlayed] = useState<{ record: IStoredGameRecord; opened: IGamePackage } | null>(
     null,
   );
@@ -226,15 +229,29 @@ export default function WelcomeScreen(props: {
     }
   };
 
-  const submitAddress = (event: FormEvent) => {
+  const submitAddress = async (event: FormEvent) => {
     event.preventDefault();
+    if (addressBusy) return;
     const trimmed = address.trim();
     if (trimmed === '') {
       setAddressError('Enter the address tournament control gave you.');
       return;
     }
     setAddressError('');
-    onConnect(trimmed);
+    setAddressUnreachable(false);
+    setAddressBusy(true);
+    try {
+      const result = await onConnect(trimmed);
+      if (!result.ok) {
+        setAddressError(result.error);
+        setAddressUnreachable(result.unreachable);
+      }
+    } catch {
+      setAddressError('Tournament control could not be reached. Check the connection and try again.');
+      setAddressUnreachable(true);
+    } finally {
+      setAddressBusy(false);
+    }
   };
 
   /** Nothing typed yet, so the button beside the field offers to go and find the address. */
@@ -331,7 +348,7 @@ export default function WelcomeScreen(props: {
       {pairedRoom && (
         <section className="shell-section resume-card welcome-room">
           <div>
-            <p className="resume-context">{pairedRoom.roomName} · Connected</p>
+            <p className="resume-context">{pairedRoom.roomName} · Paired</p>
             <p className="welcome-option-copy">
               This device is paired for the tournament. Its next game comes from tournament control.
             </p>
@@ -369,6 +386,7 @@ export default function WelcomeScreen(props: {
                     onChange={(event) => {
                       setAddress(event.target.value);
                       if (event.target.value.trim() !== '') setAddressError('');
+                      setAddressUnreachable(false);
                     }}
                   />
                   {addressEmpty ? (
@@ -381,12 +399,17 @@ export default function WelcomeScreen(props: {
                       Scan QR
                     </button>
                   ) : (
-                    <button type="submit" className="shell-button is-primary">
-                      Connect
-                    </button>
+                      <button type="submit" className="shell-button is-primary" disabled={addressBusy}>
+                        {addressBusy ? 'Connecting…' : 'Connect'}
+                      </button>
                   )}
                 </div>
-                {addressError !== '' && <p className="shell-errors" role="alert">{addressError}</p>}
+                {addressError !== '' && (
+                  <div className="shell-errors" role="alert">
+                    <p>{addressError}</p>
+                    {addressUnreachable && <p>You can still score with a game file.</p>}
+                  </div>
+                )}
               </form>
             </section>
 

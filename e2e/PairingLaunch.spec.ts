@@ -237,7 +237,9 @@ test.describe('the scanner dialog', () => {
 
     await expect(page.getByRole('dialog', { name: 'Scan tournament QR code' })).toHaveCount(0);
     await expect(scan).toBeFocused();
-    expect(await page.evaluate(() => (window as unknown as { cameraStops: string[] }).cameraStops)).toContain('video');
+    await expect
+      .poll(() => page.evaluate(() => (window as unknown as { cameraStops: string[] }).cameraStops))
+      .toContain('video');
   });
 
   test('a browser that refuses the camera leaves the typed address working', async ({ page }) => {
@@ -259,7 +261,7 @@ test.describe('the scanner dialog', () => {
     await page.locator('#control-address').fill(control.origin);
     await page.locator('.welcome-connect-form button[type="submit"]').click();
 
-    // The manual path is exactly where it was, and needs no camera at any point.
-    await expect(page.locator('#setup-address')).toHaveValue(control.origin);
+    // The address submission itself reached tournament control; no second Connect gesture is needed.
+    await expect(page.getByLabel('Pairing code')).toBeVisible();
   });
 });

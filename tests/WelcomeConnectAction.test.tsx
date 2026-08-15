@@ -17,6 +17,17 @@ import { act, fireEvent, screen, within } from '@testing-library/react';
 import { openApp } from './appHarness';
 import { takePairingLaunch } from '../src/app/PairingLaunch';
 
+vi.mock('../src/app/ControlPairing', async () => {
+  const actual = await vi.importActual<typeof import('../src/app/ControlPairing')>('../src/app/ControlPairing');
+  return {
+    ...actual,
+    openControl: vi.fn(async () => ({
+      ok: true as const,
+      value: { client: {}, tournamentName: 'Spring Invitational', rooms: [] },
+    })),
+  };
+});
+
 /** Whether the scanner dialog would have opened, without opening a camera to find out. */
 const scannerOpened = vi.fn();
 
@@ -97,7 +108,7 @@ describe('the connect action beside the address field', () => {
     expect(within(connectSection()).getByRole('button', { name: 'Scan QR' })).toBeInTheDocument();
   });
 
-  test('Connect still carries the typed address into the setup screen', async () => {
+  test('Connect opens the pairing step in the same gesture', async () => {
     await openApp();
 
     await type('192.168.1.24:3000');
@@ -105,10 +116,8 @@ describe('the connect action beside the address field', () => {
       fireEvent.click(within(connectSection()).getByRole('button', { name: 'Connect' }));
     });
 
-    // The unchanged manual path: the address arrives on the setup screen, and pressing Connect there
-    // is the gesture the browser's local-network permission needs.
-    expect(screen.getByLabelText('Tournament control address')).toHaveValue('192.168.1.24:3000');
-    expect(screen.getByRole('button', { name: 'Connect' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Pairing code')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Connect' })).toBeNull();
   });
 
   test('Scan QR opens the scanner and does not touch the address field', async () => {

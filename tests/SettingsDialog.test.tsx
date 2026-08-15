@@ -18,7 +18,7 @@ import {
 } from '../src/app/OperatorIdentity';
 import SettingsDialog from '../src/app/SettingsDialog';
 import { ResultDeliveryCapabilityStore } from '../src/app/ResultDeliveryCapability';
-import { GameStore, IStoredGameRecord } from '../src/game/GameStore';
+import { gameRecordVersion, GameStore, IStoredGameRecord } from '../src/game/GameStore';
 import { openRecordStore } from '../src/persistence/GameDatabase';
 import { buildLabel } from '../src/pwa/BuildVersion';
 import {
@@ -288,7 +288,7 @@ describe('tournament connection safety', () => {
     fireEvent.click(within(confirmation).getByRole('button', { name: 'Forget Room 204' }));
 
     expect(readConnection()).toBeNull();
-    expect(screen.queryByText('Room 204 · Connected')).toBeNull();
+    expect(screen.queryByText('Room 204 · Paired')).toBeNull();
     expect(screen.queryByText('Tournament connection')).toBeNull();
     expect(screen.queryByRole('dialog', { name: 'Settings' })).toBeNull();
     expect(screen.getByRole('status')).toHaveTextContent('Tournament pairing forgotten.');
@@ -308,6 +308,25 @@ describe('tournament connection safety', () => {
     expect(within(confirmation).getByRole('button', { name: 'Forget Room 204' })).toBeDisabled();
     expect(readConnection()).not.toBeNull();
     expect((await new GameStore(await openRecordStore<IStoredGameRecord>()).get(unfinished.id))?.id).toBe(unfinished.id);
+  });
+
+  test('an unreadable game named by the connection still protects the pairing', async () => {
+    writeOperatorNameAsked();
+    const saved = await seedGame({ connected: true });
+    const records = await openRecordStore<IStoredGameRecord>();
+    await records.put({ ...saved, version: gameRecordVersion + 99 });
+    rememberConnection({ gameRecordId: saved.id });
+
+    await openApp();
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/newer version|cannot be opened/i);
+    const dialog = await openSettings();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Forget pairing…' }));
+
+    const confirmation = screen.getByRole('dialog', { name: 'Forget tournament pairing?' });
+    expect(within(confirmation).getByRole('alert')).toHaveTextContent(/cannot change Room 204/i);
+    expect(within(confirmation).getByRole('button', { name: 'Forget Room 204' })).toBeDisabled();
+    expect(readConnection()).not.toBeNull();
   });
 });
 

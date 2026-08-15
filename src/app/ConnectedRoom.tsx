@@ -37,6 +37,8 @@ export interface IConnectedStart {
   credentials: ISessionCredentials;
   tournamentKey?: string;
   definition: IGameDefinition;
+  /** False once the room that owns this start transaction has unmounted or changed. */
+  isCurrent?: () => boolean;
 }
 
 export type ConnectedStartResult = { ok: true } | { ok: false; error: string };
@@ -67,7 +69,9 @@ export function checkStatusLine(state: {
   lastSuccessfulCheckAt: number | null;
   now: number;
   failing: boolean;
+  credentialProblem?: boolean;
 }): string {
+  if (state.credentialProblem) return 'Automatic checks are paused.';
   if (state.forbidden !== '') return 'Automatic checks paused · try tournament control again.';
   if (state.lastSuccessfulCheckAt === null) return 'Checking tournament control…';
   const age = Math.max(0, state.now - state.lastSuccessfulCheckAt);
@@ -180,7 +184,10 @@ export default function ConnectedRoom(props: {
   const [lastSuccessfulCheckAt, setLastSuccessfulCheckAt] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [problemOpen, setProblemOpen] = useState(false);
+  const [problemAssignment, setProblemAssignment] = useState<{
+    packageValue: IGameDefinition;
+    scheduledMatchId: string;
+  } | null>(null);
   const [problemReceipt, setProblemReceipt] = useState<IProblemReceipt | null>(null);
   const [repairOpen, setRepairOpen] = useState(false);
 
@@ -192,6 +199,7 @@ export default function ConnectedRoom(props: {
   const forbiddenRef = useRef(forbidden);
   const roomCredentialProblemRef = useRef(roomCredentialProblem);
   const startingRef = useRef(false);
+  const startGeneration = useRef(0);
 
   const client = useMemo(() => new FruityServerClient(pairedRoom.baseUrl), [pairedRoom.baseUrl]);
   const identity = useMemo(() => identityFor(pairedRoom, operatorName), [pairedRoom, operatorName]);
@@ -201,6 +209,13 @@ export default function ConnectedRoom(props: {
   // case where a host reuses the component instance in an embedded test or shell.
   useEffect(() => {
     roomKeyRef.current = roomKey;
+  }, [roomKey]);
+
+  useEffect(() => {
+    const generation = ++startGeneration.current;
+    return () => {
+      if (startGeneration.current === generation) startGeneration.current += 1;
+    };
   }, [roomKey]);
 
   useEffect(() => {
@@ -215,11 +230,11 @@ export default function ConnectedRoom(props: {
     if (!result.ok && result.status === 401) {
       setRoomCredentialProblem(true);
       roomCredentialProblemRef.current = true;
-      if (source === 'poll') {
-        setPollFailed(true);
-        setPollError(message);
-      }
-      setActionError(source === 'poll' ? 'Tournament control no longer recognizes this room.' : '');
+      setForbidden('');
+      forbiddenRef.current = '';
+      setPollFailed(false);
+      setPollError('');
+      setActionError('');
       return;
     }
     const refusal = forbiddenIn(result);
@@ -336,8 +351,11 @@ export default function ConnectedRoom(props: {
     setStarting(true);
     setActionError('');
     const expectedMatchId = selected.scheduledMatchId;
+    const generation = startGeneration.current;
+    const isCurrent = () => startGeneration.current === generation && roomKeyRef.current === roomKey;
     try {
       const session = await client.openSession(identity, expectedMatchId);
+      if (!isCurrent()) return;
       if (!session.ok) {
         noteFailure(session, safeStartFailure(session), 'start');
         return;
@@ -345,6 +363,7 @@ export default function ConnectedRoom(props: {
       // The assignment is deliberately read again at kickoff. A room may have been reassigned
       // between the display and the human press; opening the old session must not score the new game.
       const current = await client.assignment(identity);
+      if (!isCurrent()) return;
       if (!current.ok) {
         noteFailure(current, safeStartFailure(current), 'start');
         return;
@@ -364,13 +383,19 @@ export default function ConnectedRoom(props: {
         credentials: { sessionId: session.value.sessionId, token: session.value.token },
         ...(current.value.tournamentKey ? { tournamentKey: current.value.tournamentKey } : {}),
         definition: current.value.definition,
+        isCurrent,
       });
+      if (!isCurrent()) return;
       if (!outcome.ok) setActionError(outcome.error);
     } catch {
-      setActionError('Tournament control could not start this game. No scoring has started. Try Start scoring again.');
+      if (isCurrent()) {
+        setActionError('Tournament control could not start this game. No scoring has started. Try Start scoring again.');
+      }
     } finally {
-      startingRef.current = false;
-      setStarting(false);
+      if (startGeneration.current === generation) {
+        startingRef.current = false;
+        setStarting(false);
+      }
     }
   };
 
@@ -388,6 +413,7 @@ export default function ConnectedRoom(props: {
     lastSuccessfulCheckAt,
     now,
     failing: pollFailed,
+    credentialProblem: roomCredentialProblem,
   });
   const state = stateLine(assignment, busy);
 
@@ -399,12 +425,13 @@ export default function ConnectedRoom(props: {
             <BrandLogo className="shell-brand-logo" />
           </h1>
           <p className="room-title-line">{pairedRoom.roomName}</p>
-          <p className="shell-subtitle">Connected</p>
+          <p className="shell-subtitle">Paired</p>
         </div>
         <button
           type="button"
           className="shell-button shell-button-quiet shell-button-icon"
           onClick={() => setSettingsOpen(true)}
+          disabled={starting}
           title="Settings"
           aria-label="Settings"
         >
@@ -449,7 +476,9 @@ export default function ConnectedRoom(props: {
                   <p className="assignment-team">{assignmentDefinition.right.name}</p>
                   <p className={assignmentDefinition.round.packetName ? 'pregame-packet' : 'pregame-packet is-missing'}>
                     {assignmentDefinition.round.packetName
-                      ? `Packet ${assignmentDefinition.round.packetName}`
+                      ? /^packet\b/i.test(assignmentDefinition.round.packetName.trim())
+                        ? assignmentDefinition.round.packetName
+                        : `Packet ${assignmentDefinition.round.packetName}`
                       : 'No packet named for this round'}
                   </p>
                   <p className="pregame-tournament">{assignment?.tournamentName}</p>
@@ -482,7 +511,15 @@ export default function ConnectedRoom(props: {
               >
                 {starting ? 'Starting…' : assignment?.session?.resumable ? 'Resume scoring' : 'Start scoring'}
               </button>
-              <button type="button" className="shell-button shell-button-quiet" onClick={() => setProblemOpen(true)}>
+              <button
+                type="button"
+                className="shell-button shell-button-quiet"
+                disabled={starting}
+                onClick={() => {
+                  if (!assignmentDefinition || assignment?.scheduledMatchId === undefined) return;
+                  setProblemAssignment({ packageValue: assignmentDefinition, scheduledMatchId: assignment.scheduledMatchId });
+                }}
+              >
                 Something wrong?
               </button>
             </div>
@@ -505,7 +542,6 @@ export default function ConnectedRoom(props: {
           <p className="shell-warning" role="alert">
             Tournament control no longer recognizes {pairedRoom.roomName}.
           </p>
-          <p className="shell-hint">The room is still saved on this device. Pair this same room again to reconnect it.</p>
           <button type="button" className="shell-button" onClick={() => setRepairOpen(true)}>
             Pair {pairedRoom.roomName} again
           </button>
@@ -549,22 +585,20 @@ export default function ConnectedRoom(props: {
         />
       )}
 
-      {problemOpen && assignmentDefinition && (
+      {problemAssignment && (
         <AssignmentProblemDialog
-          packageValue={assignmentDefinition}
+          packageValue={problemAssignment.packageValue}
           onReportProblem={handleProblemReport}
           onSent={(result) => {
-            const scheduledMatchId = assignment?.scheduledMatchId;
-            if (scheduledMatchId === undefined) return;
             setProblemReceipt({
-              scheduledMatchId,
+              scheduledMatchId: problemAssignment.scheduledMatchId,
               message:
                 result.kind === 'already-outstanding'
                   ? 'Tournament control had already been notified about this room.'
                   : 'Tournament control has been notified about the assignment.',
             });
           }}
-          onClose={() => setProblemOpen(false)}
+          onClose={() => setProblemAssignment(null)}
         />
       )}
 

@@ -8,7 +8,7 @@
  * server involves discovery, a capability check, and an identify call in a specific order for
  * specific reasons, and a second copy of that sequence written for the QR path would be a second
  * place for a room to end up talking to a server that cannot run its tournament. So the sequence
- * lives here and `ConnectedSetup` calls it from all three.
+ * lives here and each pairing entry path uses it.
  *
  * # Nothing here holds state
  *

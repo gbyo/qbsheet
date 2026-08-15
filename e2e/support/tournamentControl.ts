@@ -96,7 +96,7 @@ export type RoundNumber = keyof typeof rounds;
  * Deliberately carries no `handoff_instruction`: this is the tournament that wants the result over
  * the wire and nothing else, which is the case the completion screen's new behaviour turns on.
  */
-function assignmentFor(round: RoundNumber): object {
+export function assignmentFor(round: RoundNumber): object {
   const spec = rounds[round];
   return assignmentDocument({
     tournamentId,

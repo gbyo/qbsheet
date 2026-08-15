@@ -14,6 +14,7 @@ let answer: () => Promise<unknown>;
 let sessionAnswer: () => Promise<unknown>;
 let assignmentCalls = 0;
 let sessionCalls = 0;
+let helpMessages: string[] = [];
 
 vi.mock('../src/integrations/fruity/FruityServerClient', () => {
   class StubClient {
@@ -33,7 +34,8 @@ vi.mock('../src/integrations/fruity/FruityServerClient', () => {
       return { ok: true, value: { roomId: 'room-1', roomName: 'Room 204', accessToken: 'room-token-2' } };
     }
 
-    async requestHelp() {
+    async requestHelp(_identity: unknown, _category: unknown, message: string) {
+      helpMessages.push(message);
       return { kind: 'accepted', request: { category: 'wrong-matchup', message: 'reported', id: 'help-1' } };
     }
   }
@@ -112,6 +114,7 @@ beforeEach(() => {
   vi.setSystemTime(new Date('2026-08-14T12:00:00.000Z'));
   assignmentCalls = 0;
   sessionCalls = 0;
+  helpMessages = [];
   answer = ok(assignmentOf());
   sessionAnswer = async () => ({ ok: true as const, value: { sessionId: 'session-1', token: 'session-token' } });
 });
@@ -164,6 +167,9 @@ describe('the established room', () => {
     expect(screen.getByText('Ninety Six A')).toBeInTheDocument();
     expect(screen.getByText('Greenwood')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Start scoring' })).toBeEnabled();
+    expect(screen.getByText('Packet 7')).toBeInTheDocument();
+    expect(screen.queryByText('Packet Packet 7')).toBeNull();
+    expect(screen.getByText('Paired', { exact: true })).toBeInTheDocument();
     expect(document.activeElement).toBe(settings);
   });
 
@@ -183,6 +189,32 @@ describe('the established room', () => {
     expect(sessionCalls).toBe(1);
     expect(assignmentCalls).toBe(2);
     expect(onStart).toHaveBeenCalledTimes(1);
+  });
+
+  test('disables room navigation and abandons a stale Start transaction on unmount', async () => {
+    let finishSession: ((value: unknown) => void) | undefined;
+    answer = ok(assignmentOf({ state: 'assigned', scheduledMatchId: 'match-5', definition }));
+    sessionAnswer = () => new Promise((resolve) => {
+      finishSession = resolve;
+    });
+    const onStart = vi.fn(() => ({ ok: true as const }));
+    renderRoom({ onStart });
+    await settle();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start scoring' }));
+    await settle();
+
+    expect(screen.getByRole('button', { name: 'Settings' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Something wrong?' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Starting…' })).toBeDisabled();
+
+    cleanup();
+    await act(async () => {
+      finishSession?.({ ok: true, value: { sessionId: 'session-1', token: 'session-token' } });
+      await Promise.resolve();
+    });
+
+    expect(onStart).not.toHaveBeenCalled();
   });
 
   test('shows the assignment room from the QBJ while keeping the paired room identity', async () => {
@@ -240,6 +272,30 @@ describe('the established room', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Wrong packet' }));
 
     expect(screen.getByLabelText('Which packet does the reader actually have?')).toHaveFocus();
+  });
+
+  test('reports the assignment that was shown when the problem dialog opened', async () => {
+    answer = ok(assignmentOf({ state: 'assigned', scheduledMatchId: 'match-5', definition }));
+    renderRoom();
+    await settle();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Something wrong?' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Wrong packet' }));
+
+    answer = ok(
+      assignmentOf({
+        state: 'assigned',
+        scheduledMatchId: 'match-6',
+        definition: { ...definition, room: { id: 'room-205', name: 'Room 205' } },
+      }),
+    );
+    await poll();
+    fireEvent.click(screen.getByRole('button', { name: 'Tell tournament control' }));
+    await settle();
+
+    expect(helpMessages).toHaveLength(1);
+    expect(helpMessages[0]).toContain('Round 7 · Room 204');
+    expect(helpMessages[0]).not.toContain('Room 205');
   });
 
   test('does not carry a problem receipt into a different scheduled match', async () => {
@@ -306,6 +362,8 @@ describe('room recovery', () => {
     await settle();
 
     expect(screen.getByText(/no longer recognizes Room 204/)).toBeInTheDocument();
+    expect(screen.getByText('Automatic checks are paused.')).toBeInTheDocument();
+    expect(screen.queryByText('QBSheet will keep trying automatically.')).toBeNull();
     expect(screen.getByRole('button', { name: 'Pair Room 204 again' })).toBeInTheDocument();
     expect(screen.queryByLabelText('Pairing code')).toBeNull();
 

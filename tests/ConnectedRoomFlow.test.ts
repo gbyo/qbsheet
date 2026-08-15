@@ -65,6 +65,20 @@ describe('durable startup routing for a paired room', () => {
     expect(screenAfterLoad(connection, [accepted])).toEqual({ kind: 'room' });
   });
 
+  test('ambiguous connected unfinished games stay visible on Home instead of opening the room', () => {
+    const ambiguousConnection = { ...connection, gameRecordId: undefined, sessionId: undefined };
+    const first = record({ id: 'game-1a', gameKey: 'session-1a' });
+    const second = record({ id: 'game-1b', gameKey: 'session-1b' });
+
+    expect(screenAfterLoad(ambiguousConnection, [first, second])).toEqual({ kind: 'home' });
+  });
+
+  test('an unreadable record named by the connection goes to Home', () => {
+    expect(screenAfterLoad(connection, [], [{ id: 'game-1', readability: 'too-new', storedVersion: 99 }])).toEqual({
+      kind: 'home',
+    });
+  });
+
   test('an unpaired device retains the ordinary welcome screen', () => {
     expect(screenAfterLoad(null, [])).toEqual({ kind: 'home' });
   });

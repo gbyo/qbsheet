@@ -5,10 +5,11 @@
  * and mounts ConnectedRoom. Keeping the two concepts separate is important: a room can wait for
  * many assignments without asking for its address or pairing code again.
  *
- * Every entry method still ends in the same `openControl` → `exchangePairingCode` sequence. A launch
- * link or a scanned QR payload is inert until the user presses its button, which is the gesture the
- * browser needs before it permits a local-network request. Pairing codes remain in memory only until
- * the exchange consumes them.
+ * Every entry method still ends in the same `openControl` → `exchangePairingCode` sequence. The home
+ * address form opens control before mounting this screen; manual setup, a launch link, and a scanned
+ * QR payload use the same operations here. A launch link or scanned QR payload is inert until the user
+ * presses its button, which is the gesture the browser needs before it permits a local-network request.
+ * Pairing codes remain in memory only until the exchange consumes them.
  */
 import { FormEvent, useState } from 'react';
 import BrandLogo from '../BrandLogo';
@@ -33,8 +34,20 @@ type Stage =
       roomsError?: string;
     };
 
+function pairStage(connection: IControlConnection): Extract<Stage, { kind: 'pair' }> {
+  return {
+    kind: 'pair',
+    client: connection.client,
+    tournamentName: connection.tournamentName,
+    rooms: connection.rooms,
+    ...(connection.roomsError === undefined ? {} : { roomsError: connection.roomsError }),
+  };
+}
+
 export default function ConnectedSetup(props: {
   initialBaseUrl: string;
+  /** A successful address submission from Home, so the same gesture can continue to pairing. */
+  initialConnection?: IControlConnection | null;
   launch?: IPairingLaunchIntent | null;
   /** Preserve the device identity when replacing a pairing. */
   existingDeviceId?: string;
@@ -46,6 +59,7 @@ export default function ConnectedSetup(props: {
 }) {
   const {
     initialBaseUrl,
+    initialConnection = null,
     launch = null,
     existingDeviceId,
     onPaired,
@@ -54,7 +68,9 @@ export default function ConnectedSetup(props: {
     onCancel,
   } = props;
   const [address, setAddress] = useState(launch?.server ?? initialBaseUrl);
-  const [stage, setStage] = useState<Stage>(() => (launch ? { kind: 'launch', intent: launch } : { kind: 'address' }));
+  const [stage, setStage] = useState<Stage>(() =>
+    launch ? { kind: 'launch', intent: launch } : initialConnection ? pairStage(initialConnection) : { kind: 'address' },
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [unreachable, setUnreachable] = useState(false);
@@ -63,13 +79,7 @@ export default function ConnectedSetup(props: {
   const [scanning, setScanning] = useState(false);
 
   const askForCode = (connection: IControlConnection, suggestedRoomId = '') => {
-    setStage({
-      kind: 'pair',
-      client: connection.client,
-      tournamentName: connection.tournamentName,
-      rooms: connection.rooms,
-      ...(connection.roomsError === undefined ? {} : { roomsError: connection.roomsError }),
-    });
+    setStage(pairStage(connection));
     setRoomId(suggestedRoomId);
   };
 
