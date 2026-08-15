@@ -290,7 +290,8 @@ describe('tournament connection safety', () => {
     expect(readConnection()).toBeNull();
     expect(screen.queryByText('Room 204 · Connected')).toBeNull();
     expect(screen.queryByText('Tournament connection')).toBeNull();
-    expect(screen.getByRole('dialog', { name: 'Settings' })).toHaveTextContent('Tournament pairing forgotten.');
+    expect(screen.queryByRole('dialog', { name: 'Settings' })).toBeNull();
+    expect(screen.getByRole('status')).toHaveTextContent('Tournament pairing forgotten.');
     expect((await new GameStore(await openRecordStore<IStoredGameRecord>()).get(saved.id))?.id).toBe(saved.id);
   });
 
@@ -362,7 +363,7 @@ describe('device navigation, reset, build identity, and dialog behavior', () => 
     expect(window.localStorage.getItem(connectionStorageKey)).toBeNull();
     expect(readOperatorNameAsked()).toBe(false);
     expect(keyboardEnabled()).toBe(false);
-    expect(screen.getByRole('switch', { name: 'Keyboard scoring' })).not.toBeChecked();
+    expect(screen.queryByRole('switch', { name: 'Keyboard scoring' })).toBeNull();
     expect(screen.queryByText('Hello, Gibson.')).toBeNull();
     expect(screen.queryByText('Tournament connection')).toBeNull();
     expect(screen.getByRole('status')).toHaveTextContent('Device preferences reset.');

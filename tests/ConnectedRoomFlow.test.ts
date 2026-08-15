@@ -35,11 +35,11 @@ function record(overrides: Partial<IStoredGameRecord> = {}): IStoredGameRecord {
 
 describe('durable startup routing for a paired room', () => {
   test('an idle paired device opens its existing room', () => {
-    expect(screenAfterLoad(connection, [])).toEqual({ kind: 'connect', fresh: false });
+    expect(screenAfterLoad(connection, [])).toEqual({ kind: 'room' });
   });
 
   test('an unfinished game keeps the deliberate Resume workflow', () => {
-    expect(screenAfterLoad(connection, [record()])).toEqual({ kind: 'home' });
+    expect(screenAfterLoad(connection, [record()])).toEqual({ kind: 'room' });
   });
 
   test('a linked completed result with an outstanding handoff reopens completion', () => {
@@ -62,7 +62,7 @@ describe('durable startup routing for a paired room', () => {
       serverDeliveryLedger: { attemptCount: 1, retryable: false, outcome: 'accepted' },
     });
 
-    expect(screenAfterLoad(connection, [accepted])).toEqual({ kind: 'connect', fresh: false });
+    expect(screenAfterLoad(connection, [accepted])).toEqual({ kind: 'room' });
   });
 
   test('an unpaired device retains the ordinary welcome screen', () => {

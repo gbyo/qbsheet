@@ -186,13 +186,13 @@ describe('what the room screen says about checking', () => {
 
   test('a failed poll does not let it claim it is currently in touch', () => {
     const line = checkStatusLine({ forbidden: '', lastSuccessfulCheckAt: 1000, now: 20_000, failing: true });
-    expect(line).toBe('Automatic checks continue · last successful check less than a minute ago');
+    expect(line).toBe('QBSheet will keep trying automatically · last successful check less than a minute ago');
     expect(line).not.toContain('just now');
   });
 
   test('a refusal stops the checking, so the line stops claiming it happens', () => {
     const line = checkStatusLine({ forbidden: 'Not allowed.', lastSuccessfulCheckAt: 1000, now: 2000, failing: false });
-    expect(line).toBe('Automatic checks paused · choose Check now after this is fixed.');
+    expect(line).toBe('Automatic checks paused · try tournament control again.');
     expect(line).not.toContain('checks automatically');
   });
 
