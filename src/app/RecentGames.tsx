@@ -134,7 +134,10 @@ export default function RecentGames(props: {
   if (records.length === 0) return null;
 
   return (
-    <section className="shell-section">
+    <section
+      className="shell-section"
+      style={{ marginTop: '-1px', backgroundColor: 'var(--room-surface)' }}
+    >
       <h2 className="shell-heading">Recent</h2>
       <ul className="recent-list">
         {records.map((record) => (
