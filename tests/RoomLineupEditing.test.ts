@@ -10,7 +10,7 @@ import { describe, expect, test } from 'vitest';
 import { orderedActivePlayers, playersAddedAfter, sameMembership } from '../src/scorer/LineupEditing';
 import { frameDescription, frameQuestion } from '../src/scorer/OperationsDialogs';
 import { joinMenuGroups, IGameMenuItem } from '../src/scorer/GameMenu';
-import { assignmentStateKey, checkStatusLine, lastCheckLabel } from '../src/app/ConnectedSetup';
+import { assignmentStateKey, checkStatusLine, lastCheckLabel } from '../src/app/ConnectedRoom';
 import { ScoreEvent } from '../src/scoring/ScoreEvents';
 import { IScorekeeperFormat } from '../src/scoring/ScorekeeperFormat';
 import { IDerivedGame } from '../src/scoring/deriveGame';

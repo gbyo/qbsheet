@@ -195,6 +195,7 @@ export default function SettingsDialog(props: {
                       type="button"
                       className="settings-inline-action"
                       disabled={pairingProtection !== undefined}
+                      aria-describedby={pairingProtection ? 'settings-change-tournament-protection' : undefined}
                       onClick={() => {
                         onClose();
                         onChangeTournament();
@@ -202,7 +203,11 @@ export default function SettingsDialog(props: {
                     >
                       Change tournament…
                     </button>
-                    {pairingProtection && <p className="shell-hint">{pairingProtection}</p>}
+                    {pairingProtection && (
+                      <p id="settings-change-tournament-protection" className="shell-hint">
+                        {pairingProtection}
+                      </p>
+                    )}
                   </>
                 )}
                 <button type="button" className="settings-inline-action" onClick={() => setView('forget')}>

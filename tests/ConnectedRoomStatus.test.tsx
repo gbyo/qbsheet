@@ -209,6 +209,14 @@ describe('the established room', () => {
     expect(screen.queryByRole('button', { name: 'Start scoring' })).toBeNull();
   });
 
+  test('keeps the details-not-ready message when an assigned definition is absent', async () => {
+    answer = ok(assignmentOf({ state: 'assigned', definition: null, scheduledMatchId: undefined }));
+    renderRoom();
+    await settle();
+
+    expect(screen.getByText('Tournament control assigned a game, but its details are not ready. QBSheet will keep checking.')).toBeInTheDocument();
+  });
+
   test('reports a failed Start as an action error rather than a failed poll', async () => {
     answer = ok(assignmentOf({ state: 'assigned', scheduledMatchId: 'match-5', definition }));
     sessionAnswer = async () => ({ ok: false as const, status: 500, error: 'Tournament control did not answer.' });

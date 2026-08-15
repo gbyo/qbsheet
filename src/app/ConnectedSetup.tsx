@@ -15,7 +15,7 @@ import BrandLogo from '../BrandLogo';
 import FruityServerClient from '../integrations/fruity/FruityServerClient';
 import { IControlConnection, exchangePairingCode, openControl } from './ControlPairing';
 import { IPairedRoom } from './ConnectedSession';
-import { IPairingLaunchIntent, parsePairingLaunchUrl } from './PairingLaunch';
+import { IPairingLaunchIntent, readScannedPairingCode } from './PairingLaunch';
 import { connectionTimeline } from './ConnectionTimeline';
 import QrScannerDialog from './QrScannerDialog';
 import ControlIcon from '../scorer/ControlIcon';
@@ -149,15 +149,6 @@ export default function ConnectedSetup(props: {
     } finally {
       setBusy(false);
     }
-  };
-
-  const readScannedCode = (text: string): string | null => {
-    const parsed = parsePairingLaunchUrl(text);
-    if (parsed.kind === 'problem') return parsed.message;
-    if (parsed.kind === 'none') return 'That is not a QBSheet pairing code. Look for the QR code tournament control is showing.';
-    setScanning(false);
-    onPairingLaunch(parsed.intent);
-    return null;
   };
 
   const addressEmpty = address.trim() === '';
@@ -299,11 +290,12 @@ export default function ConnectedSetup(props: {
         </button>
       </div>
 
-      {scanning && <QrScannerDialog onClose={() => setScanning(false)} onDecoded={readScannedCode} />}
+      {scanning && (
+        <QrScannerDialog
+          onClose={() => setScanning(false)}
+          onDecoded={(text) => readScannedPairingCode(text, setScanning, onPairingLaunch)}
+        />
+      )}
     </main>
   );
 }
-
-// Kept as a compatibility export for the small pure status helpers; ownership now belongs to the
-// established-room component rather than the pairing flow.
-export { assignmentStateKey, checkStatusLine, lastCheckLabel } from './ConnectedRoom';

@@ -217,6 +217,7 @@ describe('refusing to replace a running game', () => {
     expect(updatesAllowedOn({ kind: 'create' })).toBe(false);
 
     expect(updatesAllowedOn({ kind: 'home' })).toBe(true);
+    expect(updatesAllowedOn({ kind: 'pairing', returnTo: 'home' })).toBe(true);
     expect(updatesAllowedOn({ kind: 'room' })).toBe(true);
     expect(updatesAllowedOn({ kind: 'readiness' })).toBe(true);
   });

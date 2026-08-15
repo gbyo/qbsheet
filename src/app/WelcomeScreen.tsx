@@ -75,7 +75,7 @@ import GameFileOpen from './GameFileOpen';
 import RecentGames from './RecentGames';
 import NativeDialog from './NativeDialog';
 import QrScannerDialog from './QrScannerDialog';
-import { IPairingLaunchIntent, parsePairingLaunchUrl } from './PairingLaunch';
+import { IPairingLaunchIntent, readScannedPairingCode } from './PairingLaunch';
 import { readOperatorNameAsked, writeOperatorNameAsked } from './OperatorIdentity';
 import SettingsDialog, { ISettingsConnection } from './SettingsDialog';
 import { downloadStoredGameQbj } from './FinishedGameDownload';
@@ -239,23 +239,6 @@ export default function WelcomeScreen(props: {
 
   /** Nothing typed yet, so the button beside the field offers to go and find the address. */
   const addressEmpty = address.trim() === '';
-
-  /**
-   * A QR code the camera read.
-   *
-   * The scanner knows nothing about pairing, so the judgement is made here and the answer goes back
-   * to it: null closes this down, a sentence keeps the camera up with an explanation. A QR code that
-   * is simply not a pairing link — a Wi-Fi code taped to the wall, a URL on a packet — gets a plainer
-   * sentence than a pairing link that is broken, because those are different mistakes.
-   */
-  const readScannedCode = (text: string): string | null => {
-    const parsed = parsePairingLaunchUrl(text);
-    if (parsed.kind === 'problem') return parsed.message;
-    if (parsed.kind === 'none') return 'That is not a QBSheet pairing code. Look for the QR code tournament control is showing.';
-    setScanning(false);
-    onPairingLaunch(parsed.intent);
-    return null;
-  };
 
   /**
    * Opening a file for a game this device has already completed.
@@ -483,7 +466,12 @@ export default function WelcomeScreen(props: {
         />
       )}
 
-      {scanning && <QrScannerDialog onClose={() => setScanning(false)} onDecoded={readScannedCode} />}
+      {scanning && (
+        <QrScannerDialog
+          onClose={() => setScanning(false)}
+          onDecoded={(text) => readScannedPairingCode(text, setScanning, onPairingLaunch)}
+        />
+      )}
 
       {alreadyPlayed && (
         <NativeDialog

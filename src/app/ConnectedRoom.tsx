@@ -83,7 +83,10 @@ function stateLine(assignment: INormalizedAssignment | null, busy: boolean): str
   if (assignment.state === 'blocked') {
     return assignment.blockedMessage ?? 'Tournament control is holding this room.';
   }
-  if (assignment.state === 'assigned' && (!assignment.definition || assignment.scheduledMatchId === undefined)) {
+  if (assignment.state === 'assigned' && !assignment.definition) {
+    return 'Tournament control assigned a game, but its details are not ready. QBSheet will keep checking.';
+  }
+  if (assignment.state === 'assigned' && assignment.scheduledMatchId === undefined) {
     return 'Tournament control has not supplied enough information to start yet. QBSheet will keep checking.';
   }
   if (assignment.state === 'none') return 'Waiting for the next assignment.';

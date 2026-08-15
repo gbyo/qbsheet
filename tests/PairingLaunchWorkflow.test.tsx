@@ -235,7 +235,10 @@ describe('a pairing link opened on an idle device', () => {
     await openApp();
     await press('Connect and pair');
 
-    await waitFor(() => expect(document.querySelectorAll('.assignment-team')).toHaveLength(2));
+    await waitFor(() => {
+      expect(screen.getByText('Ninety Six', { exact: true })).toBeInTheDocument();
+      expect(screen.getByText('Greenwood', { exact: true })).toBeInTheDocument();
+    });
     expect(screen.getByRole('button', { name: /^(Start|Resume) scoring$/ })).toBeEnabled();
   });
 });
