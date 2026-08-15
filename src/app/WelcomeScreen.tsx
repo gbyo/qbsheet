@@ -56,11 +56,11 @@
  * plainly — round, room, teams, and how far in it got — with one button. Nothing about that path
  * involves the network, and it is offered whether or not anything is reachable.
  *
- * # And a paired room comes before the address box
+ * # And a paired room is still the normal home
  *
- * Once this device is Room 204, typing an address is not a thing anybody should have to do again.
- * The room is stated at the top with one button back into it; the address box stays underneath for
- * the case it is actually for, which is a device being pointed at a different tournament.
+ * Once this device is Room 204, typing an address is not a routine scoring choice. The room is
+ * stated at the top with one deliberate way back into it; changing tournament control happens from
+ * Room Settings, and file/manual scoring remains available here as an exceptional route.
  */
 import { FormEvent, useState } from 'react';
 import BrandLogo from '../BrandLogo';
@@ -69,13 +69,14 @@ import { IGamePackage, gamePackageIdentity, gamePackageLabel, gamePackageMatchup
 import deriveGame from '../scoring/deriveGame';
 import { IUnreadableRecord } from '../game/GameRecordUpgrade';
 import { IPairedRoom } from './ConnectedSession';
+import { ControlOpenResult } from './ControlPairing';
 import UpdateNotice from '../pwa/UpdateNotice';
 import ControlIcon from '../scorer/ControlIcon';
 import GameFileOpen from './GameFileOpen';
 import RecentGames from './RecentGames';
 import NativeDialog from './NativeDialog';
 import QrScannerDialog from './QrScannerDialog';
-import { IPairingLaunchIntent, parsePairingLaunchUrl } from './PairingLaunch';
+import { IPairingLaunchIntent, readScannedPairingCode } from './PairingLaunch';
 import { readOperatorNameAsked, writeOperatorNameAsked } from './OperatorIdentity';
 import SettingsDialog, { ISettingsConnection } from './SettingsDialog';
 import { downloadStoredGameQbj } from './FinishedGameDownload';
@@ -151,7 +152,7 @@ export default function WelcomeScreen(props: {
   onCreateGame: () => void;
   /** Back into the room this device is already paired with. No address, no code. */
   onOpenRoom: () => void;
-  onConnect: (baseUrl: string) => void;
+  onConnect: (baseUrl: string) => Promise<ControlOpenResult>;
   /**
    * A pairing link this device just read off a QR code.
    *
@@ -194,6 +195,8 @@ export default function WelcomeScreen(props: {
   } = props;
   const [address, setAddress] = useState('');
   const [addressError, setAddressError] = useState('');
+  const [addressUnreachable, setAddressUnreachable] = useState(false);
+  const [addressBusy, setAddressBusy] = useState(false);
   const [alreadyPlayed, setAlreadyPlayed] = useState<{ record: IStoredGameRecord; opened: IGamePackage } | null>(
     null,
   );
@@ -226,36 +229,33 @@ export default function WelcomeScreen(props: {
     }
   };
 
-  const submitAddress = (event: FormEvent) => {
+  const submitAddress = async (event: FormEvent) => {
     event.preventDefault();
+    if (addressBusy) return;
     const trimmed = address.trim();
     if (trimmed === '') {
       setAddressError('Enter the address tournament control gave you.');
       return;
     }
     setAddressError('');
-    onConnect(trimmed);
+    setAddressUnreachable(false);
+    setAddressBusy(true);
+    try {
+      const result = await onConnect(trimmed);
+      if (!result.ok) {
+        setAddressError(result.error);
+        setAddressUnreachable(result.unreachable);
+      }
+    } catch {
+      setAddressError('Tournament control could not be reached. Check the connection and try again.');
+      setAddressUnreachable(true);
+    } finally {
+      setAddressBusy(false);
+    }
   };
 
   /** Nothing typed yet, so the button beside the field offers to go and find the address. */
   const addressEmpty = address.trim() === '';
-
-  /**
-   * A QR code the camera read.
-   *
-   * The scanner knows nothing about pairing, so the judgement is made here and the answer goes back
-   * to it: null closes this down, a sentence keeps the camera up with an explanation. A QR code that
-   * is simply not a pairing link — a Wi-Fi code taped to the wall, a URL on a packet — gets a plainer
-   * sentence than a pairing link that is broken, because those are different mistakes.
-   */
-  const readScannedCode = (text: string): string | null => {
-    const parsed = parsePairingLaunchUrl(text);
-    if (parsed.kind === 'problem') return parsed.message;
-    if (parsed.kind === 'none') return 'That is not a QBSheet pairing code. Look for the QR code tournament control is showing.';
-    setScanning(false);
-    onPairingLaunch(parsed.intent);
-    return null;
-  };
 
   /**
    * Opening a file for a game this device has already completed.
@@ -323,7 +323,7 @@ export default function WelcomeScreen(props: {
           {unreadableNotice(unreadable)}
         </p>
       )}
-      {notice !== '' && <p className="shell-notice">{notice}</p>}
+      {notice !== '' && <p className="shell-notice" role="status">{notice}</p>}
 
       <UpdateNotice />
 
@@ -348,93 +348,102 @@ export default function WelcomeScreen(props: {
       {pairedRoom && (
         <section className="shell-section resume-card welcome-room">
           <div>
-            <p className="resume-context">{pairedRoom.roomName} · Connected</p>
+            <p className="resume-context">{pairedRoom.roomName} · Paired</p>
             <p className="welcome-option-copy">
               This device is paired for the tournament. Its next game comes from tournament control.
             </p>
           </div>
           <button type="button" className="shell-button is-primary" onClick={onOpenRoom}>
-            Go to this room
+            Return to {pairedRoom.roomName}
           </button>
         </section>
       )}
 
-      <section className="shell-section welcome-start">
-        <h2 className="shell-heading">Start scoring</h2>
-        <div className="welcome-start-options">
-          <section className="welcome-start-option" aria-labelledby="welcome-control-heading">
-            <h3 id="welcome-control-heading" className="welcome-option-heading">
-              {pairedRoom ? 'Connect to a different tournament' : 'Connect to tournament control'}
-            </h3>
-            <p className="welcome-option-copy">
-              {pairedRoom
-                ? 'Pair this device somewhere else. The room above stays paired until this replaces it.'
-                : 'Connect this room to receive its game and send back the result.'}
-            </p>
-            <form className="connect-form welcome-connect-form" onSubmit={submitAddress}>
-              <label className="shell-label" htmlFor="control-address">
-                Tournament control address
-              </label>
-              <div className="welcome-connect-fields">
-                <input
-                  id="control-address"
-                  className="shell-input"
-                  type="text"
-                  inputMode="url"
-                  autoComplete="off"
-                  spellCheck={false}
-                  placeholder="http://"
-                  value={address}
-                  required
-                  onChange={(event) => {
-                    setAddress(event.target.value);
-                    if (event.target.value.trim() !== '') setAddressError('');
-                  }}
-                />
-                {/*
-                  One control in one place, whose label and job change with the field beside it. Two
-                  buttons rendered at the same position rather than one with a conditional handler,
-                  because `type` is half of what makes each of them correct: Connect must submit the
-                  form so Enter in the address field works, and Scan QR must not.
-                */}
-                {addressEmpty ? (
-                  <button
-                    type="button"
-                    className="shell-button is-primary welcome-scan-button"
-                    onClick={() => setScanning(true)}
-                  >
-                    <ControlIcon name="qr" />
-                    Scan QR
-                  </button>
-                ) : (
-                  <button type="submit" className="shell-button is-primary">
-                    Connect
-                  </button>
+      {!pairedRoom ? (
+        <section className="shell-section welcome-start">
+          <h2 className="shell-heading">Start scoring</h2>
+          <div className="welcome-start-options">
+            <section className="welcome-start-option" aria-labelledby="welcome-control-heading">
+              <h3 id="welcome-control-heading" className="welcome-option-heading">
+                Connect to tournament control
+              </h3>
+              <p className="welcome-option-copy">Connect this room to receive its game and send back the result.</p>
+              <form className="connect-form welcome-connect-form" onSubmit={submitAddress}>
+                <label className="shell-label" htmlFor="control-address">
+                  Tournament control address
+                </label>
+                <div className="welcome-connect-fields">
+                  <input
+                    id="control-address"
+                    className="shell-input"
+                    type="text"
+                    inputMode="url"
+                    autoComplete="off"
+                    spellCheck={false}
+                    placeholder="http://"
+                    value={address}
+                    required
+                    onChange={(event) => {
+                      setAddress(event.target.value);
+                      if (event.target.value.trim() !== '') setAddressError('');
+                      setAddressUnreachable(false);
+                    }}
+                  />
+                  {addressEmpty ? (
+                    <button
+                      type="button"
+                      className="shell-button is-primary welcome-scan-button"
+                      onClick={() => setScanning(true)}
+                    >
+                      <ControlIcon name="qr" />
+                      Scan QR
+                    </button>
+                  ) : (
+                      <button type="submit" className="shell-button is-primary" disabled={addressBusy}>
+                        {addressBusy ? 'Connecting…' : 'Connect'}
+                      </button>
+                  )}
+                </div>
+                {addressError !== '' && (
+                  <div className="shell-errors" role="alert">
+                    <p>{addressError}</p>
+                    {addressUnreachable && <p>You can still score with a game file.</p>}
+                  </div>
                 )}
-              </div>
-              {addressError !== '' && <p className="shell-errors" role="alert">{addressError}</p>}
-            </form>
-          </section>
+              </form>
+            </section>
 
-          <section className="welcome-start-option" aria-labelledby="welcome-file-heading">
-            <h3 id="welcome-file-heading" className="welcome-option-heading">
-              Open a game file
-            </h3>
-            <p className="welcome-option-copy">Open a QBJ or QBG file provided by tournament staff.</p>
-            <GameFileOpen onOpen={openPackage} />
-          </section>
-        </div>
-
-        <div className="welcome-create">
-          <div className="welcome-create-copy">
-            <h3 className="welcome-option-heading">Create a game</h3>
-            <p className="welcome-option-copy">Enter teams, players, and scoring rules yourself.</p>
+            <section className="welcome-start-option" aria-labelledby="welcome-file-heading">
+              <h3 id="welcome-file-heading" className="welcome-option-heading">
+                Open a game file
+              </h3>
+              <p className="welcome-option-copy">Open a QBJ or QBG file provided by tournament staff.</p>
+              <GameFileOpen onOpen={openPackage} />
+            </section>
           </div>
-          <button type="button" className="shell-button" onClick={onCreateGame}>
-            Create game
-          </button>
-        </div>
-      </section>
+
+          <div className="welcome-create">
+            <div className="welcome-create-copy">
+              <h3 className="welcome-option-heading">Create a game</h3>
+              <p className="welcome-option-copy">Enter teams, players, and scoring rules yourself.</p>
+            </div>
+            <button type="button" className="shell-button" onClick={onCreateGame}>
+              Create game
+            </button>
+          </div>
+        </section>
+      ) : (
+        <section className="shell-section welcome-start welcome-other-scoring">
+          <h2 className="shell-heading">Other scoring options</h2>
+          <p className="welcome-option-copy">Use a game file or enter a local game when this room is not using its assigned game.</p>
+          <div className="welcome-other-scoring-actions">
+            <GameFileOpen onOpen={openPackage} />
+            <button type="button" className="shell-button" onClick={onCreateGame}>
+              Create a game
+            </button>
+          </div>
+        </section>
+      )}
 
       {!hasGameHistory && (
         <section className="shell-section welcome-practice">
@@ -480,7 +489,12 @@ export default function WelcomeScreen(props: {
         />
       )}
 
-      {scanning && <QrScannerDialog onClose={() => setScanning(false)} onDecoded={readScannedCode} />}
+      {scanning && (
+        <QrScannerDialog
+          onClose={() => setScanning(false)}
+          onDecoded={(text) => readScannedPairingCode(text, setScanning, onPairingLaunch)}
+        />
+      )}
 
       {alreadyPlayed && (
         <NativeDialog

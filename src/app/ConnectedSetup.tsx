@@ -1,307 +1,93 @@
 /**
- * Connecting a room to tournament control, and then staying connected to it.
+ * The explicit pairing flow for a device that does not yet have an operational room.
  *
- * # Pairing is once a tournament, not once a game
+ * Pairing is setup, not the room itself. Once the exchange succeeds App stores the room capability
+ * and mounts ConnectedRoom. Keeping the two concepts separate is important: a room can wait for
+ * many assignments without asking for its address or pairing code again.
  *
- * A Chromebook is assigned to Room 204 in the morning and is still Room 204 at five o'clock. So the
- * pairing code is asked for once, the room capability is kept, and after that this screen is where
- * the room *lives*: it shows what the room is playing, or that it is waiting, and the scorekeeper
- * comes back to it between games. Sending somebody back through an address box and a pairing code
- * after every round is asking them to redo work the browser already remembers, eleven times a day,
- * under time pressure, with a code they have to go and find again.
- *
- * A new code is asked for in exactly one circumstance: tournament control refused the stored room
- * token. That is the only evidence that the pairing is actually gone.
- *
- * # Every step is a button
- *
- * Not a style choice. From Chrome 142 a page may only reach the local network after the person
- * using it has granted a permission, and that prompt appears in response to a user gesture. A page
- * that quietly probed an address on load would get a denial the scorekeeper never saw and an error
- * they could do nothing about. So the connection begins when somebody presses Connect — and the
- * room screen, which polls, is only ever reached through one.
- *
- * # A denial is not a dead end
- *
- * If the browser will not let this page reach the local network — the permission was refused, the
- * address is wrong, the laptop is on a different network, the venue's Wi-Fi isolates clients — the
- * room is told plainly and offered the file workflow, which needs none of it. Connected scoring is
- * a convenience for tournaments that have a server running. It is never a requirement for this
- * application to be useful.
- *
- * # Discovery happens before anything authenticated
- *
- * The first thing a client does with an address is ask what protocol it speaks. Everything after
- * that — pairing, the assignment, opening a session — goes through whichever surface it answered
- * with, and no code below this line knows which one that was.
- *
- * # A QR code and a tapped link arrive here too
- *
- * A pairing launch link supplies the address and the code that this screen otherwise asks for, and
- * that is the whole of what it supplies: it does not reach the network, skip the capability check,
- * or store anything of its own. It lands on a stage that states the address and waits for a press,
- * because that press is where the browser's local-network permission prompt comes from, and it then
- * runs `openControl` and `exchangePairingCode` — the same two functions the typed form runs, in the
- * same order, producing the same `IPairedRoom` through the same `onPaired`. After the exchange there
- * is nothing left that could tell the two apart. See `PairingLaunch` and `ControlPairing`.
+ * Every entry method still ends in the same `openControl` → `exchangePairingCode` sequence. The home
+ * address form opens control before mounting this screen; manual setup, a launch link, and a scanned
+ * QR payload use the same operations here. A launch link or scanned QR payload is inert until the user
+ * presses its button, which is the gesture the browser needs before it permits a local-network request.
+ * Pairing codes remain in memory only until the exchange consumes them.
  */
-import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { FormEvent, useState } from 'react';
 import BrandLogo from '../BrandLogo';
-import FruityServerClient, {
-  ApiResult,
-  INormalizedAssignment,
-  IRoomIdentity,
-  IRoomListEntry,
-  ISessionCredentials,
-} from '../integrations/fruity/FruityServerClient';
-import { IGameDefinition } from '../game/GameDefinition';
-import { gamePackageMatchup } from '../game/GamePackage';
-import { IPairedRoom } from './ConnectedSession';
+import FruityServerClient from '../integrations/fruity/FruityServerClient';
 import { IControlConnection, exchangePairingCode, openControl } from './ControlPairing';
-import { IPairingLaunchIntent } from './PairingLaunch';
+import { IPairedRoom } from './ConnectedSession';
+import { IPairingLaunchIntent, readScannedPairingCode } from './PairingLaunch';
 import { connectionTimeline } from './ConnectionTimeline';
+import QrScannerDialog from './QrScannerDialog';
+import ControlIcon from '../scorer/ControlIcon';
 import UpdateNotice from '../pwa/UpdateNotice';
-import { assignmentPollIntervalMs, forbiddenIn } from './useConnectedRuntime';
-
-export interface IConnectedStart {
-  room: IPairedRoom;
-  identity: IRoomIdentity;
-  credentials: ISessionCredentials;
-  tournamentKey?: string;
-  definition: IGameDefinition;
-}
 
 type Stage =
   | { kind: 'address' }
-  /**
-   * A launch link, waiting for the press that spends it.
-   *
-   * Deliberately inert. Nothing has been sent, the previous pairing is untouched, and pressing Back
-   * leaves this device exactly as it was.
-   */
+  /** A pairing link waiting for the user gesture that is allowed to reach the LAN. */
   | { kind: 'launch'; intent: IPairingLaunchIntent }
   | {
       kind: 'pair';
       client: FruityServerClient;
       tournamentName: string;
-      rooms: IRoomListEntry[];
+      rooms: IControlConnection['rooms'];
       roomsError?: string;
-    }
-  | { kind: 'room'; client: FruityServerClient; room: IPairedRoom };
+    };
 
-/** The room capability as an identity the client can use. Never rendered; see `ConnectedSession`. */
-function identityFor(room: IPairedRoom): IRoomIdentity {
-  return { roomId: room.roomId, token: room.roomToken, deviceId: room.deviceId, roomName: room.roomName };
-}
-
-/** What the room is being told about its situation, in one line. */
-function stateLine(assignment: INormalizedAssignment | null, busy: boolean): string {
-  if (!assignment) return busy ? 'Asking tournament control what this room is playing…' : '';
-  if (assignment.state === 'held') {
-    return 'Tournament control has paused new starts. This room will be told when to begin.';
-  }
-  if (assignment.state === 'blocked') {
-    return assignment.blockedMessage ?? 'Tournament control is holding this room.';
-  }
-  if (assignment.state === 'assigned' && !assignment.definition) {
-    return 'Tournament control assigned a game, but its details are not ready. Check again or ask tournament control.';
-  }
-  if (assignment.state === 'none') {
-    return 'Waiting for the next assignment.';
-  }
-  return '';
-}
-
-/**
- * What this room is being told, reduced to the part worth redrawing for.
- *
- * The poll returns a fresh object every ten seconds whether or not anything about it has changed,
- * and keying the assignment block on that object would restart its entrance animation six times a
- * minute — for an unchanged screen, in a room where nobody has touched anything. So the key is the
- * *meaning*: which of the four situations this room is in, and for the one that has a game attached,
- * which game. Ten identical polls produce one key and no movement; control assigning the next round
- * produces a different key, and that is the only thing the animation is for.
- */
-export function assignmentStateKey(assignment: INormalizedAssignment | null): string {
-  if (!assignment) return 'none';
-  if (assignment.state === 'held') return 'held';
-  if (assignment.state === 'blocked') return 'blocked';
-  if (assignment.state === 'assigned' && !assignment.definition) {
-    return `assigned-incomplete:${assignment.scheduledMatchId ?? 'unknown'}`;
-  }
-  if (assignment.state === 'none') return 'none';
-  return `assigned:${assignment.scheduledMatchId ?? 'unknown'}`;
-}
-
-/**
- * The address on the ready-to-connect card.
- *
- * `http://` is dropped because it is noise on a card whose whole content is one local address, and
- * because it is what a scheme-less address in the box would have become anyway. `https://` is kept:
- * that one is a real difference between two servers and worth stating.
- */
-export function launchAddressLabel(server: string): string {
-  return server.replace(/^http:\/\//i, '');
-}
-
-/** How recent a successful check was, in the words a person would use about it. */
-export function lastCheckLabel(ageMs: number): string {
-  if (ageMs < 60_000) return 'less than a minute ago';
-  const minutes = Math.floor(ageMs / 60_000);
-  if (minutes === 1) return '1 minute ago';
-  if (minutes < 60) return `${minutes} minutes ago`;
-  const hours = Math.floor(minutes / 60);
-  return hours === 1 ? 'over an hour ago' : `over ${hours} hours ago`;
-}
-
-/**
- * The quiet line under the assignment: is this thing still checking?
- *
- * # Why it exists
- *
- * Because "Waiting for the next assignment." is indistinguishable from a page that has stopped. The
- * room polls every ten seconds and has done since it paired, but nothing on screen has ever said so,
- * so a scorekeeper between rounds has no evidence and does the only thing available to them, which
- * is to press the manual button — or, worse, to conclude the pairing has dropped and go looking for
- * a code. One line of text answers it for the rest of the day.
- *
- * # Why it is not a spinner
- *
- * Because there is nothing to wait for. A spinner says "your request is in progress, stay here";
- * this is an idle room being told the software is awake. Anything that animated, counted down, or
- * pulsed would be putting movement on a screen whose entire job for the next ten minutes is to be
- * calm and to be readable from across a classroom.
- *
- * # Why a failure does not make it lie
- *
- * A poll that failed does not stop the next one, so "checks automatically" is still true — but
- * "checked just now" is not, and the caller has an error banner up saying as much. So the failing
- * case reports the last check that actually succeeded and says nothing about the present. `forbidden`
- * is the one state where the checking genuinely has stopped, on purpose, and it says that instead.
- */
-export function checkStatusLine(state: {
-  forbidden: string;
-  lastSuccessfulCheckAt: number | null;
-  now: number;
-  failing: boolean;
-}): string {
-  if (state.forbidden !== '') return 'Automatic checks paused · choose Check now after this is fixed.';
-  if (state.lastSuccessfulCheckAt === null) return 'Checking tournament control…';
-  const age = Math.max(0, state.now - state.lastSuccessfulCheckAt);
-  if (state.failing) return `Automatic checks continue · last successful check ${lastCheckLabel(age)}`;
-  return `QBSheet checks automatically · checked ${age < 45_000 ? 'just now' : lastCheckLabel(age)}`;
+function pairStage(connection: IControlConnection): Extract<Stage, { kind: 'pair' }> {
+  return {
+    kind: 'pair',
+    client: connection.client,
+    tournamentName: connection.tournamentName,
+    rooms: connection.rooms,
+    ...(connection.roomsError === undefined ? {} : { roomsError: connection.roomsError }),
+  };
 }
 
 export default function ConnectedSetup(props: {
   initialBaseUrl: string;
-  /** A room this device is already paired with. Present means the address and the code are settled. */
-  pairedRoom: IPairedRoom | null;
-  /**
-   * A pairing link that has been read and scrubbed, waiting for a gesture.
-   *
-   * Read once, when this screen mounts. It holds a short bootstrap code and is dropped as soon as
-   * the exchange consumes it; nothing else on this screen ever reads it again.
-   */
+  /** A successful address submission from Home, so the same gesture can continue to pairing. */
+  initialConnection?: IControlConnection | null;
   launch?: IPairingLaunchIntent | null;
-  /** Called the moment a code is exchanged, so the capability survives a reload before any game. */
+  /** Preserve the device identity when replacing a pairing. */
+  existingDeviceId?: string;
   onPaired: (room: IPairedRoom) => void;
-  onStart: (start: IConnectedStart) => void | Promise<void>;
-  /** Tournament control refused the stored room token. The pairing really is gone. */
-  onRoomLost: () => void;
+  onPairingLaunch: (intent: IPairingLaunchIntent) => void;
+  onOtherScoring?: () => void;
+  /** Back is appropriate here because no operational room has been established in this flow. */
   onCancel: () => void;
 }) {
-  const { initialBaseUrl, pairedRoom, launch = null, onPaired, onStart, onRoomLost, onCancel } = props;
-  const [address, setAddress] = useState(launch?.server ?? pairedRoom?.baseUrl ?? initialBaseUrl);
-  // A launch link outranks a stored pairing, because a device being pointed at a different
-  // tournament is precisely what one is for. The stored pairing is not touched by that: it is still
-  // in storage, still valid, and still what this device is until a new exchange succeeds.
+  const {
+    initialBaseUrl,
+    initialConnection = null,
+    launch = null,
+    existingDeviceId,
+    onPaired,
+    onPairingLaunch,
+    onOtherScoring,
+    onCancel,
+  } = props;
+  const [address, setAddress] = useState(launch?.server ?? initialBaseUrl);
   const [stage, setStage] = useState<Stage>(() =>
-    launch
-      ? { kind: 'launch', intent: launch }
-      : pairedRoom
-        ? { kind: 'room', client: new FruityServerClient(pairedRoom.baseUrl), room: pairedRoom }
-        : { kind: 'address' },
+    launch ? { kind: 'launch', intent: launch } : initialConnection ? pairStage(initialConnection) : { kind: 'address' },
   );
   const [busy, setBusy] = useState(false);
-  const [starting, setStarting] = useState(false);
   const [error, setError] = useState('');
   const [unreachable, setUnreachable] = useState(false);
   const [code, setCode] = useState('');
   const [roomId, setRoomId] = useState('');
-  const [assignment, setAssignment] = useState<INormalizedAssignment | null>(null);
-  /** Control accepted this room's capability and refused the request anyway. */
-  const [forbidden, setForbidden] = useState('');
-  /**
-   * When tournament control last actually answered about this room.
-   *
-   * Only a completed read sets it. An HTTP failure is not a check, however promptly it came back,
-   * and the whole value of this line is that it can be believed. It is equally never cleared by a
-   * later failure: that a poll failed at 2:41 does not stop it being true that one succeeded at
-   * 2:40, and forgetting the good one would leave the screen unable to say anything at all in the
-   * situation it is most needed.
-   */
-  const [lastSuccessfulCheckAt, setLastSuccessfulCheckAt] = useState<number | null>(null);
-  /**
-   * Whether the most recent assignment read failed.
-   *
-   * Its own state rather than a reading of `error`, because `error` is where four different things
-   * end up: a failed poll, but also a failed session open, a failed pairing, and — the one that
-   * makes it actively wrong here — a poll that *succeeded* and returned a document carrying
-   * `errors`. Deriving "is the room out of touch" from any of those made the status line understate
-   * a room that had just been answered, which is the one claim it exists to get right.
-   */
-  const [assignmentFailed, setAssignmentFailed] = useState(false);
-  /**
-   * The clock the "checked just now" line is measured against.
-   *
-   * Stamped when a poll finishes rather than kept live by a timer of its own: the polls are already
-   * arriving every ten seconds and each one re-renders this screen, so the label stays current
-   * without a second interval — and without anything on screen that ticks.
-   */
-  const [now, setNow] = useState(() => Date.now());
-  const assignmentRequest = useRef<{ key: string; sequence: number } | null>(null);
-  const assignmentSequence = useRef(0);
-  const currentRoomKey =
-    stage.kind === 'room' ? `${stage.client.baseUrl}|${stage.room.roomId}|${stage.room.roomToken}` : null;
-  const currentRoomKeyRef = useRef<string | null>(currentRoomKey);
+  const [scanning, setScanning] = useState(false);
 
-  useEffect(() => {
-    currentRoomKeyRef.current = currentRoomKey;
-  }, [currentRoomKey]);
-
-  /** The pairing form, against a server that has already answered for itself. */
   const askForCode = (connection: IControlConnection, suggestedRoomId = '') => {
-    setStage({
-      kind: 'pair',
-      client: connection.client,
-      tournamentName: connection.tournamentName,
-      rooms: connection.rooms,
-      ...(connection.roomsError === undefined ? {} : { roomsError: connection.roomsError }),
-    });
+    setStage(pairStage(connection));
     setRoomId(suggestedRoomId);
   };
 
-  /**
-   * A room capability, however it was obtained.
-   *
-   * The tail of every pairing on this screen: typed, scanned, or tapped. Keeping it in one place is
-   * what makes "indistinguishable after the exchange" a property of the code rather than a claim.
-   */
-  const adoptRoom = (client: FruityServerClient, room: IPairedRoom) => {
-    // Written before anything else can fail. A room that paired and then lost the tab must not have
-    // to find the code again.
-    onPaired(room);
-    // The room name, never the code or the token. See `ConnectionTimeline`.
-    connectionTimeline.record('room-repaired', room.roomName);
+  const adoptRoom = (room: IPairedRoom) => {
     setCode('');
     setRoomId('');
-    setAssignment(null);
-    // Nothing has been checked yet under this pairing. The assignment is already cleared here for
-    // the same reason, and a check-status line inherited across a re-pair would spend the seconds
-    // before the first answer saying a room whose token was just refused had been reached just now.
-    setLastSuccessfulCheckAt(null);
-    setAssignmentFailed(false);
-    setStage({ kind: 'room', client, room });
+    connectionTimeline.record('room-repaired', room.roomName);
+    onPaired(room);
   };
 
   const connect = async (event: FormEvent) => {
@@ -311,8 +97,6 @@ export default function ConnectedSetup(props: {
     setError('');
     setUnreachable(false);
     try {
-      // The client discovers on its first call, so this also settles which surface everything below
-      // will use. Nothing here or later needs to know which one that turned out to be.
       const opened = await openControl(address);
       if (!opened.ok) {
         setUnreachable(opened.unreachable);
@@ -329,19 +113,16 @@ export default function ConnectedSetup(props: {
 
   const pair = async (event: FormEvent) => {
     event.preventDefault();
-    if (stage.kind !== 'pair') return;
-    if (busy) return;
+    if (stage.kind !== 'pair' || busy) return;
     setBusy(true);
     setError('');
     try {
-      // A device identity is stable for as long as the pairing is, so a re-pair of the same browser
-      // keeps the identity tournament control has been arbitrating writer ownership with.
-      const paired = await exchangePairingCode(stage.client, code, roomId, pairedRoom?.deviceId);
+      const paired = await exchangePairingCode(stage.client, code, roomId, existingDeviceId);
       if (!paired.ok) {
         setError(paired.error);
         return;
       }
-      adoptRoom(stage.client, paired.value);
+      adoptRoom(paired.value);
     } catch {
       setError('This room could not be paired. Check the connection and try again.');
     } finally {
@@ -349,36 +130,30 @@ export default function ConnectedSetup(props: {
     }
   };
 
-  /**
-   * Spend a launch link.
-   *
-   * Both halves in one press, because the link already contains both answers and stopping in between
-   * to show a code somebody did not type would be showing them a secret for no reason. The failures
-   * are handled differently on purpose: a server that will not answer leaves this on the launch card
-   * so the same press can be tried again once the laptop is awake, while a code control refused
-   * hands over to the ordinary pairing form against that same server — which is where somebody with
-   * a fresh code from the desk needs to be, and is the existing behaviour for a refused code.
-   */
   const connectAndPair = async () => {
     if (stage.kind !== 'launch' || busy) return;
-    const intent = stage.intent;
     setBusy(true);
     setError('');
     setUnreachable(false);
     try {
-      const opened = await openControl(intent.server);
+      const opened = await openControl(stage.intent.server);
       if (!opened.ok) {
         setUnreachable(opened.unreachable);
         setError(opened.error);
         return;
       }
-      const paired = await exchangePairingCode(opened.value.client, intent.code, intent.roomId, pairedRoom?.deviceId);
+      const paired = await exchangePairingCode(
+        opened.value.client,
+        stage.intent.code,
+        stage.intent.roomId,
+        existingDeviceId,
+      );
       if (!paired.ok) {
         setError(paired.error);
-        askForCode(opened.value, intent.roomId ?? '');
+        askForCode(opened.value, stage.intent.roomId ?? '');
         return;
       }
-      adoptRoom(opened.value.client, paired.value);
+      adoptRoom(paired.value);
     } catch {
       setError('This room could not be paired. Check the connection and try again.');
     } finally {
@@ -386,172 +161,7 @@ export default function ConnectedSetup(props: {
     }
   };
 
-  /**
-   * A refusal, wherever on this screen it arrived.
-   *
-   * The same answer for reading the assignment, opening a session, and re-reading it afterwards:
-   * every one of those is the same credential against the same server, so a refusal of one is a
-   * refusal of all three, and pressing Start after it would only ask the same question again.
-   */
-  const noteForbidden = useCallback((result: ApiResult<unknown>): boolean => {
-    const refusal = forbiddenIn(result);
-    if (refusal === null) return false;
-    setForbidden(refusal);
-    return true;
-  }, []);
-
-  const loadAssignment = useCallback(async () => {
-    if (stage.kind !== 'room') return;
-    const key = `${stage.client.baseUrl}|${stage.room.roomId}|${stage.room.roomToken}`;
-    if (assignmentRequest.current?.key === key) return;
-    const sequence = ++assignmentSequence.current;
-    assignmentRequest.current = { key, sequence };
-    setBusy(true);
-    setError('');
-    try {
-      const result = await stage.client.assignment(identityFor(stage.room));
-      // A room can be re-paired while an older request is in flight. That response belongs to the
-      // old capability and must not overwrite the newly paired room's state.
-      if (currentRoomKeyRef.current !== key || assignmentRequest.current?.sequence !== sequence) return;
-      setBusy(false);
-      setNow(Date.now());
-      setAssignmentFailed(!result.ok);
-      if (!result.ok) {
-        // A refused room token is the one thing that sends a scorekeeper back to a pairing code. Any
-        // other failure is the network's problem and the room keeps its capability.
-        if (result.status === 401) {
-          onRoomLost();
-          setAssignment(null);
-          setRoomId('');
-          setError('Tournament control no longer recognizes this room. Pair it again with a new code.');
-          setStage({ kind: 'pair', client: stage.client, tournamentName: '', rooms: [] });
-          return;
-        }
-        // A credential control accepts and will not act on — most often this page's origin is not on
-        // the server's allowlist. The pairing is fine, so it is kept and the server's own explanation
-        // is shown; asking for a new code here would be asking for work that cannot help.
-        if (noteForbidden(result)) return;
-        setError(result.error);
-        return;
-      }
-      setForbidden('');
-      // Tournament control answered about this room. Recorded here and nowhere else, so the status
-      // line below can only ever be reporting a request that actually completed.
-      setLastSuccessfulCheckAt(Date.now());
-      setAssignment(result.value);
-      if (result.value.errors?.length) setError(result.value.errors.join(' '));
-    } finally {
-      if (assignmentRequest.current?.sequence === sequence) {
-        assignmentRequest.current = null;
-        if (currentRoomKeyRef.current === key) setBusy(false);
-      }
-    }
-  }, [stage, onRoomLost, noteForbidden]);
-
-  const loadRef = useRef(loadAssignment);
-  /*
-   * Assigned from a committed effect rather than during render. A render can be thrown away and
-   * replayed, and a ref written during one holds a value from a pass that never happened; the
-   * readers here are all timers and event handlers, which run as their own tasks after the effects
-   * of any commit before them, so an effect is never the staler of the two options and is the only
-   * one that stays correct if this tree ever renders concurrently.
-   */
-  useEffect(() => {
-    loadRef.current = loadAssignment;
-  }, [loadAssignment]);
-
-  /** Read by the interval, which must see the current answer without being torn down and rebuilt. */
-  const forbiddenRef = useRef(forbidden);
-  useEffect(() => {
-    forbiddenRef.current = forbidden;
-  }, [forbidden]);
-
-  // The room screen keeps itself current, so a scorekeeper who finishes a game and comes back here
-  // sees the next assignment appear rather than having to ask for it. A restored room may make its
-  // first check without a gesture; if local-network permission blocks that request, the room stays
-  // here and Check now supplies the explicit gesture instead of sending anybody through pairing.
-  useEffect(() => {
-    if (stage.kind !== 'room') return undefined;
-    void loadRef.current();
-    const timer = setInterval(() => {
-      // "Surface it. Do not retry in a loop." A refusal of this kind does not change because it was
-      // asked again ten seconds later, so the room stops asking and Check now is the way back —
-      // an explicit press, which is what the rule leaves room for.
-      if (forbiddenRef.current !== '') return;
-      void loadRef.current();
-    }, assignmentPollIntervalMs);
-    return () => clearInterval(timer);
-  }, [stage]);
-
-  // Nothing to start against a server that will not answer for this room. Dropped as the refusal
-  // arrives, so a Start button for a game this room cannot open is never drawn.
-  const [refusalSeen, setRefusalSeen] = useState(forbidden);
-  if (refusalSeen !== forbidden) {
-    setRefusalSeen(forbidden);
-    if (forbidden !== '') setAssignment(null);
-  }
-
-  const start = async () => {
-    if (stage.kind !== 'room' || !assignment?.definition || !assignment.scheduledMatchId) return;
-    if (starting) return;
-    setStarting(true);
-    setError('');
-    const identity = identityFor(stage.room);
-    try {
-      // The same call whether this is a new game or the one already open: both surfaces return the
-      // existing session rather than creating a second one, which is what makes resume free.
-      const session = await stage.client.openSession(identity, assignment.scheduledMatchId);
-      if (!session.ok) {
-        if (!noteForbidden(session)) setError(session.error);
-        return;
-      }
-      // Re-read the assignment so the game is built from the rosters as they stand at kickoff rather
-      // than as they stood when the room paired, which may have been an hour ago.
-      const current = await stage.client.assignment(identity);
-      if (!current.ok) {
-        if (!noteForbidden(current)) setError(current.error);
-        return;
-      }
-      if (!current.value.definition) {
-        setError('Tournament control started the game but did not say what to play.');
-        return;
-      }
-      // The session was opened against one game and this is the answer about another, which means
-      // control moved the room between the two calls. Starting anyway would file the new game's
-      // scoresheet under the old game's session. Pressing Start again picks up the current one.
-      if (current.value.scheduledMatchId !== assignment.scheduledMatchId) {
-        setError('Tournament control changed this room’s game while it was starting. Check the game shown and start again.');
-        return;
-      }
-      await onStart({
-        room: stage.room,
-        identity,
-        credentials: { sessionId: session.value.sessionId, token: session.value.token },
-        ...(current.value.tournamentKey ? { tournamentKey: current.value.tournamentKey } : {}),
-        definition: current.value.definition,
-      });
-    } catch {
-      setError('This game could not be started. Check the connection and try again.');
-    } finally {
-      setStarting(false);
-    }
-  };
-
-  const resumable = assignment?.session?.resumable === true && assignment.session.finalReceived !== true;
-  // The scheduled match is what a session is opened against, so an assignment without one cannot be
-  // started. Enabling the button for it would make Start a control that visibly does nothing.
-  const startable =
-    assignment?.state === 'assigned' && assignment.definition !== null && assignment.scheduledMatchId !== undefined;
-  const waiting = stateLine(assignment, busy);
-  const assignmentKey = assignmentStateKey(assignment);
-  const checkStatus = checkStatusLine({
-    forbidden,
-    lastSuccessfulCheckAt,
-    now,
-    // Only a failed assignment read. The error banner is still the authority on *what* went wrong;
-    // this decides whether the line may claim the room is currently in touch.
-    failing: assignmentFailed,
-  });
+  const addressEmpty = address.trim() === '';
 
   return (
     <main className="shell">
@@ -561,19 +171,11 @@ export default function ConnectedSetup(props: {
         </h1>
       </header>
 
-      {/*
-        Everything the link said, minus the one thing it must never say.
-
-        The address and the room identifier are on the projector at the front of the room and are
-        useful for catching a link that points at last week's tournament. The pairing code is not
-        here, is not in the address bar any more, and is not anywhere a screenshot of this screen
-        could reach.
-      */}
       {stage.kind === 'launch' && (
         <section className="shell-section">
           <h2 className="shell-heading">Ready to connect</h2>
           {stage.intent.roomId !== undefined && <p className="shell-subtitle">{stage.intent.roomId}</p>}
-          <p className="shell-hint">{launchAddressLabel(stage.intent.server)}</p>
+          <p className="shell-hint">{stage.intent.server.replace(/^http:\/\//i, '')}</p>
           <div className="shell-actions">
             <button
               type="button"
@@ -590,24 +192,37 @@ export default function ConnectedSetup(props: {
       {stage.kind === 'address' && (
         <section className="shell-section">
           <h2 className="shell-heading">Connect to tournament control</h2>
-          <form className="connect-form" onSubmit={connect}>
+          <form className="connect-form" onSubmit={(event) => void connect(event)}>
             <label className="shell-label" htmlFor="setup-address">
               Tournament control address
             </label>
-            <input
-              id="setup-address"
-              className="shell-input"
-              type="text"
-              inputMode="url"
-              autoComplete="off"
-              spellCheck={false}
-              placeholder="http://"
-              value={address}
-              onChange={(event) => setAddress(event.target.value)}
-            />
-            <button type="submit" className="shell-button is-primary" disabled={busy}>
-              {busy ? 'Connecting…' : 'Connect'}
-            </button>
+            <div className="welcome-connect-fields setup-connect-fields">
+              <input
+                id="setup-address"
+                className="shell-input"
+                type="text"
+                inputMode="url"
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="http://"
+                value={address}
+                onChange={(event) => setAddress(event.target.value)}
+              />
+              {addressEmpty ? (
+                <button
+                  type="button"
+                  className="shell-button is-primary welcome-scan-button"
+                  onClick={() => setScanning(true)}
+                >
+                  <ControlIcon name="qr" />
+                  Scan QR
+                </button>
+              ) : (
+                <button type="submit" className="shell-button is-primary" disabled={busy}>
+                  {busy ? 'Connecting…' : 'Connect'}
+                </button>
+              )}
+            </div>
           </form>
         </section>
       )}
@@ -616,7 +231,7 @@ export default function ConnectedSetup(props: {
         <section className="shell-section">
           <h2 className="shell-heading">{stage.tournamentName || 'Pair this room'}</h2>
           {stage.roomsError && <p className="shell-warning" role="status">{stage.roomsError}</p>}
-          <form className="connect-form" onSubmit={pair}>
+          <form className="connect-form" onSubmit={(event) => void pair(event)}>
             {stage.rooms.length > 0 && (
               <>
                 <label className="shell-label" htmlFor="setup-room">
@@ -657,81 +272,6 @@ export default function ConnectedSetup(props: {
         </section>
       )}
 
-      {stage.kind === 'room' && (
-        <section className="shell-section">
-          <h2 className="shell-heading">{stage.room.roomName} · Connected</h2>
-          {assignment?.tournamentName && <p className="shell-subtitle">{assignment.tournamentName}</p>}
-          {/*
-            The live region is the container and never the contents. It stays mounted across every
-            poll so a change inside it is announced as a change; the block inside is keyed on what
-            the assignment *means*, so it is replaced — and re-enters — only when that meaning is
-            different. Polite, because an assignment arriving is news and not an emergency, and
-            focus is deliberately left alone: the Start button becoming enabled is the invitation,
-            and moving the cursor to it would take the keyboard away from whoever was using it.
-          */}
-          <div className="assignment-state" aria-live="polite">
-            <div key={assignmentKey} className="assignment-state-body">
-              {waiting === '' && assignment?.definition ? (
-                <p className="assignment-matchup">
-                  {assignment.definition.round.name} · {gamePackageMatchup(assignment.definition)}
-                </p>
-              ) : (
-                <p className="shell-hint">{waiting}</p>
-              )}
-            </div>
-          </div>
-          {/*
-            Outside the live region on purpose. This line changes every ten seconds by design, and a
-            screen reader interrupted six times a minute to be told the timestamp moved would be
-            being interrupted by the one thing on this screen that is never news.
-          */}
-          <p className="assignment-check">{checkStatus}</p>
-          {assignment?.nextAssignmentLabel && (
-            <aside className="assignment-next" aria-label="Up next">
-              <span className="assignment-next-label">Up next</span>
-              <span>{assignment.nextAssignmentLabel}</span>
-            </aside>
-          )}
-          {forbidden !== '' && (
-            <p className="shell-warning" role="alert">
-              {forbidden} This room is still paired — this is not something a new code fixes.
-            </p>
-          )}
-          {resumable && (
-            <p className="shell-notice">Tournament control still has this room&apos;s game open.</p>
-          )}
-          {assignment?.definition?.assumptions?.map((assumption) => (
-            <p className="shell-hint" key={assumption}>
-              {assumption}
-            </p>
-          ))}
-          <div className="shell-actions">
-            <button
-              type="button"
-              className="shell-button is-primary"
-              disabled={starting || !startable}
-              onClick={() => void start()}
-            >
-              {starting ? 'Starting…' : resumable ? 'Resume scoring' : 'Start scoring'}
-            </button>
-            {/*
-              "Check now" rather than "Check again", because the room is already checking and this
-              is an override rather than the way an assignment normally arrives. Nobody should have
-              to press it between rounds; it exists for the scorekeeper who has just been told from
-              across the room that the next game is up and does not want to wait out the interval —
-              and for the `forbidden` state, where automatic checking has deliberately stopped.
-            */}
-            <button type="button" className="shell-button" disabled={busy} onClick={() => void loadAssignment()}>
-              Check now
-            </button>
-          </div>
-        </section>
-      )}
-
-      {/* The room screen between rounds is the one place a scorekeeper is idle and connected, which
-          makes it the right place to be offered an update. Renders nothing when none is waiting. */}
-      {stage.kind === 'room' && <UpdateNotice />}
-
       {error !== '' && (
         <div className="shell-errors" role="alert">
           <p>{error}</p>
@@ -739,24 +279,33 @@ export default function ConnectedSetup(props: {
         </div>
       )}
 
-      {unreachable && (
+      {unreachable && onOtherScoring && (
         <section className="shell-section">
           <p className="shell-hint">
             The browser may have refused this page permission to reach the local network, the address may be
-            wrong, or the tournament computer may be on a different network. None of that stops a game being
-            scored from a file.
+            wrong, or tournament control may be on another network. None of that stops a game being scored
+            from a file.
           </p>
-          <button type="button" className="shell-button is-primary" onClick={onCancel}>
-            Open game file
+          <button type="button" className="shell-button is-primary" onClick={onOtherScoring}>
+            Open a game file
           </button>
         </section>
       )}
+
+      <UpdateNotice />
 
       <div className="shell-actions">
         <button type="button" className="shell-button" onClick={onCancel}>
           Back
         </button>
       </div>
+
+      {scanning && (
+        <QrScannerDialog
+          onClose={() => setScanning(false)}
+          onDecoded={(text) => readScannedPairingCode(text, setScanning, onPairingLaunch)}
+        />
+      )}
     </main>
   );
 }

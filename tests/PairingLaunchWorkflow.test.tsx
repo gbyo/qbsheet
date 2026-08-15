@@ -174,9 +174,7 @@ describe('a pairing link opened on an idle device', () => {
     await openApp();
 
     await press('Connect and pair');
-    await waitFor(() =>
-      expect(screen.getByRole('heading', { name: 'Room 204 · Connected' })).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.getByText('Room 204', { exact: true })).toBeInTheDocument());
 
     // Discovery, the verify that follows it, the room list, then the exchange — the same sequence
     // in the same order the typed address box runs, because it is the same two functions.
@@ -227,9 +225,7 @@ describe('a pairing link opened on an idle device', () => {
     cleanup();
     await openApp();
 
-    await waitFor(() =>
-      expect(screen.getByRole('heading', { name: 'Room 204 · Connected' })).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.getByText('Room 204', { exact: true })).toBeInTheDocument());
     expect(screen.queryByLabelText('Pairing code')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Connect and pair' })).toBeNull();
   });
@@ -239,7 +235,10 @@ describe('a pairing link opened on an idle device', () => {
     await openApp();
     await press('Connect and pair');
 
-    await waitFor(() => expect(screen.getByText(/Ninety Six vs Greenwood/)).toBeInTheDocument());
+    await waitFor(() => {
+      expect(screen.getByText('Ninety Six', { exact: true })).toBeInTheDocument();
+      expect(screen.getByText('Greenwood', { exact: true })).toBeInTheDocument();
+    });
     expect(screen.getByRole('button', { name: /^(Start|Resume) scoring$/ })).toBeEnabled();
   });
 });
@@ -329,7 +328,7 @@ describe('what a pairing link is not allowed to do', () => {
     expect(notice).toHaveTextContent('Room 12');
     expect(notice.textContent).not.toContain(pairingCode);
     // The unfinished game is still there and still resumable, and the old capability is untouched.
-    expect(screen.getByRole('button', { name: 'Resume' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Resume scoring' })).toBeInTheDocument();
     expect(readConnection()?.roomToken).toBe('existing-room-token');
     expect(server.fetchImpl).not.toHaveBeenCalled();
   });

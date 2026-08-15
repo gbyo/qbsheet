@@ -38,6 +38,10 @@ export default function SettingsDialog(props: {
   practiceInProgress: boolean;
   onPractice: () => void;
   onReadiness: () => void;
+  /** Leave the room deliberately to use file/manual scoring workflows. */
+  onOtherScoring?: () => void;
+  /** Begin a fresh pairing flow without silently clearing the current room. */
+  onChangeTournament?: () => void;
   onClose: () => void;
   initialView?: Extract<SettingsView, 'settings' | 'scorekeeper'>;
   firstRun?: boolean;
@@ -52,6 +56,8 @@ export default function SettingsDialog(props: {
     practiceInProgress,
     onPractice,
     onReadiness,
+    onOtherScoring,
+    onChangeTournament,
     onClose,
     initialView = 'settings',
     firstRun = false,
@@ -153,6 +159,19 @@ export default function SettingsDialog(props: {
                 <span>{practiceInProgress ? 'Resume practice' : 'Practice scoring'}</span>
                 <span aria-hidden="true">›</span>
               </button>
+              {onOtherScoring && (
+                <button
+                  type="button"
+                  className="settings-navigation-row"
+                  onClick={() => {
+                    onClose();
+                    onOtherScoring();
+                  }}
+                >
+                  <span>Other scoring options</span>
+                  <span aria-hidden="true">›</span>
+                </button>
+              )}
             </section>
 
             {connection && (
@@ -170,6 +189,27 @@ export default function SettingsDialog(props: {
                     <dd className="settings-address">{connection.address ?? 'Address unavailable'}</dd>
                   </div>
                 </dl>
+                {onChangeTournament && (
+                  <>
+                    <button
+                      type="button"
+                      className="settings-inline-action"
+                      disabled={pairingProtection !== undefined}
+                      aria-describedby={pairingProtection ? 'settings-change-tournament-protection' : undefined}
+                      onClick={() => {
+                        onClose();
+                        onChangeTournament();
+                      }}
+                    >
+                      Change tournament…
+                    </button>
+                    {pairingProtection && (
+                      <p id="settings-change-tournament-protection" className="shell-hint">
+                        {pairingProtection}
+                      </p>
+                    )}
+                  </>
+                )}
                 <button type="button" className="settings-inline-action" onClick={() => setView('forget')}>
                   Forget pairing…
                 </button>

@@ -320,6 +320,18 @@ body {
   border-color: var(--room-faint);
 }
 
+.shell-button-quiet {
+  color: var(--room-muted);
+  border-color: transparent;
+  background: transparent;
+}
+
+.shell-button-quiet:hover:not(:disabled) {
+  color: var(--room-text);
+  background: var(--room-surface-sunken);
+  border-color: var(--room-border);
+}
+
 .shell-button.is-destructive {
   color: var(--room-error);
   border-color: var(--room-error-border);
@@ -420,6 +432,10 @@ body {
   margin-top: 0;
 }
 
+.setup-connect-fields {
+  align-items: flex-start;
+}
+
 /*
  * The empty-field state of that same button.
  *
@@ -464,6 +480,18 @@ body {
 
 .welcome-create .shell-button {
   flex: 0 0 auto;
+}
+
+.welcome-other-scoring-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.welcome-other-scoring-actions .file-open {
+  margin: 0;
 }
 
 .welcome-practice {
@@ -591,6 +619,74 @@ body {
 .resume-context,
 .resume-matchup {
   overflow-wrap: anywhere;
+}
+
+.room-title-line {
+  margin: 18px 0 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.connected-room-shell .shell-header {
+  margin-bottom: 16px;
+}
+
+.room-assignment,
+.room-resume {
+  padding-top: 20px;
+}
+
+.assignment-context {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--room-muted);
+}
+
+.assignment-team {
+  margin: 12px 0 0;
+  font-size: 24px;
+  line-height: 1.2;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.assignment-team + .assignment-vs {
+  margin-top: 2px;
+}
+
+.assignment-vs {
+  margin: 8px 0 0;
+  color: var(--room-muted);
+  font-size: 14px;
+}
+
+.room-primary-actions {
+  margin-top: 24px;
+}
+
+.room-recovery {
+  border-bottom: 1px solid var(--room-border);
+}
+
+.room-recovery .shell-warning {
+  margin-bottom: 8px;
+}
+
+.room-repair-dialog,
+.assignment-problem-dialog {
+  max-width: 520px;
+}
+
+.assignment-problem-choices {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.assignment-problem-form .shell-heading {
+  margin-top: 0;
 }
 
 /*
@@ -732,6 +828,12 @@ body {
 .settings-action:hover,
 .settings-inline-action:hover {
   text-decoration: underline;
+}
+
+.settings-inline-action:disabled {
+  color: var(--room-faint);
+  cursor: default;
+  text-decoration: none;
 }
 
 .settings-action:focus-visible,

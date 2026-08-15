@@ -50,6 +50,15 @@ describe('accepted-result acknowledgement', () => {
     expect(screen.getByText(/Excel is a readable scoresheet for review/)).toBeInTheDocument();
   });
 
+  test('puts the next connected-room action before the optional copy section', () => {
+    show(record());
+
+    const next = screen.getByRole('button', { name: 'Done' });
+    const copy = screen.getByRole('heading', { name: 'Download a copy' });
+    expect(next).toHaveClass('is-primary');
+    expect(next.compareDocumentPosition(copy) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   test('the existing accepted status receives the stamp only for a freshly accepted result', () => {
     show(record(), true);
 

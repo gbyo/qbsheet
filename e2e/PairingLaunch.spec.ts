@@ -20,7 +20,7 @@
  * no camera at all, which is why it carries the end-to-end pairing assertions.
  */
 import { expect, test, type Page } from '@playwright/test';
-import { ITournamentControl, pairingCode, roomName, startTournamentControl } from './support/tournamentControl';
+import { ITournamentControl, pairingCode, startTournamentControl } from './support/tournamentControl';
 
 let control: ITournamentControl;
 
@@ -101,20 +101,20 @@ test.describe('a pairing deep link', () => {
 
     await page.getByRole('button', { name: 'Connect and pair' }).click();
 
-    await expect(page.getByRole('heading', { name: `${roomName} · Connected` })).toBeVisible();
+    await expect(page.locator('.connected-room-shell')).toBeVisible();
     expect(control.requests.some((entry) => entry.method === 'POST' && entry.path === '/qbtcp/v1/pair')).toBe(true);
   });
 
   test('the pairing survives a reload without asking for anything again', async ({ page }) => {
     await page.goto(launchUrl({ room: 'room-204' }));
     await page.getByRole('button', { name: 'Connect and pair' }).click();
-    await expect(page.getByRole('heading', { name: `${roomName} · Connected` })).toBeVisible();
+    await expect(page.locator('.connected-room-shell')).toBeVisible();
 
     await page.reload();
 
     // Straight back into the room, from storage. The URL is the ordinary one and has been since the
     // first load, so the reload could not have carried the code back in.
-    await expect(page.getByRole('heading', { name: `${roomName} · Connected` })).toBeVisible();
+    await expect(page.locator('.connected-room-shell')).toBeVisible();
     await expect(page.getByLabel('Pairing code')).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Connect and pair' })).toHaveCount(0);
     expect(new URL(page.url()).hash).toBe('');
@@ -124,7 +124,8 @@ test.describe('a pairing deep link', () => {
     await page.goto(launchUrl({ room: 'room-204' }));
     await page.getByRole('button', { name: 'Connect and pair' }).click();
 
-    await expect(page.getByText('Round 4 · Ninety Six vs Greenwood')).toBeVisible();
+    await expect(page.locator('.assignment-team').nth(0)).toHaveText('Ninety Six');
+    await expect(page.locator('.assignment-team').nth(1)).toHaveText('Greenwood');
     await expect(page.getByRole('button', { name: /^(Start|Resume) scoring$/ })).toBeEnabled();
   });
 
@@ -142,7 +143,7 @@ test.describe('a pairing deep link', () => {
   test('the pairing code never appears in any request line', async ({ page }) => {
     await page.goto(launchUrl({ room: 'room-204' }));
     await page.getByRole('button', { name: 'Connect and pair' }).click();
-    await expect(page.getByRole('heading', { name: `${roomName} · Connected` })).toBeVisible();
+    await expect(page.locator('.connected-room-shell')).toBeVisible();
 
     expect(control.requests.every((entry) => !entry.path.includes(pairingCode))).toBe(true);
   });
@@ -208,7 +209,9 @@ test.describe('the scanner dialog', () => {
     expect(control.requests).toHaveLength(0);
 
     // And the camera was released on the way out.
-    expect(await page.evaluate(() => (window as unknown as { cameraStops: string[] }).cameraStops)).toContain('video');
+    await expect
+      .poll(() => page.evaluate(() => (window as unknown as { cameraStops: string[] }).cameraStops))
+      .toContain('video');
   });
 
   test('a QR code that is not a pairing link keeps the scanner open', async ({ page }) => {
@@ -234,7 +237,9 @@ test.describe('the scanner dialog', () => {
 
     await expect(page.getByRole('dialog', { name: 'Scan tournament QR code' })).toHaveCount(0);
     await expect(scan).toBeFocused();
-    expect(await page.evaluate(() => (window as unknown as { cameraStops: string[] }).cameraStops)).toContain('video');
+    await expect
+      .poll(() => page.evaluate(() => (window as unknown as { cameraStops: string[] }).cameraStops))
+      .toContain('video');
   });
 
   test('a browser that refuses the camera leaves the typed address working', async ({ page }) => {
@@ -256,7 +261,7 @@ test.describe('the scanner dialog', () => {
     await page.locator('#control-address').fill(control.origin);
     await page.locator('.welcome-connect-form button[type="submit"]').click();
 
-    // The manual path is exactly where it was, and needs no camera at any point.
-    await expect(page.locator('#setup-address')).toHaveValue(control.origin);
+    // The address submission itself reached tournament control; no second Connect gesture is needed.
+    await expect(page.getByLabel('Pairing code')).toBeVisible();
   });
 });

@@ -222,6 +222,26 @@ export function parsePairingLaunchUrl(text: string): PairingLaunchResult {
 }
 
 /**
+ * Interpret a QR scan for the two screens that can start pairing.
+ *
+ * The scanner owns the camera, while its caller owns the screen state and the next pairing action.
+ * Keeping this small handoff here means both screens preserve the same distinction between a
+ * malformed QBSheet link and an ordinary non-pairing QR code.
+ */
+export function readScannedPairingCode(
+  text: string,
+  setScanning: (scanning: boolean) => void,
+  onPairingLaunch: (intent: IPairingLaunchIntent) => void,
+): string | null {
+  const parsed = parsePairingLaunchUrl(text);
+  if (parsed.kind === 'problem') return parsed.message;
+  if (parsed.kind === 'none') return 'That is not a QBSheet pairing code. Look for the QR code tournament control is showing.';
+  setScanning(false);
+  onPairingLaunch(parsed.intent);
+  return null;
+}
+
+/**
  * Take the fragment out of the address bar, without a reload and without a history entry.
  *
  * The pathname and query are rebuilt rather than the URL edited, so a deployment under a GitHub

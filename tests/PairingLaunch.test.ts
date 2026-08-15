@@ -18,6 +18,7 @@ import {
   invalidPairingLaunchMessage,
   parsePairingLaunch,
   parsePairingLaunchUrl,
+  readScannedPairingCode,
   takePairingLaunch,
   unsupportedPairingLaunchMessage,
 } from '../src/app/PairingLaunch';
@@ -155,6 +156,28 @@ describe('reading a scanned URL', () => {
       kind: 'problem',
       message: invalidPairingLaunchMessage,
     });
+  });
+
+  test('the shared scan handoff closes the scanner and forwards a valid intent', () => {
+    const setScanning = vi.fn();
+    const onPairingLaunch = vi.fn();
+
+    expect(
+      readScannedPairingCode(`https://qbsheet.com/${fragment(validQuery)}`, setScanning, onPairingLaunch),
+    ).toBeNull();
+    expect(setScanning).toHaveBeenCalledWith(false);
+    expect(onPairingLaunch).toHaveBeenCalledWith({ version: 1, server, code });
+  });
+
+  test('the shared scan handoff keeps the scanner open for an ordinary QR code', () => {
+    const setScanning = vi.fn();
+    const onPairingLaunch = vi.fn();
+
+    expect(readScannedPairingCode('WIFI:S=Venue;T=WPA;P=hunter2;;', setScanning, onPairingLaunch)).toBe(
+      'That is not a QBSheet pairing code. Look for the QR code tournament control is showing.',
+    );
+    expect(setScanning).not.toHaveBeenCalled();
+    expect(onPairingLaunch).not.toHaveBeenCalled();
   });
 });
 
