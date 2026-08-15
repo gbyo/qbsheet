@@ -46,7 +46,7 @@ export function assignmentStateKey(assignment: INormalizedAssignment | null): st
   if (!assignment) return 'none';
   if (assignment.state === 'held') return 'held';
   if (assignment.state === 'blocked') return 'blocked';
-  if (assignment.state === 'assigned' && !assignment.definition) {
+  if (assignment.state === 'assigned' && (!assignment.definition || assignment.scheduledMatchId === undefined)) {
     return `assigned-incomplete:${assignment.scheduledMatchId ?? 'unknown'}`;
   }
   if (assignment.state === 'none') return 'none';
@@ -83,8 +83,8 @@ function stateLine(assignment: INormalizedAssignment | null, busy: boolean): str
   if (assignment.state === 'blocked') {
     return assignment.blockedMessage ?? 'Tournament control is holding this room.';
   }
-  if (assignment.state === 'assigned' && !assignment.definition) {
-    return 'Tournament control assigned a game, but its details are not ready. QBSheet will keep checking.';
+  if (assignment.state === 'assigned' && (!assignment.definition || assignment.scheduledMatchId === undefined)) {
+    return 'Tournament control has not supplied enough information to start yet. QBSheet will keep checking.';
   }
   if (assignment.state === 'none') return 'Waiting for the next assignment.';
   return '';
@@ -111,6 +111,15 @@ function progressFor(record: IStoredGameRecord): string {
 
 function safeAssignmentFailure(result: ApiResult<unknown>): string {
   return result.ok ? 'Tournament control could not be reached.' : result.error || 'Tournament control could not be reached.';
+}
+
+function safeStartFailure(result: ApiResult<unknown>): string {
+  return `Tournament control could not start this game. ${safeAssignmentFailure(result)} No scoring has started. Try Start scoring again.`;
+}
+
+interface IProblemReceipt {
+  scheduledMatchId: string;
+  message: string;
 }
 
 export default function ConnectedRoom(props: {
@@ -169,7 +178,7 @@ export default function ConnectedRoom(props: {
   const [now, setNow] = useState(() => Date.now());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [problemOpen, setProblemOpen] = useState(false);
-  const [problemReceipt, setProblemReceipt] = useState('');
+  const [problemReceipt, setProblemReceipt] = useState<IProblemReceipt | null>(null);
   const [repairOpen, setRepairOpen] = useState(false);
 
   const roomKey = `${pairedRoom.baseUrl}|${pairedRoom.roomId}|${pairedRoom.roomToken}`;
@@ -199,26 +208,34 @@ export default function ConnectedRoom(props: {
     roomCredentialProblemRef.current = roomCredentialProblem;
   }, [roomCredentialProblem]);
 
-  const noteFailure = useCallback((result: ApiResult<unknown>, message: string) => {
+  const noteFailure = useCallback((result: ApiResult<unknown>, message: string, source: 'poll' | 'start') => {
     if (!result.ok && result.status === 401) {
       setRoomCredentialProblem(true);
       roomCredentialProblemRef.current = true;
-      setPollFailed(true);
-      setPollError(message);
-      setActionError('Tournament control no longer recognizes this room.');
+      if (source === 'poll') {
+        setPollFailed(true);
+        setPollError(message);
+      }
+      setActionError(source === 'poll' ? 'Tournament control no longer recognizes this room.' : '');
       return;
     }
     const refusal = forbiddenIn(result);
     if (refusal !== null) {
       setForbidden(refusal);
       forbiddenRef.current = refusal;
-      setPollFailed(true);
-      setPollError('');
+      if (source === 'poll') {
+        setPollFailed(true);
+        setPollError('');
+      }
       setActionError('');
       return;
     }
-    setPollFailed(true);
-    setPollError(message);
+    if (source === 'poll') {
+      setPollFailed(true);
+      setPollError(message);
+    } else {
+      setActionError(message);
+    }
   }, []);
 
   const loadAssignment = useCallback(async () => {
@@ -232,7 +249,7 @@ export default function ConnectedRoom(props: {
       if (roomKeyRef.current !== key || assignmentRequest.current?.sequence !== sequence) return;
       setNow(Date.now());
       if (!result.ok) {
-        noteFailure(result, safeAssignmentFailure(result));
+        noteFailure(result, safeAssignmentFailure(result), 'poll');
         return;
       }
       setForbidden('');
@@ -243,6 +260,9 @@ export default function ConnectedRoom(props: {
       setPollError('');
       setLastSuccessfulCheckAt(Date.now());
       setAssignment(result.value);
+      setProblemReceipt((receipt) =>
+        receipt && receipt.scheduledMatchId !== result.value.scheduledMatchId ? null : receipt,
+      );
       if (result.value.errors?.length) setActionError(result.value.errors.join(' '));
       else setActionError('');
     } catch {
@@ -253,7 +273,7 @@ export default function ConnectedRoom(props: {
     } finally {
       if (assignmentRequest.current?.sequence === sequence) {
         assignmentRequest.current = null;
-        if (roomKeyRef.current === key) setBusy(false);
+        setBusy(false);
       }
     }
   }, [client, identity, noteFailure, roomKey]);
@@ -316,14 +336,14 @@ export default function ConnectedRoom(props: {
     try {
       const session = await client.openSession(identity, expectedMatchId);
       if (!session.ok) {
-        noteFailure(session, safeAssignmentFailure(session));
+        noteFailure(session, safeStartFailure(session), 'start');
         return;
       }
       // The assignment is deliberately read again at kickoff. A room may have been reassigned
       // between the display and the human press; opening the old session must not score the new game.
       const current = await client.assignment(identity);
       if (!current.ok) {
-        noteFailure(current, safeAssignmentFailure(current));
+        noteFailure(current, safeStartFailure(current), 'start');
         return;
       }
       setAssignment(current.value);
@@ -344,7 +364,7 @@ export default function ConnectedRoom(props: {
       });
       if (!outcome.ok) setActionError(outcome.error);
     } catch {
-      setActionError('This game could not be started. No scoring has started; try again from this room.');
+      setActionError('Tournament control could not start this game. No scoring has started. Try Start scoring again.');
     } finally {
       startingRef.current = false;
       setStarting(false);
@@ -419,7 +439,7 @@ export default function ConnectedRoom(props: {
               {state === '' && assignmentDefinition ? (
                 <>
                   <p className="assignment-context">
-                    {pairedRoom.roomName} · {assignmentDefinition.round.name}
+                    {assignmentLine(assignmentDefinition)}
                   </p>
                   <p className="assignment-team">{assignmentDefinition.left.name}</p>
                   <p className="assignment-vs">vs</p>
@@ -502,7 +522,9 @@ export default function ConnectedRoom(props: {
       )}
 
       {actionError !== '' && <p className="shell-warning" role="alert">{actionError}</p>}
-      {problemReceipt !== '' && <p className="shell-notice" role="status">{problemReceipt}</p>}
+      {problemReceipt && problemReceipt.scheduledMatchId === assignment?.scheduledMatchId && (
+        <p className="shell-notice" role="status">{problemReceipt.message}</p>
+      )}
 
       <UpdateNotice />
 
@@ -529,11 +551,15 @@ export default function ConnectedRoom(props: {
           packageValue={assignmentDefinition}
           onReportProblem={handleProblemReport}
           onSent={(result) => {
-            setProblemReceipt(
-              result.kind === 'already-outstanding'
-                ? 'Tournament control had already been notified about this room.'
-                : 'Tournament control has been notified about the assignment.',
-            );
+            const scheduledMatchId = assignment?.scheduledMatchId;
+            if (scheduledMatchId === undefined) return;
+            setProblemReceipt({
+              scheduledMatchId,
+              message:
+                result.kind === 'already-outstanding'
+                  ? 'Tournament control had already been notified about this room.'
+                  : 'Tournament control has been notified about the assignment.',
+            });
           }}
           onClose={() => setProblemOpen(false)}
         />

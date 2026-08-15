@@ -119,6 +119,38 @@ export function unfinishedGameDependsOnConnection(
   return connection.tournamentKey === undefined || record.package.tournament.key === connection.tournamentKey;
 }
 
+/**
+ * Select the one unfinished game this connection may safely resume.
+ *
+ * Pairing protection is intentionally broader than resumption: it may keep a room credential while
+ * any unfinished game from that room still needs it. Resume, however, must not guess between those
+ * games. New connections name the record, legacy connections name the session key, and only a
+ * single room/tournament fallback is safe when neither exact link is available.
+ */
+export function resumeRecordForConnection(
+  connection: IConnectedSession | null,
+  records: IStoredGameRecord[],
+): IStoredGameRecord | null {
+  if (!connection) return null;
+  const unfinished = records.filter((record) => record.connected && isActive(record));
+
+  if (connection.gameRecordId !== undefined) {
+    const exact = unfinished.find((record) => record.id === connection.gameRecordId);
+    if (exact) return exact;
+  }
+
+  if (connection.sessionId !== undefined) {
+    const legacy = unfinished.find((record) => record.gameKey === connection.sessionId);
+    if (legacy) return legacy;
+  }
+
+  const fallback = unfinished.filter((record) => {
+    if (record.package.room?.id !== connection.roomId) return false;
+    return connection.tournamentKey === undefined || record.package.tournament.key === connection.tournamentKey;
+  });
+  return fallback.length === 1 ? fallback[0] : null;
+}
+
 export type Screen =
   | { kind: 'loading' }
   | { kind: 'home' }
@@ -597,6 +629,10 @@ export default function App() {
     () => records.find((record) => unfinishedGameDependsOnConnection(connection, record)) ?? null,
     [connection, records],
   );
+  const resumeRecord = useMemo(
+    () => resumeRecordForConnection(connection, records),
+    [connection, records],
+  );
   const settingsConnection = useMemo(
     () =>
       pairedRoom
@@ -742,7 +778,7 @@ export default function App() {
       <ConnectedRoom
         key={connection?.updatedAt ?? pairedRoom.roomId}
         pairedRoom={pairedRoom}
-        resumeRecord={pairingDependentGame}
+        resumeRecord={resumeRecord}
         notice={notice}
         durable={store.durable}
         storageDegraded={storageDegraded}

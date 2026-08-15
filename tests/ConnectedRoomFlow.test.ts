@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { screenAfterLoad } from '../src/app/App';
+import { resumeRecordForConnection, screenAfterLoad } from '../src/app/App';
 import { connectionVersion, IConnectedSession } from '../src/app/ConnectedSession';
 import { gameRecordVersion, IStoredGameRecord } from '../src/game/GameStore';
 import { validPackage } from './packages';
@@ -67,5 +67,30 @@ describe('durable startup routing for a paired room', () => {
 
   test('an unpaired device retains the ordinary welcome screen', () => {
     expect(screenAfterLoad(null, [])).toEqual({ kind: 'home' });
+  });
+});
+
+describe('safe connected-game resumption', () => {
+  test('prefers the exact game record over a newer room fallback', () => {
+    const newer = record({ id: 'game-2', gameKey: 'session-2', updatedAt: '2026-08-11T15:00:00.000Z' });
+    const exact = record();
+
+    expect(resumeRecordForConnection(connection, [newer, exact])).toBe(exact);
+  });
+
+  test('uses the legacy session key before considering room fallback', () => {
+    const legacyConnection = { ...connection, gameRecordId: undefined, sessionId: 'session-1' };
+    const newer = record({ id: 'game-2', gameKey: 'session-2', updatedAt: '2026-08-11T15:00:00.000Z' });
+    const legacy = record({ id: 'legacy-game', gameKey: 'session-1' });
+
+    expect(resumeRecordForConnection(legacyConnection, [newer, legacy])).toBe(legacy);
+  });
+
+  test('does not choose between multiple room and tournament fallbacks', () => {
+    const fallbackConnection = { ...connection, gameRecordId: undefined, sessionId: undefined };
+    const first = record({ id: 'game-1a', gameKey: 'session-1a' });
+    const second = record({ id: 'game-1b', gameKey: 'session-1b' });
+
+    expect(resumeRecordForConnection(fallbackConnection, [first, second])).toBeNull();
   });
 });

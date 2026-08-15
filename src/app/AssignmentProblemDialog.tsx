@@ -5,7 +5,7 @@
  * it lets a scorekeeper report the specific disagreement without opening a session, creating a
  * local record, or blocking the room from starting if staff says to play the assignment as shown.
  */
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { IGamePackage, gamePackageMatchup } from '../game/GamePackage';
 import { HelpRequestCategory, HelpRequestResult } from './HelpRequests';
 import NativeDialog from './NativeDialog';
@@ -65,11 +65,16 @@ export default function AssignmentProblemDialog(props: {
 }) {
   const { packageValue, onReportProblem, onSent, onClose } = props;
   const [report, setReport] = useState<ReportState>({ kind: 'choose' });
+  const noteField = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (report.kind === 'compose') noteField.current?.focus();
+  }, [report.kind]);
 
   const send = async () => {
     if (report.kind !== 'compose' || !onReportProblem) return;
     const { problem, note } = report;
-    setReport({ ...report, busy: true, error: '' });
+    setReport((current) => (current.kind === 'compose' ? { ...current, busy: true, error: '' } : current));
     let result: HelpRequestResult;
     try {
       result = await onReportProblem(
@@ -83,10 +88,8 @@ export default function AssignmentProblemDialog(props: {
       const error =
         result.kind === 'unsupported'
           ? 'This tournament connection does not support remote control requests.'
-          : result.kind === 'refused'
-            ? result.error
-            : result.error;
-      setReport({ ...report, busy: false, error });
+          : result.error;
+      setReport((current) => (current.kind === 'compose' ? { ...current, busy: false, error } : current));
       return;
     }
     onSent?.(result);
@@ -132,8 +135,14 @@ export default function AssignmentProblemDialog(props: {
             id="assignment-problem-note"
             className="shell-input pregame-note"
             rows={3}
+            ref={noteField}
+            disabled={report.busy}
             value={report.note}
-            onChange={(event) => setReport({ ...report, note: event.target.value })}
+            onChange={(event) =>
+              setReport((current) =>
+                current.kind === 'compose' ? { ...current, note: event.target.value } : current,
+              )
+            }
           />
           <p className="shell-hint">
             The round, room, teams and packet are sent automatically. Add only what tournament control

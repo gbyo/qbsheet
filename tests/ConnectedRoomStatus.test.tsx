@@ -4,12 +4,14 @@
 
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import type { ComponentProps } from 'react';
 import { INormalizedAssignment } from '../src/integrations/fruity/FruityServerClient';
 import { assignmentPollIntervalMs } from '../src/app/useConnectedRuntime';
 import { IGameDefinition } from '../src/game/GameDefinition';
 import { validPackage } from './packages';
 
 let answer: () => Promise<unknown>;
+let sessionAnswer: () => Promise<unknown>;
 let assignmentCalls = 0;
 let sessionCalls = 0;
 
@@ -24,7 +26,7 @@ vi.mock('../src/integrations/fruity/FruityServerClient', () => {
 
     async openSession() {
       sessionCalls += 1;
-      return { ok: true, value: { sessionId: 'session-1', token: 'session-token' } };
+      return sessionAnswer();
     }
 
     async join() {
@@ -53,6 +55,7 @@ const pairedRoom = {
 };
 
 const definition = { ...validPackage(), origin: 'qbj' } as IGameDefinition;
+type RoomProps = ComponentProps<typeof ConnectedRoom>;
 
 function assignmentOf(overrides: Partial<INormalizedAssignment> = {}): INormalizedAssignment {
   return {
@@ -68,7 +71,7 @@ function assignmentOf(overrides: Partial<INormalizedAssignment> = {}): INormaliz
 
 const ok = (value: INormalizedAssignment) => async () => ({ ok: true as const, value });
 
-function renderRoom() {
+function renderRoom(overrides: Partial<RoomProps> = {}) {
   return render(
     <ConnectedRoom
       pairedRoom={pairedRoom}
@@ -86,6 +89,7 @@ function renderRoom() {
       onResume={() => undefined}
       onStart={() => ({ ok: true })}
       onPaired={() => undefined}
+      {...overrides}
     />,
   );
 }
@@ -109,6 +113,7 @@ beforeEach(() => {
   assignmentCalls = 0;
   sessionCalls = 0;
   answer = ok(assignmentOf());
+  sessionAnswer = async () => ({ ok: true as const, value: { sessionId: 'session-1', token: 'session-token' } });
 });
 
 afterEach(() => {
@@ -155,7 +160,7 @@ describe('the established room', () => {
     );
     await poll();
 
-    expect(screen.getByText('Room 204 · Round 7')).toBeInTheDocument();
+    expect(screen.getByText('Round 7 · Room 204')).toBeInTheDocument();
     expect(screen.getByText('Ninety Six A')).toBeInTheDocument();
     expect(screen.getByText('Greenwood')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Start scoring' })).toBeEnabled();
@@ -165,25 +170,7 @@ describe('the established room', () => {
   test('does not open a session until Start scoring is pressed, then rechecks before starting', async () => {
     answer = ok(assignmentOf({ state: 'assigned', scheduledMatchId: 'match-5', definition }));
     const onStart = vi.fn(() => ({ ok: true as const }));
-    render(
-      <ConnectedRoom
-        pairedRoom={pairedRoom}
-        durable
-        operatorName=""
-        onOperatorNameChange={() => undefined}
-        settingsConnection={{ roomName: 'Room 204', address: pairedRoom.baseUrl }}
-        onForgetPairing={() => undefined}
-        onResetDevicePreferences={() => undefined}
-        practiceInProgress={false}
-        onReadiness={() => undefined}
-        onPractice={() => undefined}
-        onOtherScoring={() => undefined}
-        onChangeTournament={() => undefined}
-        onResume={() => undefined}
-        onStart={onStart}
-        onPaired={() => undefined}
-      />,
-    );
+    renderRoom({ onStart });
     await settle();
 
     expect(sessionCalls).toBe(0);
@@ -196,6 +183,73 @@ describe('the established room', () => {
     expect(sessionCalls).toBe(1);
     expect(assignmentCalls).toBe(2);
     expect(onStart).toHaveBeenCalledTimes(1);
+  });
+
+  test('shows the assignment room from the QBJ while keeping the paired room identity', async () => {
+    answer = ok(
+      assignmentOf({
+        state: 'assigned',
+        scheduledMatchId: 'match-5',
+        definition: { ...definition, room: { id: 'room-205', name: 'Room 205' } },
+      }),
+    );
+    renderRoom();
+    await settle();
+
+    expect(screen.getByText('Room 204', { exact: true })).toBeInTheDocument();
+    expect(screen.getByText('Round 7 · Room 205')).toBeInTheDocument();
+  });
+
+  test('explains when an assigned game is missing its scheduled match identity', async () => {
+    answer = ok(assignmentOf({ state: 'assigned', definition, scheduledMatchId: undefined }));
+    renderRoom();
+    await settle();
+
+    expect(screen.getByText('Tournament control has not supplied enough information to start yet. QBSheet will keep checking.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Start scoring' })).toBeNull();
+  });
+
+  test('reports a failed Start as an action error rather than a failed poll', async () => {
+    answer = ok(assignmentOf({ state: 'assigned', scheduledMatchId: 'match-5', definition }));
+    sessionAnswer = async () => ({ ok: false as const, status: 500, error: 'Tournament control did not answer.' });
+    renderRoom();
+    await settle();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start scoring' }));
+    await settle();
+
+    expect(screen.getByText('Tournament control could not start this game. Tournament control did not answer. No scoring has started. Try Start scoring again.')).toBeInTheDocument();
+    expect(screen.queryByText('QBSheet will keep trying automatically.')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Try now' })).toBeNull();
+  });
+
+  test('moves focus into the note field after choosing an assignment problem', async () => {
+    answer = ok(assignmentOf({ state: 'assigned', scheduledMatchId: 'match-5', definition }));
+    renderRoom();
+    await settle();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Something wrong?' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Wrong packet' }));
+
+    expect(screen.getByLabelText('Which packet does the reader actually have?')).toHaveFocus();
+  });
+
+  test('does not carry a problem receipt into a different scheduled match', async () => {
+    answer = ok(assignmentOf({ state: 'assigned', scheduledMatchId: 'match-5', definition }));
+    renderRoom();
+    await settle();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Something wrong?' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Wrong packet' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Tell tournament control' }));
+    await settle();
+
+    expect(screen.getByText('Tournament control has been notified about the assignment.')).toBeInTheDocument();
+
+    answer = ok(assignmentOf({ state: 'assigned', scheduledMatchId: 'match-6', definition }));
+    await poll();
+
+    expect(screen.queryByText('Tournament control has been notified about the assignment.')).toBeNull();
   });
 });
 
