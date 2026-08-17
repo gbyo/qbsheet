@@ -102,4 +102,24 @@ describe('Recent Games operational ledger', () => {
     await waitFor(() => expect(onRetry).toHaveBeenCalledWith(expect.objectContaining({ id: 'match:sm-4471' })));
     expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
   });
+
+  test('offers the file again as a quiet named button on every row, without the word again', () => {
+    const onDownload = vi.fn(() => true);
+    render(
+      <RecentGames
+        records={[record(), record({ id: 'match:other' })]}
+        onDownload={onDownload}
+        canRetry={() => false}
+      />,
+    );
+
+    const downloads = screen.getAllByRole('button', { name: 'Download QBJ' });
+    expect(downloads).toHaveLength(2);
+    expect(screen.queryByRole('button', { name: /again/ })).toBeNull();
+    expect(downloads[0].className).toBe('recent-download');
+
+    fireEvent.click(downloads[1]);
+    expect(onDownload).toHaveBeenCalledTimes(1);
+    expect(onDownload).toHaveBeenCalledWith(expect.objectContaining({ id: 'match:other' }));
+  });
 });

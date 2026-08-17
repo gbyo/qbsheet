@@ -110,10 +110,12 @@ export function NotesDialog(props: {
           onRecord(text.trim(), flagged);
         }}
       >
+        {/* Focused on open. Somebody who reached for Notes mid-round came here to type. */}
         <label htmlFor="scorer-note-text">
           Note on question {questionNumber}
           <textarea
             id="scorer-note-text"
+            data-dialog-autofocus
             rows={3}
             value={text}
             onChange={(changeEvent) => setText(changeEvent.target.value)}

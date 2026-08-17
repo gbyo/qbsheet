@@ -60,6 +60,19 @@ export interface IScorerRecoveryStatus {
    * permanently refused. The offline copy changes completely on this, so it is never assumed.
    */
   automaticDelivery?: boolean;
+  /**
+   * Whether there is tournament control behind this game at all.
+   *
+   * A different question from `automaticDelivery`, which is about whether a result can travel on its
+   * own: emergency scoring has a server and no delivery, and a file game has neither. It matters
+   * here because a row reading "Server snapshot — Not yet sent", in the colour this dialog uses for
+   * problems, is a report of a failure. For a game opened from a file or typed in by hand there is
+   * no server and never was one, so nothing failed, and a scorekeeper sent looking for the fault
+   * would be looking for something that does not exist.
+   *
+   * Defaults to true, because every caller that has a session says nothing and should keep the row.
+   */
+  tournamentControl?: boolean;
   /** Where the finished result has got to, once there is one. */
   delivery?: 'in-progress' | 'waiting' | 'sent' | 'accepted' | 'hand-over';
 }
@@ -194,8 +207,6 @@ function DetailRow(props: { label: string; value: string; problem?: boolean }) {
   );
 }
 
-DetailRow.defaultProps = { problem: false };
-
 /** How the finished result is travelling, said only where it is actually known. */
 function deliveryValue(recovery: IScorerRecoveryStatus): string {
   if (recovery.delivery === 'accepted') return 'Accepted';
@@ -242,18 +253,23 @@ export function ConnectionDetailDialog(props: {
   connection: RoomConnectionState;
   recovery: IScorerRecoveryStatus;
   now: number;
+  /** The word the header is showing, when the game's standing is not a network fact. See `Scorer`. */
+  statusLabel?: string;
   /** The connection history. Passed in rather than read from the singleton so this stays renderable. */
   timeline?: ITimelineEntry[];
   onDownload: () => void;
   onClose: () => void;
 }) {
-  const { connection, recovery, now, timeline = [], onDownload, onClose } = props;
+  const { connection, recovery, now, statusLabel, timeline = [], onDownload, onClose } = props;
   const recordDurablyStored = recovery.recordDurablyStored !== false;
+  const tournamentControl = recovery.tournamentControl !== false;
   return (
     <ScorerDialog title="Connection" onClose={onClose}>
+      {/* The same word as the header pill, and for the same reason: a dialog that says "Connected"
+          under a header that says "Practice" is two answers to one question. */}
       <p className={connectionClass(connection)}>
         <span className="scorer-dot" aria-hidden="true" />
-        {connectionLabel(connection)}
+        {statusLabel ?? connectionLabel(connection)}
       </p>
       <div className="scorer-detail-rows">
         <DetailRow
@@ -266,15 +282,19 @@ export function ConnectionDetailDialog(props: {
           value={recordDurablyStored ? 'Durable' : 'Temporary'}
           problem={!recordDurablyStored}
         />
-        <DetailRow
-          label="Server snapshot"
-          value={
-            recovery.serverSnapshotAt === null || recovery.serverSnapshotAt === undefined
-              ? 'Not yet sent'
-              : describeAge(recovery.serverSnapshotAt, now)
-          }
-          problem={recovery.serverSnapshotAt === null || recovery.serverSnapshotAt === undefined}
-        />
+        {tournamentControl ? (
+          <DetailRow
+            label="Server snapshot"
+            value={
+              recovery.serverSnapshotAt === null || recovery.serverSnapshotAt === undefined
+                ? 'Not yet sent'
+                : describeAge(recovery.serverSnapshotAt, now)
+            }
+            problem={recovery.serverSnapshotAt === null || recovery.serverSnapshotAt === undefined}
+          />
+        ) : (
+          <DetailRow label="Tournament control" value="None for this game" />
+        )}
         <DetailRow label="Automatic delivery" value={deliveryValue(recovery)} />
         {/* Last, because it is the only row here that is not about this game — and present at all
             because the first question about a room that is misbehaving is whether it is running the

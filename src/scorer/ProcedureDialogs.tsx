@@ -283,11 +283,17 @@ export function ReplaceQuestionDialog(props: {
         For a question that cannot stand &mdash; read from the wrong packet, spoiled, or already heard. What was
         recorded on it is removed and the same cycle is played again, so nobody is charged the tossup twice.
       </p>
+      {/*
+        The dialog opens on whichever of these is already selected. Naming the decision is the whole
+        point of asking it, and the alternative is not "the reason box" but the close button in the
+        header — the first focusable node in the dialog, and what the fallback would otherwise pick.
+      */}
       <div className="scorer-choices">
         <button
           type="button"
           aria-pressed={scope === 'tossup'}
           className={scope === 'tossup' ? 'scorer-choice is-selected' : 'scorer-choice'}
+          data-dialog-autofocus={bonusReplaceable ? undefined : true}
           onClick={() => setScope('tossup')}
         >
           Whole cycle
@@ -297,6 +303,7 @@ export function ReplaceQuestionDialog(props: {
             type="button"
             aria-pressed={scope === 'bonus'}
             className={scope === 'bonus' ? 'scorer-choice is-selected' : 'scorer-choice'}
+            data-dialog-autofocus
             onClick={() => setScope('bonus')}
           >
             Bonus only
@@ -311,6 +318,11 @@ export function ReplaceQuestionDialog(props: {
           onReplace(scope, reason.trim());
         }}
       >
+        {/*
+          Not autofocused, unlike the other reason boxes: the scope buttons above it are a decision
+          this dialog is asking for, and putting the cursor past them would make the default the
+          only choice a keyboard reaches without going backwards. Focus starts on the selected one.
+        */}
         <label htmlFor="scorer-replace-reason">
           What went wrong?
           <input
@@ -321,6 +333,7 @@ export function ReplaceQuestionDialog(props: {
             onChange={(e) => setReason(e.target.value)}
           />
         </label>
+        <p className="scorer-dialog-note">Required. It is recorded on the result next to the replaced question.</p>
         <button type="submit" className="scorer-danger" disabled={reason.trim() === ''}>
           Replace {scope === 'bonus' ? 'the bonus' : `question ${questionNumber}`}
         </button>
@@ -369,16 +382,30 @@ export function EndGameEarlyDialog(props: {
           onEnd(reason.trim(), played);
         }}
       >
+        {/*
+          Focused on open, rather than the close button the dialog shell would otherwise land on.
+          This field is the whole dialog — the button under it does nothing until it has something
+          in it — and a room ending a round early is doing it because somebody is waiting.
+        */}
         <label htmlFor="scorer-end-early-reason">
           Why is the game ending early?
           <input
             id="scorer-end-early-reason"
+            data-dialog-autofocus
             value={reason}
             maxLength={300}
             placeholder="Tournament director stopped the round"
             onChange={(e) => setReason(e.target.value)}
           />
         </label>
+        {/*
+          Said, because the button below is disabled until it is answered. A greyed-out primary
+          action with nothing next to it is a screen that knows what it is waiting for and will not
+          say, and the scorekeeper pressing it concludes the button is broken.
+        */}
+        <p className="scorer-dialog-note">
+          Required. It is recorded on the result, so the short round can be explained afterwards.
+        </p>
         <button type="submit" className="scorer-danger" disabled={reason.trim() === ''}>
           End the game now
         </button>
@@ -414,10 +441,12 @@ export function GameDetailsDialog(props: {
           onClose();
         }}
       >
+        {/* The only field in the dialog, and the only reason to have opened it. */}
         <label htmlFor="scorer-moderator">
           Moderator / reader
           <input
             id="scorer-moderator"
+            data-dialog-autofocus
             value={name}
             maxLength={120}
             placeholder="Optional"

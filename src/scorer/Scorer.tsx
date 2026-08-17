@@ -235,8 +235,12 @@ export interface IOperationNotice {
   message: string;
   /** `warning` gets the warning surface and `role="alert"`; ordinary acknowledgements do not. */
   tone: 'info' | 'warning';
-  /** Whether this disappears on its own. Only ever true for "that worked". */
+  /** Whether this uses the ordinary short acknowledgement lifetime. */
   transient: boolean;
+  /** An optional longer lifetime for notices that are useful but do not need to remain forever. */
+  autoDismissMs?: number;
+  /** Whether the notice also offers an explicit close button. */
+  dismissible?: boolean;
 }
 
 /**
@@ -246,6 +250,9 @@ export interface IOperationNotice {
  * that it is gone before the next tossup is over.
  */
 export const operationNoticeMs = 3000;
+
+/** How long the local recovery explanation stays before getting out of the way of the scoresheet. */
+export const recoveryNoticeMs = 15_000;
 
 type BonusExitContent =
   | { kind: 'choices'; options: number[]; selected: number }
@@ -514,10 +521,13 @@ export default function Scorer(props: IScorerProps) {
     recovered
       ? {
           // Not an acknowledgement. It says the events on screen came from somewhere other than this
-          // session, which stays worth knowing for as long as the game does.
+          // session, which is worth knowing for a little while but should not occupy the scoresheet
+          // for the whole game.
           message: 'Recovered the in-progress game saved on this device.',
           tone: 'info',
           transient: false,
+          autoDismissMs: recoveryNoticeMs,
+          dismissible: true,
         }
       : null,
   );
@@ -574,21 +584,22 @@ export default function Scorer(props: IScorerProps) {
     return () => window.clearTimeout(timer);
   }, [connectionRecovery]);
 
-  /**
-   * Clear an acknowledgement once it has been read.
-   *
-   * Keyed on the notice object rather than on its text, so a second acknowledgement replacing a
-   * first gets its own full time on screen instead of inheriting whatever was left of the previous
-   * one. A persistent notice never enters here at all.
-   */
+  /** Clear a timed notice once it has been read. Keyed on the notice object so replacements get a new timer. */
   useEffect(() => {
-    if (!operationNotice?.transient) return undefined;
+    const duration =
+      operationNotice?.autoDismissMs ?? (operationNotice?.transient ? operationNoticeMs : undefined);
+    if (duration === undefined) return undefined;
     const timer = window.setTimeout(() => {
       setOperationNotice(null);
       setEmphasizedQuestion(undefined);
-    }, operationNoticeMs);
+    }, duration);
     return () => window.clearTimeout(timer);
   }, [operationNotice]);
+
+  const dismissOperationNotice = useCallback(() => {
+    setOperationNotice(null);
+    setEmphasizedQuestion(undefined);
+  }, []);
 
   /** Say that something worked. Goes away on its own; see `IOperationNotice`. */
   const acknowledge = useCallback((message: string, questionNumber?: number) => {
@@ -1676,12 +1687,23 @@ export default function Scorer(props: IScorerProps) {
         that interrupting is for.
       */}
       {operationNotice && (
-        <p
+        <div
           className={operationNotice.tone === 'warning' ? 'scorer-banner is-warning' : 'scorer-banner is-info'}
           role={operationNotice.tone === 'warning' ? 'alert' : 'status'}
         >
-          {operationNotice.message}
-        </p>
+          <span className="scorer-banner-message">{operationNotice.message}</span>
+          {operationNotice.dismissible && (
+            <button
+              type="button"
+              className="scorer-banner-dismiss"
+              aria-label="Dismiss recovery notice"
+              title="Dismiss recovery notice"
+              onClick={dismissOperationNotice}
+            >
+              <span aria-hidden="true">×</span>
+            </button>
+          )}
+        </div>
       )}
       {/*
         A refused action is never silent. The engine rejecting a second buzz on the same tossup is
@@ -1764,7 +1786,47 @@ export default function Scorer(props: IScorerProps) {
         />
       )}
 
-      {phase.kind !== 'lineup' && (
+      {phase.kind === 'complete' && (
+        <div className="scorer-completion">
+          <div
+            className={`scorer-complete${completionMotion ? ' is-newly-complete' : ''}`}
+            data-completion-token={completionMotion?.token}
+          >
+            <PreSubmitReview
+              format={format}
+              game={game}
+              unsyncedRosterAdditions={unsyncedRosterAdditions}
+              warnings={warnings}
+              blockers={blockers}
+              submitting={submitting}
+              onSubmit={submit}
+              onDownload={downloadQbj}
+              onReview={() => openReviewAt(undefined)}
+            />
+            {submitResult && (
+              <div className={submitResult.ok ? 'scorer-complete-ok' : 'scorer-complete-warning'}>
+                {/**
+                  A finished game that could not be handed over is the one moment where the
+                  difference between "wait" and "carry this file to the director" decides
+                  whether the game reaches the standings. Both are said, and which one is
+                  said depends on whether there is a delivery path at all.
+                */}
+                {!submitResult.ok && connection === RoomConnectionState.Offline && (
+                  <strong>Result saved on this Chromebook</strong>
+                )}
+                <p>{submitResult.message}</p>
+                {!submitResult.ok && (
+                  <button type="button" className="scorer-action" onClick={downloadQbj}>
+                    Download QBJ backup
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {phase.kind !== 'lineup' && phase.kind !== 'complete' && (
         <div className="scorer-body">
           <main className="scorer-main">
             <div className="scorer-teams">
@@ -1810,12 +1872,8 @@ export default function Scorer(props: IScorerProps) {
                 without joining the two-column grid they are laid out in. */}
             {keyboardEnabled && <KeyboardMap context={keyboardContext} />}
 
-            {/*
-              Pinned to the control bar for every phase but the last. See `.scorer-stage.is-pinned`:
-              the completion review is the one thing put in here that can outgrow the window, and a
-              pinned block taller than the window loses its top edge off the top of the screen.
-            */}
-            <div className={phase.kind === 'complete' ? 'scorer-stage' : 'scorer-stage is-pinned'}>
+            {/* Pinned to the control bar during live play so the current scoring action stays in view. */}
+            <div className="scorer-stage is-pinned">
               {noBuzzAcknowledgement && (
                 <span
                   key={`no-buzz-${noBuzzAcknowledgement.token}`}
@@ -1970,43 +2028,6 @@ export default function Scorer(props: IScorerProps) {
                 />
               )}
 
-              {phase.kind === 'complete' && (
-                <div
-                  className={`scorer-complete${completionMotion ? ' is-newly-complete' : ''}`}
-                  data-completion-token={completionMotion?.token}
-                >
-                  <PreSubmitReview
-                    format={format}
-                    game={game}
-                    unsyncedRosterAdditions={unsyncedRosterAdditions}
-                    warnings={warnings}
-                    blockers={blockers}
-                    submitting={submitting}
-                    onSubmit={submit}
-                    onDownload={downloadQbj}
-                    onReview={() => openReviewAt(undefined)}
-                  />
-                  {submitResult && (
-                    <div className={submitResult.ok ? 'scorer-complete-ok' : 'scorer-complete-warning'}>
-                      {/*
-                        A finished game that could not be handed over is the one moment where the
-                        difference between "wait" and "carry this file to the director" decides
-                        whether the game reaches the standings. Both are said, and which one is
-                        said depends on whether there is a delivery path at all.
-                      */}
-                      {!submitResult.ok && connection === RoomConnectionState.Offline && (
-                        <strong>Result saved on this Chromebook</strong>
-                      )}
-                      <p>{submitResult.message}</p>
-                      {!submitResult.ok && (
-                        <button type="button" className="scorer-action" onClick={downloadQbj}>
-                          Download QBJ backup
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
             </div>
           </main>
 
@@ -2399,6 +2420,7 @@ export default function Scorer(props: IScorerProps) {
         <ConnectionDetailDialog
           connection={connection}
           recovery={recoveryStatus}
+          statusLabel={statusLabel}
           now={detailNow}
           // Read when the dialog opens rather than subscribed to. A history that grew a line under
           // somebody reading it would move the rest of the list, and nothing in here is urgent.

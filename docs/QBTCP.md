@@ -125,7 +125,8 @@ headers. Implementations MUST treat the names as opaque strings.
 
 A client MUST send every credential as a header. A credential MUST NOT appear in a URL, a query
 string, a log line, a rendered user interface, an error message, or any QBJ document. See "Security
-model".
+model", which states the single narrow exception: the short pairing code, and only in the fragment of
+a pairing launch URL.
 
 ## Pairing
 
@@ -152,6 +153,106 @@ A server MAY offer a listing endpoint for a room picker:
 The response contains room identifiers, display names, and descriptions only. It MUST NOT contain a
 token or a pairing code. The endpoint exists so that a scorekeeper can choose "Room 204" from a list
 instead of a typed identifier.
+
+## Pairing launch links and QR codes
+
+A scorekeeper pairing a room by hand copies two things off a projector: an address and a short code.
+This section defines an **optional** convention for delivering both in one string, so that the same
+pairing can start from a QR code on a screen or a link in a message.
+
+It is a bootstrap convenience and nothing more. It does not replace `POST /qbtcp/v1/pair`, it defines
+no endpoint, and it creates no authentication mechanism. Everything it carries is spent on the
+pairing endpoint above, under the rules above.
+
+### Format
+
+A launch link is a URL whose **fragment** carries the launch parameters:
+
+    <scoresheet>#qbtcp-pair?v=1&server=<url-encoded base URL>&code=<pairing code>&room=<room id>
+
+`<scoresheet>` is the address of a scoresheet application. Which one, and at which origin and base
+path, is a matter of configuration and deployment, not of this protocol. A tournament-control
+implementation SHOULD make it configurable, because a venue may run a self-hosted copy.
+
+| Parameter | Required | Meaning |
+| --- | --- | --- |
+| `v` | Yes | Launch format version. This document defines `1`. |
+| `server` | Yes | The base URL of tournament control, percent-encoded. `http` or `https` only. |
+| `code` | Yes | The short pairing code, exactly as `POST /qbtcp/v1/pair` expects it. |
+| `room` | No | A room identifier, used as the `roomId` of the pair request. |
+
+`v` is the version of *this launch convention*. It is not the protocol version in the path, and a
+change to it is not a change to QBTCP. A receiving scoresheet MUST accept only a version it
+implements, and MUST fail safely on any other — the launch format is small enough that a future
+version may reasonably carry a parameter whose meaning cannot be guessed, so partial understanding is
+not permitted. Within a supported version, an unrecognised parameter MUST be ignored, as everywhere
+else in this specification, and MUST NOT be treated as conferring authority.
+
+A complete example, for a scoresheet deployed at `https://qbsheet.com/`:
+
+    https://qbsheet.com/#qbtcp-pair?v=1&server=http%3A%2F%2F192.168.1.24%3A3000&code=48213906&room=room-204
+
+### One string, two ways of delivering it
+
+A QR code offered for this purpose MUST encode exactly this URL. It MUST NOT encode a private payload
+of its own. The point is that the QR code a director puts on a projector and the link they paste into
+a message are the same string, read by the same parser on the receiving side; a separate QR payload
+format would be a second thing to specify, a second thing to validate, and a second thing to get
+wrong.
+
+Tournament control needs nothing beyond this section to offer both. Given a room's pairing code, it
+can render a QR code for the URL above and can offer a "copy link" action that produces the identical
+string.
+
+### The fragment is not optional
+
+Launch data MUST be in the URL fragment. It MUST NOT be in the query string and MUST NOT be in the
+path.
+
+A fragment is not sent to an HTTP server. A scoresheet is typically a static site served by a general
+web server or a CDN that its operators do not control, and a pairing code in a query string is written
+into that server's access log, into its analytics, and into the `Referer` header of the next request —
+all before the scoresheet has run a line of its own code. Everything else in this section depends on
+the fragment property.
+
+### Obligations of a receiving scoresheet
+
+A scoresheet that implements this convention MUST do all of the following.
+
+- **Consume and remove it immediately.** The fragment MUST be read and the URL replaced in place —
+  without a reload and without a new history entry — as the first thing the application does, before
+  it installs error handling, renders, or performs any other startup work. It MUST NOT wait for a
+  render or an effect.
+- **Scrub what it refuses.** A URL carrying the recognised fragment MUST be scrubbed even when the
+  launch data is malformed or its version is unsupported. Refusal is not a reason to leave a possibly
+  live code in an address bar.
+- **Say nothing about the code.** An error arising from a launch link MUST NOT quote the code or the
+  raw fragment.
+- **Not persist, log, diagnose, export, or render the code.** It MUST NOT be written to any local
+  store, any diagnostics bundle, any connection history, any error record, any QBJ document, or any
+  part of the interface.
+- **Require an explicit user action.** A scoresheet MUST NOT contact tournament control merely because
+  a launch link was opened or a QR code was decoded. It MUST wait for a deliberate action. A browser
+  gates access to a local network behind a permission granted in response to a user gesture, and a
+  page that probed on load would be refused in a way the person using it never saw.
+- **Exchange it normally.** The code MUST be spent through `POST /qbtcp/v1/pair`, with `roomId` set
+  from `room` when present. The server remains authoritative for the room it actually paired.
+- **Then behave exactly as any other pairing.** Once the exchange succeeds, the room token is subject
+  to the ordinary persistence and lifetime rules, and nothing distinguishes the resulting pairing from
+  one that began with a typed code.
+- **Discard the code once spent.** A launch code MUST NOT be retained after the exchange, successful or
+  not.
+
+A scoresheet SHOULD also refuse a launch link that would replace a pairing an unfinished local game
+still depends on. Nothing in a link makes it more authoritative than the game in front of the person
+holding the device.
+
+### Validation
+
+The entire payload is untrusted. A receiving scoresheet MUST validate at least the fragment
+namespace, the exact launch version, the presence and shape of `server` and `code`, the URL scheme,
+bounded field lengths, and well-formed percent-encoding, and MUST refuse a payload with a duplicated
+parameter rather than choose between two values.
 
 ## Assignment
 
@@ -434,9 +535,23 @@ because the client then holds a wrong answer and treats it as correct.
    This rule is absolute. The file formats travel by memory stick and by email, and a capability that
    travels with them reaches a place that nobody intended.
 4. **Credentials never enter a log or the user interface.** This includes error text.
-5. **Uniform pairing failure.** See "Pairing".
-6. **An origin allowlist, never a wildcard.** See "CORS and local network access".
-7. **Bounded input.** Servers MUST bound the request body size and the URL length. Servers MUST
+5. **One narrow exception, for bootstrap only.** A short pairing code MAY exist transiently in the
+   **fragment** of a QBTCP pairing launch URL, solely to bootstrap the pairing exchange, and only if
+   the receiving scoresheet consumes it before its normal startup, immediately replaces the URL to
+   remove it, never renders it, and never persists, logs, diagnoses, or exports it. See "Pairing
+   launch links and QR codes".
+
+   The exception is deliberately confined to the pairing code, which is short-lived, single-purpose,
+   rate-limited, and buys nothing but a room token from an endpoint that refuses to say why it failed.
+   It does **not** extend to a room token, a session token, a session identifier, a device identifier,
+   assignment data, result data, or any QBJ document. None of those may appear in a URL in any form.
+
+   A fragment is used because a fragment is not sent to the HTTP server as part of the request. That
+   property, plus immediate removal, is the whole of what makes the exception acceptable; a query
+   string would put the code in somebody else's access log before the scoresheet ran.
+6. **Uniform pairing failure.** See "Pairing".
+7. **An origin allowlist, never a wildcard.** See "CORS and local network access".
+8. **Bounded input.** Servers MUST bound the request body size and the URL length. Servers MUST
    validate all received JSON as untrusted: finite numbers, well-formed shapes, and no
    prototype-pollution keys.
 

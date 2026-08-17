@@ -24,7 +24,7 @@ test('the about page introduces QBSheet and links to the real product', async ({
   await expect(page.getByRole('img', { name: /QBSheet scoring a tied practice game/ })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Built around how you actually score' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Made for tournament day' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Open and straightforward' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: "Your games aren't locked into QBSheet." })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Ready to score?' })).toBeVisible();
 
   const openLinks = page.getByRole('link', { name: 'Open QBSheet' });
@@ -47,9 +47,9 @@ test('the workflow reads as three ordered stages once it has been scrolled to', 
   // The reveal is one-time and driven by an IntersectionObserver, so the assertion is that the stages
   // end up visible — not that they were hidden at some particular moment.
   for (const [index, idea] of [
-    'Set up the game once.',
+    'Start with a game.',
     'Score the game.',
-    'Turn in the result.',
+    'Keep the finished result.',
   ].entries()) {
     await expect(stages.nth(index).getByText(idea)).toBeVisible();
   }
@@ -66,9 +66,9 @@ test.describe('without JavaScript', () => {
     // assertion that fails the moment somebody puts the page back behind a client-side mount.
     await expect(page.getByRole('heading', { level: 1, name: 'The simpler way to keep score.' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Built around how you actually score' })).toBeVisible();
-    await expect(page.getByText('Set up the game once.')).toBeVisible();
+    await expect(page.getByText('Start with a game.')).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Made for tournament day' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Open and straightforward' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: "Your games aren't locked into QBSheet." })).toBeVisible();
     await expect(page.getByRole('link', { name: 'Read the protocol overview' })).toHaveAttribute(
       'href',
       'https://github.com/gbyo/qbsheet/blob/main/docs/QBTCP.md',
@@ -93,7 +93,7 @@ test.describe('with reduced motion', () => {
     for (const heading of ['Built around how you actually score', 'Made for tournament day']) {
       await expect(page.getByRole('heading', { name: heading })).toBeVisible();
     }
-    await expect(page.getByText('Turn in the result.')).toBeVisible();
+    await expect(page.getByText('Keep the finished result.')).toBeVisible();
 
     // The hero's entrance and the workflow's rules are both inside `prefers-reduced-motion:
     // no-preference`, so this device is given the finished composition with no transform on it.

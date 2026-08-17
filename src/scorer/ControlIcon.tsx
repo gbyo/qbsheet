@@ -18,7 +18,8 @@ export type ControlIconName =
   | 'upload'
   | 'adjust'
   | 'forfeit'
-  | 'settings';
+  | 'settings'
+  | 'qr';
 
 const paths: Record<ControlIconName, React.ReactNode> = {
   undo: (
@@ -128,6 +129,19 @@ const paths: Record<ControlIconName, React.ReactNode> = {
       <circle cx="12" cy="12" r="7" />
       <path d="M12 5V3M12 21v-2M19 12h2M3 12h2" />
       <path d="m16.95 7.05 1.41-1.41M5.64 18.36l1.41-1.41M16.95 16.95l1.41 1.41M5.64 5.64l1.41 1.41" />
+    </>
+  ),
+  /*
+   * The three finder squares plus a broken fourth corner: the part of a QR code a person recognises
+   * without being able to say why. Drawn at this file's stroke weight rather than as a filled
+   * pictogram, so it sits beside "Scan QR" the way every other label icon here sits beside its word.
+   */
+  qr: (
+    <>
+      <rect x="3.5" y="3.5" width="6.5" height="6.5" rx="1" />
+      <rect x="14" y="3.5" width="6.5" height="6.5" rx="1" />
+      <rect x="3.5" y="14" width="6.5" height="6.5" rx="1" />
+      <path d="M14 14h3M20.5 14v3M14 17.5v3M17.5 20.5h3" />
     </>
   ),
 };

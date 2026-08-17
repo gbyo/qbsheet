@@ -320,6 +320,18 @@ body {
   border-color: var(--room-faint);
 }
 
+.shell-button-quiet {
+  color: var(--room-muted);
+  border-color: transparent;
+  background: transparent;
+}
+
+.shell-button-quiet:hover:not(:disabled) {
+  color: var(--room-text);
+  background: var(--room-surface-sunken);
+  border-color: var(--room-border);
+}
+
 .shell-button.is-destructive {
   color: var(--room-error);
   border-color: var(--room-error-border);
@@ -420,6 +432,24 @@ body {
   margin-top: 0;
 }
 
+.setup-connect-fields {
+  align-items: flex-start;
+}
+
+/*
+ * The empty-field state of that same button.
+ *
+ * Identical to it in every respect a layout notices — same class, same padding, same height, same
+ * place — and different only in that it carries a glyph. `inline-flex` rather than the default so
+ * the icon sits on the text's own baseline row instead of pushing the label off centre.
+ */
+.welcome-scan-button {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+}
+
 /*
  * The third way into a game.
  *
@@ -450,6 +480,18 @@ body {
 
 .welcome-create .shell-button {
   flex: 0 0 auto;
+}
+
+.welcome-other-scoring-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.welcome-other-scoring-actions .file-open {
+  margin: 0;
 }
 
 .welcome-practice {
@@ -577,6 +619,74 @@ body {
 .resume-context,
 .resume-matchup {
   overflow-wrap: anywhere;
+}
+
+.room-title-line {
+  margin: 18px 0 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.connected-room-shell .shell-header {
+  margin-bottom: 16px;
+}
+
+.room-assignment,
+.room-resume {
+  padding-top: 20px;
+}
+
+.assignment-context {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--room-muted);
+}
+
+.assignment-team {
+  margin: 12px 0 0;
+  font-size: 24px;
+  line-height: 1.2;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.assignment-team + .assignment-vs {
+  margin-top: 2px;
+}
+
+.assignment-vs {
+  margin: 8px 0 0;
+  color: var(--room-muted);
+  font-size: 14px;
+}
+
+.room-primary-actions {
+  margin-top: 24px;
+}
+
+.room-recovery {
+  border-bottom: 1px solid var(--room-border);
+}
+
+.room-recovery .shell-warning {
+  margin-bottom: 8px;
+}
+
+.room-repair-dialog,
+.assignment-problem-dialog {
+  max-width: 520px;
+}
+
+.assignment-problem-choices {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.assignment-problem-form .shell-heading {
+  margin-top: 0;
 }
 
 /*
@@ -718,6 +828,12 @@ body {
 .settings-action:hover,
 .settings-inline-action:hover {
   text-decoration: underline;
+}
+
+.settings-inline-action:disabled {
+  color: var(--room-faint);
+  cursor: default;
+  text-decoration: none;
 }
 
 .settings-action:focus-visible,
@@ -987,12 +1103,47 @@ body {
   overflow-wrap: anywhere;
 }
 
+/*
+ * One narrow column at the right edge of every row, so the download sits in the same place on all of
+ * them. Stacked rather than side by side, because the retry that occasionally joins it would
+ * otherwise shove that row's download inward and break the line the eye follows down the list.
+ */
 .recent-actions {
   grid-area: actions;
   display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
+  flex-direction: column;
+  align-items: flex-end;
   gap: 8px;
+}
+
+/*
+ * Downloading the file again is a repeat action on a list, not the thing to press on this screen.
+ * Several of them one under another as outlined boxes read as a wall of buttons and compete with
+ * Connect and Create above, so this keeps the button and its icon and drops the box. Muted, not
+ * blue: the accent stays with the screen's primary actions.
+ */
+.recent-download {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  font: inherit;
+  font-size: 13px;
+  color: var(--room-muted);
+  white-space: nowrap;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.recent-download:hover {
+  color: var(--room-text);
+  text-decoration: underline;
+}
+
+.recent-download:focus-visible {
+  outline: 2px solid var(--room-accent);
+  outline-offset: 2px;
 }
 
 @media (max-width: 760px) {
@@ -1005,7 +1156,7 @@ body {
   }
 
   .recent-actions {
-    justify-content: flex-start;
+    align-items: flex-start;
   }
 }
 
@@ -1178,6 +1329,40 @@ body {
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 16px;
+}
+
+/*
+ * The QR scanner.
+ *
+ * Narrower than the shared dialog's 560px, because the useful thing on it is a camera preview and a
+ * preview wider than a phone held at arm's length is a lot of ceiling. The frame keeps a fixed
+ * aspect so the dialog does not resize under somebody's hand when the camera settles on its real
+ * resolution, and the dark ground means the moment before the first frame is a black rectangle
+ * rather than a flash of white.
+ */
+.qr-dialog {
+  max-width: 420px;
+}
+
+.qr-preview {
+  overflow: hidden;
+  background: #16171a;
+  border: 1px solid var(--room-border-strong);
+  border-radius: 3px;
+}
+
+.qr-preview-video {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+}
+
+.qr-status {
+  margin: 8px 0 0;
+  min-height: 1.4em;
+  font-size: 13px;
+  color: var(--room-muted);
 }
 
 /* #endregion */
@@ -1437,6 +1622,14 @@ body {
  */
 .manual-shell {
   padding-bottom: 32px;
+
+  /*
+   * How far the sticky action bar's foot extends below its buttons. On a phone whose gesture bar
+   * eats the bottom of the viewport this is the inset rather than the default, which makes the bar
+   * that much taller — and the clearance reserved beneath scroll targets has to grow with it.
+   * Named here because two rules need the same number and they must not drift apart.
+   */
+  --manual-actions-foot: max(10px, env(safe-area-inset-bottom, 0px));
 }
 
 .manual-presets details > summary {
@@ -1471,9 +1664,26 @@ body {
   position: sticky;
   bottom: 0;
   z-index: 2;
-  padding: 10px 0 max(10px, env(safe-area-inset-bottom));
+  padding: 10px 0 var(--manual-actions-foot);
   border-top: 1px solid var(--room-border-strong);
   background: var(--room-surface);
+}
+
+/*
+ * The price of that bar is that it floats over the end of the form, and the browser does not know it
+ * is there. Anything scrolled to automatically — the error block a refused submission moves focus
+ * to, or a field reached by Tab — is brought only just into view, which puts it under the bar. A
+ * complaint nobody can see is indistinguishable from a Start game button that did nothing, which is
+ * the exact failure the focus move exists to prevent. Reserve the bar's height beneath every target
+ * the browser might scroll to; the bar's own buttons are left out because they are sticky and asking
+ * to scroll clear of themselves would drag the form to its end.
+ *
+ * 84px is that height with the foot at its 10px default, so the reservation is the rest of the bar
+ * plus whatever the foot actually resolves to. A flat 84px would come up short by the difference on
+ * any phone with a gesture bar, and coming up short here puts the complaint back under the bar.
+ */
+.manual-shell :is(input, textarea, select, .shell-errors) {
+  scroll-margin-bottom: calc(84px - 10px + var(--manual-actions-foot));
 }
 
 .manual-field {

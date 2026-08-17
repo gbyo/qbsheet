@@ -18,6 +18,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { assignmentPollIntervalMs } from '../src/app/useConnectedRuntime';
 import {
   ITournamentControl,
+  assignmentFor,
   pairingCode,
   roomId,
   roomName,
@@ -27,18 +28,16 @@ import {
 
 async function pairRoom(page: Page, control: ITournamentControl): Promise<void> {
   await page.goto('/');
-  // The address typed on the welcome screen carries into the setup screen, where pressing Connect
-  // is the gesture the browser's local-network permission prompt needs.
+  // The address submission itself is the one explicit gesture that starts discovery. The successful
+  // connection is carried into the pairing-code step without asking for the same approval twice.
   await page.locator('#control-address').fill(control.origin);
   await page.locator('.welcome-connect-form button[type="submit"]').click();
-  await expect(page.locator('#setup-address')).toHaveValue(control.origin);
-  await page.getByRole('button', { name: 'Connect', exact: true }).click();
 
   await expect(page.getByLabel('Pairing code')).toBeVisible();
   await page.getByLabel('Pairing code').fill(pairingCode);
   await page.getByRole('button', { name: 'Pair this room' }).click();
 
-  await expect(page.getByRole('heading', { name: `${roomName} · Connected` })).toBeVisible();
+  await expect(page.locator('.connected-room-shell')).toBeVisible();
 }
 
 /**
@@ -48,22 +47,16 @@ async function pairRoom(page: Page, control: ITournamentControl): Promise<void> 
  */
 async function startAssignedGame(page: Page, round: 4 | 5): Promise<void> {
   const spec = rounds[round];
-  await expect(page.getByText(`${spec.label} · ${spec.left.name} vs ${spec.right.name}`)).toBeVisible();
+  await expect(page.locator('.assignment-context')).toContainText(spec.label);
+  await expect(page.locator('.assignment-team').nth(0)).toHaveText(spec.left.name);
+  await expect(page.locator('.assignment-team').nth(1)).toHaveText(spec.right.name);
   await page.getByRole('button', { name: /^(Start|Resume) scoring$/ }).click();
 
-  const confirm = page.getByRole('button', { name: 'Everything matches' });
   const lineup = page.getByRole('heading', { name: 'Who is starting?' });
   const scoresheet = page.getByText('Tossup 1 of 20', { exact: true });
 
-  // A connected assignment is confirmed before anything is scored against it. It appears on a fresh
-  // start and not on a resume that already has questions in it, so all three landing places are waited
-  // for together — asking `count()` straight after the click would race the render and read zero.
-  await expect(confirm.or(lineup).or(scoresheet).first()).toBeVisible();
-  if (await confirm.count()) {
-    await expect(page.getByText(`${spec.label} · ${roomName}`)).toBeVisible();
-    await confirm.click();
-  }
-
+  // Start is the one deliberate boundary: the room has already shown the assignment, and pressing
+  // it opens the session and then enters the ordinary scorer without a second confirmation wall.
   await expect(lineup.or(scoresheet).first()).toBeVisible();
   if (await lineup.count()) {
     const prompt = page.getByLabel('Starting lineups');
@@ -142,8 +135,8 @@ test.describe('a server that speaks only QBTCP', () => {
 
     // --- a reload mid-round restores from local state and reconnects ---------------------------
     await page.reload();
-    await expect(page.getByRole('heading', { name: 'Unfinished game' })).toBeVisible();
-    await page.getByRole('button', { name: 'Resume' }).click();
+    await expect(page.getByRole('heading', { name: 'Resume this game' })).toBeVisible();
+    await page.getByRole('button', { name: 'Resume scoring' }).click();
     await expect(page.getByText('Tossup 2 of 20', { exact: true })).toBeVisible();
     await expect(page.getByLabel('Ninety Six score')).toHaveText('35');
 
@@ -171,16 +164,66 @@ test.describe('a server that speaks only QBTCP', () => {
     // --- back to the room, which is where the next assignment turns up -------------------------
     control.assign(5);
     await next.click();
-    await expect(page.getByRole('heading', { name: `${roomName} · Connected` })).toBeVisible();
-    await expect(
-      page.getByText(`${rounds[5].label} · ${rounds[5].left.name} vs ${rounds[5].right.name}`),
-    ).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator('.connected-room-shell')).toBeVisible();
+    await expect(page.locator('.assignment-context')).toContainText(rounds[5].label, { timeout: 20_000 });
+    await expect(page.locator('.assignment-team').nth(0)).toHaveText(rounds[5].left.name);
+    await expect(page.locator('.assignment-team').nth(1)).toHaveText(rounds[5].right.name);
 
     // No address, and no second pairing code, between one game and the next.
     expect(control.requests.filter((entry) => entry.path === '/qbtcp/v1/pair')).toHaveLength(1);
     await startAssignedGame(page, 5);
 
     expect(browserErrors).toEqual([]);
+  });
+
+  test('upgrades an offline file game when the paired room starts the same assignment', async ({ page }) => {
+    await pairRoom(page, control);
+
+    await page.getByRole('button', { name: 'Settings' }).click();
+    const settings = page.getByRole('dialog', { name: 'Settings' });
+    await settings.getByRole('button', { name: 'Other scoring options' }).click();
+    await expect(page.locator('.welcome-shell')).toBeVisible();
+
+    // Score the assignment from a file first. This record is deliberately offline, even though the
+    // paired room capability remains stored for the later connected start.
+    await page.locator('.file-open-input').setInputFiles({
+      name: 'round-4.assignment.qbj',
+      mimeType: 'application/json',
+      buffer: Buffer.from(JSON.stringify(assignmentFor(4))),
+    });
+    const lineupHeading = page.getByRole('heading', { name: 'Who is starting?' });
+    if (await lineupHeading.count()) {
+      await expect(lineupHeading).toBeVisible();
+      const startingLineups = page.getByLabel('Starting lineups');
+      for (const player of rounds[4].starters) {
+        await startingLineups.getByRole('button', { name: `Start ${player}` }).click();
+      }
+      await page.getByRole('button', { name: 'Start game', exact: true }).click();
+    }
+    await expect(page.getByText('Tossup 1 of 20', { exact: true })).toBeVisible();
+    await scoreTossup(page, 'Sarah', 'Power', 20);
+    await expect(page.getByText('Tossup 2 of 20', { exact: true })).toBeVisible();
+
+    // Reloading while the file game is active returns to Home, where the paired room remains an
+    // explicit choice. This is the offline/recovery boundary the room workflow must preserve.
+    await page.reload();
+    await expect(page.locator('.welcome-shell')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Unfinished game' })).toBeVisible();
+    await page.getByRole('button', { name: `Return to ${roomName}` }).click();
+    await expect(page.locator('.connected-room-shell')).toBeVisible();
+    await expect(page.locator('.assignment-context')).toContainText(rounds[4].label, { timeout: 20_000 });
+
+    await page.getByRole('button', { name: 'Start scoring' }).click();
+    await expect(page.getByText('Tossup 2 of 20', { exact: true })).toBeVisible();
+    await expect(page.getByLabel('Ninety Six score')).toHaveText('35');
+    await scoreTossup(page, 'Emma', 'Correct', 10);
+    await expect(page.getByText('Tossup 3 of 20', { exact: true })).toBeVisible();
+    await expect.poll(() => control.progress.length, { timeout: 20_000 }).toBeGreaterThan(0);
+
+    await endGameAndSubmit(page);
+    expect(control.results).toHaveLength(1);
+    expect(control.results[0]).toMatchObject({ tossups_read: 2 });
+    await expect(page.getByText('Result sent ✓')).toBeVisible();
   });
 
   test('keeps one truthful room summons across scoring, reload, and server resolution', async ({ page }) => {
@@ -206,8 +249,8 @@ test.describe('a server that speaks only QBTCP', () => {
     await expect(page.getByText('Tournament control requested · Question / packet issue')).toBeVisible();
 
     await page.reload();
-    await expect(page.getByRole('heading', { name: 'Unfinished game' })).toBeVisible();
-    await page.getByRole('button', { name: 'Resume', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Resume this game' })).toBeVisible();
+    await page.getByRole('button', { name: 'Resume scoring', exact: true }).click();
     await expect(page.getByText('Tossup 2 of 20', { exact: true })).toBeVisible();
     await expect(page.getByLabel('Ninety Six score')).toHaveText('35');
     await expect(page.getByText('Tournament control requested · Question / packet issue')).toBeVisible({
@@ -293,7 +336,7 @@ test.describe('a server that speaks only QBTCP', () => {
     // No reconnect, re-pair, QBJ handoff, or manual retry is needed before the next assignment.
     control.assign(5);
     await next.click();
-    await expect(page.getByRole('heading', { name: `${roomName} · Connected` })).toBeVisible();
+    await expect(page.locator('.connected-room-shell')).toBeVisible();
     expect(control.requests.filter((entry) => entry.path === '/qbtcp/v1/pair')).toHaveLength(1);
   });
 
@@ -302,8 +345,10 @@ test.describe('a server that speaks only QBTCP', () => {
 
     await page.goto('/');
     // Durable pairing is enough to enter the existing room; there is no reconnect interstitial.
-    await expect(page.getByRole('heading', { name: `${roomName} · Connected` })).toBeVisible();
-    await expect(page.getByText(`${rounds[4].label} · Ninety Six vs Greenwood`)).toBeVisible();
+    await expect(page.locator('.connected-room-shell')).toBeVisible();
+    await expect(page.locator('.assignment-context')).toContainText(rounds[4].label);
+    await expect(page.locator('.assignment-team').nth(0)).toHaveText('Ninety Six');
+    await expect(page.locator('.assignment-team').nth(1)).toHaveText('Greenwood');
     await expect(page.getByLabel('Up next')).toContainText(rounds[5].label);
     expect(control.requests.filter((entry) => entry.path === '/qbtcp/v1/pair')).toHaveLength(1);
   });
@@ -336,15 +381,14 @@ test.describe('a server that speaks only QBTCP', () => {
     // Back to the room with nothing to play, which is where a scorekeeper actually waits.
     control.assign(null);
     await page.getByRole('button', { name: `Next game in ${roomName}` }).click();
-    await expect(page.getByRole('heading', { name: `${roomName} · Connected` })).toBeVisible();
+    await expect(page.locator('.connected-room-shell')).toBeVisible();
     await expect(page.getByText('Waiting for the next assignment.')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Start scoring' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Start scoring' })).toHaveCount(0);
 
-    // The screen says the checking is happening, so the manual button is an override rather than
-    // the way an assignment normally arrives.
+    // The screen says the checking is happening, and there is no manual button in the healthy room.
     const checkStatus = page.locator('.assignment-check');
     await expect(checkStatus).toContainText('checks automatically');
-    await expect(page.getByRole('button', { name: 'Check now' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Check now' })).toHaveCount(0);
 
     // Mark the block showing the waiting line, so its replacement is something that can be seen.
     await page.evaluate(() =>
@@ -355,13 +399,13 @@ test.describe('a server that speaks only QBTCP', () => {
     control.assign(5);
 
     // Nothing is pressed from here on. The matchup arrives because the room asked for it.
-    await expect(
-      page.getByText(`${rounds[5].label} · ${rounds[5].left.name} vs ${rounds[5].right.name}`),
-    ).toBeVisible({ timeout: 40_000 });
+    await expect(page.locator('.assignment-context')).toContainText(rounds[5].label, { timeout: 40_000 });
+    await expect(page.locator('.assignment-team').nth(0)).toHaveText(rounds[5].left.name);
+    await expect(page.locator('.assignment-team').nth(1)).toHaveText(rounds[5].right.name);
     expect(control.requests.filter((entry) => entry.path === '/qbtcp/v1/assignment').length).toBeGreaterThan(
       before,
     );
-    await expect(page.getByRole('button', { name: 'Start scoring' })).toBeEnabled();
+    await expect(page.getByRole('button', { name: 'Start scoring' })).toBeVisible();
     // The block really was replaced, which is the one state change and the one entrance.
     await expect(page.locator('.assignment-state-body[data-e2e-mark="waiting"]')).toHaveCount(0);
 
@@ -372,7 +416,7 @@ test.describe('a server that speaks only QBTCP', () => {
     );
     await page.waitForTimeout(assignmentPollIntervalMs * 2 + 2_000);
     await expect(page.locator('.assignment-state-body[data-e2e-mark="assigned"]')).toHaveCount(1);
-    await expect(page.getByRole('button', { name: 'Start scoring' })).toBeEnabled();
+    await expect(page.getByRole('button', { name: 'Start scoring' })).toBeVisible();
 
     // One pairing for the whole of it, which is the promise the room screen exists to keep.
     expect(control.requests.filter((entry) => entry.path === '/qbtcp/v1/pair')).toHaveLength(1);
@@ -384,20 +428,23 @@ test.describe('a server that speaks only QBTCP', () => {
     await pairRoom(page, control);
 
     await expect(page.getByText('Waiting for the next assignment.')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Start scoring' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Start scoring' })).toHaveCount(0);
     // `204 No Content` is not an error and must not send anybody back through pairing.
     await expect(page.getByLabel('Pairing code')).toHaveCount(0);
   });
 
   test('asks for a new code only once the stored room token is actually refused', async ({ page }) => {
     await pairRoom(page, control);
-    await expect(page.getByText(`${rounds[4].label} · Ninety Six vs Greenwood`)).toBeVisible();
+    await expect(page.locator('.assignment-context')).toContainText(rounds[4].label);
+    await expect(page.locator('.assignment-team').nth(0)).toHaveText('Ninety Six');
+    await expect(page.locator('.assignment-team').nth(1)).toHaveText('Greenwood');
 
     control.revokeRoomToken();
-    await page.getByRole('button', { name: 'Check now' }).click();
+    await expect(page.getByRole('button', { name: `Pair ${roomName} again` })).toBeVisible({ timeout: 20_000 });
+    await page.getByRole('button', { name: `Pair ${roomName} again` }).click();
 
     await expect(page.getByLabel('Pairing code')).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByText(/no longer recognizes this room/)).toBeVisible();
+    await expect(page.getByText(/Tournament control no longer recognizes this room\. The address and room are already known/)).toBeVisible();
   });
 
   /**

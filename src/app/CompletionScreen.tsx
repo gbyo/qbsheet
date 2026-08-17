@@ -57,13 +57,23 @@ export default function CompletionScreen(props: {
   onUpdate: (recordId: string, change: Partial<IStoredGameRecord>) => boolean | void | Promise<boolean | void>;
   /** What leaving this screen is called. A connected room is going back to its room, not home. */
   continueLabel?: string;
+  /** Reopen the saved game in the scorer so the result can be checked or corrected. */
+  onBackToScorekeeper: () => void | Promise<void>;
   onHome: () => void | Promise<void>;
   /** Start another local game with the same manual setup, when this was a manual game. */
   onRematch?: () => void | Promise<void>;
   /** True only on the navigation caused by a server-accepted submission. */
   acceptedJustNow?: boolean;
 }) {
-  const { record, onUpdate, continueLabel = 'Done', onHome, onRematch, acceptedJustNow = false } = props;
+  const {
+    record,
+    onUpdate,
+    continueLabel = 'Done',
+    onBackToScorekeeper,
+    onHome,
+    onRematch,
+    acceptedJustNow = false,
+  } = props;
   const [writeFailed, setWriteFailed] = useState(false);
   const [qbjRecordFailed, setQbjRecordFailed] = useState(false);
   const [qbjRecordPending, setQbjRecordPending] = useState(false);
@@ -82,6 +92,7 @@ export default function CompletionScreen(props: {
     !delivered && (connected || Boolean(record.package.handoffInstruction));
   /** Nobody is owed this result. The copy stops calling the download a handoff. */
   const optionalCopy = !gameRequiresHandoff(record);
+  const downloadIsPrimary = !optionalCopy && !delivered;
   const backupDownloaded = record.qbjDownloadedAt !== undefined;
   const canLeave = !needsHandoff(record);
 
@@ -164,10 +175,16 @@ export default function CompletionScreen(props: {
         </section>
       )}
 
+      {delivered && (
+        <div className="shell-actions completion-next-action">
+          <button type="button" className="shell-button is-primary" onClick={() => void onHome()}>
+            {continueLabel}
+          </button>
+        </div>
+      )}
+
       <section className="shell-section">
-        <h2 className="shell-heading">
-          {optionalCopy ? 'Save a copy' : delivered ? 'Back up this result' : 'Hand this result over'}
-        </h2>
+        <h2 className="shell-heading">{optionalCopy ? 'Save a copy' : delivered ? 'Download a copy' : 'Hand this result over'}</h2>
         {optionalCopy ? (
           <p className="shell-hint">
             This result is saved on this device. Download a QBJ if you want to keep or share a portable
@@ -193,7 +210,7 @@ export default function CompletionScreen(props: {
         <div className="shell-actions">
           {/* Optional means secondary. Done is the action on this screen for a game nobody is
               waiting for, and two primary buttons would say otherwise. */}
-          <button type="button" className={`shell-button${optionalCopy ? '' : ' is-primary'}`} onClick={download}>
+          <button type="button" className={`shell-button${downloadIsPrimary ? ' is-primary' : ''}`} onClick={download}>
             {record.qbjDownloadedAt
               ? 'Download QBJ again'
               : optionalCopy
@@ -288,14 +305,19 @@ export default function CompletionScreen(props: {
               : `Download the QBJ${requiresHandoffAcknowledgement ? ' and confirm the handoff' : ''} before finishing.`}
           </p>
         )}
-        <button
-          type="button"
-          className={`shell-button${canLeave ? ' is-primary' : ''}`}
-          disabled={!canLeave}
-          onClick={() => void onHome()}
-        >
-          {continueLabel}
+        <button type="button" className="shell-button shell-button-quiet" onClick={() => void onBackToScorekeeper()}>
+          Back to scorekeeper
         </button>
+        {!delivered && (
+          <button
+            type="button"
+            className={`shell-button${canLeave ? ' is-primary' : ''}`}
+            disabled={!canLeave}
+            onClick={() => void onHome()}
+          >
+            {continueLabel}
+          </button>
+        )}
         {onRematch && isManualGame(record.package) && (
           <button
             type="button"

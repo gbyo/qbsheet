@@ -16,7 +16,8 @@ import scoringRulesToScorekeeperFormat from './rules';
 import { CommonRuleSets, ScoringRules } from './rules';
 import AnswerType from './AnswerType';
 import ScorerHost from '../src/scorer/ScorerHost';
-import { operationNoticeMs } from '../src/scorer/Scorer';
+import { operationNoticeMs, recoveryNoticeMs } from '../src/scorer/Scorer';
+import { saveGame } from '../src/scorer/GameSession';
 import { IRoomProcedure } from '../src/scoring/RoomProcedure';
 import { ITeamRoster } from '../src/game/Roster';
 import { RoomConnectionState } from '../src/app/ConnectionState';
@@ -70,10 +71,23 @@ function renderScorer(
   packetName?: string,
   rosterOptions: IRosterSyncTestOptions = {},
   controlOptions: IControlRequestTestOptions = {},
+  recovered = false,
 ) {
   const submit = onSubmit ?? vi.fn().mockResolvedValue({ ok: true, message: 'Sent' });
   gameCounter += 1;
   const gameKey = `test-game-${gameCounter}`;
+  if (recovered) {
+    saveGame(
+      gameKey,
+      {
+        left: { name: leftTeam.name, players: leftTeam.players.map((player) => player.name) },
+        right: { name: rightTeam.name, players: rightTeam.players.map((player) => player.name) },
+      },
+      [{ id: 'recovered-event', type: 'tossup-dead', questionNumber: 1 }],
+      new Date(),
+      window.localStorage,
+    );
+  }
   const scorer = (connection: RoomConnectionState) => (
     <ScorerHost
       gameKey={gameKey}
@@ -1577,6 +1591,82 @@ describe('ending a game short', () => {
     await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect((onSubmit.mock.calls[0][0] as { notes: string }).notes).toContain('Director stopped the round');
   });
+
+  /**
+   * A required box, said out loud, with the cursor already in it.
+   *
+   * The dialog shell focuses the first thing it finds, which is the close button in its own header,
+   * so every one of these opened one Tab away from the only field it has. And the primary action is
+   * disabled until that field has something in it — which, with nothing next to it saying so, is a
+   * screen that knows what it is waiting for and will not say. A room ending a round early is doing
+   * it because somebody is standing there waiting, which is the worst moment to make them guess.
+   */
+  test('the reason box has the cursor, and the greyed-out button says what it is waiting for', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+    fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('20'));
+
+    pressControl('End game early…');
+
+    expect(screen.getByLabelText('Why is the game ending early?')).toHaveFocus();
+    expect(screen.getByText(/^Required\./)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'End the game now' })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText('Why is the game ending early?'), {
+      target: { value: 'Packet ran out' },
+    });
+    expect(screen.getByRole('button', { name: 'End the game now' })).toBeEnabled();
+  });
+});
+
+/**
+ * Where the cursor lands when a dialog opens.
+ *
+ * Each of these exists to have something typed into it, and each used to open on the close button in
+ * the shell's header — one wasted keystroke for a scorekeeper, and, for anybody listening to the
+ * screen instead of looking at it, a dialog that announces itself as "Close dialog".
+ *
+ * Replace question asks for something other than typing. It wants a scope voided before it wants a
+ * reason, so the cursor stops on that decision rather than past it — putting it in the reason box
+ * would make the default the only scope a keyboard reaches without going backwards.
+ */
+describe('a dialog opens on the thing it is asking for', () => {
+  test('Notes starts in the note', () => {
+    renderScorer(formatFor());
+
+    pressControl('Notes');
+
+    expect(screen.getByLabelText(/^Note on question/)).toHaveFocus();
+  });
+
+  test('Issue starts in the description', () => {
+    renderScorer(formatFor());
+
+    openIssue();
+
+    expect(screen.getByLabelText('What happened?')).toHaveFocus();
+  });
+
+  test('Game details starts in the moderator name', () => {
+    renderScorer(formatFor());
+
+    pressControl('Game details');
+
+    expect(screen.getByLabelText('Moderator / reader')).toHaveFocus();
+  });
+
+  test('Replace question starts on the scope it would void, ahead of the reason', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+
+    pressControl(/^Replace question/);
+
+    // Landing anywhere else means landing on the header's close button, which is the fallback and
+    // announces itself as "Close dialog" — the thing every other dialog here was fixed to stop.
+    const dialog = screen.getByRole('dialog', { name: /^Replace question/ });
+    expect(within(dialog).getByRole('button', { pressed: true })).toHaveFocus();
+    expect(screen.getByLabelText('What went wrong?')).not.toHaveFocus();
+  });
 });
 
 describe('a protest is a thing with a state', () => {
@@ -1868,6 +1958,37 @@ describe('operation notices', () => {
   function notice(): string | null {
     return document.querySelector('.scorer-banner.is-info')?.textContent ?? null;
   }
+
+  test('the local recovery notice can be closed with its X', () => {
+    renderScorer(formatFor(), undefined, undefined, undefined, undefined, {}, {}, true);
+
+    expect(screen.getByText('Recovered the in-progress game saved on this device.')).toBeTruthy();
+    const dismiss = screen.getByRole('button', { name: 'Dismiss recovery notice' });
+    expect(dismiss).toHaveTextContent('×');
+
+    fireEvent.click(dismiss);
+
+    expect(screen.queryByText('Recovered the in-progress game saved on this device.')).toBeNull();
+  });
+
+  test('the local recovery notice dismisses itself after fifteen seconds', () => {
+    vi.useFakeTimers();
+    try {
+      renderScorer(formatFor(), undefined, undefined, undefined, undefined, {}, {}, true);
+
+      act(() => {
+        vi.advanceTimersByTime(recoveryNoticeMs - 1);
+      });
+      expect(screen.getByText('Recovered the in-progress game saved on this device.')).toBeTruthy();
+
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(screen.queryByText('Recovered the in-progress game saved on this device.')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   test('an acknowledgement goes away on its own', () => {
     vi.useFakeTimers();

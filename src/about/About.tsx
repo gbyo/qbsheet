@@ -13,13 +13,15 @@
  * of them that nothing keeps in step. Rendering the real component means the page cannot drift from
  * the application it is advertising, and it means the copy below is unit-testable.
  *
- * # Written for the person who hands out the games
+ * # Written for the person deciding whether to use it
  *
  * The reader this page is composed for is a tournament director deciding whether sixteen rooms can be
- * asked to use it, so the middle of the page is the tournament workflow in the order that person meets
- * it: the game goes out, the room scores it, the result comes back. That is one sequence rather than a
- * feature list, and it is laid out as one — three stages on a rule — because a director reading a grid
- * of capabilities still has to work out which of them happen in what order.
+ * asked to use it, or a scorekeeper deciding whether it fits a practice table. So the middle of the page
+ * is the scoring workflow in the order the scorekeeper meets it: start with a game, score it, finish
+ * with a result. Start deliberately covers all three ways in: open a QBJ assignment, connect to
+ * tournament control, or create a game yourself. That is one sequence rather than a feature list, and
+ * it is laid out as one — three stages on a rule — because a reader looking at a grid of capabilities
+ * still has to work out which of them happen in what order.
  *
  * What follows it is the set of properties that decision actually turns on, and it is a section of its
  * own rather than a fourth stage of the sequence.
@@ -31,12 +33,21 @@
  * shape, a roster size, or a substitution model, because `IScorekeeperFormat` assumes none of them and
  * a tournament whose format the copy quietly excluded is a tournament that reads this page and leaves.
  */
-import BrandLogo from '../BrandLogo';
 import productImage from '../assets/about-qbsheet-practice.webp';
+import {
+  ActionLinks,
+  PageFooter,
+  PageHeader,
+  githubUrl,
+  pageUrl,
+  qbjDocsUrl,
+  qbtcpDocsUrl,
+} from './PageChrome';
 
-const githubUrl = 'https://github.com/gbyo/qbsheet';
-const qbjDocsUrl = `${githubUrl}/blob/main/docs/QBJ_ASSIGNMENT_PROFILE.md`;
-const qbtcpDocsUrl = `${githubUrl}/blob/main/docs/QBTCP.md`;
+const slug = '' as const;
+
+/** Relative, because this page does not know what directory the deployment put it in. */
+const selfHostUrl = pageUrl(slug, 'self-host');
 
 /**
  * React 18 does not recognise `fetchPriority` and drops it with a warning, so it is spread in as the
@@ -46,36 +57,35 @@ const qbtcpDocsUrl = `${githubUrl}/blob/main/docs/QBTCP.md`;
 const highFetchPriority = { fetchpriority: 'high' };
 
 /**
- * The three stages of a tournament game, in the order the room meets them.
+ * The three stages of a game, in the order the scorekeeper meets them.
  *
- * `detail` is deliberately conditional where the implementation is. An assignment carries whatever the
- * producer put in it, and QBSheet asks for the rest (`RosterSetup`, `ScoringRulesSetup`), so the copy
- * says the room "can start with" those fields rather than promising a roster a generic QBJ may not have.
- * Tournament control is offered as one of two ways in at both ends of the sequence, never as a
- * requirement: a tournament that runs on files is the common case, and this page must not read as though
- * that case were the fallback.
+ * `detail` is deliberately conditional where the implementation is. A game may come from a QBJ
+ * assignment, tournament control, or manual setup, and QBSheet asks for the rest (`RosterSetup`,
+ * `ScoringRulesSetup`) when needed. The copy names all three ways in without promising that an
+ * assignment contains fields a generic QBJ may not have. Tournament control is one path, never a
+ * requirement, and a finished result remains useful without it.
  */
 const stages = [
   {
     number: '01',
-    name: 'Assign',
-    idea: 'Set up the game once.',
+    name: 'Start',
+    idea: 'Start with a game.',
     detail:
-      'Open a QBJ assignment or connect QBSheet to tournament control. The room can start with the teams, players, and scoring rules already filled in.',
+      'Open a QBJ assignment, connect QBSheet to tournament control, or create a game yourself for practice, scrimmages, and tryouts. QBSheet asks for the teams, players, and scoring rules it still needs.',
   },
   {
     number: '02',
     name: 'Score',
     idea: 'Score the game.',
     detail:
-      'The scorekeeper gets a scoresheet built around the game they were assigned, without having to recreate the setup at the table.',
+      'The scorekeeper gets a scoresheet built around the game they started, with the setup in place before scoring begins.',
   },
   {
     number: '03',
-    name: 'Return',
-    idea: 'Turn in the result.',
+    name: 'Finish',
+    idea: 'Keep the finished result.',
     detail:
-      'If QBSheet is connected to tournament control, the finished game can be sent back directly. If not, the result can be saved as QBJ.',
+      'When the game is over, QBSheet keeps the result on the device. Connected games can be sent back to tournament control; any game can be downloaded as QBJ.',
   },
 ];
 
@@ -98,19 +108,6 @@ const assurances = [
     body: 'Every accepted question is written to the device as it is scored, and a finished game stays there, downloadable as QBJ, for days after it was handed over.',
   },
 ];
-
-function ActionLinks() {
-  return (
-    <div className="about-actions">
-      <a className="about-button is-primary" href="../">
-        Open QBSheet
-      </a>
-      <a className="about-button" href={githubUrl}>
-        View on GitHub
-      </a>
-    </div>
-  );
-}
 
 /**
  * The workflow, which is the one sequence on the page.
@@ -144,9 +141,9 @@ function WorkflowSection() {
   return (
     <section className="about-section about-flow" aria-labelledby="scoring-heading">
       <div className="about-section-heading about-flow-heading about-reveal">
-        <p className="about-kicker">From assignment to result</p>
+        <p className="about-kicker">From start to finish</p>
         <h2 id="scoring-heading">Built around how you actually score</h2>
-        <p>From room assignments to final results, QBSheet fits into the tournament you already run.</p>
+        <p>From the first setup to the final result, QBSheet fits the way you already score.</p>
       </div>
       <WorkflowStages />
     </section>
@@ -187,17 +184,7 @@ function AssuranceSection() {
 export default function About() {
   return (
     <div className="about-page">
-      <header className="about-header">
-        <div className="about-header-inner">
-          <a className="about-brand" href="../" aria-label="QBSheet home">
-            <BrandLogo className="about-brand-logo" />
-          </a>
-          <nav className="about-nav" aria-label="Primary navigation">
-            <a href="../">Open QBSheet</a>
-            <a href={githubUrl}>GitHub</a>
-          </nav>
-        </div>
-      </header>
+      <PageHeader slug={slug} />
 
       <main>
         <section className="about-hero" aria-labelledby="about-title">
@@ -206,7 +193,7 @@ export default function About() {
             QBSheet keeps quiz bowl scoring fast, flexible, and out of your way, whether you’re connected or
             offline.
           </p>
-          <ActionLinks />
+          <ActionLinks slug={slug} />
         </section>
 
         <figure className="about-product-visual">
@@ -226,29 +213,38 @@ export default function About() {
 
         <section className="about-section about-open" aria-labelledby="open-heading">
           <div className="about-section-heading about-section-heading-narrow">
-            <p className="about-kicker">Interoperable by design</p>
-            <h2 id="open-heading">Open and straightforward</h2>
-            <p>One scoresheet, built around established quiz bowl formats and a readable source codebase.</p>
+            <p className="about-kicker">OPEN BY DESIGN</p>
+            <h2 id="open-heading">Your games aren&apos;t locked into QBSheet.</h2>
+            <p>
+              QBSheet uses open formats and an open protocol, so tournament data can move between the scoresheet and
+              compatible tournament software.
+            </p>
           </div>
           <dl className="about-definition-list">
             <div>
               <dt>QBJ</dt>
               <dd>
-                QBSheet reads and writes Quiz Bowl JSON files.{' '}
+                Portable files for assignments, games, and results.{' '}
                 <a href={qbjDocsUrl}>Read the QBJ documentation</a>.
               </dd>
             </div>
             <div>
               <dt>QBTCP</dt>
               <dd>
-                QBSheet uses QBTCP for live communication with compatible tournament-control software.{' '}
+                Live communication with compatible tournament-control software.{' '}
                 <a href={qbtcpDocsUrl}>Read the protocol overview</a>.
               </dd>
             </div>
             <div>
               <dt>Open source</dt>
               <dd>
-                QBSheet is available under the GNU AGPL. <a href={githubUrl}>View the source on GitHub</a>.
+                QBSheet is licensed under the GNU AGPL. <a href={githubUrl}>View the source on GitHub</a>.
+              </dd>
+            </div>
+            <div>
+              <dt>Self-hosting</dt>
+              <dd>
+                Run your own copy on any static host. <a href={selfHostUrl}>Read the self-hosting guide</a>.
               </dd>
             </div>
           </dl>
@@ -257,18 +253,11 @@ export default function About() {
         <section className="about-final" aria-labelledby="ready-heading">
           <h2 id="ready-heading">Ready to score?</h2>
           <p>Open QBSheet and start with the game in front of you.</p>
-          <ActionLinks />
+          <ActionLinks slug={slug} />
         </section>
       </main>
 
-      <footer className="about-footer">
-        <nav aria-label="Footer navigation">
-          <a href="../">QBSheet</a>
-          <a href="./" aria-current="page">About</a>
-          <a href={`${githubUrl}#documentation`}>Documentation</a>
-          <a href={githubUrl}>GitHub</a>
-        </nav>
-      </footer>
+      <PageFooter slug={slug} />
     </div>
   );
 }

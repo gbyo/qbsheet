@@ -18,7 +18,7 @@ import {
 } from '../src/app/OperatorIdentity';
 import SettingsDialog from '../src/app/SettingsDialog';
 import { ResultDeliveryCapabilityStore } from '../src/app/ResultDeliveryCapability';
-import { GameStore, IStoredGameRecord } from '../src/game/GameStore';
+import { gameRecordVersion, GameStore, IStoredGameRecord } from '../src/game/GameStore';
 import { openRecordStore } from '../src/persistence/GameDatabase';
 import { buildLabel } from '../src/pwa/BuildVersion';
 import {
@@ -86,6 +86,8 @@ function defaultSettingsProps(overrides: Partial<React.ComponentProps<typeof Set
     connection: null,
     onForgetPairing: () => undefined,
     onResetDevicePreferences: () => undefined,
+    practiceInProgress: false,
+    onPractice: () => undefined,
     onReadiness: () => undefined,
     onClose: () => undefined,
     ...overrides,
@@ -121,6 +123,24 @@ describe('homepage Settings entry and scorekeeper identity', () => {
     expect(within(dialog).getByText('Scoring')).toBeInTheDocument();
     expect(within(dialog).getByText('Device')).toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: 'Scorekeeper' })).toBeNull();
+  });
+
+  test('practice stays on the homepage only until the device has game history', async () => {
+    writeOperatorNameAsked();
+    await openApp();
+
+    expect(screen.getByRole('button', { name: 'Practice scoring' })).toBeInTheDocument();
+    let dialog = await openSettings();
+    expect(within(dialog).getByRole('button', { name: 'Practice scoring' })).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close dialog' }));
+
+    cleanup();
+    await seedGame({ completed: true });
+    await openApp();
+
+    expect(screen.queryByRole('button', { name: 'Practice scoring' })).toBeNull();
+    dialog = await openSettings();
+    expect(within(dialog).getByRole('button', { name: 'Practice scoring' })).toBeInTheDocument();
   });
 
   test('a never-asked device still asks once, while an unfinished game keeps Resume in front', async () => {
@@ -268,9 +288,10 @@ describe('tournament connection safety', () => {
     fireEvent.click(within(confirmation).getByRole('button', { name: 'Forget Room 204' }));
 
     expect(readConnection()).toBeNull();
-    expect(screen.queryByText('Room 204 · Connected')).toBeNull();
+    expect(screen.queryByText('Room 204 · Paired')).toBeNull();
     expect(screen.queryByText('Tournament connection')).toBeNull();
-    expect(screen.getByRole('dialog', { name: 'Settings' })).toHaveTextContent('Tournament pairing forgotten.');
+    expect(screen.queryByRole('dialog', { name: 'Settings' })).toBeNull();
+    expect(screen.getByRole('status')).toHaveTextContent('Tournament pairing forgotten.');
     expect((await new GameStore(await openRecordStore<IStoredGameRecord>()).get(saved.id))?.id).toBe(saved.id);
   });
 
@@ -288,19 +309,39 @@ describe('tournament connection safety', () => {
     expect(readConnection()).not.toBeNull();
     expect((await new GameStore(await openRecordStore<IStoredGameRecord>()).get(unfinished.id))?.id).toBe(unfinished.id);
   });
+
+  test('an unreadable game named by the connection still protects the pairing', async () => {
+    writeOperatorNameAsked();
+    const saved = await seedGame({ connected: true });
+    const records = await openRecordStore<IStoredGameRecord>();
+    await records.put({ ...saved, version: gameRecordVersion + 99 });
+    rememberConnection({ gameRecordId: saved.id });
+
+    await openApp();
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/newer version|cannot be opened/i);
+    const dialog = await openSettings();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Forget pairing…' }));
+
+    const confirmation = screen.getByRole('dialog', { name: 'Forget tournament pairing?' });
+    expect(within(confirmation).getByRole('alert')).toHaveTextContent(/cannot change Room 204/i);
+    expect(within(confirmation).getByRole('button', { name: 'Forget Room 204' })).toBeDisabled();
+    expect(readConnection()).not.toBeNull();
+  });
 });
 
 describe('device navigation, reset, build identity, and dialog behavior', () => {
-  test('both Settings and the homepage reach the existing readiness screen', async () => {
+  test('device readiness is only available from Settings', async () => {
     writeOperatorNameAsked();
     await openApp();
+    expect(screen.queryByRole('button', { name: 'Check this device' })).toBeNull();
+
     const dialog = await openSettings();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Check this device' }));
     expect(await screen.findByText('Device readiness')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /QBSheet/ }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Check this device' }));
-    expect(await screen.findByText('Device readiness')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Check this device' })).toBeNull();
   });
 
   test('reset is confirmed, clears only device preferences live, preserves games and retry capability, and restores first-run on reload', async () => {
@@ -341,7 +382,7 @@ describe('device navigation, reset, build identity, and dialog behavior', () => 
     expect(window.localStorage.getItem(connectionStorageKey)).toBeNull();
     expect(readOperatorNameAsked()).toBe(false);
     expect(keyboardEnabled()).toBe(false);
-    expect(screen.getByRole('switch', { name: 'Keyboard scoring' })).not.toBeChecked();
+    expect(screen.queryByRole('switch', { name: 'Keyboard scoring' })).toBeNull();
     expect(screen.queryByText('Hello, Gibson.')).toBeNull();
     expect(screen.queryByText('Tournament connection')).toBeNull();
     expect(screen.getByRole('status')).toHaveTextContent('Device preferences reset.');
@@ -395,6 +436,7 @@ describe('device navigation, reset, build identity, and dialog behavior', () => 
     expect(within(dialog).getByRole('button', { name: /Set name/ })).toBeInTheDocument();
     expect(within(dialog).getByRole('switch', { name: 'Keyboard scoring' })).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'View' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Practice scoring' })).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Forget pairing…' })).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Check this device' })).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Reset device preferences…' })).toBeInTheDocument();

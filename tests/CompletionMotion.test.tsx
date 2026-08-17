@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import CompletionScreen from '../src/app/CompletionScreen';
 import { IStoredGameRecord } from '../src/game/GameStore';
@@ -34,6 +34,7 @@ function show(candidate: IStoredGameRecord, acceptedJustNow = false) {
       record={candidate}
       acceptedJustNow={acceptedJustNow}
       onUpdate={vi.fn()}
+      onBackToScorekeeper={vi.fn()}
       onHome={vi.fn()}
     />,
   );
@@ -47,6 +48,15 @@ describe('accepted-result acknowledgement', () => {
 
     expect(screen.getByRole('button', { name: 'Download Excel scoresheet' })).toBeInTheDocument();
     expect(screen.getByText(/Excel is a readable scoresheet for review/)).toBeInTheDocument();
+  });
+
+  test('puts the next connected-room action before the optional copy section', () => {
+    show(record());
+
+    const next = screen.getByRole('button', { name: 'Done' });
+    const copy = screen.getByRole('heading', { name: 'Download a copy' });
+    expect(next).toHaveClass('is-primary');
+    expect(next.compareDocumentPosition(copy) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   test('the existing accepted status receives the stamp only for a freshly accepted result', () => {
@@ -72,6 +82,27 @@ describe('accepted-result acknowledgement', () => {
 });
 
 describe('pending-result delivery', () => {
+  test('can return to the scorekeeper while the handoff gate remains locked', () => {
+    const onBackToScorekeeper = vi.fn();
+    render(
+      <CompletionScreen
+        record={record({
+          serverDelivery: 'pending',
+          serverDeliveryLedger: { attemptCount: 2, retryable: true, outcome: 'pending' },
+        })}
+        onUpdate={vi.fn()}
+        onBackToScorekeeper={onBackToScorekeeper}
+        onHome={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Done' })).toBeDisabled();
+    const back = screen.getByRole('button', { name: 'Back to scorekeeper' });
+    expect(back).toBeEnabled();
+    fireEvent.click(back);
+    expect(onBackToScorekeeper).toHaveBeenCalledOnce();
+  });
+
   test('explains automatic retry while keeping the handoff gate closed', () => {
     show(
       record({
@@ -106,6 +137,7 @@ describe('pending-result delivery', () => {
         })}
         acceptedJustNow={false}
         onUpdate={vi.fn()}
+        onBackToScorekeeper={vi.fn()}
         onHome={vi.fn()}
       />,
     );
