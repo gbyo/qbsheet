@@ -1,4 +1,27 @@
+/*
+ * The marketing and wiki pages' palette, which is the scorer's in its own namespace.
+ *
+ * # Why these are not `--room-*`
+ *
+ * The pages under /about/ are separate Vite entries with their own HTML documents; see the `input`
+ * map in `vite.config.ts`. They never load `app-shell.css`, so they cannot inherit its tokens, and
+ * aliasing these to `--room-*` would leave every page here unstyled the moment somebody read the
+ * alias as proof the two were connected.
+ *
+ * The values are duplicated on purpose and the duplication is the contract: these pages and the
+ * scoresheet are one product, and a visitor who opens the scorer from a wiki page must not see the
+ * colours change. When one moves, move the other.
+ *
+ * # Appearance
+ *
+ * Same three states and the same two-block structure as `app-shell.css`, for the reasons documented
+ * there at length. `data-theme` reaches these pages too: they share a domain and therefore a
+ * `localStorage`, so `aboutAppearance` reads the scorekeeper's choice and applies it here as well.
+ * Somebody who set the scoresheet to dark does not want the FAQ to be white.
+ */
 :root {
+  color-scheme: light;
+
   --about-text: #1c1d20;
   --about-muted: #5c6066;
   --about-faint: #8a8f96;
@@ -8,10 +31,54 @@
   --about-sunken: #f6f7f8;
   --about-accent: #1565c0;
   --about-accent-hover: #10529c;
+  --about-on-accent: #ffffff;
   /* One curve for the whole page. Decelerating, and deliberately without overshoot: nothing here
      bounces, because a marketing page that springs is the tell that its product was not built. */
   --about-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
 }
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+
+    --about-text: #e7e9ec;
+    --about-muted: #a6acb5;
+    --about-faint: #7b818a;
+    --about-border: #33363b;
+    --about-border-strong: #4a4f57;
+    --about-surface: #16171a;
+    --about-sunken: #1f2125;
+    --about-accent: #7ab3ee;
+    --about-accent-hover: #9ac9f8;
+    --about-on-accent: #10151c;
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --about-text: #e7e9ec;
+  --about-muted: #a6acb5;
+  --about-faint: #7b818a;
+  --about-border: #33363b;
+  --about-border-strong: #4a4f57;
+  --about-surface: #16171a;
+  --about-sunken: #1f2125;
+  --about-accent: #7ab3ee;
+  --about-accent-hover: #9ac9f8;
+  --about-on-accent: #10151c;
+}
+
+/* The browser's own font-size preference, for the reason `app-shell.css` documents. These pages
+   carry no in-application text-size control -- browser zoom and the device font size are the whole
+   of it -- so there is no scale multiplier here. */
+html {
+  font-size: 100%;
+}
+
+/* Breakpoints follow the five-tier ladder documented in `app-shell.css`. These pages do not load
+   that stylesheet -- see the palette note above -- but they are the same product and a visitor
+   dragging a window between them must not see two different sets of widths. */
 
 * {
   box-sizing: border-box;
@@ -29,7 +96,7 @@ body {
   background: var(--about-surface);
   color: var(--about-text);
   font-family: 'IBM Plex Sans', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-  font-size: 17px;
+  font-size: 1.0625rem;
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
 }
@@ -111,7 +178,7 @@ a:focus-visible {
 .about-nav a,
 .about-footer a {
   color: var(--about-muted);
-  font-size: 14px;
+  font-size: 0.875rem;
   font-weight: 500;
   text-decoration: none;
 }
@@ -154,7 +221,7 @@ a:focus-visible {
 .about-kicker {
   margin: 0 0 12px;
   color: var(--about-muted);
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 600;
   letter-spacing: 0.07em;
   line-height: 1.4;
@@ -164,7 +231,7 @@ a:focus-visible {
 .about-hero h1 {
   max-width: 760px;
   margin: 0 auto;
-  font-size: clamp(42px, 6vw, 60px);
+  font-size: clamp(2.625rem, 6vw, 3.75rem);
   font-weight: 600;
   letter-spacing: -0.035em;
   line-height: 1.06;
@@ -174,7 +241,7 @@ a:focus-visible {
   max-width: 640px;
   margin: 24px auto 0;
   color: var(--about-muted);
-  font-size: 19px;
+  font-size: 1.1875rem;
   line-height: 1.5;
 }
 
@@ -196,7 +263,7 @@ a:focus-visible {
   border-radius: 3px;
   background: var(--about-surface);
   color: var(--about-text);
-  font-size: 15px;
+  font-size: 0.9375rem;
   font-weight: 500;
   line-height: 1.4;
   text-decoration: none;
@@ -210,13 +277,13 @@ a:focus-visible {
 .about-button.is-primary {
   border-color: var(--about-accent);
   background: var(--about-accent);
-  color: #ffffff;
+  color: var(--about-on-accent);
 }
 
 .about-button.is-primary:hover {
   border-color: var(--about-accent-hover);
   background: var(--about-accent-hover);
-  color: #ffffff;
+  color: var(--about-on-accent);
 }
 
 .about-product-visual {
@@ -232,7 +299,7 @@ a:focus-visible {
 .about-product-visual figcaption {
   margin-top: 8px;
   color: var(--about-muted);
-  font-size: 13px;
+  font-size: 0.8125rem;
   text-align: center;
 }
 
@@ -248,7 +315,7 @@ a:focus-visible {
 .about-editorial h2,
 .about-final h2 {
   margin: 0;
-  font-size: clamp(29px, 3.2vw, 36px);
+  font-size: clamp(1.8125rem, 3.2vw, 2.25rem);
   font-weight: 600;
   letter-spacing: -0.02em;
   line-height: 1.15;
@@ -307,7 +374,7 @@ a:focus-visible {
   gap: 32px;
 }
 
-@media (max-width: 1000px) and (min-width: 821px) {
+@media (max-width: 1100px) and (min-width: 821px) {
   .about-stages-wide {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 40px 56px;
@@ -354,7 +421,7 @@ a:focus-visible {
   gap: 10px;
   margin: 0;
   color: var(--about-muted);
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 600;
   letter-spacing: 0.07em;
   line-height: 1.4;
@@ -368,7 +435,7 @@ a:focus-visible {
 
 .about-stage-idea {
   margin: 14px 0 0;
-  font-size: 19px;
+  font-size: 1.1875rem;
   font-weight: 500;
   letter-spacing: -0.01em;
   line-height: 1.35;
@@ -377,7 +444,7 @@ a:focus-visible {
 .about-stage-detail {
   margin: 10px 0 0;
   color: var(--about-muted);
-  font-size: 16px;
+  font-size: 1rem;
 }
 
 /*
@@ -422,7 +489,7 @@ a:focus-visible {
 
 .about-assurance-grid h3 {
   margin: 0;
-  font-size: 17px;
+  font-size: 1.0625rem;
   font-weight: 600;
   line-height: 1.35;
 }
@@ -430,7 +497,7 @@ a:focus-visible {
 .about-assurance-grid p {
   margin: 8px 0 0;
   color: var(--about-muted);
-  font-size: 16px;
+  font-size: 1rem;
 }
 
 .about-definition-list {
@@ -479,7 +546,7 @@ a:focus-visible {
 }
 
 .about-faq-list dt {
-  font-size: 17px;
+  font-size: 1.0625rem;
   line-height: 1.4;
 }
 
@@ -567,7 +634,7 @@ a:focus-visible {
 .about-wiki-nav h2 {
   margin: 0 0 10px;
   color: var(--about-faint);
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 600;
   letter-spacing: 0.07em;
   line-height: 1.4;
@@ -588,7 +655,7 @@ a:focus-visible {
   display: block;
   padding: 4px 0;
   color: var(--about-muted);
-  font-size: 15px;
+  font-size: 0.9375rem;
   line-height: 1.4;
   text-decoration: none;
 }
@@ -615,7 +682,7 @@ a:focus-visible {
 
 .about-wiki-heading h1 {
   margin: 0;
-  font-size: clamp(30px, 3.4vw, 38px);
+  font-size: clamp(1.875rem, 3.4vw, 2.375rem);
   font-weight: 600;
   letter-spacing: -0.02em;
   line-height: 1.15;
@@ -644,7 +711,7 @@ a:focus-visible {
   border: 1px solid var(--about-border-strong);
   border-radius: 3px;
   color: var(--about-text);
-  font-size: 14px;
+  font-size: 0.875rem;
   font-weight: 500;
   line-height: 1.4;
   text-decoration: none;
@@ -665,7 +732,7 @@ a:focus-visible {
 
 .about-wiki-prose h2 {
   margin: 40px 0 0;
-  font-size: 23px;
+  font-size: 1.4375rem;
   font-weight: 600;
   letter-spacing: -0.015em;
   line-height: 1.25;
@@ -673,7 +740,7 @@ a:focus-visible {
 
 .about-wiki-prose h3 {
   margin: 32px 0 0;
-  font-size: 18px;
+  font-size: 1.125rem;
   font-weight: 600;
   line-height: 1.3;
 }
@@ -729,7 +796,7 @@ a:focus-visible {
   padding: 0;
   border: 0;
   background: none;
-  font-size: 13px;
+  font-size: 0.8125rem;
   white-space: pre;
 }
 
@@ -745,7 +812,7 @@ a:focus-visible {
   margin: 18px 0 0;
   overflow-x: auto;
   border-collapse: collapse;
-  font-size: 15px;
+  font-size: 0.9375rem;
 }
 
 .about-wiki-prose th,
@@ -868,7 +935,7 @@ a:focus-visible {
 
 }
 
-@media (max-width: 680px) {
+@media (max-width: 700px) {
   .about-header-inner,
   .about-footer,
   .about-section,
@@ -893,7 +960,7 @@ a:focus-visible {
   }
 
   .about-nav a {
-    font-size: 13px;
+    font-size: 0.8125rem;
   }
 
   .about-hero {
@@ -901,12 +968,12 @@ a:focus-visible {
   }
 
   .about-hero h1 {
-    font-size: clamp(38px, 12vw, 48px);
+    font-size: clamp(2.375rem, 12vw, 3rem);
   }
 
   .about-hero-copy {
     margin-top: 20px;
-    font-size: 17px;
+    font-size: 1.0625rem;
   }
 
   .about-product-visual {
@@ -919,7 +986,7 @@ a:focus-visible {
   }
 
   .about-stage-idea {
-    font-size: 18px;
+    font-size: 1.125rem;
   }
 
   .about-definition-list > div {
@@ -937,7 +1004,7 @@ a:focus-visible {
   }
 }
 
-@media (max-width: 360px) {
+@media (max-width: 440px) {
   .about-header-inner {
     align-items: flex-start;
     flex-direction: column;

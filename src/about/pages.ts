@@ -24,5 +24,8 @@ import '@fontsource/ibm-plex-sans/latin-500.css';
 import '@fontsource/ibm-plex-sans/latin-600.css';
 import './about.css';
 import startReveals from './reveal';
+import startAppearance from './appearance';
 
+// Before the reveals, so a page that is about to animate does so in the appearance it will keep.
+startAppearance();
 startReveals();

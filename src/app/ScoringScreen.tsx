@@ -48,6 +48,7 @@ import { connectionTimeline } from './ConnectionTimeline';
 import { useAppUpdate } from '../pwa/useAppUpdate';
 import { updateDeferredAlert } from '../pwa/UpdateNotice';
 import { ResultDeliveryService } from './ResultDelivery';
+import { IScoringRulesCorrection } from '../scorer/ScoringRulesCorrectionDialog';
 
 /** The two totals, read back out of the payload rather than derived a second time. */
 export function scoreFromQbj(qbj: object): { left: number; right: number } | undefined {
@@ -87,6 +88,8 @@ export default function ScoringScreen(props: {
   storageDegraded?: boolean;
   /** `acceptedJustNow` is a transient presentation fact, never persisted as game state. */
   onComplete: (recordId: string, acceptedJustNow?: boolean) => void | Promise<void>;
+  /** Re-read the stored record, after something outside the scorer's own event history changed it. */
+  onRecordChanged: () => void | Promise<void>;
   /** A repair produced new credentials for the same game. Persist them; nothing else changes. */
   onConnectionRepaired: (change: Partial<IConnectedSession>) => void;
   /** The room gave up on tournament control for this game. The game continues, offline. */
@@ -101,10 +104,25 @@ export default function ScoringScreen(props: {
     operatorName,
     storageDegraded = false,
     onComplete,
+    onRecordChanged,
     onConnectionRepaired,
     onConnectionLost,
   } = props;
   const [downloadedAt, setDownloadedAt] = useState<string | undefined>(record.qbjDownloadedAt);
+  /**
+   * How many times the rules have been corrected in this sitting. Part of the scorer's key.
+   *
+   * A correction changes the format and, when an answer type moved position, the events that point
+   * at it. Those two have to take effect together or the scoresheet spends a render pricing buzzes
+   * against the wrong buttons — a render that `onProgress` could sample and send to tournament
+   * control. Remounting the scorer makes it re-read both from the journal in one pass, which is the
+   * only place the pair is atomic.
+   *
+   * The cost is the undo stack, which does not survive the remount. That is the right thing to lose:
+   * "undo" across a rules change would have to mean undoing the change or undoing a question priced
+   * under rules that no longer apply, and neither is what anybody would press it for.
+   */
+  const [ruleRevision, setRuleRevision] = useState(0);
   const [recordDurablyStored, setRecordDurablyStored] = useState(durable && !storageDegraded);
   const [repairing, setRepairing] = useState(false);
   const update = useAppUpdate();
@@ -304,6 +322,31 @@ export default function ScoringScreen(props: {
   );
 
   /**
+   * Apply corrected scoring rules to this game.
+   *
+   * The order matters and is the same order every other write on this screen follows: the copy that
+   * survives a reload goes first. `saveEvents` writes the synchronous journal before it queues the
+   * durable mirror, so a device that loses power between these two lines comes back with the
+   * re-pointed history and the old format -- which `correctFormat` would simply offer to correct
+   * again. The reverse order would come back with a format the events no longer match.
+   *
+   * See `formatCorrection` for what has already been checked by the time this runs, and why nothing
+   * here needs to validate anything: a correction that could not be applied honestly never becomes
+   * one of these calls.
+   */
+  const correctScoringRules = useCallback(
+    async ({ format, events }: IScoringRulesCorrection) => {
+      store.saveEvents(record.id, events);
+      await store.update(record.id, {
+        package: { ...record.package, scorekeeperFormat: format },
+      });
+      await onRecordChanged();
+      setRuleRevision((revision) => revision + 1);
+    },
+    [record.id, record.package, store, onRecordChanged],
+  );
+
+  /**
    * The banner strip's contents.
    *
    * The update line goes last because it is the only thing here that is not about this game: every
@@ -318,7 +361,14 @@ export default function ScoringScreen(props: {
   return (
     <>
       <ScorerHost
-        key={record.gameKey}
+        key={`${record.gameKey}:${ruleRevision}`}
+        /*
+         * The remount above is deliberate, so the scoresheet must not greet it as a recovery. See
+         * the note on `ruleRevision`, and `openingNotice` in `Scorer`.
+         */
+        openingNotice={
+          ruleRevision > 0 ? 'Scoring rules corrected. Every question has been recalculated.' : undefined
+        }
         gameKey={record.gameKey}
         format={record.package.scorekeeperFormat}
         leftTeam={record.package.left}
@@ -342,6 +392,7 @@ export default function ScoringScreen(props: {
         recordDurablyStored={recordDurablyStored}
         degradedMessage={live ? runtime.degradedMessage : undefined}
         onSubmit={submit}
+        onCorrectScoringRules={correctScoringRules}
         onDownload={write}
         onDownloadForm={(game, form) => downloadForm(game, form)}
         onProgress={live ? (qbj) => runtime.reportProgress(qbjWithSourceMetadata(qbj, record.package)) : undefined}

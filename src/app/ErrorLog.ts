@@ -29,6 +29,14 @@ export type ErrorSource =
   | 'uncaught'
   /** A rejected promise nobody handled. */
   | 'unhandled-rejection'
+  /**
+   * A throw during render, which `window.onerror` never sees.
+   *
+   * React catches these itself and unmounts the tree, so the browser has nothing to report. Kept
+   * distinct from `uncaught` because it is the only source that took the scoresheet off the screen,
+   * and a diagnostics bundle that says which one happened answers "why was it blank?" on its own.
+   */
+  | 'render'
   /** Something this application refused to do, recorded on purpose. */
   | 'rejected-operation';
 

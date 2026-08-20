@@ -1,0 +1,167 @@
+/*
+ * What comes out of the printer.
+ *
+ * Before this file, nothing did — there was no `@media print` rule anywhere in the application, so
+ * asking a browser to print the scoresheet produced the scoresheet *interface*: menus, footer
+ * controls, the answer-type buttons, a connection pill, spread over several pages and useful to
+ * nobody. See `PrintableScoresheet` for what is printed instead and why a room needs it.
+ *
+ * # The rule this file follows
+ *
+ * On screen, the printable document does not exist. On paper, nothing else does. That is stated
+ * once, at the top of each block, rather than by finding and hiding each piece of chrome — a
+ * hide-list is a list somebody has to remember to add to, and the failure mode is a stray button
+ * printed across a scoresheet in a hallway six months from now.
+ */
+
+.printable-scoresheet {
+  display: none;
+}
+
+@media print {
+  /*
+   * Ink, and the lack of it.
+   *
+   * Print always draws black on white regardless of appearance: a room printing this has a
+   * near-empty toner cartridge and a scoresheet in dark mode would empty it. The tokens are
+   * overridden rather than the rules rewritten, so everything below stays readable in one palette.
+   */
+  :root {
+    color-scheme: light;
+
+    --room-text: #000000;
+    --room-muted: #000000;
+    --room-faint: #444444;
+    --room-border: #000000;
+    --room-border-strong: #000000;
+    --room-surface: #ffffff;
+    --room-surface-sunken: #ffffff;
+  }
+
+  /* The browser's own font-size preference and the in-application step are both screen concerns.
+     Paper has its own measure, and a `large` setting would otherwise cost three extra sheets. */
+  html {
+    font-size: 11pt;
+  }
+
+  body {
+    background: #ffffff;
+    color: #000000;
+  }
+
+  /*
+   * Everything the application draws for the screen. One rule, no hide-list.
+   *
+   * This works only because `PrintableScoresheet` portals itself to `document.body` rather than
+   * rendering where it sits in the React tree: `display: none` on an ancestor cannot be undone by a
+   * descendant, so a printable document inside `#root` would be hidden with everything else.
+   */
+  #root {
+    display: none !important;
+  }
+
+  .printable-scoresheet {
+    display: block;
+  }
+
+  @page {
+    margin: 12mm;
+  }
+
+  .printable-header {
+    margin-bottom: 8pt;
+    padding-bottom: 6pt;
+    border-bottom: 1pt solid #000000;
+  }
+
+  .printable-title {
+    margin: 0;
+    font-size: 14pt;
+  }
+
+  .printable-meta {
+    margin: 2pt 0 0;
+    font-size: 9pt;
+  }
+
+  .printable-score {
+    margin: 8pt 0;
+    font-size: 12pt;
+  }
+
+  .printable-table {
+    width: 100%;
+    margin-bottom: 10pt;
+    border-collapse: collapse;
+    /* A game runs to two pages more often than not, and a header row that appears only on the first
+       one leaves the second as six unlabelled columns. `thead` repeats; this makes it do so. */
+    page-break-inside: auto;
+  }
+
+  .printable-table caption {
+    padding-bottom: 3pt;
+    font-size: 10pt;
+    font-weight: 700;
+    text-align: left;
+  }
+
+  .printable-table th,
+  .printable-table td {
+    padding: 2pt 4pt;
+    border: 0.5pt solid #000000;
+    font-size: 9pt;
+    font-weight: 400;
+    text-align: left;
+    vertical-align: top;
+  }
+
+  .printable-table thead th {
+    font-weight: 700;
+  }
+
+  .printable-table thead {
+    display: table-header-group;
+  }
+
+  .printable-table tr {
+    page-break-inside: avoid;
+  }
+
+  /* Tall enough to write in, which is the entire purpose of these rows. */
+  .printable-blank th,
+  .printable-blank td {
+    height: 20pt;
+  }
+
+  .printable-total th,
+  .printable-total td {
+    font-weight: 700;
+  }
+
+  .printable-legend {
+    margin: 0 0 10pt;
+    font-size: 9pt;
+  }
+
+  .printable-notes {
+    margin-bottom: 10pt;
+  }
+
+  .printable-notes h2 {
+    margin: 0 0 3pt;
+    font-size: 10pt;
+  }
+
+  .printable-notes ul {
+    margin: 0;
+    padding-left: 14pt;
+    font-size: 9pt;
+  }
+
+  .printable-footer {
+    margin: 0;
+    padding-top: 6pt;
+    border-top: 0.5pt solid #000000;
+    font-size: 8pt;
+  }
+}

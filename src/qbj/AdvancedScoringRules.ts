@@ -512,3 +512,68 @@ export function advancedScorekeeperFormat(input: IAdvancedScoringRulesInput): IS
   const result = readAdvancedScoringRules(input);
   return result.ok ? result.format : null;
 }
+
+/**
+ * An existing format, back in the form that produced it.
+ *
+ * # Why this direction has to exist
+ *
+ * Every other path here runs forwards: a scorekeeper fills in the form, the form becomes QBJ, the
+ * QBJ becomes an `IScorekeeperFormat`, and the game is scored against it. That is sufficient right up
+ * until the tournament corrects its own rules — powers are 20, not 15; regulation is 24, not 20 —
+ * which happens after the first round rather than before it, and always to a game that already has
+ * a format nobody typed in on this device. It may have arrived in a QBJ file or over QBTCP.
+ *
+ * So the form needs to be openable on a format it did not create. See `formatCorrection` for what is
+ * then done with the result, and for the rules about which corrections a scored game will accept.
+ *
+ * # Lossless in the direction that matters
+ *
+ * `IAdvancedScoringRulesInput` has a field for everything `IScorekeeperFormat` carries except the two
+ * it derives -- `isPower` and `isNeg` follow from the point value, and `totalDivisor` from the whole
+ * rule set -- so a format that came from this form round-trips to itself. A format from a QBJ file
+ * round-trips to itself too, with one deliberate exception: `qbjId` is not carried on an answer-type
+ * row, so re-saving mints new identities for the answer types. That is why `formatCorrection` keeps
+ * the original format's identities where the answer type is unchanged, rather than doing it here
+ * where there is nothing to compare against.
+ */
+export function advancedFromFormat(format: IScorekeeperFormat): IAdvancedScoringRulesInput {
+  const { bonus, regulation, overtime, lightning, players } = format;
+  return {
+    answerTypes: format.answerTypes.map((answerType) =>
+      newAdvancedAnswerType({
+        value: answerType.value,
+        label: answerType.label,
+        shortLabel: answerType.shortLabel,
+        awardsBonus: answerType.awardsBonus,
+      }),
+    ),
+
+    useBonuses: bonus.enabled,
+    bonusStructure: bonus.regular ? 'regular' : 'irregular',
+    // A regular bonus has `minimumParts === maximumParts`, which is what made it regular; either
+    // side is the part count the form asks for.
+    ...(bonus.regular
+      ? { pointsPerBonusPart: bonus.pointsPerPart, partsPerBonus: bonus.maximumParts }
+      : {
+          maximumBonusScore: bonus.maximumScore,
+          bonusDivisor: bonus.divisor,
+          minimumPartsPerBonus: bonus.minimumParts,
+          maximumPartsPerBonus: bonus.maximumParts,
+        }),
+    bonusesBounceBack: bonus.bounceBack,
+
+    tossupCount: regulation.tossupCount,
+    maximumTossupCount: regulation.maximumTossupCount,
+    maximumPlayersPerTeam: players.maximumActive,
+
+    overtimeQuestionCount: overtime.minimumQuestionCount,
+    overtimeIncludesBonuses: overtime.includesBonuses,
+
+    useLightning: lightning.enabled,
+    ...(lightning.enabled ? { lightningCountPerTeam: lightning.countPerTeam, lightningDivisor: lightning.divisor } : {}),
+
+    timed: regulation.timed,
+    name: format.name,
+  };
+}

@@ -35,11 +35,9 @@ import {
   protestBlocksCheckpoint,
   protestBlocksSuddenDeathTossup,
   protestCheckpointPolicy,
-  roomBreakDue,
   roomBreakLabel,
   roomBreakTaken,
   roomBreaksAreScheduled,
-  roomMayBreakNow,
   roomTakesBreaks,
   substitutionOpportunityPhrase,
   substitutionPolicy,
@@ -58,7 +56,8 @@ import { RoomConnectionState } from '../app/ConnectionState';
 import TeamPanel from './TeamPanel';
 import BonusPrompt from './BonusPrompt';
 import RecentRail, { IRecentMotion } from './RecentRail';
-import GameMenu, { IGameMenuItem, joinMenuGroups } from './GameMenu';
+import GameMenu from './GameMenu';
+import scorerMenuItems from './scorerMenu';
 import ControlIcon from './ControlIcon';
 import PlayersDialog, { rosterSyncKey } from './PlayersDialog';
 import StartingLineupPrompt from './StartingLineupPrompt';
@@ -81,6 +80,9 @@ import {
   RecoveryDialog,
   ScoresheetReviewDialog,
 } from './OperationsDialogs';
+import PrintableScoresheet from './PrintableScoresheet';
+import usePrinting from './usePrinting';
+import ScoringRulesCorrectionDialog, { IScoringRulesCorrection } from './ScoringRulesCorrectionDialog';
 import { attachScorerRecovery } from './ScorerRecovery';
 import useRoomClock from './useRoomClock';
 import usePlayerSeating from './usePlayerSeating';
@@ -167,6 +169,14 @@ export interface IScorerProps {
    * system simply does not get the menu entries.
    */
   onDownloadForm?: (game: IDerivedGame, form: 'partial' | 'legacy-match') => void;
+  /**
+   * Apply corrected scoring rules to this game.
+   *
+   * Absent when nothing above the scorer can persist the change — the practice screen, chiefly, whose
+   * format belongs to the scenario rather than to a tournament. An absent callback removes the menu
+   * entry rather than disabling it, exactly as `onDownloadForm` does. See `formatCorrection`.
+   */
+  onCorrectScoringRules?: (correction: IScoringRulesCorrection) => void | Promise<void>;
   /** Called as the game changes, so tournament control can watch progress. */
   onProgress?: (qbj: object, questionsPlayed: number) => void;
   /** Round number and the rest of the non-scoring metadata for the exported match. */
@@ -178,6 +188,15 @@ export interface IScorerProps {
   onCancelControlRequest?: () => Promise<HelpClearResult | null>;
   /** The event list was restored automatically from local storage. */
   recovered?: boolean;
+  /**
+   * Why the scoresheet has just been mounted on a game that was already in progress.
+   *
+   * The default assumption is recovery — a reload, a restored tab, a device picked back up — and the
+   * opening banner says so. A rules correction remounts the scorer deliberately (see `ScoringScreen`)
+   * and is not that: telling a room its game was "recovered" seconds after they corrected the rules
+   * describes something that did not happen and hides the thing that did.
+   */
+  openingNotice?: string;
   /** Something the host wants said about recovery, e.g. where a restored game came from. */
   recoveryNotice?: string;
   /**
@@ -215,6 +234,7 @@ type OpenDialog =
   | 'end-early'
   | 'details'
   | 'connection'
+  | 'scoring-rules'
   | null;
 
 /** How often, at most, to tell tournament control how the game is going. Matches MODAQ's old timer. */
@@ -473,6 +493,7 @@ export default function Scorer(props: IScorerProps) {
     onSubmit,
     onDownload,
     onDownloadForm,
+    onCorrectScoringRules,
     onProgress,
     qbjMeta,
     onRequestControl,
@@ -480,6 +501,7 @@ export default function Scorer(props: IScorerProps) {
     onRetryControlRequest,
     onCancelControlRequest,
     recovered = false,
+    openingNotice,
     recoveryNotice,
     alerts,
     recovery,
@@ -496,6 +518,8 @@ export default function Scorer(props: IScorerProps) {
   const recoveryStatus: IScorerRecoveryStatus = recovery ?? { localSaveOk: saved !== false };
 
   const [dialog, setDialog] = useState<OpenDialog>(null);
+  // Mounts the paper copy for the length of a print and not otherwise. See `usePrinting`.
+  const { printing, print } = usePrinting();
   /**
    * Whether the seat layer is on.
    *
@@ -518,12 +542,12 @@ export default function Scorer(props: IScorerProps) {
   const submitInFlight = useRef(false);
   const [submitResult, setSubmitResult] = useState<IScorerSubmitResult | null>(null);
   const [operationNotice, setOperationNotice] = useState<IOperationNotice | null>(
-    recovered
+    recovered || openingNotice
       ? {
           // Not an acknowledgement. It says the events on screen came from somewhere other than this
           // session, which is worth knowing for a little while but should not occupy the scoresheet
           // for the whole game.
-          message: 'Recovered the in-progress game saved on this device.',
+          message: openingNotice ?? 'Recovered the in-progress game saved on this device.',
           tone: 'info',
           transient: false,
           autoDismissMs: recoveryNoticeMs,
@@ -1431,145 +1455,52 @@ export default function Scorer(props: IScorerProps) {
    */
   const downloadQbj = () => onDownload(qbj);
 
-  /*
-   * The Game menu, in groups.
+  /**
+   * Apply a rules correction, and leave a record of it in the game itself.
    *
-   * One menu, one level, and the grouping carried by rules rather than by headings or by nesting —
-   * see `IGameMenuItem.dividerBefore`. What is not here any more is Protests and Issue: both are
-   * reached from Flag, which is a permanent footer control right beside this one, and a live-play
-   * action with two entry points is a live-play action a scorekeeper has to choose between under
-   * time pressure. Choosing the protest path from Flag opens the same Protests dialog, so nothing
-   * that was reachable has stopped being reachable — including resolving one already recorded.
+   * The note is the whole reason this is not the prop passed straight down. A result whose scores
+   * were repriced mid-game and says nothing about it is a result that looks, to whoever imports it on
+   * Monday, exactly like one scored wrong. A note event travels into the QBJ with everything else, so
+   * the answer is in the document rather than in somebody's memory of the morning.
+   *
+   * Written into the history handed upward rather than appended through `events.append`, because the
+   * two have to be persisted together: `ScoringScreen` writes this array and the corrected format as
+   * one operation, and an `append` here would be a third write racing the other two.
    */
-  const generalItems: IGameMenuItem[] = [
-    {
-      // Named for what it does rather than for the state it is in, and stating the current state after
-      // it, because a menu entry that reads "Keyboard scoring" tells nobody whether it is on.
-      label: keyboardEnabled ? 'Keyboard scoring: on' : 'Keyboard scoring: off',
-      icon: 'game',
-      onSelect: () => setKeyboardEnabled(!keyboardEnabled),
-    },
-    { label: 'Notes', icon: 'note', onSelect: () => setDialog('notes'), disabled: submitting },
-    { label: 'Game details', icon: 'details', onSelect: () => setDialog('details') },
-  ];
+  const applyScoringRulesCorrection = async (correction: IScoringRulesCorrection) => {
+    if (!onCorrectScoringRules) return;
+    const summary = correction.changes.map((change) => `${change.subject}: ${change.detail}`).join('; ');
+    const note: ScoreEvent = {
+      id: newEventId(),
+      questionNumber: lastPlayedQuestion(game),
+      type: 'note',
+      text: summary === '' ? 'Scoring rules corrected.' : `Scoring rules corrected — ${summary}.`,
+    };
+    await onCorrectScoringRules({ ...correction, events: [...correction.events, note] });
+  };
 
-  /** Things that move the round along. Only ever what this format and this moment actually allow. */
-  const roundItems: IGameMenuItem[] = [];
-  if (format.lightning.enabled)
-    roundItems.push({
-      label: 'Lightning / worksheet',
-      icon: 'lightning',
-      onSelect: () => setDialog('lightning'),
-      disabled: submitting,
-    });
-  if ((procedure?.timeoutsPerTeam ?? 0) > 0 && phase.kind !== 'complete' && phase.kind !== 'timeout') {
-    roundItems.push({ label: 'Timeout', icon: 'clock', onSelect: () => setDialog('timeout'), disabled: submitting });
-  }
-  if (phase.kind === 'timeout') {
-    roundItems.push({
-      label: 'Resume play',
-      icon: 'play',
-      onSelect: () => record({ id: newEventId(), type: 'timeout-resume', questionNumber: currentQuestion }),
-      disabled: submitting,
-    });
-  }
-  if (roomTakesBreaks(procedure) && phase.kind !== 'complete' && !game.awaitingScoreCheck) {
-    // A scheduled room is only offered the break it actually owes; an unscheduled `halves` room keeps
-    // the moderator-chosen break it has always had. Offering "End this half" to a room whose
-    // procedure says "after tossup 5, 10 and 15" would be offering it a break nobody scheduled.
-    const mayBreak = roomMayBreakNow(procedure, game.halfBreaks, lastPlayedQuestion(game));
-    const due = roomBreakDue(procedure, game.halfBreaks, lastPlayedQuestion(game));
-    if (mayBreak) {
-      roundItems.push({
-        label: roomBreaksAreScheduled(procedure)
-          ? `${roomBreakLabel(procedure, due)} · after tossup ${due?.afterTossup}`
-          : `End ${game.halfBreaks.length === 0 ? 'first' : 'this'} half`,
-        icon: 'pause',
-        // The boundary is the last tossup actually played, not the one on screen. A displayed
-        // question with nothing recorded against it has not been read.
-        onSelect: () =>
-          record({
-            id: newEventId(),
-            type: 'half-break',
-            questionNumber: currentQuestion,
-            lastQuestion: lastPlayedQuestion(game),
-          }),
-        disabled: submitting,
-      });
-    }
-  }
-  if (format.regulation.timed && !game.regulationComplete && phase.kind !== 'complete') {
-    roundItems.push({
-      label: 'End regulation',
-      icon: 'pause',
-      /*
-       * `lastRegulationQuestion` is the fix for the boundary being one out. Q18 finishes, Q19
-       * appears, the horn goes before anybody reads it: the last regulation question is 18, and
-       * recording 19 would make the first overtime tossup count as regulation.
-       */
-      onSelect: () =>
-        record({
-          id: newEventId(),
-          type: 'end-regulation',
-          questionNumber: currentQuestion,
-          lastRegulationQuestion: lastPlayedQuestion(game),
-        }),
-      disabled: submitting,
-    });
-  }
-
-  /** Going back over what is already written. */
-  const reviewItems: IGameMenuItem[] = [
-    { label: 'Full scoresheet review', icon: 'review', onSelect: () => openReviewAt(undefined), disabled: submitting },
-  ];
-  if (phase.kind === 'tossup' || phase.kind === 'bonus') {
-    reviewItems.push({
-      label: `Replace question ${phase.questionNumber}`,
-      icon: 'replace',
-      onSelect: () => openReplacementAt(phase.questionNumber),
-      disabled: submitting,
-    });
-  }
-  reviewItems.push({ label: 'Adjust score', icon: 'adjust', onSelect: () => setDialog('adjust'), disabled: submitting });
-
-  /** Getting the game off this device, or back on to it. */
-  const fileItems: IGameMenuItem[] = [
-    { label: 'Download QBJ backup', icon: 'download', onSelect: downloadQbj },
-  ];
-  if (onDownloadForm) {
-    // The mid-game portable copy. Not a substitute for local recovery, which keeps the event
-    // history this cannot represent; see `docs/QBJ_ASSIGNMENT_PROFILE.md`.
-    fileItems.push({ label: 'Download current QBJ', icon: 'download', onSelect: () => onDownloadForm(game, 'partial') });
-    fileItems.push({
-      label: 'Download legacy match-only QBJ',
-      icon: 'download',
-      onSelect: () => onDownloadForm(game, 'legacy-match'),
-    });
-  }
-  fileItems.push({ label: 'Recover from QBJ', icon: 'upload', onSelect: () => setDialog('recovery'), disabled: submitting });
-
-  /** The two that end a game. Last, and behind their own rule. */
-  const endingItems: IGameMenuItem[] = [];
-  if (phase.kind !== 'complete' && game.tossupsRead > 0) {
-    endingItems.push({
-      label: 'End game early…',
-      icon: 'stop',
-      onSelect: () => setDialog('end-early'),
-      destructive: true,
-      disabled: submitting,
-    });
-  }
-  if (phase.kind !== 'complete') {
-    endingItems.push({
-      label: 'Record forfeit',
-      icon: 'forfeit',
-      onSelect: () => setDialog('forfeit'),
-      destructive: true,
-      disabled: submitting,
-    });
-  }
-
-  const menuItems = joinMenuGroups([generalItems, roundItems, reviewItems, fileItems, endingItems]);
+  const menuItems = scorerMenuItems({
+    game,
+    format,
+    phase,
+    procedure,
+    currentQuestion,
+    lastPlayed: lastPlayedQuestion(game),
+    keyboardEnabled,
+    submitting,
+    canDownloadForms: onDownloadForm !== undefined,
+    canCorrectScoringRules: onCorrectScoringRules !== undefined,
+    openDialog: setDialog,
+    setKeyboardEnabled,
+    record,
+    newEventId,
+    openReview: () => openReviewAt(undefined),
+    openReplacement: openReplacementAt,
+    downloadQbjBackup: downloadQbj,
+    downloadPartialQbj: () => onDownloadForm?.(game, 'partial'),
+    downloadLegacyQbj: () => onDownloadForm?.(game, 'legacy-match'),
+    print,
+  })
 
   const submit = async () => {
     if (submitInFlight.current) return;
@@ -2426,6 +2357,31 @@ export default function Scorer(props: IScorerProps) {
           // somebody reading it would move the rest of the list, and nothing in here is urgent.
           timeline={connectionTimeline.entries()}
           onDownload={downloadQbj}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {/*
+        Mounted only while a print is being produced, so the scoresheet is not carrying a second copy
+        of the whole game in the DOM at all times. Ctrl+P reaches it through `beforeprint`; see
+        `usePrinting`. It portals out of this tree so one rule in `print.css` can hide the interface.
+      */}
+      {printing && (
+        <PrintableScoresheet
+          game={game}
+          format={format}
+          tournamentName={tournamentName}
+          roundName={roundName}
+          roomName={roomName}
+          packetName={packetName}
+          operatorName={operatorName}
+        />
+      )}
+      {dialog === 'scoring-rules' && onCorrectScoringRules && (
+        <ScoringRulesCorrectionDialog
+          format={format}
+          events={events.events}
+          disabled={submitting}
+          onCorrect={applyScoringRulesCorrection}
           onClose={() => setDialog(null)}
         />
       )}

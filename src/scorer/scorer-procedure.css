@@ -1,0 +1,989 @@
+/*
+ * The scorer, part three: how the room runs the game rather than how it scores one.
+ *
+ * Zero-point answers, timeouts, half breaks, starting lineups, the halftime score check, the
+ * pre-submit review and protests. Grouped together because every one of them is procedure --
+ * a rule about the round -- and because a format that runs none of it renders none of this.
+ *
+ * Split out of a single 3,200-line `scorer.css`, along the `#region` boundaries that
+ * file already had. One stylesheet meant every change to the scoresheet -- a dialog,
+ * a protest row, a button -- landed in the same file, so two people could not touch
+ * different parts of the scorer without meeting in a merge.
+ *
+ * Load order is preserved by `main.tsx` and is load-bearing: these were one document
+ * and the cascade between them is the cascade they had. A new file goes at the end of
+ * that import list, not into the middle of it.
+ */
+
+/* #region Zero-point answers, timeouts and the rest of the procedure layer */
+
+/*
+ * A wrong answer worth nothing. Deliberately quieter than every scoring button around it: it is a
+ * real outcome, but it is not a score, and giving it the same weight as a +15 would put the two a
+ * glance apart on a row a scorekeeper hits without looking.
+ */
+.scorer-answer-zero {
+  color: var(--room-muted);
+}
+
+.scorer-answer-zero:hover:not(:disabled) {
+  border-color: var(--room-muted);
+  background: var(--room-surface-sunken);
+}
+
+.scorer-team-timeout {
+  margin: 0 0 6px;
+  font-size: 0.75rem;
+  color: var(--room-warning);
+}
+
+.scorer-checkpoint,
+.scorer-timeout {
+  width: 100%;
+  max-width: 620px;
+  margin: 0 auto;
+  padding: 12px 0;
+  text-align: center;
+}
+
+.scorer-checkpoint-title {
+  margin: 0 0 8px;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.scorer-checkpoint .scorer-complete-score {
+  display: flex;
+  justify-content: center;
+  gap: 24px;
+  margin: 0 0 8px;
+  font-size: 1.125rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.scorer-checkpoint .scorer-complete-actions,
+.scorer-timeout .scorer-complete-actions {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.scorer-timeout-clock {
+  margin: 4px 0;
+  font-size: 1.5rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.scorer-flag-options {
+  display: grid;
+  gap: 8px;
+}
+
+.scorer-question-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/*
+ * Said once to somebody who has never opened a correction before, then dismissed for good.
+ *
+ * A note, not a card: the same left rule and tinted ground the errors block and the flag list use,
+ * so the three kinds of aside in this dialog are one thing said in three colours. It had been a
+ * rounded box outlined on all four sides, which is the one shape this stylesheet does not have.
+ */
+.scorer-question-intro {
+  padding: 10px 12px;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: var(--room-text);
+  background: var(--room-info-bg);
+  border-left: 3px solid var(--room-info-border);
+}
+
+.scorer-question-intro-title {
+  margin: 0 0 6px;
+  font-weight: 650;
+}
+
+.scorer-question-intro ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.scorer-question-intro li + li {
+  margin-top: 4px;
+}
+
+.scorer-question-intro .scorer-text-action {
+  margin-top: 9px;
+}
+
+.scorer-question-score {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.scorer-question-score caption {
+  padding-bottom: 4px;
+  text-align: left;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--room-muted);
+}
+
+.scorer-question-score th,
+.scorer-question-score td {
+  padding: 3px 0;
+  text-align: left;
+}
+
+.scorer-question-score td {
+  text-align: right;
+}
+
+.scorer-question-score th:first-child {
+  width: 50%;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scorer-question-score tbody th {
+  font-weight: 500;
+}
+
+.scorer-question-score-change {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+  font-variant-numeric: tabular-nums;
+}
+
+.scorer-question-score-impact {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+}
+
+.scorer-question-score-before,
+.scorer-question-score-arrow {
+  color: var(--room-muted);
+}
+
+.scorer-question-score-after {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.scorer-question-score-unchanged {
+  font-size: 0.75rem;
+  color: var(--room-muted);
+}
+
+.scorer-question-score-delta {
+  font-size: 0.6875rem;
+  color: var(--room-muted);
+}
+
+.scorer-question-score tbody tr.is-unchanged th {
+  color: var(--room-muted);
+  font-weight: 450;
+}
+
+.scorer-question-heading {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--room-muted);
+}
+
+/* The quick bonus totals, sized to be tapped rather than aimed at. */
+.scorer-question-totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Opens directly under its own disclosure, so the form's 16px gap is cancelled. */
+.scorer-question-more {
+  margin-top: -16px;
+  padding: 4px 0 0;
+}
+
+.scorer-question-scoreline {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--room-muted);
+}
+
+.scorer-question-flags {
+  padding: 8px 10px;
+  border-left: 3px solid var(--room-warning);
+  background: var(--room-surface-sunken);
+  font-size: 0.75rem;
+}
+
+.scorer-question-flags p {
+  margin: 4px 0 0;
+}
+
+.scorer-question-section {
+  padding-top: 14px;
+  border-top: 1px solid var(--room-border);
+}
+
+.scorer-question-section h3 {
+  margin: 0 0 8px;
+  font-size: 0.875rem;
+}
+
+.scorer-question-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.scorer-question-bonus-head {
+  justify-content: space-between;
+}
+
+.scorer-question-heading-line,
+.scorer-question-bonus-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* A heading with a line of context under it, rather than one long shouted line. */
+.scorer-question-heading-line {
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+}
+
+/*
+ * Who converted, as context rather than a control. Below the heading and in the ordinary text
+ * colour: the heading says what this section is, this says whose bonus it is, and neither of them
+ * is something to fill in when the tossup already settled it.
+ */
+.scorer-question-bonus-context {
+  margin: 2px 0 0;
+  font-size: 0.8125rem;
+  color: var(--room-text);
+}
+
+.scorer-question-bonus-head-actions {
+  margin-left: auto;
+}
+
+.scorer-question-bonus-head-actions .scorer-checkbox {
+  display: inline-flex;
+}
+
+.scorer-question-status-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.scorer-question-status-actions > span[aria-hidden='true'] {
+  color: var(--room-muted);
+}
+
+.scorer-question-remove-bonus {
+  margin-left: auto;
+  font-size: 0.6875rem;
+  white-space: nowrap;
+}
+
+.scorer-question-status {
+  font-size: 0.75rem;
+  color: var(--room-muted);
+}
+
+.scorer-question-attempt-head,
+.scorer-question-attempt {
+  display: grid;
+  grid-template-columns: 20px minmax(110px, 0.8fr) minmax(150px, 1.2fr) minmax(150px, 0.95fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.scorer-question-attempt-head {
+  margin-top: 10px;
+  padding: 0 0 6px;
+  font-size: 0.6875rem;
+  color: var(--room-muted);
+}
+
+/*
+ * A list of at most two rows, so it is not ruled.
+ *
+ * It used to carry a rule above every row and another below the last, which is three lines to
+ * separate two things — and drawn in the same 1px as the rules that divide Tossup from Bonus, so
+ * the eye could not tell a row boundary from a section boundary. The rows are made of bordered
+ * selects sitting in fixed columns under their own headings; they are already legible as rows. Air
+ * is enough.
+ */
+.scorer-question-attempts {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.scorer-question-field {
+  min-width: 0;
+}
+
+.scorer-question-field > span {
+  display: none;
+}
+
+.scorer-question-attempt select,
+.scorer-question-bonus select,
+.scorer-question-bonus input {
+  min-width: 0;
+  padding: 6px 7px;
+  font: inherit;
+  font-size: 0.8125rem;
+  color: var(--room-text);
+  background: var(--room-surface);
+  border: 1px solid var(--room-border-strong);
+  border-radius: 3px;
+}
+
+.scorer-question-attempt select {
+  width: 100%;
+}
+
+.scorer-question-attempt-number {
+  text-align: center;
+  color: var(--room-muted);
+}
+
+.scorer-question-empty {
+  margin: 10px 0 0;
+  font-size: 0.8125rem;
+  color: var(--room-muted);
+}
+
+.scorer-question-actions,
+.scorer-question-parts {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.scorer-question-actions {
+  margin-top: 10px;
+}
+
+.scorer-question-actions .scorer-checkbox {
+  display: inline-flex;
+}
+
+/*
+ * A column, not a row of controls jostling for the same line.
+ *
+ * With bouncebacks on there are two named sides to enter and a mode switch under them, and packing
+ * those across one wrapping row put the opponent's choices wherever there happened to be room. Each
+ * thing here is a labelled block on its own line, in the order the bonus is scored.
+ */
+.scorer-question-bonus {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.scorer-question-total-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+/*
+ * Says whose points these are. The same 12px muted label the number fields carry, so a row of
+ * buttons and a typed field read as the same kind of thing.
+ */
+.scorer-question-total-label {
+  font-size: 0.75rem;
+  color: var(--room-muted);
+}
+
+/* The mode switch is a link-sized action, not a full-width control the column would stretch it into. */
+.scorer-question-bonus > .scorer-text-action,
+.scorer-question-bonus > label {
+  align-self: flex-start;
+}
+
+.scorer-question-bonus label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.75rem;
+  color: var(--room-muted);
+}
+
+/* Two or three digits. Sized to what goes in it, so it does not read as a field for a sentence. */
+.scorer-question-bonus input {
+  width: 84px;
+}
+
+/*
+ * Its own line under the bonus row rather than a column standing beside it.
+ *
+ * The parts block is a flex item of a wrapping row, so without a full basis it packed itself into
+ * whatever space was left next to Points and Use total and the three parts came out staggered down
+ * the middle of the dialog. They are a short column of small numbers; they belong under the total
+ * they add up to.
+ */
+.scorer-question-parts {
+  flex-basis: 100%;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+/*
+ * Part rows and the headings over them share one grid, because the headings are the only thing
+ * saying which of two identical `+10` buttons belongs to which team. A flex row with a fixed label
+ * width could not keep them lined up once the team names were the widest thing in the column.
+ */
+.scorer-question-part-head,
+.scorer-question-part {
+  display: grid;
+  grid-template-columns: 48px repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  align-items: center;
+  font-size: 0.75rem;
+  color: var(--room-muted);
+}
+
+/* Without bouncebacks a part is taken or missed, and the third column has nothing to hold. */
+.scorer-question-part-head.is-two-way,
+.scorer-question-part.is-two-way {
+  grid-template-columns: 48px repeat(2, minmax(0, 1fr));
+}
+
+.scorer-question-part-head {
+  padding-bottom: 2px;
+}
+
+.scorer-question-part-head > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scorer-question-part > span {
+  min-width: 0;
+}
+
+/* Sized to the row rather than to the live prompt, where a bonus button is the primary action. */
+.scorer-question-part .scorer-choice {
+  min-width: 0;
+  padding: 6px 8px;
+  font-size: 0.8125rem;
+}
+
+/*
+ * Selected is a filled button, a heavier weight and a tick — three cues, so the one part that was
+ * bounced back is still obvious to a scorekeeper who cannot tell the accent from the surface.
+ */
+.scorer-question-part .scorer-choice.is-selected {
+  font-weight: 600;
+}
+
+/* A non-breaking space: a trailing one in `content` collapses and the tick lands on the number. */
+.scorer-question-part .scorer-choice.is-selected::before {
+  content: '✓\00a0';
+}
+
+/* The column heading names the team on wide screens; this repeats it once the heading folds away. */
+.scorer-question-part-team {
+  display: none;
+}
+
+/* A part nobody has answered yet: marked, so an unfinished breakdown cannot look finished. */
+.scorer-question-part.is-unanswered .scorer-question-part-label::after {
+  content: ' •';
+  color: var(--room-warning);
+}
+
+.scorer-question-part-summary {
+  margin: 4px 0 0;
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--room-text);
+}
+
+.scorer-question-part-pending {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--room-muted);
+}
+
+/*
+ * Narrow enough that four columns would be four slivers: the heading row goes, each part becomes a
+ * block, and the buttons name their own team instead of relying on a heading that is no longer
+ * there. Part N still leads the block, so which outcomes belong to which part stays obvious.
+ */
+@media (max-width: 560px) {
+  .scorer-question-part-head {
+    display: none;
+  }
+
+  .scorer-question-part,
+  .scorer-question-part.is-two-way {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+    padding-bottom: 6px;
+  }
+
+  .scorer-question-part .scorer-choice {
+    justify-self: stretch;
+    text-align: left;
+  }
+
+  .scorer-question-part-team {
+    display: inline;
+  }
+}
+
+/*
+ * Ruled off the section above it exactly as Tossup and Bonus are, and closed by the footer's rule
+ * rather than one of its own — a line above, a line below and the footer's line made three rules
+ * inside forty pixels for a control that is one word and a plus sign.
+ */
+.scorer-question-disclosure {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 12px 0 2px;
+  font: inherit;
+  font-size: 0.8125rem;
+  color: var(--room-text);
+  background: none;
+  border: 0;
+  border-top: 1px solid var(--room-border);
+  cursor: pointer;
+}
+
+.scorer-question-disclosure:hover {
+  color: var(--room-accent);
+}
+
+.scorer-question-disclosure:focus-visible,
+.scorer-question-attempt select:focus-visible,
+.scorer-question-bonus select:focus-visible,
+.scorer-question-bonus input:focus-visible {
+  outline: 2px solid var(--room-accent);
+  outline-offset: 1px;
+}
+
+.scorer-question-errors {
+  padding: 10px 12px;
+  font-size: 0.8125rem;
+  color: var(--room-error);
+  background: var(--room-error-bg);
+  border-left: 3px solid var(--room-error);
+}
+
+.scorer-question-errors ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+.scorer-question-footer {
+  position: sticky;
+  bottom: -16px;
+  z-index: 1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: 0 -16px -16px;
+  padding: 12px 16px;
+  background: var(--room-surface);
+  border-top: 1px solid var(--room-border);
+}
+
+@media (max-width: 700px) {
+  .scorer-question-attempt-head {
+    display: none;
+  }
+
+  /* A row is two lines tall here, so the space between rows has to beat the space inside one. */
+  .scorer-question-attempts {
+    gap: 22px;
+  }
+
+  .scorer-question-attempt {
+    grid-template-columns: 20px minmax(0, 1fr) minmax(84px, 0.55fr);
+    align-items: end;
+  }
+
+  .scorer-question-attempt-number {
+    grid-row: 1 / span 2;
+    align-self: center;
+  }
+
+  .scorer-question-field:nth-of-type(1),
+  .scorer-question-field:nth-of-type(2) {
+    grid-column: auto;
+  }
+
+  .scorer-question-field:nth-of-type(3) {
+    grid-column: 2;
+  }
+
+  .scorer-question-field-ruling {
+    grid-column: 2;
+  }
+
+  .scorer-question-attempt .scorer-text-action {
+    grid-column: 3;
+    justify-self: start;
+    padding: 7px 0;
+  }
+
+  .scorer-question-field > span {
+    display: block;
+    margin-bottom: 3px;
+    font-size: 0.6875rem;
+    color: var(--room-muted);
+  }
+}
+
+@media (max-width: 440px) {
+  .scorer-question-score th,
+  .scorer-question-score td {
+    padding-right: 6px;
+    padding-left: 6px;
+  }
+
+  /* Four lines tall now. */
+  .scorer-question-attempts {
+    gap: 26px;
+  }
+
+  .scorer-question-attempt {
+    grid-template-columns: 20px minmax(0, 1fr);
+  }
+
+  .scorer-question-attempt-number {
+    grid-row: 1 / span 4;
+  }
+
+  .scorer-question-field,
+  .scorer-question-field:nth-of-type(3),
+  .scorer-question-attempt .scorer-text-action {
+    grid-column: 2;
+  }
+
+  .scorer-question-footer .scorer-submit {
+    flex: 1;
+  }
+}
+
+/* Bonus parts. One row per part, the choices in a line, and the running total under them. */
+.scorer-bonus-parts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.scorer-part-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.scorer-part-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.scorer-part-label {
+  width: 60px;
+  flex-shrink: 0;
+  font-size: 0.8125rem;
+  color: var(--room-muted);
+}
+
+/*
+ * Under the bounceback choices, not beside them.
+ *
+ * It is the way out of a stage whose buttons are the primary action, so it must not sit in the row
+ * a scorekeeper is aiming at — a mispress there records a bounceback instead of going back, which is
+ * the mistake this control exists to fix.
+ */
+.scorer-prompt-back {
+  display: block;
+  margin-top: 12px;
+}
+
+.scorer-part-total {
+  margin: 0;
+  font-size: 1.125rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* #endregion */
+
+/* #region Starting lineups and the halftime score check */
+
+.scorer-starters {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 24px;
+}
+
+.scorer-starters-team {
+  min-width: 0;
+}
+
+.scorer-starters-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.scorer-starters-team .scorer-text-action:disabled {
+  color: var(--room-faint);
+  cursor: default;
+}
+
+/*
+ * A lineup change, shown.
+ *
+ * Scoped to the places where a press moves a row between groups: the starting prompt, and the two
+ * Playing / Bench editors that replaced the checkbox lists. Not applied to the Players roster at
+ * large, where the rows are a reading of the current lineup rather than something being rearranged.
+ * The geometry is worked out in LineupMotion; all this contributes is how long the travel takes and
+ * what the moved row looks like while it happens.
+ *
+ * The row stays the ruled row it already is. It is not lifted, outlined, rounded or shadowed, because
+ * a row that turns into a card while it moves is saying "you are dragging this", and nobody is: they
+ * pressed an arrow, and the row is on its way to a seat it has already been given. So the whole
+ * treatment is the sunken wash the rest of the scoresheet uses for "this line, the one you just
+ * touched" — arriving at once so it is legible during the travel, and taking its time leaving so the
+ * eye has somewhere to land after the movement stops.
+ */
+.scorer-starters-team .scorer-lineup-entry.is-moved,
+.scorer-lineup-groups .scorer-lineup-entry.is-moved {
+  background: var(--room-surface-sunken);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .scorer-starters-team .scorer-lineup-entry,
+  .scorer-lineup-groups .scorer-lineup-entry {
+    transition: background-color 220ms ease-out;
+  }
+
+  /* Ease-out only. A seat is a fixed thing and a row that overshoots one has to be read twice. */
+  .scorer-starters-team .scorer-lineup-entry.is-moving,
+  .scorer-lineup-groups .scorer-lineup-entry.is-moving {
+    transition: transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    will-change: transform;
+  }
+}
+
+.scorer-starters-submit {
+  margin-top: 24px;
+}
+
+.scorer-lineup-problem {
+  margin: 8px 0;
+  font-size: 0.8125rem;
+  color: var(--room-error);
+}
+
+.scorer-starters-title {
+  margin: 0 0 4px;
+  font-size: 1.25rem;
+}
+
+.scorer-score-check {
+  padding: 8px 0;
+}
+
+.scorer-check-heading {
+  margin: 0 0 8px;
+  font-size: 0.8125rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--room-muted);
+}
+
+/* #endregion */
+
+/* #region Pre-submit check */
+
+.scorer-presubmit {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.scorer-check-teams {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.scorer-check-team-name {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 6px;
+  font-size: 0.9375rem;
+}
+
+.scorer-check-team-score {
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * The player lines. Numbers are tabular and right-aligned so a column of tossups heard can be read
+ * down rather than one row at a time, which is what this table is for.
+ */
+.scorer-check-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.scorer-check-table th,
+.scorer-check-table td {
+  padding: 3px 6px;
+  text-align: right;
+  border-bottom: 1px solid var(--room-border);
+}
+
+.scorer-check-table thead th {
+  color: var(--room-muted);
+  font-weight: 500;
+}
+
+.scorer-check-table th:first-child,
+.scorer-check-table tbody th {
+  text-align: left;
+  font-weight: 400;
+}
+
+.scorer-check-breakdown {
+  margin: 6px 0 0;
+  font-size: 0.75rem;
+  color: var(--room-muted);
+}
+
+.scorer-check-outstanding {
+  margin-top: 12px;
+  padding: 8px 12px;
+  border-left: 3px solid var(--room-warning);
+  background: var(--room-warning-bg);
+}
+
+.scorer-check-outstanding h3 {
+  margin: 0 0 4px;
+  font-size: 0.8125rem;
+}
+
+.scorer-check-outstanding ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 0.8125rem;
+}
+
+.scorer-confirm {
+  margin-top: 16px;
+  font-size: 0.9375rem;
+}
+
+/* #endregion */
+
+/* #region Protests */
+
+.scorer-protest-list {
+  list-style: none;
+  margin: 0 0 16px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.scorer-protest-list > li {
+  padding: 8px 12px;
+  border-left: 3px solid var(--room-border);
+  background: var(--room-surface-sunken);
+}
+
+.scorer-protest-list > li.is-open {
+  border-left-color: var(--room-warning);
+}
+
+.scorer-protest-head {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  font-size: 0.75rem;
+  color: var(--room-muted);
+}
+
+.scorer-protest-status {
+  margin-left: auto;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.scorer-protest-what,
+.scorer-protest-resolution {
+  margin: 4px 0 0;
+  font-size: 0.8125rem;
+}
+
+.scorer-protest-resolution {
+  color: var(--room-muted);
+}
+
+.scorer-dialog-subhead {
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+/* #endregion */

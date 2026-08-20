@@ -79,6 +79,7 @@ import { ResultDeliveryService } from './ResultDelivery';
 import useAutomaticResultDelivery from './useAutomaticResultDelivery';
 import { clearOperatorIdentity, readOperatorName, writeOperatorName } from './OperatorIdentity';
 import { clearKeyboardPreference } from '../scorer/keyboardPreference';
+import { clearDisplayPreferences } from './displayPreference';
 import { safeAddress } from './Diagnostics';
 
 /**
@@ -784,6 +785,7 @@ export default function App() {
     if (pairingProtected) return;
     clearOperatorIdentity();
     clearKeyboardPreference();
+    clearDisplayPreferences();
     clearConnection();
     setOperatorName('');
     connectionRef.current = null;
@@ -960,6 +962,7 @@ export default function App() {
           storageDegraded={storageDegraded}
           operatorName={operatorName}
           onComplete={onComplete}
+          onRecordChanged={refreshCurrentStore}
           onConnectionRepaired={mergeConnection}
           onConnectionLost={() => {
             clearConnection();

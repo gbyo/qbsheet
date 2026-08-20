@@ -1,0 +1,413 @@
+/*
+ * The scorer, part four: the auditable Recent rail and the keyboard status readout.
+ *
+ * What the scoresheet says about what it has just done. Read constantly and interacted with
+ * rarely, which is the opposite of everything in the dialogs file.
+ *
+ * Split out of a single 3,200-line `scorer.css`, along the `#region` boundaries that
+ * file already had. One stylesheet meant every change to the scoresheet -- a dialog,
+ * a protest row, a button -- landed in the same file, so two people could not touch
+ * different parts of the scorer without meeting in a merge.
+ *
+ * Load order is preserved by `main.tsx` and is load-bearing: these were one document
+ * and the cascade between them is the cascade they had. A new file goes at the end of
+ * that import list, not into the middle of it.
+ */
+
+/* #region An auditable Recent rail */
+
+/*
+ * The whole row is the target. A scorekeeper who has just seen the wrong thing appear is already
+ * looking at it, so it is the shortest route back into the scoresheet there is.
+ */
+.scorer-rail-open {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.scorer-rail-open:hover {
+  background: var(--room-surface-sunken);
+}
+
+/*
+ * The line something just happened to.
+ *
+ * The same sunken wash as everywhere else, applied to the row rather than to the button, so it is
+ * there whether or not the rail is clickable in this host. It fades rather than snapping off,
+ * because it is arriving to be noticed and leaving because it is finished, and those want different
+ * speeds; and it is a background only, so a row being pointed at is still an ordinary row that
+ * opens the question when it is pressed.
+ */
+.scorer-rail-item.is-emphasized {
+  background: var(--room-surface-sunken);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .scorer-rail-item {
+    transition: background-color var(--room-motion-slow) var(--room-ease-out);
+  }
+}
+
+.scorer-rail-mark {
+  display: inline-block;
+  margin-left: 4px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--room-muted);
+}
+
+.scorer-rail-mark.is-flagged {
+  color: var(--room-warning);
+}
+
+.scorer-rail-running {
+  flex-shrink: 0;
+  align-self: flex-end;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--room-faint);
+}
+
+.scorer-review-list > li.is-focused {
+  outline: 2px solid var(--room-accent);
+  outline-offset: -1px;
+}
+
+/* #endregion */
+
+@media (max-width: 700px) {
+  .scorer-completion {
+    padding: 16px;
+  }
+
+  .scorer-check-teams {
+    grid-template-columns: 1fr;
+  }
+
+  .scorer-completion .scorer-complete-score {
+    grid-template-columns: 1fr;
+  }
+
+  .scorer-completion .scorer-complete-score span:last-child {
+    text-align: left;
+  }
+}
+
+/*
+ * The connection history inside the connection dialog.
+ *
+ * Monospaced and tabular so the clock times line up into a column that can be read down: the thing
+ * being looked for is almost always a gap between two timestamps, and a proportional font hides it.
+ */
+.scorer-timeline {
+  margin: 16px 0 0;
+}
+
+.scorer-timeline-heading {
+  margin: 0 0 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--room-muted);
+}
+
+.scorer-timeline-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.scorer-timeline-row {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.scorer-timeline-more {
+  margin: 6px 0 0;
+  font-size: 0.75rem;
+  color: var(--room-muted);
+}
+
+/*
+ * The keyboard legend.
+ *
+ * A strip, not a panel. It has to be readable in peripheral vision on the third tossup and to have
+ * stopped being noticed by the thirtieth, which means small, quiet, and in the same place every time.
+ * Laid out horizontally so it costs one line of height rather than a column of the scoresheet.
+ */
+.scorer-keymap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 18px;
+  margin: 8px 0 0;
+  padding: 6px 10px;
+  border: 1px solid var(--room-border);
+  border-radius: 3px;
+  background: var(--room-surface-sunken);
+  font-size: 0.75rem;
+}
+
+.scorer-keymap.is-inactive {
+  color: var(--room-muted);
+}
+
+.scorer-keymap-title {
+  margin: 0;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--room-muted);
+}
+
+.scorer-keymap-note {
+  margin: 0;
+  color: var(--room-muted);
+}
+
+.scorer-keymap-seats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+
+.scorer-keymap-seat-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+
+.scorer-keymap-seat-side {
+  color: var(--room-muted);
+}
+
+.scorer-keymap-seat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+}
+
+.scorer-keymap-seat-number {
+  color: var(--room-muted);
+  font-size: 0.625rem;
+}
+
+.scorer-keymap-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.scorer-keymap-row {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+/*
+ * A binding the layout has but this format does not. Struck through rather than hidden: the shape of
+ * the legend stays the same between formats, and a scorekeeper who reaches for P learns why it did
+ * nothing instead of wondering whether they mistyped.
+ */
+.scorer-keymap-row.is-unavailable {
+  color: var(--room-muted);
+  text-decoration: line-through;
+}
+
+.scorer-keymap-key {
+  padding: 1px 5px;
+  border: 1px solid var(--room-border-strong);
+  border-radius: 3px;
+  background: var(--room-surface);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.6875rem;
+  white-space: nowrap;
+}
+
+/*
+ * The echo after a keyboard ruling.
+ *
+ * A background wash on the row that was scored, gone in under half a second. Deliberately not a toast
+ * and deliberately not a movement: the scorekeeper's eyes are on the table, not the screen, and
+ * anything that reflows the roster mid-round costs more than it confirms.
+ */
+.scorer-player.is-keyed {
+  background: var(--room-info-bg);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .scorer-player.is-keyed {
+    transition: background 120ms ease-out;
+  }
+}
+
+/*
+ * A substitution landing in a seat.
+ *
+ * The sentence this has to tell is "the person changed; the seat did not", so the seat is the thing
+ * that does not move: the row keeps its number, the ruling buttons under it keep their columns, and
+ * the only thing with an entrance is the name. It gets the same sunken wash a row travelling between
+ * Playing and Bench gets — this is that event, seen from the scoresheet — and the same few pixels of
+ * rise the rest of the application uses for content that has just arrived.
+ *
+ * Nothing here is a card, a toast, or a flight across the panel. A row that flew would be saying the
+ * seat moved, which is the one thing that did not happen.
+ */
+.scorer-player.is-substituted {
+  background: var(--room-surface-sunken);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .scorer-player.is-substituted {
+    transition: background-color var(--room-motion-standard) var(--room-ease-out);
+  }
+
+  /*
+   * Reduced motion keeps the wash and drops the travel, which is the whole point of the split: the
+   * row still says it is the one that changed, and nothing anybody needs to read depends on having
+   * seen six pixels of movement.
+   */
+  .scorer-player.is-substituted .scorer-player-name {
+    animation: qbsheet-rise-in var(--room-motion-standard) var(--room-ease-out) both;
+  }
+}
+
+/*
+ * The keyboard readout.
+ *
+ * The exception to "no floating cards": this is the one thing on the scoresheet that is not part of
+ * the scoresheet. It reports the scorekeeper's own half-finished keystroke, it is true for about a
+ * second, and it has to be findable without looking for it — so it is inverted, pinned to the bottom
+ * edge where the eye already goes for the control bar, and centred so its position never depends on
+ * which team was scored.
+ *
+ * The wrapper is always in the DOM and always the full width of the window; only the pill inside it
+ * comes and goes. That keeps the live region continuously observed, and `pointer-events: none` keeps
+ * a strip of nothing across the bottom of the screen from eating a click meant for the buttons under
+ * it.
+ */
+.scorer-keystatus {
+  position: fixed;
+  right: 0;
+  /* Clears the control bar in both layouts: in flow at desktop width, fixed at phone width. */
+  bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+  left: 0;
+  z-index: 24;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.scorer-keystatus-pill {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100% - 32px);
+  margin: 0;
+  padding: 7px 14px;
+  border-radius: 999px;
+  background: var(--room-text);
+  color: var(--room-surface);
+  font-size: 0.875rem;
+  line-height: 1.2;
+  box-shadow: var(--room-shadow-strong);
+}
+
+/* The number that was actually pressed, boxed like the key it is. */
+.scorer-keystatus-seat {
+  flex: none;
+  min-width: 20px;
+  padding: 1px 0;
+  border-radius: 4px;
+  background: var(--room-inverted-key);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-align: center;
+}
+
+/* Truncated rather than wrapped: the pill must not change height between one name and the next. */
+.scorer-keystatus-player {
+  overflow: hidden;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.scorer-keystatus-prompt {
+  flex: none;
+  display: flex;
+  align-items: center;
+  opacity: 0.75;
+}
+
+.scorer-keystatus-key {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+}
+
+.scorer-keystatus-ruling {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * Green on the inverted pill, which is the one place green means "recorded" rather than "connected".
+ * The tick is doing the work; the colour is there so a glance can tell a landed ruling from a seat
+ * still waiting without reading either.
+ */
+.scorer-keystatus-check {
+  flex: none;
+  color: var(--room-inverted-success);
+  font-weight: 700;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* Appears at once and is gone before it can be watched. A toast that animates in is a toast that is
+     still arriving when the next tossup starts. */
+  .scorer-keystatus-pill {
+    animation: scorer-keystatus-in 110ms ease-out both;
+  }
+}
+
+@keyframes scorer-keystatus-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (max-width: 560px) {
+  /* The control bar leaves the flow here and becomes a taller fixed grid; the pill has to clear it. */
+  .scorer-keystatus {
+    bottom: calc(80px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .scorer-keystatus-pill {
+    font-size: 0.8125rem;
+  }
+}
