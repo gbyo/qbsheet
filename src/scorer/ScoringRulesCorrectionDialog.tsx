@@ -27,6 +27,7 @@ import ScoringRulesEditor from '../app/ScoringRulesEditor';
 import { IScoringRulesInput, advancedRulesInput, scoringRulesInputFormat } from '../qbj/ScoringRulesInput';
 import { advancedFromFormat } from '../qbj/AdvancedScoringRules';
 import { IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
+import { IGameSetup } from '../scoring/deriveGame';
 import { ScoreEvent } from '../scoring/ScoreEvents';
 import correctFormat, { IFormatChange } from '../scoring/formatCorrection';
 
@@ -39,16 +40,24 @@ export interface IScoringRulesCorrection {
 export default function ScoringRulesCorrectionDialog(props: {
   format: IScorekeeperFormat;
   events: ScoreEvent[];
-  /** Persist the corrected rules and the re-pointed history together, or neither. */
+  /** The rosters, so a lower players cap is checked against the opening lineup too. */
+  setup: IGameSetup;
+  /**
+   * Persist the corrected rules and the re-pointed history together, or neither.
+   *
+   * Rejecting means nothing was written. The dialog stays open and says so, rather than closing over
+   * a correction that did not happen.
+   */
   onCorrect: (correction: IScoringRulesCorrection) => void | Promise<void>;
   onClose: () => void;
   /** True while a submission is in flight, when nothing about the game may change. */
   disabled?: boolean;
 }) {
-  const { format, events, onCorrect, onClose, disabled = false } = props;
+  const { format, events, setup, onCorrect, onClose, disabled = false } = props;
   const [input, setInput] = useState<IScoringRulesInput>(() => advancedRulesInput(advancedFromFormat(format)));
   const [confirming, setConfirming] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [failure, setFailure] = useState('');
 
   /*
    * Recomputed as the form changes rather than on submit, so the consequences are on screen while
@@ -57,8 +66,8 @@ export default function ScoringRulesCorrectionDialog(props: {
    */
   const proposed = useMemo(() => scoringRulesInputFormat(input), [input]);
   const correction = useMemo(
-    () => (proposed ? correctFormat(format, proposed, events) : null),
-    [format, proposed, events],
+    () => (proposed ? correctFormat(format, proposed, events, setup) : null),
+    [format, proposed, events, setup],
   );
 
   const blocked = correction === null || !correction.ok;
@@ -69,7 +78,19 @@ export default function ScoringRulesCorrectionDialog(props: {
   const apply = async () => {
     if (!correction?.ok || saving || disabled) return;
     setSaving(true);
-    await onCorrect({ format: correction.format, events: correction.events, changes: correction.changes });
+    setFailure('');
+    try {
+      await onCorrect({ format: correction.format, events: correction.events, changes: correction.changes });
+    } catch {
+      /*
+       * Nothing was written. Staying open is the whole point: the scorekeeper's proposed rules are
+       * still in the form behind this screen, so pressing the button again is the retry, and closing
+       * would leave a room believing a correction had been applied when the device refused it.
+       */
+      setSaving(false);
+      setFailure('Those rules could not be saved on this device. Nothing has changed; try again.');
+      return;
+    }
     onClose();
   };
 
@@ -83,8 +104,10 @@ export default function ScoringRulesCorrectionDialog(props: {
         </p>
 
         <dl className="rules-correction-changes">
-          {changes.map((change) => (
-            <div key={`${change.subject}-${change.detail}`} className="rules-correction-change">
+          {/* Indexed, because two changes can legitimately read the same -- two answer types both
+              gaining a bonus produce identical subject and detail. */}
+          {changes.map((change, position) => (
+            <div key={`${position}-${change.subject}-${change.detail}`} className="rules-correction-change">
               <dt>{change.subject}</dt>
               <dd>
                 {change.detail}
@@ -100,6 +123,12 @@ export default function ScoringRulesCorrectionDialog(props: {
           Every question stays exactly as the scorekeeper recorded it. Only what those answers are
           worth changes, and the scoresheet is recalculated from the start of the game.
         </p>
+
+        {failure !== '' && (
+          <p className="scorer-problem" role="alert">
+            {failure}
+          </p>
+        )}
 
         <div className="rules-correction-actions">
           <button type="button" className="scorer-action" onClick={() => setConfirming(false)} disabled={saving}>

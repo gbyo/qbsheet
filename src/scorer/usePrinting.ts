@@ -76,13 +76,17 @@ export default function usePrinting(): IPrinting {
   const print = () => {
     if (typeof window === 'undefined') return;
     flushSync(() => setPrinting(true));
-    try {
-      window.print();
-    } finally {
-      // `window.print()` blocks until the dialog is dismissed wherever it is implemented
-      // synchronously. Where it is not, `afterprint` clears the flag and this is a harmless repeat.
-      setPrinting(false);
-    }
+    /*
+     * Mounted, then left alone. Clearing the flag after `window.print()` returns looks tidy and is
+     * wrong: `print()` blocks only where it is implemented synchronously, and where it is not, the
+     * document would be unmounted while the browser was still deciding what to put on the paper --
+     * producing a blank print, on exactly the browsers least able to spare one.
+     *
+     * `afterprint` and the `matchMedia('print')` listener above both clear it, and between them they
+     * cover every browser this ships to. The synchronous case clears it before this line is even
+     * reached, which is why there is nothing to do here.
+     */
+    window.print();
   };
 
   return { printing, print };

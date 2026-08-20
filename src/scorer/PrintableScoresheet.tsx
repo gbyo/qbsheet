@@ -110,6 +110,15 @@ export default function PrintableScoresheet(props: {
 
   const answerTypeLegend = format.answerTypes.map((type) => `${type.shortLabel} = ${type.value}`).join(' · ');
 
+  /*
+   * The cycle the device's copy stops at, which is not the same as how many rows are above.
+   *
+   * A voided question leaves a gap, so `questions.length` and the last question number diverge, and
+   * a continuation numbered from the count would hand somebody a sheet whose row 15 is the game's
+   * question 16. The last entry's own number is the only honest place to carry on from.
+   */
+  const lastQuestionNumber = game.questions[game.questions.length - 1]?.questionNumber ?? 0;
+
   // No document to portal into. Only reachable from a non-browser renderer; the scoresheet itself
   // still works, and there is nothing to print in that context anyway.
   if (typeof document === 'undefined') return null;
@@ -175,7 +184,7 @@ export default function PrintableScoresheet(props: {
           {/* Ruled, empty, and the reason this document is worth printing before anything goes wrong. */}
           {Array.from({ length: continuationRows }, (_unused, offset) => (
             <tr key={`blank-${offset}`} className="printable-blank">
-              <th scope="row">{game.questions.length + offset + 1}</th>
+              <th scope="row">{lastQuestionNumber + offset + 1}</th>
               <td />
               <td />
               <td />
@@ -188,8 +197,14 @@ export default function PrintableScoresheet(props: {
 
       <p className="printable-legend">{answerTypeLegend}</p>
 
-      {([game.left, game.right] as const).map((team) => (
-        <table className="printable-table" key={team.name}>
+      {/* Keyed by side, not by name. Two teams can arrive with the same name -- a scrimmage between
+          two squads from one school, a placeholder typed twice -- and duplicate React keys silently
+          drop one of the two box scores. */}
+      {([
+        { side: 'left', team: game.left },
+        { side: 'right', team: game.right },
+      ] as const).map(({ side, team }) => (
+        <table className="printable-table" key={side}>
           <caption>{team.name}</caption>
           <thead>
             <tr>
@@ -241,7 +256,7 @@ export default function PrintableScoresheet(props: {
 
       <p className="printable-footer">
         Scored in QBSheet. If this game is finished on paper, give this sheet to the tournament
-        director — the device’s copy stops at question {game.questions.length}.
+        director — the device’s copy stops at question {lastQuestionNumber}.
       </p>
     </div>,
     document.body,

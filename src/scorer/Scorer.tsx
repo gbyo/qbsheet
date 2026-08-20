@@ -1472,7 +1472,9 @@ export default function Scorer(props: IScorerProps) {
     const summary = correction.changes.map((change) => `${change.subject}: ${change.detail}`).join('; ');
     const note: ScoreEvent = {
       id: newEventId(),
-      questionNumber: lastPlayedQuestion(game),
+      // `currentQuestion`, not `lastPlayedQuestion`: cycles are 1-based, and a correction made
+      // before the first tossup has been scored would otherwise file its note against question zero.
+      questionNumber: currentQuestion,
       type: 'note',
       text: summary === '' ? 'Scoring rules corrected.' : `Scoring rules corrected — ${summary}.`,
     };
@@ -2380,6 +2382,7 @@ export default function Scorer(props: IScorerProps) {
         <ScoringRulesCorrectionDialog
           format={format}
           events={events.events}
+          setup={setup}
           disabled={submitting}
           onCorrect={applyScoringRulesCorrection}
           onClose={() => setDialog(null)}

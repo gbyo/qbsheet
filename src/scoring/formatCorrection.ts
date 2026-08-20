@@ -50,6 +50,7 @@
  * scorekeeper corrects the earlier questions first — which is a thing the scorer already does well.
  */
 import { IScorekeeperAnswerType, IScorekeeperFormat, scorekeeperFormatProblems } from './ScorekeeperFormat';
+import { IGameSetup, startingLineup } from './deriveGame';
 import { ScoreEvent } from './ScoreEvents';
 
 /** Compare short labels the way a scorekeeper would: the characters, not the whitespace or the case. */
@@ -109,12 +110,76 @@ function points(value: number): string {
 function remapAnswerTypes(from: IScorekeeperFormat, to: IScorekeeperFormat): (number | null)[] {
   const destination = new Map<string, number>();
   to.answerTypes.forEach((answerType, index) => {
-    // First wins. A format with two identically-labelled buttons is refused by
-    // `scorekeeperFormatProblems` long before this, so the collision is not reachable in practice;
-    // preferring the earlier of the two keeps this total rather than relying on that.
+    // Safe to take the first, because `duplicateButtonProblems` has already refused any format where
+    // two buttons share a key. Without that guard this would silently point two old answer types at
+    // one new index and reprice half the game.
     if (!destination.has(buttonKey(answerType))) destination.set(buttonKey(answerType), index);
   });
   return from.answerTypes.map((answerType) => destination.get(buttonKey(answerType)) ?? null);
+}
+
+/**
+ * Short labels that collide once normalized.
+ *
+ * `scorekeeperFormatProblems` checks that a short label is a non-empty string and nothing else, so a
+ * format with `P` and ` p ` is valid to it and ambiguous here: `buttonKey` trims and lowercases, both
+ * rows produce the same key, and every buzz recorded against the second would be remapped onto the
+ * first. That is the exact failure this module exists to prevent, arriving through the front door.
+ *
+ * Checked on both formats, but not on the same terms. A collision in `to` is always fatal: it is
+ * being proposed now, and it makes every future remapping ambiguous. A collision already present in
+ * `from` only matters for the buzzes that actually reference one of the colliding buttons — and a
+ * room whose tournament shipped an ambiguous QBJ must not be locked out of correcting its rules over
+ * two answer types nobody has pressed, especially since the fix for it is in the form this would be
+ * refusing to open.
+ *
+ * @param usedIndices when given, a `from`-side collision is reported only if the history uses one of
+ * the colliding answer types. Omit for the proposed format, where every collision counts.
+ */
+function duplicateButtonProblems(
+  format: IScorekeeperFormat,
+  which: 'current' | 'new',
+  usedIndices?: Set<number>,
+): string[] {
+  const seen = new Map<string, { label: string; index: number }>();
+  const problems: string[] = [];
+  format.answerTypes.forEach((answerType, index) => {
+    const key = buttonKey(answerType);
+    const first = seen.get(key);
+    if (first === undefined) {
+      seen.set(key, { label: answerType.label, index });
+      return;
+    }
+    if (usedIndices && !usedIndices.has(index) && !usedIndices.has(first.index)) return;
+    problems.push(
+      `The ${which} rules have two answer types whose short label reads as "${answerType.shortLabel.trim()}" — "${first.label}" and "${answerType.label}". Give them different short labels first.`,
+    );
+  });
+  return problems;
+}
+
+/**
+ * A key that changes whenever any part of the format does.
+ *
+ * `changes` is a human-readable summary and is deliberately selective — it says "Power: 15 → 20"
+ * because that is what a scorekeeper checks against what a director just said. It is the wrong thing
+ * to decide `unchanged` from: every field it does not narrate is a correction the dialog would refuse
+ * to apply, having told the scorekeeper their rules were already in force. A bonus divisor, an
+ * extended regulation and a lightning count were all in that position.
+ *
+ * So the question "did anything change?" is asked of the whole structure instead, with keys sorted so
+ * two objects built by different paths compare equal.
+ */
+function stableKey(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableKey).join(',')}]`;
+  if (value !== null && typeof value === 'object') {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .filter(([, entry]) => entry !== undefined)
+      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+      .map(([key, entry]) => `${key}:${stableKey(entry)}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'undefined';
 }
 
 /** Every answer-type index the history actually uses. */
@@ -141,17 +206,41 @@ export default function correctFormat(
   from: IScorekeeperFormat,
   to: IScorekeeperFormat,
   events: ScoreEvent[],
+  /**
+   * The rosters, so the opening lineup counts as a lineup.
+   *
+   * Optional only so that a caller with no setup to hand still gets every other check. When it is
+   * absent the players cap is validated against substitutions alone, which is what this did before
+   * and is not sufficient on its own; see the players section below.
+   */
+  setup?: IGameSetup,
 ): FormatCorrection {
   // A proposed format that is not a playable game is refused before anything is compared against it,
   // so the reasons a scorekeeper reads are about the rules rather than about the consequences of
   // rules that were never valid.
-  const invalid = scorekeeperFormatProblems(to);
+  const used = usedAnswerTypes(events);
+  const invalid = [
+    ...scorekeeperFormatProblems(to),
+    ...duplicateButtonProblems(from, 'current', used),
+    ...duplicateButtonProblems(to, 'new'),
+  ];
   if (invalid.length > 0) return { ok: false, problems: invalid };
 
   const problems: string[] = [];
   const changes: IFormatChange[] = [];
+  /** One line for a plain numeric field that moved. Silent when it did not. */
+  const numericChange = (
+    subject: string,
+    before: number | undefined,
+    after: number | undefined,
+    affectsRecordedScoring: boolean,
+    unit?: string,
+  ) => {
+    if (before === after) return;
+    const say = (value: number | undefined) => (value === undefined ? 'not set' : `${value}${unit ? ` ${unit}` : ''}`);
+    changes.push({ subject, detail: `${say(before)} → ${say(after)}`, affectsRecordedScoring });
+  };
   const mapping = remapAnswerTypes(from, to);
-  const used = usedAnswerTypes(events);
   const played = lastRecordedQuestion(events);
 
   // --- answer types ---------------------------------------------------------------------------
@@ -251,6 +340,18 @@ export default function correctFormat(
         affectsRecordedScoring: bonusesRecorded,
       });
     }
+    // The shape of an irregular bonus, and the regular/irregular switch itself. Each of these
+    // reprices bonuses already on the board, and none of them was being said out loud.
+    if (from.bonus.regular !== to.bonus.regular) {
+      changes.push({
+        subject: 'Bonus structure',
+        detail: to.bonus.regular ? 'every bonus the same' : 'bonuses vary',
+        affectsRecordedScoring: bonusesRecorded,
+      });
+    }
+    numericChange('Bonus score increment', from.bonus.divisor, to.bonus.divisor, bonusesRecorded);
+    numericChange('Maximum bonus score', from.bonus.maximumScore, to.bonus.maximumScore, bonusesRecorded);
+    numericChange('Fewest bonus parts', from.bonus.minimumParts, to.bonus.minimumParts, bonusesRecorded);
   }
 
   // --- regulation -----------------------------------------------------------------------------
@@ -270,6 +371,13 @@ export default function correctFormat(
       });
     }
   }
+  numericChange(
+    'Longest regulation',
+    from.regulation.maximumTossupCount,
+    to.regulation.maximumTossupCount,
+    false,
+    'tossups',
+  );
   if (from.regulation.timed !== to.regulation.timed) {
     changes.push({
       subject: 'Clock',
@@ -293,15 +401,33 @@ export default function correctFormat(
         affectsRecordedScoring: lightningRecorded,
       });
     }
+  } else if (to.lightning.enabled) {
+    numericChange('Lightning rounds per team', from.lightning.countPerTeam, to.lightning.countPerTeam, lightningRecorded);
+    numericChange('Lightning score increment', from.lightning.divisor, to.lightning.divisor, lightningRecorded);
   }
 
   // --- players --------------------------------------------------------------------------------
 
   if (from.players.maximumActive !== to.players.maximumActive) {
-    // Every lineup the game has recorded has to remain legal, including the starting one.
+    /*
+     * Every lineup this game has played has to remain legal, and most games have exactly one: the
+     * opening one, which is not a substitution event and lives in the setup. Counting only
+     * substitutions accepted a correction that put a five-player opening lineup under a four-player
+     * cap -- a game whose own first tossup its format forbids, which is the failure this module is
+     * for.
+     *
+     * Measured under the *old* cap, because `startingLineup` truncates to whatever cap it is given
+     * and the new one would trivially agree with itself.
+     */
+    const openingLineup = setup
+      ? Math.max(
+          startingLineup(setup.left, from.players.maximumActive).length,
+          startingLineup(setup.right, from.players.maximumActive).length,
+        )
+      : 0;
     const largestLineup = events.reduce(
       (most, event) => (event.type === 'substitution' ? Math.max(most, event.activePlayers.length) : most),
-      0,
+      openingLineup,
     );
     if (to.players.maximumActive < largestLineup) {
       problems.push(
@@ -371,5 +497,24 @@ export default function correctFormat(
       )
     : events;
 
-  return { ok: true, format: carried, events: remapped, changes, unchanged: changes.length === 0 && !moved };
+  /*
+   * Whether anything actually differs, asked of the whole structure rather than of `changes`.
+   *
+   * `carried` is exactly what would be written, so comparing it against `from` answers the question
+   * completely -- including every field `changes` does not narrate. Deriving this from
+   * `changes.length` meant a correction to, say, only the bonus divisor reported itself as no change
+   * at all, and the dialog refused to apply it.
+   */
+  const unchanged = !moved && stableKey(carried) === stableKey(from);
+
+  /*
+   * A change nobody described. Possible whenever the structure differs but no branch above had a
+   * sentence for it, and the confirmation screen must not be an empty list under a heading that
+   * promises to say what will happen.
+   */
+  if (!unchanged && changes.length === 0) {
+    changes.push({ subject: 'Scoring rules', detail: 'updated', affectsRecordedScoring: false });
+  }
+
+  return { ok: true, format: carried, events: remapped, changes, unchanged };
 }

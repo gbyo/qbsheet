@@ -206,6 +206,140 @@ describe('correcting the scoring rules of a game already in progress', () => {
       );
     });
 
+    test('a bonus already recorded with more parts than the new rules allow', () => {
+      const format = powersFormat();
+      const events = [
+        event({
+          type: 'tossup-buzz',
+          questionNumber: 1,
+          team: 'left',
+          playerName: 'Sarah Mitchell',
+          answerTypeIndex: typeIndex(format, 15),
+        }),
+        event({
+          type: 'bonus',
+          questionNumber: 1,
+          team: 'left',
+          parts: [{ controlledPoints: 10 }, { controlledPoints: 10 }, { controlledPoints: 0 }],
+        }),
+      ];
+      const twoParts: IScorekeeperFormat = {
+        ...format,
+        bonus: { ...format.bonus, minimumParts: 2, maximumParts: 2, maximumScore: 20 },
+      };
+      const correction = correctFormat(format, twoParts, events);
+      expect(correction.ok).toBe(false);
+      if (correction.ok) return;
+      expect(correction.problems.join(' ')).toMatch(/3 parts recorded/);
+    });
+
+    test('lightning cannot be switched off once a total is recorded', () => {
+      const format: IScorekeeperFormat = {
+        ...powersFormat(),
+        lightning: { enabled: true, countPerTeam: 1, divisor: 10 },
+      };
+      const events = [event({ type: 'lightning', questionNumber: 1, team: 'left', points: 20 })];
+      const withoutLightning: IScorekeeperFormat = {
+        ...format,
+        lightning: { enabled: false, countPerTeam: 0, divisor: 10 },
+      };
+      const correction = correctFormat(format, withoutLightning, events);
+      expect(correction.ok).toBe(false);
+      if (correction.ok) return;
+      expect(correction.problems.join(' ')).toMatch(/lightning cannot be switched off/i);
+    });
+
+    test('the players cap cannot drop below a lineup a substitution recorded', () => {
+      const format = powersFormat();
+      const events = [
+        event({
+          type: 'substitution',
+          questionNumber: 2,
+          team: 'left',
+          activePlayers: ['Sarah Mitchell', 'James Robinson'],
+        }),
+      ];
+      const oneAtATime: IScorekeeperFormat = { ...format, players: { maximumActive: 1 } };
+      const correction = correctFormat(format, oneAtATime, events);
+      expect(correction.ok).toBe(false);
+      if (correction.ok) return;
+      expect(correction.problems.join(' ')).toMatch(/lineup of 2 players/);
+    });
+
+    /**
+     * The opening lineup is not a substitution event, and most games never record one — so a check
+     * that looked only at substitutions accepted a cap below the lineup the game actually started
+     * with, which is a game whose own first tossup its format forbids.
+     */
+    test('the players cap cannot drop below the opening lineup, which is not an event', () => {
+      const format = powersFormat();
+      const oneAtATime: IScorekeeperFormat = { ...format, players: { maximumActive: 1 } };
+
+      // Both teams start two players, from `setup`, with nothing recorded at all.
+      const correction = correctFormat(format, oneAtATime, [], setup);
+      expect(correction.ok).toBe(false);
+      if (correction.ok) return;
+      expect(correction.problems.join(' ')).toMatch(/lineup of 2 players/);
+
+      // And without the setup there is nothing to check it against, which is why it is passed.
+      expect(correctFormat(format, oneAtATime, []).ok).toBe(true);
+    });
+
+    test('two answer types whose short labels normalize to the same button', () => {
+      const format = powersFormat();
+      // The fixture labels buttons by their value, so the collision has to be built: `P` and ` p `
+      // are different strings and the same button as far as a scorekeeper is concerned.
+      const ambiguous: IScorekeeperFormat = {
+        ...format,
+        answerTypes: format.answerTypes.map((answerType) => {
+          if (answerType.value === 15) return { ...answerType, shortLabel: 'P' };
+          if (answerType.value === 10) return { ...answerType, shortLabel: ' p ' };
+          return answerType;
+        }),
+      };
+      const correction = correctFormat(format, ambiguous, []);
+      expect(correction.ok).toBe(false);
+      if (correction.ok) return;
+      expect(correction.problems.join(' ')).toMatch(/two answer types whose short label/i);
+    });
+
+    /**
+     * A tournament can ship a QBJ whose short labels are already ambiguous. Disambiguating them is
+     * part of the correction — the proposed rules are always checked — but the *old* collision only
+     * blocks the correction when a recorded buzz depends on which of the two buttons it meant.
+     */
+    test('a collision already in the current rules blocks only the history that depends on it', () => {
+      const base = powersFormat();
+      const label = (format: IScorekeeperFormat, value: number, shortLabel: string): IScorekeeperFormat => ({
+        ...format,
+        answerTypes: format.answerTypes.map((answerType) =>
+          answerType.value === value ? { ...answerType, shortLabel } : answerType,
+        ),
+      });
+      // `P` and ` p ` read as one button. This is the format the game is already being scored under.
+      const ambiguousNow = label(label(base, 15, 'P'), 10, ' p ');
+      // The correction disambiguates them, which is what the refusal message asks for.
+      const disambiguated = label(ambiguousNow, 10, 'C');
+
+      // Nothing recorded against either, so which one they were is not a question anybody is asking.
+      expect(correctFormat(ambiguousNow, disambiguated, []).ok).toBe(true);
+
+      // Once a buzz is recorded against one of them, it cannot be re-pointed honestly.
+      const usedIt = [
+        event({
+          type: 'tossup-buzz',
+          questionNumber: 1,
+          team: 'left',
+          playerName: 'Sarah Mitchell',
+          answerTypeIndex: typeIndex(base, 15),
+        }),
+      ];
+      const correction = correctFormat(ambiguousNow, disambiguated, usedIt);
+      expect(correction.ok).toBe(false);
+      if (correction.ok) return;
+      expect(correction.problems.join(' ')).toMatch(/current rules have two answer types/i);
+    });
+
     test('a format that is not a playable game is refused before anything is compared to it', () => {
       const format = powersFormat();
       const empty: IScorekeeperFormat = { ...format, answerTypes: [] };
@@ -214,6 +348,56 @@ describe('correcting the scoring rules of a game already in progress', () => {
       if (correction.ok) return;
       expect(correction.problems.length).toBeGreaterThan(0);
     });
+  });
+
+  describe('changes that no sentence used to describe', () => {
+    /**
+     * `unchanged` was derived from the length of the human-readable `changes` list, so any field
+     * without a sentence of its own reported itself as no change and the dialog refused to apply it.
+     * It is now derived from the whole structure.
+     */
+    test.each([
+      [
+        'an extended regulation',
+        (format: IScorekeeperFormat): IScorekeeperFormat => ({
+          ...format,
+          regulation: { ...format.regulation, maximumTossupCount: 24 },
+        }),
+      ],
+      [
+        'the bonus score increment',
+        (format: IScorekeeperFormat): IScorekeeperFormat => ({
+          ...format,
+          bonus: { ...format.bonus, divisor: 5 },
+        }),
+      ],
+      [
+        'the lightning count',
+        (format: IScorekeeperFormat): IScorekeeperFormat => ({
+          ...format,
+          lightning: { enabled: true, countPerTeam: 3, divisor: 10 },
+        }),
+      ],
+    ])('%s is a change, and is described', (_name, mutate) => {
+      const format: IScorekeeperFormat = {
+        ...powersFormat(),
+        lightning: { enabled: true, countPerTeam: 1, divisor: 10 },
+      };
+      const correction = correctFormat(format, mutate(format), onePower(format));
+      expect(correction.ok).toBe(true);
+      if (!correction.ok) return;
+      expect(correction.unchanged).toBe(false);
+      // Never an empty list under a heading that promises to say what will happen.
+      expect(correction.changes.length).toBeGreaterThan(0);
+    });
+  });
+
+  test('a correction does not rename the tournament’s rule set', () => {
+    const format: IScorekeeperFormat = { ...powersFormat(), name: 'NAQT 2026 Rules' };
+    const correction = correctFormat(format, repricedPower(format, 20), onePower(format));
+    expect(correction.ok).toBe(true);
+    if (!correction.ok) return;
+    expect(correction.format.name).toBe('NAQT 2026 Rules');
   });
 
   test('recognizes a correction that corrects nothing', () => {

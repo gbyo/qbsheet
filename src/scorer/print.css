@@ -22,11 +22,23 @@
   /*
    * Ink, and the lack of it.
    *
-   * Print always draws black on white regardless of appearance: a room printing this has a
-   * near-empty toner cartridge and a scoresheet in dark mode would empty it. The tokens are
-   * overridden rather than the rules rewritten, so everything below stays readable in one palette.
+   * Print always draws black on white regardless of appearance: a room printing this has a near-empty
+   * toner cartridge and a scoresheet in dark mode would empty it. The tokens are overridden rather
+   * than the rules rewritten, so everything below stays readable in one palette.
+   *
+   * # Why the selector is repeated
+   *
+   * `:root` alone does not win. A media query contributes nothing to specificity, so this competes
+   * on equal terms with the palette in `app-shell.css`, whose dark blocks are
+   * `:root:not([data-theme='light'])` and `:root[data-theme='dark']` -- both (0,2,0) against this
+   * rule's (0,1,0). Printing from a device set to dark therefore produced the *dark* tokens, which is
+   * a black page, which is the exact outcome the block exists to prevent.
+   *
+   * `:root:root:root` is (0,3,0), which beats every palette rule in every stylesheet regardless of
+   * load order, including the `prefers-contrast` overrides in `contrast.css`. Ugly, and the only
+   * thing here that is load-order-proof.
    */
-  :root {
+  :root:root:root {
     color-scheme: light;
 
     --room-text: #000000;
@@ -93,9 +105,6 @@
     width: 100%;
     margin-bottom: 10pt;
     border-collapse: collapse;
-    /* A game runs to two pages more often than not, and a header row that appears only on the first
-       one leaves the second as six unlabelled columns. `thead` repeats; this makes it do so. */
-    page-break-inside: auto;
   }
 
   .printable-table caption {
@@ -119,12 +128,15 @@
     font-weight: 700;
   }
 
+  /* A game runs to two pages more often than not, and a header row that appears only on the first
+     one leaves the second as six unlabelled columns. This is what makes `thead` repeat. */
   .printable-table thead {
     display: table-header-group;
   }
 
+  /* A row split across a page boundary is a ruling with its player on the other sheet. */
   .printable-table tr {
-    page-break-inside: avoid;
+    break-inside: avoid;
   }
 
   /* Tall enough to write in, which is the entire purpose of these rows. */

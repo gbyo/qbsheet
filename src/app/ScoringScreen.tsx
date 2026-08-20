@@ -330,16 +330,29 @@ export default function ScoringScreen(props: {
    * re-pointed history and the old format -- which `correctFormat` would simply offer to correct
    * again. The reverse order would come back with a format the events no longer match.
    *
-   * See `formatCorrection` for what has already been checked by the time this runs, and why nothing
-   * here needs to validate anything: a correction that could not be applied honestly never becomes
-   * one of these calls.
+   * See `formatCorrection` for what has already been checked by the time this runs: the correction
+   * itself is known to be applicable. What is not known is whether this device will accept it, and
+   * both writes can refuse -- a locked-down profile, a full quota, a database that has gone away.
+   *
+   * A refusal is reported rather than absorbed. The screen stops claiming the record is durably
+   * stored, the scorer is *not* remounted, and the throw reaches the dialog, which stays open and
+   * says nothing was written. Bumping `ruleRevision` on a failed write would be the worst outcome
+   * available: the scoresheet would redraw under rules that exist only in memory, and the next
+   * reload would silently undo scores the room had already been shown.
    */
   const correctScoringRules = useCallback(
     async ({ format, events }: IScoringRulesCorrection) => {
-      store.saveEvents(record.id, events);
-      await store.update(record.id, {
+      const refuse = () => {
+        if (onScreen.current) setRecordDurablyStored(false);
+        throw new Error('The corrected scoring rules could not be saved on this device.');
+      };
+      // The history first, and no format written at all if it was refused. A format the events do
+      // not match is the one combination neither this dialog nor a reload can recover from.
+      if (!store.saveEvents(record.id, events)) refuse();
+      const updated = await store.update(record.id, {
         package: { ...record.package, scorekeeperFormat: format },
       });
+      if (updated === null) refuse();
       await onRecordChanged();
       setRuleRevision((revision) => revision + 1);
     },

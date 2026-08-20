@@ -12,6 +12,7 @@
  */
 import { describe, expect, test, vi } from 'vitest';
 import scorerMenuItems, { IScorerMenuInput } from '../src/scorer/scorerMenu';
+import { IGameMenuItem } from '../src/scorer/GameMenu';
 import deriveGame, { IGameSetup } from '../src/scoring/deriveGame';
 import { IScorekeeperFormat } from '../src/scoring/ScorekeeperFormat';
 import { ScoreEvent } from '../src/scoring/ScoreEvents';
@@ -29,10 +30,16 @@ function formatFor(ruleSet: CommonRuleSets): IScorekeeperFormat {
   return scoringRulesToScorekeeperFormat(rules);
 }
 
-function menu(overrides: Partial<IScorerMenuInput> = {}, events: ScoreEvent[] = []): string[] {
+/**
+ * The menu for a game, with everything the caller did not care about filled in.
+ *
+ * One builder, because a test that restates all twenty inputs to vary one of them is a test that
+ * stops being read. `menu` is the label-only view of the same thing.
+ */
+function items(overrides: Partial<IScorerMenuInput> = {}, events: ScoreEvent[] = []): IGameMenuItem[] {
   const format = overrides.format ?? formatFor(CommonRuleSets.AcfPowers);
   const game = deriveGame(format, setup, events);
-  const input: IScorerMenuInput = {
+  return scorerMenuItems({
     game,
     format,
     phase: game.phase,
@@ -54,8 +61,11 @@ function menu(overrides: Partial<IScorerMenuInput> = {}, events: ScoreEvent[] = 
     downloadLegacyQbj: vi.fn(),
     print: vi.fn(),
     ...overrides,
-  };
-  return scorerMenuItems(input).map((item) => item.label);
+  });
+}
+
+function menu(overrides: Partial<IScorerMenuInput> = {}, events: ScoreEvent[] = []): string[] {
+  return items(overrides, events).map((item) => item.label);
 }
 
 describe('what every game gets', () => {
@@ -87,11 +97,11 @@ describe('what every game gets', () => {
 
 describe('what depends on the format', () => {
   test('lightning appears only for a format that plays it', () => {
-    const withLightning = formatFor(CommonRuleSets.AcfPowers);
-    expect(menu({ format: withLightning })).not.toContain('Lightning / worksheet');
+    const withoutLightning = formatFor(CommonRuleSets.AcfPowers);
+    expect(menu({ format: withoutLightning })).not.toContain('Lightning / worksheet');
     expect(
       menu({
-        format: { ...withLightning, lightning: { enabled: true, countPerTeam: 1, divisor: 10 } },
+        format: { ...withoutLightning, lightning: { enabled: true, countPerTeam: 1, divisor: 10 } },
       }),
     ).toContain('Lightning / worksheet');
   });
@@ -139,31 +149,11 @@ describe('ending a game', () => {
   });
 
   test('both are marked destructive, so the menu can set them apart', () => {
-    const format = formatFor(CommonRuleSets.AcfPowers);
-    const game = deriveGame(format, setup, [event({ type: 'tossup-dead', questionNumber: 1 })]);
-    const items = scorerMenuItems({
-      game,
-      format,
-      phase: game.phase,
-      procedure: undefined,
-      currentQuestion: 2,
-      lastPlayed: 1,
-      keyboardEnabled: false,
-      submitting: false,
-      canDownloadForms: false,
-      canCorrectScoringRules: false,
-      openDialog: vi.fn(),
-      setKeyboardEnabled: vi.fn(),
-      record: vi.fn().mockReturnValue(true),
-      newEventId: () => 'id',
-      openReview: vi.fn(),
-      openReplacement: vi.fn(),
-      downloadQbjBackup: vi.fn(),
-      downloadPartialQbj: vi.fn(),
-      downloadLegacyQbj: vi.fn(),
-      print: vi.fn(),
-    });
-    const ending = items.filter((item) => item.label === 'End game early…' || item.label === 'Record forfeit');
+    const built = items(
+      { currentQuestion: 2, lastPlayed: 1 },
+      [event({ type: 'tossup-dead', questionNumber: 1 })],
+    );
+    const ending = built.filter((item) => item.label === 'End game early…' || item.label === 'Record forfeit');
     expect(ending).toHaveLength(2);
     ending.forEach((item) => expect(item.destructive).toBe(true));
   });
@@ -171,31 +161,8 @@ describe('ending a game', () => {
 
 describe('while a result is being submitted', () => {
   test('everything that would change the game is unavailable, and the backup is not', () => {
-    const format = formatFor(CommonRuleSets.AcfPowers);
-    const game = deriveGame(format, setup, []);
-    const items = scorerMenuItems({
-      game,
-      format,
-      phase: game.phase,
-      procedure: undefined,
-      currentQuestion: 1,
-      lastPlayed: 0,
-      keyboardEnabled: false,
-      submitting: true,
-      canDownloadForms: false,
-      canCorrectScoringRules: true,
-      openDialog: vi.fn(),
-      setKeyboardEnabled: vi.fn(),
-      record: vi.fn().mockReturnValue(true),
-      newEventId: () => 'id',
-      openReview: vi.fn(),
-      openReplacement: vi.fn(),
-      downloadQbjBackup: vi.fn(),
-      downloadPartialQbj: vi.fn(),
-      downloadLegacyQbj: vi.fn(),
-      print: vi.fn(),
-    });
-    const by = (label: string) => items.find((item) => item.label === label);
+    const built = items({ submitting: true, canCorrectScoringRules: true });
+    const by = (label: string) => built.find((item) => item.label === label);
 
     expect(by('Adjust score')?.disabled).toBe(true);
     expect(by('Correct scoring rules…')?.disabled).toBe(true);

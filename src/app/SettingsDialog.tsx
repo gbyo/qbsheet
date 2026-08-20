@@ -468,7 +468,8 @@ export default function SettingsDialog(props: {
           <div className="settings-detail-view">
             <p>Reset this device’s QBSheet preferences?</p>
             <p>
-              This clears the scorekeeper name, first-run answer, keyboard-scoring choice, and tournament pairing. Saved games are not deleted.
+              This clears the scorekeeper name, first-run answer, keyboard-scoring choice, appearance
+              and text size, and tournament pairing. Saved games are not deleted.
             </p>
             {pairingProtection && (
               <p className="shell-warning" role="alert">
