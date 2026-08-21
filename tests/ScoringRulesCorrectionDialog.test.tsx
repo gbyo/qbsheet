@@ -12,6 +12,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, test, vi } from 'vitest';
 import ScoringRulesCorrectionDialog from '../src/scorer/ScoringRulesCorrectionDialog';
+import { readQbjScoringRules } from '../src/qbj/QbjScoringRules';
 import { IGameSetup } from '../src/scoring/deriveGame';
 import { ScoreEvent } from '../src/scoring/ScoreEvents';
 import scoringRulesToScorekeeperFormat, { CommonRuleSets, ScoringRules, typeIndex } from './rules';
@@ -141,5 +142,77 @@ describe('the form step', () => {
 
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/cannot be removed/i));
     expect(screen.getByRole('button', { name: /review changes/i })).toBeDisabled();
+  });
+
+  /*
+   * A disabled button with nothing to read is the failure this covers.
+   *
+   * `scoringRulesInputFormat` returns null for any form the rules screens would refuse, and
+   * `correctFormat` needs a format before it can have an opinion — so a scorekeeper who cleared one
+   * field got an empty problem list, a greyed `Review changes`, and no way to find out which field.
+   * The sentence below is the one `ScoringRulesSetup` was already showing for the same edit.
+   */
+  test('says which field is wrong rather than only disabling the button', async () => {
+    open(vi.fn());
+    fireEvent.input(screen.getByLabelText(/tossups in regulation/i), { target: { value: '' } });
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/tossups in regulation must be at least 1/i));
+    expect(screen.getByRole('button', { name: /review changes/i })).toBeDisabled();
+  });
+});
+
+/*
+ * A round with no bonuses in it, scored from a tournament's own file.
+ *
+ * This is a whole describe because the format has to come through the reader rather than be built
+ * here: the bug was that `advancedFromFormat` carried `awardsBonus` across from a format with
+ * bonuses switched off, the trip back out wrote it as `awards_bonus: true`, and `bonusesAreUsed`
+ * read that as bonuses being in play. The dialog then opened permanently unusable — six complaints
+ * about bonus structure for bonuses nobody asked for, and because `advancedScorekeeperFormat`
+ * returns null while any of them stand, not one of them reached the screen. A tossup-only room could
+ * not correct its rules and was told nothing.
+ */
+describe('a tossup-only game whose rules arrived in a QBJ', () => {
+  const read = readQbjScoringRules(
+    {
+      answer_types: [{ value: 10 }, { value: -5 }],
+      regulation_tossup_count: 20,
+      maximum_regulation_tossup_count: 20,
+      minimum_overtime_question_count: 1,
+      maximum_players_per_team: 4,
+    },
+    false,
+  );
+
+  function openTossupsOnly() {
+    if (!read.ok) throw new Error('the fixture rules should be readable');
+    render(
+      <ScoringRulesCorrectionDialog
+        format={read.format}
+        events={[]}
+        setup={setup}
+        onCorrect={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+  }
+
+  test('opens with no complaints on it', () => {
+    openTossupsOnly();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByText(/already being scored under/i)).toBeInTheDocument();
+  });
+
+  test('can actually correct something', async () => {
+    openTossupsOnly();
+    const tossupValue = screen
+      .getAllByLabelText('Points')
+      .find((input) => (input as HTMLInputElement).value === '10') as HTMLInputElement;
+    fireEvent.input(tossupValue, { target: { value: '15' } });
+
+    const review = await screen.findByRole('button', { name: /review changes/i });
+    await waitFor(() => expect(review).not.toBeDisabled());
+    fireEvent.click(review);
+    expect(await screen.findByRole('button', { name: /apply corrected rules/i })).toBeInTheDocument();
   });
 });

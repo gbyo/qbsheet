@@ -1478,6 +1478,9 @@ export default function Scorer(props: IScorerProps) {
       type: 'note',
       text: summary === '' ? 'Scoring rules corrected.' : `Scoring rules corrected — ${summary}.`,
     };
+    // The note goes on `events` and deliberately not on `previousEvents`: the second is the history
+    // to restore if the write is refused, and a game that was not corrected must not come back
+    // carrying a note saying it was.
     await onCorrectScoringRules({ ...correction, events: [...correction.events, note] });
   };
 
