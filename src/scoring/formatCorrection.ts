@@ -273,7 +273,11 @@ export default function correctFormat(
       changes.push({
         subject: answerType.label,
         detail: replacement.awardsBonus ? 'now earns a bonus' : 'no longer earns a bonus',
-        affectsRecordedScoring: used.has(oldIndex),
+        // Only where there are bonuses for it to be about. `awardsBonus` is meaningless on its own —
+        // see the note on it in `ScorekeeperFormat` — so a game with bonuses switched off in both
+        // rule sets has nothing to reprice, and telling the room "the scores will move" would be the
+        // confirmation screen's one job done wrong.
+        affectsRecordedScoring: used.has(oldIndex) && (from.bonus.enabled || to.bonus.enabled),
       });
     }
   });

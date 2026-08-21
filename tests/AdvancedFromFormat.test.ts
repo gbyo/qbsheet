@@ -10,8 +10,13 @@
  * dialog to check the rules and closes it again has silently changed them.
  */
 import { describe, expect, test } from 'vitest';
-import { advancedFromFormat, advancedScorekeeperFormat } from '../src/qbj/AdvancedScoringRules';
-import { IScorekeeperFormat } from '../src/scoring/ScorekeeperFormat';
+import {
+  advancedFromFormat,
+  advancedScorekeeperFormat,
+  advancedScoringRulesProblems,
+} from '../src/qbj/AdvancedScoringRules';
+import { readQbjScoringRules } from '../src/qbj/QbjScoringRules';
+import { IScorekeeperFormat, scorekeeperFormatProblems } from '../src/scoring/ScorekeeperFormat';
 import scoringRulesToScorekeeperFormat, { CommonRuleSets, ScoringRules } from './rules';
 
 /**
@@ -104,6 +109,57 @@ describe('a format, back into the form that produces one', () => {
     const input = advancedFromFormat(tossupsOnly);
     expect(input.useBonuses).toBe(false);
     expect(roundTrip(tossupsOnly)?.bonus.enabled).toBe(false);
+  });
+
+  /*
+   * The same claim, made about a format nobody built by hand.
+   *
+   * The test above constructs its bonus-free format by clearing `awardsBonus` on every answer type
+   * as well as switching bonuses off -- which is the one step the import path does not take, and so
+   * the one step that made the test pass while a real tossup-only QBJ opened a dialog with six
+   * complaints on it and every button disabled. `awardsBonus` says nothing on its own about whether
+   * bonuses are used (see `ScorekeeperFormat`), but the trip out of this form writes it as
+   * `awards_bonus`, which is exactly what `bonusesAreUsed` reads. So the assertion has to start
+   * where a tournament's file starts.
+   */
+  test('a tossup-only format read from a QBJ opens in the form with nothing to complain about', () => {
+    const read = readQbjScoringRules(
+      {
+        // No bonus fields and no `awards_bonus` anywhere, which is what a round with no bonuses in
+        // it actually ships as. Every other field is one the reader requires.
+        answer_types: [{ value: 10 }, { value: -5 }],
+        regulation_tossup_count: 20,
+        maximum_regulation_tossup_count: 20,
+        minimum_overtime_question_count: 1,
+        maximum_players_per_team: 4,
+      },
+      false,
+    );
+    expect(read.ok).toBe(true);
+    if (!read.ok) return;
+    expect(scorekeeperFormatProblems(read.format)).toEqual([]);
+    expect(read.format.bonus.enabled).toBe(false);
+
+    // Openable, which is the whole property this file is about.
+    expect(advancedScoringRulesProblems(advancedFromFormat(read.format))).toEqual([]);
+    expect(withoutLabels(roundTrip(read.format) as IScorekeeperFormat)).toEqual(withoutLabels(read.format));
+  });
+
+  /*
+   * And openable even for a format that reached the scorer already carrying the contradiction --
+   * a record written by an earlier build, or a descriptor assembled in code. A correction dialog
+   * that cannot be used is not an acceptable way to report one.
+   */
+  test('a format that claims a bonus with bonuses switched off still opens', () => {
+    const format = scoringRulesToScorekeeperFormat(new ScoringRules(CommonRuleSets.Acf));
+    const contradictory: IScorekeeperFormat = {
+      ...format,
+      answerTypes: format.answerTypes.map((answerType) => ({ ...answerType, awardsBonus: answerType.value > 0 })),
+      bonus: { ...format.bonus, enabled: false },
+    };
+    expect(advancedFromFormat(contradictory).useBonuses).toBe(false);
+    expect(advancedScoringRulesProblems(advancedFromFormat(contradictory))).toEqual([]);
+    expect(roundTrip(contradictory)?.bonus.enabled).toBe(false);
   });
 
   test('carries lightning only when the format plays it', () => {

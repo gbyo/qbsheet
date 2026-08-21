@@ -48,7 +48,7 @@ import { connectionTimeline } from './ConnectionTimeline';
 import { useAppUpdate } from '../pwa/useAppUpdate';
 import { updateDeferredAlert } from '../pwa/UpdateNotice';
 import { ResultDeliveryService } from './ResultDelivery';
-import { IScoringRulesCorrection } from '../scorer/ScoringRulesCorrectionDialog';
+import { IScoringRulesCorrection, ScoringRulesCorrectionRefusal } from '../scorer/ScoringRulesCorrectionDialog';
 
 /** The two totals, read back out of the payload rather than derived a second time. */
 export function scoreFromQbj(qbj: object): { left: number; right: number } | undefined {
@@ -326,33 +326,58 @@ export default function ScoringScreen(props: {
    *
    * The order matters and is the same order every other write on this screen follows: the copy that
    * survives a reload goes first. `saveEvents` writes the synchronous journal before it queues the
-   * durable mirror, so a device that loses power between these two lines comes back with the
-   * re-pointed history and the old format -- which `correctFormat` would simply offer to correct
-   * again. The reverse order would come back with a format the events no longer match.
+   * durable mirror. The reverse order would leave a reload holding a format the events no longer
+   * match.
    *
    * See `formatCorrection` for what has already been checked by the time this runs: the correction
    * itself is known to be applicable. What is not known is whether this device will accept it, and
    * both writes can refuse -- a locked-down profile, a full quota, a database that has gone away.
    *
+   * # Half of a correction is worse than none of it
+   *
+   * Neither order is safe on its own, which is why there is a rollback here rather than a comment
+   * explaining why one order is fine. A correction that adds an answer type moves every index below
+   * it, so `saveEvents` has already re-pointed every recorded buzz at positions that exist only in
+   * the format the next line is about to be refused. Leaving that behind is not a correction that
+   * did not happen; it is a game whose powers are priced as tossups from the next reload onwards,
+   * silently, with the correction's own note sitting in the history claiming the rules were fixed.
+   *
+   * Retrying does not undo it either. `correctFormat` remaps from wherever the indices currently
+   * sit, so a second attempt walks the same buzz one position further along.
+   *
+   * So the history goes back the way it came. `previousEvents` travels on the correction for that
+   * purpose; see the note on it. It is the same synchronous journal write in the other direction, on
+   * a smaller array than the one that has just been accepted, so the only way it fails is a browser
+   * that withdrew storage between the two lines -- which is told apart from an ordinary refusal,
+   * because "nothing has changed" would then be the second false thing the room had been told.
+   *
    * A refusal is reported rather than absorbed. The screen stops claiming the record is durably
-   * stored, the scorer is *not* remounted, and the throw reaches the dialog, which stays open and
-   * says nothing was written. Bumping `ruleRevision` on a failed write would be the worst outcome
-   * available: the scoresheet would redraw under rules that exist only in memory, and the next
-   * reload would silently undo scores the room had already been shown.
+   * stored, the scorer is *not* remounted, and the throw reaches the dialog, which stays open with
+   * the reason on it. Bumping `ruleRevision` on a failed write would be the worst outcome available:
+   * the scoresheet would redraw under rules that exist only in memory, and the next reload would
+   * silently undo scores the room had already been shown.
    */
   const correctScoringRules = useCallback(
-    async ({ format, events }: IScoringRulesCorrection) => {
-      const refuse = () => {
+    async ({ format, events, previousEvents }: IScoringRulesCorrection) => {
+      const refuse = (message: string) => {
         if (onScreen.current) setRecordDurablyStored(false);
-        throw new Error('The corrected scoring rules could not be saved on this device.');
+        throw new ScoringRulesCorrectionRefusal(message);
       };
+      const nothingWritten = 'Those rules could not be saved on this device. Nothing has changed; try again.';
       // The history first, and no format written at all if it was refused. A format the events do
       // not match is the one combination neither this dialog nor a reload can recover from.
-      if (!store.saveEvents(record.id, events)) refuse();
+      if (!store.saveEvents(record.id, events)) refuse(nothingWritten);
       const updated = await store.update(record.id, {
         package: { ...record.package, scorekeeperFormat: format },
       });
-      if (updated === null) refuse();
+      if (updated === null) {
+        const restored = store.saveEvents(record.id, previousEvents);
+        refuse(
+          restored
+            ? nothingWritten
+            : 'Those rules could not be saved, and this device would not put the scoresheet back either. Download the QBJ backup from the Game menu before scoring anything else.',
+        );
+      }
       await onRecordChanged();
       setRuleRevision((revision) => revision + 1);
     },

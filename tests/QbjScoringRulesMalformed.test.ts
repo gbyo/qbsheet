@@ -175,6 +175,51 @@ describe('QBJ scoring-rule shape is validated without familiar-format guesses', 
     expect(reread.format.bonus.enabled).toBe(false);
   });
 
+  /*
+   * The case every other no-bonus test in this file spells out and a real file does not.
+   *
+   * `awards_bonus` is optional, and a tournament whose round has no bonuses has no reason to write
+   * it — so the interesting document is the silent one, which is exactly the one nothing here was
+   * covering. The default for a silent flag was `value > 0` regardless of whether the rule set has
+   * bonuses at all, which produced a format with bonuses switched off and every positive answer type
+   * claiming one. Valid to `scorekeeperFormatProblems`, perfectly scoreable, and impossible to put
+   * back into the rules form: the trip out writes those flags as `awards_bonus: true`, and
+   * `bonusesAreUsed` reads a single one of those as evidence that bonuses are in play. See
+   * `advancedFromFormat`, which is where the room met the consequence.
+   */
+  test('a no-bonus format that says nothing about awards_bonus claims no bonuses per answer type', () => {
+    const silent = withoutBonusFields();
+    (silent.answer_types as QbjObject[]).forEach((answerType) => {
+      delete answerType.awards_bonus;
+    });
+
+    const parsed = read(silent);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.format.bonus.enabled).toBe(false);
+    expect(parsed.format.answerTypes.map((answerType) => answerType.awardsBonus)).toEqual([false, false, false]);
+
+    // Which is what makes the round trip hold, and the round trip is what the rules form is.
+    const reread = read(writeQbjScoringRules(parsed.format));
+    expect(reread.ok).toBe(true);
+    if (!reread.ok) return;
+    expect(reread.format).toEqual(parsed.format);
+  });
+
+  /** An explicit flag is still an explicit flag: a document that says bonuses is not overruled. */
+  test('an explicit awards_bonus is honoured whether or not bonus structure came with it', () => {
+    const claimed = withoutBonusFields();
+    claimed.answer_types = (claimed.answer_types as QbjObject[]).map((answerType) => ({
+      ...answerType,
+      awards_bonus: typeof answerType.value === 'number' && answerType.value > 0,
+    }));
+    const incomplete = read(claimed);
+
+    // Bonuses are in play, and the structure for them is missing rather than assumed absent.
+    expect(incomplete.ok).toBe(false);
+    if (!incomplete.ok) expect(incomplete.problems.join(' ')).toContain('use bonuses');
+  });
+
   test('custom order, zero answers, multiple negatives, and custom labels survive normalization', () => {
     const rules = withoutBonusFields();
     rules.total_divisor = 1;
