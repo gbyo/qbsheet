@@ -94,11 +94,15 @@ const aboutScreenshot = 'src/assets/about-qbsheet-practice.webp';
 /**
  * The assets the rendered markup names by their development URL.
  *
- * Both are ordinary Vite asset imports inside components — the wordmark in `BrandLogo`, the screenshot
- * in `About` — so a server-side render produces `/src/assets/…` for each, and the build has to swap in
- * the content-hashed file it actually emitted.
+ * An ordinary Vite asset import inside a component — the screenshot in `About` — produces
+ * `/src/assets/…` in a server-side render, and the build has to swap in the content-hashed file it
+ * actually emitted.
+ *
+ * The wordmark used to be the other member of this list. It is now inline SVG in `BrandLogo` so that
+ * it can take `currentColor` and follow the dark appearance, which means it is no longer an emitted
+ * asset and no longer has a URL to rewrite.
  */
-const aboutAssetSources = ['src/assets/qbsheet-black-logo.svg', aboutScreenshot];
+const aboutAssetSources = [aboutScreenshot];
 
 /**
  * The documents rendered to static HTML at build time, and the component each one is.

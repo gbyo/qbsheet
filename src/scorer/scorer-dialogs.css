@@ -1,0 +1,795 @@
+/*
+ * The scorer, part two: the menu, every dialog, and the completion screen.
+ *
+ * Everything a scorekeeper reaches deliberately rather than by scoring, which is why it is
+ * separable from the live surface at all: none of it is on screen during a tossup.
+ *
+ * Split out of a single 3,200-line `scorer.css`, along the `#region` boundaries that
+ * file already had. One stylesheet meant every change to the scoresheet -- a dialog,
+ * a protest row, a button -- landed in the same file, so two people could not touch
+ * different parts of the scorer without meeting in a merge.
+ *
+ * Load order is preserved by `main.tsx` and is load-bearing: these were one document
+ * and the cascade between them is the cascade they had. A new file goes at the end of
+ * that import list, not into the middle of it.
+ */
+
+/* #region Menu, dialogs and completion
+ *
+ * The infrequent actions. Same restraint as everything else: a dialog is a bordered white panel over
+ * a dimmed page, not a floating card with a shadow.
+ */
+
+.scorer-menu {
+  position: relative;
+}
+
+.scorer-menu-list {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  min-width: 200px;
+  max-height: calc(100vh - 120px);
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+  background: var(--room-surface);
+  border: 1px solid var(--room-border-strong);
+  border-radius: 6px;
+}
+
+.scorer-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 0.8125rem;
+  text-align: left;
+  color: var(--room-text);
+  background: none;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.scorer-menu-item .scorer-control-icon {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+
+.scorer-menu-item:hover {
+  background: var(--room-surface-sunken);
+}
+
+.scorer-menu-item:disabled {
+  color: var(--room-faint);
+  cursor: default;
+}
+
+.scorer-menu-item:disabled:hover {
+  background: none;
+}
+
+/*
+ * The rules between groups.
+ *
+ * One hairline, the same weight as every other rule on the scoresheet, with air either side of it
+ * and nothing else: no label, no background, no inset. It is doing the same job the ruled lines on a
+ * paper sheet do, which is to say where one list stops without saying anything about it.
+ */
+.scorer-menu-separator {
+  height: 0;
+  margin: 4px 6px;
+  border-top: 1px solid var(--room-border);
+}
+
+/*
+ * Colour only. The separation used to be drawn here, by a border on the first red entry, which was
+ * the whole grouping mechanism this menu had; now that groups are ruled properly a border here would
+ * be a second line inside the group it already sits at the top of.
+ */
+.scorer-menu-item.is-destructive {
+  color: var(--room-error);
+}
+
+.scorer-footer-warning {
+  margin-left: auto;
+  font-size: 0.8125rem;
+  color: var(--room-warning);
+}
+
+.scorer-clock {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.scorer-clock.is-expired {
+  color: var(--room-warning);
+  font-weight: 600;
+}
+
+.scorer-clock-button {
+  padding: 2px 6px;
+  font: inherit;
+  font-size: 0.75rem;
+  color: var(--room-text);
+  background: var(--room-surface);
+  border: 1px solid var(--room-border-strong);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.scorer-clock-button:hover {
+  background: var(--room-surface-sunken);
+}
+
+.scorer-dialog::backdrop {
+  background: var(--room-scrim);
+}
+
+.scorer-dialog {
+  width: calc(100% - 48px);
+  max-width: 560px;
+  max-height: calc(100% - 48px);
+  padding: 0;
+  overflow-y: auto;
+  color: var(--room-text);
+  background: var(--room-surface);
+  border: 1px solid var(--room-border-strong);
+  border-radius: 6px;
+}
+
+.scorer-dialog.is-wide {
+  max-width: 820px;
+}
+
+/*
+ * Pinned, because it holds the way out. The panel scrolls as one box, and a Close that scrolls away
+ * with the title leaves a scorekeeper halfway down a long correction with no exit on screen.
+ */
+.scorer-dialog-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+  background: var(--room-surface);
+  border-bottom: 1px solid var(--room-border);
+}
+
+.scorer-dialog-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+}
+
+.scorer-dialog-close-glyph {
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.scorer-dialog-title {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+.scorer-dialog-body {
+  padding: 16px;
+}
+
+.scorer-dialog-note {
+  margin: 0 0 12px;
+  font-size: 0.8125rem;
+  color: var(--room-muted);
+}
+
+.scorer-lineups {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  align-items: start;
+}
+
+.scorer-lineup {
+  min-width: 0;
+}
+
+.scorer-lineup-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.scorer-lineup-team {
+  margin: 0 0 8px;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.scorer-lineup-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+}
+
+.scorer-lineup-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scorer-lineup-player {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.scorer-lineup-player .scorer-lineup-name {
+  width: 100%;
+}
+
+.scorer-lineup-sync,
+.scorer-inline-add-note {
+  font-size: 0.6875rem;
+  color: var(--room-faint);
+}
+
+/*
+ * Why a row is unusual, said in the row.
+ *
+ * Colour rather than an icon or a badge, because this is information and not decoration: the one
+ * case it exists for is a name in a historical lineup that the roster had not reached yet, which is
+ * a scoresheet already saying something impossible. It gets the warning colour and nothing else —
+ * no box, no pill — because the row is still an ordinary row with an ordinary action on it.
+ */
+.scorer-lineup-note {
+  font-size: 0.6875rem;
+  color: var(--room-warning);
+}
+
+.scorer-sync-action {
+  margin: 1px 0 0;
+  padding: 0;
+  font: inherit;
+  font-size: 0.6875rem;
+  color: var(--room-accent);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.scorer-lineup-tuh {
+  color: var(--room-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.scorer-lineup-count {
+  margin: 0 0 8px;
+  font-size: 0.8125rem;
+  color: var(--room-faint);
+}
+
+/*
+ * Playing and Bench read as two groups without being two cards. A heading and the row divider are
+ * enough; a box around each would double the vertical space this dialog needs on a 768px screen.
+ */
+.scorer-lineup-group {
+  margin: 12px 0 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--room-muted);
+}
+
+.scorer-lineup-entry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  font-size: 0.8125rem;
+  border-bottom: 1px solid var(--room-border);
+}
+
+.scorer-lineup-entry > .scorer-text-action {
+  flex: none;
+}
+
+.scorer-lineup-seat {
+  flex: none;
+  width: 16px;
+  color: var(--room-faint);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* The two arrows sit together so they read as one control rather than as two more actions. */
+.scorer-lineup-move {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.scorer-lineup-move .scorer-text-action {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 8px;
+}
+
+.scorer-lineup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.scorer-lineup-primary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  min-height: 24px;
+  margin: 0 0 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--room-border);
+}
+
+.scorer-lineup-roster {
+  max-height: min(48vh, 420px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+}
+
+.scorer-reorder-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.scorer-lineup-step {
+  margin-top: 8px;
+}
+
+.scorer-lineup-step-title {
+  margin: 0 0 4px;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.scorer-replacement-list {
+  max-height: min(42vh, 360px);
+  overflow-y: auto;
+  border-top: 1px solid var(--room-border);
+}
+
+.scorer-replacement-choice {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 0;
+  font: inherit;
+  font-size: 0.8125rem;
+  color: var(--room-text);
+  text-align: left;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--room-border);
+  cursor: pointer;
+}
+
+.scorer-replacement-choice:hover {
+  color: var(--room-accent);
+}
+
+.scorer-inline-add {
+  margin: 8px 0 10px;
+  padding: 8px 0 10px;
+  font-size: 0.8125rem;
+  border-bottom: 1px solid var(--room-border);
+}
+
+.scorer-inline-add > label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--room-muted);
+}
+
+.scorer-inline-add-fields {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.scorer-inline-add-fields input {
+  min-width: 0;
+  flex: 1;
+  padding: 7px 8px;
+  font: inherit;
+  color: var(--room-text);
+  background: var(--room-surface);
+  border: 1px solid var(--room-border-strong);
+  border-radius: 4px;
+}
+
+.scorer-inline-add .scorer-choice {
+  min-width: 48px;
+  padding: 7px 12px;
+  font-size: 0.8125rem;
+}
+
+.scorer-inline-add-note,
+.scorer-field-error {
+  display: block;
+  margin-top: 4px;
+}
+
+.scorer-field-error {
+  font-size: 0.75rem;
+  color: var(--room-error);
+}
+
+.scorer-add-player {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--room-border);
+}
+
+.scorer-add-player label,
+.scorer-file-field,
+.scorer-event-edit label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.8125rem;
+  color: var(--room-muted);
+}
+
+.scorer-add-player input,
+.scorer-file-field input,
+.scorer-event-edit input,
+.scorer-event-edit select {
+  width: 100%;
+  margin: 4px 0 8px;
+  padding: 8px;
+  font: inherit;
+  color: var(--room-text);
+  background: var(--room-surface);
+  border: 1px solid var(--room-border-strong);
+  border-radius: 6px;
+}
+
+.scorer-note-list {
+  margin: 0 0 16px;
+  padding: 0 0 0 0;
+  list-style: none;
+  font-size: 0.8125rem;
+}
+
+.scorer-note-list li {
+  display: flex;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--room-surface-sunken);
+}
+
+.scorer-note-q {
+  color: var(--room-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.scorer-note-flag {
+  color: var(--room-warning);
+}
+
+.scorer-note-form {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.scorer-note-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  font-size: 0.8125rem;
+  color: var(--room-muted);
+}
+
+/*
+ * The category, carried in from Flag.
+ *
+ * A line of text and a quiet action, at the weight of a settled fact rather than of a question. It
+ * is deliberately not a field, not a pill and not a badge: nothing here is waiting to be filled in,
+ * and the one thing on this screen that is waiting is the box underneath it.
+ */
+.scorer-issue-type {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  margin: 0;
+  font-size: 0.8125rem;
+}
+
+.scorer-issue-type-name {
+  font-weight: 600;
+}
+
+.scorer-note-form textarea,
+.scorer-note-form input,
+.scorer-note-form select {
+  width: 100%;
+  padding: 8px;
+  font: inherit;
+  color: var(--room-text);
+  background: var(--room-surface);
+  border: 1px solid var(--room-border-strong);
+  border-radius: 4px;
+}
+
+.scorer-checkbox {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px !important;
+  width: auto !important;
+}
+
+.scorer-checkbox input {
+  width: auto;
+  margin: 0;
+}
+
+.scorer-review-list,
+.scorer-review-list ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.scorer-review-list > li {
+  min-width: 0;
+  padding: 10px 0 11px;
+  border-bottom: 1px solid var(--room-border);
+}
+
+.scorer-review-list > li:last-child {
+  border-bottom: none;
+}
+
+.scorer-review-question-number,
+.scorer-review-question-gutter {
+  grid-column: 1;
+  min-width: 0;
+}
+
+.scorer-review-question-number {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--room-muted);
+}
+
+.scorer-review-question-action {
+  font-size: 0.8125rem;
+  white-space: nowrap;
+}
+
+.scorer-review-list > li > ul {
+  margin: 0;
+  min-width: 0;
+}
+
+.scorer-review-event {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: baseline;
+  min-width: 0;
+  padding: 5px 0;
+  font-size: 0.8125rem;
+}
+
+.scorer-review-event-description {
+  grid-column: 2;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.scorer-review-actions,
+.scorer-event-edit-actions {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.scorer-review-actions {
+  grid-column: 3;
+  justify-content: flex-end;
+  min-width: max-content;
+  white-space: nowrap;
+}
+
+.scorer-text-action {
+  padding: 0;
+  font: inherit;
+  color: var(--room-accent);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.scorer-text-action.is-destructive {
+  color: var(--room-error);
+}
+
+.scorer-event-edit {
+  grid-column: 1 / -1;
+  padding: 12px;
+  background: var(--room-surface-sunken);
+  border: 1px solid var(--room-border);
+  border-radius: 6px;
+}
+
+@media (max-width: 560px) {
+  .scorer-review-event {
+    grid-template-columns: 44px minmax(0, 1fr);
+    row-gap: 2px;
+  }
+
+  .scorer-review-actions {
+    grid-column: 2;
+    justify-self: start;
+    flex-wrap: wrap;
+  }
+}
+
+.scorer-choice.is-selected {
+  color: var(--room-surface);
+  background: var(--room-accent);
+  border-color: var(--room-accent);
+}
+
+.scorer-danger {
+  margin-top: 16px;
+  padding: 10px 16px;
+  font: inherit;
+  color: var(--room-surface);
+  background: var(--room-error);
+  border: 1px solid var(--room-error);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.scorer-danger:disabled {
+  color: var(--room-muted);
+  background: var(--room-surface-sunken);
+  border-color: var(--room-border);
+  cursor: default;
+}
+
+.scorer-complete-score {
+  display: flex;
+  gap: 32px;
+  margin: 0 0 4px;
+  font-size: 1.25rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.scorer-complete-warning {
+  margin: 8px 0 0;
+  font-size: 0.8125rem;
+  color: var(--room-warning);
+}
+
+.scorer-complete-ok {
+  margin: 8px 0 0;
+  font-size: 0.8125rem;
+  color: var(--room-success);
+}
+
+.scorer-complete-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.scorer-submit {
+  padding: 10px 20px;
+  font: inherit;
+  color: var(--room-surface);
+  background: var(--room-accent);
+  border: 1px solid var(--room-accent);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.scorer-submit:hover:not(:disabled) {
+  background: var(--room-accent-hover);
+}
+
+.scorer-submit:disabled {
+  color: var(--room-muted);
+  background: var(--room-surface-sunken);
+  border-color: var(--room-border);
+  cursor: default;
+}
+
+@media (max-width: 700px) {
+  .scorer-lineups {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* #endregion */
+
+/* #region Scoring rules correction */
+
+/*
+ * The confirmation step of a mid-game rules correction.
+ *
+ * A definition list rather than prose, because the scorekeeper is checking it against something a
+ * tournament director just said out loud, and a list can be read down. The affected note is the only
+ * emphasis on the screen: it marks the lines that move points already on the board, which is the one
+ * distinction that decides whether this correction is routine or serious.
+ */
+.rules-correction-changes {
+  margin: 12px 0 0;
+}
+
+.rules-correction-change {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 6px 0;
+  border-top: 1px solid var(--room-border);
+}
+
+.rules-correction-change dt {
+  min-width: 140px;
+  font-weight: 600;
+}
+
+.rules-correction-change dd {
+  margin: 0;
+  color: var(--room-muted);
+}
+
+.rules-correction-affected {
+  color: var(--room-warning);
+}
+
+.rules-correction-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+/* #endregion */

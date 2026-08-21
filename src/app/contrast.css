@@ -1,0 +1,162 @@
+/*
+ * The two accessibility modes the palette could not answer on its own.
+ *
+ * Loaded last, after every other stylesheet, because both of these are corrections to what the
+ * others decided. Keeping them here rather than scattered through six files means the question "what
+ * does QBSheet do in High Contrast?" has one place to be answered, and a new state surface that
+ * forgets to handle it is a visible omission rather than an invisible one.
+ *
+ * # Why this is not decoration
+ *
+ * The scoresheet signals a great deal with a tinted background: an unresolved protest, a question
+ * whose answer types no longer validate, a device that cannot save. Those tints are the fastest
+ * signal on the screen and they are the first thing both of these modes take away -- Forced Colors
+ * replaces every background outright, and a scorekeeper who asked for more contrast is by definition
+ * somebody the low-saturation tints were not working for.
+ *
+ * So the rule below is: where colour carried meaning, give the meaning a second carrier that
+ * survives. Borders and weight survive; hue does not.
+ */
+
+/*
+ * More contrast, by request.
+ *
+ * Almost entirely a token override, which is the dividend from the palette being tokenized in the
+ * first place: nothing here names a component. Text goes to the full foreground rather than the
+ * muted grey, borders go to the strong weight everywhere, and the tinted state grounds step back so
+ * the border and the text colour do the work instead of competing with a wash.
+ */
+@media (prefers-contrast: more) {
+  :root {
+    --room-muted: var(--room-text);
+    --room-faint: #4a4e55;
+    --room-border: var(--room-border-strong);
+    --room-border-strong: #4a4e55;
+    --room-surface-sunken: var(--room-surface);
+    --room-accent: #0b4a91;
+    --room-accent-hover: #08386e;
+    --room-success: #14512a;
+    --room-warning: #6b4000;
+    --room-error: #8a1610;
+    --room-success-bg: var(--room-surface);
+    --room-warning-bg: var(--room-surface);
+    --room-error-bg: var(--room-surface);
+    --room-info-bg: var(--room-surface);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme='light']) {
+      --room-faint: #c3c8d0;
+      --room-border-strong: #c3c8d0;
+      --room-accent: #a8d0ff;
+      --room-accent-hover: #c6e1ff;
+      --room-success: #a9e6bd;
+      --room-warning: #f5cd8d;
+      --room-error: #ffb3ad;
+    }
+  }
+
+  :root[data-theme='dark'] {
+    --room-faint: #c3c8d0;
+    --room-border-strong: #c3c8d0;
+    --room-accent: #a8d0ff;
+    --room-accent-hover: #c6e1ff;
+    --room-success: #a9e6bd;
+    --room-warning: #f5cd8d;
+    --room-error: #ffb3ad;
+  }
+
+  /* With the grounds gone, these need an edge or they are loose text on a page. */
+  .scorer-banner,
+  .scorer-question-errors,
+  .scorer-question-intro,
+  .scorer-check-outstanding,
+  .readiness-summary,
+  .readiness-test-result,
+  .practice-drill,
+  .shell-errors,
+  .shell-notice {
+    border: 2px solid currentcolor;
+  }
+
+  /* A hairline that has to separate two surfaces which are now the same colour cannot be a hairline. */
+  .shell-section,
+  .shell-header {
+    border-color: var(--room-border-strong);
+  }
+
+  /* Drawn in the sunken surface, which this block has just made identical to the page. */
+  .settings-row + .settings-row {
+    border-top-color: var(--room-border);
+  }
+}
+
+/*
+ * Windows High Contrast, and anything else that turns Forced Colors on.
+ *
+ * The browser is now choosing every colour, so nothing below tries to set one. What it does instead
+ * is make sure the shapes that were only ever distinguished by fill have an outline, because an
+ * outline is one of the few things Forced Colors preserves.
+ *
+ * `forced-color-adjust` is deliberately never set to `none` here. Opting a component out returns it
+ * to the application's palette, which on a system configured for High Contrast is precisely the
+ * palette the user rejected. The only correct move is to work within the system colours.
+ */
+@media (forced-colors: active) {
+  /* Every state surface, given the edge its tint used to be. `CanvasText` rather than `currentcolor`
+     so a muted region does not get a muted border. */
+  .scorer-banner,
+  .scorer-question-errors,
+  .scorer-question-intro,
+  .scorer-check-outstanding,
+  .scorer-answer,
+  .scorer-answer-neg,
+  .scorer-choice,
+  .scorer-player,
+  .scorer-sub-action,
+  .readiness-summary,
+  .readiness-test-result,
+  .practice-drill,
+  .shell-errors,
+  .shell-notice,
+  .shell-modal-body,
+  .crash-panel {
+    border: 1px solid CanvasText;
+  }
+
+  /* Selected is a fill here, and a fill is what Forced Colors takes. */
+  .settings-choice.is-selected {
+    outline: 2px solid CanvasText;
+    outline-offset: -3px;
+  }
+
+  /*
+   * Selection, which is the one that actually loses information.
+   *
+   * A chosen bonus part, a picked side, a substituted player: all of them are "this one and not the
+   * others", and Forced Colors flattens chosen and unchosen to the same pair. A second, offset
+   * outline reads as a thicker edge and survives, so the selected control still looks different from
+   * the ones beside it.
+   *
+   * The answer-type buttons are deliberately absent. They are distinguished from each other by their
+   * point value, which is text, and text is the one thing neither of these modes takes away.
+   */
+  .scorer-choice[aria-pressed='true'],
+  .scorer-choice.is-selected,
+  .scorer-player.is-substituted {
+    outline: 2px solid CanvasText;
+    outline-offset: 2px;
+  }
+
+  /* The focus ring is `--room-accent`, and an accent is exactly what Forced Colors discards. */
+  :focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 1px;
+  }
+
+  /* Drawn with a translucent black, which composites to nothing once the ground is system-chosen. */
+  .shell-modal,
+  .crash-screen {
+    background: Canvas;
+  }
+}
