@@ -17,6 +17,7 @@ import { LeftOrRight } from '../scoring/types';
 import { IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
 import { IDerivedGame, IDerivedTeam } from '../scoring/deriveGame';
 import { protestStatusLabels, protestSubjectLabels } from './ProcedureDialogs';
+import SpreadsheetCopyPanel from './SpreadsheetCopyPanel';
 
 /** "+15" / "-5". */
 function signed(value: number): string {
@@ -149,11 +150,27 @@ export interface IPreSubmitReviewProps {
   onSubmit: () => void;
   onDownload: () => void;
   onReview: () => void;
+  /** Canonical spreadsheet copy, when the host has a durable game package to export. */
+  spreadsheetTsv?: string;
+  spreadsheetGameLabel?: string;
+  spreadsheetSuggestedTabName?: string;
 }
 
 export default function PreSubmitReview(props: IPreSubmitReviewProps) {
-  const { format, game, unsyncedRosterAdditions, warnings, submitting, blockers, onSubmit, onDownload, onReview } =
-    props;
+  const {
+    format,
+    game,
+    unsyncedRosterAdditions,
+    warnings,
+    submitting,
+    blockers,
+    onSubmit,
+    onDownload,
+    onReview,
+    spreadsheetTsv,
+    spreadsheetGameLabel,
+    spreadsheetSuggestedTabName,
+  } = props;
   // Confirmation belongs to the exact derived result shown here. A correction, undo, or redo
   // replaces `game`, so identity makes a previous acknowledgement invalid without an effect-driven
   // render in between the new result and its checkbox.
@@ -257,6 +274,15 @@ export default function PreSubmitReview(props: IPreSubmitReviewProps) {
           Download QBJ backup
         </button>
       </div>
+
+      {spreadsheetTsv !== undefined && spreadsheetGameLabel && (
+        <SpreadsheetCopyPanel
+          tsv={spreadsheetTsv}
+          gameLabel={spreadsheetGameLabel}
+          suggestedTabName={spreadsheetSuggestedTabName}
+          disabled={submitting || blockers.length > 0}
+        />
+      )}
     </div>
   );
 }

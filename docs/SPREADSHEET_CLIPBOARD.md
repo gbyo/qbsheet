@@ -1,15 +1,16 @@
-# Spreadsheet clipboard sidecar
+# Tournament spreadsheet game export
 
-This document describes the clipboard delivery layer for QBSheet's tournament-spreadsheet
-representation. It is intentionally narrower than the game serializer and narrower than the scorer
-UI: the sidecar accepts canonical TSV produced by the core serializer, offers a safe HTML flavor for
-rich clipboard paste, and reports whether a browser copied the value or whether the caller must show
-the value in a manual-copy textarea.
+This document describes QBSheet's first-class one-game tournament-spreadsheet export. The core
+serializer/parser lives in [`src/scoring/SpreadsheetGame.ts`](../src/scoring/SpreadsheetGame.ts) and
+the browser delivery layer lives in [`src/scorer/SpreadsheetClipboard.ts`](../src/scorer/SpreadsheetClipboard.ts).
+The completed-game review renders the exact **Copy game for tournament spreadsheet** action through
+[`src/scorer/SpreadsheetCopyPanel.tsx`](../src/scorer/SpreadsheetCopyPanel.tsx).
 
-The sidecar does not create a second game model. QBSheet's ordered `ScoreEvent[]` history remains the
-source of truth. A future core spreadsheet serializer/parser is responsible for turning the existing
-game package, setup, scorekeeper format, procedure, and ordered event history into and out of the
-versioned spreadsheet schema.
+The export does not create a second game model. QBSheet's ordered `ScoreEvent[]` history remains the
+source of truth. The serializer turns the existing game package, setup, scorekeeper format,
+procedure, record metadata, and ordered event history into a versioned, self-contained TSV range;
+the parser validates that range and reconstructs the same snapshot without depending on workbook
+state.
 
 ## Purpose and boundaries
 
@@ -24,11 +25,8 @@ Each tab contains one complete game. The tab name, workbook name, tab order, col
 other spreadsheet formatting are cosmetic. The durable game identity is data in the pasted range.
 
 This feature is an additional collection/archive path. It does not replace QBJ download, QBJ
-recovery, QBTCP submission, or the ordinary submission/review flow. The optional
-`src/scorer/SpreadsheetCopyPanel.tsx` file is only a thin, reusable React adapter for the helper's
-success and manual-copy states; it is not wired into the protected scorer/completion screens in this
-sidecar change. A parent surface remains responsible for placing it in the appropriate completed-
-game flow.
+recovery, QBTCP submission, or the ordinary submission/review flow. It is available from the
+completed scorer review, and it remains disabled while the review has blockers or is submitting.
 
 There is deliberately no Google integration:
 
@@ -99,11 +97,10 @@ text is escaped for `&`, `<`, `>`, `"`, and `'`. HTML is only a presentation fla
 future importers must use `text/plain`/TSV as the canonical content and must not rely on rich-paste
 formatting.
 
-## Schema v1 contract assumed by this sidecar
+## Schema v1 contract
 
-The core serializer owns the independently versioned spreadsheet schema. The sidecar does not
-import a not-yet-present core export or duplicate its parser. The v1 contract described in the
-spreadsheet brief is:
+The core serializer owns the independently versioned spreadsheet schema. The canonical v1 payload
+starts with these visible rows and then contains the named sections below:
 
 ```text
 QBSHEET_GAME    1    <game-id>
@@ -111,25 +108,30 @@ QBSHEET_GAME    1    <game-id>
 Round ...
 If you are trying to paste a different game, create a NEW BLANK TAB first.
 
-SECTION    GAME    <game-id>
+SECTION    GAME    1    <game-id>
 ...
-SECTION    TEAMS    <game-id>
+SECTION    RECORD    1    <game-id>
 ...
-SECTION    PLAYERS    <game-id>
+SECTION    TEAMS    1    <game-id>
 ...
-SECTION    SCORING_RULES    <game-id>
+SECTION    PLAYERS    1    <game-id>
 ...
-SECTION    PROCEDURE    <game-id>
+SECTION    SCORING_RULES    1    <game-id>
 ...
-SECTION    EVENTS    <game-id>
+SECTION    PROCEDURE    1    <game-id>
+...
+SECTION    EVENTS    1    <game-id>
 ...
 QBSHEET_END    1    <game-id>    <event-count>
 ```
 
-The exact row positions are not semantic. A future parser should identify sections by their marker
-and stable headers, tolerate harmless blank rows and trimmed trailing empty cells, and reject
+The exact row positions are not semantic. `parseSpreadsheetGame` identifies sections by their marker
+and stable headers, tolerates harmless blank rows and trimmed trailing empty cells, and rejects
 ambiguous structure. In particular, every section marker and the end marker repeat the same game ID
-and schema version. A future parser must reject a mixed tab instead of guessing which section wins.
+and schema version; a mixed tab is rejected instead of guessed. `GAME`, `TEAMS`, `PLAYERS`,
+`SCORING_RULES`, and `EVENTS` are required. `RECORD` is optional metadata, and `PROCEDURE` is
+optional when the package has no room procedure; the serializer emits both sections so the exported
+range is explicit.
 
 The first cell at A1 is the stable machine marker. The warning rows are deliberately plain text so
 they remain visible when an application pastes only the plain TSV flavor. They are an overwrite
@@ -141,7 +143,7 @@ informative unsupported-version error for a newer version.
 
 ## Identity and duplicate games
 
-The core serializer must choose a durable ID from existing QBSheet identity data, in this order when
+The core serializer chooses a durable ID from existing QBSheet identity data, in this order when
 available:
 
 1. the QBJ match identity (`qbjIdentity.matchId`);
@@ -159,10 +161,9 @@ tournament control, and require an explicit choice when their contents differ.
 
 ## Canonical state and source of truth
 
-The spreadsheet representation must be built from the canonical game snapshot, not only from a
-final QBJ projection or `IDerivedGame`. The current room architecture stores the setup/package data
-and derives scores and readable questions from the ordered event history. The core serializer is
-expected to preserve, where present:
+The spreadsheet representation is built from the canonical game snapshot, not only from a final QBJ
+projection or `IDerivedGame`. The current room architecture stores the setup/package data and derives
+scores and readable questions from the ordered event history. The serializer preserves, where present:
 
 - game, tournament, round/revision, packet, room, team, player, registration, and QBJ identity
   metadata;
@@ -181,17 +182,15 @@ expected to preserve, where present:
 import; a stale summary row must never override edited canonical event cells. This keeps corrections
 to player attribution, answer type, bonus points, notes, and metadata understandable and auditable.
 
-Known event properties should have named columns. A future core serializer may put only genuinely
-unknown remaining properties in an `extras` cell, in deterministic order. It must not place a full
-duplicate raw event beside editable columns, because two contradictory copies create an ambiguous
-human edit.
+Known event properties have named columns. Only genuinely unknown remaining properties go in an
+`extras` cell, in deterministic order. The serializer must not place a full duplicate raw event
+beside editable columns, because two contradictory copies create an ambiguous human edit.
 
 ## TSV encoding and spreadsheet coercion
 
-The clipboard sidecar deliberately does not decode or rewrite cells. It receives canonical TSV and
-passes that exact text to both clipboard paths. This is an integration boundary: before calling this
-module, the core serializer must apply a deterministic, reversible cell codec to untrusted string
-fields.
+The clipboard layer deliberately does not decode or rewrite cells. It receives canonical TSV and
+passes that exact text to both clipboard paths. The core serializer applies a deterministic,
+reversible cell codec to untrusted string fields before the transport sees them.
 
 That codec must make all of the following safe and lossless:
 
@@ -215,8 +214,7 @@ assumption is intentional so the text/plain grid and future parser have one cano
 
 ## Corruption and overwrite handling
 
-The sidecar cannot validate a game schema because it has no game model import. The future core
-parser should reject, with structured errors suitable for UI:
+The core parser rejects, with structured errors suitable for UI:
 
 - a wrong or missing A1 marker;
 - an unsupported schema version;
@@ -269,5 +267,6 @@ schema parser used for other sources. It need not know the tab name or workbook 
 reader, if one is ever added, can enumerate tabs, find A1 `QBSHEET_GAME`, parse each independent
 range, group by durable game ID, and report duplicates or conflicts.
 
-That future reader is intentionally out of scope for this sidecar. No Google API or hidden workbook
-metadata is needed: the portable contract is the visible, versioned, self-contained range itself.
+An importer that enumerates workbook tabs is intentionally out of scope. No Google API or hidden
+workbook metadata is needed: the portable contract is the visible, versioned, self-contained range
+itself.
