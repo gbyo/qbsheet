@@ -8,11 +8,28 @@ import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { beforeAll, describe, expect, test } from 'vitest';
+import { JSDOM } from 'jsdom';
 import { readWikiPage, wikiPageNames } from '../src/about/wikiContent';
 
 const root = process.cwd();
 const dist = join(root, 'dist');
 const startHerePath = join(dist, 'about', 'wiki', 'start-here', 'index.html');
+
+/**
+ * The page as a browser with scripting switched off would have it.
+ *
+ * Parsed rather than pattern-matched. A regular expression that looks for `</script>` is the wrong
+ * tool twice over: it misses the spellings a real parser accepts (`</script >`), and CodeQL
+ * correctly refuses to believe any hand-rolled tag filter -- `js/bad-tag-filter` and
+ * `js/incomplete-multi-character-sanitization` both fired on the previous one. Nothing here needs
+ * to be clever; jsdom is already a dev dependency, and asking the DOM to drop its own script
+ * elements cannot be wrong about what a script element is.
+ */
+function withScriptsRemoved(html: string): string {
+  const { window } = new JSDOM(html);
+  for (const script of window.document.querySelectorAll('script')) script.remove();
+  return window.document.documentElement.outerHTML;
+}
 
 function javascriptFiles(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -47,7 +64,7 @@ describe('production wiki output', () => {
 
   test('keeps the article, chrome, and navigation readable without its client scripts', () => {
     const html = readFileSync(startHerePath, 'utf8');
-    const withoutScripts = html.replace(/<script\b[\s\S]*?<\/script>/gi, '');
+    const withoutScripts = withScriptsRemoved(html);
     const page = readWikiPage(root, 'Start-here');
 
     expect(withoutScripts).toContain('<header class="about-header">');
@@ -61,11 +78,12 @@ describe('production wiki output', () => {
     const html = readFileSync(startHerePath, 'utf8');
 
     expect(html).toContain('<a href="../../../">Open QBSheet</a>');
-    expect(html).toMatch(/<img[^>]+src="\.\.\/\.\.\/\.\.\/assets\/qbsheet-black-logo-[^"]+\.svg"/);
+    // The brand mark is inlined into the markup rather than fetched, so the header draws on the
+    // first paint and at whatever depth the article sits. There is no `<img>` on this page to
+    // check a relative path on; the favicon and the two build assets below cover that.
+    expect(html).toContain('<svg class="about-brand-logo"');
     expect(html).toContain('href="../../../favicon.ico"');
-    expect(html).toMatch(
-      /<script type="module"[^>]+src="\.\.\/\.\.\/\.\.\/about\/assets\/pages-[^"]+\.js"/,
-    );
+    expect(html).toMatch(/<script type="module"[^>]+src="\.\.\/\.\.\/\.\.\/about\/assets\/pages-[^"]+\.js"/);
     expect(html).toMatch(
       /<link rel="stylesheet"[^>]+href="\.\.\/\.\.\/\.\.\/about\/assets\/pages-[^"]+\.css"/,
     );
@@ -80,7 +98,9 @@ describe('production wiki output', () => {
       .map((script) => readFileSync(join(dirname(startHerePath), script), 'utf8'))
       .join('\n');
 
-    expect(runtime).not.toMatch(/(?:createRoot|hydrateRoot|renderToStaticMarkup|WikiPage|Marked|parseMarkdown)/);
+    expect(runtime).not.toMatch(
+      /(?:createRoot|hydrateRoot|renderToStaticMarkup|WikiPage|Marked|parseMarkdown)/,
+    );
     expect(runtime).not.toContain('https://github.com/gbyo/qbsheet/wiki');
     expect(runtime).not.toContain('This page is for a scorekeeper');
   });
