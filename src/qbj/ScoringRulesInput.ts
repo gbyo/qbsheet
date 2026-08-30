@@ -108,7 +108,7 @@ export function scoringRulesInputIsTimed(input: IScoringRulesInput): boolean {
 
 /** How many tossups regulation is, which the round-options validation needs to place a break. */
 export function scoringRulesInputTossupCount(input: IScoringRulesInput): number {
-  return input.mode === 'advanced' ? input.advanced.tossupCount : input.basic.tossupCount;
+  return input.mode === 'advanced' ? input.advanced.tossupCount ?? 0 : input.basic.tossupCount ?? 0;
 }
 
 /**

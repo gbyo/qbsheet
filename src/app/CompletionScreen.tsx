@@ -38,7 +38,7 @@
  * the record does, because the second most common thing that goes wrong with a downloads folder is
  * that somebody cleared it.
  */
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { IStoredGameRecord, gameRequiresHandoff, isDelivered, needsHandoff } from '../game/GameStore';
 import { isManualGame } from '../game/GameDefinition';
 import { gamePackageLabel } from '../game/GamePackage';
@@ -54,19 +54,36 @@ function timeOfDay(iso: string | undefined): string {
 
 export default function CompletionScreen(props: {
   record: IStoredGameRecord;
-  onUpdate: (recordId: string, change: Partial<IStoredGameRecord>) => void | Promise<void>;
+  onUpdate: (recordId: string, change: Partial<IStoredGameRecord>) => boolean | void | Promise<boolean | void>;
   /** What leaving this screen is called. A connected room is going back to its room, not home. */
   continueLabel?: string;
+  /** Reopen the saved game in the scorer so the result can be checked or corrected. */
+  onBackToScorekeeper: () => void | Promise<void>;
   onHome: () => void | Promise<void>;
   /** Start another local game with the same manual setup, when this was a manual game. */
   onRematch?: () => void | Promise<void>;
   /** True only on the navigation caused by a server-accepted submission. */
   acceptedJustNow?: boolean;
 }) {
-  const { record, onUpdate, continueLabel = 'Done', onHome, onRematch, acceptedJustNow = false } = props;
+  const {
+    record,
+    onUpdate,
+    continueLabel = 'Done',
+    onBackToScorekeeper,
+    onHome,
+    onRematch,
+    acceptedJustNow = false,
+  } = props;
   const [writeFailed, setWriteFailed] = useState(false);
+  const [qbjRecordFailed, setQbjRecordFailed] = useState(false);
+  const [qbjRecordPending, setQbjRecordPending] = useState(false);
+  const [qbjAttemptAt, setQbjAttemptAt] = useState<string | undefined>(record.qbjDownloadedAt);
   const [excelDownloaded, setExcelDownloaded] = useState(false);
   const [rematchFailed, setRematchFailed] = useState(false);
+  const [handoffPending, setHandoffPending] = useState(false);
+  const [handoffFailed, setHandoffFailed] = useState(false);
+  const [rematching, setRematching] = useState(false);
+  const rematchInFlight = useRef(false);
   const score = record.finalScore;
   const connected = record.serverDelivery !== 'none';
   /** Tournament control has it, and did not ask for anything else. */
@@ -75,14 +92,32 @@ export default function CompletionScreen(props: {
     !delivered && (connected || Boolean(record.package.handoffInstruction));
   /** Nobody is owed this result. The copy stops calling the download a handoff. */
   const optionalCopy = !gameRequiresHandoff(record);
+  const downloadIsPrimary = !optionalCopy && !delivered;
   const backupDownloaded = record.qbjDownloadedAt !== undefined;
   const canLeave = !needsHandoff(record);
+
+  const recordQbjDownload = async (at: string) => {
+    setQbjRecordPending(true);
+    setQbjRecordFailed(false);
+    try {
+      const persisted = await onUpdate(record.id, { qbjDownloadedAt: at });
+      if (persisted === false) setQbjRecordFailed(true);
+    } catch {
+      setQbjRecordFailed(true);
+    } finally {
+      setQbjRecordPending(false);
+    }
+  };
 
   const download = () => {
     if (!record.finalQbj) return;
     const written = downloadFile(qbjFileContents(record.finalQbj), qbjFileName(record.package));
     setWriteFailed(!written);
-    if (written) void onUpdate(record.id, { qbjDownloadedAt: new Date().toISOString() });
+    if (written) {
+      const at = new Date().toISOString();
+      setQbjAttemptAt(at);
+      void recordQbjDownload(at);
+    }
   };
 
   const downloadExcel = () => {
@@ -90,6 +125,94 @@ export default function CompletionScreen(props: {
     setWriteFailed(!written);
     setExcelDownloaded(written);
   };
+
+  const acknowledgeHandoff = async () => {
+    if (handoffPending) return;
+    setHandoffPending(true);
+    setHandoffFailed(false);
+    try {
+      const persisted = await onUpdate(record.id, {
+        handoffAcknowledgedAt: new Date().toISOString(),
+      });
+      if (persisted === false) setHandoffFailed(true);
+    } catch {
+      setHandoffFailed(true);
+    } finally {
+      setHandoffPending(false);
+    }
+  };
+
+  const qbjButton = (
+    <button type="button" className={`shell-button${downloadIsPrimary ? ' is-primary' : ''}`} onClick={download}>
+      {record.qbjDownloadedAt
+        ? 'Download QBJ again'
+        : optionalCopy
+          ? 'Download QBJ copy'
+          : delivered
+            ? 'Download QBJ backup'
+            : 'Download QBJ'}
+    </button>
+  );
+  const excelButton = (
+    <button type="button" className="shell-button" onClick={downloadExcel}>
+      {excelDownloaded ? 'Download Excel again' : 'Download Excel scoresheet'}
+    </button>
+  );
+
+  const copyStatus = (
+    <>
+      {excelDownloaded && (
+        <p className="final-ok" role="status">
+          Excel scoresheet downloaded.
+        </p>
+      )}
+      {writeFailed && (
+        <p className="shell-warning" role="alert">
+          This browser would not save the file. Try again, or use the browser&apos;s own download settings.
+        </p>
+      )}
+      {record.qbjDownloadedAt && (
+        <div className="final-handoff">
+          <p className="shell-hint">Downloaded at {timeOfDay(record.qbjDownloadedAt)}</p>
+          {optionalCopy || delivered ? (
+            <p className="final-ok" role="status">A copy of this result is in your downloads.</p>
+          ) : !requiresHandoffAcknowledgement ? (
+            <p className="final-ok" role="status">The QBJ is ready to hand over.</p>
+          ) : record.handoffAcknowledgedAt ? (
+            <p className="final-ok" role="status">Handoff confirmed at {timeOfDay(record.handoffAcknowledgedAt)}</p>
+          ) : (
+            <>
+              <p>After you upload the file:</p>
+              <button
+                type="button"
+                className="shell-button"
+                disabled={handoffPending}
+                onClick={() => void acknowledgeHandoff()}
+              >
+                {handoffPending ? 'Saving…' : 'I uploaded the result'}
+              </button>
+              {handoffFailed && (
+                <p className="shell-warning" role="alert">
+                  QBSheet could not save that confirmation. Try again; finishing remains locked until it is recorded.
+                </p>
+              )}
+            </>
+          )}
+        </div>
+      )}
+      {qbjRecordPending && <p className="shell-hint" role="status">Recording the QBJ download…</p>}
+      {qbjRecordFailed && (
+        <div className="shell-warning" role="alert">
+          <p>The QBJ was downloaded, but QBSheet could not record that durable backup.</p>
+          {qbjAttemptAt && (
+            <button type="button" className="shell-button" onClick={() => void recordQbjDownload(qbjAttemptAt)}>
+              Retry recording the download
+            </button>
+          )}
+        </div>
+      )}
+    </>
+  );
 
   return (
     <main className="shell">
@@ -140,90 +263,62 @@ export default function CompletionScreen(props: {
         </section>
       )}
 
-      <section className="shell-section">
-        <h2 className="shell-heading">
-          {optionalCopy ? 'Save a copy' : delivered ? 'Back up this result' : 'Hand this result over'}
-        </h2>
-        {optionalCopy ? (
-          <p className="shell-hint">
-            This result is saved on this device. Download a QBJ if you want to keep or share a portable
-            copy.
-          </p>
-        ) : delivered ? (
-          <p className="shell-hint">
-            Tournament control has this game. A copy stays on this device, and downloading one is always
-            worth doing when there is a moment for it.
-          </p>
-        ) : (
-          connected && (
+      {delivered && (
+        <div className="shell-actions completion-next-action">
+          <button type="button" className="shell-button is-primary" onClick={() => void onHome()}>
+            {continueLabel}
+          </button>
+        </div>
+      )}
+
+      {(optionalCopy || delivered) ? (
+        <details className="shell-section final-copy-details">
+          <summary className="shell-heading">Download or export a copy</summary>
+          <div className="final-copy-content">
+            <p className="shell-hint">
+              {optionalCopy
+                ? 'This result is saved on this device. Download a QBJ if you want to keep or share a portable copy.'
+                : 'Tournament control has this game. A copy stays on this device, and downloading one is available whenever there is a moment for it.'}
+            </p>
+            <div className="shell-actions">
+              {qbjButton}
+              {excelButton}
+            </div>
+            <p className="shell-hint">
+              Excel is a readable scoresheet for review. QBJ remains the portable result used for tournament
+              handoff and recovery.
+            </p>
+            {copyStatus}
+          </div>
+        </details>
+      ) : (
+        <section className="shell-section">
+          <h2 className="shell-heading">Hand this result over</h2>
+          {connected && (
             <ol className="final-steps">
               <li>Download the QBJ.</li>
               <li>Upload it using the instructions provided for this room.</li>
             </ol>
-          )
-        )}
-        {record.package.handoffInstruction && (
-          <p className="final-instruction">{record.package.handoffInstruction}</p>
-        )}
-
-        <div className="shell-actions">
-          {/* Optional means secondary. Done is the action on this screen for a game nobody is
-              waiting for, and two primary buttons would say otherwise. */}
-          <button type="button" className={`shell-button${optionalCopy ? '' : ' is-primary'}`} onClick={download}>
-            {record.qbjDownloadedAt
-              ? 'Download QBJ again'
-              : optionalCopy
-                ? 'Download QBJ copy'
-                : delivered
-                  ? 'Download QBJ backup'
-                  : 'Download QBJ'}
-          </button>
-          <button type="button" className="shell-button" onClick={downloadExcel}>
-            {excelDownloaded ? 'Download Excel again' : 'Download Excel scoresheet'}
-          </button>
-        </div>
-
-        <p className="shell-hint">
-          Excel is a readable scoresheet for review. QBJ remains the portable result used for tournament
-          handoff and recovery.
-        </p>
-
-        {excelDownloaded && (
-          <p className="final-ok" role="status">
-            Excel scoresheet downloaded.
-          </p>
-        )}
-
-        {writeFailed && (
-          <p className="shell-warning" role="alert">
-            This browser would not save the file. Try again, or use the browser&apos;s own download settings.
-          </p>
-        )}
-
-        {record.qbjDownloadedAt && (
-          <div className="final-handoff">
-            <p className="shell-hint">Downloaded at {timeOfDay(record.qbjDownloadedAt)}</p>
-            {optionalCopy ? (
-              <p className="final-ok">A copy of this result is in your downloads.</p>
-            ) : !requiresHandoffAcknowledgement ? (
-              <p className="final-ok">The QBJ is ready to hand over.</p>
-            ) : record.handoffAcknowledgedAt ? (
-              <p className="final-ok">Handoff confirmed at {timeOfDay(record.handoffAcknowledgedAt)}</p>
-            ) : (
-              <>
-                <p>After you upload the file:</p>
-                <button
-                  type="button"
-                  className="shell-button"
-                  onClick={() => void onUpdate(record.id, { handoffAcknowledgedAt: new Date().toISOString() })}
-                >
-                  I uploaded the result
-                </button>
-              </>
-            )}
+          )}
+          {record.package.handoffInstruction && (
+            <p className="final-instruction">{record.package.handoffInstruction}</p>
+          )}
+          <div className="shell-actions">
+            {qbjButton}
+            <details className="final-more-formats">
+              <summary>More formats</summary>
+              <div className="final-more-formats-content">
+                {excelButton}
+                <p className="shell-hint">
+                  Excel is a readable scoresheet for review. QBJ remains the portable result used for
+                  tournament handoff and recovery.
+                </p>
+              </div>
+            </details>
           </div>
-        )}
-      </section>
+          {copyStatus}
+        </section>
+      )}
 
       <div className="shell-actions">
         {!canLeave && (
@@ -233,24 +328,38 @@ export default function CompletionScreen(props: {
               : `Download the QBJ${requiresHandoffAcknowledgement ? ' and confirm the handoff' : ''} before finishing.`}
           </p>
         )}
-        <button
-          type="button"
-          className={`shell-button${canLeave ? ' is-primary' : ''}`}
-          disabled={!canLeave}
-          onClick={() => void onHome()}
-        >
-          {continueLabel}
+        <button type="button" className="shell-button shell-button-quiet" onClick={() => void onBackToScorekeeper()}>
+          Back to scorekeeper
         </button>
+        {!delivered && (
+          <button
+            type="button"
+            className={`shell-button${canLeave ? ' is-primary' : ''}`}
+            disabled={!canLeave}
+            onClick={() => void onHome()}
+          >
+            {continueLabel}
+          </button>
+        )}
         {onRematch && isManualGame(record.package) && (
           <button
             type="button"
             className="shell-button"
+            disabled={rematching}
             onClick={() => {
+              if (rematchInFlight.current) return;
+              rematchInFlight.current = true;
               setRematchFailed(false);
-              void Promise.resolve(onRematch()).catch(() => setRematchFailed(true));
+              setRematching(true);
+              void Promise.resolve(onRematch())
+                .catch(() => setRematchFailed(true))
+                .finally(() => {
+                  rematchInFlight.current = false;
+                  setRematching(false);
+                });
             }}
           >
-            Rematch
+            {rematching ? 'Starting…' : 'Rematch'}
           </button>
         )}
       </div>

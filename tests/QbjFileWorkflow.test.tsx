@@ -182,6 +182,7 @@ describe('downloading QBJ during a game', () => {
     const downloads = captureDownloads();
     await openAssignmentAndStart();
 
+    await pressControl('Export / backup…');
     await pressControl('Download current QBJ');
 
     expect(downloads.files).toHaveLength(1);
@@ -197,6 +198,7 @@ describe('downloading QBJ during a game', () => {
     const downloads = captureDownloads();
     await openAssignmentAndStart();
 
+    await pressControl('Export / backup…');
     await pressControl('Download current QBJ');
 
     expect(downloads.files[0].name).toBe('R04_Room-204_Ninety-Six_vs_Greenwood.partial.qbj');
@@ -206,6 +208,7 @@ describe('downloading QBJ during a game', () => {
     const downloads = captureDownloads();
     await openAssignmentAndStart();
 
+    await pressControl('Export / backup…');
     await pressControl('Download legacy match-only QBJ');
 
     const written = JSON.parse(downloads.files[0].contents);
@@ -217,6 +220,7 @@ describe('downloading QBJ during a game', () => {
     const downloads = captureDownloads();
     await openAssignmentAndStart();
 
+    await pressControl('Export / backup…');
     await pressControl('Download current QBJ');
 
     const contents = downloads.files[0].contents.toLowerCase();

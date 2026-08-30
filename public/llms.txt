@@ -1,0 +1,53 @@
+# QBSheet
+
+> QBSheet is an open-source, offline-first electronic scoresheet for quiz bowl tournaments, practices, and scrimmages.
+
+QBSheet runs in the browser and can be used standalone, with QBJ game files, or connected to compatible tournament-control software using QBTCP.
+
+QBJ is the file format used for quiz bowl game and tournament data. QBSheet reads and writes ordinary QBJ and defines no format of its own. QBTCP is an open application-layer protocol for communication between electronic scoresheets and tournament-control software; QBSheet is one scoresheet implementation of it, and no product owns the protocol.
+
+A scoresheet and tournament-control software do different jobs. QBSheet scores a single room: it owns the game in front of it, and it keeps working with no network and no server. Tournament-control software owns the tournament around that room — the schedule, room assignments, and collected results.
+
+## Website
+
+- [About QBSheet](https://qbsheet.com/about/): Overview of QBSheet and its scoring workflows.
+- [Scoring with QBSheet](https://qbsheet.com/about/scoring/): The per-question sequence, keyboard shortcuts, corrections and lineup changes, local recovery, and the guided practice game.
+- [QBSheet for tournaments](https://qbsheet.com/about/tournaments/): Pairing a room over QBTCP, receiving assignments as QBJ, behaviour when the connection fails, and returning results.
+- [Host QBSheet yourself](https://qbsheet.com/about/self-host/): Building QBSheet and serving it from any static host.
+- [Frequently asked questions](https://qbsheet.com/about/faq/): Supported devices and browsers, format and scoring configuration, files and local storage, and licensing.
+- [Privacy](https://qbsheet.com/about/privacy/): What QBSheet stores on a device, what a connected room transmits and to whom, and the absence of accounts and analytics.
+- [Wiki](https://qbsheet.com/about/wiki/home/): Front page of the QBSheet wiki, which is published here from GitHub.
+- [Open QBSheet](https://qbsheet.com/): Launch the scorekeeper.
+
+## Wiki
+
+These pages are a guide. The specifications in `docs/` are normative, and where the two disagree the specification wins. They are synced from the GitHub wiki, so anyone can correct them.
+
+<!-- wiki:start pages -->
+- [Develop and contribute](https://qbsheet.com/about/wiki/develop-and-contribute/): This page summarises the contribution rules. The normative document is CONTRIBUTING.md. Read it before you open a pull request.
+- [During the game](https://qbsheet.com/about/wiki/during-the-game/): This page tells you how to score each question, how to correct a mistake, and how to use the game menu.
+- [Files and formats](https://qbsheet.com/about/wiki/files-and-formats/): Every public QBSheet file is QBJ. This page tells you which shapes QBSheet reads, which shape QBSheet writes, and what QBSheet does when a file leaves something
+- [Finish a game](https://qbsheet.com/about/wiki/finish-a-game/): This page tells you how to close a game and how to hand over the result.
+- [Glossary](https://qbsheet.com/about/wiki/glossary/): This wiki uses one word for one thing. This page gives the meaning of each term.
+- [QBSheet](https://qbsheet.com/about/wiki/home/): QBSheet is an electronic scoresheet for quiz bowl. It runs in a web browser. It works offline.
+- [Install and host](https://qbsheet.com/about/wiki/install-and-host/): QBSheet is a static web application. It needs no backend server. You can host it on any static host, and you can also open a build from a local directory.
+- [Move from QBG and api-v1](https://qbsheet.com/about/wiki/move-from-qbg-and-api-v1/): Two migrations happen together. The file that a room opens and the response that a room fetches become the same document.
+- [Prepare a device](https://qbsheet.com/about/wiki/prepare-a-device/): Do this before the tournament day. A browser problem is easy to fix on a quiet afternoon. It is hard to fix in a room with two teams and a moderator who waits.
+- [QBTCP for implementers](https://qbsheet.com/about/wiki/qbtcp-for-implementers/): QBTCP is the Quiz Bowl Tournament Control Protocol. It is an application-layer protocol over HTTP with JSON bodies. It connects an electronic scoresheet to tour
+- [Recovery and backups](https://qbsheet.com/about/wiki/recovery-and-backups/): QBSheet has three ways to bring a game back. They are not equal. This page tells you which one to use and why.
+- [Score a connected game](https://qbsheet.com/about/wiki/score-a-connected-game/): Use this workflow when tournament control software runs on the network. The scoresheet receives the assignment for your room. The scoresheet sends the result ba
+- [Score a game from a file](https://qbsheet.com/about/wiki/score-a-game-from-a-file/): Use this workflow when the tournament staff give you a file. This workflow needs no network connection and no server.
+- [Start here](https://qbsheet.com/about/wiki/start-here/): This page is for a scorekeeper. It tells you what to do the first time that you open QBSheet.
+- [Troubleshooting](https://qbsheet.com/about/wiki/troubleshooting/): Find your problem in the list. Follow the steps in order.
+- [Writing rules for this wiki](https://qbsheet.com/about/wiki/writing-rules-for-this-wiki/): This wiki uses ASD-STE100 Simplified Technical English. A scorekeeper reads these pages in a loud room, under time pressure, and sometimes not in a first langua
+<!-- wiki:end pages -->
+
+## Documentation
+
+- [GitHub repository](https://github.com/gbyo/qbsheet): Source code and project documentation.
+- [QBTCP](https://github.com/gbyo/qbsheet/blob/main/docs/QBTCP.md): Protocol for communication between electronic scoresheets and tournament-control software.
+- [QBJ Assignment Profile](https://github.com/gbyo/qbsheet/blob/main/docs/QBJ_ASSIGNMENT_PROFILE.md): How QBSheet interprets QBJ documents used to initialize games.
+
+## Source
+
+- [QBSheet on GitHub](https://github.com/gbyo/qbsheet)

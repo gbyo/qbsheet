@@ -94,10 +94,10 @@ export interface IAdvancedScoringRulesInput {
   maximumPartsPerBonus?: number;
   bonusesBounceBack: boolean;
 
-  tossupCount: number;
+  tossupCount?: number;
   /** The longest a regulation can run, where that differs from the planned length. */
   maximumTossupCount?: number;
-  maximumPlayersPerTeam: number;
+  maximumPlayersPerTeam?: number;
 
   overtimeQuestionCount?: number;
   overtimeIncludesBonuses?: boolean;
@@ -218,6 +218,7 @@ export function advancedFitsBasicForm(input: IAdvancedScoringRulesInput): boolea
 
   const values = input.answerTypes.map((type) => type.value).filter((value): value is number => value !== undefined);
   if (values.length !== input.answerTypes.length) return false;
+  if (new Set(values).size !== values.length) return false;
 
   const positives = values.filter((value) => value > 0);
   const negatives = values.filter((value) => value < 0);
@@ -369,9 +370,9 @@ export function advancedScoringRulesToQbj(input: IAdvancedScoringRulesInput): Qb
     id: 'ScoringRules_Entered',
     name: input.name ?? 'Scoring rules entered in the room',
     teams_per_match: 2,
-    maximum_players_per_team: input.maximumPlayersPerTeam,
-    regulation_tossup_count: input.tossupCount,
-    maximum_regulation_tossup_count: input.maximumTossupCount ?? input.tossupCount,
+    maximum_players_per_team: input.maximumPlayersPerTeam ?? 0,
+    regulation_tossup_count: input.tossupCount ?? 0,
+    maximum_regulation_tossup_count: input.maximumTossupCount ?? input.tossupCount ?? 0,
     minimum_overtime_question_count: input.overtimeQuestionCount ?? 1,
     overtime_includes_bonuses: input.overtimeIncludesBonuses === true,
     answer_types: answerTypes,
@@ -431,10 +432,15 @@ function fieldProblems(input: IAdvancedScoringRulesInput): string[] {
     seenValues.add(type.value);
   });
 
+  wholeAtLeastOne(input.tossupCount, 'Tossups in regulation must be at least 1.');
   wholeAtLeastOne(input.maximumPlayersPerTeam, 'Players playing at once must be at least 1.');
 
-  if (input.maximumTossupCount !== undefined && input.maximumTossupCount < input.tossupCount) {
-    problems.push('The maximum tossup count cannot be below the regulation tossup count.');
+  if (input.maximumTossupCount !== undefined) {
+    if (!Number.isInteger(input.maximumTossupCount) || input.maximumTossupCount < 1) {
+      problems.push('The maximum tossup count must be at least 1.');
+    } else if (input.tossupCount !== undefined && input.maximumTossupCount < input.tossupCount) {
+      problems.push('The maximum tossup count cannot be below the regulation tossup count.');
+    }
   }
 
   // --- bonuses --------------------------------------------------------------------------------
@@ -489,7 +495,10 @@ function fieldProblems(input: IAdvancedScoringRulesInput): string[] {
 export function advancedScoringRulesProblems(input: IAdvancedScoringRulesInput): string[] {
   const fields = fieldProblems(input);
   const result = readAdvancedScoringRules(input);
-  return [...fields, ...(result.ok ? [] : result.problems)];
+  const parserProblems = result.ok
+    ? []
+    : result.problems.filter((problem) => !problem.includes("reuses another answer type's QBJ identity"));
+  return [...fields, ...parserProblems];
 }
 
 /**
@@ -502,4 +511,87 @@ export function advancedScorekeeperFormat(input: IAdvancedScoringRulesInput): IS
   if (advancedScoringRulesProblems(input).length > 0) return null;
   const result = readAdvancedScoringRules(input);
   return result.ok ? result.format : null;
+}
+
+/**
+ * An existing format, back in the form that produced it.
+ *
+ * # Why this direction has to exist
+ *
+ * Every other path here runs forwards: a scorekeeper fills in the form, the form becomes QBJ, the
+ * QBJ becomes an `IScorekeeperFormat`, and the game is scored against it. That is sufficient right up
+ * until the tournament corrects its own rules — powers are 20, not 15; regulation is 24, not 20 —
+ * which happens after the first round rather than before it, and always to a game that already has
+ * a format nobody typed in on this device. It may have arrived in a QBJ file or over QBTCP.
+ *
+ * So the form needs to be openable on a format it did not create. See `formatCorrection` for what is
+ * then done with the result, and for the rules about which corrections a scored game will accept.
+ *
+ * # Lossless in the direction that matters
+ *
+ * `IAdvancedScoringRulesInput` has a field for everything `IScorekeeperFormat` carries except the two
+ * it derives -- `isPower` and `isNeg` follow from the point value, and `totalDivisor` from the whole
+ * rule set -- so a format that came from this form round-trips to itself. A format from a QBJ file
+ * round-trips to itself too, with one deliberate exception: `qbjId` is not carried on an answer-type
+ * row, so re-saving mints new identities for the answer types. That is why `formatCorrection` keeps
+ * the original format's identities where the answer type is unchanged, rather than doing it here
+ * where there is nothing to compare against.
+ */
+export function advancedFromFormat(format: IScorekeeperFormat): IAdvancedScoringRulesInput {
+  const { bonus, regulation, overtime, lightning, players } = format;
+  return {
+    answerTypes: format.answerTypes.map((answerType) =>
+      newAdvancedAnswerType({
+        value: answerType.value,
+        label: answerType.label,
+        shortLabel: answerType.shortLabel,
+        /*
+         * Gated on `bonus.enabled`, exactly as `advancedFromBasic` gates it, and for a reason the
+         * comment there only half covers.
+         *
+         * `IScorekeeperAnswerType.awardsBonus` is documented as saying nothing about whether
+         * bonuses are used — it has to be combined with `bonus.enabled` by whoever reads it. This
+         * form is not a reader; it is the round trip, and the trip out writes the flag into
+         * `awards_bonus`, which `bonusesAreUsed` reads as evidence that bonuses *are* in play. So a
+         * format carrying `awardsBonus: true` with bonuses switched off comes back through the
+         * reader as a bonus format missing every one of its bonus fields, and the correction dialog
+         * it opens cannot be used at all: `advancedScorekeeperFormat` returns null while any of
+         * those complaints stand, so nothing can be applied and — until they were surfaced — nothing
+         * said why.
+         *
+         * `readQbjScoringRules` no longer produces that combination, so this is for the formats
+         * that reached the scorer another way: a record written by an earlier build, or a descriptor
+         * assembled in code. A dead dialog is not the right way to find out about one.
+         */
+        awardsBonus: bonus.enabled && answerType.awardsBonus,
+      }),
+    ),
+
+    useBonuses: bonus.enabled,
+    bonusStructure: bonus.regular ? 'regular' : 'irregular',
+    // A regular bonus has `minimumParts === maximumParts`, which is what made it regular; either
+    // side is the part count the form asks for.
+    ...(bonus.regular
+      ? { pointsPerBonusPart: bonus.pointsPerPart, partsPerBonus: bonus.maximumParts }
+      : {
+          maximumBonusScore: bonus.maximumScore,
+          bonusDivisor: bonus.divisor,
+          minimumPartsPerBonus: bonus.minimumParts,
+          maximumPartsPerBonus: bonus.maximumParts,
+        }),
+    bonusesBounceBack: bonus.bounceBack,
+
+    tossupCount: regulation.tossupCount,
+    maximumTossupCount: regulation.maximumTossupCount,
+    maximumPlayersPerTeam: players.maximumActive,
+
+    overtimeQuestionCount: overtime.minimumQuestionCount,
+    overtimeIncludesBonuses: overtime.includesBonuses,
+
+    useLightning: lightning.enabled,
+    ...(lightning.enabled ? { lightningCountPerTeam: lightning.countPerTeam, lightningDivisor: lightning.divisor } : {}),
+
+    timed: regulation.timed,
+    name: format.name,
+  };
 }

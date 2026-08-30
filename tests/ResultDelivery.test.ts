@@ -55,6 +55,18 @@ async function completedStore(): Promise<{ store: GameStore; record: IStoredGame
   return { store, record };
 }
 
+/**
+ * The clock the capability store is judged against.
+ *
+ * Capabilities expire `completedGameRetentionMs` -- seven days -- after the game completed, and every
+ * fixture below completes at `2026-08-11T14:00Z`. Left on the real clock, these tests passed for a
+ * week after they were written and then began failing everywhere at once, because `has()` correctly
+ * reported every capability as expired. The store has always accepted an injected clock; the tests
+ * simply were not using it. Anchoring it to the same era as the fixtures is what makes them a test of
+ * the ledger rather than of what day it is.
+ */
+const capabilityClock = () => new Date('2026-08-11T14:05:00.000Z');
+
 const accepted = (extra: Record<string, unknown> = {}) => ({
   ok: true as const,
   value: { accepted: true, duplicate: false, ...extra },
@@ -138,7 +150,7 @@ describe('bounded result-delivery ledger and private retry capability', () => {
   test('persists attempts, timestamps, receipt ids, and duplicate acceptance', async () => {
     const { store, record } = await completedStore();
     const storage = new MemoryStorage();
-    const capabilities = new ResultDeliveryCapabilityStore(storage);
+    const capabilities = new ResultDeliveryCapabilityStore(storage, capabilityClock);
     capabilities.remember(record.id, capability, record.completedAt!);
     const responses = [
       { ok: false as const, error: 'Could not reach tournament control.' },
@@ -183,7 +195,7 @@ describe('bounded result-delivery ledger and private retry capability', () => {
 
   test('only retryable pending records qualify for unattended delivery', async () => {
     const { store, record } = await completedStore();
-    const capabilities = new ResultDeliveryCapabilityStore(new MemoryStorage());
+    const capabilities = new ResultDeliveryCapabilityStore(new MemoryStorage(), capabilityClock);
     capabilities.remember(record.id, capability, record.completedAt!);
     const service = new ResultDeliveryService(store, capabilities, () => fakeClient(vi.fn(async () => accepted())));
     const pending = await store.update(record.id, {
@@ -201,7 +213,7 @@ describe('bounded result-delivery ledger and private retry capability', () => {
     ).toBe(false);
     const withoutCapability = new ResultDeliveryService(
       store,
-      new ResultDeliveryCapabilityStore(new MemoryStorage()),
+      new ResultDeliveryCapabilityStore(new MemoryStorage(), capabilityClock),
     );
     expect(withoutCapability.canAutoRetry(pending!)).toBe(false);
 
@@ -215,7 +227,7 @@ describe('bounded result-delivery ledger and private retry capability', () => {
 
   test('manual and automatic retries share one in-flight delivery', async () => {
     const { store, record } = await completedStore();
-    const capabilities = new ResultDeliveryCapabilityStore(new MemoryStorage());
+    const capabilities = new ResultDeliveryCapabilityStore(new MemoryStorage(), capabilityClock);
     capabilities.remember(record.id, capability, record.completedAt!);
     let release: ((value: ReturnType<typeof accepted>) => void) | undefined;
     const response = new Promise<ReturnType<typeof accepted>>((resolve) => {
@@ -237,7 +249,7 @@ describe('bounded result-delivery ledger and private retry capability', () => {
   test('first-send acceptance is recorded as one attempt and does not mark the QBJ as downloaded', async () => {
     const { store, record } = await completedStore();
     const storage = new MemoryStorage();
-    const capabilities = new ResultDeliveryCapabilityStore(storage);
+    const capabilities = new ResultDeliveryCapabilityStore(storage, capabilityClock);
     capabilities.remember(record.id, capability, record.completedAt!);
     const service = new ResultDeliveryService(
       store,
@@ -263,11 +275,11 @@ describe('bounded result-delivery ledger and private retry capability', () => {
     const first = await completedStore();
     const second = await completedStore();
     const storage = new MemoryStorage();
-    const capabilities = new ResultDeliveryCapabilityStore(storage);
+    const capabilities = new ResultDeliveryCapabilityStore(storage, capabilityClock);
     capabilities.remember(first.record.id, capability, first.record.completedAt!);
     const serviceAfterReload = new ResultDeliveryService(
       first.store,
-      new ResultDeliveryCapabilityStore(storage),
+      new ResultDeliveryCapabilityStore(storage, capabilityClock),
       () => fakeClient(vi.fn(async () => accepted({ matchId: 'sm-4471' }))),
     );
 
@@ -300,7 +312,7 @@ describe('bounded result-delivery ledger and private retry capability', () => {
   test('a backward clock cannot regress accepted state or lower the attempt count', async () => {
     const { store, record } = await completedStore();
     const storage = new MemoryStorage();
-    const capabilities = new ResultDeliveryCapabilityStore(storage);
+    const capabilities = new ResultDeliveryCapabilityStore(storage, capabilityClock);
     capabilities.remember(record.id, capability, record.completedAt!);
     const postFinal = vi
       .fn()
@@ -322,7 +334,7 @@ describe('bounded result-delivery ledger and private retry capability', () => {
   test('unsupported delivery does not create an attempt or leave a pointless retry', async () => {
     const { store, record } = await completedStore();
     const storage = new MemoryStorage();
-    const capabilities = new ResultDeliveryCapabilityStore(storage);
+    const capabilities = new ResultDeliveryCapabilityStore(storage, capabilityClock);
     capabilities.remember(record.id, capability, record.completedAt!);
     const service = new ResultDeliveryService(
       store,
@@ -347,7 +359,7 @@ describe('bounded result-delivery ledger and private retry capability', () => {
   test('credentials stay out of the stored record and its frozen QBJ', async () => {
     const { store, record } = await completedStore();
     const storage = new MemoryStorage();
-    const capabilities = new ResultDeliveryCapabilityStore(storage);
+    const capabilities = new ResultDeliveryCapabilityStore(storage, capabilityClock);
     capabilities.remember(record.id, capability, record.completedAt!);
     const service = new ResultDeliveryService(store, capabilities, () => fakeClient(vi.fn(async () => accepted())));
     await service.retry(record.id);
@@ -360,7 +372,7 @@ describe('bounded result-delivery ledger and private retry capability', () => {
 
   test('a refused private-capability write does not make the completed result unsafe', async () => {
     const { store, record } = await completedStore();
-    const capabilities = new ResultDeliveryCapabilityStore(new RefusingStorage());
+    const capabilities = new ResultDeliveryCapabilityStore(new RefusingStorage(), capabilityClock);
     expect(capabilities.remember(record.id, capability, record.completedAt!)).toBe(false);
     expect((await store.get(record.id))?.finalQbj).toEqual(record.finalQbj);
   });

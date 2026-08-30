@@ -167,6 +167,7 @@ describe('the front door', () => {
     expect(screen.getByText('Create a game')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Create game' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Practice scoring' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'About QBSheet' })).toHaveAttribute('href', 'about/');
   });
 
   test('creating a game is stated as scoring, not as a tutorial', async () => {
@@ -491,7 +492,7 @@ describe('finishing a practice', () => {
     await bonus('20');
     await finishGame();
 
-    expect(screen.getByText('Save a copy')).toBeInTheDocument();
+    expect(screen.getByText('Download or export a copy')).toBeInTheDocument();
     expect(
       screen.getByText(
         'This result is saved on this device. Download a QBJ if you want to keep or share a portable copy.',
@@ -600,6 +601,7 @@ describe('the QBJ a practice produces', () => {
     await score('Sarah', 'C');
     await bonus('20');
 
+    await pressControl('Export / backup…');
     await pressControl('Download current QBJ');
 
     const document = JSON.parse(downloads.files[0].contents);

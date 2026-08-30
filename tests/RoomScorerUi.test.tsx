@@ -16,7 +16,8 @@ import scoringRulesToScorekeeperFormat from './rules';
 import { CommonRuleSets, ScoringRules } from './rules';
 import AnswerType from './AnswerType';
 import ScorerHost from '../src/scorer/ScorerHost';
-import { operationNoticeMs } from '../src/scorer/Scorer';
+import { operationNoticeMs, recoveryNoticeMs } from '../src/scorer/Scorer';
+import { saveGame } from '../src/scorer/GameSession';
 import { IRoomProcedure } from '../src/scoring/RoomProcedure';
 import { ITeamRoster } from '../src/game/Roster';
 import { RoomConnectionState } from '../src/app/ConnectionState';
@@ -70,10 +71,23 @@ function renderScorer(
   packetName?: string,
   rosterOptions: IRosterSyncTestOptions = {},
   controlOptions: IControlRequestTestOptions = {},
+  recovered = false,
 ) {
   const submit = onSubmit ?? vi.fn().mockResolvedValue({ ok: true, message: 'Sent' });
   gameCounter += 1;
   const gameKey = `test-game-${gameCounter}`;
+  if (recovered) {
+    saveGame(
+      gameKey,
+      {
+        left: { name: leftTeam.name, players: leftTeam.players.map((player) => player.name) },
+        right: { name: rightTeam.name, players: rightTeam.players.map((player) => player.name) },
+      },
+      [{ id: 'recovered-event', type: 'tossup-dead', questionNumber: 1 }],
+      new Date(),
+      window.localStorage,
+    );
+  }
   const scorer = (connection: RoomConnectionState) => (
     <ScorerHost
       gameKey={gameKey}
@@ -302,7 +316,7 @@ describe('scoring buttons come from the format', () => {
    * be — a fabricated 0-point AnswerType would appear in every player's P/TU/I line — so it is
    * checked as the constant it is rather than mixed into the format's own values.
    */
-  const wrong = '0 after readout';
+  const wrong = '0';
 
   test('mACF gives each player +15 / +10 / -5', () => {
     renderScorer(formatFor());
@@ -589,13 +603,15 @@ describe('scoring motion state', () => {
     fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('Parts…'));
     const firstPart = screen.getByText('Part 1').closest('.scorer-part-row') as HTMLElement;
 
-    fireEvent.click(within(firstPart).getByRole('button', { name: '+10' }));
+    fireEvent.click(within(firstPart).getByRole('button', { name: /Part 1, Ninety Six \+10/ }));
     let total = screen.getByLabelText('10 controlled points');
     expect(total).toHaveAttribute('data-motion-direction', 'forward');
     expect(total).toHaveAttribute('data-previous-value', '0');
-    expect(within(firstPart).getByRole('button', { name: '+10' })).toHaveClass('is-part-recorded');
+    expect(within(firstPart).getByRole('button', { name: /Part 1, Ninety Six \+10/ })).toHaveClass(
+      'is-part-recorded',
+    );
 
-    fireEvent.click(within(firstPart).getByRole('button', { name: 'Miss' }));
+    fireEvent.click(within(firstPart).getByRole('button', { name: /Part 1, missed by both teams/ }));
     total = screen.getByLabelText('0 controlled points');
     expect(total).toHaveAttribute('data-motion-direction', 'backward');
     expect(total).toHaveAttribute('data-previous-value', '10');
@@ -606,7 +622,11 @@ describe('scoring motion state', () => {
     fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
     fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('Parts…'));
     const firstPart = screen.getByText('Part 1').closest('.scorer-part-row') as HTMLElement;
-    fireEvent.click(within(firstPart).getByRole('button', { name: '+10' }));
+    fireEvent.click(within(firstPart).getByRole('button', { name: /Part 1, Ninety Six \+10/ }));
+    const secondPart = screen.getByText('Part 2').closest('.scorer-part-row') as HTMLElement;
+    fireEvent.click(within(secondPart).getByRole('button', { name: /Part 2, Ninety Six \+10/ }));
+    const thirdPart = screen.getByText('Part 3').closest('.scorer-part-row') as HTMLElement;
+    fireEvent.click(within(thirdPart).getByRole('button', { name: /Part 3, Ninety Six \+10/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Record parts' }));
 
     const exit = document.querySelector('.scorer-bonus-exit') as HTMLElement;
@@ -780,7 +800,7 @@ describe('the game menu', () => {
 
     // Matched loosely: what matters is that each tool is reachable from the scoring screen without
     // hunting, not which of the footer or the menu is holding it today.
-    for (const tool of [/players/i, /flag/i, /scoresheet review/i, /download qbj/i, /recover from qbj/i]) {
+    for (const tool of [/players/i, /flag/i, /scoresheet review/i, /export \/ backup/i, /recover from qbj/i]) {
       expect(
         controls.some((control) => tool.test(control)),
         `${tool} should be reachable`,
@@ -1529,7 +1549,7 @@ describe('halves and timeouts, when the tournament asked for them', () => {
     pressControl('Timeout');
     fireEvent.click(within(screen.getByLabelText('Timeout')).getByText('Ninety Six'));
 
-    expect(screen.getByText('Timeout used')).toBeTruthy();
+    expect(screen.getByText('0 remaining (1 used)')).toBeTruthy();
   });
 });
 
@@ -1570,6 +1590,82 @@ describe('ending a game short', () => {
 
     await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect((onSubmit.mock.calls[0][0] as { notes: string }).notes).toContain('Director stopped the round');
+  });
+
+  /**
+   * A required box, said out loud, with the cursor already in it.
+   *
+   * The dialog shell focuses the first thing it finds, which is the close button in its own header,
+   * so every one of these opened one Tab away from the only field it has. And the primary action is
+   * disabled until that field has something in it — which, with nothing next to it saying so, is a
+   * screen that knows what it is waiting for and will not say. A room ending a round early is doing
+   * it because somebody is standing there waiting, which is the worst moment to make them guess.
+   */
+  test('the reason box has the cursor, and the greyed-out button says what it is waiting for', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+    fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('20'));
+
+    pressControl('End game early…');
+
+    expect(screen.getByLabelText('Why is the game ending early?')).toHaveFocus();
+    expect(screen.getByText(/^Required\./)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'End the game now' })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText('Why is the game ending early?'), {
+      target: { value: 'Packet ran out' },
+    });
+    expect(screen.getByRole('button', { name: 'End the game now' })).toBeEnabled();
+  });
+});
+
+/**
+ * Where the cursor lands when a dialog opens.
+ *
+ * Each of these exists to have something typed into it, and each used to open on the close button in
+ * the shell's header — one wasted keystroke for a scorekeeper, and, for anybody listening to the
+ * screen instead of looking at it, a dialog that announces itself as "Close dialog".
+ *
+ * Replace question asks for something other than typing. It wants a scope voided before it wants a
+ * reason, so the cursor stops on that decision rather than past it — putting it in the reason box
+ * would make the default the only scope a keyboard reaches without going backwards.
+ */
+describe('a dialog opens on the thing it is asking for', () => {
+  test('Notes starts in the note', () => {
+    renderScorer(formatFor());
+
+    pressControl('Notes');
+
+    expect(screen.getByLabelText(/^Note on question/)).toHaveFocus();
+  });
+
+  test('Issue starts in the description', () => {
+    renderScorer(formatFor());
+
+    openIssue();
+
+    expect(screen.getByLabelText('What happened?')).toHaveFocus();
+  });
+
+  test('Game details starts in the moderator name', () => {
+    renderScorer(formatFor());
+
+    pressControl('Game details');
+
+    expect(screen.getByLabelText('Moderator / reader')).toHaveFocus();
+  });
+
+  test('Replace question starts on the scope it would void, ahead of the reason', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+
+    pressControl(/^Replace question/);
+
+    // Landing anywhere else means landing on the header's close button, which is the fallback and
+    // announces itself as "Close dialog" — the thing every other dialog here was fixed to stop.
+    const dialog = screen.getByRole('dialog', { name: /^Replace question/ });
+    expect(within(dialog).getByRole('button', { pressed: true })).toHaveFocus();
+    expect(screen.getByLabelText('What went wrong?')).not.toHaveFocus();
   });
 });
 
@@ -1863,6 +1959,37 @@ describe('operation notices', () => {
     return document.querySelector('.scorer-banner.is-info')?.textContent ?? null;
   }
 
+  test('the local recovery notice can be closed with its X', () => {
+    renderScorer(formatFor(), undefined, undefined, undefined, undefined, {}, {}, true);
+
+    expect(screen.getByText('Recovered the in-progress game saved on this device.')).toBeTruthy();
+    const dismiss = screen.getByRole('button', { name: 'Dismiss recovery notice' });
+    expect(dismiss).toHaveTextContent('×');
+
+    fireEvent.click(dismiss);
+
+    expect(screen.queryByText('Recovered the in-progress game saved on this device.')).toBeNull();
+  });
+
+  test('the local recovery notice dismisses itself after fifteen seconds', () => {
+    vi.useFakeTimers();
+    try {
+      renderScorer(formatFor(), undefined, undefined, undefined, undefined, {}, {}, true);
+
+      act(() => {
+        vi.advanceTimersByTime(recoveryNoticeMs - 1);
+      });
+      expect(screen.getByText('Recovered the in-progress game saved on this device.')).toBeTruthy();
+
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(screen.queryByText('Recovered the in-progress game saved on this device.')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test('an acknowledgement goes away on its own', () => {
     vi.useFakeTimers();
     try {
@@ -1916,11 +2043,10 @@ describe('operation notices', () => {
     expect(document.querySelector('.scorer-banner.is-info')?.getAttribute('role')).toBe('status');
   });
 
-  test('a warning stays, and says it is a warning', () => {
+  test('a rejected replacement stays discoverable as a warning', () => {
     vi.useFakeTimers();
     try {
       renderScorer(formatFor());
-      // A cleared question is an instruction about the next thing to do, not a receipt.
       fireEvent.click(screen.getByRole('button', { name: 'Game' }));
       fireEvent.click(screen.getByRole('menuitem', { name: 'Replace question 1' }));
       const dialog = screen.getByRole('dialog', { name: 'Replace question 1' });
@@ -1932,7 +2058,8 @@ describe('operation notices', () => {
         vi.advanceTimersByTime(operationNoticeMs * 3);
       });
 
-      expect(screen.getByText(/Question 1 was cleared/)).toBeTruthy();
+      expect(screen.getByText('Nothing has been recorded on that question yet.')).toBeTruthy();
+      expect(screen.getByText('Nothing has been recorded on that question yet.').closest('[role="alert"]')).toBeTruthy();
     } finally {
       vi.useRealTimers();
     }

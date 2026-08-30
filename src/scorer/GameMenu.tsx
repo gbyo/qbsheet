@@ -15,22 +15,27 @@ export interface IGameMenuItem {
   label: string;
   icon: ControlIconName;
   onSelect: () => void;
+  /** A mutation that is temporarily unavailable, e.g. while a result is being submitted. */
+  disabled?: boolean;
   /** Rendered in red and separated from the rest. */
   destructive?: boolean;
+  /** Kept in the compact phone menu while the corresponding desktop control remains in the footer. */
+  phoneOnly?: boolean;
+  /** A quiet, noninteractive heading for the group this item starts. */
+  groupLabel?: string;
   /**
    * Draw a rule above this entry.
    *
-   * A line and not a heading. The groups here are obvious once they are apart — files with files,
-   * the two things that end a game with each other — and naming them would put five pieces of
-   * permanent text in a menu whose entries are the only thing anybody is reading. It is also not a
-   * submenu: a rare action that has been filed inside a second level is a rare action a scorekeeper
-   * has to remember the filing of, at the one moment they are least able to.
+   * A line and not a focusable heading. The group label, when present, is carried by the first item
+   * and rendered as a separator outside the button list. It is also not a submenu: a rare action that
+   * has been filed inside a second level is a rare action a scorekeeper has to remember the filing of,
+   * at the one moment they are least able to.
    */
   dividerBefore?: boolean;
 }
 
 /**
- * Lay groups out in one list, ruled between the ones that survived.
+ * Lay groups out in one list, labelled and ruled between the ones that survived.
  *
  * Which groups exist depends on the format and the state — an untimed game has no End regulation, a
  * finished one has nothing left to end — so the rules cannot be decided when the entries are
@@ -38,34 +43,47 @@ export interface IGameMenuItem {
  * below it both actually rendered, and an empty group leaves no trace at all rather than a doubled
  * line or one hanging off the top.
  */
-export function joinMenuGroups(groups: ReadonlyArray<readonly IGameMenuItem[]>): IGameMenuItem[] {
+export function joinMenuGroups(
+  groups: ReadonlyArray<readonly IGameMenuItem[]>,
+  labels: ReadonlyArray<string | undefined> = [],
+): IGameMenuItem[] {
   const joined: IGameMenuItem[] = [];
-  for (const group of groups) {
-    if (group.length === 0) continue;
+  groups.forEach((group, groupIndex) => {
+    if (group.length === 0) return;
     const needsRule = joined.length > 0;
     group.forEach((item, index) => {
-      joined.push(needsRule && index === 0 ? { ...item, dividerBefore: true } : item);
+      const isFirst = index === 0;
+      const label = isFirst ? labels[groupIndex] : undefined;
+      joined.push({
+        ...item,
+        ...(needsRule && isFirst ? { dividerBefore: true } : {}),
+        ...(label === undefined ? {} : { groupLabel: label }),
+      });
     });
-  }
+  });
   return joined;
 }
 
-export default function GameMenu(props: { items: IGameMenuItem[] }) {
-  const { items } = props;
+export default function GameMenu(props: { items: IGameMenuItem[]; label?: string; compactLabel?: string }) {
+  const { items, label = 'Game', compactLabel = 'More' } = props;
   const [open, setOpen] = useState(false);
   const container = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const menuItems = useRef<Array<HTMLButtonElement | null>>([]);
 
-  const focusMenuItem = (index: number) => {
-    const count = items.length;
-    if (count === 0) return;
-    menuItems.current[(index + count) % count]?.focus();
+  const focusMenuItem = (index: number, direction: 1 | -1) => {
+    const enabledIndices = items
+      .map((item, itemIndex) => (item.disabled ? -1 : itemIndex))
+      .filter((itemIndex) => itemIndex >= 0);
+    if (enabledIndices.length === 0) return;
+    const current = enabledIndices.indexOf(index);
+    const position = current === -1 ? (direction === 1 ? 0 : enabledIndices.length - 1) : current;
+    menuItems.current[enabledIndices[(position + direction + enabledIndices.length) % enabledIndices.length]]?.focus();
   };
 
   useEffect(() => {
     if (!open) return undefined;
-    menuItems.current[0]?.focus();
+    menuItems.current[items.findIndex((item) => !item.disabled)]?.focus();
     const onDocumentEvent = (domEvent: Event) => {
       if (domEvent instanceof KeyboardEvent) {
         if (domEvent.key === 'Escape') {
@@ -83,6 +101,9 @@ export default function GameMenu(props: { items: IGameMenuItem[] }) {
       document.removeEventListener('keydown', onDocumentEvent);
       document.removeEventListener('mousedown', onDocumentEvent);
     };
+    // `items` is intentionally omitted: scorer menu data is rebuilt on every score update, and
+    // refocusing an already-open menu would steal a keyboard user's current position.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   if (items.length === 0) return null;
@@ -106,7 +127,10 @@ export default function GameMenu(props: { items: IGameMenuItem[] }) {
         }}
       >
         <ControlIcon name="game" />
-        Game
+        <span className="scorer-menu-label-wide">{label}</span>
+        <span className="scorer-menu-label-compact" aria-hidden="true">
+          {compactLabel}
+        </span>
       </button>
       {open && (
         <ul
@@ -124,6 +148,11 @@ export default function GameMenu(props: { items: IGameMenuItem[] }) {
                 because a menu that made somebody press Down twice to get past a line would have made
                 the line a control.
               */}
+              {item.groupLabel && (
+                <li role="presentation" className="scorer-menu-group-label">
+                  {item.groupLabel}
+                </li>
+              )}
               {item.dividerBefore && index > 0 && (
                 <li role="separator" className="scorer-menu-separator" aria-orientation="horizontal" />
               )}
@@ -134,20 +163,28 @@ export default function GameMenu(props: { items: IGameMenuItem[] }) {
                     menuItems.current[index] = element;
                   }}
                   role="menuitem"
-                  className={item.destructive ? 'scorer-menu-item is-destructive' : 'scorer-menu-item'}
+                  className={`scorer-menu-item${item.destructive ? ' is-destructive' : ''}${item.phoneOnly ? ' is-phone-only' : ''}`}
+                  disabled={item.disabled}
+                  aria-disabled={item.disabled || undefined}
+                  onBlur={(event) => {
+                    const next = event.relatedTarget as Node | null;
+                    if (next !== null && !container.current?.contains(next)) setOpen(false);
+                  }}
                   onKeyDown={(event) => {
                     if (event.key === 'ArrowDown') {
                       event.preventDefault();
-                      focusMenuItem(index + 1);
+                      focusMenuItem(index, 1);
                     } else if (event.key === 'ArrowUp') {
                       event.preventDefault();
-                      focusMenuItem(index - 1);
+                      focusMenuItem(index, -1);
                     } else if (event.key === 'Home') {
                       event.preventDefault();
-                      focusMenuItem(0);
+                      menuItems.current[items.findIndex((candidate) => !candidate.disabled)]?.focus();
                     } else if (event.key === 'End') {
                       event.preventDefault();
-                      focusMenuItem(items.length - 1);
+                      menuItems.current[
+                        items.length - 1 - [...items].reverse().findIndex((candidate) => !candidate.disabled)
+                      ]?.focus();
                     } else if (event.key === 'Escape') {
                       event.preventDefault();
                       setOpen(false);
@@ -155,6 +192,7 @@ export default function GameMenu(props: { items: IGameMenuItem[] }) {
                     }
                   }}
                   onClick={() => {
+                    if (item.disabled) return;
                     setOpen(false);
                     trigger.current?.focus();
                     item.onSelect();

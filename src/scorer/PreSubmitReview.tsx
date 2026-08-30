@@ -94,10 +94,19 @@ export function HalftimeCheck(props: {
   afterQuestion: number;
   /** What this room calls the break it is at. See `roomBreakLabel`. */
   breakName?: string;
+  /** Procedure-aware lineup guidance; never assume a tournament permits a change. */
+  substitutionMessage?: string;
   onPlayers: () => void;
   onContinue: () => void;
 }) {
-  const { game, afterQuestion, breakName = 'Halftime', onPlayers, onContinue } = props;
+  const {
+    game,
+    afterQuestion,
+    breakName = 'Halftime',
+    substitutionMessage = 'Lineup changes can be recorded here; follow the tournament procedure.',
+    onPlayers,
+    onContinue,
+  } = props;
 
   return (
     <section className="scorer-score-check" aria-label={`${breakName} score check`}>
@@ -112,7 +121,9 @@ export function HalftimeCheck(props: {
           {game.right.name} <strong>{game.right.points}</strong>
         </span>
       </p>
-      <p className="scorer-dialog-note">Read the score to the moderator. Substitutions are allowed now.</p>
+      <p className="scorer-dialog-note">
+        Read the score to the moderator. {substitutionMessage}
+      </p>
       <div className="scorer-complete-actions">
         <button type="button" className="scorer-action" onClick={onPlayers}>
           Players
@@ -143,7 +154,11 @@ export interface IPreSubmitReviewProps {
 export default function PreSubmitReview(props: IPreSubmitReviewProps) {
   const { format, game, unsyncedRosterAdditions, warnings, submitting, blockers, onSubmit, onDownload, onReview } =
     props;
-  const [confirmed, setConfirmed] = useState(false);
+  // Confirmation belongs to the exact derived result shown here. A correction, undo, or redo
+  // replaces `game`, so identity makes a previous acknowledgement invalid without an effect-driven
+  // render in between the new result and its checkbox.
+  const [confirmedGame, setConfirmedGame] = useState<IDerivedGame | null>(null);
+  const confirmed = confirmedGame === game;
 
   const openProtests = game.protests.filter((protest) => protest.status === 'open');
   const totalTuh = game.tossupsRead;
@@ -221,7 +236,7 @@ export default function PreSubmitReview(props: IPreSubmitReviewProps) {
           id="scorer-final-confirm"
           type="checkbox"
           checked={confirmed}
-          onChange={(e) => setConfirmed(e.target.checked)}
+          onChange={(e) => setConfirmedGame(e.target.checked ? game : null)}
         />
         Final score confirmed with both teams
       </label>
@@ -235,7 +250,7 @@ export default function PreSubmitReview(props: IPreSubmitReviewProps) {
         >
           {submitting ? 'Sending…' : 'Submit result'}
         </button>
-        <button type="button" className="scorer-action" onClick={onReview}>
+        <button type="button" className="scorer-action" onClick={onReview} disabled={submitting}>
           Full scoresheet review
         </button>
         <button type="button" className="scorer-action" onClick={onDownload}>

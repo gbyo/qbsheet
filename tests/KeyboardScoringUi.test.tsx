@@ -136,7 +136,9 @@ describe('the eight numeric seat numbers', () => {
     await pressSequence(number, 'c');
 
     const rail = screen.getByLabelText('Recent activity');
-    await waitFor(() => expect(within(rail).getByText(new RegExp(player))).toBeInTheDocument());
+    // The rail keeps a wide and compact presentation in the DOM so CSS can switch between them;
+    // either presentation is the same recorded activity.
+    await waitFor(() => expect(within(rail).getAllByText(new RegExp(player)).length).toBeGreaterThan(0));
   });
 
   test('1 is the first left seat', async () => {
@@ -312,7 +314,8 @@ describe('a substitution moves the name, not the key', () => {
     await pressKey('KeyS');
 
     const rail = screen.getByLabelText('Recent activity');
-    await waitFor(() => expect(within(rail).getByText(/Priya Raman/)).toBeInTheDocument());
+    // The wide and compact rail presentations intentionally repeat the latest activity in the DOM.
+    await waitFor(() => expect(within(rail).getAllByText(/Priya Raman/).length).toBeGreaterThan(0));
   });
 });
 

@@ -422,6 +422,7 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
   const noteHelpCredentialProblem = useCallback(() => {
     helpRoomCredentialProblem.current = true;
     setRoomCredentialProblem(true);
+    setForbidden(null);
   }, []);
 
   const setControlRequestValue = useCallback((next: ControlRequestState) => {
@@ -832,6 +833,7 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
       timeline.record(classified.connection);
       if (classified.credentialProblem) {
         setRoomCredentialProblem(true);
+        setForbidden(null);
         timeline.record('room-refused');
       }
       const refusal = forbiddenIn(result);

@@ -97,11 +97,29 @@ test('a practice game is created, scored, reloaded, finished and kept', async ({
   await expect(page.locator('.final-row').first()).toContainText('45');
   await expect(page.locator('.final-row').nth(1)).toContainText('0');
 
-  // Nobody is waiting for this file, so nothing is demanded before the screen can be left.
-  await expect(page.getByRole('heading', { name: 'Save a copy' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Download QBJ copy' })).toBeVisible();
+  // Nobody is waiting for this file, so nothing is demanded before the screen can be left. The
+  // optional exports stay out of the way until somebody asks for them.
+  const copy = page.locator('details.final-copy-details');
+  await expect(copy).toBeVisible();
+  await expect(copy.locator('summary')).toHaveText('Download or export a copy');
+  await expect(copy).not.toHaveAttribute('open', '');
+  await expect(copy.getByRole('button', { name: 'Download QBJ copy' })).toBeHidden();
+  await copy.locator('summary').click();
+  await expect(copy).toHaveAttribute('open', '');
+  await expect(copy).toContainText('This result is saved on this device.');
+  await expect(copy.getByRole('button', { name: 'Download QBJ copy' })).toBeVisible();
+  await expect(copy.getByRole('button', { name: 'Download Excel scoresheet' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'I uploaded the result' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Done' })).toBeEnabled();
+
+  // A finished result must remain editable. Return to the scorer, verify the completed review is
+  // still the active presentation, then submit it again so the original exit path remains covered.
+  await page.getByRole('button', { name: 'Back to scorekeeper' }).click();
+  await expect(page.locator('.scorer-completion')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Full scoresheet review' })).toBeVisible();
+  await page.getByLabel('Final score confirmed with both teams').check();
+  await page.getByRole('button', { name: 'Submit result' }).click();
+  await expect(page.getByRole('heading', { name: 'Final' })).toBeVisible();
 
   await page.getByRole('button', { name: 'Done' }).click();
 
@@ -146,4 +164,63 @@ test('a second practice between the same two teams is a second game', async ({ p
   await expect(page.getByRole('heading', { name: 'Unfinished game' })).toBeVisible();
   const recent = page.locator('.shell-section').filter({ has: page.getByRole('heading', { name: 'Recent' }) });
   await expect(recent).toContainText('First practice');
+});
+
+/**
+ * A refused submission, and whether anybody can read the refusal.
+ *
+ * Start game is always pressable, and a form that will not start says why next to the fields that
+ * caused it and moves focus onto the first such complaint. That whole design is worth nothing if the
+ * complaint is behind something. The action bar at the foot of this form is sticky, so it floats
+ * over the end of the page, and the browser's own "scroll this into view" does not know it is there:
+ * it brings the error block only just onto the screen, which is exactly where the bar is. What the
+ * scorekeeper then sees is a primary button that did nothing — which is the failure the focus move
+ * was added to prevent, arriving by a different route.
+ *
+ * Checked in a real browser because there is nothing to check anywhere else: the fix is the reserved
+ * space a browser leaves when it scrolls, and jsdom neither lays out nor scrolls.
+ */
+test('a refused Start game leaves the complaint where it can be read', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Create game' }).click();
+  await expect(page.getByRole('heading', { name: 'Create a game' })).toBeVisible();
+
+  const errors = page.locator('.shell-errors').first();
+  const bar = page.locator('.manual-actions');
+
+  // Each refusal re-runs the focus move, so this can be asked more than once of the same form.
+  const refuse = async () => {
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.getByRole('button', { name: 'Start game' }).click();
+    await expect(errors).toContainText('Enter a name for the left team.');
+    // The form put the cursor on it, which is the behaviour the visibility below has to hold up.
+    await expect(errors).toBeFocused();
+
+    const errorBox = await errors.boundingBox();
+    const barBox = await bar.boundingBox();
+    if (!errorBox || !barBox) throw new Error('The error block and the action bar should both be laid out.');
+    return { errorBox, barBox };
+  };
+
+  const flat = await refuse();
+  // Every line of it, not just the first: four complaints scrolled to the bottom edge lose the last
+  // two under the bar, and the last two are as load-bearing as the first.
+  expect(flat.errorBox.y).toBeGreaterThanOrEqual(0);
+  expect(flat.errorBox.y + flat.errorBox.height).toBeLessThanOrEqual(flat.barBox.y);
+
+  /*
+   * And again on a handset whose gesture bar takes the bottom of the viewport, which is where a
+   * clearance written as a flat number comes apart: the bar grows by the inset and the reserved
+   * space does not, so the last line of the complaint ends up back underneath it.
+   *
+   * env(safe-area-inset-bottom) cannot be driven from a test, so the foot both rules are derived
+   * from is overridden instead. 48px is past the ~34px a phone with a home indicator reports, so a
+   * bar measured at the old flat 84px is comfortably too short here.
+   */
+  await page.addStyleTag({ content: '.manual-shell { --manual-actions-foot: 48px; }' });
+
+  const inset = await refuse();
+  expect(inset.barBox.height).toBeGreaterThan(84);
+  expect(inset.errorBox.y).toBeGreaterThanOrEqual(0);
+  expect(inset.errorBox.y + inset.errorBox.height).toBeLessThanOrEqual(inset.barBox.y);
 });

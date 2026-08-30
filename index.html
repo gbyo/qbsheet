@@ -3,6 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <!--
+      True in both directions, and now backed by real styles. `app-shell.css` defines a full dark
+      palette and restates `color-scheme` itself for all three appearance states, so this only has to
+      cover the moment before that stylesheet parses. It previously promised dark with no dark rules
+      behind it, which left the browser painting scrollbars, `<select>` popups and form controls dark
+      on top of white surfaces. See the palette note in `app-shell.css`.
+    -->
     <meta name="color-scheme" content="light dark" />
     <meta name="description" content="A standalone, offline-first electronic quiz bowl scoresheet." />
     <!--

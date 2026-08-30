@@ -143,3 +143,38 @@ export function clearGame(gameKey: string, storage: IStorageLike | null = browse
     // The age check is the backstop.
   }
 }
+
+/**
+ * Everything this device has journalled, as raw text.
+ *
+ * # Why this bypasses `loadGame`
+ *
+ * `loadGame` is deliberately strict: an unrecognized version, a failed `validEvent`, a game older
+ * than `gameSessionMaxAgeMs` all read as "no saved game", because a scorer that starts fresh is
+ * recoverable and one that crashes on load is not. That is the right rule for putting a game back
+ * on screen and exactly the wrong one for getting a game *off* a device that will not render.
+ *
+ * So this reads the strings and does not judge them. It is the last resort behind
+ * `RenderErrorBoundary`: when the application cannot draw the scoresheet at all, a scorekeeper can
+ * still put the morning's scoring on a USB stick and hand it to somebody who can read JSON. A
+ * corrupt entry is more useful in that file than absent from it, because the corruption is the
+ * evidence.
+ *
+ * Carries no tokens for the same reason the journal itself does not: see the note at the top.
+ */
+export function exportJournals(storage: IStorageLike | null = browserStorage()): Record<string, string> {
+  const found: Record<string, string> = {};
+  try {
+    const enumerable = storage as (IStorageLike & { length?: number; key?: (index: number) => string | null }) | null;
+    if (!enumerable || typeof enumerable.length !== 'number' || typeof enumerable.key !== 'function') return found;
+    for (let index = 0; index < enumerable.length; index += 1) {
+      const key = enumerable.key(index);
+      if (key === null || !key.startsWith(storagePrefix)) continue;
+      const raw = enumerable.getItem(key);
+      if (raw !== null) found[key.slice(storagePrefix.length)] = raw;
+    }
+  } catch {
+    // A profile that refuses enumeration gives back whatever was collected before it refused.
+  }
+  return found;
+}

@@ -58,6 +58,25 @@ test('the contextual row sits directly on the control bar', async ({ page }) => 
   expect(Math.abs((stageBox?.y ?? 0) + (stageBox?.height ?? 0) - (footerBox?.y ?? 0))).toBeLessThanOrEqual(1);
 });
 
+test('a completed game renders the review without live scorer chrome', async ({ page }) => {
+  await startPracticeGame(page);
+
+  await page.getByRole('button', { name: 'No buzz' }).click();
+  await page.getByRole('button', { name: 'Game', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'End game early…' }).click();
+  await page.getByLabel('Why is the game ending early?').fill('Layout test');
+  await page.getByRole('button', { name: 'End the game now' }).click();
+
+  const completion = page.locator('.scorer-completion');
+  await expect(completion).toBeVisible();
+  await expect(completion.locator('.scorer-complete-title')).toHaveText('Final score — game ended early');
+  await expect(page.locator('.scorer-teams')).toHaveCount(0);
+  await expect(page.locator('.scorer-stage')).toHaveCount(0);
+  await expect(page.locator('.scorer-keymap')).toHaveCount(0);
+  await expect(page.locator('.scorer-rail')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'No buzz' })).toHaveCount(0);
+});
+
 test('the guide is a wide panel that keeps clear of the contextual row controls', async ({ page }) => {
   await startPracticeGame(page);
 
@@ -117,7 +136,7 @@ for (const size of [
   });
 }
 
-test('the phone guide stays above the control bar when a warning adds a row', async ({ page }) => {
+test('the phone guide stays above the control bar without footer reflow', async ({ page }) => {
   await startPracticeGame(page);
   await page.getByRole('button', { name: 'Minimize practice guide' }).click();
   await page.setViewportSize({ width: 390, height: 844 });
@@ -127,13 +146,12 @@ test('the phone guide stays above the control bar when a warning adds a row', as
   await expect(collapsedCoach).toBeVisible();
   const compactFooterHeight = await footer.evaluate((element) => element.getBoundingClientRect().height);
 
-  // A converted tossup is unfinished until its bonus is recorded, which puts the real scorer warning
-  // onto the footer's second grid row at phone width.
+  // A converted tossup is unfinished until its bonus is recorded. Warnings now belong to the notice
+  // center rather than adding a second footer row, so the fixed control bar keeps its height.
   await page.getByRole('button', { name: 'Gibson Power' }).click();
-  await expect(page.locator('.scorer-footer-warning')).toHaveText('Question 1 is not finished.');
   await expect
     .poll(async () => footer.evaluate((element) => element.getBoundingClientRect().height))
-    .toBeGreaterThan(compactFooterHeight);
+    .toBeLessThanOrEqual(compactFooterHeight + 1);
 
   const footerBox = await footer.boundingBox();
   const collapsedBox = await collapsedCoach.boundingBox();
