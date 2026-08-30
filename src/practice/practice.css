@@ -47,6 +47,21 @@
 }
 
 /*
+ * The guide is deliberately allowed to overlap the empty end of the scoresheet, but setup still has
+ * real controls underneath it (a bench Start button can sit below the panel's left edge). Let the
+ * sheet receive clicks through the guide's reading surface; the guide's own buttons and disclosures
+ * opt back into hit testing below. This keeps the guide useful without making an obscured lineup
+ * control impossible to press.
+ */
+.practice-coach {
+  pointer-events: none;
+}
+
+.practice-coach :is(button, summary) {
+  pointer-events: auto;
+}
+
+/*
  * Wide and shallow, which is the shape the content wants: a situation and the action it calls for are
  * two short paragraphs, and side by side they are read in one glance instead of scrolled past each
  * other. It is also the shape that can share the bottom of the screen with the scoresheet — see the

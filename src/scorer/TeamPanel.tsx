@@ -21,6 +21,7 @@ import { IDerivedTeam } from '../scoring/deriveGame';
 import { orderBySeating } from './PlayerSeating';
 import { lineupMoveMs, lineupSettleMs } from './LineupMotion';
 import { availableAnswerTypes, powerCorrect } from './tossupRulings';
+import ControlIcon from './ControlIcon';
 
 /**
  * How long the seat a substitution landed in keeps its emphasis.
@@ -301,10 +302,10 @@ export default function TeamPanel(props: ITeamPanelProps) {
               where it spent its time being a fifth target beside +10 for a thumb to find while a
               reader was still talking. Distance from that block is the safety here.
 
-              The swap arrows rather than the word, because the word was repeated down every row of
-              both teams — eight copies of "Sub" on a full sheet, competing for the eye with the one
-              thing on the line that has to be read at a glance, which is the name. The accessible
-              name and the tooltip still spell it out for anyone the glyph does not reach.
+              The swap icon rather than the word, because the word was repeated down every row of both
+              teams — eight copies of "Substitute" on a full sheet, competing for the eye with the one
+              thing on the line that has to be read at a glance, which is the name. The accessible name
+              and the tooltip still spell it out for anyone the icon does not reach.
             */}
             {onSubstitute && (
               <button
@@ -320,7 +321,7 @@ export default function TeamPanel(props: ITeamPanelProps) {
                   setSubstituting((current) => (current === player.name ? null : player.name));
                 }}
               >
-                &#8644;
+                <ControlIcon name="swap" />
               </button>
             )}
             <span className="scorer-answers">

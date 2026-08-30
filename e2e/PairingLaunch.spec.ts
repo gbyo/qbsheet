@@ -150,19 +150,27 @@ test.describe('a pairing deep link', () => {
 });
 
 test.describe('the homepage button', () => {
-  test('is Scan QR when the field is empty and Connect when it is not', async ({ page }) => {
+  test('keeps Connect stable while Scan QR stays available', async ({ page }) => {
     await page.goto('/');
     const fields = page.locator('.welcome-connect-fields');
+    const connect = fields.getByRole('button', { name: 'Connect', exact: true });
+    const scan = fields.getByRole('button', { name: 'Scan QR', exact: true });
 
-    await expect(fields.getByRole('button', { name: 'Scan QR' })).toBeVisible();
-    await expect(fields.getByRole('button')).toHaveCount(1);
+    await expect(connect).toBeVisible();
+    await expect(connect).toBeDisabled();
+    await expect(scan).toBeVisible();
+    await expect(scan).toBeEnabled();
+    await expect(fields.getByRole('button')).toHaveCount(2);
 
     await page.locator('#control-address').fill('192.168.1.24:3000');
-    await expect(fields.getByRole('button', { name: 'Connect' })).toBeVisible();
-    await expect(fields.getByRole('button')).toHaveCount(1);
+    await expect(connect).toBeEnabled();
+    await expect(scan).toBeEnabled();
+    await expect(fields.getByRole('button')).toHaveCount(2);
 
     await page.locator('#control-address').fill('');
-    await expect(fields.getByRole('button', { name: 'Scan QR' })).toBeVisible();
+    await expect(connect).toBeDisabled();
+    await expect(scan).toBeVisible();
+    await expect(scan).toBeEnabled();
   });
 
   test('stays a single row of controls on a phone-width viewport', async ({ page }) => {

@@ -28,14 +28,11 @@
  * Set once still has to happen once, so a device that has never been asked is asked, in a dialog,
  * on the first load. Once. A blank answer is an answer and is remembered as one.
  *
- * # The address box has one button, and it has two jobs
+ * # Connect and scan are separate actions
  *
- * Typing an address and pressing Connect is still the whole of connecting, and nothing about it has
- * moved. But an empty address box has an action that is not "Connect", because there is nothing to
- * connect to yet — so that same button offers to read the QR code tournament control is showing,
- * which is where the address was going to come from anyway. One control, two states, decided by
- * whether the field has anything in it. There is no second button, no mode picker, and no way for a
- * scorekeeper who has an address on a projector to be sent through a camera to use it.
+ * Connect always means "use the address in this field", and Scan QR always means "read the pairing
+ * link from the camera". Keeping both controls present avoids a morphing button that changes under a
+ * scorekeeper's hand when they start typing, and makes either route predictable at narrow widths.
  *
  * Once it is set it is said back, under the logo, as a greeting with a "Not you?" underneath. This
  * is the one part of it that is not a preference: a shared Chromebook that has been handed to the
@@ -45,8 +42,8 @@
  * already asking.
  *
  * Guided practice is a tutorial with a script in it, it invents its own teams, and its result is not
- * a game anybody keeps. A device with no game history still gets that invitation on the homepage;
- * after it has been used for real scoring, the same action lives quietly in Settings instead.
+ * a game anybody keeps. It remains a quiet homepage action even after real game history exists, so a
+ * scorekeeper does not have to hunt through Settings to rehearse the workflow.
  * "Create a game" is scoring; "Practice scoring" is learning where the buttons are.
  *
  * # An unfinished game comes before either
@@ -254,7 +251,7 @@ export default function WelcomeScreen(props: {
     }
   };
 
-  /** Nothing typed yet, so the button beside the field offers to go and find the address. */
+  /** Keep the primary action disabled until there is an address worth connecting to. */
   const addressEmpty = address.trim() === '';
 
   /**
@@ -305,6 +302,7 @@ export default function WelcomeScreen(props: {
               aria-label="Settings"
             >
               <ControlIcon name="settings" />
+              <span className="shell-button-label">Settings</span>
             </button>
           )}
         </div>
@@ -380,7 +378,7 @@ export default function WelcomeScreen(props: {
                     inputMode="url"
                     autoComplete="off"
                     spellCheck={false}
-                    placeholder="http://"
+                    placeholder="Paste the address shown by tournament control"
                     value={address}
                     required
                     onChange={(event) => {
@@ -389,20 +387,18 @@ export default function WelcomeScreen(props: {
                       setAddressUnreachable(false);
                     }}
                   />
-                  {addressEmpty ? (
-                    <button
-                      type="button"
-                      className="shell-button is-primary welcome-scan-button"
-                      onClick={() => setScanning(true)}
-                    >
-                      <ControlIcon name="qr" />
-                      Scan QR
-                    </button>
-                  ) : (
-                      <button type="submit" className="shell-button is-primary" disabled={addressBusy}>
-                        {addressBusy ? 'Connecting…' : 'Connect'}
-                      </button>
-                  )}
+                  <button type="submit" className="shell-button is-primary" disabled={addressBusy || addressEmpty}>
+                    {addressBusy ? 'Connecting…' : 'Connect'}
+                  </button>
+                  <button
+                    type="button"
+                    className="shell-button welcome-scan-button"
+                    onClick={() => setScanning(true)}
+                    disabled={addressBusy}
+                  >
+                    <ControlIcon name="qr" />
+                    Scan QR
+                  </button>
                 </div>
                 {addressError !== '' && (
                   <div className="shell-errors" role="alert">
@@ -441,25 +437,30 @@ export default function WelcomeScreen(props: {
             <button type="button" className="shell-button" onClick={onCreateGame}>
               Create a game
             </button>
+            <button type="button" className="shell-button shell-button-quiet" onClick={onPractice}>
+              {practiceInProgress ? 'Resume practice' : 'Practice scoring'}
+            </button>
           </div>
         </section>
       )}
 
-      {!hasGameHistory && (
-        <section className="shell-section welcome-practice">
-          <div>
-            <h2 className="shell-heading">{practiceInProgress ? 'Practice game in progress' : 'New to QBSheet?'}</h2>
-            <p className="welcome-practice-copy">
-              {practiceInProgress
-                ? 'Continue where you left off. Your practice scoresheet and guide position are saved on this device.'
+      <section className="shell-section welcome-practice">
+        <div>
+          <h2 className="shell-heading">
+            {practiceInProgress ? 'Practice game in progress' : hasGameHistory ? 'Practice scoring' : 'New to QBSheet?'}
+          </h2>
+          <p className="welcome-practice-copy">
+            {practiceInProgress
+              ? 'Continue where you left off. Your practice scoresheet and guide position are saved on this device.'
+              : hasGameHistory
+                ? 'Rehearse the workflow with a guided game using the real scoresheet. No setup needed.'
                 : 'Learn the workflow with a guided game using the real scoresheet. No setup needed.'}
-            </p>
-          </div>
-          <button type="button" className="shell-button" onClick={onPractice}>
-            {practiceInProgress ? 'Resume practice' : 'Practice scoring'}
-          </button>
-        </section>
-      )}
+          </p>
+        </div>
+        <button type="button" className="shell-button" onClick={onPractice}>
+          {practiceInProgress ? 'Resume practice' : 'Practice scoring'}
+        </button>
+      </section>
 
       <RecentGames
         records={completed}
@@ -482,8 +483,6 @@ export default function WelcomeScreen(props: {
           pairingProtection={pairingProtection}
           onForgetPairing={onForgetPairing}
           onResetDevicePreferences={onResetDevicePreferences}
-          practiceInProgress={practiceInProgress}
-          onPractice={onPractice}
           onReadiness={onReadiness}
           onClose={closeSettings}
         />
