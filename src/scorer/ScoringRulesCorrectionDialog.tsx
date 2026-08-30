@@ -24,16 +24,52 @@
 import { useMemo, useState } from 'react';
 import ScorerDialog from './ScorerDialog';
 import ScoringRulesEditor from '../app/ScoringRulesEditor';
-import { IScoringRulesInput, advancedRulesInput, scoringRulesInputFormat } from '../qbj/ScoringRulesInput';
+import {
+  IScoringRulesInput,
+  advancedRulesInput,
+  scoringRulesInputFormat,
+  scoringRulesInputProblems,
+} from '../qbj/ScoringRulesInput';
 import { advancedFromFormat } from '../qbj/AdvancedScoringRules';
 import { IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
 import { IGameSetup } from '../scoring/deriveGame';
 import { ScoreEvent } from '../scoring/ScoreEvents';
 import correctFormat, { IFormatChange } from '../scoring/formatCorrection';
 
+/**
+ * A refusal whose message the room is meant to read.
+ *
+ * The host's write can fail in two materially different ways — nothing was written, or nothing could
+ * be put back — and only the host can tell them apart, so only the host can supply the sentence. But
+ * "show whatever was thrown" is not the way to let it: an exception out of IndexedDB carries an
+ * internal message, and this application redacts error text everywhere else it displays any (see
+ * `ErrorLog` and `redact`). So the permission is explicit, and anything else falls back to the
+ * dialog's own wording.
+ */
+export class ScoringRulesCorrectionRefusal extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ScoringRulesCorrectionRefusal';
+  }
+}
+
 export interface IScoringRulesCorrection {
   format: IScorekeeperFormat;
   events: ScoreEvent[];
+  /**
+   * The history as it stood before the correction, so a refused write can be undone.
+   *
+   * The two halves of a correction — the re-pointed history and the corrected format — go to two
+   * different storages, and the second can be refused after the first has been accepted. What is
+   * left then is a journal whose buzzes point at positions only the format that was refused has,
+   * which is a game that reads as though it were scored wrong on purpose. Nothing about the
+   * re-pointed array says where it came from, so the way back has to travel with it.
+   *
+   * Carried on the correction rather than re-read by the host because this is the array the host's
+   * journal actually holds at this moment: the scoresheet behind this dialog is inert while it is
+   * open, so nothing can have been scored since `events` was read.
+   */
+  previousEvents: ScoreEvent[];
   changes: IFormatChange[];
 }
 
@@ -70,8 +106,26 @@ export default function ScoringRulesCorrectionDialog(props: {
     [format, proposed, events, setup],
   );
 
+  /*
+   * What the form itself is complaining about, which has to be shown here for the same reason it is
+   * shown on the two setup screens that ask for scoring rules.
+   *
+   * `scoringRulesInputFormat` returns null for any form the rules screens would refuse — a cleared
+   * regulation count, a part value nobody has typed yet — and `correctFormat` cannot run without a
+   * format to compare against. So this screen had a state, reachable by clearing one field, in which
+   * `problems` was empty, no explanation appeared anywhere, and `Review changes` was disabled: a
+   * scorekeeper mid-correction with a greyed button and nothing to read. The messages existed all
+   * along; `ScoringRulesSetup` and `ManualGame` were both already showing them.
+   *
+   * Mutually exclusive with the correction's own problems by construction — a non-null `proposed`
+   * means this list is empty — so the order below is a statement about which layer answers first
+   * rather than a choice between two things to say.
+   */
+  const fieldProblems = useMemo(() => scoringRulesInputProblems(input), [input]);
+
   const blocked = correction === null || !correction.ok;
-  const problems = correction && !correction.ok ? correction.problems : [];
+  const correctionProblems = correction && !correction.ok ? correction.problems : [];
+  const problems = fieldProblems.length > 0 ? fieldProblems : correctionProblems;
   const changes = correction?.ok ? correction.changes : [];
   const repricing = changes.some((change) => change.affectsRecordedScoring);
 
@@ -80,15 +134,29 @@ export default function ScoringRulesCorrectionDialog(props: {
     setSaving(true);
     setFailure('');
     try {
-      await onCorrect({ format: correction.format, events: correction.events, changes: correction.changes });
-    } catch {
+      await onCorrect({
+        format: correction.format,
+        events: correction.events,
+        previousEvents: events,
+        changes: correction.changes,
+      });
+    } catch (thrown) {
       /*
        * Nothing was written. Staying open is the whole point: the scorekeeper's proposed rules are
        * still in the form behind this screen, so pressing the button again is the retry, and closing
        * would leave a room believing a correction had been applied when the device refused it.
+       *
+       * The host's own sentence wins when it marked one for the room, because "nothing has changed"
+       * is a claim only the host can make. It is true when the writes were refused or undone, and
+       * there is one narrow case — a device that refused to put the history back either — where it
+       * is the opposite of true and the room has to be told something else entirely.
        */
       setSaving(false);
-      setFailure('Those rules could not be saved on this device. Nothing has changed; try again.');
+      setFailure(
+        thrown instanceof ScoringRulesCorrectionRefusal && thrown.message.trim() !== ''
+          ? thrown.message
+          : 'Those rules could not be saved on this device. Nothing has changed; try again.',
+      );
       return;
     }
     onClose();

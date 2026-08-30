@@ -545,7 +545,25 @@ export function advancedFromFormat(format: IScorekeeperFormat): IAdvancedScoring
         value: answerType.value,
         label: answerType.label,
         shortLabel: answerType.shortLabel,
-        awardsBonus: answerType.awardsBonus,
+        /*
+         * Gated on `bonus.enabled`, exactly as `advancedFromBasic` gates it, and for a reason the
+         * comment there only half covers.
+         *
+         * `IScorekeeperAnswerType.awardsBonus` is documented as saying nothing about whether
+         * bonuses are used — it has to be combined with `bonus.enabled` by whoever reads it. This
+         * form is not a reader; it is the round trip, and the trip out writes the flag into
+         * `awards_bonus`, which `bonusesAreUsed` reads as evidence that bonuses *are* in play. So a
+         * format carrying `awardsBonus: true` with bonuses switched off comes back through the
+         * reader as a bonus format missing every one of its bonus fields, and the correction dialog
+         * it opens cannot be used at all: `advancedScorekeeperFormat` returns null while any of
+         * those complaints stand, so nothing can be applied and — until they were surfaced — nothing
+         * said why.
+         *
+         * `readQbjScoringRules` no longer produces that combination, so this is for the formats
+         * that reached the scorer another way: a record written by an earlier build, or a descriptor
+         * assembled in code. A dead dialog is not the right way to find out about one.
+         */
+        awardsBonus: bonus.enabled && answerType.awardsBonus,
       }),
     ),
 
