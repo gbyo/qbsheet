@@ -10,6 +10,7 @@
  * moves itself to the next thing without being told.
  */
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import type { Mock } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { IScorekeeperFormat } from '../src/scoring/ScorekeeperFormat';
 import scoringRulesToScorekeeperFormat from './rules';
@@ -17,6 +18,7 @@ import { CommonRuleSets, ScoringRules } from './rules';
 import AnswerType from './AnswerType';
 import ScorerHost from '../src/scorer/ScorerHost';
 import { operationNoticeMs, recoveryNoticeMs } from '../src/scorer/Scorer';
+import type { IScorerSubmitResult } from '../src/scorer/Scorer';
 import { saveGame } from '../src/scorer/GameSession';
 import { IRoomProcedure } from '../src/scoring/RoomProcedure';
 import { ITeamRoster } from '../src/game/Roster';
@@ -63,9 +65,16 @@ interface IControlRequestTestOptions {
   connection?: RoomConnectionState;
 }
 
+/*
+ * Spelled out rather than `ReturnType<typeof vi.fn>`. An untyped `vi.fn` is `Mock<Procedure |
+ * Constructable>`, which carries no call signature the `onSubmit` prop can match, so the prop only
+ * ever type-checked because older Vitest widened that to `any`.
+ */
+type SubmitMock = Mock<(qbj: object) => Promise<IScorerSubmitResult>>;
+
 function renderScorer(
   format: IScorekeeperFormat,
-  onSubmit?: ReturnType<typeof vi.fn>,
+  onSubmit?: SubmitMock,
   onRequestControl?: (category: HelpRequestCategory, message: string) => Promise<HelpRequestResult>,
   procedure?: IRoomProcedure,
   packetName?: string,
@@ -73,7 +82,8 @@ function renderScorer(
   controlOptions: IControlRequestTestOptions = {},
   recovered = false,
 ) {
-  const submit = onSubmit ?? vi.fn().mockResolvedValue({ ok: true, message: 'Sent' });
+  const submit: SubmitMock =
+    onSubmit ?? vi.fn<(qbj: object) => Promise<IScorerSubmitResult>>().mockResolvedValue({ ok: true, message: 'Sent' });
   gameCounter += 1;
   const gameKey = `test-game-${gameCounter}`;
   if (recovered) {
