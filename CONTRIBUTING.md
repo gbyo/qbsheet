@@ -80,6 +80,10 @@ session credential.
 Run what CI runs:
 
 ```sh
+npm run format
+```
+
+```sh
 npm run lint
 ```
 
@@ -178,8 +182,10 @@ implement.
 ## Code style
 
 * TypeScript throughout, `.tsx` for a component, React 18 with hooks. No class components.
+* Prettier formats the code — 110 columns, single quotes, trailing commas — and CI checks it. Run
+  `npm run format` before opening a pull request. Nothing in review is about where a line break went.
 * ESLint flat config in `eslint.config.js`, which includes `react-hooks` and `jsx-a11y`. `npm run lint`
-  must be clean.
+  must be clean. It ends with `eslint-config-prettier`, so ESLint has no opinion about formatting.
 * Volunteers use this scoresheet on Chromebooks and phones under time pressure. Keep the touch targets
   large, keep the keyboard paths intact, and keep the labels legible. Treat `jsx-a11y` findings as
   functional defects.
