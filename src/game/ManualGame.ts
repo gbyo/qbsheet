@@ -28,12 +28,7 @@
  * device-local record identity instead, which never leaves this browser. See `ICreateGameInput`.
  */
 import { IGameDefinition } from './GameDefinition';
-import {
-  IGamePackageTeam,
-  gamePackageFormat,
-  gamePackageProducer,
-  gamePackageVersion,
-} from './GamePackage';
+import { IGamePackageTeam, gamePackageFormat, gamePackageProducer, gamePackageVersion } from './GamePackage';
 import { playerNameMaxLength, readRosterLines, rosterLineProblems } from './Roster';
 import {
   IScoringRulesInput,
@@ -233,7 +228,9 @@ function breakProblems(options: IManualRoundOptions, regulationTossupCount: numb
     // A break after the last tossup of the round is a break the room will never reach. Worth saying
     // here, where the tossup count is on the same screen, rather than discovering it mid-game.
     if (regulationTossupCount >= 1 && at >= regulationTossupCount) {
-      problems.push(`${which} comes after tossup ${at}, which is not inside a ${regulationTossupCount}-tossup round.`);
+      problems.push(
+        `${which} comes after tossup ${at}, which is not inside a ${regulationTossupCount}-tossup round.`,
+      );
     }
     if (row.label.trim().length > maximumRoomBreakLabelLength) {
       problems.push(`${which}'s name is too long.`);
@@ -305,9 +302,14 @@ export function manualRoomProcedure(options: IManualRoundOptions): IRoomProcedur
       const at = row.afterTossup;
       if (at === undefined || !Number.isInteger(at) || at < 1) return [];
       const label = row.label.trim();
-      return [{ afterTossup: at, ...(label !== '' ? { label: label.slice(0, maximumRoomBreakLabelLength) } : {}) }];
+      return [
+        { afterTossup: at, ...(label !== '' ? { label: label.slice(0, maximumRoomBreakLabelLength) } : {}) },
+      ];
     })
-    .filter((roomBreak, position, all) => all.findIndex((other) => other.afterTossup === roomBreak.afterTossup) === position)
+    .filter(
+      (roomBreak, position, all) =>
+        all.findIndex((other) => other.afterTossup === roomBreak.afterTossup) === position,
+    )
     .sort((a, b) => a.afterTossup - b.afterTossup)
     .slice(0, maximumRoomBreaks);
 
@@ -335,8 +337,7 @@ export function manualRoomProcedure(options: IManualRoundOptions): IRoomProcedur
 }
 
 export type ManualGameResult =
-  | { ok: true; definition: IGameDefinition }
-  | { ok: false; problems: IManualGameProblem[] };
+  { ok: true; definition: IGameDefinition } | { ok: false; problems: IManualGameProblem[] };
 
 /** The typed-in game as an ordinary definition, or the reasons it is not one yet. */
 export function defineManualGame(input: IManualGameInput): ManualGameResult {

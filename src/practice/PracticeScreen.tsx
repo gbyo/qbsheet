@@ -37,7 +37,9 @@ export function clearPracticeProgress(): void {
 
 function readPracticeProgress(): IPracticeProgress {
   try {
-    const parsed = JSON.parse(window.localStorage.getItem(practiceProgressKey) ?? '') as Partial<IPracticeProgress>;
+    const parsed = JSON.parse(
+      window.localStorage.getItem(practiceProgressKey) ?? '',
+    ) as Partial<IPracticeProgress>;
     if (
       Number.isInteger(parsed.stepIndex) &&
       Number.isInteger(parsed.acceptedEventCount) &&
@@ -45,7 +47,10 @@ function readPracticeProgress(): IPracticeProgress {
       (parsed.stepIndex as number) < practiceSteps.length &&
       (parsed.acceptedEventCount as number) >= 0
     ) {
-      return { stepIndex: parsed.stepIndex as number, acceptedEventCount: parsed.acceptedEventCount as number };
+      return {
+        stepIndex: parsed.stepIndex as number,
+        acceptedEventCount: parsed.acceptedEventCount as number,
+      };
     }
   } catch {
     // A stale or unavailable marker should never stop practice from opening.
@@ -74,7 +79,8 @@ export function practiceLineupsRecorded(events: ScoreEvent[]): boolean {
     ) &&
     lineups.some(
       (event) =>
-        event.team === 'right' && practiceLineupMatches(event.activePlayers, practiceRightTeam.startingLineup),
+        event.team === 'right' &&
+        practiceLineupMatches(event.activePlayers, practiceRightTeam.startingLineup),
     )
   );
 }
@@ -84,8 +90,13 @@ function practiceLineupBoundary(events: ScoreEvent[]): number | undefined {
   let right = -1;
   events.forEach((event, index) => {
     if (event.type !== 'substitution' || event.questionNumber !== 1) return;
-    if (event.team === 'left' && practiceLineupMatches(event.activePlayers, practiceLeftTeam.startingLineup)) left = index;
-    if (event.team === 'right' && practiceLineupMatches(event.activePlayers, practiceRightTeam.startingLineup)) right = index;
+    if (event.team === 'left' && practiceLineupMatches(event.activePlayers, practiceLeftTeam.startingLineup))
+      left = index;
+    if (
+      event.team === 'right' &&
+      practiceLineupMatches(event.activePlayers, practiceRightTeam.startingLineup)
+    )
+      right = index;
   });
   return left >= 0 && right >= 0 ? Math.max(left, right) + 1 : undefined;
 }
@@ -205,7 +216,13 @@ function unexpectedMessage(step: IPracticeStep): string {
   return 'Review the situation or open Show me where, then try again.';
 }
 
-export default function PracticeScreen({ onHome, operatorName }: { onHome: () => void; operatorName?: string }) {
+export default function PracticeScreen({
+  onHome,
+  operatorName,
+}: {
+  onHome: () => void;
+  operatorName?: string;
+}) {
   const [run, setRun] = useState(0);
   const [progress, setProgress] = useState(readPracticeProgress);
   const { stepIndex, acceptedEventCount } = progress;

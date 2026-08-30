@@ -46,7 +46,10 @@ function isCycleEvent(event: ScoreEvent): boolean {
   );
 }
 
-export function editableQuestionFromEvents(events: readonly ScoreEvent[], questionNumber: number): IEditableQuestion {
+export function editableQuestionFromEvents(
+  events: readonly ScoreEvent[],
+  questionNumber: number,
+): IEditableQuestion {
   const cycleEvents = effectiveQuestionEvents(events, questionNumber);
   const attempts: IEditableAttempt[] = [];
   let dead = false;
@@ -69,18 +72,17 @@ export function editableQuestionFromEvents(events: readonly ScoreEvent[], questi
     else if (event.type === 'tossup-readout') {
       readout = true;
       readoutBeforeAttempt = attempts.length === 0;
-    }
-    else if (event.type === 'tossup-dead') dead = true;
+    } else if (event.type === 'tossup-dead') dead = true;
     else if (event.type === 'bonus') {
       const parts = event.parts?.map((part) => ({ ...part }));
       const controlledPoints =
         parts && parts.length > 0
           ? parts.reduce((total, part) => total + part.controlledPoints, 0)
-          : event.controlledPoints ?? 0;
+          : (event.controlledPoints ?? 0);
       const bouncebackPoints =
         parts && parts.length > 0
           ? parts.reduce((total, part) => total + (part.bouncebackPoints ?? 0), 0)
-          : event.bouncebackPoints ?? 0;
+          : (event.bouncebackPoints ?? 0);
       bonus = {
         id: event.id,
         team: event.team,
@@ -120,7 +122,10 @@ export function bonusFromParts(bonus: IEditableBonus, parts: IBonusPartResult[] 
   };
 }
 
-export function conversion(model: IEditableQuestion, format: IScorekeeperFormat): IEditableAttempt | undefined {
+export function conversion(
+  model: IEditableQuestion,
+  format: IScorekeeperFormat,
+): IEditableAttempt | undefined {
   return model.attempts.find(
     (attempt) =>
       attempt.kind === 'buzz' &&
@@ -131,7 +136,10 @@ export function conversion(model: IEditableQuestion, format: IScorekeeperFormat)
 
 /** Which period the cycle being edited belongs to. Unknown reads as regulation. */
 function editedPeriod(game: IDerivedGame, model: IEditableQuestion): GamePeriod {
-  return game.questions.find((candidate) => candidate.questionNumber === model.questionNumber)?.period ?? 'regulation';
+  return (
+    game.questions.find((candidate) => candidate.questionNumber === model.questionNumber)?.period ??
+    'regulation'
+  );
 }
 
 /**
@@ -188,7 +196,8 @@ export function validateEditableQuestion(
   const errors: string[] = [];
   const question = game.questions.find((candidate) => candidate.questionNumber === model.questionNumber);
   const activePlayers = question?.activePlayers ?? { left: [], right: [] };
-  if (model.attempts.length === 0 && !model.dead) errors.push(`Question ${model.questionNumber} needs a ruling.`);
+  if (model.attempts.length === 0 && !model.dead)
+    errors.push(`Question ${model.questionNumber} needs a ruling.`);
   if (model.readingResumed === true && model.attempts.length === 0) {
     errors.push(`Question ${model.questionNumber} cannot resume reading before an answer.`);
   }
@@ -211,7 +220,9 @@ export function validateEditableQuestion(
     used.add(attempt.team);
     if (attempt.kind === 'buzz') {
       if (attempt.playerName === undefined || !activePlayers[attempt.team].includes(attempt.playerName)) {
-        errors.push(`${attempt.playerName || 'That player'} was not active for Question ${model.questionNumber}.`);
+        errors.push(
+          `${attempt.playerName || 'That player'} was not active for Question ${model.questionNumber}.`,
+        );
       }
       const answerType =
         attempt.answerTypeIndex === undefined ? undefined : format.answerTypes[attempt.answerTypeIndex];
@@ -223,7 +234,10 @@ export function validateEditableQuestion(
           (previousAttempt && model.readingResumed !== true))
       )
         errors.push(`Question ${model.questionNumber} cannot have a second-team neg.`);
-    } else if (attempt.playerName !== undefined && !activePlayers[attempt.team].includes(attempt.playerName)) {
+    } else if (
+      attempt.playerName !== undefined &&
+      !activePlayers[attempt.team].includes(attempt.playerName)
+    ) {
       errors.push(`${attempt.playerName} was not active for Question ${model.questionNumber}.`);
     }
     previousAttempt = true;
@@ -251,7 +265,11 @@ export function validateEditableQuestion(
     errors.push(`The bonus on Question ${model.questionNumber} belongs to the converting team.`);
   }
   if (model.bonus) {
-    const scoreProblem = bonusScoreProblem(format.bonus, model.bonus.controlledPoints, model.bonus.bouncebackPoints);
+    const scoreProblem = bonusScoreProblem(
+      format.bonus,
+      model.bonus.controlledPoints,
+      model.bonus.bouncebackPoints,
+    );
     if (scoreProblem) errors.push(scoreProblem);
     if (model.bonus.parts) {
       if (
@@ -279,7 +297,10 @@ function nextId(): string {
 }
 
 /** Turn the editable representation back into only the cycle events it describes. */
-export function eventsFromEditableQuestion(model: IEditableQuestion, idFactory: () => string = nextId): ScoreEvent[] {
+export function eventsFromEditableQuestion(
+  model: IEditableQuestion,
+  idFactory: () => string = nextId,
+): ScoreEvent[] {
   const attempts = model.attempts.map((attempt) => {
     if (attempt.kind === 'no-penalty') {
       return {
@@ -349,7 +370,9 @@ export function replaceQuestionEvents(
     .map((event, index) => (event.questionNumber === questionNumber && isCycleEvent(event) ? index : -1))
     .filter((index) => index >= 0);
   const voidIndexes = original
-    .map((event, index) => (event.questionNumber === questionNumber && event.type === 'question-void' ? index : -1))
+    .map((event, index) =>
+      event.questionNumber === questionNumber && event.type === 'question-void' ? index : -1,
+    )
     .filter((index) => index >= 0);
   const firstLaterEvent = original.findIndex((event) => event.questionNumber > questionNumber);
   let insertionIndex = cycleIndexes[0];

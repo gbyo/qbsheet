@@ -43,7 +43,9 @@ export interface ILeaveWarningState {
 }
 
 export function shouldWarnBeforeLeaving(state: ILeaveWarningState): boolean {
-  return state.gameInProgress || state.localSaveFailed || state.handoffOutstanding || state.setupDirty === true;
+  return (
+    state.gameInProgress || state.localSaveFailed || state.handoffOutstanding || state.setupDirty === true
+  );
 }
 
 export default function useLeaveWarning(state: ILeaveWarningState): void {

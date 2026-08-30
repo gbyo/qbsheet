@@ -431,7 +431,9 @@ body {
   visibility: hidden;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 120ms ease, visibility 120ms ease;
+  transition:
+    opacity 120ms ease,
+    visibility 120ms ease;
 }
 
 .help-tooltip:not([data-dismissed='true']):hover .help-tooltip-popover,

@@ -100,7 +100,12 @@ import { safeAddress } from './Diagnostics';
  * exactly where somebody checking versions is standing anyway.
  */
 export function updatesAllowedOn(screen: Screen): boolean {
-  return screen.kind === 'home' || screen.kind === 'pairing' || screen.kind === 'room' || screen.kind === 'readiness';
+  return (
+    screen.kind === 'home' ||
+    screen.kind === 'pairing' ||
+    screen.kind === 'room' ||
+    screen.kind === 'readiness'
+  );
 }
 
 /**
@@ -148,7 +153,9 @@ export function resumeRecordForConnection(
 
   const fallback = unfinished.filter((record) => {
     if (record.package.room?.id !== connection.roomId) return false;
-    return connection.tournamentKey === undefined || record.package.tournament.key === connection.tournamentKey;
+    return (
+      connection.tournamentKey === undefined || record.package.tournament.key === connection.tournamentKey
+    );
   });
   return fallback.length === 1 ? fallback[0] : null;
 }
@@ -312,15 +319,18 @@ export default function App() {
     [store, resultDeliveryCapabilities],
   );
 
-  const refresh = useCallback(async (openStore: GameStore) => {
-    const listed = await openStore.list();
-    resultDeliveryCapabilities.prune(new Set(listed.map((record) => record.id)));
-    setRecords(listed);
-    // Read after `list`, which is what populates it. A game this build cannot open is a fact the room
-    // has to be told, because the alternative — an unfinished game that is simply not on the screen
-    // any more — is indistinguishable from having lost it. See `GameRecordUpgrade`.
-    setUnreadable(openStore.unreadable);
-  }, [resultDeliveryCapabilities]);
+  const refresh = useCallback(
+    async (openStore: GameStore) => {
+      const listed = await openStore.list();
+      resultDeliveryCapabilities.prune(new Set(listed.map((record) => record.id)));
+      setRecords(listed);
+      // Read after `list`, which is what populates it. A game this build cannot open is a fact the room
+      // has to be told, because the alternative — an unfinished game that is simply not on the screen
+      // any more — is indistinguishable from having lost it. See `GameRecordUpgrade`.
+      setUnreadable(openStore.unreadable);
+    },
+    [resultDeliveryCapabilities],
+  );
 
   const refreshCurrentStore = useCallback(async () => {
     if (store) await refresh(store);
@@ -388,8 +398,7 @@ export default function App() {
   const storageError = useSyncExternalStore(subscribeStorageStatus, () => store?.storageError);
 
   const current = useMemo(
-    () =>
-      'recordId' in screen ? (records.find((record) => record.id === screen.recordId) ?? null) : null,
+    () => ('recordId' in screen ? (records.find((record) => record.id === screen.recordId) ?? null) : null),
     [screen, records],
   );
 
@@ -480,7 +489,8 @@ export default function App() {
     ): Promise<IStoredGameRecord | null> => {
       if (!store) return null;
       const failureScreen = options.failureScreen ?? { kind: 'home' as const };
-      const failureNotice = options.failureNotice ?? 'This game could not be committed to local storage. No scoring has started.';
+      const failureNotice =
+        options.failureNotice ?? 'This game could not be committed to local storage. No scoring has started.';
       const identity = gamePackageIdentity(packageValue);
       const stale = () => options.isCurrent !== undefined && !options.isCurrent();
       if (stale()) return null;
@@ -675,11 +685,15 @@ export default function App() {
         resumeExisting: true,
         isCurrent,
         failureScreen: { kind: 'room' },
-        failureNotice: 'This game could not be committed locally. No scoring has started; try again from the room.',
+        failureNotice:
+          'This game could not be committed locally. No scoring has started; try again from the room.',
       });
       if (!record) {
         if (!isCurrent()) return staleStart();
-        return { ok: false, error: 'This game could not be committed locally. No scoring has started; try again.' };
+        return {
+          ok: false,
+          error: 'This game could not be committed locally. No scoring has started; try again.',
+        };
       }
       if (!isCurrent()) return staleStart();
       const stored: Omit<IConnectedSession, 'version' | 'updatedAt'> = {
@@ -704,9 +718,7 @@ export default function App() {
       setNotice('');
       const opened = await openRecord(record, isCurrent);
       if (!isCurrent()) return staleStart();
-      return opened
-        ? { ok: true }
-        : { ok: false, error: 'Another tab is already scoring this game.' };
+      return opened ? { ok: true } : { ok: false, error: 'Another tab is already scoring this game.' };
     },
     [ensureRecord, openRecord, store],
   );
@@ -721,10 +733,7 @@ export default function App() {
     () => unreadableGameDependsOnConnection(connection, unreadable),
     [connection, unreadable],
   );
-  const resumeRecord = useMemo(
-    () => resumeRecordForConnection(connection, records),
-    [connection, records],
-  );
+  const resumeRecord = useMemo(() => resumeRecordForConnection(connection, records), [connection, records]);
   const settingsConnection = useMemo(
     () =>
       pairedRoom
@@ -868,7 +877,9 @@ export default function App() {
         onPaired={onPaired}
         onPairingLaunch={(intent) => beginPairingLaunch(intent, screen.returnTo)}
         onOtherScoring={() => setScreen({ kind: 'home' })}
-        onCancel={() => setScreen(screen.returnTo === 'room' && pairedRoom ? { kind: 'room' } : { kind: 'home' })}
+        onCancel={() =>
+          setScreen(screen.returnTo === 'room' && pairedRoom ? { kind: 'room' } : { kind: 'home' })
+        }
       />
     );
   }
@@ -937,12 +948,7 @@ export default function App() {
   }
 
   if (screen.kind === 'create') {
-    return (
-      <ManualGameSetup
-        onStart={createManualGame}
-        onCancel={() => setScreen({ kind: 'home' })}
-      />
-    );
+    return <ManualGameSetup onStart={createManualGame} onCancel={() => setScreen({ kind: 'home' })} />;
   }
 
   if (screen.kind === 'duplicate' && current) {
@@ -953,7 +959,7 @@ export default function App() {
     return (
       <>
         <GameOriginNotice packageValue={current.package} />
-      <ScoringScreen
+        <ScoringScreen
           record={current}
           store={store}
           resultDelivery={resultDelivery as ResultDeliveryService}
@@ -983,13 +989,13 @@ export default function App() {
         acceptedJustNow={screen.acceptedJustNow === true}
         onUpdate={updateRecord}
         onBackToScorekeeper={() => backToScorekeeper(current.id)}
-          continueLabel={backToRoom ? `Next game in ${pairedRoom.roomName}` : 'Done'}
-          onRematch={
-            isManualGame(current.package)
-              ? () => createManualGame(current.package as IGameDefinition)
-              : undefined
-          }
-          onHome={async () => {
+        continueLabel={backToRoom ? `Next game in ${pairedRoom.roomName}` : 'Done'}
+        onRematch={
+          isManualGame(current.package)
+            ? () => createManualGame(current.package as IGameDefinition)
+            : undefined
+        }
+        onHome={async () => {
           claim.current?.release();
           claim.current = null;
           await refresh(store);

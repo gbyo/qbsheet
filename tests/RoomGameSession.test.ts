@@ -2,7 +2,13 @@
  * A half-scored game surviving a reload, and not turning into two games.
  */
 import { describe, expect, test } from 'vitest';
-import { clearGame, gameSessionMaxAgeMs, gameSessionVersion, loadGame, saveGame } from '../src/scorer/GameSession';
+import {
+  clearGame,
+  gameSessionMaxAgeMs,
+  gameSessionVersion,
+  loadGame,
+  saveGame,
+} from '../src/scorer/GameSession';
 import deriveGame, { IGameSetup } from '../src/scoring/deriveGame';
 import { ScoreEvent } from '../src/scoring/ScoreEvents';
 import scoringRulesToScorekeeperFormat from './rules';

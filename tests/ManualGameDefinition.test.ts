@@ -60,7 +60,8 @@ function input(overrides: ManualOverrides = {}): IManualGameInput {
 /** The definition, or a failure the test wants to see as one. */
 function define(overrides: ManualOverrides = {}) {
   const result = defineManualGame(input(overrides));
-  if (!result.ok) throw new Error(`expected a definition, got: ${result.problems.map((p) => p.message).join(' ')}`);
+  if (!result.ok)
+    throw new Error(`expected a definition, got: ${result.problems.map((p) => p.message).join(' ')}`);
   return result.definition;
 }
 
@@ -70,7 +71,10 @@ function problems(overrides: ManualOverrides = {}): string[] {
 }
 
 /** The setup with an advanced format in it, for the branch the basic form cannot state. */
-function advancedInput(advanced: IAdvancedScoringRulesInput, overrides: ManualOverrides = {}): IManualGameInput {
+function advancedInput(
+  advanced: IAdvancedScoringRulesInput,
+  overrides: ManualOverrides = {},
+): IManualGameInput {
   return { ...input(overrides), rules: advancedRulesInput(advanced) };
 }
 
@@ -80,7 +84,8 @@ function advancedRules(overrides: Partial<IAdvancedScoringRulesInput> = {}): IAd
 
 function defineAdvanced(advanced: IAdvancedScoringRulesInput) {
   const result = defineManualGame(advancedInput(advanced));
-  if (!result.ok) throw new Error(`expected a definition, got: ${result.problems.map((p) => p.message).join(' ')}`);
+  if (!result.ok)
+    throw new Error(`expected a definition, got: ${result.problems.map((p) => p.message).join(' ')}`);
   return result.definition;
 }
 
@@ -114,12 +119,16 @@ describe('teams and players', () => {
   });
 
   test('a team with no name is refused, by side', () => {
-    expect(problems({ left: { name: '   ', players: 'Sarah' } })).toContain('Enter a name for the left team.');
+    expect(problems({ left: { name: '   ', players: 'Sarah' } })).toContain(
+      'Enter a name for the left team.',
+    );
     expect(problems({ right: { name: '', players: 'Emma' } })).toContain('Enter a name for the right team.');
   });
 
   test('two teams with the same name are refused whatever the capitals', () => {
-    expect(problems({ right: { name: 'ninety six', players: 'Emma' } })).toContain('Team names must be different.');
+    expect(problems({ right: { name: 'ninety six', players: 'Emma' } })).toContain(
+      'Team names must be different.',
+    );
   });
 
   test('a side with no players is refused, and named', () => {
@@ -129,7 +138,9 @@ describe('teams and players', () => {
   });
 
   test('a side with no players and no name is still refused in words', () => {
-    expect(problems({ right: { name: '', players: '' } })).toContain('The right team needs at least one player.');
+    expect(problems({ right: { name: '', players: '' } })).toContain(
+      'The right team needs at least one player.',
+    );
   });
 
   test('a player listed twice on one roster is refused, in the same words the file path uses', () => {
@@ -181,9 +192,30 @@ describe('scoring rules', () => {
         minimum_overtime_question_count: 3,
         overtime_includes_bonuses: true,
         answer_types: [
-          { type: 'AnswerType', id: 'AnswerType_15', value: 15, label: 'Power', short_label: 'P', awards_bonus: true },
-          { type: 'AnswerType', id: 'AnswerType_10', value: 10, label: 'Correct', short_label: 'C', awards_bonus: true },
-          { type: 'AnswerType', id: 'AnswerType_-5', value: -5, label: 'Neg', short_label: 'N', awards_bonus: false },
+          {
+            type: 'AnswerType',
+            id: 'AnswerType_15',
+            value: 15,
+            label: 'Power',
+            short_label: 'P',
+            awards_bonus: true,
+          },
+          {
+            type: 'AnswerType',
+            id: 'AnswerType_10',
+            value: 10,
+            label: 'Correct',
+            short_label: 'C',
+            awards_bonus: true,
+          },
+          {
+            type: 'AnswerType',
+            id: 'AnswerType_-5',
+            value: -5,
+            label: 'Neg',
+            short_label: 'N',
+            awards_bonus: false,
+          },
         ],
         maximum_bonus_score: 30,
         bonus_divisor: 10,
@@ -235,8 +267,10 @@ describe('scoring rules', () => {
   });
 
   test('bouncebacks are carried, both ways', () => {
-    expect(define({ rules: { ...basicScoringRulesDefaults, bonusesBounceBack: true } }).scorekeeperFormat.bonus
-      .bounceBack).toBe(true);
+    expect(
+      define({ rules: { ...basicScoringRulesDefaults, bonusesBounceBack: true } }).scorekeeperFormat.bonus
+        .bounceBack,
+    ).toBe(true);
     expect(define().scorekeeperFormat.bonus.bounceBack).toBe(false);
   });
 
@@ -324,7 +358,11 @@ describe('advanced scoring rules', () => {
   test('two different negs are both kept', () => {
     const format = defineAdvanced(
       advancedRules({
-        answerTypes: [answerType(10, 'Correct', 'C'), answerType(-5, 'Neg', 'N'), answerType(-10, 'Bad neg', 'B')],
+        answerTypes: [
+          answerType(10, 'Correct', 'C'),
+          answerType(-5, 'Neg', 'N'),
+          answerType(-10, 'Bad neg', 'B'),
+        ],
       }),
     ).scorekeeperFormat;
 
@@ -385,10 +423,38 @@ describe('advanced scoring rules', () => {
         minimum_overtime_question_count: 1,
         overtime_includes_bonuses: false,
         answer_types: [
-          { type: 'AnswerType', id: 'AnswerType_20', value: 20, label: 'Superpower', short_label: 'S', awards_bonus: true },
-          { type: 'AnswerType', id: 'AnswerType_15', value: 15, label: 'Power', short_label: 'P', awards_bonus: true },
-          { type: 'AnswerType', id: 'AnswerType_10', value: 10, label: 'Correct', short_label: 'C', awards_bonus: true },
-          { type: 'AnswerType', id: 'AnswerType_-5', value: -5, label: 'Neg', short_label: 'N', awards_bonus: false },
+          {
+            type: 'AnswerType',
+            id: 'AnswerType_20',
+            value: 20,
+            label: 'Superpower',
+            short_label: 'S',
+            awards_bonus: true,
+          },
+          {
+            type: 'AnswerType',
+            id: 'AnswerType_15',
+            value: 15,
+            label: 'Power',
+            short_label: 'P',
+            awards_bonus: true,
+          },
+          {
+            type: 'AnswerType',
+            id: 'AnswerType_10',
+            value: 10,
+            label: 'Correct',
+            short_label: 'C',
+            awards_bonus: true,
+          },
+          {
+            type: 'AnswerType',
+            id: 'AnswerType_-5',
+            value: -5,
+            label: 'Neg',
+            short_label: 'N',
+            awards_bonus: false,
+          },
         ],
         maximum_bonus_score: 40,
         bonus_divisor: 10,
@@ -422,7 +488,13 @@ describe('advanced scoring rules', () => {
 
   test('the QBJ object it builds carries no points per part for an irregular bonus', () => {
     const qbj = advancedScoringRulesToQbj(
-      advancedRules({ bonusStructure: 'irregular', maximumBonusScore: 40, bonusDivisor: 10, minimumPartsPerBonus: 2, maximumPartsPerBonus: 3 }),
+      advancedRules({
+        bonusStructure: 'irregular',
+        maximumBonusScore: 40,
+        bonusDivisor: 10,
+        minimumPartsPerBonus: 2,
+        maximumPartsPerBonus: 3,
+      }),
     );
 
     expect(qbj.points_per_bonus_part).toBeUndefined();
@@ -431,7 +503,9 @@ describe('advanced scoring rules', () => {
 
   test('a row with no value typed in it is refused rather than scored as zero', () => {
     const found = advancedProblems(
-      advancedRules({ answerTypes: [answerType(10, 'Correct', 'C'), newAdvancedAnswerType({ label: 'Power' })] }),
+      advancedRules({
+        answerTypes: [answerType(10, 'Correct', 'C'), newAdvancedAnswerType({ label: 'Power' })],
+      }),
     );
 
     expect(found).toContain('"Power" needs a point value.');
@@ -446,7 +520,9 @@ describe('advanced scoring rules', () => {
   });
 
   test('a format with no answer types at all is refused', () => {
-    expect(advancedProblems(advancedRules({ answerTypes: [] }))).toContain('Add at least one way to answer a tossup.');
+    expect(advancedProblems(advancedRules({ answerTypes: [] }))).toContain(
+      'Add at least one way to answer a tossup.',
+    );
   });
 
   test('bonuses nothing earns are refused, because no buzz could ever open one', () => {
@@ -487,7 +563,7 @@ describe('advanced scoring rules', () => {
 
   test('the engine still gets the last word on a format nobody could play', () => {
     // Nothing positive to score. The complaint comes from the shared playability judgement rather
-        // than from a check written twice.
+    // than from a check written twice.
     expect(advancedProblems(advancedRules({ answerTypes: [answerType(-5, 'Neg', 'N')] }))).toContain(
       'These scoring rules have no way to score points on a tossup.',
     );
@@ -495,7 +571,9 @@ describe('advanced scoring rules', () => {
 
   test('no rule set is named anywhere in what it produces', () => {
     const serialized = JSON.stringify(
-      defineAdvanced(advancedRules({ answerTypes: [answerType(20, 'Superpower', 'S'), answerType(10, 'Correct', 'C')] })),
+      defineAdvanced(
+        advancedRules({ answerTypes: [answerType(20, 'Superpower', 'S'), answerType(10, 'Correct', 'C')] }),
+      ),
     );
 
     expect(serialized).not.toContain('NAQT');

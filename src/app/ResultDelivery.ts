@@ -14,10 +14,7 @@ import {
   IStoredGameRecord,
   ServerDeliveryLedgerOutcome,
 } from '../game/GameStore';
-import {
-  IResultDeliveryCapability,
-  ResultDeliveryCapabilityStore,
-} from './ResultDeliveryCapability';
+import { IResultDeliveryCapability, ResultDeliveryCapabilityStore } from './ResultDeliveryCapability';
 
 const rejectedDeliveryFallback = 'Tournament control did not accept this result.';
 
@@ -67,7 +64,9 @@ export async function recordFinalDelivery(
   const previousAttempts = validAttemptCount(previous?.attemptCount);
   const attemptCount = previousAttempts + (delivery.attempted ? 1 : 0);
   const accepted = delivery.delivery === 'sent';
-  const acceptedAt = accepted ? latestTimestamp(previous?.acceptedAt, previous?.lastAttemptedAt, at) ?? at : undefined;
+  const acceptedAt = accepted
+    ? (latestTimestamp(previous?.acceptedAt, previous?.lastAttemptedAt, at) ?? at)
+    : undefined;
   const nextLedger: IServerDeliveryLedger = {
     attemptCount,
     ...(previous?.firstAttemptedAt !== undefined
@@ -75,7 +74,11 @@ export async function recordFinalDelivery(
       : delivery.attempted
         ? { firstAttemptedAt: at }
         : {}),
-    ...(delivery.attempted ? { lastAttemptedAt: at } : previous?.lastAttemptedAt ? { lastAttemptedAt: previous.lastAttemptedAt } : {}),
+    ...(delivery.attempted
+      ? { lastAttemptedAt: at }
+      : previous?.lastAttemptedAt
+        ? { lastAttemptedAt: previous.lastAttemptedAt }
+        : {}),
     ...(accepted
       ? {
           acceptedAt,
@@ -84,7 +87,9 @@ export async function recordFinalDelivery(
       : previous?.acceptedAt
         ? {
             acceptedAt: previous.acceptedAt,
-            ...(previous.acceptedOnAttempt !== undefined ? { acceptedOnAttempt: previous.acceptedOnAttempt } : {}),
+            ...(previous.acceptedOnAttempt !== undefined
+              ? { acceptedOnAttempt: previous.acceptedOnAttempt }
+              : {}),
           }
         : {}),
     ...(accepted
@@ -92,7 +97,11 @@ export async function recordFinalDelivery(
       : previous?.acceptedAsDuplicate !== undefined
         ? { acceptedAsDuplicate: previous.acceptedAsDuplicate }
         : {}),
-    ...(delivery.matchId !== undefined ? { matchId: delivery.matchId } : previous?.matchId ? { matchId: previous.matchId } : {}),
+    ...(delivery.matchId !== undefined
+      ? { matchId: delivery.matchId }
+      : previous?.matchId
+        ? { matchId: previous.matchId }
+        : {}),
     ...(delivery.fingerprint !== undefined
       ? { fingerprint: delivery.fingerprint }
       : previous?.fingerprint
@@ -120,7 +129,8 @@ export class ResultDeliveryService {
   constructor(
     private store: GameStore,
     private capabilities: ResultDeliveryCapabilityStore,
-    private makeClient: (baseUrl: string) => FruityServerClient = (baseUrl) => new FruityServerClient(baseUrl),
+    private makeClient: (baseUrl: string) => FruityServerClient = (baseUrl) =>
+      new FruityServerClient(baseUrl),
   ) {}
 
   remember(recordId: string, capability: IResultDeliveryCapability, completedAt: string): boolean {
@@ -143,12 +153,21 @@ export class ResultDeliveryService {
 
   /** Network/server pending outcomes are safe to retry unattended; refusals remain a person's job. */
   canAutoRetry(record: IStoredGameRecord): boolean {
-    return record.serverDelivery === 'pending' && record.serverDeliveryLedger?.retryable === true && this.canRetry(record);
+    return (
+      record.serverDelivery === 'pending' &&
+      record.serverDeliveryLedger?.retryable === true &&
+      this.canRetry(record)
+    );
   }
 
-  async recordOutcome(recordId: string, delivery: IFinalDelivery, now: Date = new Date()): Promise<IStoredGameRecord | null> {
+  async recordOutcome(
+    recordId: string,
+    delivery: IFinalDelivery,
+    now: Date = new Date(),
+  ): Promise<IStoredGameRecord | null> {
     const updated = await recordFinalDelivery(this.store, recordId, delivery, now);
-    if (delivery.delivery === 'sent' || !delivery.retryable || delivery.unsupported) this.capabilities.remove(recordId);
+    if (delivery.delivery === 'sent' || !delivery.retryable || delivery.unsupported)
+      this.capabilities.remove(recordId);
     return updated;
   }
 

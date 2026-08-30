@@ -95,8 +95,8 @@ export default function BasicScoringRulesEditor(props: {
             <div className="label-with-help">
               <label htmlFor={id('power')}>Power (blank for none)</label>
               <HelpTooltip label="What is a power?">
-                A power is a tossup answered before the power mark for extra points. Leave this blank if the format
-                does not use powers.
+                A power is a tossup answered before the power mark for extra points. Leave this blank if the
+                format does not use powers.
               </HelpTooltip>
             </div>
             <input
@@ -112,8 +112,8 @@ export default function BasicScoringRulesEditor(props: {
             <div className="label-with-help">
               <label htmlFor={id('neg')}>Neg (blank for none)</label>
               <HelpTooltip label="What is a neg?">
-                A neg is the penalty for an incorrect buzz before the tossup ends. Enter the value as a negative
-                number, or leave it blank when there is no penalty.
+                A neg is the penalty for an incorrect buzz before the tossup ends. Enter the value as a
+                negative number, or leave it blank when there is no penalty.
               </HelpTooltip>
             </div>
             <input
@@ -183,7 +183,8 @@ export default function BasicScoringRulesEditor(props: {
                   Missed parts bounce back
                 </label>
                 <HelpTooltip label="What does bonus bounceback mean?">
-                  When the team controlling a bonus misses a part, the other team gets a chance to answer that part.
+                  When the team controlling a bonus misses a part, the other team gets a chance to answer that
+                  part.
                 </HelpTooltip>
               </div>
             )}
@@ -210,7 +211,8 @@ export default function BasicScoringRulesEditor(props: {
               <div className="label-with-help">
                 <label htmlFor={id('max-active')}>Players playing at once</label>
                 <HelpTooltip label="Explain the player limit">
-                  The maximum number of active players per team. Additional rostered players begin on the bench.
+                  The maximum number of active players per team. Additional rostered players begin on the
+                  bench.
                 </HelpTooltip>
               </div>
               <input
@@ -236,8 +238,8 @@ export default function BasicScoringRulesEditor(props: {
             {variant === 'full' ? 'Round is timed' : 'Rounds run on a clock'}
           </label>
           <HelpTooltip label="About timed rounds">
-            In a timed round, regulation ends when the moderator calls time; the tossup count is still used as a
-            maximum.
+            In a timed round, regulation ends when the moderator calls time; the tossup count is still used as
+            a maximum.
           </HelpTooltip>
         </div>
         {timedHint && <p className="shell-hint rules-fields-hint">{timedHint}</p>}
@@ -251,8 +253,8 @@ export default function BasicScoringRulesEditor(props: {
               <div className="label-with-help">
                 <label htmlFor={id('overtime-count')}>Initial overtime tossups</label>
                 <HelpTooltip label="Explain the overtime length">
-                  The number of tossups guaranteed when regulation ends tied. If the game remains tied, QBSheet
-                  continues with sudden-death tossups.
+                  The number of tossups guaranteed when regulation ends tied. If the game remains tied,
+                  QBSheet continues with sudden-death tossups.
                 </HelpTooltip>
               </div>
               <input
@@ -290,8 +292,8 @@ export default function BasicScoringRulesEditor(props: {
               Use lightning
             </label>
             <HelpTooltip label="What is lightning?">
-              A lightning round is a separate timed or worksheet-style scoring phase. Its points are added outside
-              the tossup-and-bonus cycle.
+              A lightning round is a separate timed or worksheet-style scoring phase. Its points are added
+              outside the tossup-and-bonus cycle.
             </HelpTooltip>
           </div>
 

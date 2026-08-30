@@ -26,7 +26,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
 import { IRoomProcedure } from '../scoring/RoomProcedure';
 import { ITeamRoster } from '../game/Roster';
-import { ControlRequestState, HelpClearResult, HelpRequestCategory, HelpRequestResult } from '../app/HelpRequests';
+import {
+  ControlRequestState,
+  HelpClearResult,
+  HelpRequestCategory,
+  HelpRequestResult,
+} from '../app/HelpRequests';
 import { IDerivedGame, IGameSetup } from '../scoring/deriveGame';
 import { ScoreEvent } from '../scoring/ScoreEvents';
 import { RoomConnectionState } from '../app/ConnectionState';
@@ -167,7 +172,9 @@ export default function ScorerHost(props: IScorerHostProps) {
   const initialGameKey = useRef(gameKey);
   useEffect(() => {
     if (import.meta.env?.DEV && initialGameKey.current !== gameKey) {
-      console.warn('ScorerHost gameKey changed without a remount. Render it with key={gameKey} to isolate each game.');
+      console.warn(
+        'ScorerHost gameKey changed without a remount. Render it with key={gameKey} to isolate each game.',
+      );
     }
   }, [gameKey]);
 

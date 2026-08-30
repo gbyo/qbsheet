@@ -83,7 +83,8 @@ function renderScorer(
   recovered = false,
 ) {
   const submit: SubmitMock =
-    onSubmit ?? vi.fn<(qbj: object) => Promise<IScorerSubmitResult>>().mockResolvedValue({ ok: true, message: 'Sent' });
+    onSubmit ??
+    vi.fn<(qbj: object) => Promise<IScorerSubmitResult>>().mockResolvedValue({ ok: true, message: 'Sent' });
   gameCounter += 1;
   const gameKey = `test-game-${gameCounter}`;
   if (recovered) {
@@ -177,7 +178,9 @@ function openIssue(category = 'Question / packet issue') {
 
 function openProtests() {
   fireEvent.click(screen.getByRole('button', { name: 'Flag' }));
-  fireEvent.click(within(screen.getByRole('dialog', { name: 'Flag' })).getByText('Protest / disputed ruling'));
+  fireEvent.click(
+    within(screen.getByRole('dialog', { name: 'Flag' })).getByText('Protest / disputed ruling'),
+  );
 }
 
 /** Every control the screen offers, footer and Game menu together. */
@@ -199,8 +202,8 @@ function scoreOf(teamName: string): string {
  * goes straight to tossup one, which is why most tests below never call this.
  */
 function editReviewEvent(description: string) {
-  const row = Array.from(document.querySelectorAll('.scorer-review-event')).find(
-    (candidate) => candidate.textContent?.includes(description),
+  const row = Array.from(document.querySelectorAll('.scorer-review-event')).find((candidate) =>
+    candidate.textContent?.includes(description),
   );
   if (!row) throw new Error(`No scoresheet entry reading "${description}"`);
   const questionRow = row.closest('.scorer-review-list > li');
@@ -312,7 +315,9 @@ describe('what the header says', () => {
     renderScorer(formatFor());
 
     const layoutCopy = document.querySelector('.scorer-progress-copy') as HTMLElement;
-    const paintedNumber = document.querySelector('.scorer-progress-visual .qbsheet-motion-number') as HTMLElement;
+    const paintedNumber = document.querySelector(
+      '.scorer-progress-visual .qbsheet-motion-number',
+    ) as HTMLElement;
     expect(layoutCopy).toHaveTextContent('Tossup 1 of 20');
     expect(layoutCopy.style.getPropertyValue('--scorer-progress-missing-digit-width')).toBe('1ch');
     expect(paintedNumber.style.getPropertyValue('--qbsheet-number-digits')).toBe('2');
@@ -331,7 +336,12 @@ describe('scoring buttons come from the format', () => {
   test('mACF gives each player +15 / +10 / -5', () => {
     renderScorer(formatFor());
 
-    expect(buttonsFor('Sarah Mitchell').map((button) => button.textContent)).toEqual(['+15', '+10', '-5', wrong]);
+    expect(buttonsFor('Sarah Mitchell').map((button) => button.textContent)).toEqual([
+      '+15',
+      '+10',
+      '-5',
+      wrong,
+    ]);
   });
 
   test('a format with no powers gives two', () => {
@@ -536,7 +546,9 @@ describe('scoring motion state', () => {
     const firstToken = document.querySelector('.scorer-no-buzz-sweep')?.getAttribute('data-motion-token');
     expect(firstToken).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'No buzz' }));
-    expect(document.querySelector('.scorer-no-buzz-sweep')?.getAttribute('data-motion-token')).not.toBe(firstToken);
+    expect(document.querySelector('.scorer-no-buzz-sweep')?.getAttribute('data-motion-token')).not.toBe(
+      firstToken,
+    );
   });
 
   test('a pointer ruling identifies the actual player and format-defined answer type', () => {
@@ -792,7 +804,9 @@ describe('the game menu', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Game' }));
 
     const menuItems = document.querySelectorAll('.scorer-menu-item');
-    expect(document.querySelectorAll('.scorer-menu-item .scorer-control-icon')).toHaveLength(menuItems.length);
+    expect(document.querySelectorAll('.scorer-menu-item .scorer-control-icon')).toHaveLength(
+      menuItems.length,
+    );
   });
 
   test('Flag opens the existing protest workflow', () => {
@@ -810,7 +824,13 @@ describe('the game menu', () => {
 
     // Matched loosely: what matters is that each tool is reachable from the scoring screen without
     // hunting, not which of the footer or the menu is holding it today.
-    for (const tool of [/players/i, /flag/i, /scoresheet review/i, /export \/ backup/i, /recover from qbj/i]) {
+    for (const tool of [
+      /players/i,
+      /flag/i,
+      /scoresheet review/i,
+      /export \/ backup/i,
+      /recover from qbj/i,
+    ]) {
       expect(
         controls.some((control) => tool.test(control)),
         `${tool} should be reachable`,
@@ -839,7 +859,9 @@ describe('the game menu', () => {
     renderScorer(formatFor());
     openProtests();
     expect(screen.getByRole('dialog', { name: 'Protests' })).toBeTruthy();
-    fireEvent.click(within(screen.getByRole('dialog', { name: 'Protests' })).getByRole('button', { name: 'Close dialog' }));
+    fireEvent.click(
+      within(screen.getByRole('dialog', { name: 'Protests' })).getByRole('button', { name: 'Close dialog' }),
+    );
 
     openIssue();
     expect(screen.getByRole('dialog', { name: 'Issue / tournament control' })).toBeTruthy();
@@ -1233,7 +1255,9 @@ describe('the game menu', () => {
     fireEvent.change(screen.getByLabelText('What happened?'), { target: { value: 'The buzzers cut out.' } });
     fireEvent.click(screen.getByText('Save and request control'));
 
-    await vi.waitFor(() => expect(requestControl).toHaveBeenCalledWith('question-packet', 'The buzzers cut out.'));
+    await vi.waitFor(() =>
+      expect(requestControl).toHaveBeenCalledWith('question-packet', 'The buzzers cut out.'),
+    );
   });
 
   test('a failed control request never prevents the local issue from being saved', async () => {
@@ -1242,20 +1266,34 @@ describe('the game menu', () => {
       error: 'Tournament control did not answer.',
     } satisfies HelpRequestResult);
     let latestEvents: unknown[] = [];
-    renderScorer(formatFor(), undefined, requestControl, undefined, undefined, {}, {
-      onEventsChanged: (events) => {
-        latestEvents = events;
+    renderScorer(
+      formatFor(),
+      undefined,
+      requestControl,
+      undefined,
+      undefined,
+      {},
+      {
+        onEventsChanged: (events) => {
+          latestEvents = events;
+        },
       },
-    });
+    );
     openIssue();
     fireEvent.change(screen.getByLabelText('What happened?'), { target: { value: 'The room lost Wi-Fi.' } });
     fireEvent.click(screen.getByText('Save and request control'));
 
-    await vi.waitFor(() => expect(screen.getByText('Issue saved, but tournament control was not reached.')).toBeTruthy());
+    await vi.waitFor(() =>
+      expect(screen.getByText('Issue saved, but tournament control was not reached.')).toBeTruthy(),
+    );
     await vi.waitFor(() =>
       expect(latestEvents).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({ type: 'note', text: 'Question / packet issue: The room lost Wi-Fi.', flagged: true }),
+          expect.objectContaining({
+            type: 'note',
+            text: 'Question / packet issue: The room lost Wi-Fi.',
+            flagged: true,
+          }),
         ]),
       ),
     );
@@ -1271,12 +1309,20 @@ describe('the game menu', () => {
       requestedAtSource: 'server',
     };
     let latestEvents: unknown[] = [];
-    renderScorer(formatFor(), undefined, requestControl, undefined, undefined, {}, {
-      controlRequest: outstanding,
-      onEventsChanged: (events) => {
-        latestEvents = events;
+    renderScorer(
+      formatFor(),
+      undefined,
+      requestControl,
+      undefined,
+      undefined,
+      {},
+      {
+        controlRequest: outstanding,
+        onEventsChanged: (events) => {
+          latestEvents = events;
+        },
       },
-    });
+    );
 
     openIssue();
     expect(screen.getByRole('dialog', { name: 'Issue / tournament control' })).toHaveTextContent(
@@ -1287,7 +1333,9 @@ describe('the game menu', () => {
     fireEvent.click(screen.getByText('Save issue'));
     await vi.waitFor(() =>
       expect(latestEvents).toEqual(
-        expect.arrayContaining([expect.objectContaining({ type: 'note', text: 'Question / packet issue: A second issue.' })]),
+        expect.arrayContaining([
+          expect.objectContaining({ type: 'note', text: 'Question / packet issue: A second issue.' }),
+        ]),
       ),
     );
     expect(requestControl).not.toHaveBeenCalled();
@@ -1301,7 +1349,15 @@ describe('the game menu', () => {
       requestedAt: '2026-08-11T14:42:00.000Z',
       requestedAtSource: 'server',
     };
-    renderScorer(formatFor(), undefined, requestControl, undefined, undefined, {}, { controlRequest: outstanding });
+    renderScorer(
+      formatFor(),
+      undefined,
+      requestControl,
+      undefined,
+      undefined,
+      {},
+      { controlRequest: outstanding },
+    );
 
     openProtests();
     expect(screen.getByRole('dialog', { name: 'Protests' })).toHaveTextContent(
@@ -1322,29 +1378,49 @@ describe('the game menu', () => {
       error: 'Could not reach tournament control.',
       retryable: true,
     };
-    renderScorer(formatFor(), undefined, undefined, undefined, undefined, {}, {
-      controlRequest: failed,
-      onRetryControlRequest: retry,
-    });
+    renderScorer(
+      formatFor(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {},
+      {
+        controlRequest: failed,
+        onRetryControlRequest: retry,
+      },
+    );
     openIssue();
     expect(screen.getAllByText('Tournament control was not reached.').length).toBeGreaterThan(0);
-    fireEvent.click(within(screen.getByRole('dialog', { name: 'Issue / tournament control' })).getByRole('button', {
-      name: 'Try request again',
-    }));
+    fireEvent.click(
+      within(screen.getByRole('dialog', { name: 'Issue / tournament control' })).getByRole('button', {
+        name: 'Try request again',
+      }),
+    );
     await vi.waitFor(() => expect(retry).toHaveBeenCalledTimes(1));
   });
 
   test('a file-scored issue is saved without offering remote controls', async () => {
     let latestEvents: unknown[] = [];
-    renderScorer(formatFor(), undefined, undefined, undefined, undefined, {}, {
-      onEventsChanged: (events) => {
-        latestEvents = events;
+    renderScorer(
+      formatFor(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {},
+      {
+        onEventsChanged: (events) => {
+          latestEvents = events;
+        },
       },
-    });
+    );
     openIssue();
     expect(screen.queryByLabelText('Ask tournament control to come')).toBeNull();
     expect(screen.getByText(/remote control requests/)).toBeTruthy();
-    fireEvent.change(screen.getByLabelText('What happened?'), { target: { value: 'The packet is damaged.' } });
+    fireEvent.change(screen.getByLabelText('What happened?'), {
+      target: { value: 'The packet is damaged.' },
+    });
     fireEvent.click(screen.getByText('Save issue'));
 
     await vi.waitFor(() =>
@@ -1373,7 +1449,10 @@ describe('the game menu', () => {
     fireEvent.click(screen.getByText('Record protest and keep playing'));
 
     await vi.waitFor(() =>
-      expect(requestControl).toHaveBeenCalledWith('protest', expect.stringContaining('The ruling was disputed.')),
+      expect(requestControl).toHaveBeenCalledWith(
+        'protest',
+        expect.stringContaining('The ruling was disputed.'),
+      ),
     );
   });
 });
@@ -1800,7 +1879,9 @@ describe('undo and redo say what they changed', () => {
     expect(emphasised).toHaveLength(1);
     expect(emphasised[0].textContent).toContain('Q2');
     // Emphasis is a background and nothing else; the row still opens the question.
-    expect(within(emphasised[0] as HTMLElement).getByRole('button', { name: 'Review question 2' })).toBeTruthy();
+    expect(
+      within(emphasised[0] as HTMLElement).getByRole('button', { name: 'Review question 2' }),
+    ).toBeTruthy();
   });
 
   test('a multi-event action is still one undo, described as one thing', () => {
@@ -1811,7 +1892,9 @@ describe('undo and redo say what they changed', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Game' }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Replace question 1' }));
     const dialog = screen.getByRole('dialog', { name: 'Replace question 1' });
-    fireEvent.change(within(dialog).getByLabelText('What went wrong?'), { target: { value: 'Wrong packet' } });
+    fireEvent.change(within(dialog).getByLabelText('What went wrong?'), {
+      target: { value: 'Wrong packet' },
+    });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Whole cycle' }));
     fireEvent.click(within(dialog).getByRole('button', { name: 'Replace question 1' }));
 
@@ -1874,9 +1957,9 @@ describe('the issue category carries forward from Flag', () => {
     expect((within(dialog).getByLabelText('What happened?') as HTMLTextAreaElement).value).toBe(
       'Half a sentence so far',
     );
-    expect((within(dialog).getByLabelText('Ask tournament control to come') as HTMLInputElement).checked).toBe(
-      controlBefore,
-    );
+    expect(
+      (within(dialog).getByLabelText('Ask tournament control to come') as HTMLInputElement).checked,
+    ).toBe(controlBefore);
   });
 
   test('a corrected category is the one that is used', async () => {
@@ -1885,7 +1968,9 @@ describe('the issue category carries forward from Flag', () => {
     openIssue('Equipment / technical issue');
     fireEvent.click(screen.getByRole('button', { name: 'Change type' }));
     fireEvent.change(screen.getByLabelText('Issue'), { target: { value: 'rules-question' } });
-    fireEvent.change(screen.getByLabelText('What happened?'), { target: { value: 'A ruling needs a director.' } });
+    fireEvent.change(screen.getByLabelText('What happened?'), {
+      target: { value: 'A ruling needs a director.' },
+    });
     fireEvent.click(screen.getByText('Save and request control'));
 
     await vi.waitFor(() =>
@@ -2060,7 +2145,9 @@ describe('operation notices', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Game' }));
       fireEvent.click(screen.getByRole('menuitem', { name: 'Replace question 1' }));
       const dialog = screen.getByRole('dialog', { name: 'Replace question 1' });
-      fireEvent.change(within(dialog).getByLabelText('What went wrong?'), { target: { value: 'Wrong packet' } });
+      fireEvent.change(within(dialog).getByLabelText('What went wrong?'), {
+        target: { value: 'Wrong packet' },
+      });
       fireEvent.click(within(dialog).getByRole('button', { name: 'Whole cycle' }));
       fireEvent.click(within(dialog).getByRole('button', { name: 'Replace question 1' }));
 
@@ -2069,7 +2156,9 @@ describe('operation notices', () => {
       });
 
       expect(screen.getByText('Nothing has been recorded on that question yet.')).toBeTruthy();
-      expect(screen.getByText('Nothing has been recorded on that question yet.').closest('[role="alert"]')).toBeTruthy();
+      expect(
+        screen.getByText('Nothing has been recorded on that question yet.').closest('[role="alert"]'),
+      ).toBeTruthy();
     } finally {
       vi.useRealTimers();
     }
@@ -2083,7 +2172,9 @@ describe('operation notices', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Game' }));
       fireEvent.click(screen.getByRole('menuitem', { name: 'Replace question 1' }));
       const dialog = screen.getByRole('dialog', { name: 'Replace question 1' });
-      fireEvent.change(within(dialog).getByLabelText('What went wrong?'), { target: { value: 'Wrong packet' } });
+      fireEvent.change(within(dialog).getByLabelText('What went wrong?'), {
+        target: { value: 'Wrong packet' },
+      });
       fireEvent.click(within(dialog).getByRole('button', { name: 'Whole cycle' }));
       fireEvent.click(within(dialog).getByRole('button', { name: 'Replace question 1' }));
       expect(screen.getByText('Nothing has been recorded on that question yet.')).toBeTruthy();
@@ -2109,7 +2200,15 @@ describe('operation notices', () => {
         requestedAt: '2026-08-11T14:42:00.000Z',
         requestedAtSource: 'server',
       };
-      renderScorer(formatFor(), undefined, undefined, undefined, undefined, {}, { controlRequest: outstanding });
+      renderScorer(
+        formatFor(),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        {},
+        { controlRequest: outstanding },
+      );
       pressControl('Players');
       addMissingPlayer('Ninety Six lineup', 'Alex Brown');
 
@@ -2138,7 +2237,9 @@ describe('operation notices', () => {
     try {
       renderScorer(formatFor(), undefined, requestControl);
       openIssue();
-      fireEvent.change(screen.getByLabelText('What happened?'), { target: { value: 'The room lost Wi-Fi.' } });
+      fireEvent.change(screen.getByLabelText('What happened?'), {
+        target: { value: 'The room lost Wi-Fi.' },
+      });
       fireEvent.click(screen.getByText('Save and request control'));
 
       await vi.waitFor(() => expect(document.querySelector('.scorer-banner.is-warning')).toBeTruthy());
@@ -2168,9 +2269,17 @@ describe('operation notices', () => {
       kind: 'unreachable',
       error: 'Tournament control did not answer.',
     } satisfies HelpRequestResult);
-    renderScorer(formatFor(), undefined, requestControl, undefined, undefined, {}, {
-      controlRequest: { kind: 'unavailable' },
-    });
+    renderScorer(
+      formatFor(),
+      undefined,
+      requestControl,
+      undefined,
+      undefined,
+      {},
+      {
+        controlRequest: { kind: 'unavailable' },
+      },
+    );
     openIssue();
     fireEvent.change(screen.getByLabelText('What happened?'), { target: { value: 'The room lost Wi-Fi.' } });
     fireEvent.click(screen.getByText('Save and request control'));

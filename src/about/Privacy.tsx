@@ -63,8 +63,8 @@ export default function Privacy() {
         <section className="about-hero" aria-labelledby="privacy-title">
           <h1 id="privacy-title">Privacy</h1>
           <p className="about-hero-copy">
-            QBSheet has no user accounts, no analytics, and no application server. This page describes
-            what the software stores on a device and what a connected room transmits.
+            QBSheet has no user accounts, no analytics, and no application server. This page describes what
+            the software stores on a device and what a connected room transmits.
           </p>
           <ActionLinks slug={slug} />
         </section>
@@ -90,29 +90,27 @@ export default function Privacy() {
             <p className="about-kicker">On the device</p>
             <h2 id="storage-heading">Data stored on the device</h2>
             <p>
-              The following is stored in the browser of the device that scored the game and is
-              readable only by that browser.
+              The following is stored in the browser of the device that scored the game and is readable only
+              by that browser.
             </p>
           </div>
           <dl className="about-definition-list">
             <div>
               <dt>Games in progress</dt>
               <dd>
-                Each accepted question, written as it is scored, so that a reload or a closed tab does
-                not lose the round.
+                Each accepted question, written as it is scored, so that a reload or a closed tab does not
+                lose the round.
               </dd>
             </div>
             <div>
               <dt>Completed games</dt>
-              <dd>
-                Retained for seven days. Games entered manually are retained for thirty days.
-              </dd>
+              <dd>Retained for seven days. Games entered manually are retained for thirty days.</dd>
             </div>
             <div>
               <dt>Settings</dt>
               <dd>
-                The keyboard preference, progress through the guided practice game, and the tournament
-                server a room last paired with.
+                The keyboard preference, progress through the guided practice game, and the tournament server
+                a room last paired with.
               </dd>
             </div>
             <div>
@@ -133,20 +131,19 @@ export default function Privacy() {
           </div>
           <div className="about-prose">
             <p>
-              A room connected to tournament control communicates with the server the tournament
-              operates. That server is not run by this project, and QBSheet retains no copy of what it
-              receives.
+              A room connected to tournament control communicates with the server the tournament operates.
+              That server is not run by this project, and QBSheet retains no copy of what it receives.
             </p>
             <p>
-              The room sends the game: the scoresheet as it is filled in, and the completed result. It
-              also sends two further items. The scorekeeper&apos;s name, which tournament control
-              displays in its view of the rooms, and an opaque per-device identifier, used to determine
-              which device currently holds write access when two are open on one game.
+              The room sends the game: the scoresheet as it is filled in, and the completed result. It also
+              sends two further items. The scorekeeper&apos;s name, which tournament control displays in its
+              view of the rooms, and an opaque per-device identifier, used to determine which device currently
+              holds write access when two are open on one game.
             </p>
             <p>
-              Neither is a user account. Credentials, device identifiers, operator names, and server
-              addresses are not written into QBJ documents, log lines, or error messages, so an
-              exported scoresheet carries no access to the tournament.{' '}
+              Neither is a user account. Credentials, device identifiers, operator names, and server addresses
+              are not written into QBJ documents, log lines, or error messages, so an exported scoresheet
+              carries no access to the tournament.{' '}
               <a href={qbtcpDocsUrl}>The protocol&apos;s security model</a> states these rules in full.
             </p>
             <p>A room that is not connected transmits none of this.</p>
@@ -161,12 +158,12 @@ export default function Privacy() {
           <div className="about-prose">
             <p>
               Loading a website causes a request to the server hosting it, and web servers commonly log
-              requests. This applies to any deployment of QBSheet. The requests occur when the site
-              loads; scoring itself transmits nothing.
+              requests. This applies to any deployment of QBSheet. The requests occur when the site loads;
+              scoring itself transmits nothing.
             </p>
             <p>
-              A self-hosted copy places those logs under your own control, because the site is static
-              files on a host you choose. <a href={pageUrl(slug, 'self-host')}>Self-hosting guide</a>.
+              A self-hosted copy places those logs under your own control, because the site is static files on
+              a host you choose. <a href={pageUrl(slug, 'self-host')}>Self-hosting guide</a>.
             </p>
           </div>
         </section>
@@ -178,8 +175,8 @@ export default function Privacy() {
           </div>
           <div className="about-prose">
             <p>
-              QBSheet is open source. Each statement above describes code that can be read: what is
-              stored, what is transmitted, and the single module that makes network requests at all.{' '}
+              QBSheet is open source. Each statement above describes code that can be read: what is stored,
+              what is transmitted, and the single module that makes network requests at all.{' '}
               <a href={githubUrl}>Read the source</a>.
             </p>
             <p>Report anything on this page that the code does not support.</p>
@@ -189,8 +186,7 @@ export default function Privacy() {
         <section className="about-final" aria-labelledby="privacy-cta-heading">
           <h2 id="privacy-cta-heading">Other questions</h2>
           <p>
-            Devices, formats, files, and licensing are covered in the{' '}
-            <a href={pageUrl(slug, 'faq')}>FAQ</a>.
+            Devices, formats, files, and licensing are covered in the <a href={pageUrl(slug, 'faq')}>FAQ</a>.
           </p>
           <ActionLinks slug={slug} />
         </section>

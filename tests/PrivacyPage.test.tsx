@@ -70,7 +70,9 @@ describe('the privacy page', () => {
     const said = words(storage);
     expect(said).toContain('Retained for seven days');
     expect(said).toContain('retained for thirty days');
-    expect(said).toContain("Clearing the browser's data for the site removes the local copy from that browser");
+    expect(said).toContain(
+      "Clearing the browser's data for the site removes the local copy from that browser",
+    );
     expect(said).toContain(
       'Connected tournament servers may retain data they have received under their operators’ policies',
     );
@@ -79,7 +81,9 @@ describe('the privacy page', () => {
   test('discloses what a connected room sends and who receives it', () => {
     const { container } = render(<Privacy />);
 
-    expect(screen.getByRole('heading', { level: 2, name: 'Data sent by a connected room' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'Data sent by a connected room' }),
+    ).toBeInTheDocument();
 
     const connected = words(container.querySelector('.about-connected'));
     // The disclosure. A page listing only absences would be incomplete here.
@@ -143,7 +147,15 @@ describe('the privacy page', () => {
     const { container } = render(<Privacy />);
     const said = words(container).toLowerCase();
 
-    for (const assumption of ['naqt', 'acf', 'power', 'neg', 'bounce', 'four players a side', 'between tossups']) {
+    for (const assumption of [
+      'naqt',
+      'acf',
+      'power',
+      'neg',
+      'bounce',
+      'four players a side',
+      'between tossups',
+    ]) {
       expect(said).not.toContain(assumption);
     }
   });

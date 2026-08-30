@@ -386,7 +386,10 @@ describe('the code goes nowhere', () => {
     expect(JSON.stringify(errorLog.entries())).not.toContain(pairingCode);
 
     // And the diagnostics file, which is the thing that actually gets emailed to a stranger.
-    const bundle = buildDiagnostics({ server: { address: control, protocol: 'QBTCP' }, roomName: 'Room 204' });
+    const bundle = buildDiagnostics({
+      server: { address: control, protocol: 'QBTCP' },
+      roomName: 'Room 204',
+    });
     expect(JSON.stringify(bundle)).not.toContain(pairingCode);
     expect(findLeaks(bundle, [roomToken, pairingCode])).toEqual([]);
 

@@ -5,18 +5,13 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { describe, expect, test, vi } from 'vitest';
-import AssignmentProblemDialog, {
-  assignmentLine,
-  problemMessage,
-} from '../src/app/AssignmentProblemDialog';
+import AssignmentProblemDialog, { assignmentLine, problemMessage } from '../src/app/AssignmentProblemDialog';
 import { HelpRequestCategory, HelpRequestResult } from '../src/app/HelpRequests';
 import { validPackage } from './packages';
 
 type ReportProblem = NonNullable<ComponentProps<typeof AssignmentProblemDialog>['onReportProblem']>;
 
-function open(
-  onReportProblem: ReportProblem,
-) {
+function open(onReportProblem: ReportProblem) {
   const onSent = vi.fn();
   const onClose = vi.fn();
   render(
@@ -55,10 +50,12 @@ describe('the wrong-assignment report', () => {
   });
 
   test('reports the selected problem with the assignment attached and then closes', async () => {
-    const onReportProblem = vi.fn(async (_category: HelpRequestCategory, _message: string): Promise<HelpRequestResult> => ({
-      kind: 'accepted',
-      request: { category: 'question-packet', message: 'reported', id: 'help-1' },
-    }));
+    const onReportProblem = vi.fn(
+      async (_category: HelpRequestCategory, _message: string): Promise<HelpRequestResult> => ({
+        kind: 'accepted',
+        request: { category: 'question-packet', message: 'reported', id: 'help-1' },
+      }),
+    );
     const { onSent, onClose } = open(onReportProblem);
 
     await press('Wrong packet');
@@ -76,7 +73,10 @@ describe('the wrong-assignment report', () => {
   });
 
   test('keeps failure truthful and does not claim the request was delivered', async () => {
-    const { onClose } = open(async () => ({ kind: 'unreachable', error: 'Tournament control did not answer.' }));
+    const { onClose } = open(async () => ({
+      kind: 'unreachable',
+      error: 'Tournament control did not answer.',
+    }));
 
     await press('Wrong teams');
     await press('Tell tournament control');

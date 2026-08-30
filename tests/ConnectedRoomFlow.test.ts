@@ -74,7 +74,9 @@ describe('durable startup routing for a paired room', () => {
   });
 
   test('an unreadable record named by the connection goes to Home', () => {
-    expect(screenAfterLoad(connection, [], [{ id: 'game-1', readability: 'too-new', storedVersion: 99 }])).toEqual({
+    expect(
+      screenAfterLoad(connection, [], [{ id: 'game-1', readability: 'too-new', storedVersion: 99 }]),
+    ).toEqual({
       kind: 'home',
     });
   });

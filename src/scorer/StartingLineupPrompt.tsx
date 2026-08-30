@@ -121,7 +121,11 @@ function TeamStarters(props: {
         {starters.length > 0 ? (
           <ul className="scorer-lineup-list">
             {starters.map((name, seat) => (
-              <li key={name} ref={motion.rowRef(name)} className={motion.rowClassName(name, 'scorer-lineup-entry')}>
+              <li
+                key={name}
+                ref={motion.rowRef(name)}
+                className={motion.rowClassName(name, 'scorer-lineup-entry')}
+              >
                 {/* Inside the row rather than beside it, so the number travels with the player. */}
                 <span className="scorer-lineup-seat" aria-hidden="true">
                   {seat + 1}
@@ -229,7 +233,9 @@ function TeamStarters(props: {
               maxLength={playerNameMaxLength}
               onChange={(event) => setNewPlayer(event.target.value)}
               onKeyDown={handleAddKeyDown}
-              aria-describedby={newPlayer !== '' && validation.problem ? `scorer-start-add-error-${side}` : undefined}
+              aria-describedby={
+                newPlayer !== '' && validation.problem ? `scorer-start-add-error-${side}` : undefined
+              }
             />
             <button type="submit" className="scorer-choice" disabled={validation.problem !== undefined}>
               Add
@@ -250,7 +256,16 @@ function TeamStarters(props: {
 }
 
 export default function StartingLineupPrompt(props: IStartingLineupPromptProps) {
-  const { left, right, maximumActive, needed, procedure, requiredStarterCount = {}, onAddPlayer, onConfirm } = props;
+  const {
+    left,
+    right,
+    maximumActive,
+    needed,
+    procedure,
+    requiredStarterCount = {},
+    onAddPlayer,
+    onConfirm,
+  } = props;
   const [chosen, setChosen] = useState<Record<LeftOrRight, string[]>>({ left: [], right: [] });
   const [confirmationProblem, setConfirmationProblem] = useState('');
 

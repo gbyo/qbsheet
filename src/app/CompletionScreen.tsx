@@ -54,7 +54,10 @@ function timeOfDay(iso: string | undefined): string {
 
 export default function CompletionScreen(props: {
   record: IStoredGameRecord;
-  onUpdate: (recordId: string, change: Partial<IStoredGameRecord>) => boolean | void | Promise<boolean | void>;
+  onUpdate: (
+    recordId: string,
+    change: Partial<IStoredGameRecord>,
+  ) => boolean | void | Promise<boolean | void>;
   /** What leaving this screen is called. A connected room is going back to its room, not home. */
   continueLabel?: string;
   /** Reopen the saved game in the scorer so the result can be checked or corrected. */
@@ -143,7 +146,11 @@ export default function CompletionScreen(props: {
   };
 
   const qbjButton = (
-    <button type="button" className={`shell-button${downloadIsPrimary ? ' is-primary' : ''}`} onClick={download}>
+    <button
+      type="button"
+      className={`shell-button${downloadIsPrimary ? ' is-primary' : ''}`}
+      onClick={download}
+    >
       {record.qbjDownloadedAt
         ? 'Download QBJ again'
         : optionalCopy
@@ -175,11 +182,17 @@ export default function CompletionScreen(props: {
         <div className="final-handoff">
           <p className="shell-hint">Downloaded at {timeOfDay(record.qbjDownloadedAt)}</p>
           {optionalCopy || delivered ? (
-            <p className="final-ok" role="status">A copy of this result is in your downloads.</p>
+            <p className="final-ok" role="status">
+              A copy of this result is in your downloads.
+            </p>
           ) : !requiresHandoffAcknowledgement ? (
-            <p className="final-ok" role="status">The QBJ is ready to hand over.</p>
+            <p className="final-ok" role="status">
+              The QBJ is ready to hand over.
+            </p>
           ) : record.handoffAcknowledgedAt ? (
-            <p className="final-ok" role="status">Handoff confirmed at {timeOfDay(record.handoffAcknowledgedAt)}</p>
+            <p className="final-ok" role="status">
+              Handoff confirmed at {timeOfDay(record.handoffAcknowledgedAt)}
+            </p>
           ) : (
             <>
               <p>After you upload the file:</p>
@@ -193,19 +206,28 @@ export default function CompletionScreen(props: {
               </button>
               {handoffFailed && (
                 <p className="shell-warning" role="alert">
-                  QBSheet could not save that confirmation. Try again; finishing remains locked until it is recorded.
+                  QBSheet could not save that confirmation. Try again; finishing remains locked until it is
+                  recorded.
                 </p>
               )}
             </>
           )}
         </div>
       )}
-      {qbjRecordPending && <p className="shell-hint" role="status">Recording the QBJ download…</p>}
+      {qbjRecordPending && (
+        <p className="shell-hint" role="status">
+          Recording the QBJ download…
+        </p>
+      )}
       {qbjRecordFailed && (
         <div className="shell-warning" role="alert">
           <p>The QBJ was downloaded, but QBSheet could not record that durable backup.</p>
           {qbjAttemptAt && (
-            <button type="button" className="shell-button" onClick={() => void recordQbjDownload(qbjAttemptAt)}>
+            <button
+              type="button"
+              className="shell-button"
+              onClick={() => void recordQbjDownload(qbjAttemptAt)}
+            >
               Retry recording the download
             </button>
           )}
@@ -249,9 +271,9 @@ export default function CompletionScreen(props: {
           )}
           {record.serverDelivery === 'pending' && (
             <p className="final-pending">
-              Tournament control has not received the result yet. It is saved on this device, and QBSheet
-              will keep trying automatically while it is open. You can also retry from Recent Games or hand
-              over the QBJ file.
+              Tournament control has not received the result yet. It is saved on this device, and QBSheet will
+              keep trying automatically while it is open. You can also retry from Recent Games or hand over
+              the QBJ file.
             </p>
           )}
           {record.serverDelivery === 'rejected' && (
@@ -271,7 +293,7 @@ export default function CompletionScreen(props: {
         </div>
       )}
 
-      {(optionalCopy || delivered) ? (
+      {optionalCopy || delivered ? (
         <details className="shell-section final-copy-details">
           <summary className="shell-heading">Download or export a copy</summary>
           <div className="final-copy-content">
@@ -328,7 +350,11 @@ export default function CompletionScreen(props: {
               : `Download the QBJ${requiresHandoffAcknowledgement ? ' and confirm the handoff' : ''} before finishing.`}
           </p>
         )}
-        <button type="button" className="shell-button shell-button-quiet" onClick={() => void onBackToScorekeeper()}>
+        <button
+          type="button"
+          className="shell-button shell-button-quiet"
+          onClick={() => void onBackToScorekeeper()}
+        >
           Back to scorekeeper
         </button>
         {!delivered && (

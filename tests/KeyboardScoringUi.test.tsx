@@ -35,7 +35,14 @@ afterEach(() => {
 /** Press one key at the document. */
 async function pressRawKey(
   code: string,
-  options: { shift?: boolean; alt?: boolean; ctrl?: boolean; meta?: boolean; repeat?: boolean; key?: string } = {},
+  options: {
+    shift?: boolean;
+    alt?: boolean;
+    ctrl?: boolean;
+    meta?: boolean;
+    repeat?: boolean;
+    key?: string;
+  } = {},
 ): Promise<void> {
   await act(async () => {
     fireEvent.keyDown(document, {
@@ -60,7 +67,10 @@ async function pressSequence(number: number, action: string): Promise<void> {
  * Keep the older seat-code call sites readable while the cases migrate to the public numeric scheme.
  * The application itself only sees the two numeric events emitted here.
  */
-async function pressSeatCode(code: string, options: { shift?: boolean; alt?: boolean; ctrl?: boolean; meta?: boolean; repeat?: boolean } = {}): Promise<void> {
+async function pressSeatCode(
+  code: string,
+  options: { shift?: boolean; alt?: boolean; ctrl?: boolean; meta?: boolean; repeat?: boolean } = {},
+): Promise<void> {
   const numbers: Record<string, number> = {
     KeyA: 1,
     KeyS: 2,
@@ -88,7 +98,14 @@ async function pressSeatCode(code: string, options: { shift?: boolean; alt?: boo
 
 async function pressKey(
   code: string,
-  options: { shift?: boolean; alt?: boolean; ctrl?: boolean; meta?: boolean; repeat?: boolean; key?: string } = {},
+  options: {
+    shift?: boolean;
+    alt?: boolean;
+    ctrl?: boolean;
+    meta?: boolean;
+    repeat?: boolean;
+    key?: string;
+  } = {},
 ): Promise<void> {
   if (/^(?:Key[ASDFJKL]|Semicolon)$/.test(code)) {
     await pressSeatCode(code, options);
@@ -269,7 +286,9 @@ describe('the action keys', () => {
     await openScoringWithKeyboard();
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Sarah Mitchell 0 after readout wrong, no penalty' }));
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Sarah Mitchell 0 after readout wrong, no penalty' }),
+      );
     });
     await pressKey('KeyA');
 
@@ -387,7 +406,9 @@ describe('shortcuts stay silent while somebody is typing', () => {
 
     // A map that lied about the current state would be worse than no map, because it is what somebody
     // checks when they are unsure.
-    expect(within(screen.getByLabelText('Keyboard scoring')).getByText(/Finish what is open first/)).toBeInTheDocument();
+    expect(
+      within(screen.getByLabelText('Keyboard scoring')).getByText(/Finish what is open first/),
+    ).toBeInTheDocument();
   });
 
   test('a keystroke aimed at a text field belongs to the field', async () => {

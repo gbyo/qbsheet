@@ -29,13 +29,7 @@
  */
 import { IGameDefinition } from '../../game/GameDefinition';
 import { HelpRequestCategory } from '../../app/HelpRequests';
-import {
-  IQbtcpDiscovery,
-  IQbtcpRoutes,
-  legacyRoutes,
-  qbtcpRoutes,
-  supports,
-} from '../../qbtcp/QbtcpRoutes';
+import { IQbtcpDiscovery, IQbtcpRoutes, legacyRoutes, qbtcpRoutes, supports } from '../../qbtcp/QbtcpRoutes';
 import { assignmentToGamePackage, qbtcpAssignmentToDefinition } from './FruityGameSource';
 import {
   ApiResult,
@@ -109,9 +103,7 @@ export function readAssignmentStatus(value: unknown): {
   const sessionId = rawSession ? stringOf(rawSession.session_id) : undefined;
   const rawNext = isRecord(value.next) ? value.next : null;
   const nextAssignmentLabel =
-    rawNext && typeof rawNext.label === 'string' && rawNext.label.trim() !== ''
-      ? rawNext.label
-      : undefined;
+    rawNext && typeof rawNext.label === 'string' && rawNext.label.trim() !== '' ? rawNext.label : undefined;
   return {
     state: readAssignmentState(value.state),
     session: sessionId ? { sessionId, resumable: rawSession?.resumable !== false } : null,
@@ -383,7 +375,11 @@ export class QbtcpAdapter extends BaseAdapter {
 
     // A credential refusal or an unreachable server is this room's answer, whichever endpoint it
     // came from. Anything else about the status endpoint alone is survivable, so it falls through.
-    if (status && !status.ok && (status.status === undefined || status.status === 401 || status.status === 403)) {
+    if (
+      status &&
+      !status.ok &&
+      (status.status === undefined || status.status === 401 || status.status === 403)
+    ) {
       return status;
     }
     const operational = status?.ok ? readAssignmentStatus(status.value) : null;
@@ -398,7 +394,9 @@ export class QbtcpAdapter extends BaseAdapter {
           session: operational.session,
           ...(operational.blockedReason ? { blockedReason: operational.blockedReason } : {}),
           ...(operational.blockedMessage ? { blockedMessage: operational.blockedMessage } : {}),
-          ...(operational.nextAssignmentLabel ? { nextAssignmentLabel: operational.nextAssignmentLabel } : {}),
+          ...(operational.nextAssignmentLabel
+            ? { nextAssignmentLabel: operational.nextAssignmentLabel }
+            : {}),
         },
       };
     }
@@ -417,7 +415,9 @@ export class QbtcpAdapter extends BaseAdapter {
           state: operational?.state ?? 'none',
           definition: null,
           session: operational?.session ?? null,
-          ...(operational?.nextAssignmentLabel ? { nextAssignmentLabel: operational.nextAssignmentLabel } : {}),
+          ...(operational?.nextAssignmentLabel
+            ? { nextAssignmentLabel: operational.nextAssignmentLabel }
+            : {}),
         },
       };
     }
@@ -431,7 +431,9 @@ export class QbtcpAdapter extends BaseAdapter {
           state: 'assigned',
           definition: null,
           session: operational?.session ?? null,
-          ...(operational?.nextAssignmentLabel ? { nextAssignmentLabel: operational.nextAssignmentLabel } : {}),
+          ...(operational?.nextAssignmentLabel
+            ? { nextAssignmentLabel: operational.nextAssignmentLabel }
+            : {}),
           errors: opened.errors,
         },
       };
@@ -444,8 +446,12 @@ export class QbtcpAdapter extends BaseAdapter {
           state: 'assigned',
           definition: null,
           session: operational?.session ?? null,
-          ...(operational?.nextAssignmentLabel ? { nextAssignmentLabel: operational.nextAssignmentLabel } : {}),
-          errors: ['Tournament control sent more than one game for this room. Ask tournament control to reissue the assignment.'],
+          ...(operational?.nextAssignmentLabel
+            ? { nextAssignmentLabel: operational.nextAssignmentLabel }
+            : {}),
+          errors: [
+            'Tournament control sent more than one game for this room. Ask tournament control to reissue the assignment.',
+          ],
         },
       };
     }
@@ -478,7 +484,10 @@ export class QbtcpAdapter extends BaseAdapter {
       headers: this.roomHeaders(identity, 'application/json'),
       // Omitted rather than empty when there is none. An empty string is a device identifier that
       // every device without one shares, and the server arbitrates writer ownership by this field.
-      body: JSON.stringify({ match_id: matchId, ...(identity.deviceId ? { device_id: identity.deviceId } : {}) }),
+      body: JSON.stringify({
+        match_id: matchId,
+        ...(identity.deviceId ? { device_id: identity.deviceId } : {}),
+      }),
     });
     if (!result.ok) return result;
     const body = isRecord(result.value) ? result.value : {};
@@ -497,7 +506,10 @@ export class QbtcpAdapter extends BaseAdapter {
     const result = await this.request<unknown>(`${this.routes.session(credentials.sessionId)}/writer`, {
       method: 'POST',
       headers: this.sessionHeaders(credentials, 'application/json'),
-      body: JSON.stringify({ ...(identity.deviceId ? { device_id: identity.deviceId } : {}), take_over: true }),
+      body: JSON.stringify({
+        ...(identity.deviceId ? { device_id: identity.deviceId } : {}),
+        take_over: true,
+      }),
     });
     if (!result.ok) return result;
     const body = isRecord(result.value) ? result.value : {};
@@ -539,7 +551,10 @@ export class QbtcpAdapter extends BaseAdapter {
     return this.guard('result', 'result submission', () => this.sendResult(credentials, qbj));
   }
 
-  private async sendResult(credentials: ISessionCredentials, qbj: object): Promise<ApiResult<IResultReceipt>> {
+  private async sendResult(
+    credentials: ISessionCredentials,
+    qbj: object,
+  ): Promise<ApiResult<IResultReceipt>> {
     const result = await this.request<unknown>(this.routes.result(credentials.sessionId), {
       method: 'POST',
       headers: this.sessionHeaders(credentials, qbjMediaType),
@@ -655,7 +670,9 @@ export class LegacyAdapter extends BaseAdapter {
             resumable: rawSession?.finalReceived !== true,
             ...(stringOf(rawSession?.status) ? { status: stringOf(rawSession?.status) } : {}),
             finalReceived: rawSession?.finalReceived === true,
-            ...(stringOf(rawSession?.rejectionReason) ? { rejectionReason: stringOf(rawSession?.rejectionReason) } : {}),
+            ...(stringOf(rawSession?.rejectionReason)
+              ? { rejectionReason: stringOf(rawSession?.rejectionReason) }
+              : {}),
           }
         : null;
 
@@ -723,7 +740,8 @@ export class LegacyAdapter extends BaseAdapter {
   async takeWriter(): Promise<ApiResult<IOpenedSession>> {
     return {
       ok: false,
-      error: 'This tournament control cannot move a game between devices. Ask tournament control to reassign the room.',
+      error:
+        'This tournament control cannot move a game between devices. Ask tournament control to reassign the room.',
     };
   }
 

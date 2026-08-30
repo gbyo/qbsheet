@@ -1,8 +1,11 @@
 import { describe, expect, test, vi } from 'vitest';
-import { completedGameRetentionMs, GameStore, IStoredGameRecord, memoryGameStore } from '../src/game/GameStore';
 import {
-  ResultDeliveryService,
-} from '../src/app/ResultDelivery';
+  completedGameRetentionMs,
+  GameStore,
+  IStoredGameRecord,
+  memoryGameStore,
+} from '../src/game/GameStore';
+import { ResultDeliveryService } from '../src/app/ResultDelivery';
 import {
   IResultDeliveryCapabilityStorage,
   ResultDeliveryCapabilityStore,
@@ -74,9 +77,11 @@ const accepted = (extra: Record<string, unknown> = {}) => ({
 
 describe('normalizing completed-result delivery', () => {
   test('accepted false is a rejection even when HTTP succeeded', () => {
-    expect(
-      classifyFinalDelivery({ ok: true, value: { accepted: false, duplicate: false } }),
-    ).toMatchObject({ delivery: 'rejected', attempted: true, retryable: false });
+    expect(classifyFinalDelivery({ ok: true, value: { accepted: false, duplicate: false } })).toMatchObject({
+      delivery: 'rejected',
+      attempted: true,
+      retryable: false,
+    });
   });
 
   test('duplicate receipt is successful delivery', () => {
@@ -110,11 +115,15 @@ describe('normalizing completed-result delivery', () => {
       delivery: 'rejected',
       retryable: false,
     });
-    expect(classifyFinalDelivery({ ok: false, status: 403, error: 'Origin is not approved.' })).toMatchObject({
-      delivery: 'rejected',
-      retryable: true,
-    });
-    expect(classifyFinalDelivery({ ok: false, status: 409, error: 'Another device is scoring.' })).toMatchObject({
+    expect(classifyFinalDelivery({ ok: false, status: 403, error: 'Origin is not approved.' })).toMatchObject(
+      {
+        delivery: 'rejected',
+        retryable: true,
+      },
+    );
+    expect(
+      classifyFinalDelivery({ ok: false, status: 409, error: 'Another device is scoring.' }),
+    ).toMatchObject({
       delivery: 'rejected',
       retryable: true,
     });
@@ -197,7 +206,9 @@ describe('bounded result-delivery ledger and private retry capability', () => {
     const { store, record } = await completedStore();
     const capabilities = new ResultDeliveryCapabilityStore(new MemoryStorage(), capabilityClock);
     capabilities.remember(record.id, capability, record.completedAt!);
-    const service = new ResultDeliveryService(store, capabilities, () => fakeClient(vi.fn(async () => accepted())));
+    const service = new ResultDeliveryService(store, capabilities, () =>
+      fakeClient(vi.fn(async () => accepted())),
+    );
     const pending = await store.update(record.id, {
       serverDelivery: 'pending',
       serverDeliveryLedger: { attemptCount: 1, retryable: true, outcome: 'pending' },
@@ -251,10 +262,8 @@ describe('bounded result-delivery ledger and private retry capability', () => {
     const storage = new MemoryStorage();
     const capabilities = new ResultDeliveryCapabilityStore(storage, capabilityClock);
     capabilities.remember(record.id, capability, record.completedAt!);
-    const service = new ResultDeliveryService(
-      store,
-      capabilities,
-      () => fakeClient(vi.fn(async () => accepted({ matchId: 'sm-4471', fingerprint: 'fp-1' }))),
+    const service = new ResultDeliveryService(store, capabilities, () =>
+      fakeClient(vi.fn(async () => accepted({ matchId: 'sm-4471', fingerprint: 'fp-1' }))),
     );
 
     const result = await service.retry(record.id, new Date('2026-08-11T14:01:00.000Z'));
@@ -285,7 +294,11 @@ describe('bounded result-delivery ledger and private retry capability', () => {
 
     // The active room may now have a different game, but the old record id still has its own
     // private session capability.
-    capabilities.remember(second.record.id, { ...capability, sessionId: 'session-2' }, second.record.completedAt!);
+    capabilities.remember(
+      second.record.id,
+      { ...capability, sessionId: 'session-2' },
+      second.record.completedAt!,
+    );
     expect(capabilities.has(first.record.id)).toBe(true);
     expect(capabilities.has(second.record.id)).toBe(true);
     await serviceAfterReload.retry(first.record.id);
@@ -336,23 +349,24 @@ describe('bounded result-delivery ledger and private retry capability', () => {
     const storage = new MemoryStorage();
     const capabilities = new ResultDeliveryCapabilityStore(storage, capabilityClock);
     capabilities.remember(record.id, capability, record.completedAt!);
-    const service = new ResultDeliveryService(
-      store,
-      capabilities,
-      () =>
-        fakeClient(
-          vi.fn(async () => ({
-            ok: false as const,
-            unsupported: true,
-            error: 'Tournament control does not offer result on this connection.',
-          })),
-        ),
+    const service = new ResultDeliveryService(store, capabilities, () =>
+      fakeClient(
+        vi.fn(async () => ({
+          ok: false as const,
+          unsupported: true,
+          error: 'Tournament control does not offer result on this connection.',
+        })),
+      ),
     );
 
     const result = await service.retry(record.id);
     expect(result?.unsupported).toBe(true);
     const updated = await store.get(record.id);
-    expect(updated?.serverDeliveryLedger).toMatchObject({ attemptCount: 0, outcome: 'unsupported', retryable: false });
+    expect(updated?.serverDeliveryLedger).toMatchObject({
+      attemptCount: 0,
+      outcome: 'unsupported',
+      retryable: false,
+    });
     expect(capabilities.has(record.id)).toBe(false);
   });
 
@@ -361,13 +375,17 @@ describe('bounded result-delivery ledger and private retry capability', () => {
     const storage = new MemoryStorage();
     const capabilities = new ResultDeliveryCapabilityStore(storage, capabilityClock);
     capabilities.remember(record.id, capability, record.completedAt!);
-    const service = new ResultDeliveryService(store, capabilities, () => fakeClient(vi.fn(async () => accepted())));
+    const service = new ResultDeliveryService(store, capabilities, () =>
+      fakeClient(vi.fn(async () => accepted())),
+    );
     await service.retry(record.id);
     const serialized = JSON.stringify(await store.get(record.id));
     expect(serialized).not.toContain(capability.sessionToken);
     expect(serialized).not.toContain(capability.sessionId);
     expect(JSON.stringify(record.finalQbj)).not.toContain(capability.sessionToken);
-    expect(findLeaks(buildDiagnostics({ now: new Date('2026-08-11T14:00:00.000Z') }), [capability.sessionToken])).toEqual([]);
+    expect(
+      findLeaks(buildDiagnostics({ now: new Date('2026-08-11T14:00:00.000Z') }), [capability.sessionToken]),
+    ).toEqual([]);
   });
 
   test('a refused private-capability write does not make the completed result unsafe', async () => {

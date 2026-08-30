@@ -91,9 +91,7 @@ export default function KeyboardMap(props: { context: KeyboardMapContext }) {
         // Said plainly rather than papered over with a new chord. A scorekeeper who knows the middle
         // tier is mouse-only will reach for the mouse; one who does not will hunt for a shortcut that
         // was never designed.
-        <p className="scorer-keymap-note">
-          {context.unreachable.join(', ')}: use the buttons.
-        </p>
+        <p className="scorer-keymap-note">{context.unreachable.join(', ')}: use the buttons.</p>
       )}
     </aside>
   );

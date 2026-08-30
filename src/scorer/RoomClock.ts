@@ -65,7 +65,8 @@ export function resetRoomClock(state: IRoomClockState): IRoomClockState {
 }
 
 export function elapsedRoomClock(state: IRoomClockState, now = Date.now()): number {
-  const running = state.status === 'running' && state.runningSince !== undefined ? now - state.runningSince : 0;
+  const running =
+    state.status === 'running' && state.runningSince !== undefined ? now - state.runningSince : 0;
   return Math.min(state.durationMs, Math.max(0, state.accumulatedMs + running));
 }
 
@@ -79,7 +80,10 @@ export function normalizeRoomClock(value: unknown, durationMs: number): IRoomClo
   if (
     raw.version !== roomClockVersion ||
     raw.durationMs !== durationMs ||
-    (raw.status !== 'idle' && raw.status !== 'running' && raw.status !== 'paused' && raw.status !== 'expired') ||
+    (raw.status !== 'idle' &&
+      raw.status !== 'running' &&
+      raw.status !== 'paused' &&
+      raw.status !== 'expired') ||
     typeof raw.accumulatedMs !== 'number' ||
     !Number.isFinite(raw.accumulatedMs) ||
     raw.accumulatedMs < 0
@@ -90,7 +94,10 @@ export function normalizeRoomClock(value: unknown, durationMs: number): IRoomClo
     return { version: roomClockVersion, durationMs, status: 'expired', accumulatedMs: durationMs };
   }
   if (raw.status === 'idle') return idleRoomClock(durationMs);
-  if (raw.status === 'running' && (typeof raw.runningSince !== 'number' || !Number.isFinite(raw.runningSince))) {
+  if (
+    raw.status === 'running' &&
+    (typeof raw.runningSince !== 'number' || !Number.isFinite(raw.runningSince))
+  ) {
     return idleRoomClock(durationMs);
   }
   if (raw.status === 'paused') {
@@ -161,7 +168,10 @@ export function loadRoomClock(
 ): IRoomClockState {
   if (!storage || gameKey === '') return idleRoomClock(durationMs);
   try {
-    return normalizeRoomClock(JSON.parse(storage.getItem(storageKey(gameKey, segment)) ?? 'null'), durationMs);
+    return normalizeRoomClock(
+      JSON.parse(storage.getItem(storageKey(gameKey, segment)) ?? 'null'),
+      durationMs,
+    );
   } catch {
     return idleRoomClock(durationMs);
   }

@@ -272,7 +272,9 @@ describe('the store, across a version change', () => {
     const packageValue = validPackage();
     const setup = setupFromPackage(packageValue);
     const records = new MemoryRecordStore<IStoredGameRecord>();
-    await records.put(storedGame(gameRecordVersion, { package: packageValue, setup }) as unknown as IStoredGameRecord);
+    await records.put(
+      storedGame(gameRecordVersion, { package: packageValue, setup }) as unknown as IStoredGameRecord,
+    );
 
     const resumed = (await new GameStore(records, nextBuild).list())[0];
     const game = deriveGame(resumed.package.scorekeeperFormat, resumed.setup, resumed.events);
@@ -320,7 +322,9 @@ describe('the store, across a version change', () => {
     await records.put(storedGame(gameRecordVersion) as unknown as IStoredGameRecord);
     const store = new GameStore(records, nextBuild);
 
-    const updated = await store.update('spring:round-3:room-204', { serverDeliveryDetail: 'updated directly' });
+    const updated = await store.update('spring:round-3:room-204', {
+      serverDeliveryDetail: 'updated directly',
+    });
 
     expect(updated?.version).toBe(gameRecordVersion + 1);
     expect((updated as unknown as RawRecord).deliveryAttempts).toBe(0);
@@ -368,7 +372,9 @@ describe('the store, across a version change', () => {
   test('a record this build cannot read survives a prune', async () => {
     const records = new MemoryRecordStore<IStoredGameRecord>();
     await records.put(
-      storedGame(gameRecordVersion + 99, { completedAt: '2020-01-01T00:00:00.000Z' }) as unknown as IStoredGameRecord,
+      storedGame(gameRecordVersion + 99, {
+        completedAt: '2020-01-01T00:00:00.000Z',
+      }) as unknown as IStoredGameRecord,
     );
     const store = new GameStore(records);
 

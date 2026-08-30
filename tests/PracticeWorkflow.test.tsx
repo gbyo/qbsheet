@@ -101,7 +101,9 @@ test('the right four in the wrong seats names the seat, the player in it, and wh
   fireEvent.click(start);
 
   const alert = screen.getByRole('alert');
-  expect(alert.textContent).toContain('Use the ↑/↓ controls to put Gibson, Jeremy, Owen and Lachlan in that order.');
+  expect(alert.textContent).toContain(
+    'Use the ↑/↓ controls to put Gibson, Jeremy, Owen and Lachlan in that order.',
+  );
   expect(screen.getByLabelText('Starting lineups')).toBeTruthy();
 
   // Bench the wrong order, then start the names in the order the guide lists.

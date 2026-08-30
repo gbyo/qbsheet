@@ -13,7 +13,11 @@ import { validPackage } from './packages';
 
 const start = new Date('2026-08-11T14:00:00.000Z');
 
-function pendingRecord(id: string, completedAt: string, attemptedAt = start.toISOString()): IStoredGameRecord {
+function pendingRecord(
+  id: string,
+  completedAt: string,
+  attemptedAt = start.toISOString(),
+): IStoredGameRecord {
   return {
     version: gameRecordVersion,
     id,
@@ -51,13 +55,7 @@ afterEach(() => {
 describe('automatic result retry schedule', () => {
   test('uses the specified backoff and caps at five minutes', () => {
     expect([1, 2, 3, 4, 5, 6, 20].map(automaticResultRetryDelayMs)).toEqual([
-      5_000,
-      15_000,
-      30_000,
-      60_000,
-      120_000,
-      300_000,
-      300_000,
+      5_000, 15_000, 30_000, 60_000, 120_000, 300_000, 300_000,
     ]);
     expect(automaticResultRetryAt(pendingRecord('one', start.toISOString()))).toBe(start.getTime() + 5_000);
   });
@@ -70,7 +68,11 @@ describe('automatic result retry schedule', () => {
     } as unknown as ResultDeliveryService;
     const onAttemptFinished = vi.fn(async () => undefined);
     renderHook(() =>
-      useAutomaticResultDelivery({ records: [pendingRecord('one', start.toISOString())], service, onAttemptFinished }),
+      useAutomaticResultDelivery({
+        records: [pendingRecord('one', start.toISOString())],
+        service,
+        onAttemptFinished,
+      }),
     );
 
     await act(async () => vi.advanceTimersByTimeAsync(4_999));

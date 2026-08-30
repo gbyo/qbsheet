@@ -112,7 +112,9 @@ export default function GameFileOpen(props: {
       }
     } catch (error: unknown) {
       const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-      setErrors(['QBSheet encountered an unexpected error while opening this file. Try another copy or ask tournament staff for the original file.']);
+      setErrors([
+        'QBSheet encountered an unexpected error while opening this file. Try another copy or ask tournament staff for the original file.',
+      ]);
       setDiagnostic(detail);
     } finally {
       readInFlight.current = false;
@@ -131,7 +133,8 @@ export default function GameFileOpen(props: {
     source: IQbjSource,
     index: number,
     overrides: IGameDefinitionOverrides,
-    state: MatchPlayState = source.candidates.find((candidate) => candidate.index === index)?.state ?? 'unplayed',
+    state: MatchPlayState = source.candidates.find((candidate) => candidate.index === index)?.state ??
+      'unplayed',
   ) => {
     const defined = chooseGame(source, index, overrides);
     if (defined.ok) {
@@ -165,19 +168,29 @@ export default function GameFileOpen(props: {
 
   const applyRules = async (format: IScorekeeperFormat) => {
     if (!needsRules) return;
-    await resolve(needsRules.source, needsRules.index, {
-      ...needsRules.overrides,
-      scorekeeperFormat: format,
-      timed: format.regulation.timed,
-    }, needsRules.state);
+    await resolve(
+      needsRules.source,
+      needsRules.index,
+      {
+        ...needsRules.overrides,
+        scorekeeperFormat: format,
+        timed: format.regulation.timed,
+      },
+      needsRules.state,
+    );
   };
 
   const applyRosters = async (rosters: Record<string, IRosterPlayer[]>) => {
     if (!needsRoster) return;
-    await resolve(needsRoster.source, needsRoster.index, {
-      ...needsRoster.overrides,
-      rosters: { ...needsRoster.overrides.rosters, ...rosters },
-    }, needsRoster.state);
+    await resolve(
+      needsRoster.source,
+      needsRoster.index,
+      {
+        ...needsRoster.overrides,
+        rosters: { ...needsRoster.overrides.rosters, ...rosters },
+      },
+      needsRoster.state,
+    );
   };
 
   const restorePicker = (pending: IPendingSetup) => {

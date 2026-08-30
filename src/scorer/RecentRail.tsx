@@ -83,7 +83,10 @@ function questionLines(question: IDerivedQuestion, teamNames: { left: string; ri
     lines.push({ what: missed.playerName ?? `${teamNames[missed.team]} wrong`, points: '0' });
   }
   if (question.bonus) {
-    lines.push({ what: `${teamNames[question.bonus.team]} bonus`, points: `+${question.bonus.controlledPoints}` });
+    lines.push({
+      what: `${teamNames[question.bonus.team]} bonus`,
+      points: `+${question.bonus.controlledPoints}`,
+    });
     if (question.bonus.bouncebackPoints > 0) {
       const other = question.bonus.team === 'left' ? 'right' : 'left';
       lines.push({ what: `${teamNames[other]} bounceback`, points: `+${question.bonus.bouncebackPoints}` });
@@ -140,13 +143,17 @@ export default function RecentRail(props: IRecentRailProps) {
   const { game, limit = 8, onInspect, emphasizeQuestion, motion } = props;
   const teamNames = { left: game.left.name, right: game.right.name };
   const recent = game.questions.slice(-limit).reverse();
-  const flaggedQuestions = new Set(game.notes.filter((note) => note.flagged).map((note) => note.questionNumber));
+  const flaggedQuestions = new Set(
+    game.notes.filter((note) => note.flagged).map((note) => note.questionNumber),
+  );
   const latest = recent[0] ?? (motion?.kind === 'undo' ? motion.snapshot : undefined);
   const latestLines = latest ? questionLines(latest, teamNames) : [];
   const latestSummary = latest
     ? latestLines.map((line) => `${line.what}${line.points ? ` ${line.points}` : ''}`).join(' · ')
     : 'Nothing scored yet';
-  const latestMarked = latest ? latest.openProtests > 0 || flaggedQuestions.has(latest.questionNumber) : false;
+  const latestMarked = latest
+    ? latest.openProtests > 0 || flaggedQuestions.has(latest.questionNumber)
+    : false;
 
   return (
     <aside className="scorer-rail" aria-label="Recent activity">
@@ -178,12 +185,16 @@ export default function RecentRail(props: IRecentRailProps) {
               ]
                 .filter(Boolean)
                 .join(', ');
-              const body = <QuestionBody question={question} teamNames={teamNames} marked={marked} statusText={status} />;
+              const body = (
+                <QuestionBody question={question} teamNames={teamNames} marked={marked} statusText={status} />
+              );
               const isMotionTarget = question.questionNumber === motion?.questionNumber;
 
               return (
                 <li
-                  key={isMotionTarget ? `${question.questionNumber}-${motion.token}` : question.questionNumber}
+                  key={
+                    isMotionTarget ? `${question.questionNumber}-${motion.token}` : question.questionNumber
+                  }
                   // The class is the whole emphasis: the button inside it is untouched, so a row being
                   // pointed at is still a row that opens the question when it is pressed.
                   className={[

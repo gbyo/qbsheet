@@ -165,8 +165,10 @@ export function clearGame(gameKey: string, storage: IStorageLike | null = browse
 export function exportJournals(storage: IStorageLike | null = browserStorage()): Record<string, string> {
   const found: Record<string, string> = {};
   try {
-    const enumerable = storage as (IStorageLike & { length?: number; key?: (index: number) => string | null }) | null;
-    if (!enumerable || typeof enumerable.length !== 'number' || typeof enumerable.key !== 'function') return found;
+    const enumerable = storage as
+      (IStorageLike & { length?: number; key?: (index: number) => string | null }) | null;
+    if (!enumerable || typeof enumerable.length !== 'number' || typeof enumerable.key !== 'function')
+      return found;
     for (let index = 0; index < enumerable.length; index += 1) {
       const key = enumerable.key(index);
       if (key === null || !key.startsWith(storagePrefix)) continue;

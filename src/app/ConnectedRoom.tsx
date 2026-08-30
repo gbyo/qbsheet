@@ -24,9 +24,7 @@ import { IPairedRoom } from './ConnectedSession';
 import { assignmentPollIntervalMs, forbiddenIn } from './useConnectedRuntime';
 import { connectionTimeline } from './ConnectionTimeline';
 import { HelpRequestCategory, HelpRequestResult } from './HelpRequests';
-import AssignmentProblemDialog, {
-  assignmentLine,
-} from './AssignmentProblemDialog';
+import AssignmentProblemDialog, { assignmentLine } from './AssignmentProblemDialog';
 import SettingsDialog, { ISettingsConnection } from './SettingsDialog';
 import NativeDialog from './NativeDialog';
 import { exchangePairingCode } from './ControlPairing';
@@ -49,7 +47,10 @@ export function assignmentStateKey(assignment: INormalizedAssignment | null): st
   if (!assignment) return 'none';
   if (assignment.state === 'held') return 'held';
   if (assignment.state === 'blocked') return 'blocked';
-  if (assignment.state === 'assigned' && (!assignment.definition || assignment.scheduledMatchId === undefined)) {
+  if (
+    assignment.state === 'assigned' &&
+    (!assignment.definition || assignment.scheduledMatchId === undefined)
+  ) {
     return `assigned-incomplete:${assignment.scheduledMatchId ?? 'unknown'}`;
   }
   if (assignment.state === 'none') return 'none';
@@ -76,7 +77,8 @@ export function checkStatusLine(state: {
   if (state.forbidden !== '') return 'Automatic checks paused · try tournament control again.';
   if (state.lastSuccessfulCheckAt === null) return 'Checking tournament control…';
   const age = Math.max(0, state.now - state.lastSuccessfulCheckAt);
-  if (state.failing) return `QBSheet will keep trying automatically · last successful check ${lastCheckLabel(age)}`;
+  if (state.failing)
+    return `QBSheet will keep trying automatically · last successful check ${lastCheckLabel(age)}`;
   return `QBSheet checks automatically · checked ${age < 45_000 ? 'just now' : lastCheckLabel(age)}`;
 }
 
@@ -118,7 +120,9 @@ function progressFor(record: IStoredGameRecord): string {
 }
 
 function safeAssignmentFailure(result: ApiResult<unknown>): string {
-  return result.ok ? 'Tournament control could not be reached.' : result.error || 'Tournament control could not be reached.';
+  return result.ok
+    ? 'Tournament control could not be reached.'
+    : result.error || 'Tournament control could not be reached.';
 }
 
 function safeStartFailure(result: ApiResult<unknown>): string {
@@ -373,7 +377,9 @@ export default function ConnectedRoom(props: {
         return;
       }
       if (current.value.scheduledMatchId !== expectedMatchId) {
-        setActionError('Tournament control changed this room’s game while it was starting. Check the game shown and start again.');
+        setActionError(
+          'Tournament control changed this room’s game while it was starting. Check the game shown and start again.',
+        );
         return;
       }
       const outcome = await onStart({
@@ -388,7 +394,9 @@ export default function ConnectedRoom(props: {
       if (!outcome.ok) setActionError(outcome.error);
     } catch {
       if (isCurrent()) {
-        setActionError('Tournament control could not start this game. No scoring has started. Try Start scoring again.');
+        setActionError(
+          'Tournament control could not start this game. No scoring has started. Try Start scoring again.',
+        );
       }
     } finally {
       if (startGeneration.current === generation) {
@@ -450,34 +458,48 @@ export default function ConnectedRoom(props: {
           {storageError}
         </p>
       )}
-      {notice !== '' && <p className="shell-notice" role="status">{notice}</p>}
+      {notice !== '' && (
+        <p className="shell-notice" role="status">
+          {notice}
+        </p>
+      )}
 
       {resumeRecord ? (
         <section className="shell-section room-resume" aria-labelledby="room-resume-heading">
-          <h2 id="room-resume-heading" className="shell-heading">Resume this game</h2>
+          <h2 id="room-resume-heading" className="shell-heading">
+            Resume this game
+          </h2>
           <p className="assignment-context">{assignmentLine(resumeRecord.package)}</p>
           <p className="assignment-matchup">{gamePackageMatchup(resumeRecord.package)}</p>
           <p className="shell-hint">{progressFor(resumeRecord)}</p>
           <div className="shell-actions">
-            <button type="button" className="shell-button is-primary" onClick={() => void onResume(resumeRecord)}>
+            <button
+              type="button"
+              className="shell-button is-primary"
+              onClick={() => void onResume(resumeRecord)}
+            >
               Resume scoring
             </button>
           </div>
         </section>
       ) : (
         <section className="shell-section room-assignment" aria-labelledby="room-assignment-heading">
-          <h2 id="room-assignment-heading" className="visually-hidden">Current assignment</h2>
+          <h2 id="room-assignment-heading" className="visually-hidden">
+            Current assignment
+          </h2>
           <div className="assignment-state" aria-live="polite">
             <div key={assignmentKey} className="assignment-state-body">
               {state === '' && assignmentDefinition ? (
                 <>
-                  <p className="assignment-context">
-                    {assignmentLine(assignmentDefinition)}
-                  </p>
+                  <p className="assignment-context">{assignmentLine(assignmentDefinition)}</p>
                   <p className="assignment-team">{assignmentDefinition.left.name}</p>
                   <p className="assignment-vs">vs</p>
                   <p className="assignment-team">{assignmentDefinition.right.name}</p>
-                  <p className={assignmentDefinition.round.packetName ? 'pregame-packet' : 'pregame-packet is-missing'}>
+                  <p
+                    className={
+                      assignmentDefinition.round.packetName ? 'pregame-packet' : 'pregame-packet is-missing'
+                    }
+                  >
                     {assignmentDefinition.round.packetName
                       ? /^packet\b/i.test(assignmentDefinition.round.packetName.trim())
                         ? assignmentDefinition.round.packetName
@@ -504,7 +526,9 @@ export default function ConnectedRoom(props: {
             <details className="assignment-details">
               <summary>Assignment details</summary>
               {assignmentDefinition.assumptions.map((assumption) => (
-                <p className="shell-hint" key={assumption}>{assumption}</p>
+                <p className="shell-hint" key={assumption}>
+                  {assumption}
+                </p>
               ))}
             </details>
           )}
@@ -525,7 +549,10 @@ export default function ConnectedRoom(props: {
                 disabled={starting}
                 onClick={() => {
                   if (!assignmentDefinition || assignment?.scheduledMatchId === undefined) return;
-                  setProblemAssignment({ packageValue: assignmentDefinition, scheduledMatchId: assignment.scheduledMatchId });
+                  setProblemAssignment({
+                    packageValue: assignmentDefinition,
+                    scheduledMatchId: assignment.scheduledMatchId,
+                  });
                 }}
               >
                 Something wrong?
@@ -536,14 +563,21 @@ export default function ConnectedRoom(props: {
       )}
 
       <div className="room-secondary-actions">
-        <button type="button" className="shell-button shell-button-quiet" onClick={onOtherScoring} disabled={starting}>
+        <button
+          type="button"
+          className="shell-button shell-button-quiet"
+          onClick={onOtherScoring}
+          disabled={starting}
+        >
           Other scoring options
         </button>
       </div>
 
       {forbidden !== '' && (
         <section className="shell-section room-recovery" aria-label="Tournament control recovery">
-          <p className="shell-warning" role="alert">{forbidden}</p>
+          <p className="shell-warning" role="alert">
+            {forbidden}
+          </p>
           <p className="shell-hint">This room is still paired. Automatic checks are paused.</p>
           <button type="button" className="shell-button" onClick={retryAssignment} disabled={busy}>
             Try tournament control again
@@ -574,9 +608,15 @@ export default function ConnectedRoom(props: {
         </section>
       )}
 
-      {actionError !== '' && <p className="shell-warning" role="alert">{actionError}</p>}
+      {actionError !== '' && (
+        <p className="shell-warning" role="alert">
+          {actionError}
+        </p>
+      )}
       {problemReceipt && problemReceipt.scheduledMatchId === assignment?.scheduledMatchId && (
-        <p className="shell-notice" role="status">{problemReceipt.message}</p>
+        <p className="shell-notice" role="status">
+          {problemReceipt.message}
+        </p>
       )}
 
       <UpdateNotice />
@@ -664,11 +704,13 @@ function RoomPairingRepair(props: {
   return (
     <NativeDialog title={`Pair ${room.roomName} again`} onClose={onClose} className="room-repair-dialog">
       <p className="shell-hint">
-        Tournament control no longer recognizes this room. The address and room are already known; enter
-        only the new pairing code.
+        Tournament control no longer recognizes this room. The address and room are already known; enter only
+        the new pairing code.
       </p>
       <form className="connect-form" onSubmit={(event) => void submit(event)}>
-        <label className="shell-label" htmlFor="room-repair-code">Pairing code</label>
+        <label className="shell-label" htmlFor="room-repair-code">
+          Pairing code
+        </label>
         <input
           id="room-repair-code"
           className="shell-input"
@@ -683,7 +725,11 @@ function RoomPairingRepair(props: {
           {busy ? 'Pairing…' : `Pair ${room.roomName} again`}
         </button>
       </form>
-      {error !== '' && <p className="shell-warning" role="alert">{error}</p>}
+      {error !== '' && (
+        <p className="shell-warning" role="alert">
+          {error}
+        </p>
+      )}
     </NativeDialog>
   );
 }

@@ -42,7 +42,9 @@ describe('the tournaments page', () => {
   test('states the scope, including the software the director has to run', () => {
     const { container } = render(<Tournaments />);
 
-    expect(screen.getByRole('heading', { level: 2, name: 'QBSheet and tournament control' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'QBSheet and tournament control' }),
+    ).toBeInTheDocument();
 
     const scope = container.querySelector('.about-split');
     for (const term of ['Tournament control', 'QBSheet', 'QBTCP', 'QBJ']) {
@@ -70,7 +72,9 @@ describe('the tournaments page', () => {
 
     // Persisting the assignment before scoring depends on a further network call is the durability
     // requirement the rest of the page rests on.
-    expect(words(flow)).toContain('stores it on the device before scoring depends on any further network call');
+    expect(words(flow)).toContain(
+      'stores it on the device before scoring depends on any further network call',
+    );
     // And a retry is deduplicated rather than filed twice, which is the result-identity rule.
     expect(words(flow)).toContain('identified as the same result rather than recorded as a second game');
   });
@@ -78,9 +82,7 @@ describe('the tournaments page', () => {
   test('documents the failure handling without overstating any of it', () => {
     const { container } = render(<Tournaments />);
 
-    expect(
-      screen.getByRole('heading', { level: 2, name: 'Connection failures' }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: 'Connection failures' })).toBeInTheDocument();
     for (const title of [
       'Network loss during a round',
       'A second device on the same game',
@@ -95,7 +97,9 @@ describe('the tournaments page', () => {
     const said = words(bands[0] ?? null);
     // Each of these is a documented protocol obligation rather than a hope.
     expect(said).toContain('Snapshots resume when the connection returns');
-    expect(said).toContain('A takeover is started by a person rather than resolved automatically between devices');
+    expect(said).toContain(
+      'A takeover is started by a person rather than resolved automatically between devices',
+    );
     expect(said).toContain('does not unmount the scorer or discard scored work');
     expect(said).toContain('Acceptance by the server is not a reason for a room to delete its local copy');
   });
@@ -105,7 +109,12 @@ describe('the tournaments page', () => {
 
     expect(screen.getByRole('heading', { level: 2, name: 'Requirements' })).toBeInTheDocument();
     const requirements = container.querySelector('.about-requirements');
-    for (const term of ['Tournament-control software', 'A browser per room', 'A secure origin', 'Pairing codes']) {
+    for (const term of [
+      'Tournament-control software',
+      'A browser per room',
+      'A secure origin',
+      'Pairing codes',
+    ]) {
       expect(within(requirements as HTMLElement).getByText(term, { selector: 'dt' })).toBeInTheDocument();
     }
     // The two that would otherwise strand somebody.
@@ -118,10 +127,14 @@ describe('the tournaments page', () => {
 
     // This is the page most likely to imply a server is required, so the alternative is a section
     // rather than a clause.
-    expect(screen.getByRole('heading', { level: 2, name: 'Scoring without a connection' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'Scoring without a connection' }),
+    ).toBeInTheDocument();
     const fallback = container.querySelector('.about-fallback');
     expect(words(fallback)).toContain('Connected scoring is one of three ways to start a game');
-    expect(words(fallback)).toContain('open a QBJ file or enter the teams, players, and scoring rules directly');
+    expect(words(fallback)).toContain(
+      'open a QBJ file or enter the teams, players, and scoring rules directly',
+    );
   });
 
   test('links out from two directories deep', () => {
@@ -204,7 +217,15 @@ describe('the tournaments page', () => {
 
     // The same editorial floor as every other page: nothing here may narrow QBSheet to one
     // tournament's rules.
-    for (const assumption of ['naqt', 'acf', 'power', 'neg', 'bounce', 'four players a side', 'between tossups']) {
+    for (const assumption of [
+      'naqt',
+      'acf',
+      'power',
+      'neg',
+      'bounce',
+      'four players a side',
+      'between tossups',
+    ]) {
       expect(said).not.toContain(assumption);
     }
   });

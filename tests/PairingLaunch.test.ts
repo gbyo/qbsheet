@@ -69,7 +69,10 @@ describe('reading a pairing launch fragment', () => {
     );
 
     // Normalized the same way a typed address is: the path prefix kept, the trailing slash dropped.
-    expect(result).toMatchObject({ kind: 'intent', intent: { server: 'http://tournament.local:8787/control' } });
+    expect(result).toMatchObject({
+      kind: 'intent',
+      intent: { server: 'http://tournament.local:8787/control' },
+    });
   });
 
   test('an unknown future parameter is ignored rather than obeyed', () => {
@@ -87,17 +90,37 @@ describe('reading a pairing launch fragment', () => {
 
 describe('refusing a pairing launch fragment', () => {
   const refusals: [string, string, string][] = [
-    ['an unsupported launch version', `v=2&server=${encodedServer}&code=${code}`, unsupportedPairingLaunchMessage],
-    ['a version that is not a number', `v=one&server=${encodedServer}&code=${code}`, unsupportedPairingLaunchMessage],
+    [
+      'an unsupported launch version',
+      `v=2&server=${encodedServer}&code=${code}`,
+      unsupportedPairingLaunchMessage,
+    ],
+    [
+      'a version that is not a number',
+      `v=one&server=${encodedServer}&code=${code}`,
+      unsupportedPairingLaunchMessage,
+    ],
     ['no version at all', `server=${encodedServer}&code=${code}`, invalidPairingLaunchMessage],
     ['a missing server', `v=1&code=${code}`, invalidPairingLaunchMessage],
     ['an empty server', `v=1&server=&code=${code}`, invalidPairingLaunchMessage],
     ['a missing code', `v=1&server=${encodedServer}`, invalidPairingLaunchMessage],
     ['an empty code', `v=1&server=${encodedServer}&code=`, invalidPairingLaunchMessage],
-    ['a code that is only whitespace', `v=1&server=${encodedServer}&code=%20%20`, invalidPairingLaunchMessage],
+    [
+      'a code that is only whitespace',
+      `v=1&server=${encodedServer}&code=%20%20`,
+      invalidPairingLaunchMessage,
+    ],
     ['malformed percent encoding', `v=1&server=%E0%A4%A&code=${code}`, invalidPairingLaunchMessage],
-    ['a duplicated code', `v=1&server=${encodedServer}&code=${code}&code=99999999`, invalidPairingLaunchMessage],
-    ['a duplicated server', `v=1&server=${encodedServer}&server=${encodedServer}&code=${code}`, invalidPairingLaunchMessage],
+    [
+      'a duplicated code',
+      `v=1&server=${encodedServer}&code=${code}&code=99999999`,
+      invalidPairingLaunchMessage,
+    ],
+    [
+      'a duplicated server',
+      `v=1&server=${encodedServer}&server=${encodedServer}&code=${code}`,
+      invalidPairingLaunchMessage,
+    ],
     ['a duplicated version', `v=1&v=1&server=${encodedServer}&code=${code}`, invalidPairingLaunchMessage],
     [
       'a server scheme this application does not speak',
@@ -114,7 +137,11 @@ describe('refusing a pairing launch fragment', () => {
       `v=1&server=${encodeURIComponent('javascript:alert(1)')}&code=${code}`,
       invalidPairingLaunchMessage,
     ],
-    ['an empty room, which is ambiguous rather than absent', `${validQuery}&room=`, invalidPairingLaunchMessage],
+    [
+      'an empty room, which is ambiguous rather than absent',
+      `${validQuery}&room=`,
+      invalidPairingLaunchMessage,
+    ],
     ['an over-long code', `v=1&server=${encodedServer}&code=${'9'.repeat(65)}`, invalidPairingLaunchMessage],
   ];
 
@@ -219,7 +246,11 @@ describe('consuming the fragment from the address bar', () => {
   });
 
   test('an unsupported launch version is scrubbed, and says so without the code', () => {
-    window.history.replaceState(null, '', `${homePath}${fragment(`v=9&server=${encodedServer}&code=${code}`)}`);
+    window.history.replaceState(
+      null,
+      '',
+      `${homePath}${fragment(`v=9&server=${encodedServer}&code=${code}`)}`,
+    );
 
     const result = consumePairingLaunch();
 

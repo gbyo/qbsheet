@@ -114,10 +114,7 @@ export default function WikiPage({
               <h1>{page.title}</h1>
               <EditLink href={editUrl} />
             </div>
-            <div
-              className="about-wiki-prose"
-              dangerouslySetInnerHTML={{ __html: page.bodyHtml }}
-            />
+            <div className="about-wiki-prose" dangerouslySetInnerHTML={{ __html: page.bodyHtml }} />
           </article>
         </div>
       </main>

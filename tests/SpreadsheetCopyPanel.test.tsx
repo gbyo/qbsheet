@@ -40,7 +40,9 @@ describe('SpreadsheetCopyPanel', () => {
     expect(screen.getByRole('status')).toHaveTextContent('NEW BLANK TAB');
     expect(screen.getByRole('status')).toHaveTextContent('A1');
     expect(screen.getByRole('status')).toHaveTextContent('NEW TAB → A1 → PASTE');
-    expect(screen.getByRole('status')).toHaveTextContent('Never paste into a tab that already contains a QBSheet game.');
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Never paste into a tab that already contains a QBSheet game.',
+    );
   });
 
   test('shows the complete manual-select fallback when clipboard access fails', async () => {

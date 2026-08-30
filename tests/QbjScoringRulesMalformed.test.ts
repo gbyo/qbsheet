@@ -197,7 +197,11 @@ describe('QBJ scoring-rule shape is validated without familiar-format guesses', 
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
     expect(parsed.format.bonus.enabled).toBe(false);
-    expect(parsed.format.answerTypes.map((answerType) => answerType.awardsBonus)).toEqual([false, false, false]);
+    expect(parsed.format.answerTypes.map((answerType) => answerType.awardsBonus)).toEqual([
+      false,
+      false,
+      false,
+    ]);
 
     // Which is what makes the round trip hold, and the round trip is what the rules form is.
     const reread = read(writeQbjScoringRules(parsed.format));
@@ -262,7 +266,13 @@ describe('QBJ export retains answer-type identity when point values collide', ()
     expect(first).toBeDefined();
     if (!first) return;
     const events: ScoreEvent[] = [
-      event({ type: 'tossup-buzz', questionNumber: 1, team: 'left', playerName: 'Sarah', answerTypeIndex: first.index }),
+      event({
+        type: 'tossup-buzz',
+        questionNumber: 1,
+        team: 'left',
+        playerName: 'Sarah',
+        answerTypeIndex: first.index,
+      }),
     ];
     const game = deriveGame(parsed.format, setup, events);
     const match = toQbjMatch(parsed.format, game) as QbjObject;

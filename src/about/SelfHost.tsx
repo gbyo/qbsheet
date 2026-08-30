@@ -28,14 +28,7 @@
  * self-hosting in order to get offline scoring, which is the one failure this page must not cause.
  */
 import type { ReactNode } from 'react';
-import {
-  ActionLinks,
-  PageFooter,
-  PageHeader,
-  buildStepsUrl,
-  licenseUrl,
-  qbtcpDocsUrl,
-} from './PageChrome';
+import { ActionLinks, PageFooter, PageHeader, buildStepsUrl, licenseUrl, qbtcpDocsUrl } from './PageChrome';
 
 const slug = 'self-host' as const;
 
@@ -54,8 +47,8 @@ const steps: { number: string; name: string; idea: string; detail: ReactNode }[]
     detail: (
       <>
         QBSheet needs Node.js 20 or later. Run <code>npm ci</code> to install dependencies, then{' '}
-        <code>npm run build</code>. The finished site lands in <code>dist/</code>. Neither the build nor
-        the site it produces contacts anything we run.
+        <code>npm run build</code>. The finished site lands in <code>dist/</code>. Neither the build nor the
+        site it produces contacts anything we run.
       </>
     ),
   },
@@ -65,9 +58,9 @@ const steps: { number: string; name: string; idea: string; detail: ReactNode }[]
     idea: 'Put dist/ on a web host.',
     detail: (
       <>
-        GitHub Pages, Cloudflare Pages, a school web server, a machine on the venue network. Asset paths
-        are relative, so one build works at a domain root or inside a repository path without rebuilding
-        it. Set <code>BASE_PATH</code> only if your host needs an absolute prefix.
+        GitHub Pages, Cloudflare Pages, a school web server, a machine on the venue network. Asset paths are
+        relative, so one build works at a domain root or inside a repository path without rebuilding it. Set{' '}
+        <code>BASE_PATH</code> only if your host needs an absolute prefix.
       </>
     ),
   },
@@ -77,8 +70,8 @@ const steps: { number: string; name: string; idea: string; detail: ReactNode }[]
     idea: 'Rebuild when you want a newer version.',
     detail: (
       <>
-        Pull, build again, replace the folder. Devices already in a game keep running the build they
-        started on. The new one installs quietly and waits until somebody confirms the round is over.
+        Pull, build again, replace the folder. Devices already in a game keep running the build they started
+        on. The new one installs quietly and waits until somebody confirms the round is over.
       </>
     ),
   },
@@ -167,9 +160,8 @@ export default function SelfHost() {
         <section className="about-hero" aria-labelledby="self-host-title">
           <h1 id="self-host-title">Host QBSheet yourself</h1>
           <p className="about-hero-copy">
-            QBSheet builds into a folder of static files. Put that folder on a web host and you have your
-            own working copy, with no application server behind it and no accounts for the people scoring
-            with it.
+            QBSheet builds into a folder of static files. Put that folder on a web host and you have your own
+            working copy, with no application server behind it and no accounts for the people scoring with it.
           </p>
           <ActionLinks
             slug={slug}
@@ -191,8 +183,8 @@ export default function SelfHost() {
             <div>
               <dt>GitHub Pages</dt>
               <dd>
-                Project repositories are served from a subpath, which the relative asset paths already
-                handle. The default build works there with no configuration.
+                Project repositories are served from a subpath, which the relative asset paths already handle.
+                The default build works there with no configuration.
               </dd>
             </div>
             <div>
@@ -224,15 +216,14 @@ export default function SelfHost() {
           <div className="about-prose">
             <p>
               The offline shell is a service worker, and browsers only install one on a secure origin. In
-              practice that means HTTPS, or <code>localhost</code> while you’re testing. Over plain HTTP
-              the scorer still loads and still scores, but nothing is cached, so the next device that
-              starts cold needs the network again.
+              practice that means HTTPS, or <code>localhost</code> while you’re testing. Over plain HTTP the
+              scorer still loads and still scores, but nothing is cached, so the next device that starts cold
+              needs the network again.
             </p>
             <p>
               If offline scoring is why you’re hosting this, put a certificate in front of it. Rooms that
-              connect to tournament control need one anyway, because{' '}
-              <a href={qbtcpDocsUrl}>QBTCP</a> is a connection your tournament server owns rather than
-              anything QBSheet hosts.
+              connect to tournament control need one anyway, because <a href={qbtcpDocsUrl}>QBTCP</a> is a
+              connection your tournament server owns rather than anything QBSheet hosts.
             </p>
           </div>
         </section>
@@ -242,16 +233,15 @@ export default function SelfHost() {
             <p className="about-kicker">Open by design</p>
             <h2 id="license-heading">Yours to change</h2>
             <p>
-              QBSheet is licensed under the{' '}
-              <a href={licenseUrl}>GNU AGPL, version 3 or later</a>. You can host it, modify it, and
-              run your league’s own version of it.
+              QBSheet is licensed under the <a href={licenseUrl}>GNU AGPL, version 3 or later</a>. You can
+              host it, modify it, and run your league’s own version of it.
             </p>
           </div>
           <div className="about-prose">
             <p>
-              One obligation comes with that. If you change QBSheet and then let other people use your
-              changed version over a network, the AGPL asks you to offer them the source for what they’re
-              using. Hosting an unmodified build doesn’t involve that step.
+              One obligation comes with that. If you change QBSheet and then let other people use your changed
+              version over a network, the AGPL asks you to offer them the source for what they’re using.
+              Hosting an unmodified build doesn’t involve that step.
             </p>
           </div>
         </section>

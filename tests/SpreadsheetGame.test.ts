@@ -99,7 +99,10 @@ describe('QBSheet spreadsheet game schema', () => {
 
     expect(parsed).toEqual(original);
     expect(new Set(grid.map((row) => row.length))).toEqual(new Set([spreadsheetEventColumns.length]));
-    expect((parsed.events[0] as ScoreEvent & { futureField: unknown }).futureField).toEqual({ z: 'last', a: 'first' });
+    expect((parsed.events[0] as ScoreEvent & { futureField: unknown }).futureField).toEqual({
+      z: 'last',
+      a: 'first',
+    });
     expect(text).toContain('QBSHEET_GAME\t1');
     expect(text).toContain('QBSHEET_END\t1');
     expect(text).toContain('SECTION\tGAME');
@@ -115,7 +118,9 @@ describe('QBSheet spreadsheet game schema', () => {
     expect(first).toBe(second);
     expect(encodeSpreadsheetText('=SUM(A1:A2)\tunsafe\n')).not.toMatch(/[\t\r\n]/);
 
-    const grid = buildSpreadsheetGameGrid(source([event('danger', { type: 'note', text: '=1+1', flagged: false })]));
+    const grid = buildSpreadsheetGameGrid(
+      source([event('danger', { type: 'note', text: '=1+1', flagged: false })]),
+    );
     for (const row of grid) {
       for (const cell of row) {
         expect(cell.startsWith('=')).toBe(false);
@@ -127,7 +132,12 @@ describe('QBSheet spreadsheet game schema', () => {
 
   it('preserves the ordered event list as the scoring source of truth', () => {
     const original = source([
-      event('buzz', { type: 'tossup-buzz', team: 'left', playerName: 'Ada "Ace"\nLovelace', answerTypeIndex: 0 }),
+      event('buzz', {
+        type: 'tossup-buzz',
+        team: 'left',
+        playerName: 'Ada "Ace"\nLovelace',
+        answerTypeIndex: 0,
+      }),
       event('bonus', { type: 'bonus', team: 'left', controlledPoints: 20 }),
     ]);
     const expected = deriveGame(original.package.scorekeeperFormat, original.setup, original.events);
@@ -168,7 +178,9 @@ describe('QBSheet spreadsheet game schema', () => {
       event('left-buzz', { type: 'tossup-buzz', team: 'left', playerName: 'Ada', answerTypeIndex: 0 }),
       event('right-buzz', { type: 'tossup-buzz', team: 'right', playerName: 'Grace', answerTypeIndex: 1 }),
       event('zero-bonus', { type: 'bonus', team: 'left', controlledPoints: 0, bouncebackPoints: 0 }),
-      ...hostileValues.map((text, index) => event(`hostile-${index}`, { type: 'note', text, flagged: index % 2 === 0 })),
+      ...hostileValues.map((text, index) =>
+        event(`hostile-${index}`, { type: 'note', text, flagged: index % 2 === 0 }),
+      ),
     ]);
     const text = serializeSpreadsheetGame(original);
 
@@ -184,7 +196,9 @@ describe('QBSheet spreadsheet game schema', () => {
   });
 
   it('round-trips the configured room procedure and scheduled breaks', () => {
-    const original = source([event('timeout-start', { type: 'timeout-start', team: 'left', startedAt: 456 })]);
+    const original = source([
+      event('timeout-start', { type: 'timeout-start', team: 'left', startedAt: 456 }),
+    ]);
     original.package = {
       ...original.package,
       procedure: {
@@ -220,7 +234,17 @@ describe('QBSheet spreadsheet game schema', () => {
     ['timeout', { type: 'timeout', team: 'left' }],
     ['timeout-start', { type: 'timeout-start', team: 'right', startedAt: 123 }],
     ['timeout-resume', { type: 'timeout-resume' }],
-    ['protest', { type: 'protest', team: 'left', subject: 'question', description: 'Why?', status: 'open', resolution: 'Pending' }],
+    [
+      'protest',
+      {
+        type: 'protest',
+        team: 'left',
+        subject: 'question',
+        description: 'Why?',
+        status: 'open',
+        resolution: 'Pending',
+      },
+    ],
     ['question-void', { type: 'question-void', scope: 'bonus', reason: 'Spoiled\tquestion' }],
     ['end-game-early', { type: 'end-game-early', reason: 'Packet ended', tossupsRead: 0 }],
     ['adjustment', { type: 'adjustment', team: 'right', points: -5, reason: 'Correction' }],
@@ -239,16 +263,19 @@ describe('QBSheet spreadsheet game schema', () => {
     expect(errorCode(`${text}\nEVENTS\t0\tgarbage\n`)).toBe('data-outside-section');
     expect(errorCode(text.replace('SECTION\tGAME', 'SECTION\tGAME\textra'))).toBe('malformed-section-marker');
     expect(errorCode(text.replace('SECTION\tRECORD', 'SECTION\tGAME'))).toBe('duplicate-section');
-    expect(errorCode(text.replace(/(SECTION\tTEAMS\t1\t)QBSHEET_TEXT:[^\n]+/, '$1QBSHEET_TEXT:"other"'))).toBe('section-game-id-mismatch');
-    expect(errorCode(text.replace(/QBSHEET_END\t1\t[^\t]+\t0/, 'QBSHEET_END\t1\tQBSHEET_TEXT:"other"\t0'))).toBe('end-game-id-mismatch');
+    expect(
+      errorCode(text.replace(/(SECTION\tTEAMS\t1\t)QBSHEET_TEXT:[^\n]+/, '$1QBSHEET_TEXT:"other"')),
+    ).toBe('section-game-id-mismatch');
+    expect(
+      errorCode(text.replace(/QBSHEET_END\t1\t[^\t]+\t0/, 'QBSHEET_END\t1\tQBSHEET_TEXT:"other"\t0')),
+    ).toBe('end-game-id-mismatch');
     expect(errorCode(text.replace('SECTION\tEVENTS\t1', 'SECTION\tEVENTS\t2'))).toBe('unsupported-version');
   });
 
   it('rejects duplicate event IDs and malformed event rows', () => {
-    const duplicate = serializeSpreadsheetGame(source([
-      event('same', { type: 'note', text: 'one' }),
-      event('same', { type: 'note', text: 'two' }),
-    ]));
+    const duplicate = serializeSpreadsheetGame(
+      source([event('same', { type: 'note', text: 'one' }), event('same', { type: 'note', text: 'two' })]),
+    );
     expect(errorCode(duplicate)).toBe('duplicate-event-id');
 
     const valid = serializeSpreadsheetGame(source([event('one', { type: 'note', text: 'one' })]));
@@ -259,15 +286,27 @@ describe('QBSheet spreadsheet game schema', () => {
   it('uses durable assignment identity before a local record fallback', () => {
     const packageValue = source().package;
     expect(spreadsheetGameIdentity(packageValue, 'local-record')).toBe('match:qbj-match-9');
-    expect(spreadsheetGameIdentity({ ...packageValue, qbjIdentity: undefined, scheduledMatchId: 'scheduled-1' }, 'other')).toBe('match:scheduled-1');
-    expect(spreadsheetGameIdentity({ ...packageValue, qbjIdentity: undefined, scheduledMatchId: undefined }, 'local-record')).toBe('local-record');
-    expect(() => spreadsheetGameIdentity({ ...packageValue, qbjIdentity: undefined, scheduledMatchId: undefined })).toThrow(
-      /existing stable local identity/,
-    );
+    expect(
+      spreadsheetGameIdentity(
+        { ...packageValue, qbjIdentity: undefined, scheduledMatchId: 'scheduled-1' },
+        'other',
+      ),
+    ).toBe('match:scheduled-1');
+    expect(
+      spreadsheetGameIdentity(
+        { ...packageValue, qbjIdentity: undefined, scheduledMatchId: undefined },
+        'local-record',
+      ),
+    ).toBe('local-record');
+    expect(() =>
+      spreadsheetGameIdentity({ ...packageValue, qbjIdentity: undefined, scheduledMatchId: undefined }),
+    ).toThrow(/existing stable local identity/);
   });
 
   it('accepts harmless blank rows, trimmed trailing cells, and an omitted optional procedure section', () => {
-    const original = serializeSpreadsheetGame(source([event('note', { type: 'note', text: 'kept', flagged: false })]));
+    const original = serializeSpreadsheetGame(
+      source([event('note', { type: 'note', text: 'kept', flagged: false })]),
+    );
     let skippingProcedure = false;
     const withoutProcedure = original
       .split('\n')
@@ -297,12 +336,14 @@ describe('QBSheet spreadsheet game schema', () => {
   });
 
   it('rejects malformed typed cells and unrelated event columns', () => {
-    const note = serializeSpreadsheetGame(source([event('note', { type: 'note', text: 'kept', flagged: false })]));
+    const note = serializeSpreadsheetGame(
+      source([event('note', { type: 'note', text: 'kept', flagged: false })]),
+    );
     expect(errorCode(note.replace(/\tfalse\t/, '\tmaybe\t'))).toBe('malformed-boolean');
 
-    const bonus = serializeSpreadsheetGame(source([
-      event('bonus', { type: 'bonus', team: 'left', parts: [{ controlledPoints: 10 }] }),
-    ]));
+    const bonus = serializeSpreadsheetGame(
+      source([event('bonus', { type: 'bonus', team: 'left', parts: [{ controlledPoints: 10 }] })]),
+    );
     expect(errorCode(bonus.replace(/QBSHEET_JSON:\{[^\n]*?\}/, 'QBSHEET_JSON:{'))).toBe('malformed-json');
 
     const unrelated = note.replace(/(\n1\t[^\n]*?\t1\tnote\t)[^\t]*\t/, '$1left\t');

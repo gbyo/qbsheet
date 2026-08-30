@@ -73,7 +73,9 @@ export function classifyFinalDelivery(result: ApiResult<IResultReceipt>): IFinal
     if (receipt.duplicate === true || receipt.accepted === true) {
       return {
         delivery: 'sent',
-        detail: receipt.duplicate ? 'Tournament control already had this result on record.' : acceptedFallback,
+        detail: receipt.duplicate
+          ? 'Tournament control already had this result on record.'
+          : acceptedFallback,
         duplicate: receipt.duplicate,
         ...(receipt.matchId !== undefined ? { matchId: receipt.matchId } : {}),
         ...(receipt.fingerprint !== undefined ? { fingerprint: receipt.fingerprint } : {}),

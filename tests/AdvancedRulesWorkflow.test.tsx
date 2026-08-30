@@ -269,7 +269,9 @@ describe('an irregular bonus', () => {
     });
 
     await startGame();
-    expect(screen.getByText('The maximum bonus score must be a multiple of the bonus score increment.')).toBeTruthy();
+    expect(
+      screen.getByText('The maximum bonus score must be a multiple of the bonus score increment.'),
+    ).toBeTruthy();
   });
 });
 

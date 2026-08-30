@@ -156,7 +156,9 @@ describe('the form step', () => {
     open(vi.fn());
     fireEvent.input(screen.getByLabelText(/tossups in regulation/i), { target: { value: '' } });
 
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/tossups in regulation must be at least 1/i));
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent(/tossups in regulation must be at least 1/i),
+    );
     expect(screen.getByRole('button', { name: /review changes/i })).toBeDisabled();
   });
 });

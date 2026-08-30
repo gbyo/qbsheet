@@ -235,7 +235,8 @@ export function readScannedPairingCode(
 ): string | null {
   const parsed = parsePairingLaunchUrl(text);
   if (parsed.kind === 'problem') return parsed.message;
-  if (parsed.kind === 'none') return 'That is not a QBSheet pairing code. Look for the QR code tournament control is showing.';
+  if (parsed.kind === 'none')
+    return 'That is not a QBSheet pairing code. Look for the QR code tournament control is showing.';
   setScanning(false);
   onPairingLaunch(parsed.intent);
   return null;
@@ -264,7 +265,9 @@ function scrub(target: Window): void {
  * Synchronous, all of it. Nothing here awaits, schedules, or renders between reading the code and
  * replacing the URL that held it.
  */
-export function consumePairingLaunch(target: Window | null = typeof window === 'undefined' ? null : window): PairingLaunchResult {
+export function consumePairingLaunch(
+  target: Window | null = typeof window === 'undefined' ? null : window,
+): PairingLaunchResult {
   if (target === null) return { kind: 'none' };
   const result = parsePairingLaunch(target.location.hash);
   if (result.kind !== 'none') scrub(target);

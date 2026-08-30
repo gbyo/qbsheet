@@ -129,14 +129,10 @@ export default function Scoring() {
         <section className="about-hero" aria-labelledby="scoring-title">
           <h1 id="scoring-title">Scoring with QBSheet</h1>
           <p className="about-hero-copy">
-            A scorekeeper records who answered each question and what the answer was worth. QBSheet
-            derives the score, writes the game to the device as it is scored, and produces the result
-            file at the end.
+            A scorekeeper records who answered each question and what the answer was worth. QBSheet derives
+            the score, writes the game to the device as it is scored, and produces the result file at the end.
           </p>
-          <ActionLinks
-            slug={slug}
-            primary={{ href: scorerUrl(slug), label: 'Open the practice game' }}
-          />
+          <ActionLinks slug={slug} primary={{ href: scorerUrl(slug), label: 'Open the practice game' }} />
         </section>
 
         <LoopSection />
@@ -153,15 +149,15 @@ export default function Scoring() {
             <div>
               <dt>Seats</dt>
               <dd>
-                <code>1</code>–<code>4</code> are the left team’s seats and <code>5</code>–
-                <code>8</code> are the right team’s. The numbers are shown beside the players.
+                <code>1</code>–<code>4</code> are the left team’s seats and <code>5</code>–<code>8</code> are
+                the right team’s. The numbers are shown beside the players.
               </dd>
             </div>
             <div>
               <dt>Outcome keys</dt>
               <dd>
-                A second key records the outcome. Which keys are active depends on the tournament’s
-                scoring rules; a key with no corresponding ruling does nothing.
+                A second key records the outcome. Which keys are active depends on the tournament’s scoring
+                rules; a key with no corresponding ruling does nothing.
               </dd>
             </div>
             <div>
@@ -186,13 +182,13 @@ export default function Scoring() {
           </div>
           <div className="about-prose">
             <p>
-              QBSheet includes a guided practice game. It runs the real scoresheet through a full
-              round with a prompt at each step, and covers a correction and a lineup change as well as
-              ordinary scoring. A separate keyboard drill covers the shortcuts.
+              QBSheet includes a guided practice game. It runs the real scoresheet through a full round with a
+              prompt at each step, and covers a correction and a lineup change as well as ordinary scoring. A
+              separate keyboard drill covers the shortcuts.
             </p>
             <p>
-              Practice does not require a tournament server or a game file. Progress is stored locally,
-              so the round can be stopped and resumed.
+              Practice does not require a tournament server or a game file. Progress is stored locally, so the
+              round can be stopped and resumed.
             </p>
           </div>
         </section>
@@ -204,14 +200,13 @@ export default function Scoring() {
           </div>
           <div className="about-prose">
             <p>
-              QBSheet shows the completed scoresheet for review before the game is submitted. In a
-              connected room the result is sent to tournament control and the delivery state is
-              reported to the scorekeeper. Otherwise the result is downloaded as a QBJ file and handed
-              over.
+              QBSheet shows the completed scoresheet for review before the game is submitted. In a connected
+              room the result is sent to tournament control and the delivery state is reported to the
+              scorekeeper. Otherwise the result is downloaded as a QBJ file and handed over.
             </p>
             <p>
-              The game remains on the device after it has been handed over and can be downloaded
-              again. <a href={pageUrl(slug, 'tournaments')}>How connected rooms work</a>.
+              The game remains on the device after it has been handed over and can be downloaded again.{' '}
+              <a href={pageUrl(slug, 'tournaments')}>How connected rooms work</a>.
             </p>
           </div>
         </section>

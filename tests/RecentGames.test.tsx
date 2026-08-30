@@ -62,7 +62,9 @@ describe('Recent Games operational ledger', () => {
     );
 
     expect(screen.getAllByText('Receipts and attempts')).toHaveLength(2);
-    expect(screen.getByText(`Already received · ${localTime('2026-08-11T14:42:00.000Z')}`)).toBeInTheDocument();
+    expect(
+      screen.getByText(`Already received · ${localTime('2026-08-11T14:42:00.000Z')}`),
+    ).toBeInTheDocument();
     expect(screen.getByText('2 attempts · Match sm-4471')).toBeInTheDocument();
     expect(screen.getByText(`Downloaded · ${localTime('2026-08-11T14:43:00.000Z')}`)).toBeInTheDocument();
     expect(screen.getByText(`Confirmed · ${localTime('2026-08-11T14:44:00.000Z')}`)).toBeInTheDocument();
@@ -99,7 +101,9 @@ describe('Recent Games operational ledger', () => {
     await act(async () => {
       fireEvent.click(retry);
     });
-    await waitFor(() => expect(onRetry).toHaveBeenCalledWith(expect.objectContaining({ id: 'match:sm-4471' })));
+    await waitFor(() =>
+      expect(onRetry).toHaveBeenCalledWith(expect.objectContaining({ id: 'match:sm-4471' })),
+    );
     expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
   });
 

@@ -35,7 +35,11 @@
  */
 import { IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
 import { QbjObject } from './QbjSerialization';
-import { IBasicScoringRulesInput, basicAnswerTypeNames, basicScoringRulesDefaults } from './BasicScoringRules';
+import {
+  IBasicScoringRulesInput,
+  basicAnswerTypeNames,
+  basicScoringRulesDefaults,
+} from './BasicScoringRules';
 import { QbjScoringRulesResult, readQbjScoringRules } from './QbjScoringRules';
 
 /**
@@ -158,7 +162,9 @@ export function advancedFromBasic(basic: IBasicScoringRulesInput): IAdvancedScor
     }),
   );
   if (basic.negValue !== undefined) {
-    answerTypes.push(newAdvancedAnswerType({ value: basic.negValue, ...basicAnswerTypeNames.neg, awardsBonus: false }));
+    answerTypes.push(
+      newAdvancedAnswerType({ value: basic.negValue, ...basicAnswerTypeNames.neg, awardsBonus: false }),
+    );
   }
 
   return {
@@ -216,7 +222,9 @@ export function advancedFitsBasicForm(input: IAdvancedScoringRulesInput): boolea
   // planned count is not an extension, and is therefore not a loss.
   if (input.maximumTossupCount !== undefined && input.maximumTossupCount !== input.tossupCount) return false;
 
-  const values = input.answerTypes.map((type) => type.value).filter((value): value is number => value !== undefined);
+  const values = input.answerTypes
+    .map((type) => type.value)
+    .filter((value): value is number => value !== undefined);
   if (values.length !== input.answerTypes.length) return false;
   if (new Set(values).size !== values.length) return false;
 
@@ -251,7 +259,8 @@ export function advancedFitsBasicForm(input: IAdvancedScoringRulesInput): boolea
     JSON.stringify([value, names.label.trim(), names.shortLabel.trim()]);
 
   const expected: string[] = [];
-  if (positivesDescending.length === 2) expected.push(rowKey(positivesDescending[0], basicAnswerTypeNames.power));
+  if (positivesDescending.length === 2)
+    expected.push(rowKey(positivesDescending[0], basicAnswerTypeNames.power));
   expected.push(rowKey(positivesDescending[positivesDescending.length - 1], basicAnswerTypeNames.correct));
   const negative = descending.find((value) => value < 0);
   if (negative !== undefined) expected.push(rowKey(negative, basicAnswerTypeNames.neg));
@@ -589,7 +598,9 @@ export function advancedFromFormat(format: IScorekeeperFormat): IAdvancedScoring
     overtimeIncludesBonuses: overtime.includesBonuses,
 
     useLightning: lightning.enabled,
-    ...(lightning.enabled ? { lightningCountPerTeam: lightning.countPerTeam, lightningDivisor: lightning.divisor } : {}),
+    ...(lightning.enabled
+      ? { lightningCountPerTeam: lightning.countPerTeam, lightningDivisor: lightning.divisor }
+      : {}),
 
     timed: regulation.timed,
     name: format.name,

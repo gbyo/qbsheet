@@ -53,7 +53,11 @@ import validateScoresheet from '../scoring/validateScoresheet';
 import toQbjMatch, { IQbjMatchMeta } from '../scoring/toQbjMatch';
 import { IGameDefinition } from '../game/GameDefinition';
 import { IGamePackage } from '../game/GamePackage';
-import { createSpreadsheetGameSnapshot, ISpreadsheetGameMetadata, serializeSpreadsheetGame } from '../spreadsheet';
+import {
+  createSpreadsheetGameSnapshot,
+  ISpreadsheetGameMetadata,
+  serializeSpreadsheetGame,
+} from '../spreadsheet';
 import { connectionTimeline } from '../app/ConnectionTimeline';
 import { RoomConnectionState } from '../app/ConnectionState';
 import TeamPanel from './TeamPanel';
@@ -100,7 +104,8 @@ import { availableActionKeys, keyboardActionNames, sequenceLegend, bonusKeyLegen
 import { rulingLabel, unreachableAnswerTypes } from './tossupRulings';
 import { setKeyboardEnabled } from './keyboardPreference';
 import useKeyboardEnabled from './useKeyboardEnabled';
-import { ConnectionDetailDialog,
+import {
+  ConnectionDetailDialog,
   IScorerAlert,
   IScorerRecoveryStatus,
   connectionClass,
@@ -333,51 +338,59 @@ function BonusExitPrompt({ exit }: { exit: IBonusExit }) {
             <span className="scorer-choice is-selected" data-presentation-label="Record" />
           </div>
         )}
-        {content.kind === 'parts' && (() => {
-          const controlledTotal = content.parts.reduce((sum, part) => sum + part.controlledPoints, 0);
-          const bouncebackTotal = content.parts.reduce((sum, part) => sum + (part.bouncebackPoints ?? 0), 0);
-          return (
-            <div className="scorer-bonus-parts">
-              <ol className="scorer-part-list">
-                {content.parts.map((part, index) => {
-                  const outcome =
-                    part.controlledPoints > 0 ? 'controlled' : (part.bouncebackPoints ?? 0) > 0 ? 'bounceback' : 'missed';
-                  return (
-                    <li key={index} className="scorer-part-row">
-                      <span className="scorer-part-label" data-presentation-label={`Part ${index + 1}`} />
-                      <span className="scorer-choices">
-                        <span
-                          className={`scorer-choice${outcome === 'controlled' ? ' is-selected' : ''}`}
-                          data-presentation-label={`+${content.pointsPerPart}`}
-                        />
-                        {content.bounceBack && (
+        {content.kind === 'parts' &&
+          (() => {
+            const controlledTotal = content.parts.reduce((sum, part) => sum + part.controlledPoints, 0);
+            const bouncebackTotal = content.parts.reduce(
+              (sum, part) => sum + (part.bouncebackPoints ?? 0),
+              0,
+            );
+            return (
+              <div className="scorer-bonus-parts">
+                <ol className="scorer-part-list">
+                  {content.parts.map((part, index) => {
+                    const outcome =
+                      part.controlledPoints > 0
+                        ? 'controlled'
+                        : (part.bouncebackPoints ?? 0) > 0
+                          ? 'bounceback'
+                          : 'missed';
+                    return (
+                      <li key={index} className="scorer-part-row">
+                        <span className="scorer-part-label" data-presentation-label={`Part ${index + 1}`} />
+                        <span className="scorer-choices">
                           <span
-                            className={`scorer-choice${outcome === 'bounceback' ? ' is-selected' : ''}`}
-                            data-presentation-label="Bounce"
+                            className={`scorer-choice${outcome === 'controlled' ? ' is-selected' : ''}`}
+                            data-presentation-label={`+${content.pointsPerPart}`}
                           />
-                        )}
-                        <span
-                          className={`scorer-choice${outcome === 'missed' ? ' is-selected' : ''}`}
-                          data-presentation-label="Miss"
-                        />
-                      </span>
-                    </li>
-                  );
-                })}
-              </ol>
-              <p
-                className="scorer-part-total"
-                data-presentation-label={`${controlledTotal}${
-                  content.bounceBack && bouncebackTotal > 0 ? ` · ${bouncebackTotal} bounced back` : ''
-                }`}
-              />
-              <div className="scorer-choices">
-                <span className="scorer-choice is-selected" data-presentation-label="Record parts" />
-                <span className="scorer-action" data-presentation-label="Back to totals" />
+                          {content.bounceBack && (
+                            <span
+                              className={`scorer-choice${outcome === 'bounceback' ? ' is-selected' : ''}`}
+                              data-presentation-label="Bounce"
+                            />
+                          )}
+                          <span
+                            className={`scorer-choice${outcome === 'missed' ? ' is-selected' : ''}`}
+                            data-presentation-label="Miss"
+                          />
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ol>
+                <p
+                  className="scorer-part-total"
+                  data-presentation-label={`${controlledTotal}${
+                    content.bounceBack && bouncebackTotal > 0 ? ` · ${bouncebackTotal} bounced back` : ''
+                  }`}
+                />
+                <div className="scorer-choices">
+                  <span className="scorer-choice is-selected" data-presentation-label="Record parts" />
+                  <span className="scorer-action" data-presentation-label="Back to totals" />
+                </div>
               </div>
-            </div>
-          );
-        })()}
+            );
+          })()}
       </div>
     </div>
   );
@@ -398,7 +411,9 @@ function ClockControl(props: {
   const { status, display, onStart, onPause, onResume, onReset } = props;
   const previous = useRef(status);
   const sequence = useRef(0);
-  const [motion, setMotion] = useState<{ from: RoomClockStatus; to: RoomClockStatus; token: number } | null>(null);
+  const [motion, setMotion] = useState<{ from: RoomClockStatus; to: RoomClockStatus; token: number } | null>(
+    null,
+  );
 
   useLayoutEffect(() => {
     const from = previous.current;
@@ -421,13 +436,30 @@ function ClockControl(props: {
     return () => window.clearTimeout(timer);
   }, [status]);
 
-  const label = status === 'running' ? 'Pause' : status === 'paused' ? 'Resume' : status === 'expired' ? 'Reset' : 'Start';
-  const action = status === 'running' ? onPause : status === 'paused' ? onResume : status === 'expired' ? onReset : onStart;
+  const label =
+    status === 'running'
+      ? 'Pause'
+      : status === 'paused'
+        ? 'Resume'
+        : status === 'expired'
+          ? 'Reset'
+          : 'Start';
+  const action =
+    status === 'running'
+      ? onPause
+      : status === 'paused'
+        ? onResume
+        : status === 'expired'
+          ? onReset
+          : onStart;
   const icon = status === 'running' ? 'pause' : 'play';
   const oldIcon = motion?.from === 'running' ? 'pause' : 'play';
 
   return (
-    <span className={status === 'expired' ? 'scorer-clock is-expired' : 'scorer-clock'} data-clock-state={status}>
+    <span
+      className={status === 'expired' ? 'scorer-clock is-expired' : 'scorer-clock'}
+      data-clock-state={status}
+    >
       <span
         className={motion ? `scorer-clock-digits is-${motion.to}` : 'scorer-clock-digits'}
         aria-label="Room clock"
@@ -556,9 +588,11 @@ export default function Scorer(props: IScorerProps) {
    * state. Reporting the stage upward is smaller than lifting the state, and keeps the shortcut in the
    * same file as the buttons it stands in for.
    */
-  const [bonusStage, setBonusStage] = useState<{ title: string; options: number[]; cancellable: boolean } | null>(
-    null,
-  );
+  const [bonusStage, setBonusStage] = useState<{
+    title: string;
+    options: number[];
+    cancellable: boolean;
+  } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const submitInFlight = useRef(false);
   const [submitResult, setSubmitResult] = useState<IScorerSubmitResult | null>(null);
@@ -841,7 +875,9 @@ export default function Scorer(props: IScorerProps) {
     for (const addition of localRosterAdds) {
       const key = rosterSyncKey(addition.team, addition.playerName);
       const authoritative = authoritativeRosters?.[addition.team] ?? [];
-      if (authoritative.some((name) => name.toLocaleLowerCase() === addition.playerName.toLocaleLowerCase())) {
+      if (
+        authoritative.some((name) => name.toLocaleLowerCase() === addition.playerName.toLocaleLowerCase())
+      ) {
         status[key] = 'synced';
       } else if (rejectedRosterSyncs[key]) status[key] = 'rejected';
       else if (authoritativeRosters && connection === RoomConnectionState.Connected && onSyncRosterPlayer)
@@ -852,7 +888,8 @@ export default function Scorer(props: IScorerProps) {
   }, [authoritativeRosters, connection, localRosterAdds, onSyncRosterPlayer, rejectedRosterSyncs]);
 
   useEffect(() => {
-    if (connection !== RoomConnectionState.Connected || !onSyncRosterPlayer || !authoritativeRosters) return undefined;
+    if (connection !== RoomConnectionState.Connected || !onSyncRosterPlayer || !authoritativeRosters)
+      return undefined;
     let cancelled = false;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -866,7 +903,9 @@ export default function Scorer(props: IScorerProps) {
 
       for (const addition of localRosterAdds) {
         const authoritative = authoritativeRosters[addition.team];
-        if (authoritative.some((name) => name.toLocaleLowerCase() === addition.playerName.toLocaleLowerCase()))
+        if (
+          authoritative.some((name) => name.toLocaleLowerCase() === addition.playerName.toLocaleLowerCase())
+        )
           continue;
         const key = rosterSyncKey(addition.team, addition.playerName);
         if (rejectedRosterSyncs[key]) continue;
@@ -1158,7 +1197,9 @@ export default function Scorer(props: IScorerProps) {
       record({ id: newEventId(), type: 'substitution', questionNumber: lineupQuestion, team, activePlayers });
       // The seat itself says most of this now — see `TeamPanel` — so the sentence is here to name the
       // tossup it takes effect from, and then to get out of the way.
-      acknowledge(`${incoming} came on for ${outgoing} (${derivedTeam.name}), starting Tossup ${lineupQuestion}.`);
+      acknowledge(
+        `${incoming} came on for ${outgoing} (${derivedTeam.name}), starting Tossup ${lineupQuestion}.`,
+      );
     },
     [acknowledge, game.left, game.right, lineupQuestion, record, seating, submitting],
   );
@@ -1214,19 +1255,25 @@ export default function Scorer(props: IScorerProps) {
       .map((player) => player.name);
   };
 
-  const openReviewAt = useCallback((questionNumber?: number, edit = false) => {
-    if (submitting) return;
-    setReviewFocus(questionNumber);
-    setReviewEditQuestion(edit ? questionNumber : undefined);
-    setDialog('review');
-  }, [submitting]);
+  const openReviewAt = useCallback(
+    (questionNumber?: number, edit = false) => {
+      if (submitting) return;
+      setReviewFocus(questionNumber);
+      setReviewEditQuestion(edit ? questionNumber : undefined);
+      setDialog('review');
+    },
+    [submitting],
+  );
 
-  const openReplacementAt = useCallback((questionNumber: number) => {
-    if (submitting) return;
-    setReviewFocus(questionNumber);
-    setReviewEditQuestion(undefined);
-    setDialog('replace');
-  }, [submitting]);
+  const openReplacementAt = useCallback(
+    (questionNumber: number) => {
+      if (submitting) return;
+      setReviewFocus(questionNumber);
+      setReviewEditQuestion(undefined);
+      setDialog('replace');
+    },
+    [submitting],
+  );
 
   const openProtests = game.protests.filter((protest) => protest.status === 'open');
   const playBlockedByProtest =
@@ -1240,7 +1287,6 @@ export default function Scorer(props: IScorerProps) {
   const checkpointProtestBlocks = (checkpoint: 'overtime' | 'sudden-death') =>
     openProtests.length > 0 && protestBlocksCheckpoint(protestCheckpointPolicy(procedure), checkpoint);
 
-
   const scoringEnabled = phase.kind === 'tossup' && !playBlockedByProtest;
   const eligible = (side: LeftOrRight) =>
     scoringEnabled && phase.kind === 'tossup' && phase.eligibleTeams.includes(side);
@@ -1251,7 +1297,9 @@ export default function Scorer(props: IScorerProps) {
    * zero — removes the team that gave it from the eligible list. See `TeamPanel`.
    */
   const currentQuestionState =
-    phase.kind === 'tossup' ? game.questions.find((question) => question.questionNumber === phase.questionNumber) : undefined;
+    phase.kind === 'tossup'
+      ? game.questions.find((question) => question.questionNumber === phase.questionNumber)
+      : undefined;
   const answeredTeams = new Set<LeftOrRight>([
     ...(currentQuestionState?.buzzes.map((buzz) => buzz.team) ?? []),
     ...(currentQuestionState?.noPenalty.map((missed) => missed.team) ?? []),
@@ -1413,7 +1461,9 @@ export default function Scorer(props: IScorerProps) {
   const unsyncedRosterAdditions = useMemo(
     () =>
       localRosterAdds
-        .filter((addition) => rosterSyncStatus[rosterSyncKey(addition.team, addition.playerName)] !== 'synced')
+        .filter(
+          (addition) => rosterSyncStatus[rosterSyncKey(addition.team, addition.playerName)] !== 'synced',
+        )
         .map((addition) => ({ team: addition.team, playerName: addition.playerName })),
     [localRosterAdds, rosterSyncStatus],
   );
@@ -1445,7 +1495,8 @@ export default function Scorer(props: IScorerProps) {
     (phase.kind === 'tossup' || phase.kind === 'bonus') &&
     game.questions.some(
       (question) =>
-        question.questionNumber === phase.questionNumber && (question.bonus !== undefined || question.awaitingBonus),
+        question.questionNumber === phase.questionNumber &&
+        (question.bonus !== undefined || question.awaitingBonus),
     );
 
   /**
@@ -1459,7 +1510,10 @@ export default function Scorer(props: IScorerProps) {
    * first break, not at whichever scheduled break happens to sit nearest to 12.
    */
   const currentBreakName = roomBreaksAreScheduled(procedure)
-    ? roomBreakLabel(procedure, roomBreakTaken(procedure, phase.kind === 'score-check' ? game.halfBreaks.length : 0))
+    ? roomBreakLabel(
+        procedure,
+        roomBreakTaken(procedure, phase.kind === 'score-check' ? game.halfBreaks.length : 0),
+      )
     : 'Halftime';
   const progressText = (() => {
     if (phase.kind === 'complete') return 'Game complete';
@@ -1468,7 +1522,8 @@ export default function Scorer(props: IScorerProps) {
     if (phase.kind === 'checkpoint') {
       return phase.checkpoint === 'overtime' ? 'Regulation complete' : 'Initial overtime complete';
     }
-    if (phase.kind === 'timeout') return `Timeout · ${phase.team === 'left' ? game.left.name : game.right.name}`;
+    if (phase.kind === 'timeout')
+      return `Timeout · ${phase.team === 'left' ? game.left.name : game.right.name}`;
     if (phase.period === 'overtime') {
       const overtimeNumber = game.overtimeTossupsRead + (phase.kind === 'tossup' ? 1 : 0);
       return `Overtime tossup ${Math.max(1, overtimeNumber)}${game.suddenDeathStarted ? ' · sudden death' : ''}`;
@@ -1564,7 +1619,7 @@ export default function Scorer(props: IScorerProps) {
     downloadLegacyQbj: () => onDownloadForm?.(game, 'legacy-match'),
     openExport: () => setDialog('export'),
     print,
-  })
+  });
 
   const submit = async () => {
     if (submitInFlight.current) return;
@@ -1574,7 +1629,10 @@ export default function Scorer(props: IScorerProps) {
     try {
       setSubmitResult(await onSubmit(qbj));
     } catch {
-      setSubmitResult({ ok: false, message: 'This result could not be sent. It is still saved on this device.' });
+      setSubmitResult({
+        ok: false,
+        message: 'This result could not be sent. It is still saved on this device.',
+      });
     } finally {
       submitInFlight.current = false;
       setSubmitting(false);
@@ -1682,7 +1740,8 @@ export default function Scorer(props: IScorerProps) {
         priority: operationNotice.transient ? (operationNotice.tone === 'warning' ? 25 : 50) : 18,
         transient: operationNotice.transient,
         persistent: !operationNotice.transient && operationNotice.autoDismissMs === undefined,
-        autoDismissMs: operationNotice.autoDismissMs ?? (operationNotice.transient ? operationNoticeMs : undefined),
+        autoDismissMs:
+          operationNotice.autoDismissMs ?? (operationNotice.transient ? operationNoticeMs : undefined),
         dismissible: operationNotice.dismissible !== false,
         onDismiss: dismissOperationNotice,
         onExpire: dismissOperationNotice,
@@ -1830,9 +1889,7 @@ export default function Scorer(props: IScorerProps) {
         </div>
         <div className="scorer-header-side">
           <div className="scorer-header-status">
-            <span
-              className={progressMotion ? 'scorer-progress has-motion-number' : 'scorer-progress'}
-            >
+            <span className={progressMotion ? 'scorer-progress has-motion-number' : 'scorer-progress'}>
               {progressMotion ? (
                 <>
                   <span
@@ -1893,7 +1950,9 @@ export default function Scorer(props: IScorerProps) {
             over a "Gibson Bell" in the submitted match is a mismatch nobody can check mid-game.
             Absent when nobody has named themselves, since an empty label claims a fact.
           */}
-          {operatorName?.trim() && <span className="scorer-operator">Scorekeeper: {operatorName.trim()}</span>}
+          {operatorName?.trim() && (
+            <span className="scorer-operator">Scorekeeper: {operatorName.trim()}</span>
+          )}
         </div>
       </header>
 
@@ -1987,7 +2046,9 @@ export default function Scorer(props: IScorerProps) {
                 eligible={eligible('left')}
                 negsAvailable={negsAvailable('left')}
                 timeoutsUsed={(procedure?.timeoutsPerTeam ?? 0) > 0 ? game.timeouts.left : undefined}
-                timeoutsPerTeam={(procedure?.timeoutsPerTeam ?? 0) > 0 ? procedure?.timeoutsPerTeam : undefined}
+                timeoutsPerTeam={
+                  (procedure?.timeoutsPerTeam ?? 0) > 0 ? procedure?.timeoutsPerTeam : undefined
+                }
                 onBuzz={(playerName, answerType) => recordBuzz('left', playerName, answerType)}
                 onWrongNoPenalty={(playerName) => recordWrongNoPenalty('left', playerName)}
                 onSubstitute={(outgoing, incoming) => substituteFromRow('left', outgoing, incoming)}
@@ -2005,7 +2066,9 @@ export default function Scorer(props: IScorerProps) {
                 eligible={eligible('right')}
                 negsAvailable={negsAvailable('right')}
                 timeoutsUsed={(procedure?.timeoutsPerTeam ?? 0) > 0 ? game.timeouts.right : undefined}
-                timeoutsPerTeam={(procedure?.timeoutsPerTeam ?? 0) > 0 ? procedure?.timeoutsPerTeam : undefined}
+                timeoutsPerTeam={
+                  (procedure?.timeoutsPerTeam ?? 0) > 0 ? procedure?.timeoutsPerTeam : undefined
+                }
                 onBuzz={(playerName, answerType) => recordBuzz('right', playerName, answerType)}
                 onWrongNoPenalty={(playerName) => recordWrongNoPenalty('right', playerName)}
                 onSubstitute={(outgoing, incoming) => substituteFromRow('right', outgoing, incoming)}
@@ -2038,7 +2101,9 @@ export default function Scorer(props: IScorerProps) {
                   breakName={currentBreakName}
                   substitutionMessage={substitutionMessage}
                   onPlayers={() => setDialog('players')}
-                  onContinue={() => record({ id: newEventId(), type: 'half-resume', questionNumber: currentQuestion })}
+                  onContinue={() =>
+                    record({ id: newEventId(), type: 'half-resume', questionNumber: currentQuestion })
+                  }
                 />
               )}
 
@@ -2062,12 +2127,22 @@ export default function Scorer(props: IScorerProps) {
                     {noBuzzLabel}
                   </button>
                   {canResumeReading && (
-                    <button type="button" className="scorer-action" onClick={recordReadingResumed} disabled={playBlockedByProtest}>
+                    <button
+                      type="button"
+                      className="scorer-action"
+                      onClick={recordReadingResumed}
+                      disabled={playBlockedByProtest}
+                    >
                       Resume reading
                     </button>
                   )}
                   {canReadout && (
-                    <button type="button" className="scorer-action" onClick={recordReadout} disabled={playBlockedByProtest}>
+                    <button
+                      type="button"
+                      className="scorer-action"
+                      onClick={recordReadout}
+                      disabled={playBlockedByProtest}
+                    >
                       Question read out
                     </button>
                   )}
@@ -2175,7 +2250,6 @@ export default function Scorer(props: IScorerProps) {
                   onStageChange={setBonusStage}
                 />
               )}
-
             </div>
           </main>
 
@@ -2193,7 +2267,12 @@ export default function Scorer(props: IScorerProps) {
       {keyboardEnabled && <KeyboardStatus status={keyStatus} />}
 
       <footer className="scorer-footer">
-        <button type="button" className="scorer-action" onClick={undoWithFeedback} disabled={submitting || !events.canUndo}>
+        <button
+          type="button"
+          className="scorer-action"
+          onClick={undoWithFeedback}
+          disabled={submitting || !events.canUndo}
+        >
           <ControlIcon name="undo" />
           Undo
         </button>
@@ -2206,11 +2285,21 @@ export default function Scorer(props: IScorerProps) {
           <ControlIcon name="redo" />
           Redo
         </button>
-        <button type="button" className="scorer-action" onClick={() => setDialog('players')} disabled={submitting}>
+        <button
+          type="button"
+          className="scorer-action"
+          onClick={() => setDialog('players')}
+          disabled={submitting}
+        >
           <ControlIcon name="players" />
           Players
         </button>
-        <button type="button" className="scorer-action" onClick={() => setDialog('flag')} disabled={submitting}>
+        <button
+          type="button"
+          className="scorer-action"
+          onClick={() => setDialog('flag')}
+          disabled={submitting}
+        >
           <ControlIcon name="flag" />
           Flag
         </button>
@@ -2251,7 +2340,13 @@ export default function Scorer(props: IScorerProps) {
           }}
           onSubstitute={(team, activePlayers) => {
             if (submitting) return;
-            record({ id: newEventId(), type: 'substitution', questionNumber: lineupQuestion, team, activePlayers });
+            record({
+              id: newEventId(),
+              type: 'substitution',
+              questionNumber: lineupQuestion,
+              team,
+              activePlayers,
+            });
             setDialog(null);
           }}
           onAddPlayer={(team, playerName, activePlayers) => {
@@ -2307,7 +2402,14 @@ export default function Scorer(props: IScorerProps) {
         <AdjustDialog
           game={game}
           onAdjust={(team, points, reason) => {
-            record({ id: newEventId(), type: 'adjustment', questionNumber: currentQuestion, team, points, reason });
+            record({
+              id: newEventId(),
+              type: 'adjustment',
+              questionNumber: currentQuestion,
+              team,
+              points,
+              reason,
+            });
             setDialog(null);
           }}
           onClose={() => setDialog(null)}
@@ -2353,7 +2455,10 @@ export default function Scorer(props: IScorerProps) {
               }
               // The scoresheet fact and the network fact, split: the note really is saved whatever
               // happened on the wire, and when the room is modelling the request it owns the rest.
-              noteControlOutcome({ prefix: 'Issue saved', localOnly: 'Issue saved on the scoresheet.' }, result);
+              noteControlOutcome(
+                { prefix: 'Issue saved', localOnly: 'Issue saved on the scoresheet.' },
+                result,
+              );
               return result;
             }
             acknowledge('Issue saved on the scoresheet.');
@@ -2439,7 +2544,10 @@ export default function Scorer(props: IScorerProps) {
               acknowledge('Protest recorded; asking tournament control to come.');
               let result: HelpRequestResult;
               try {
-                result = await onRequestControl('protest', `Q${currentQuestion} protest by ${teamName}: ${description}`);
+                result = await onRequestControl(
+                  'protest',
+                  `Q${currentQuestion} protest by ${teamName}: ${description}`,
+                );
               } catch {
                 result = { kind: 'unreachable', error: 'Could not reach tournament control.' };
               }
@@ -2485,60 +2593,65 @@ export default function Scorer(props: IScorerProps) {
           onClose={() => setDialog(null)}
         />
       )}
-      {dialog === 'replace' && (reviewFocus !== undefined || phase.kind === 'tossup' || phase.kind === 'bonus') && (
-        <ReplaceQuestionDialog
-          questionNumber={reviewFocus ?? (phase.kind === 'tossup' || phase.kind === 'bonus' ? phase.questionNumber : 1)}
-          bonusReplaceable={
-            (reviewFocus !== undefined &&
-              (game.questions.find((question) => question.questionNumber === reviewFocus)?.bonus !== undefined ||
-                game.questions.find((question) => question.questionNumber === reviewFocus)?.awaitingBonus === true)) ||
-            (reviewFocus === undefined && (phase.kind === 'bonus' || currentCycleHasBonus))
-          }
-          onReplace={(scope, reason) => {
-            if (submitting) return;
-            // Resolved once: the note, the void and the message must all be about one question.
-            const questionNumber = reviewFocus ?? currentQuestion;
-            /*
-             * The void and the note go together as one action: a cycle removed from the scoresheet
-             * with no record of why is indistinguishable from a scorekeeper who deleted it by
-             * mistake, and the whole point of this is that the room can explain itself afterwards.
-             */
-            const recorded = record(
-              {
-                id: newEventId(),
-                type: 'note',
-                questionNumber,
-                text: `${scope === 'bonus' ? 'Bonus' : 'Question'} replaced: ${reason}`,
-                flagged: true,
-              },
-              {
-                id: newEventId(),
-                type: 'question-void',
-                questionNumber,
-                scope,
-                reason,
-              },
-            );
-            if (!recorded) return;
-            setDialog(null);
-            /*
-             * Persistent, unlike the other acknowledgements here: this one is not "that worked", it
-             * is an instruction about the next thing to do, and it stays until the replacement has
-             * been scored over the top of it.
-             */
-            notePersistent(
-              scope === 'bonus'
-                ? `The bonus on question ${questionNumber} was cleared. Score the replacement.`
-                : `Question ${questionNumber} was cleared. Score the replacement as question ${questionNumber}.`,
-              'info',
-            );
-          }}
-          onClose={() => {
-            setDialog(null);
-            setReviewFocus(undefined);
-          }}
-        />
-      )}
+      {dialog === 'replace' &&
+        (reviewFocus !== undefined || phase.kind === 'tossup' || phase.kind === 'bonus') && (
+          <ReplaceQuestionDialog
+            questionNumber={
+              reviewFocus ?? (phase.kind === 'tossup' || phase.kind === 'bonus' ? phase.questionNumber : 1)
+            }
+            bonusReplaceable={
+              (reviewFocus !== undefined &&
+                (game.questions.find((question) => question.questionNumber === reviewFocus)?.bonus !==
+                  undefined ||
+                  game.questions.find((question) => question.questionNumber === reviewFocus)
+                    ?.awaitingBonus === true)) ||
+              (reviewFocus === undefined && (phase.kind === 'bonus' || currentCycleHasBonus))
+            }
+            onReplace={(scope, reason) => {
+              if (submitting) return;
+              // Resolved once: the note, the void and the message must all be about one question.
+              const questionNumber = reviewFocus ?? currentQuestion;
+              /*
+               * The void and the note go together as one action: a cycle removed from the scoresheet
+               * with no record of why is indistinguishable from a scorekeeper who deleted it by
+               * mistake, and the whole point of this is that the room can explain itself afterwards.
+               */
+              const recorded = record(
+                {
+                  id: newEventId(),
+                  type: 'note',
+                  questionNumber,
+                  text: `${scope === 'bonus' ? 'Bonus' : 'Question'} replaced: ${reason}`,
+                  flagged: true,
+                },
+                {
+                  id: newEventId(),
+                  type: 'question-void',
+                  questionNumber,
+                  scope,
+                  reason,
+                },
+              );
+              if (!recorded) return;
+              setDialog(null);
+              /*
+               * Persistent, unlike the other acknowledgements here: this one is not "that worked", it
+               * is an instruction about the next thing to do, and it stays until the replacement has
+               * been scored over the top of it.
+               */
+              notePersistent(
+                scope === 'bonus'
+                  ? `The bonus on question ${questionNumber} was cleared. Score the replacement.`
+                  : `Question ${questionNumber} was cleared. Score the replacement as question ${questionNumber}.`,
+                'info',
+              );
+            }}
+            onClose={() => {
+              setDialog(null);
+              setReviewFocus(undefined);
+            }}
+          />
+        )}
       {dialog === 'end-early' && (
         <EndGameEarlyDialog
           game={game}

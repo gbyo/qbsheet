@@ -123,7 +123,9 @@ describe('what the printed sheet says', () => {
     const left = screen.getByRole('table', { name: 'Ninety Six', hidden: true });
     expect(within(left).getByRole('rowheader', { name: 'Sarah Mitchell', hidden: true })).toBeInTheDocument();
     format.answerTypes.forEach((answerType) => {
-      expect(within(left).getByRole('columnheader', { name: answerType.shortLabel, hidden: true })).toBeInTheDocument();
+      expect(
+        within(left).getByRole('columnheader', { name: answerType.shortLabel, hidden: true }),
+      ).toBeInTheDocument();
     });
   });
 
@@ -135,7 +137,11 @@ describe('what the printed sheet says', () => {
   test('carries the notes, including a mid-game rules correction', () => {
     printed([
       ...events,
-      event({ type: 'note', questionNumber: 2, text: 'Scoring rules corrected — Power: 15 points → 20 points.' }),
+      event({
+        type: 'note',
+        questionNumber: 2,
+        text: 'Scoring rules corrected — Power: 15 points → 20 points.',
+      }),
     ]);
     expect(screen.getByText(/Scoring rules corrected/)).toBeInTheDocument();
   });

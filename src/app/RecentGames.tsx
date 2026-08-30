@@ -84,9 +84,7 @@ function serverStatus(record: IStoredGameRecord): { title: string; detail?: stri
   if (record.serverDelivery === 'pending') {
     const lastTried = timeOfDay(ledger?.lastAttemptedAt);
     const secondary = ledger
-      ? [attemptText(ledger.attemptCount), ledger.lastFailureDetail]
-          .filter(Boolean)
-          .join(' · ')
+      ? [attemptText(ledger.attemptCount), ledger.lastFailureDetail].filter(Boolean).join(' · ')
       : undefined;
     return {
       title: lastTried ? `Not delivered yet · Last tried ${lastTried}` : 'Not delivered yet',
@@ -134,10 +132,7 @@ export default function RecentGames(props: {
   if (records.length === 0) return null;
 
   return (
-    <section
-      className="shell-section"
-      style={{ marginTop: '-1px', backgroundColor: 'var(--room-surface)' }}
-    >
+    <section className="shell-section" style={{ marginTop: '-1px', backgroundColor: 'var(--room-surface)' }}>
       <h2 className="shell-heading">Recent</h2>
       <ul className="recent-list">
         {records.map((record) => (
@@ -168,7 +163,9 @@ export default function RecentGames(props: {
                         <>
                           <span>{status.title}</span>
                           {status.detail && <small className="recent-status-detail">{status.detail}</small>}
-                          {status.secondary && <small className="recent-status-secondary">{status.secondary}</small>}
+                          {status.secondary && (
+                            <small className="recent-status-secondary">{status.secondary}</small>
+                          )}
                           {record.serverDeliveryLedger?.fingerprint && (
                             <details className="recent-receipt">
                               <summary>Receipt details</summary>
@@ -182,7 +179,11 @@ export default function RecentGames(props: {
                 </div>
                 <div>
                   <dt>QBJ</dt>
-                  <dd>{record.qbjDownloadedAt ? `Downloaded · ${timeOfDay(record.qbjDownloadedAt)}` : 'Not downloaded'}</dd>
+                  <dd>
+                    {record.qbjDownloadedAt
+                      ? `Downloaded · ${timeOfDay(record.qbjDownloadedAt)}`
+                      : 'Not downloaded'}
+                  </dd>
                 </div>
                 <div>
                   <dt>Handoff</dt>

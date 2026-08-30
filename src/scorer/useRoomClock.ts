@@ -41,7 +41,9 @@ export default function useRoomClock(
   const configured = durationMs > 0;
   const identity = `${gameKey}\u0000${segment}\u0000${durationMs}`;
   const [state, setState] = useState<IRoomClockState>(() =>
-    configured ? expireRoomClock(loadRoomClock(gameKey, durationMs, undefined, segment), Date.now()) : idleRoomClock(0),
+    configured
+      ? expireRoomClock(loadRoomClock(gameKey, durationMs, undefined, segment), Date.now())
+      : idleRoomClock(0),
   );
   const [loadedIdentity, setLoadedIdentity] = useState(() => (configured ? identity : ''));
   const [now, setNow] = useState(() => Date.now());
@@ -93,11 +95,14 @@ export default function useRoomClock(
     };
   }, [configured]);
 
-  const transition = useCallback((next: (current: IRoomClockState, currentTime: number) => IRoomClockState) => {
-    const currentTime = Date.now();
-    setNow(currentTime);
-    setState((current) => next(current, currentTime));
-  }, []);
+  const transition = useCallback(
+    (next: (current: IRoomClockState, currentTime: number) => IRoomClockState) => {
+      const currentTime = Date.now();
+      setNow(currentTime);
+      setState((current) => next(current, currentTime));
+    },
+    [],
+  );
 
   const start = useCallback(() => transition(startRoomClock), [transition]);
   const pause = useCallback(
@@ -113,7 +118,9 @@ export default function useRoomClock(
   const resumeAfter = useCallback(
     (reason: 'timeout' | 'checkpoint') =>
       transition((current, currentTime) =>
-        current.status === 'paused' && current.pauseReason === reason ? resumeRoomClock(current, currentTime) : current,
+        current.status === 'paused' && current.pauseReason === reason
+          ? resumeRoomClock(current, currentTime)
+          : current,
       ),
     [transition],
   );

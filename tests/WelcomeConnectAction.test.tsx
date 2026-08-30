@@ -15,7 +15,8 @@ import { openApp } from './appHarness';
 import { takePairingLaunch } from '../src/app/PairingLaunch';
 
 vi.mock('../src/app/ControlPairing', async () => {
-  const actual = await vi.importActual<typeof import('../src/app/ControlPairing')>('../src/app/ControlPairing');
+  const actual =
+    await vi.importActual<typeof import('../src/app/ControlPairing')>('../src/app/ControlPairing');
   return {
     ...actual,
     openControl: vi.fn(async () => ({

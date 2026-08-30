@@ -61,8 +61,8 @@ const groups: IGroup[] = [
         question: 'What has to be installed?',
         answer: (
           <>
-            Nothing. QBSheet runs in a browser. It can also be installed from the browser as an app,
-            which is useful on a device that will be scoring all day, but this is optional.
+            Nothing. QBSheet runs in a browser. It can also be installed from the browser as an app, which is
+            useful on a device that will be scoring all day, but this is optional.
           </>
         ),
       },
@@ -70,8 +70,8 @@ const groups: IGroup[] = [
         question: 'Does it work on Chromebooks, iPads, and phones?',
         answer: (
           <>
-            Yes. The scoresheet is dense on a phone-sized screen. A physical keyboard makes scoring
-            faster but is not required.
+            Yes. The scoresheet is dense on a phone-sized screen. A physical keyboard makes scoring faster but
+            is not required.
           </>
         ),
       },
@@ -79,9 +79,9 @@ const groups: IGroup[] = [
         question: 'Which browsers are supported?',
         answer: (
           <>
-            Current versions of Chrome, Edge, Safari, and Firefox. QBSheet includes a device check
-            that tests local storage, file downloads, and service-worker registration on the device
-            that will be used, so a room can be verified before the tournament.
+            Current versions of Chrome, Edge, Safari, and Firefox. QBSheet includes a device check that tests
+            local storage, file downloads, and service-worker registration on the device that will be used, so
+            a room can be verified before the tournament.
           </>
         ),
       },
@@ -89,9 +89,9 @@ const groups: IGroup[] = [
         question: 'Do rooms have to stay online?',
         answer: (
           <>
-            No. Once a game is open, scoring does not require a network connection. Connected rooms
-            send progress and results while the server is reachable and continue scoring when it is
-            not. <a href={pageUrl(slug, 'tournaments')}>How connected rooms work</a>.
+            No. Once a game is open, scoring does not require a network connection. Connected rooms send
+            progress and results while the server is reachable and continue scoring when it is not.{' '}
+            <a href={pageUrl(slug, 'tournaments')}>How connected rooms work</a>.
           </>
         ),
       },
@@ -106,10 +106,9 @@ const groups: IGroup[] = [
         question: 'Does QBSheet support our format?',
         answer: (
           <>
-            QBSheet defines no format of its own. Tossup values, the available outcomes, whether
-            bonuses are used and how they are structured, the number of active players, and overtime
-            all come from the tournament&apos;s scoring rules. QBSheet does not infer rules from the
-            name of a rule set.
+            QBSheet defines no format of its own. Tossup values, the available outcomes, whether bonuses are
+            used and how they are structured, the number of active players, and overtime all come from the
+            tournament&apos;s scoring rules. QBSheet does not infer rules from the name of a rule set.
           </>
         ),
       },
@@ -117,10 +116,9 @@ const groups: IGroup[] = [
         question: 'Can rules differ between games?',
         answer: (
           <>
-            Scoring rules belong to the game, so a game configured with different rules is scored by
-            those rules. Room procedure — where the round breaks, whether a clock is shown, when
-            lineups may change — is configured separately, because it varies by room and event rather
-            than by rule set.
+            Scoring rules belong to the game, so a game configured with different rules is scored by those
+            rules. Room procedure — where the round breaks, whether a clock is shown, when lineups may change
+            — is configured separately, because it varies by room and event rather than by rule set.
           </>
         ),
       },
@@ -128,9 +126,9 @@ const groups: IGroup[] = [
         question: 'How are protests recorded?',
         answer: (
           <>
-            A room can mark a question as under protest and continue scoring. A connected room can
-            also send a help request to tournament control, for a protest to adjudicate, an absent
-            player, or equipment trouble.
+            A room can mark a question as under protest and continue scoring. A connected room can also send a
+            help request to tournament control, for a protest to adjudicate, an absent player, or equipment
+            trouble.
           </>
         ),
       },
@@ -154,8 +152,8 @@ const groups: IGroup[] = [
         question: 'What happens if the tab is closed during a game?',
         answer: (
           <>
-            Reopening QBSheet restores the game. Each accepted question is written to the device as it
-            is scored, so the restored game is current as of the last recorded operation.
+            Reopening QBSheet restores the game. Each accepted question is written to the device as it is
+            scored, so the restored game is current as of the last recorded operation.
           </>
         ),
       },
@@ -163,9 +161,9 @@ const groups: IGroup[] = [
         question: 'What if the browser cannot store data?',
         answer: (
           <>
-            QBSheet reports it. A restricted profile, private browsing, or an exhausted storage quota
-            can all prevent durable storage. Scoring continues, and the scoresheet states that local
-            recovery is unavailable so the room can move to another device or export as it goes.
+            QBSheet reports it. A restricted profile, private browsing, or an exhausted storage quota can all
+            prevent durable storage. Scoring continues, and the scoresheet states that local recovery is
+            unavailable so the room can move to another device or export as it goes.
           </>
         ),
       },
@@ -173,9 +171,8 @@ const groups: IGroup[] = [
         question: 'What format are results in?',
         answer: (
           <>
-            QBJ, the interchange format for quiz bowl game data, which is not specific to QBSheet.
-            Older <code>.qbg</code> files can be read for compatibility.{' '}
-            <a href={qbjDocsUrl}>Read the profile</a>.
+            QBJ, the interchange format for quiz bowl game data, which is not specific to QBSheet. Older{' '}
+            <code>.qbg</code> files can be read for compatibility. <a href={qbjDocsUrl}>Read the profile</a>.
           </>
         ),
       },
@@ -200,8 +197,8 @@ const groups: IGroup[] = [
         question: 'What does QBSheet cost?',
         answer: (
           <>
-            Nothing. QBSheet is free software under the GNU AGPL, version 3 or later. There is no paid
-            tier and no per-room charge. <a href={licenseUrl}>Read the license</a>.
+            Nothing. QBSheet is free software under the GNU AGPL, version 3 or later. There is no paid tier
+            and no per-room charge. <a href={licenseUrl}>Read the license</a>.
           </>
         ),
       },
@@ -209,8 +206,8 @@ const groups: IGroup[] = [
         question: 'Can we host our own copy?',
         answer: (
           <>
-            Yes. The build produces a folder of static files that any web host can serve, with no
-            application server behind it. <a href={pageUrl(slug, 'self-host')}>Self-hosting guide</a>.
+            Yes. The build produces a folder of static files that any web host can serve, with no application
+            server behind it. <a href={pageUrl(slug, 'self-host')}>Self-hosting guide</a>.
           </>
         ),
       },
@@ -218,8 +215,8 @@ const groups: IGroup[] = [
         question: 'How are problems reported?',
         answer: (
           <>
-            On the issue tracker. During a tournament the room continues scoring from local state and
-            the result remains downloadable, so a report can wait until afterwards.{' '}
+            On the issue tracker. During a tournament the room continues scoring from local state and the
+            result remains downloadable, so a report can wait until afterwards.{' '}
             <a href={githubUrl}>The repository</a>.
           </>
         ),
@@ -228,8 +225,8 @@ const groups: IGroup[] = [
         question: 'Does QBSheet replace tournament-control software?',
         answer: (
           <>
-            No. QBSheet scores one room. The schedule, the room assignments, and the statistics belong
-            to tournament-control software, which QBSheet connects to over an open protocol.
+            No. QBSheet scores one room. The schedule, the room assignments, and the statistics belong to
+            tournament-control software, which QBSheet connects to over an open protocol.
           </>
         ),
       },

@@ -202,11 +202,18 @@ describe('moving between the two forms', () => {
         ...from(basic()),
         answerTypes: [
           newAdvancedAnswerType({ value: 10, label: 'Correct', shortLabel: 'C' }),
-          newAdvancedAnswerType({ value: 0, label: 'Wrong after readout', shortLabel: 'W', awardsBonus: false }),
+          newAdvancedAnswerType({
+            value: 0,
+            label: 'Wrong after readout',
+            shortLabel: 'W',
+            awardsBonus: false,
+          }),
         ],
       }),
     ).toBe(false);
-    expect(fits({ ...from(basic()), answerTypes: [newAdvancedAnswerType({ label: 'Correct' })] })).toBe(false);
+    expect(fits({ ...from(basic()), answerTypes: [newAdvancedAnswerType({ label: 'Correct' })] })).toBe(
+      false,
+    );
     // A neg that earns a bonus is a real rule the advanced form can state and the basic one cannot.
     expect(
       fits({
@@ -317,7 +324,10 @@ describe('moving between the two forms', () => {
       });
       // A row nobody named is not a row called "Correct"; the conversion would be inventing the name.
       const unnamed = handEntered({
-        answerTypes: [newAdvancedAnswerType({ value: 10 }), newAdvancedAnswerType({ value: -5, awardsBonus: false })],
+        answerTypes: [
+          newAdvancedAnswerType({ value: 10 }),
+          newAdvancedAnswerType({ value: -5, awardsBonus: false }),
+        ],
       });
 
       expect(advancedFitsBasicForm(shortLabelOnly)).toBe(false);
@@ -359,7 +369,9 @@ describe('dispatching to whichever form is live', () => {
   test('problems and the format come from the branch in hand', () => {
     const bad = basicRulesInput(basic({ tossupValue: 0, negValue: -5 }));
 
-    expect(scoringRulesInputProblems(bad)).toContain('These scoring rules have no way to score points on a tossup.');
+    expect(scoringRulesInputProblems(bad)).toContain(
+      'These scoring rules have no way to score points on a tossup.',
+    );
     expect(scoringRulesInputFormat(bad)).toBeNull();
 
     const good = advancedRulesInput(advancedFromBasic(basic()));
@@ -375,9 +387,13 @@ describe('dispatching to whichever form is live', () => {
 
   test('the timed flag and the tossup count are readable without knowing the branch', () => {
     expect(scoringRulesInputIsTimed(basicRulesInput(basic({ timed: true })))).toBe(true);
-    expect(scoringRulesInputIsTimed(advancedRulesInput(advancedFromBasic(basic({ timed: false }))))).toBe(false);
+    expect(scoringRulesInputIsTimed(advancedRulesInput(advancedFromBasic(basic({ timed: false }))))).toBe(
+      false,
+    );
 
     expect(scoringRulesInputTossupCount(basicRulesInput(basic({ tossupCount: 24 })))).toBe(24);
-    expect(scoringRulesInputTossupCount(advancedRulesInput(advancedFromBasic(basic({ tossupCount: 15 }))))).toBe(15);
+    expect(
+      scoringRulesInputTossupCount(advancedRulesInput(advancedFromBasic(basic({ tossupCount: 15 })))),
+    ).toBe(15);
   });
 });

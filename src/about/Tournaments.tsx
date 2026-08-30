@@ -30,14 +30,7 @@
  * how many events use QBSheet or what hardware they use, because neither is something this repository
  * knows.
  */
-import {
-  ActionLinks,
-  PageFooter,
-  PageHeader,
-  pageUrl,
-  qbjDocsUrl,
-  qbtcpDocsUrl,
-} from './PageChrome';
+import { ActionLinks, PageFooter, PageHeader, pageUrl, qbjDocsUrl, qbtcpDocsUrl } from './PageChrome';
 
 const slug = 'tournaments' as const;
 
@@ -105,15 +98,18 @@ function ScopeSection() {
         <p className="about-kicker">Scope</p>
         <h2 id="scope-heading">QBSheet and tournament control</h2>
         <p>
-          QBSheet scores the game in one room. The schedule, the room assignments, and the
-          tournament&apos;s statistics belong to tournament-control software. Connected scoring
-          requires tournament-control software that implements QBTCP.
+          QBSheet scores the game in one room. The schedule, the room assignments, and the tournament&apos;s
+          statistics belong to tournament-control software. Connected scoring requires tournament-control
+          software that implements QBTCP.
         </p>
       </div>
       <dl className="about-definition-list">
         <div>
           <dt>Tournament control</dt>
-          <dd>Owns the schedule, assigns teams to rooms, and collects results into the tournament&apos;s statistics.</dd>
+          <dd>
+            Owns the schedule, assigns teams to rooms, and collects results into the tournament&apos;s
+            statistics.
+          </dd>
         </div>
         <div>
           <dt>QBSheet</dt>
@@ -129,8 +125,8 @@ function ScopeSection() {
         <div>
           <dt>QBJ</dt>
           <dd>
-            The document format for game and tournament data. An assignment sent over the network is
-            the same document tournament control could write to disk. <a href={qbjDocsUrl}>Read the profile</a>.
+            The document format for game and tournament data. An assignment sent over the network is the same
+            document tournament control could write to disk. <a href={qbjDocsUrl}>Read the profile</a>.
           </dd>
         </div>
       </dl>
@@ -193,8 +189,8 @@ export default function Tournaments() {
         <section className="about-hero" aria-labelledby="tournaments-title">
           <h1 id="tournaments-title">QBSheet for tournaments</h1>
           <p className="about-hero-copy">
-            QBSheet connects to tournament-control software over QBTCP. Rooms score in a browser,
-            continue scoring when the server is unreachable, and return results as QBJ.
+            QBSheet connects to tournament-control software over QBTCP. Rooms score in a browser, continue
+            scoring when the server is unreachable, and return results as QBJ.
           </p>
           <ActionLinks
             slug={slug}
@@ -217,30 +213,29 @@ export default function Tournaments() {
             <div>
               <dt>Tournament-control software</dt>
               <dd>
-                Software that implements QBTCP, reachable from the rooms. QBSheet connects to the
-                server you run.
+                Software that implements QBTCP, reachable from the rooms. QBSheet connects to the server you
+                run.
               </dd>
             </div>
             <div>
               <dt>A browser per room</dt>
               <dd>
-                A current browser on any device. Nothing is installed, and a room that has loaded
-                QBSheet once can score without a network connection.
+                A current browser on any device. Nothing is installed, and a room that has loaded QBSheet once
+                can score without a network connection.
               </dd>
             </div>
             <div>
               <dt>A secure origin</dt>
               <dd>
-                Serve QBSheet over HTTPS. Offline support uses a service worker, which browsers
-                install only on a secure origin.{' '}
-                <a href={pageUrl(slug, 'self-host')}>Self-hosting guide</a>.
+                Serve QBSheet over HTTPS. Offline support uses a service worker, which browsers install only
+                on a secure origin. <a href={pageUrl(slug, 'self-host')}>Self-hosting guide</a>.
               </dd>
             </div>
             <div>
               <dt>Pairing codes</dt>
               <dd>
-                Issued by your tournament-control software. A code pairs one room and is exchanged
-                for a credential that reaches that room only.
+                Issued by your tournament-control software. A code pairs one room and is exchanged for a
+                credential that reaches that room only.
               </dd>
             </div>
           </dl>
@@ -253,13 +248,13 @@ export default function Tournaments() {
           </div>
           <div className="about-prose">
             <p>
-              Connected scoring is one of three ways to start a game. A room that cannot reach the
-              server can open a QBJ file or enter the teams, players, and scoring rules directly, and
-              scores the game with the same scoresheet, the same corrections, and the same QBJ export.
+              Connected scoring is one of three ways to start a game. A room that cannot reach the server can
+              open a QBJ file or enter the teams, players, and scoring rules directly, and scores the game
+              with the same scoresheet, the same corrections, and the same QBJ export.
             </p>
             <p>
-              A game started this way is not connected, so its result is handed over as a downloaded
-              file rather than submitted. <a href={pageUrl(slug, 'scoring')}>What scoring a game involves</a>.
+              A game started this way is not connected, so its result is handed over as a downloaded file
+              rather than submitted. <a href={pageUrl(slug, 'scoring')}>What scoring a game involves</a>.
             </p>
           </div>
         </section>

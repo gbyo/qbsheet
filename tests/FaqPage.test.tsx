@@ -68,7 +68,9 @@ describe('the questions page', () => {
   test('states that storage can fail', () => {
     const { container } = render(<Faq />);
 
-    expect(screen.getByText('What if the browser cannot store data?', { selector: 'dt' })).toBeInTheDocument();
+    expect(
+      screen.getByText('What if the browser cannot store data?', { selector: 'dt' }),
+    ).toBeInTheDocument();
 
     // The comfortable version of this answer would be that it cannot happen.
     const said = words(container);
@@ -100,9 +102,18 @@ describe('the questions page', () => {
     for (const link of screen.getAllByRole('link', { name: 'About' })) {
       expect(link).toHaveAttribute('href', '../');
     }
-    expect(screen.getByRole('link', { name: 'How connected rooms work' })).toHaveAttribute('href', '../tournaments/');
-    expect(screen.getByRole('link', { name: 'What scoring a game involves' })).toHaveAttribute('href', '../scoring/');
-    expect(screen.getByRole('link', { name: 'What is stored and transmitted' })).toHaveAttribute('href', '../privacy/');
+    expect(screen.getByRole('link', { name: 'How connected rooms work' })).toHaveAttribute(
+      'href',
+      '../tournaments/',
+    );
+    expect(screen.getByRole('link', { name: 'What scoring a game involves' })).toHaveAttribute(
+      'href',
+      '../scoring/',
+    );
+    expect(screen.getByRole('link', { name: 'What is stored and transmitted' })).toHaveAttribute(
+      'href',
+      '../privacy/',
+    );
     expect(screen.getByRole('link', { name: 'Self-hosting guide' })).toHaveAttribute('href', '../self-host/');
 
     for (const region of ['.about-nav', '.about-footer nav']) {
@@ -119,7 +130,15 @@ describe('the questions page', () => {
 
     // Hardest here of anywhere: this page answers "does it support our format", which is exactly the
     // question that tempts a list of format names. A list is what would narrow the answer.
-    for (const assumption of ['naqt', 'acf', 'power', 'neg', 'bounce', 'four players a side', 'between tossups']) {
+    for (const assumption of [
+      'naqt',
+      'acf',
+      'power',
+      'neg',
+      'bounce',
+      'four players a side',
+      'between tossups',
+    ]) {
       expect(said).not.toContain(assumption);
     }
   });

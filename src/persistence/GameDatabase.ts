@@ -230,7 +230,7 @@ class IndexedDbRecordStore<T extends { id: string }> implements IRecordStore<T> 
 
   async get(id: string): Promise<T | null> {
     const result = await this.run<T | null>('readonly', (store) => store.get(id));
-    return result.ok ? result.result ?? null : null;
+    return result.ok ? (result.result ?? null) : null;
   }
 
   async put(record: T): Promise<boolean> {

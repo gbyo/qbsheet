@@ -439,6 +439,7 @@ export function readRoomProcedure(value: unknown): IRoomProcedure {
   if (breaks !== undefined) normalized.breaks = breaks;
   if (timeoutDurationSeconds !== undefined) normalized.timeoutDurationSeconds = timeoutDurationSeconds;
   if (protestCheckpoints !== undefined) normalized.protestCheckpoints = protestCheckpoints;
-  if (configuredSubstitutionPolicy !== undefined) normalized.substitutionPolicy = configuredSubstitutionPolicy;
+  if (configuredSubstitutionPolicy !== undefined)
+    normalized.substitutionPolicy = configuredSubstitutionPolicy;
   return normalized;
 }

@@ -861,7 +861,6 @@ a:focus-visible {
   border-top: 1px solid var(--about-border);
 }
 
-
 @media (max-width: 820px) {
   .about-section {
     grid-template-columns: 1fr;
@@ -932,7 +931,6 @@ a:focus-visible {
   .about-stages li:not(:last-child)::after {
     display: none;
   }
-
 }
 
 @media (max-width: 700px) {

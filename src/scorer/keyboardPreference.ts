@@ -45,7 +45,10 @@ export function loadKeyboardEnabled(storage: IPreferenceStorage | null = browser
   }
 }
 
-export function saveKeyboardEnabled(enabled: boolean, storage: IPreferenceStorage | null = browserStorage()): boolean {
+export function saveKeyboardEnabled(
+  enabled: boolean,
+  storage: IPreferenceStorage | null = browserStorage(),
+): boolean {
   try {
     storage?.setItem(keyboardPreferenceStorageKey, enabled ? 'on' : 'off');
     return true;

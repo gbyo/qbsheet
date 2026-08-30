@@ -29,7 +29,14 @@ const maximumEnumeratedBonusChoices = 1_000;
 export function regularBonusTotals(bonus: IScorekeeperBonus): number[] | null {
   if (!bonus.regular) return null;
   const perPart = bonus.pointsPerPart;
-  if (typeof perPart !== 'number' || !Number.isInteger(perPart) || perPart <= 0 || !Number.isInteger(bonus.maximumScore) || bonus.maximumScore < 0) return null;
+  if (
+    typeof perPart !== 'number' ||
+    !Number.isInteger(perPart) ||
+    perPart <= 0 ||
+    !Number.isInteger(bonus.maximumScore) ||
+    bonus.maximumScore < 0
+  )
+    return null;
   if (Math.floor(bonus.maximumScore / perPart) + 2 > maximumEnumeratedBonusChoices) return null;
 
   const totals: number[] = [];
@@ -42,10 +49,13 @@ export function regularBonusTotals(bonus: IScorekeeperBonus): number[] | null {
 
 /** Whether bounceback choices are too numerous for a useful button row. */
 export function bouncebackNeedsTypedEntry(bonus: IScorekeeperBonus, controlledPoints: number): boolean {
-  if (!Number.isInteger(bonus.maximumScore) || bonus.maximumScore < 0 || !Number.isInteger(controlledPoints)) return false;
+  if (!Number.isInteger(bonus.maximumScore) || bonus.maximumScore < 0 || !Number.isInteger(controlledPoints))
+    return false;
   const available = Math.max(0, bonus.maximumScore - Math.max(0, controlledPoints));
   const step = bonus.pointsPerPart && bonus.pointsPerPart > 0 ? bonus.pointsPerPart : bonus.divisor;
-  return Number.isInteger(step) && step > 0 && Math.floor(available / step) + 2 > maximumEnumeratedBonusChoices;
+  return (
+    Number.isInteger(step) && step > 0 && Math.floor(available / step) + 2 > maximumEnumeratedBonusChoices
+  );
 }
 
 /**
@@ -55,7 +65,8 @@ export function bouncebackNeedsTypedEntry(bonus: IScorekeeperBonus, controlledPo
  * bounce, and offering a button for it would invite a score that cannot happen.
  */
 export function bouncebackOptions(bonus: IScorekeeperBonus, controlledPoints: number): number[] {
-  if (!Number.isInteger(bonus.maximumScore) || bonus.maximumScore < 0 || !Number.isInteger(controlledPoints)) return [0];
+  if (!Number.isInteger(bonus.maximumScore) || bonus.maximumScore < 0 || !Number.isInteger(controlledPoints))
+    return [0];
   const available = Math.max(0, bonus.maximumScore - Math.max(0, controlledPoints));
   const step = bonus.pointsPerPart && bonus.pointsPerPart > 0 ? bonus.pointsPerPart : bonus.divisor;
   if (!Number.isInteger(step) || step <= 0) return [0];
@@ -74,13 +85,19 @@ export function bouncebackOptions(bonus: IScorekeeperBonus, controlledPoints: nu
  * problem in both places is told the same thing about it.
  */
 export function bonusTotalProblem(bonus: IScorekeeperBonus, points: number): string | null {
-  if (!Number.isInteger(bonus.maximumScore) || bonus.maximumScore < 0 || !Number.isInteger(bonus.divisor) || bonus.divisor < 1) {
+  if (
+    !Number.isInteger(bonus.maximumScore) ||
+    bonus.maximumScore < 0 ||
+    !Number.isInteger(bonus.divisor) ||
+    bonus.divisor < 1
+  ) {
     return 'This bonus format is not usable.';
   }
   if (!Number.isFinite(points) || !Number.isInteger(points)) return 'Enter a whole number of points.';
   if (points < 0) return 'Bonus points cannot be negative.';
   if (points > bonus.maximumScore) return `The most a bonus can be worth is ${bonus.maximumScore}.`;
-  const divisor = bonus.regular && bonus.pointsPerPart && bonus.pointsPerPart > 0 ? bonus.pointsPerPart : bonus.divisor;
+  const divisor =
+    bonus.regular && bonus.pointsPerPart && bonus.pointsPerPart > 0 ? bonus.pointsPerPart : bonus.divisor;
   if (divisor > 0 && points % divisor !== 0) {
     return `Bonus points should be divisible by ${divisor}.`;
   }

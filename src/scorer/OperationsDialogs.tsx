@@ -36,7 +36,8 @@ const issueCategories: HelpRequestCategory[] = [
 
 export function formatControlRequestTime(value: string, source: 'server' | 'device'): string {
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return source === 'device' ? 'requested on this device' : 'requested time unavailable';
+  if (Number.isNaN(date.getTime()))
+    return source === 'device' ? 'requested on this device' : 'requested time unavailable';
   const time = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   return source === 'device' ? `${time} · time from this device` : time;
 }
@@ -120,14 +121,13 @@ export function ControlRequestControl(props: {
         </span>
       ) : (
         <span>
-          This tournament connection does not support remote control requests; the {unsupportedMessageNoun} will still
-          be saved on the scoresheet.
+          This tournament connection does not support remote control requests; the {unsupportedMessageNoun}{' '}
+          will still be saved on the scoresheet.
         </span>
       )}
     </div>
   );
 }
-
 
 export function IssueDialog(props: {
   questionNumber: number;
@@ -183,7 +183,9 @@ export function IssueDialog(props: {
       await onReport(category, details.trim(), requestControl);
       onClose();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'The issue could not be sent to tournament control.');
+      setError(
+        reason instanceof Error ? reason.message : 'The issue could not be sent to tournament control.',
+      );
     } finally {
       setSending(false);
     }
@@ -252,7 +254,12 @@ export function IssueDialog(props: {
           onCancelControl={onCancelControl}
         />
         {error && <p className="scorer-problem">{error}</p>}
-        <button type="button" className="scorer-choice" disabled={sending || !details.trim()} onClick={submit}>
+        <button
+          type="button"
+          className="scorer-choice"
+          disabled={sending || !details.trim()}
+          onClick={submit}
+        >
           {submitLabel}
         </button>
       </div>
@@ -370,7 +377,8 @@ export function eventDescription(event: ScoreEvent, format: IScorekeeperFormat, 
     }`;
   if (event.type === 'question-void')
     return `${event.scope === 'bonus' ? 'Bonus' : 'Question'} replaced: ${event.reason}`;
-  if (event.type === 'end-game-early') return `Game ended early after ${event.tossupsRead} tossups: ${event.reason}`;
+  if (event.type === 'end-game-early')
+    return `Game ended early after ${event.tossupsRead} tossups: ${event.reason}`;
   return `${event.flagged ? 'Flagged note' : 'Note'}: ${event.text}`;
 }
 
@@ -506,7 +514,9 @@ export function frameDescription(
 export function frameQuestion(frame: readonly ScoreEvent[]): number | undefined {
   if (frame.length === 0) return undefined;
   const [first] = frame;
-  return frame.every((event) => event.questionNumber === first.questionNumber) ? first.questionNumber : undefined;
+  return frame.every((event) => event.questionNumber === first.questionNumber)
+    ? first.questionNumber
+    : undefined;
 }
 
 function EditableEvent(props: {
@@ -534,7 +544,9 @@ function EditableEvent(props: {
     return '';
   };
   const [points, setPoints] = useState(initialPoints);
-  const [bounceback, setBounceback] = useState(event.type === 'bonus' ? String(event.bouncebackPoints ?? 0) : '0');
+  const [bounceback, setBounceback] = useState(
+    event.type === 'bonus' ? String(event.bouncebackPoints ?? 0) : '0',
+  );
   const [text, setText] = useState(initialText);
   const [flagged, setFlagged] = useState(event.type === 'note' && event.flagged === true);
   const [problem, setProblem] = useState('');
@@ -550,12 +562,14 @@ function EditableEvent(props: {
     () => new Set(event.type === 'substitution' ? event.activePlayers : []),
   );
 
-  const eventTeam = event.type === 'tossup-buzz' || event.type === 'substitution' ? game[event.team] : undefined;
+  const eventTeam =
+    event.type === 'tossup-buzz' || event.type === 'substitution' ? game[event.team] : undefined;
   const parsedBoundary = Number(effectiveQuestion);
   /** What the bench is computed against while the field is mid-edit. */
-  const boundary = Number.isInteger(parsedBoundary) && parsedBoundary >= 1 ? parsedBoundary : event.questionNumber;
+  const boundary =
+    Number.isInteger(parsedBoundary) && parsedBoundary >= 1 ? parsedBoundary : event.questionNumber;
   const question = game.questions.find((candidate) => candidate.questionNumber === event.questionNumber);
-  const activeBuzzPlayers = event.type === 'tossup-buzz' ? question?.activePlayers[event.team] ?? [] : [];
+  const activeBuzzPlayers = event.type === 'tossup-buzz' ? (question?.activePlayers[event.team] ?? []) : [];
 
   const save = () => {
     setProblem('');
@@ -595,7 +609,9 @@ function EditableEvent(props: {
       const tooEarly = playersAddedAfter(events, event.team, chosen);
       const impossible = Array.from(playing).find((name) => tooEarly.has(name));
       if (impossible !== undefined) {
-        setProblem(`${impossible} was not on the roster at Tossup ${chosen}. Take them off, or move the tossup later.`);
+        setProblem(
+          `${impossible} was not on the roster at Tossup ${chosen}. Take them off, or move the tossup later.`,
+        );
         return;
       }
       const activePlayers = orderedActivePlayers(
@@ -623,7 +639,9 @@ function EditableEvent(props: {
         return;
       }
       if (bounced > format.bonus.maximumScore - controlled) {
-        setProblem(`The bounceback cannot exceed ${Math.max(0, format.bonus.maximumScore - controlled)} points.`);
+        setProblem(
+          `The bounceback cannot exceed ${Math.max(0, format.bonus.maximumScore - controlled)} points.`,
+        );
         return;
       }
       onSave({ ...event, parts: undefined, controlledPoints: controlled, bouncebackPoints: bounced });
@@ -662,8 +680,14 @@ function EditableEvent(props: {
         <>
           <label htmlFor={`event-player-${event.id}`}>
             Player
-            <select id={`event-player-${event.id}`} value={playerName} onChange={(e) => setPlayerName(e.target.value)}>
-              {!activeBuzzPlayers.includes(playerName) && <option value={playerName}>{playerName} — not active</option>}
+            <select
+              id={`event-player-${event.id}`}
+              value={playerName}
+              onChange={(e) => setPlayerName(e.target.value)}
+            >
+              {!activeBuzzPlayers.includes(playerName) && (
+                <option value={playerName}>{playerName} — not active</option>
+              )}
               {activeBuzzPlayers.map((name) => (
                 <option key={name} value={name}>
                   {name}
@@ -799,7 +823,9 @@ export function ScoresheetReviewDialog(props: {
    * out. Somebody who chose Edit question *from* the list is going back to the list.
    */
   const [cameFromList, setCameFromList] = useState(editQuestion === undefined);
-  const questionNumbers = Array.from(new Set(events.map((event) => event.questionNumber))).sort((a, b) => a - b);
+  const questionNumbers = Array.from(new Set(events.map((event) => event.questionNumber))).sort(
+    (a, b) => a - b,
+  );
   const leaveEditor = () => {
     if (cameFromList) setEditingQuestion(null);
     else onClose();
@@ -822,8 +848,8 @@ export function ScoresheetReviewDialog(props: {
       ) : (
         <>
           <p className="scorer-dialog-note">
-            {game.left.name} {game.left.points} · {game.right.name} {game.right.points}. Corrections recalculate every
-            total and player stat.
+            {game.left.name} {game.left.points} · {game.right.name} {game.right.points}. Corrections
+            recalculate every total and player stat.
           </p>
           {game.personnelProblems.map((problem) => (
             <p key={problem.eventId} className="scorer-problem">
@@ -896,8 +922,8 @@ export function ScoresheetReviewDialog(props: {
                                   type="button"
                                   className="scorer-text-action is-destructive"
                                   onClick={() => {
-
-                                    if (window.confirm('Remove this event from the scoresheet?')) onRemove(event.id);
+                                    if (window.confirm('Remove this event from the scoresheet?'))
+                                      onRemove(event.id);
                                   }}
                                 >
                                   Remove
@@ -941,8 +967,8 @@ export function RecoveryDialog(props: {
   return (
     <ScorerDialog title="Recover from QBJ" onClose={onClose}>
       <p className="scorer-dialog-note">
-        Choose a QBJ backup downloaded by this scorer for {expectedTeams.left.name} vs {expectedTeams.right.name}. This
-        replaces the events currently on screen.
+        Choose a QBJ backup downloaded by this scorer for {expectedTeams.left.name} vs{' '}
+        {expectedTeams.right.name}. This replaces the events currently on screen.
       </p>
       <label className="scorer-file-field" htmlFor="scorer-recovery-file">
         QBJ backup

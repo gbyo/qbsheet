@@ -22,10 +22,16 @@ describe('the product page', () => {
   test('keeps the hero exactly as it is', () => {
     render(<About />);
 
-    expect(screen.getByRole('heading', { level: 1, name: 'The simpler way to keep score.' })).toBeInTheDocument();
-    expect(screen.getByText(/QBSheet keeps quiz bowl scoring fast, flexible, and out of your way/)).toBeInTheDocument();
     expect(
-      screen.getByRole('img', { name: /QBSheet scoring a tied practice game between Ninety Six and Greenwood/ }),
+      screen.getByRole('heading', { level: 1, name: 'The simpler way to keep score.' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/QBSheet keeps quiz bowl scoring fast, flexible, and out of your way/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('img', {
+        name: /QBSheet scoring a tied practice game between Ninety Six and Greenwood/,
+      }),
     ).toBeInTheDocument();
     expect(screen.getByText(/The real QBSheet scoring interface/)).toBeInTheDocument();
   });
@@ -33,7 +39,9 @@ describe('the product page', () => {
   test('explains the tournament workflow as three ordered stages', () => {
     render(<About />);
 
-    expect(screen.getByRole('heading', { level: 2, name: 'Built around how you actually score' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'Built around how you actually score' }),
+    ).toBeInTheDocument();
 
     // The stage numerals are decoration next to the name, so the heading a screen reader reaches is the
     // stage itself. A numeral that stopped being `aria-hidden` would fail this by name.
@@ -64,16 +72,27 @@ describe('the product page', () => {
     // A file, a server, and self-created games all have to be present. Tournament control is useful,
     // but a practice, scrimmage, or tryout has no assignment to receive and no result to send back.
     expect(
-      screen.getByText(/Open a QBJ assignment, connect QBSheet to tournament control, or create a game yourself/),
+      screen.getByText(
+        /Open a QBJ assignment, connect QBSheet to tournament control, or create a game yourself/,
+      ),
     ).toBeInTheDocument();
-    expect(screen.getByText(/Connected games can be sent back to tournament control; any game can be downloaded as QBJ/)).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /Connected games can be sent back to tournament control; any game can be downloaded as QBJ/,
+      ),
+    ).toBeInTheDocument();
   });
 
   test('answers the four things a director asks in a section of their own', () => {
     const { container } = render(<About />);
 
     expect(screen.getByRole('heading', { level: 2, name: 'Made for tournament day' })).toBeInTheDocument();
-    for (const title of ['No internet required', 'Less setup at the table', 'Your format, not ours', 'Recovery built in']) {
+    for (const title of [
+      'No internet required',
+      'Less setup at the table',
+      'Your format, not ours',
+      'Recovery built in',
+    ]) {
       expect(screen.getByRole('heading', { level: 3, name: title })).toBeInTheDocument();
     }
 
@@ -87,7 +106,9 @@ describe('the product page', () => {
     render(<About />);
 
     expect(screen.getByText('OPEN BY DESIGN')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { level: 2, name: "Your games aren't locked into QBSheet." })).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { level: 2, name: "Your games aren't locked into QBSheet." }),
+    ).toBeInTheDocument();
     expect(
       screen.getByText(
         'QBSheet uses open formats and an open protocol, so tournament data can move between the scoresheet and compatible tournament software.',
@@ -98,7 +119,9 @@ describe('the product page', () => {
       expect(screen.getByText(term, { selector: 'dt' })).toBeInTheDocument();
     }
     expect(screen.getByText(/Portable files for assignments, games, and results\./)).toBeInTheDocument();
-    expect(screen.getByText(/Live communication with compatible tournament-control software\./)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Live communication with compatible tournament-control software\./),
+    ).toBeInTheDocument();
     expect(screen.getByText(/QBSheet is licensed under the GNU AGPL\./)).toBeInTheDocument();
 
     expect(screen.getByRole('link', { name: 'Read the QBJ documentation' })).toHaveAttribute(
@@ -159,7 +182,15 @@ describe('the product page', () => {
     // Each of these would narrow the page to somebody else's tournament. Powers, negs and bounce-backs
     // are optional structures in `IScorekeeperFormat`; the active-player count is configurable; and
     // when substitutions are allowed is whatever the tournament's `IRoomProcedure` says it is.
-    for (const assumption of ['naqt', 'acf', 'power', 'neg', 'bounce', 'four players a side', 'between tossups']) {
+    for (const assumption of [
+      'naqt',
+      'acf',
+      'power',
+      'neg',
+      'bounce',
+      'four players a side',
+      'between tossups',
+    ]) {
       expect(words).not.toContain(assumption);
     }
   });

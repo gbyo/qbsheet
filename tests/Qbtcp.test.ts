@@ -100,7 +100,9 @@ describe('assignment status', () => {
     { next: { label: 5 } },
     { next: 'Round 5' },
   ])('omits a missing or malformed next-game label %#', (nextShape) => {
-    expect(readAssignmentStatus({ state: 'none', session: null, ...nextShape })?.nextAssignmentLabel).toBeUndefined();
+    expect(
+      readAssignmentStatus({ state: 'none', session: null, ...nextShape })?.nextAssignmentLabel,
+    ).toBeUndefined();
   });
 });
 
@@ -209,7 +211,15 @@ describe('what the client puts on the wire', () => {
       if (path === '/qbtcp/v1') return { status: 404, body: { error: 'Not found' } };
       if (path.endsWith('/assignment')) {
         return {
-          body: { roomId: 'room-204', roomName: 'Room 204', tournamentName: 'T', current: null, session: null, scoringFormat: null, timedRounds: false },
+          body: {
+            roomId: 'room-204',
+            roomName: 'Room 204',
+            tournamentName: 'T',
+            current: null,
+            session: null,
+            scoringFormat: null,
+            timedRounds: false,
+          },
         };
       }
       return { body: {} };
@@ -293,7 +303,9 @@ describe('what the client puts on the wire', () => {
   test('a QBTCP success without the defined help envelope is not reported as accepted', async () => {
     const { fetchImpl } = qbtcpServer({ '/qbtcp/v1/help': { body: {} } });
 
-    await expect(new FruityServerClient('http://control.test', fetchImpl).requestHelp(identity, 'protest', 'Help.')).resolves.toMatchObject({
+    await expect(
+      new FruityServerClient('http://control.test', fetchImpl).requestHelp(identity, 'protest', 'Help.'),
+    ).resolves.toMatchObject({
       kind: 'server-error',
     });
   });
@@ -354,14 +366,19 @@ describe('what the client puts on the wire', () => {
         return {
           ok: true,
           status: 200,
-          text: async () => JSON.stringify({ request: { id: 'legacy-help', category: 'rules-question', message: 'Rule.', status: 'open' } }),
+          text: async () =>
+            JSON.stringify({
+              request: { id: 'legacy-help', category: 'rules-question', message: 'Rule.', status: 'open' },
+            }),
         } as Response;
       }
       return { ok: true, status: 200, text: async () => '{}' } as Response;
     }) as unknown as typeof fetch;
     const client = new FruityServerClient('http://control.test', fetchImpl);
 
-    await expect(client.requestHelp(identity, 'rules-question', 'Rule.')).resolves.toMatchObject({ kind: 'accepted' });
+    await expect(client.requestHelp(identity, 'rules-question', 'Rule.')).resolves.toMatchObject({
+      kind: 'accepted',
+    });
     await expect(client.readHelp(identity)).resolves.toMatchObject({ kind: 'outstanding' });
     await expect(client.cancelHelp(identity, 'legacy-help')).resolves.toEqual({ kind: 'cleared' });
     expect(calls.map((call) => call.path)).toEqual([
@@ -379,24 +396,35 @@ describe('what the client puts on the wire', () => {
       calls.push({ path, method: init.method ?? 'GET' });
       if (path === '/qbtcp/v1') return { ok: false, status: 404, text: async () => '{}' } as Response;
       if (path === '/api/v1/rooms/room-204/help' && (init.method ?? 'GET') === 'GET') {
-        return { ok: false, status: 404, text: async () => JSON.stringify({ error: 'Not found' }) } as Response;
+        return {
+          ok: false,
+          status: 404,
+          text: async () => JSON.stringify({ error: 'Not found' }),
+        } as Response;
       }
       if (path === '/api/v1/rooms/room-204/help' && init.method === 'POST') {
         return {
           ok: true,
           status: 200,
-          text: async () => JSON.stringify({ request: { category: 'protest', message: 'Help.', status: 'open' } }),
+          text: async () =>
+            JSON.stringify({ request: { category: 'protest', message: 'Help.', status: 'open' } }),
         } as Response;
       }
       if (path === '/api/v1/rooms/room-204/help/legacy-help' && init.method === 'DELETE') {
-        return { ok: false, status: 404, text: async () => JSON.stringify({ error: 'Not found' }) } as Response;
+        return {
+          ok: false,
+          status: 404,
+          text: async () => JSON.stringify({ error: 'Not found' }),
+        } as Response;
       }
       return { ok: false, status: 404, text: async () => '{}' } as Response;
     }) as unknown as typeof fetch;
     const client = new FruityServerClient('http://control.test', fetchImpl);
 
     await expect(client.readHelp(identity)).resolves.toMatchObject({ kind: 'unavailable' });
-    await expect(client.requestHelp(identity, 'protest', 'Help.')).resolves.toMatchObject({ kind: 'accepted' });
+    await expect(client.requestHelp(identity, 'protest', 'Help.')).resolves.toMatchObject({
+      kind: 'accepted',
+    });
     await expect(client.cancelHelp(identity, 'legacy-help')).resolves.toMatchObject({ kind: 'unsupported' });
     expect(calls.map((call) => `${call.method} ${call.path}`)).toEqual([
       'GET /qbtcp/v1',
@@ -428,7 +456,11 @@ describe('what the client puts on the wire', () => {
       path === '/qbtcp/v1' ? { status: 404, body: {} } : { body: {} },
     );
 
-    await new FruityServerClient('http://control.test', fetchImpl).putSnapshot(credentials, { tossups_read: 3 }, 41);
+    await new FruityServerClient('http://control.test', fetchImpl).putSnapshot(
+      credentials,
+      { tossups_read: 3 },
+      41,
+    );
 
     const sent = calls.find((call) => call.path === '/api/v1/sessions/sess-1/snapshot');
     expect(sent?.body).toEqual({ tossups_read: 3 });
@@ -460,12 +492,19 @@ describe('what the client puts on the wire', () => {
       '/qbtcp/v1/sessions': { body: { session_id: 'sess-9f13', token: 'session-token', writer: true } },
     });
 
-    const opened = await new FruityServerClient('http://control.test', fetchImpl).openSession(identity, 'sm-4471');
+    const opened = await new FruityServerClient('http://control.test', fetchImpl).openSession(
+      identity,
+      'sm-4471',
+    );
 
     const sent = calls.find((call) => call.path === '/qbtcp/v1/sessions');
     expect(sent?.body).toEqual({ match_id: 'sm-4471', device_id: 'device-1' });
     expect(sent?.headers['x-yf-room-token']).toBe('room-token');
-    expect(opened.ok && opened.value).toEqual({ sessionId: 'sess-9f13', token: 'session-token', writer: true });
+    expect(opened.ok && opened.value).toEqual({
+      sessionId: 'sess-9f13',
+      token: 'session-token',
+      writer: true,
+    });
   });
 
   test('the room capability is read under the name QBTCP gives it', async () => {
@@ -633,7 +672,9 @@ describe('what the client puts on the wire', () => {
 
     test('the room is told before it pairs, not after it has scored a game', async () => {
       const { fetchImpl } = recordingFetch((path) =>
-        path === '/qbtcp/v1' ? { body: { ...qbtcpDiscovery, capabilities: ['pairing', 'assignment'] } } : { body: {} },
+        path === '/qbtcp/v1'
+          ? { body: { ...qbtcpDiscovery, capabilities: ['pairing', 'assignment'] } }
+          : { body: {} },
       );
       const client = new FruityServerClient('http://control.test', fetchImpl);
       await client.verify();
@@ -644,7 +685,9 @@ describe('what the client puts on the wire', () => {
     });
 
     test('a pre-QBTCP server is not measured against a document it does not publish', async () => {
-      const { fetchImpl } = recordingFetch((path) => (path === '/qbtcp/v1' ? { status: 404, body: {} } : { body: {} }));
+      const { fetchImpl } = recordingFetch((path) =>
+        path === '/qbtcp/v1' ? { status: 404, body: {} } : { body: {} },
+      );
       const client = new FruityServerClient('http://control.test', fetchImpl);
       await client.verify();
 
@@ -656,7 +699,10 @@ describe('what the client puts on the wire', () => {
 
 describe('which repair a refusal calls for', () => {
   test('a refused session token reopens the session rather than asking for a code', () => {
-    expect(classifyWrite({ ok: false, status: 401, error: 'no' })).toEqual({ sessionProblem: true, conflict: null });
+    expect(classifyWrite({ ok: false, status: 401, error: 'no' })).toEqual({
+      sessionProblem: true,
+      conflict: null,
+    });
   });
 
   /**

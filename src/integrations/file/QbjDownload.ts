@@ -59,7 +59,11 @@ export interface IDownloadEnvironment {
 }
 
 function defaultDownloadEnvironment(): IDownloadEnvironment | null {
-  if (typeof document === 'undefined' || typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') {
+  if (
+    typeof document === 'undefined' ||
+    typeof URL === 'undefined' ||
+    typeof URL.createObjectURL !== 'function'
+  ) {
     return null;
   }
   return {
@@ -105,7 +109,11 @@ export function downloadQbj(
   packageValue: IGamePackage,
   environment: IDownloadEnvironment | null = defaultDownloadEnvironment(),
 ): boolean {
-  return downloadFile(qbjFileContents(portableQbj(qbj, packageValue)), qbjFileName(packageValue), environment);
+  return downloadFile(
+    qbjFileContents(portableQbj(qbj, packageValue)),
+    qbjFileName(packageValue),
+    environment,
+  );
 }
 
 /**

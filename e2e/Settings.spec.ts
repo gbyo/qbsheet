@@ -2,7 +2,9 @@ import { expect, test } from '@playwright/test';
 
 test.use({ viewport: { width: 320, height: 568 } });
 
-test('Settings stays inside a phone viewport, scrolls internally, and restores focus to the cog', async ({ page }) => {
+test('Settings stays inside a phone viewport, scrolls internally, and restores focus to the cog', async ({
+  page,
+}) => {
   await page.goto('/');
   const cog = page.getByRole('button', { name: 'Settings' });
   await cog.click();

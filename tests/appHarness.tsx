@@ -69,10 +69,12 @@ export async function startLineups(): Promise<void> {
         if (!currentStart || !currentStart.hasAttribute('disabled')) break;
         changed = false;
         for (const team of Array.from(prompt.querySelectorAll('section[aria-label$=" starters"]'))) {
-          const button = Array.from(team.querySelectorAll('button[aria-label^="Start "]')).find((candidate) => {
-            const key = `${team.getAttribute('aria-label')}\u0000${candidate.getAttribute('aria-label')}`;
-            return !candidate.hasAttribute('disabled') && !chosen.has(key);
-          });
+          const button = Array.from(team.querySelectorAll('button[aria-label^="Start "]')).find(
+            (candidate) => {
+              const key = `${team.getAttribute('aria-label')}\u0000${candidate.getAttribute('aria-label')}`;
+              return !candidate.hasAttribute('disabled') && !chosen.has(key);
+            },
+          );
           if (!button) continue;
           const key = `${team.getAttribute('aria-label')}\u0000${button.getAttribute('aria-label')}`;
           chosen.add(key);

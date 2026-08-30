@@ -97,12 +97,16 @@ export default function AssignmentProblemDialog(props: {
   };
 
   return (
-    <NativeDialog title="Something wrong with this game?" onClose={onClose} className="assignment-problem-dialog">
+    <NativeDialog
+      title="Something wrong with this game?"
+      onClose={onClose}
+      className="assignment-problem-dialog"
+    >
       {report.kind === 'choose' && (
         <>
           <p className="shell-hint">
-            Choose the one fact that does not match. QBSheet will include the assignment shown in the room
-            so tournament control can compare it.
+            Choose the one fact that does not match. QBSheet will include the assignment shown in the room so
+            tournament control can compare it.
           </p>
           <div className="shell-modal-actions assignment-problem-choices">
             {(Object.keys(assignmentProblems) as AssignmentProblem[]).map((problem) => (
@@ -145,8 +149,8 @@ export default function AssignmentProblemDialog(props: {
             }
           />
           <p className="shell-hint">
-            The round, room, teams and packet are sent automatically. Add only what tournament control
-            cannot already see.
+            The round, room, teams and packet are sent automatically. Add only what tournament control cannot
+            already see.
           </p>
           {!onReportProblem && (
             <p className="shell-warning" role="alert">

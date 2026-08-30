@@ -156,7 +156,9 @@ describe('rosters', () => {
   });
 
   test('a roster of absurd size is refused rather than walked', () => {
-    const players = Array.from({ length: maxPlayersPerTeam + 1 }, (_, index) => ({ name: `Player ${index}` }));
+    const players = Array.from({ length: maxPlayersPerTeam + 1 }, (_, index) => ({
+      name: `Player ${index}`,
+    }));
     const errors = errorsFor(validPackage({ left: { name: 'Ninety Six A', players } }));
 
     expect(errors.some((error) => error.includes('implausible'))).toBe(true);
@@ -229,16 +231,18 @@ describe('scoring rules', () => {
       answerTypes: [{ ...format.answerTypes[0], value: 'ten' as unknown as number }, format.answerTypes[1]],
     };
 
-    expect(errorsFor(validPackage({ scorekeeperFormat: broken })).some((error) => error.includes('point value'))).toBe(
-      true,
-    );
+    expect(
+      errorsFor(validPackage({ scorekeeperFormat: broken })).some((error) => error.includes('point value')),
+    ).toBe(true);
   });
 
   test('answer types out of order are refused, because events reference them by index', () => {
     const format = scoringRulesToScorekeeperFormat(new ScoringRules());
     const broken = { ...format, answerTypes: [...format.answerTypes].reverse() };
 
-    expect(errorsFor(validPackage({ scorekeeperFormat: broken })).some((error) => error.includes('index'))).toBe(true);
+    expect(
+      errorsFor(validPackage({ scorekeeperFormat: broken })).some((error) => error.includes('index')),
+    ).toBe(true);
   });
 });
 

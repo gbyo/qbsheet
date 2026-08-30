@@ -79,7 +79,8 @@ describe('what the log keeps', () => {
   test('the buffer is bounded and drops the oldest', () => {
     const log = new ErrorLog();
 
-    for (let index = 0; index < errorLogLimit + 10; index += 1) log.record('uncaught', new Error(`e${index}`));
+    for (let index = 0; index < errorLogLimit + 10; index += 1)
+      log.record('uncaught', new Error(`e${index}`));
 
     const entries = log.entries();
     expect(entries).toHaveLength(errorLogLimit);

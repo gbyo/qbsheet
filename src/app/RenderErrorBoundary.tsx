@@ -216,26 +216,30 @@ export default class RenderErrorBoundary extends Component<IProps, IState> {
           {repeating ? (
             <>
               <p className="crash-lead">
-                This has now happened more than once, so reloading is unlikely to clear it. Your scoring is still saved
-                on this device.
+                This has now happened more than once, so reloading is unlikely to clear it. Your scoring is
+                still saved on this device.
               </p>
               <p className="crash-body">
-                Save the recovery file below and give it to your tournament director. It contains every game this device
-                has scored today. Then score the rest of this game on paper.
+                Save the recovery file below and give it to your tournament director. It contains every game
+                this device has scored today. Then score the rest of this game on paper.
               </p>
             </>
           ) : (
             <>
               <p className="crash-lead">Your scoring is saved on this device. Nothing has been lost.</p>
               <p className="crash-body">
-                Reload to return to the question you were on. Every operation you accepted was written to this device
-                before the screen went wrong.
+                Reload to return to the question you were on. Every operation you accepted was written to this
+                device before the screen went wrong.
               </p>
             </>
           )}
 
           <div className="crash-actions">
-            <button type="button" className={`crash-button${repeating ? '' : ' is-primary'}`} onClick={this.reload}>
+            <button
+              type="button"
+              className={`crash-button${repeating ? '' : ' is-primary'}`}
+              onClick={this.reload}
+            >
               Reload the scoresheet
             </button>
             <button

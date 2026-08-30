@@ -85,8 +85,8 @@ export default function AdvancedScoringRulesEditor(props: {
           </span>
         </legend>
         <p className="shell-hint answer-types-hint">
-          Every way a tossup can be answered, and what each is worth. Use a negative value for a neg.
-          The scorer shows them highest value first, whatever order they are in here.
+          Every way a tossup can be answered, and what each is worth. Use a negative value for a neg. The
+          scorer shows them highest value first, whatever order they are in here.
         </p>
 
         {value.answerTypes.length === 0 && (
@@ -206,7 +206,9 @@ export default function AdvancedScoringRulesEditor(props: {
             // A new row follows the format it is being added to, so a bonus-free one does not open
             // with a bonus checked and a complaint about it.
             onClick={() =>
-              set({ answerTypes: [...value.answerTypes, newAdvancedAnswerType({ awardsBonus: value.useBonuses })] })
+              set({
+                answerTypes: [...value.answerTypes, newAdvancedAnswerType({ awardsBonus: value.useBonuses })],
+              })
             }
           >
             Add an answer type
@@ -244,8 +246,8 @@ export default function AdvancedScoringRulesEditor(props: {
                 <span className="label-with-help">
                   <span id={id('bonus-structure-legend')}>Bonus structure</span>
                   <HelpTooltip label="Explain regular and irregular bonuses">
-                    Choose regular when every bonus has the same number of equally valued parts. Otherwise QBSheet
-                    records the total directly.
+                    Choose regular when every bonus has the same number of equally valued parts. Otherwise
+                    QBSheet records the total directly.
                   </HelpTooltip>
                 </span>
               </legend>
@@ -278,22 +280,22 @@ export default function AdvancedScoringRulesEditor(props: {
               <div className="rules-setup-grid">
                 <label htmlFor={id('bonus-part')}>
                   Points per bonus part
-                    <input
-                      id={id('bonus-part')}
-                      type="number"
-                      min={1}
-                      step={1}
+                  <input
+                    id={id('bonus-part')}
+                    type="number"
+                    min={1}
+                    step={1}
                     value={value.pointsPerBonusPart === undefined ? '' : String(value.pointsPerBonusPart)}
                     onChange={(event) => set({ pointsPerBonusPart: numberValue(event.target.value) })}
                   />
                 </label>
                 <label htmlFor={id('bonus-parts')}>
                   Parts per bonus
-                    <input
-                      id={id('bonus-parts')}
-                      type="number"
-                      min={1}
-                      step={1}
+                  <input
+                    id={id('bonus-parts')}
+                    type="number"
+                    min={1}
+                    step={1}
                     value={value.partsPerBonus === undefined ? '' : String(value.partsPerBonus)}
                     onChange={(event) => set({ partsPerBonus: numberValue(event.target.value) })}
                   />
@@ -317,8 +319,8 @@ export default function AdvancedScoringRulesEditor(props: {
                     <div className="label-with-help">
                       <label htmlFor={id('bonus-divisor')}>Bonus score increment</label>
                       <HelpTooltip label="Explain valid bonus-total steps">
-                        The smallest step between possible bonus totals. For example, use 10 when totals can be 0,
-                        10, 20, 30, and so on.
+                        The smallest step between possible bonus totals. For example, use 10 when totals can
+                        be 0, 10, 20, 30, and so on.
                       </HelpTooltip>
                     </div>
                     <input
@@ -337,7 +339,9 @@ export default function AdvancedScoringRulesEditor(props: {
                       type="number"
                       min={1}
                       step={1}
-                      value={value.minimumPartsPerBonus === undefined ? '' : String(value.minimumPartsPerBonus)}
+                      value={
+                        value.minimumPartsPerBonus === undefined ? '' : String(value.minimumPartsPerBonus)
+                      }
                       onChange={(event) => set({ minimumPartsPerBonus: numberValue(event.target.value) })}
                     />
                   </label>
@@ -348,14 +352,16 @@ export default function AdvancedScoringRulesEditor(props: {
                       type="number"
                       min={1}
                       step={1}
-                      value={value.maximumPartsPerBonus === undefined ? '' : String(value.maximumPartsPerBonus)}
+                      value={
+                        value.maximumPartsPerBonus === undefined ? '' : String(value.maximumPartsPerBonus)
+                      }
                       onChange={(event) => set({ maximumPartsPerBonus: numberValue(event.target.value) })}
                     />
                   </label>
                 </div>
                 <p className="shell-hint rules-fields-hint">
-                  The increment is the largest number that always divides a bonus total. For parts worth
-                  10, 10 and 20 that is 10.
+                  The increment is the largest number that always divides a bonus total. For parts worth 10,
+                  10 and 20 that is 10.
                 </p>
               </>
             )}
@@ -371,7 +377,8 @@ export default function AdvancedScoringRulesEditor(props: {
                 Missed parts bounce back
               </label>
               <HelpTooltip label="What does bonus bounceback mean?">
-                When the team controlling a bonus misses a part, the other team gets a chance to answer that part.
+                When the team controlling a bonus misses a part, the other team gets a chance to answer that
+                part.
               </HelpTooltip>
             </div>
           </div>
@@ -435,8 +442,8 @@ export default function AdvancedScoringRulesEditor(props: {
             Round is timed
           </label>
           <HelpTooltip label="About timed rounds">
-            In a timed round, regulation ends when the moderator calls time; the tossup count is still used as a
-            maximum.
+            In a timed round, regulation ends when the moderator calls time; the tossup count is still used as
+            a maximum.
           </HelpTooltip>
         </div>
         {timedHint && <p className="shell-hint rules-fields-hint">{timedHint}</p>}

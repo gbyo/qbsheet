@@ -375,7 +375,10 @@ describe('connected room durability', () => {
     expect(requestHelp).toHaveBeenCalledTimes(1);
 
     await act(async () => {
-      await Promise.all([hook.result.current.cancelControlRequest(), hook.result.current.cancelControlRequest()]);
+      await Promise.all([
+        hook.result.current.cancelControlRequest(),
+        hook.result.current.cancelControlRequest(),
+      ]);
     });
     expect(cancelHelp).toHaveBeenCalledTimes(1);
     expect(hook.result.current.controlRequest.kind).toBe('idle');
@@ -404,7 +407,9 @@ describe('connected room durability', () => {
       assignment: vi.fn(async () => ({ ok: true as const, value: assignmentWithNothingToPlay })),
       putSnapshot: vi.fn(async () => ({ ok: true as const, value: {} })),
       requestHelp,
-      readHelp: vi.fn(async () => (openHelp ? { kind: 'outstanding' as const, request: openHelp } : { kind: 'idle' as const })),
+      readHelp: vi.fn(async () =>
+        openHelp ? { kind: 'outstanding' as const, request: openHelp } : { kind: 'idle' as const },
+      ),
       cancelHelp: vi.fn(async () => ({ kind: 'cleared' as const })),
     } as unknown as FruityServerClient;
     const hook = renderHook(() =>
@@ -445,7 +450,10 @@ describe('connected room durability', () => {
       putSnapshot: vi.fn(async () => ({ ok: true as const, value: {} })),
       requestHelp: vi.fn(async () => ({ kind: 'accepted' as const, request })),
       readHelp: vi.fn(async () => ({ kind: 'outstanding' as const, request })),
-      cancelHelp: vi.fn(async () => ({ kind: 'unsupported' as const, error: 'This older server has no DELETE route.' })),
+      cancelHelp: vi.fn(async () => ({
+        kind: 'unsupported' as const,
+        error: 'This older server has no DELETE route.',
+      })),
     } as unknown as FruityServerClient;
     const hook = renderHook(() =>
       useConnectedRuntime({
@@ -564,7 +572,11 @@ describe('connected room durability', () => {
     });
     if (!result) throw new Error('help request result was not returned');
     expect(result).toMatchObject({ kind: 'refused', status: 403 });
-    expect(hook.result.current.controlRequest).toMatchObject({ kind: 'refused', status: 403, retryable: false });
+    expect(hook.result.current.controlRequest).toMatchObject({
+      kind: 'refused',
+      status: 403,
+      retryable: false,
+    });
     expect(hook.result.current.alerts.some((alert) => alert.id === 'credentials')).toBe(false);
     hook.unmount();
   });

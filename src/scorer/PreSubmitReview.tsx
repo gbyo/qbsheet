@@ -122,9 +122,7 @@ export function HalftimeCheck(props: {
           {game.right.name} <strong>{game.right.points}</strong>
         </span>
       </p>
-      <p className="scorer-dialog-note">
-        Read the score to the moderator. {substitutionMessage}
-      </p>
+      <p className="scorer-dialog-note">Read the score to the moderator. {substitutionMessage}</p>
       <div className="scorer-complete-actions">
         <button type="button" className="scorer-action" onClick={onPlayers}>
           Players
@@ -212,14 +210,14 @@ export default function PreSubmitReview(props: IPreSubmitReviewProps) {
           <ul>
             {openProtests.map((protest) => (
               <li key={protest.eventId}>
-                Q{protest.questionNumber} · {protest.teamName} · {protestSubjectLabels[protest.subject]} &mdash;{' '}
-                {protest.description} ({protestStatusLabels[protest.status]})
+                Q{protest.questionNumber} · {protest.teamName} · {protestSubjectLabels[protest.subject]}{' '}
+                &mdash; {protest.description} ({protestStatusLabels[protest.status]})
               </li>
             ))}
           </ul>
           <p className="scorer-dialog-note">
-            The result can still be sent. Tournament control is told the protest is outstanding and will see it before
-            accepting the game.
+            The result can still be sent. Tournament control is told the protest is outstanding and will see
+            it before accepting the game.
           </p>
         </div>
       )}

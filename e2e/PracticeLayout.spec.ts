@@ -119,7 +119,12 @@ for (const size of [
     await expect(coach).toBeVisible();
 
     const coachBox = await coach.boundingBox();
-    const rulings = page.locator('.scorer-team').last().locator('.scorer-player').last().locator('.scorer-answers');
+    const rulings = page
+      .locator('.scorer-team')
+      .last()
+      .locator('.scorer-player')
+      .last()
+      .locator('.scorer-answers');
     const rulingsBox = await rulings.boundingBox();
     expect(coachBox).not.toBeNull();
     expect(rulingsBox).not.toBeNull();

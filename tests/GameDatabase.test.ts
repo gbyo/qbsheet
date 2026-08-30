@@ -36,10 +36,12 @@ describe('the renamed database migration', () => {
     const store = await openRecordStore<ITestRecord>();
     const records = new Map((await store.list()).map((record) => [record.id, record.value]));
 
-    expect(records).toEqual(new Map([
-      ['already-copied', 'new database version'],
-      ['stranded-one', 'recovered one'],
-      ['stranded-two', 'recovered two'],
-    ]));
+    expect(records).toEqual(
+      new Map([
+        ['already-copied', 'new database version'],
+        ['stranded-one', 'recovered one'],
+        ['stranded-two', 'recovered two'],
+      ]),
+    );
   });
 });

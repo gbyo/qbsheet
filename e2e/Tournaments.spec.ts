@@ -14,9 +14,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 /** Whether the document fits its own viewport. A sideways scrollbar on a phone is a defect. */
 async function fits(page: Page): Promise<boolean> {
-  return page.evaluate(
-    () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
-  );
+  return page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
 }
 
 test('the tournaments page explains running QBSheet across rooms', async ({ page }) => {
@@ -24,13 +22,9 @@ test('the tournaments page explains running QBSheet across rooms', async ({ page
 
   await expect(page).toHaveTitle('QBSheet for tournaments | QBSheet');
   await expect(page.getByRole('heading', { level: 1, name: 'QBSheet for tournaments' })).toBeVisible();
-  await expect(
-    page.getByRole('heading', { name: 'QBSheet and tournament control' }),
-  ).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'QBSheet and tournament control' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'A connected round' })).toBeVisible();
-  await expect(
-    page.getByRole('heading', { name: 'Connection failures' }),
-  ).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Connection failures' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Requirements' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Scoring without a connection' })).toBeVisible();
 
@@ -46,7 +40,10 @@ test('the product page reaches it from the header, and it comes back', async ({ 
   await expect(page.getByRole('heading', { level: 1, name: 'QBSheet for tournaments' })).toBeVisible();
 
   // Back up one directory, not two. This catches a path written as though from `about/`.
-  await page.getByRole('navigation', { name: 'Footer navigation' }).getByRole('link', { name: 'About' }).click();
+  await page
+    .getByRole('navigation', { name: 'Footer navigation' })
+    .getByRole('link', { name: 'About' })
+    .click();
   await expect(page).toHaveURL(/\/about\/$/);
   await expect(page.getByRole('heading', { level: 1, name: 'The simpler way to keep score.' })).toBeVisible();
 });
@@ -56,9 +53,7 @@ test('it reaches its sibling pages sideways', async ({ page }) => {
 
   await page.getByRole('link', { name: 'What scoring a game involves' }).click();
   await expect(page).toHaveURL(/\/about\/scoring\/$/);
-  await expect(
-    page.getByRole('heading', { level: 1, name: 'Scoring with QBSheet' }),
-  ).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: 'Scoring with QBSheet' })).toBeVisible();
 });
 
 test('the scorer is two directories up', async ({ page }) => {

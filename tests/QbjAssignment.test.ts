@@ -51,20 +51,58 @@ function typeIndex(format: IScorekeeperFormat, value: number): number {
 /** A short but representative game: powers, a neg, bonuses, and a substitution. */
 function representativeEvents(format: IScorekeeperFormat): ScoreEvent[] {
   return [
-    event({ type: 'tossup-buzz', questionNumber: 1, team: 'left', playerName: 'Sarah', answerTypeIndex: typeIndex(format, 15) }),
+    event({
+      type: 'tossup-buzz',
+      questionNumber: 1,
+      team: 'left',
+      playerName: 'Sarah',
+      answerTypeIndex: typeIndex(format, 15),
+    }),
     event({ type: 'bonus', questionNumber: 1, team: 'left', controlledPoints: 20 }),
-    event({ type: 'tossup-buzz', questionNumber: 2, team: 'right', playerName: 'Emma', answerTypeIndex: typeIndex(format, 10) }),
+    event({
+      type: 'tossup-buzz',
+      questionNumber: 2,
+      team: 'right',
+      playerName: 'Emma',
+      answerTypeIndex: typeIndex(format, 10),
+    }),
     event({ type: 'bonus', questionNumber: 2, team: 'right', controlledPoints: 10 }),
-    event({ type: 'tossup-buzz', questionNumber: 3, team: 'left', playerName: 'James', answerTypeIndex: typeIndex(format, -5) }),
-    event({ type: 'tossup-buzz', questionNumber: 3, team: 'right', playerName: 'Jordan', answerTypeIndex: typeIndex(format, 10) }),
+    event({
+      type: 'tossup-buzz',
+      questionNumber: 3,
+      team: 'left',
+      playerName: 'James',
+      answerTypeIndex: typeIndex(format, -5),
+    }),
+    event({
+      type: 'tossup-buzz',
+      questionNumber: 3,
+      team: 'right',
+      playerName: 'Jordan',
+      answerTypeIndex: typeIndex(format, 10),
+    }),
     event({ type: 'bonus', questionNumber: 3, team: 'right', controlledPoints: 30 }),
-    event({ type: 'substitution', questionNumber: 4, team: 'left', activePlayers: ['Sarah', 'Alex', 'Taylor'] }),
-    event({ type: 'tossup-buzz', questionNumber: 4, team: 'left', playerName: 'Alex', answerTypeIndex: typeIndex(format, 10) }),
+    event({
+      type: 'substitution',
+      questionNumber: 4,
+      team: 'left',
+      activePlayers: ['Sarah', 'Alex', 'Taylor'],
+    }),
+    event({
+      type: 'tossup-buzz',
+      questionNumber: 4,
+      team: 'left',
+      playerName: 'Alex',
+      answerTypeIndex: typeIndex(format, 10),
+    }),
     event({ type: 'bonus', questionNumber: 4, team: 'left', controlledPoints: 10 }),
   ];
 }
 
-function setupFor(definition: { left: { name: string; players: { name: string }[] }; right: { name: string; players: { name: string }[] } }): IGameSetup {
+function setupFor(definition: {
+  left: { name: string; players: { name: string }[] };
+  right: { name: string; players: { name: string }[] };
+}): IGameSetup {
   return {
     left: { name: definition.left.name, players: definition.left.players.map((player) => player.name) },
     right: { name: definition.right.name, players: definition.right.players.map((player) => player.name) },
@@ -93,7 +131,12 @@ describe('reading an official one-game assignment', () => {
     expect(definition.tournament.name).toBe('Spring Invitational');
     expect(definition.left.name).toBe('Ninety Six');
     expect(definition.right.name).toBe('Greenwood');
-    expect(definition.left.players.map((player) => player.name)).toEqual(['Sarah', 'James', 'Alex', 'Taylor']);
+    expect(definition.left.players.map((player) => player.name)).toEqual([
+      'Sarah',
+      'James',
+      'Alex',
+      'Taylor',
+    ]);
     expect(definition.round.number).toBe(4);
     expect(definition.room?.name).toBe('Room 204');
   });
@@ -106,7 +149,9 @@ describe('reading an official one-game assignment', () => {
     expect(definition.qbjIdentity?.phaseId).toBe('Phase_Prelims');
     expect(definition.qbjIdentity?.roundId).toBe('Round_4');
     expect(definition.qbjIdentity?.teamIds).toEqual({ left: ninetySix.id, right: greenwood.id });
-    expect(definition.qbjIdentity?.playerIds?.[playerIdentityKey('Ninety Six', 'Sarah')]).toBe('Player_Sarah');
+    expect(definition.qbjIdentity?.playerIds?.[playerIdentityKey('Ninety Six', 'Sarah')]).toBe(
+      'Player_Sarah',
+    );
   });
 
   test('the operational extension is read, and the room id survives a renamed room', () => {
@@ -291,7 +336,14 @@ describe('incomplete QBJ', () => {
 
     test('the game does not open, and the room is told which version and what to do', () => {
       const opened = openGameText(
-        text(fromTheFuture({ version: roomProcedureVersion + 1, halves: true, timeoutsPerTeam: 0, newRule: 'unknown' })),
+        text(
+          fromTheFuture({
+            version: roomProcedureVersion + 1,
+            halves: true,
+            timeoutsPerTeam: 0,
+            newRule: 'unknown',
+          }),
+        ),
       );
 
       expect(opened.ok).toBe(false);
@@ -354,7 +406,13 @@ describe('incomplete QBJ', () => {
   });
 
   test('a roster naming the same player twice is refused rather than merged', () => {
-    const duplicated = { ...ninetySix, players: [{ id: 'p1', name: 'Sarah' }, { id: 'p2', name: 'Sarah' }] };
+    const duplicated = {
+      ...ninetySix,
+      players: [
+        { id: 'p1', name: 'Sarah' },
+        { id: 'p2', name: 'Sarah' },
+      ],
+    };
     const document = assignmentDocument({ teams: [duplicated, greenwood] });
 
     const opened = openGameText(text(document));
@@ -557,7 +615,15 @@ describe('assignment to result', () => {
     const match = objectOfType(buildResultDocument({ definition, format, game }), 'Match');
     const extension = match[qbtcpExtensionKey] as QbjObject;
 
-    for (const forbidden of ['tournament_id', 'tournament_name', 'match_id', 'round_name', 'teams', 'location', 'packet']) {
+    for (const forbidden of [
+      'tournament_id',
+      'tournament_name',
+      'match_id',
+      'round_name',
+      'teams',
+      'location',
+      'packet',
+    ]) {
       expect(extension[forbidden]).toBeUndefined();
     }
   });
@@ -659,7 +725,16 @@ describe('output form', () => {
 
     const serialized = JSON.stringify(buildResultDocument({ definition, format, game })).toLowerCase();
 
-    for (const forbidden of ['token', 'pairing', 'authorization', 'device_id', 'deviceid', 'secret', 'password', '_yf_scorekeeper_recovery']) {
+    for (const forbidden of [
+      'token',
+      'pairing',
+      'authorization',
+      'device_id',
+      'deviceid',
+      'secret',
+      'password',
+      '_yf_scorekeeper_recovery',
+    ]) {
       expect(serialized).not.toContain(forbidden);
     }
   });
@@ -694,9 +769,7 @@ describe('round numbers', () => {
   });
 
   test('a non-numeric round name is not turned into a wrong number', () => {
-    const { definition } = openOne(
-      assignmentDocument({ roundName: 'Playoff 2', omitRoundNumber: true }),
-    );
+    const { definition } = openOne(assignmentDocument({ roundName: 'Playoff 2', omitRoundNumber: true }));
 
     // Scoring still works; the round simply has no number.
     expect(definition.round.number).toBe(0);

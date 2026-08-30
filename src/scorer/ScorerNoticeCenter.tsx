@@ -165,7 +165,7 @@ export default function ScorerNoticeCenter(props: { notices: IScorerNotice[] }) 
   const active = visible[0];
   const activeKey = active ? noticeKey(active) : undefined;
   const activeDuration = active
-    ? active.autoDismissMs ?? (active.transient ? defaultTransientMs : undefined)
+    ? (active.autoDismissMs ?? (active.transient ? defaultTransientMs : undefined))
     : undefined;
   const activeNoticeRef = useRef(active);
 

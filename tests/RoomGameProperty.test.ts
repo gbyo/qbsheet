@@ -212,7 +212,10 @@ function administrativeCandidate(real: IReal, intent: IActionIntent): ScoreEvent
       const roster = game[intent.team].players.map((player) => player.name);
       const count = Math.min(real.format.players.maximumActive, 1 + (intent.choice % roster.length));
       const offset = intent.choice % roster.length;
-      const activePlayers = Array.from({ length: count }, (_, index) => roster[(offset + index) % roster.length]);
+      const activePlayers = Array.from(
+        { length: count },
+        (_, index) => roster[(offset + index) % roster.length],
+      );
       return nextEvent(real, {
         type: 'substitution',
         questionNumber: lineupChangeEffectiveQuestion(game, real.events),
@@ -313,7 +316,9 @@ function assertInvariants(real: IReal): void {
   }
 
   for (const question of game.questions) {
-    const teams = question.buzzes.map((buzz) => buzz.team).concat(question.noPenalty.map((attempt) => attempt.team));
+    const teams = question.buzzes
+      .map((buzz) => buzz.team)
+      .concat(question.noPenalty.map((attempt) => attempt.team));
     expect(new Set(teams).size).toBe(teams.length);
     const conversion = question.buzzes.find((buzz) => buzz.answerType.value > 0);
     if (question.bonus) expect(question.bonus.team).toBe(conversion?.team);
@@ -399,27 +404,23 @@ const commandArbitrary = fc
   .map((intent) => new GeneratedCommand(intent));
 
 describe('fast-check scoring state machine', () => {
-  test(
-    'shrinks mixed scoring, procedure, correction, and undo sequences while preserving invariants',
-    () => {
-      fc.assert(
-        fc.property(
-          fc.integer({ min: 0, max: formats.length - 1 }),
-          fc.commands<IModel, IReal>([commandArbitrary], { maxCommands: maximumCommands, size: 'large' }),
-          (formatIndex, commands) => {
-            const format = formats[formatIndex];
-            fc.modelRun(
-              () => ({
-                model: { eventCount: 0, phase: 'tossup' } as IModel,
-                real: { format, setup, procedure, events: [], nextId: 0 },
-              }),
-              commands,
-            );
-          },
-        ),
-        { numRuns: propertyRunCount, verbose: true },
-      );
-    },
-    20_000,
-  );
+  test('shrinks mixed scoring, procedure, correction, and undo sequences while preserving invariants', () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 0, max: formats.length - 1 }),
+        fc.commands<IModel, IReal>([commandArbitrary], { maxCommands: maximumCommands, size: 'large' }),
+        (formatIndex, commands) => {
+          const format = formats[formatIndex];
+          fc.modelRun(
+            () => ({
+              model: { eventCount: 0, phase: 'tossup' } as IModel,
+              real: { format, setup, procedure, events: [], nextId: 0 },
+            }),
+            commands,
+          );
+        },
+      ),
+      { numRuns: propertyRunCount, verbose: true },
+    );
+  }, 20_000);
 });

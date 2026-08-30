@@ -82,7 +82,9 @@ describe('what reaches the page', () => {
 
   test('text size is a multiplier on the root, so every rem in the application follows', () => {
     applyDisplayPreferences('system', 'large');
-    expect(document.documentElement.style.getPropertyValue('--room-text-scale')).toBe(String(textSizeScales.large));
+    expect(document.documentElement.style.getPropertyValue('--room-text-scale')).toBe(
+      String(textSizeScales.large),
+    );
 
     applyDisplayPreferences('system', 'standard');
     expect(document.documentElement.style.getPropertyValue('--room-text-scale')).toBe('1');

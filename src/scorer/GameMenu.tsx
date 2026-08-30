@@ -78,7 +78,9 @@ export default function GameMenu(props: { items: IGameMenuItem[]; label?: string
     if (enabledIndices.length === 0) return;
     const current = enabledIndices.indexOf(index);
     const position = current === -1 ? (direction === 1 ? 0 : enabledIndices.length - 1) : current;
-    menuItems.current[enabledIndices[(position + direction + enabledIndices.length) % enabledIndices.length]]?.focus();
+    menuItems.current[
+      enabledIndices[(position + direction + enabledIndices.length) % enabledIndices.length]
+    ]?.focus();
   };
 
   useEffect(() => {

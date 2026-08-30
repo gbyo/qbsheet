@@ -141,7 +141,11 @@ function teamName(team: QbjObject | null, registration: QbjObject | null): strin
  * anybody is a real and useful assignment, and the room types the names in. What is an error is a
  * roster that lists the same person twice, which silently merges two players' statistics.
  */
-function readRoster(team: QbjObject | null): { players: IRosterPlayer[]; ids: Record<string, string>; problems: string[] } {
+function readRoster(team: QbjObject | null): {
+  players: IRosterPlayer[];
+  ids: Record<string, string>;
+  problems: string[];
+} {
   const players: IRosterPlayer[] = [];
   const ids: Record<string, string> = {};
   const problems: string[] = [];
@@ -176,7 +180,11 @@ function readRoster(team: QbjObject | null): { players: IRosterPlayer[]; ids: Re
  * a test, a future host, the connected path — must get the same names and the same refusals, and a
  * second cleaning step somewhere else is how those drift.
  */
-function normalizeSuppliedRoster(supplied: IRosterPlayer[], teamName_: string, errors: string[]): IRosterPlayer[] {
+function normalizeSuppliedRoster(
+  supplied: IRosterPlayer[],
+  teamName_: string,
+  errors: string[],
+): IRosterPlayer[] {
   if (supplied.length > maxPlayersPerTeam) {
     errors.push(`The roster for ${teamName_} lists an implausible number of players.`);
     return [];
@@ -216,7 +224,9 @@ function playState(match: QbjObject): MatchPlayState {
   const hasQuestions = Array.isArray(match.match_questions) && match.match_questions.length > 0;
   const hasPoints =
     Array.isArray(match.match_teams) &&
-    match.match_teams.filter(isPlainObject).some((matchTeam) => finiteNumber(matchTeam.points) && matchTeam.points !== 0);
+    match.match_teams
+      .filter(isPlainObject)
+      .some((matchTeam) => finiteNumber(matchTeam.points) && matchTeam.points !== 0);
 
   if (tossupsRead === 0 && !hasQuestions && !hasPoints) return 'unplayed';
   // A game is treated as finished once it has read a plausible number of tossups. The threshold is
@@ -263,7 +273,10 @@ export interface IRoundContext {
  * emit them alongside the tournament rather than inside it. The tournament wins where both exist:
  * it is the one an importer will follow.
  */
-function buildRoundIndex(document: IQbjDocument, byId: ReadonlyMap<string, QbjObject>): Map<QbjObject, IRoundContext> {
+function buildRoundIndex(
+  document: IQbjDocument,
+  byId: ReadonlyMap<string, QbjObject>,
+): Map<QbjObject, IRoundContext> {
   const roundOfMatch = new Map<QbjObject, IRoundContext>();
 
   const indexRound = (roundRef: unknown, phase: QbjObject | null) => {
@@ -314,7 +327,8 @@ export function readQbjSource(value: unknown): QbjReadResult<IQbjSource> {
           {
             index: 0,
             matchId: stringField(match.id),
-            roundName: stringField(match._round) ?? (finiteNumber(match._round) ? `Round ${match._round}` : undefined),
+            roundName:
+              stringField(match._round) ?? (finiteNumber(match._round) ? `Round ${match._round}` : undefined),
             roundNumber: finiteNumber(match._round) ? match._round : undefined,
             location: stringField(match.location),
             leftName: left,
@@ -459,7 +473,10 @@ export function defineGame(
   }
 
   // --- teams ----------------------------------------------------------------------------------
-  const names = [teamName(sides[0].team, sides[0].registration), teamName(sides[1].team, sides[1].registration)];
+  const names = [
+    teamName(sides[0].team, sides[0].registration),
+    teamName(sides[1].team, sides[1].registration),
+  ];
   if (!names[0] || !names[1]) return { ok: false, errors: ['That game does not name both teams.'] };
   if (names[0] === names[1]) {
     return { ok: false, errors: ['Both teams in this game have the same name. A team cannot play itself.'] };
@@ -479,7 +496,10 @@ export function defineGame(
     errors.push(...fromDocument.problems);
 
     const supplied = overrides.rosters?.[name];
-    const players = supplied && supplied.length > 0 ? normalizeSuppliedRoster(supplied, name, errors) : fromDocument.players;
+    const players =
+      supplied && supplied.length > 0
+        ? normalizeSuppliedRoster(supplied, name, errors)
+        : fromDocument.players;
 
     for (const player of players) {
       const id = fromDocument.ids[player.name];
@@ -505,14 +525,17 @@ export function defineGame(
   // The same index the read built, so a candidate's round and its definition's round cannot differ.
   const context = source.document ? (buildRoundIndex(source.document, byId).get(match) ?? null) : null;
 
-  const roundNumber = roundNumberOf(context?.round) ?? (finiteNumber(match._round) ? (match._round as number) : 0);
+  const roundNumber =
+    roundNumberOf(context?.round) ?? (finiteNumber(match._round) ? (match._round as number) : 0);
   const roundName = stringField(context?.round?.name) ?? (roundNumber > 0 ? `Round ${roundNumber}` : 'Game');
   if (!context && !finiteNumber(match._round)) {
     assumptions.push('This QBJ does not say which round this game is. It is being scored without one.');
   }
 
   const location = stringField(match.location);
-  const packetName = stringField(context?.round?.packet) ?? stringField((resolveRef(context?.round?.packet ?? null, byId) ?? {}).name);
+  const packetName =
+    stringField(context?.round?.packet) ??
+    stringField((resolveRef(context?.round?.packet ?? null, byId) ?? {}).name);
 
   // --- procedure ------------------------------------------------------------------------------
   if (!extension?.procedure) {
@@ -558,7 +581,12 @@ export function defineGame(
       ...(packetName ? { packetName } : {}),
     },
     ...(location || extension?.roomId
-      ? { room: { ...(extension?.roomId ? { id: extension.roomId } : {}), ...(location ? { name: location } : {}) } }
+      ? {
+          room: {
+            ...(extension?.roomId ? { id: extension.roomId } : {}),
+            ...(location ? { name: location } : {}),
+          },
+        }
       : {}),
     left: rosters[0],
     right: rosters[1],

@@ -128,7 +128,9 @@ test('a practice game is created, scored, reloaded, finished and kept', async ({
   await page.getByRole('button', { name: 'Done' }).click();
 
   await expect(page.getByRole('heading', { name: 'Start scoring' })).toBeVisible();
-  const recent = page.locator('.shell-section').filter({ has: page.getByRole('heading', { name: 'Recent' }) });
+  const recent = page
+    .locator('.shell-section')
+    .filter({ has: page.getByRole('heading', { name: 'Recent' }) });
   await expect(recent).toContainText('Tuesday practice');
   await expect(recent).toContainText('Ninety Six');
 });
@@ -166,7 +168,9 @@ test('a second practice between the same two teams is a second game', async ({ p
   // And the first one is still on the device, untouched.
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Unfinished game' })).toBeVisible();
-  const recent = page.locator('.shell-section').filter({ has: page.getByRole('heading', { name: 'Recent' }) });
+  const recent = page
+    .locator('.shell-section')
+    .filter({ has: page.getByRole('heading', { name: 'Recent' }) });
   await expect(recent).toContainText('First practice');
 });
 

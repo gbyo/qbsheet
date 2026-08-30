@@ -31,8 +31,7 @@ let nextPayload: string | null = null;
 let decoderAvailable = true;
 
 vi.mock('../src/app/QrDecoding', () => ({
-  loadQrDecoder: async () =>
-    decoderAvailable ? { scan: async () => nextPayload } : null,
+  loadQrDecoder: async () => (decoderAvailable ? { scan: async () => nextPayload } : null),
 }));
 
 const {

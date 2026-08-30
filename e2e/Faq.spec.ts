@@ -12,9 +12,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 /** Whether the document fits its own viewport. A sideways scrollbar on a phone is a defect. */
 async function fits(page: Page): Promise<boolean> {
-  return page.evaluate(
-    () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
-  );
+  return page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
 }
 
 test('the questions page answers the four groups', async ({ page }) => {
@@ -37,11 +35,17 @@ test('the questions page answers the four groups', async ({ page }) => {
 test('the product page reaches it from the header, and it comes back', async ({ page }) => {
   await page.goto('/about/');
 
-  await page.getByRole('navigation', { name: 'Primary navigation' }).getByRole('link', { name: 'FAQ' }).click();
+  await page
+    .getByRole('navigation', { name: 'Primary navigation' })
+    .getByRole('link', { name: 'FAQ' })
+    .click();
   await expect(page).toHaveURL(/\/about\/faq\/$/);
   await expect(page.getByRole('heading', { level: 1, name: 'Frequently asked questions' })).toBeVisible();
 
-  await page.getByRole('navigation', { name: 'Footer navigation' }).getByRole('link', { name: 'About' }).click();
+  await page
+    .getByRole('navigation', { name: 'Footer navigation' })
+    .getByRole('link', { name: 'About' })
+    .click();
   await expect(page).toHaveURL(/\/about\/$/);
   await expect(page.getByRole('heading', { level: 1, name: 'The simpler way to keep score.' })).toBeVisible();
 });

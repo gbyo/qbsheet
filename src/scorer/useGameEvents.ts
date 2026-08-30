@@ -203,7 +203,11 @@ export default function useGameEvents(
         setRejection(questionErrors[0]);
         return false;
       }
-      const proposed = replaceQuestionEvents(current.current, questionNumber, eventsFromEditableQuestion(question));
+      const proposed = replaceQuestionEvents(
+        current.current,
+        questionNumber,
+        eventsFromEditableQuestion(question),
+      );
       const validation = validateCorrectedHistory(format, setup, proposed, procedure);
       if (validation.blockers.length > 0) {
         setRejection(validation.blockers[0].message);

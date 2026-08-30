@@ -55,7 +55,14 @@ export type OpenGameResult =
   /** Several games in one document. The caller shows the picker and calls `chooseGame`. */
   | { ok: true; kind: 'choice'; source: IQbjSource }
   /** A single QBJ game that could not be defined without more from the scorekeeper. */
-  | { ok: false; errors: string[]; source?: IQbjSource; index?: number; needsScoringRules?: boolean; needsRoster?: boolean };
+  | {
+      ok: false;
+      errors: string[];
+      source?: IQbjSource;
+      index?: number;
+      needsScoringRules?: boolean;
+      needsRoster?: boolean;
+    };
 
 /**
  * Read a document's text as a game.

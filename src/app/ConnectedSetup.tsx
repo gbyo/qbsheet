@@ -69,7 +69,11 @@ export default function ConnectedSetup(props: {
   } = props;
   const [address, setAddress] = useState(launch?.server ?? initialBaseUrl);
   const [stage, setStage] = useState<Stage>(() =>
-    launch ? { kind: 'launch', intent: launch } : initialConnection ? pairStage(initialConnection) : { kind: 'address' },
+    launch
+      ? { kind: 'launch', intent: launch }
+      : initialConnection
+        ? pairStage(initialConnection)
+        : { kind: 'address' },
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -228,7 +232,11 @@ export default function ConnectedSetup(props: {
       {stage.kind === 'pair' && (
         <section className="shell-section">
           <h2 className="shell-heading">{stage.tournamentName || 'Pair this room'}</h2>
-          {stage.roomsError && <p className="shell-warning" role="status">{stage.roomsError}</p>}
+          {stage.roomsError && (
+            <p className="shell-warning" role="status">
+              {stage.roomsError}
+            </p>
+          )}
           <form className="connect-form" onSubmit={(event) => void pair(event)}>
             {stage.rooms.length > 0 && (
               <>

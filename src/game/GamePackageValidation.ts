@@ -54,9 +54,7 @@ export const maxTextLength = 500;
 export const maxAnswerTypes = 50;
 export const maxHandoffInstructionLength = 2000;
 
-export type GamePackageValidation =
-  | { ok: true; value: IGamePackage }
-  | { ok: false; errors: string[] };
+export type GamePackageValidation = { ok: true; value: IGamePackage } | { ok: false; errors: string[] };
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -121,7 +119,8 @@ function formatStructureProblems(value: unknown): string[] {
       continue;
     }
     for (const field of fields) {
-      if (!finiteNumber(block[field])) problems.push(`The scoring rules' ${section}.${field} is not a number.`);
+      if (!finiteNumber(block[field]))
+        problems.push(`The scoring rules' ${section}.${field} is not a number.`);
     }
   }
 
@@ -214,7 +213,9 @@ export function validateGamePackage(value: unknown): GamePackageValidation {
   if (raw.producer !== undefined && raw.producer !== gamePackageProducer) {
     return {
       ok: false,
-      errors: [`This game file was produced by ${String(raw.producer)}, which this scoresheet cannot verify.`],
+      errors: [
+        `This game file was produced by ${String(raw.producer)}, which this scoresheet cannot verify.`,
+      ],
     };
   }
 
@@ -233,7 +234,9 @@ export function validateGamePackage(value: unknown): GamePackageValidation {
     if (!finiteNumber(round.number)) errors.push('The round has no number.');
     if (!nonBlankString(round.name)) errors.push('The round has no name.');
     if (!Number.isInteger(round.revision) || Number(round.revision) < 1) {
-      errors.push('The round has no usable revision. A game file must say which issue of the pairings it came from.');
+      errors.push(
+        'The round has no usable revision. A game file must say which issue of the pairings it came from.',
+      );
     }
     if (round.packetName !== undefined && !nonBlankString(round.packetName)) {
       errors.push('The packet name is not usable.');
@@ -243,8 +246,10 @@ export function validateGamePackage(value: unknown): GamePackageValidation {
   if (raw.room !== undefined) {
     if (!isPlainObject(raw.room)) errors.push('The room is not an object.');
     else {
-      if (raw.room.id !== undefined && !nonBlankString(raw.room.id)) errors.push("The room's identifier is not usable.");
-      if (raw.room.name !== undefined && !nonBlankString(raw.room.name)) errors.push("The room's name is not usable.");
+      if (raw.room.id !== undefined && !nonBlankString(raw.room.id))
+        errors.push("The room's identifier is not usable.");
+      if (raw.room.name !== undefined && !nonBlankString(raw.room.name))
+        errors.push("The room's name is not usable.");
     }
   }
 
@@ -253,7 +258,10 @@ export function validateGamePackage(value: unknown): GamePackageValidation {
   }
 
   if (raw.handoffInstruction !== undefined) {
-    if (typeof raw.handoffInstruction !== 'string' || raw.handoffInstruction.length > maxHandoffInstructionLength) {
+    if (
+      typeof raw.handoffInstruction !== 'string' ||
+      raw.handoffInstruction.length > maxHandoffInstructionLength
+    ) {
       errors.push('The result instructions are not usable.');
     }
   }
@@ -262,7 +270,9 @@ export function validateGamePackage(value: unknown): GamePackageValidation {
   errors.push(...formatErrors);
 
   const maximumActive =
-    formatErrors.length === 0 ? (raw.scorekeeperFormat as IScorekeeperFormat).players.maximumActive : maxPlayersPerTeam;
+    formatErrors.length === 0
+      ? (raw.scorekeeperFormat as IScorekeeperFormat).players.maximumActive
+      : maxPlayersPerTeam;
   errors.push(...teamProblems(raw.left, 'left', maximumActive));
   errors.push(...teamProblems(raw.right, 'right', maximumActive));
 

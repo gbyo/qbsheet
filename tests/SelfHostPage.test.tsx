@@ -23,9 +23,7 @@ describe('the self-hosting page', () => {
     render(<SelfHost />);
 
     expect(screen.getByRole('heading', { level: 1, name: 'Host QBSheet yourself' })).toBeInTheDocument();
-    expect(
-      screen.getByText(/QBSheet builds into a folder of static files/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/QBSheet builds into a folder of static files/)).toBeInTheDocument();
     // No application server and no accounts are the two things the reader is deciding about.
     expect(screen.getByText(/no application server behind it and no accounts/)).toBeInTheDocument();
   });
@@ -158,7 +156,15 @@ describe('the self-hosting page', () => {
 
     // Same editorial floor as the product page: nothing here may narrow QBSheet to one format.
     const words = (container.textContent ?? '').toLowerCase();
-    for (const assumption of ['naqt', 'acf', 'power', 'neg', 'bounce', 'four players a side', 'between tossups']) {
+    for (const assumption of [
+      'naqt',
+      'acf',
+      'power',
+      'neg',
+      'bounce',
+      'four players a side',
+      'between tossups',
+    ]) {
       expect(words).not.toContain(assumption);
     }
   });

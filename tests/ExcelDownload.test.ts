@@ -62,7 +62,9 @@ function completedRecord(overrides: Partial<IStoredGameRecord> = {}): IStoredGam
       match_questions: [
         {
           question_number: 1,
-          buzzes: [{ team: { name: 'Ninety Six A' }, player: { name: 'Sarah Mitchell' }, result: { value: 15 } }],
+          buzzes: [
+            { team: { name: 'Ninety Six A' }, player: { name: 'Sarah Mitchell' }, result: { value: 15 } },
+          ],
           bonus_points: 20,
         },
         {
@@ -128,9 +130,7 @@ describe('completed-game Excel export', () => {
   });
 
   test('uses a useful, filesystem-safe Excel filename', () => {
-    expect(excelFileName(completedRecord())).toBe(
-      'R07_Room-204_Ninety-Six-A_vs_Greenwood_scoresheet.xlsx',
-    );
+    expect(excelFileName(completedRecord())).toBe('R07_Room-204_Ninety-Six-A_vs_Greenwood_scoresheet.xlsx');
   });
 
   test('downloads the XLSX bytes with the Excel media type', () => {

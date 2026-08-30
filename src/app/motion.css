@@ -53,18 +53,18 @@
 
 /* Controls respond quickly; no long movement is used on scoring actions. */
 :where(
-    .shell-button,
-    .game-picker-entry,
-    .scorer-answer,
-    .scorer-nobuzz,
-    .scorer-choice,
-    .scorer-action,
-    .scorer-clock-button,
-    .scorer-menu-item,
-    .scorer-replacement-choice,
-    .scorer-submit,
-    .scorer-danger
-  ) {
+  .shell-button,
+  .game-picker-entry,
+  .scorer-answer,
+  .scorer-nobuzz,
+  .scorer-choice,
+  .scorer-action,
+  .scorer-clock-button,
+  .scorer-menu-item,
+  .scorer-replacement-choice,
+  .scorer-submit,
+  .scorer-danger
+) {
   transition:
     color var(--room-motion-fast) var(--room-ease-standard),
     background-color var(--room-motion-fast) var(--room-ease-standard),
@@ -89,7 +89,13 @@
   transform: translateY(1px);
 }
 
-:where(.shell-input, .rules-setup-grid input, .roster-setup-team textarea, .scorer-inline-form input, .scorer-inline-add input) {
+:where(
+  .shell-input,
+  .rules-setup-grid input,
+  .roster-setup-team textarea,
+  .scorer-inline-form input,
+  .scorer-inline-add input
+) {
   transition:
     border-color var(--room-motion-fast) var(--room-ease-standard),
     background-color var(--room-motion-fast) var(--room-ease-standard),
@@ -108,25 +114,25 @@
 
 /* Content that appears in response to an action enters from only a few pixels away. */
 :where(
-    .shell-notice,
-    .shell-warning,
-    .shell-errors,
-    .readiness-summary,
-    .readiness-confirm,
-    .readiness-test-result,
-    .game-origin-notice,
-    .game-picker,
-    .rules-setup,
-    .roster-setup,
-    .scorer-banner,
-    .scorer-prompt,
-    .scorer-tossup-actions,
-    .scorer-score-check,
-    .scorer-lineup-step,
-    .scorer-inline-add,
-    .scorer-event-edit,
-    .practice-feedback
-  ) {
+  .shell-notice,
+  .shell-warning,
+  .shell-errors,
+  .readiness-summary,
+  .readiness-confirm,
+  .readiness-test-result,
+  .game-origin-notice,
+  .game-picker,
+  .rules-setup,
+  .roster-setup,
+  .scorer-banner,
+  .scorer-prompt,
+  .scorer-tossup-actions,
+  .scorer-score-check,
+  .scorer-lineup-step,
+  .scorer-inline-add,
+  .scorer-event-edit,
+  .practice-feedback
+) {
   animation: qbsheet-rise-in var(--room-motion-standard) var(--room-ease-out) both;
 }
 
@@ -758,7 +764,7 @@
       .scorer-replacement-choice,
       .scorer-submit,
       .scorer-danger
-  ):active:not(:disabled) {
+    ):active:not(:disabled) {
     transform: none;
   }
 
@@ -772,21 +778,21 @@
   }
 
   :where(
-      .qbsheet-motion-number-current,
-      .scorer-answer.is-recorded,
-      .scorer-player.is-ruling-recorded,
-      .scorer-prompt-content.is-incoming,
-      .scorer-choice.is-part-recorded,
-      .scorer-clock-digits,
-      .scorer-clock-icon,
-      .scorer-rail-item,
-      .scorer-score-check,
-      .scorer-score-check::before,
-      .scorer-presubmit,
-      .scorer-complete-score strong,
-      .final-accepted,
-      .final-accepted-mark path
-    ) {
+    .qbsheet-motion-number-current,
+    .scorer-answer.is-recorded,
+    .scorer-player.is-ruling-recorded,
+    .scorer-prompt-content.is-incoming,
+    .scorer-choice.is-part-recorded,
+    .scorer-clock-digits,
+    .scorer-clock-icon,
+    .scorer-rail-item,
+    .scorer-score-check,
+    .scorer-score-check::before,
+    .scorer-presubmit,
+    .scorer-complete-score strong,
+    .final-accepted,
+    .final-accepted-mark path
+  ) {
     transform: none !important;
   }
 }

@@ -107,9 +107,7 @@ export async function openControl(address: string): Promise<ControlOpenResult> {
   };
 }
 
-export type PairingExchangeResult =
-  | { ok: true; value: IPairedRoom }
-  | { ok: false; error: string };
+export type PairingExchangeResult = { ok: true; value: IPairedRoom } | { ok: false; error: string };
 
 /**
  * Spend the short code and keep what it bought.

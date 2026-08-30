@@ -133,9 +133,9 @@ export default function KeyboardDrill(props: { onBack: () => void; onHome: () =>
         <p className="practice-label">Keyboard drill</p>
         <h1 className="shell-title">You have pressed every key the layout has.</h1>
         <p>
-          The seats, the four rulings, no buzz, a bonus total, undo and redo. Nothing else is bound — which
-          is the other half of knowing the layout, because a key you are sure does nothing is a key you
-          will not hunt for during a round.
+          The seats, the four rulings, no buzz, a bonus total, undo and redo. Nothing else is bound — which is
+          the other half of knowing the layout, because a key you are sure does nothing is a key you will not
+          hunt for during a round.
         </p>
 
         <section className="shell-section">
@@ -230,7 +230,10 @@ export default function KeyboardDrill(props: { onBack: () => void; onHome: () =>
 
       <section className="practice-drill-task">
         {feedback !== null && (
-          <p className={feedback.pressed ? 'practice-feedback is-success' : 'practice-feedback'} role="status">
+          <p
+            className={feedback.pressed ? 'practice-feedback is-success' : 'practice-feedback'}
+            role="status"
+          >
             {feedback.pressed && <span aria-hidden="true">✓</span>} {feedback.text}
           </p>
         )}

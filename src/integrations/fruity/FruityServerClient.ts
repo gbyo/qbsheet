@@ -106,7 +106,9 @@ export const requestTimeoutMs = 8000;
  */
 export const requiredCapabilities = ['pairing', 'assignment', 'result'] as const;
 
-const helpCategories = new Set<HelpRequestCategory>(Object.keys(helpRequestCategoryLabels) as HelpRequestCategory[]);
+const helpCategories = new Set<HelpRequestCategory>(
+  Object.keys(helpRequestCategoryLabels) as HelpRequestCategory[],
+);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -395,12 +397,19 @@ export default class FruityServerClient {
         try {
           payload = JSON.parse(text);
         } catch {
-          return { ok: false, status: response.status, error: 'Tournament control sent an answer this page could not read.' };
+          return {
+            ok: false,
+            status: response.status,
+            error: 'Tournament control sent an answer this page could not read.',
+          };
         }
       }
       if (!response.ok) {
         const detail =
-          typeof payload === 'object' && payload !== null && 'error' in payload && typeof payload.error === 'string'
+          typeof payload === 'object' &&
+          payload !== null &&
+          'error' in payload &&
+          typeof payload.error === 'string'
             ? payload.error
             : undefined;
         return {
@@ -484,7 +493,9 @@ export default class FruityServerClient {
       const newlySeen = this.rememberHelpRequest(request);
       return {
         kind:
-          newlySeen || (request.category === category && request.message === message) ? 'accepted' : 'already-outstanding',
+          newlySeen || (request.category === category && request.message === message)
+            ? 'accepted'
+            : 'already-outstanding',
         request,
       };
     }
@@ -511,7 +522,11 @@ export default class FruityServerClient {
     // reads. A missing legacy GET must not hide the POST action or clear a locally known request;
     // it only means reload reconciliation is unavailable on that server. QBTCP discovery remains
     // authoritative for its own capability.
-    if (!this.isQbtcp && !result.ok && (result.unsupported || result.status === 404 || result.status === 405)) {
+    if (
+      !this.isQbtcp &&
+      !result.ok &&
+      (result.unsupported || result.status === 404 || result.status === 405)
+    ) {
       this.legacyHelpLifecycleUnavailable = true;
       return { kind: 'unavailable', error: 'This older tournament connection cannot restore help state.' };
     }

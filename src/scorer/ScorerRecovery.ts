@@ -44,7 +44,11 @@ function validTeam(value: unknown): value is 'left' | 'right' {
 }
 
 function validPlayerList(value: unknown): value is string[] {
-  return Array.isArray(value) && value.length > 0 && value.every((name) => typeof name === 'string' && name.trim() !== '');
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every((name) => typeof name === 'string' && name.trim() !== '')
+  );
 }
 
 function validStartingLineup(value: unknown, players: string[]): boolean {
@@ -130,14 +134,16 @@ export function validEvent(value: unknown): value is ScoreEvent {
   if (event.type === 'tossup-no-penalty')
     return (
       validTeam(event.team) &&
-      (event.playerName === undefined || (typeof event.playerName === 'string' && event.playerName.trim() !== ''))
+      (event.playerName === undefined ||
+        (typeof event.playerName === 'string' && event.playerName.trim() !== ''))
     );
   if (event.type === 'end-regulation')
     return (
       event.lastRegulationQuestion === undefined ||
       (Number.isInteger(event.lastRegulationQuestion) && Number(event.lastRegulationQuestion) >= 0)
     );
-  if (event.type === 'half-break') return Number.isInteger(event.lastQuestion) && Number(event.lastQuestion) >= 0;
+  if (event.type === 'half-break')
+    return Number.isInteger(event.lastQuestion) && Number(event.lastQuestion) >= 0;
   if (event.type === 'timeout') return validTeam(event.team);
   if (event.type === 'timeout-start') {
     return (
@@ -146,7 +152,11 @@ export function validEvent(value: unknown): value is ScoreEvent {
         (typeof event.startedAt === 'number' && Number.isFinite(event.startedAt) && event.startedAt >= 0))
     );
   }
-  if (event.type === 'timeout-resume' || event.type === 'begin-overtime' || event.type === 'begin-sudden-death')
+  if (
+    event.type === 'timeout-resume' ||
+    event.type === 'begin-overtime' ||
+    event.type === 'begin-sudden-death'
+  )
     return true;
   if (event.type === 'protest')
     return (
@@ -159,7 +169,11 @@ export function validEvent(value: unknown): value is ScoreEvent {
   if (event.type === 'question-void')
     return (event.scope === 'tossup' || event.scope === 'bonus') && typeof event.reason === 'string';
   if (event.type === 'end-game-early')
-    return typeof event.reason === 'string' && Number.isInteger(event.tossupsRead) && Number(event.tossupsRead) >= 0;
+    return (
+      typeof event.reason === 'string' &&
+      Number.isInteger(event.tossupsRead) &&
+      Number(event.tossupsRead) >= 0
+    );
   return true;
 }
 
@@ -181,11 +195,13 @@ export function readScorerRecovery(
   expected: { left: { name: string }; right: { name: string } },
 ): IScorerRecoveryPayload | null {
   if (typeof value !== 'object' || value === null) return null;
-  const payload = (value as Record<string, unknown>)[scorerRecoveryKey] as Partial<IScorerRecoveryPayload> | undefined;
+  const payload = (value as Record<string, unknown>)[scorerRecoveryKey] as
+    Partial<IScorerRecoveryPayload> | undefined;
   if (payload?.version !== scorerRecoveryVersion || !Array.isArray(payload.events)) return null;
   if (!payload.events.every(validEvent)) return null;
   if (!validSetup(payload.setup)) return null;
-  if (payload.setup.left.name !== expected.left.name || payload.setup.right.name !== expected.right.name) return null;
+  if (payload.setup.left.name !== expected.left.name || payload.setup.right.name !== expected.right.name)
+    return null;
   return {
     version: scorerRecoveryVersion,
     setup: payload.setup,

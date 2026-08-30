@@ -119,9 +119,7 @@ describe('applying a keystroke', () => {
   });
 
   test('the last key finishes rather than running off the end of the list', () => {
-    const finished = drillTasks
-      .flatMap((task) => task.keys)
-      .reduce(drillKeystroke, drillStart);
+    const finished = drillTasks.flatMap((task) => task.keys).reduce(drillKeystroke, drillStart);
 
     expect(finished.done).toBe(true);
     expect(finished.index).toBe(drillTasks.length - 1);
