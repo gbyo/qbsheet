@@ -31,6 +31,7 @@ import { playerNameMaxLength, validatePlayerName } from '../game/Roster';
 import { orderBySeating } from './PlayerSeating';
 import PlayingBenchEditor from './PlayingBenchEditor';
 import { orderedActivePlayers, sameMembership } from './LineupEditing';
+import { useLineupMotion } from './LineupMotion';
 
 export interface IPlayersDialogProps {
   left: IDerivedTeam;
@@ -222,6 +223,7 @@ function TeamLineup(props: {
   const [mode, setMode] = useState<PanelMode>({ kind: 'idle' });
   const [newPlayer, setNewPlayer] = useState('');
   const addPlayerInput = useRef<HTMLInputElement>(null);
+  const motion = useLineupMotion();
 
   // Both lists follow the room's seating, so what is on screen here is what is on screen out
   // there. The bench is ordered too, so a player who comes on lands where the room expects.
@@ -290,6 +292,48 @@ function TeamLineup(props: {
     const sync = rosterSyncStatus[rosterSyncKey(side, player.name)];
     const syncLabel = syncLabelFor(sync);
     const canMove = reordering && active && onMovePlayer !== undefined && playing.length > 1;
+    const move = (direction: -1 | 1) => {
+      // Measure immediately before the actual seating state changes. LineupMotion owns the
+      // presentation-only FLIP interpolation; the callback still changes the real order at once.
+      motion.beginMove(player.name);
+      onMovePlayer?.(side, playingNames, player.name, direction);
+    };
+
+    if (reordering && active) {
+      return (
+        <li
+          key={player.name}
+          ref={motion.rowRef(player.name)}
+          className={motion.rowClassName(player.name, 'scorer-lineup-entry scorer-lineup-reorder-entry')}
+        >
+          <span className="scorer-lineup-seat" aria-hidden="true">
+            {seat + 1}
+          </span>
+          <span className="scorer-lineup-reorder-name">{player.name}</span>
+          <span className="scorer-lineup-move">
+            <button
+              type="button"
+              className="scorer-text-action"
+              aria-label={`Move ${player.name} up`}
+              disabled={!canMove || seat === 0}
+              onClick={() => move(-1)}
+            >
+              &uarr;
+            </button>
+            <button
+              type="button"
+              className="scorer-text-action"
+              aria-label={`Move ${player.name} down`}
+              disabled={!canMove || seat === playing.length - 1}
+              onClick={() => move(1)}
+            >
+              &darr;
+            </button>
+          </span>
+        </li>
+      );
+    }
+
     return (
       <li key={player.name} className="scorer-lineup-entry">
         {/* The seat number, matching the column this player occupies on the scoring screen. */}
@@ -318,7 +362,7 @@ function TeamLineup(props: {
               className="scorer-text-action"
               aria-label={`Move ${player.name} up`}
               disabled={seat === 0}
-              onClick={() => onMovePlayer?.(side, playingNames, player.name, -1)}
+              onClick={() => move(-1)}
             >
               &uarr;
             </button>
@@ -327,7 +371,7 @@ function TeamLineup(props: {
               className="scorer-text-action"
               aria-label={`Move ${player.name} down`}
               disabled={seat === playing.length - 1}
-              onClick={() => onMovePlayer?.(side, playingNames, player.name, 1)}
+              onClick={() => move(1)}
             >
               &darr;
             </button>
@@ -468,15 +512,23 @@ function TeamLineup(props: {
             </div>
           )}
           <h4 className="scorer-lineup-group">Playing</h4>
-          <ul className="scorer-lineup-list">
-            {playing.map((player, seat) => playerRow(player, true, seat, mode.kind === 'reorder'))}
-          </ul>
-          {bench.length > 0 && (
+          {mode.kind === 'reorder' ? (
+            <ul className="scorer-lineup-list scorer-lineup-reorder-list" aria-label={`${team.name} playing seats`}>
+              {playing.map((player, seat) => playerRow(player, true, seat, true))}
+            </ul>
+          ) : (
             <>
-              <h4 className="scorer-lineup-group">Bench</h4>
               <ul className="scorer-lineup-list">
-                {bench.map((player) => playerRow(player, false, -1, mode.kind === 'reorder'))}
+                {playing.map((player, seat) => playerRow(player, true, seat))}
               </ul>
+              {bench.length > 0 && (
+                <>
+                  <h4 className="scorer-lineup-group">Bench</h4>
+                  <ul className="scorer-lineup-list">
+                    {bench.map((player) => playerRow(player, false, -1))}
+                  </ul>
+                </>
+              )}
             </>
           )}
           <p className="scorer-lineup-count">

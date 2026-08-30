@@ -96,11 +96,16 @@ export default function SettingsDialog(props: {
   pairingProtection?: string;
   onForgetPairing: () => void;
   onResetDevicePreferences: () => void;
-  practiceInProgress: boolean;
-  onPractice: () => void;
   onReadiness: () => void;
-  /** Leave the room deliberately to use file/manual scoring workflows. */
+  /**
+   * Retained as an optional compatibility prop for callers compiled against older builds. General
+   * scoring navigation now lives on Welcome/ConnectedRoom, not in Settings.
+   */
   onOtherScoring?: () => void;
+  /** Retained for the same compatibility reason; practice has its own quiet home entry. */
+  onPractice?: () => void;
+  /** Whether practice has a saved in-progress game; navigation is no longer rendered here. */
+  practiceInProgress?: boolean;
   /** Begin a fresh pairing flow without silently clearing the current room. */
   onChangeTournament?: () => void;
   onClose: () => void;
@@ -114,10 +119,7 @@ export default function SettingsDialog(props: {
     pairingProtection,
     onForgetPairing,
     onResetDevicePreferences,
-    practiceInProgress,
-    onPractice,
     onReadiness,
-    onOtherScoring,
     onChangeTournament,
     onClose,
     initialView = 'settings',
@@ -238,30 +240,6 @@ export default function SettingsDialog(props: {
                   View
                 </button>
               </div>
-              <button
-                type="button"
-                className="settings-navigation-row"
-                onClick={() => {
-                  onClose();
-                  onPractice();
-                }}
-              >
-                <span>{practiceInProgress ? 'Resume practice' : 'Practice scoring'}</span>
-                <span aria-hidden="true">›</span>
-              </button>
-              {onOtherScoring && (
-                <button
-                  type="button"
-                  className="settings-navigation-row"
-                  onClick={() => {
-                    onClose();
-                    onOtherScoring();
-                  }}
-                >
-                  <span>Other scoring options</span>
-                  <span aria-hidden="true">›</span>
-                </button>
-              )}
             </section>
 
             {connection && (

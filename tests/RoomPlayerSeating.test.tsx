@@ -258,8 +258,17 @@ describe('what rearranging must not touch', () => {
 
     openPlayers();
     let lineup = screen.getByLabelText('Ninety Six lineup');
+    // Reorder is intentionally a compact seat-arranging view: TUH is not part of these rows.
     fireEvent.click(within(lineup).getByText('Reorder'));
     fireEvent.click(within(lineup).getByLabelText('Move Alex Brown up'));
+    lineup = screen.getByLabelText('Ninety Six lineup');
+    expect(within(lineup).queryAllByText(/TUH/)).toHaveLength(0);
+
+    // Returning to the ordinary player view exposes the same TUH values, proving the seating
+    // preference changed order only and did not touch scoring statistics.
+    fireEvent.click(within(lineup).getByText('Done'));
+    fireEvent.click(screen.getByRole('button', { name: 'Close dialog' }));
+    openPlayers();
     lineup = screen.getByLabelText('Ninety Six lineup');
 
     // Everybody on the floor heard the tossup, wherever their row now is.

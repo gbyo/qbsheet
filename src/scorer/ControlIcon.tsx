@@ -19,7 +19,8 @@ export type ControlIconName =
   | 'adjust'
   | 'forfeit'
   | 'settings'
-  | 'qr';
+  | 'qr'
+  | 'swap';
 
 const paths: Record<ControlIconName, React.ReactNode> = {
   undo: (
@@ -129,6 +130,12 @@ const paths: Record<ControlIconName, React.ReactNode> = {
       <circle cx="12" cy="12" r="7" />
       <path d="M12 5V3M12 21v-2M19 12h2M3 12h2" />
       <path d="m16.95 7.05 1.41-1.41M5.64 18.36l1.41-1.41M16.95 16.95l1.41 1.41M5.64 5.64l1.41 1.41" />
+    </>
+  ),
+  swap: (
+    <>
+      <path d="M7 7h11l-2.5-2.5M18 7l-2.5 2.5" />
+      <path d="M17 17H6l2.5 2.5M6 17l2.5-2.5" />
     </>
   ),
   /*

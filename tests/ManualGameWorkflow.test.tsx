@@ -492,7 +492,7 @@ describe('finishing a practice', () => {
     await bonus('20');
     await finishGame();
 
-    expect(screen.getByText('Save a copy')).toBeInTheDocument();
+    expect(screen.getByText('Download or export a copy')).toBeInTheDocument();
     expect(
       screen.getByText(
         'This result is saved on this device. Download a QBJ if you want to keep or share a portable copy.',

@@ -9,13 +9,72 @@
  * The copy avoids urgency. Nothing here is more important than the next round, and a scorekeeper who
  * ignores this until five o'clock has done nothing wrong.
  */
+import { useEffect, useState } from 'react';
 import { IScorerAlert } from '../scorer/ConnectionStatus';
 import { appUpdates } from './AppUpdate';
 import { useAppUpdate } from './useAppUpdate';
 
+/** Persist only the presentation choice; the waiting worker remains available until it is applied. */
+export const updateNoticeDismissalKey = 'qbsheet:update-notice-dismissed';
+
+function wasUpdateNoticeDismissed(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.localStorage.getItem(updateNoticeDismissalKey) === '1';
+  } catch {
+    return false;
+  }
+}
+
 export default function UpdateNotice() {
   const { available, applying } = useAppUpdate();
+  const [dismissed, setDismissed] = useState(wasUpdateNoticeDismissed);
+
+  useEffect(() => {
+    // A fresh worker means the old dismissal has served its purpose. Clearing here lets the next
+    // update announce itself without requiring a user to clear site data.
+    if (available) return;
+    // Defer the local presentation reset by a tick so the update watcher remains the source of
+    // truth without making the availability transition pay for a synchronous cascading render.
+    const reset = window.setTimeout(() => setDismissed(false), 0);
+    try {
+      window.localStorage.removeItem(updateNoticeDismissalKey);
+    } catch {
+      // Private browsing and locked-down school profiles may deny storage; the notice still works.
+    }
+    return () => window.clearTimeout(reset);
+  }, [available]);
+
   if (!available) return null;
+
+  const dismiss = () => {
+    setDismissed(true);
+    try {
+      window.localStorage.setItem(updateNoticeDismissalKey, '1');
+    } catch {
+      // A dismissal for this render is still useful even when it cannot persist across reloads.
+    }
+  };
+
+  if (dismissed) {
+    return (
+      <section className="shell-section update-notice update-notice-quiet" role="status">
+        <span className="update-notice-quiet-copy">Update available</span>
+        <button
+          type="button"
+          className="shell-button shell-button-quiet"
+          disabled={applying}
+          onClick={() => appUpdates.apply()}
+        >
+          {applying ? 'Updating…' : 'Update now'}
+        </button>
+        <button type="button" className="shell-button shell-button-quiet" onClick={() => setDismissed(false)}>
+          Show details
+        </button>
+      </section>
+    );
+  }
+
   return (
     <section className="shell-section update-notice" role="status">
       <div>
@@ -33,6 +92,9 @@ export default function UpdateNotice() {
         }}
       >
         {applying ? 'Updating…' : 'Update now'}
+      </button>
+      <button type="button" className="shell-button shell-button-quiet" onClick={dismiss}>
+        Dismiss
       </button>
     </section>
   );

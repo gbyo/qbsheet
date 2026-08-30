@@ -1,7 +1,7 @@
 # During the game
 
 This page tells you how to score each question, how to correct a mistake, and how to use the game
-menu.
+menu. On a wide screen it is labelled **Game**; on a phone it is labelled **More**.
 
 The scoresheet works the same way for a file-only game and for a connected game.
 
@@ -12,7 +12,7 @@ The scoresheet works the same way for a file-only game and for a connected game.
 | The two team panels | The players, the score, and the buzz buttons for each team |
 | The question area | The current tossup or bonus, and the question number |
 | The recent rail | The last questions, so you can look back without a dialog |
-| The game menu | Every action that is not a buzz. The button shows a game icon. |
+| The Game / More menu | Actions that are not a buzz. It is labelled **More** on a phone. |
 | The connection indicator | Shown for a connected game only |
 
 ## Score a tossup
@@ -52,7 +52,7 @@ The shortcut works only when no dialog is open and the keyboard is not in a cont
 
 Undo is for the last action. Use a correction for an earlier question.
 
-1. Open the game menu.
+1. Open the Game / More menu.
 2. Select **Full scoresheet review**.
 3. Find the question.
 4. Change the record for that question.
@@ -63,49 +63,56 @@ The menu also offers **Replace question `<number>`** for the current question.
 
 The menu shows only the items that apply at this moment.
 
-### Records and notes
+### Game
 
 | Item | Purpose |
 | --- | --- |
 | **Notes** | Free text about the game |
-| **Protests** | Open, record, and resolve a protest |
-| **Issue / tournament control** | Ask for a person. Report a problem in the room. |
 | **Game details** | The teams, the round, the room, and the format |
-| **Full scoresheet review** | Every question, and the place to correct one |
-| **Lightning / worksheet** | Shown only when the format has a lightning round |
 
-### Game flow
+Use **Flag** in the footer to open a protest or report an issue. Those live-play workflows do not
+appear a second time in this menu.
+
+### Round
 
 | Item | Purpose |
 | --- | --- |
+| **Lightning / worksheet** | Shown only when the format has a lightning round |
 | **Timeout** | Start a timeout |
-| **Resume play** | Leave a halftime, a timeout, or another break |
+| **Resume play** | Leave a timeout or another break |
 | **End first half** or **End this half** | Close the current half |
 | **End regulation** | Close regulation play. Overtime can follow. |
-| **End game early…** | Stop the game before the end. This action is destructive. |
+
+### Review
+
+| Item | Purpose |
+| --- | --- |
+| **Full scoresheet review** | Every question, and the place to correct one |
+| **Replace question `<number>`** | Replace the current question |
+| **Adjust score** | Change a score directly, when no question-level fix fits |
+| **Correct scoring rules…** | Shown when the host supports a recorded rules correction |
 
 ### Files
 
 | Item | Purpose |
 | --- | --- |
-| **Download QBJ backup** | Write the game as a QBJ file |
-| **Download current QBJ** | Write the game so far as a partial QBJ file |
-| **Download legacy match-only QBJ** | Write the older shape, for another tool |
+| **Export / backup…** | Open the export dialog. It contains the backup and any supported portable forms. |
 | **Recover from QBJ** | Read a partial QBJ file back into the scoresheet |
+| **Print scoresheet** | Print the scoresheet from the browser |
 
-### Corrections
+### End game
 
 | Item | Purpose |
 | --- | --- |
-| **Adjust score** | Change a score directly, when no question-level fix fits |
+| **End game early…** | Stop the game before the end. This action is destructive. |
 | **Record forfeit** | Record a forfeit. This action is destructive. |
 
 ## Protests
 
 A protest can stop play. The room procedure decides when.
 
-1. Open the game menu.
-2. Select **Protests**.
+1. Select **Flag** in the footer.
+2. Select **Protest / disputed ruling**.
 3. Record the protest.
 
 When an open protest stops play, the tossup button reads **Resolve protest before play**. Resolve the

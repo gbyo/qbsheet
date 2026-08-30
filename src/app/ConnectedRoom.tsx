@@ -4,7 +4,8 @@
  * This is the scorekeeper's normal home between games. It owns assignment polling and the one
  * deliberate Start transaction, but it does not create a session or a local record merely because
  * an assignment was displayed. Pairing/setup lives in ConnectedSetup; a live scoresheet lives in
- * ScoringScreen.
+ * ScoringScreen. A healthy room stays quiet: the compact connection indicator is enough, while
+ * timing/retry detail appears only when a check is pending or failing.
  */
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import BrandLogo from '../BrandLogo';
@@ -164,9 +165,7 @@ export default function ConnectedRoom(props: {
     pairingProtection,
     onForgetPairing,
     onResetDevicePreferences,
-    practiceInProgress,
     onReadiness,
-    onPractice,
     onOtherScoring,
     onChangeTournament,
     onResume,
@@ -415,6 +414,8 @@ export default function ConnectedRoom(props: {
     failing: pollFailed,
     credentialProblem: roomCredentialProblem,
   });
+  const healthyConnection =
+    lastSuccessfulCheckAt !== null && !pollFailed && forbidden === '' && !roomCredentialProblem;
   const state = stateLine(assignment, busy);
 
   return (
@@ -426,6 +427,7 @@ export default function ConnectedRoom(props: {
           </h1>
           <p className="room-title-line">{pairedRoom.roomName}</p>
           <p className="shell-subtitle">Paired</p>
+          {healthyConnection && <p className="room-connection-indicator">Connected</p>}
         </div>
         <button
           type="button"
@@ -436,6 +438,7 @@ export default function ConnectedRoom(props: {
           aria-label="Settings"
         >
           <ControlIcon name="settings" />
+          <span className="shell-button-label">Settings</span>
         </button>
       </header>
 
@@ -488,7 +491,7 @@ export default function ConnectedRoom(props: {
               )}
             </div>
           </div>
-          <p className="assignment-check">{status}</p>
+          {status !== '' && !healthyConnection && <p className="assignment-check">{status}</p>}
 
           {assignment?.nextAssignmentLabel && (
             <aside className="assignment-next" aria-label="Up next">
@@ -497,9 +500,14 @@ export default function ConnectedRoom(props: {
             </aside>
           )}
 
-          {assignmentDefinition?.assumptions?.map((assumption) => (
-            <p className="shell-hint" key={assumption}>{assumption}</p>
-          ))}
+          {assignmentDefinition?.assumptions && assignmentDefinition.assumptions.length > 0 && (
+            <details className="assignment-details">
+              <summary>Assignment details</summary>
+              {assignmentDefinition.assumptions.map((assumption) => (
+                <p className="shell-hint" key={assumption}>{assumption}</p>
+              ))}
+            </details>
+          )}
 
           {startable && (
             <div className="shell-actions room-primary-actions">
@@ -526,6 +534,12 @@ export default function ConnectedRoom(props: {
           )}
         </section>
       )}
+
+      <div className="room-secondary-actions">
+        <button type="button" className="shell-button shell-button-quiet" onClick={onOtherScoring} disabled={starting}>
+          Other scoring options
+        </button>
+      </div>
 
       {forbidden !== '' && (
         <section className="shell-section room-recovery" aria-label="Tournament control recovery">
@@ -576,10 +590,7 @@ export default function ConnectedRoom(props: {
           pairingProtection={pairingProtection}
           onForgetPairing={onForgetPairing}
           onResetDevicePreferences={onResetDevicePreferences}
-          practiceInProgress={practiceInProgress}
-          onPractice={onPractice}
           onReadiness={onReadiness}
-          onOtherScoring={onOtherScoring}
           onChangeTournament={onChangeTournament}
           onClose={() => setSettingsOpen(false)}
         />
