@@ -70,7 +70,7 @@ devices produce two different scoresheets.
 Try these sources in order.
 
 1. **The same device.** Open QBSheet again. Select **Resume** under **Unfinished game**.
-2. **A partial QBJ file.** On another device, open the file that you downloaded. Or open the game menu
+2. **A partial QBJ file.** On another device, open the file that you downloaded. Or open the Game / More menu
    and select **Recover from QBJ**.
 3. **The server.** In a connected room, pair again on the new device and open the session. The server
    returns the state that the old device sent.
@@ -107,8 +107,8 @@ QBSheet shows a duplicate-tab notice. Only one tab keeps control of the game.
 The tossup button reads **Resolve protest before play**. The room procedure stops play while a protest
 is open.
 
-1. Open the game menu.
-2. Select **Protests**.
+1. Select **Flag** in the footer.
+2. Select **Protest / disputed ruling**.
 3. Resolve the protest.
 
 ## QBSheet will not send the result

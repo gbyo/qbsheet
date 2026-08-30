@@ -54,9 +54,10 @@ describe('accepted-result acknowledgement', () => {
     show(record());
 
     const next = screen.getByRole('button', { name: 'Done' });
-    const copy = screen.getByRole('heading', { name: 'Download a copy' });
+    const copy = screen.getByText('Download or export a copy');
     expect(next).toHaveClass('is-primary');
     expect(next.compareDocumentPosition(copy) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(copy.closest('details')).not.toHaveAttribute('open');
   });
 
   test('the existing accepted status receives the stamp only for a freshly accepted result', () => {

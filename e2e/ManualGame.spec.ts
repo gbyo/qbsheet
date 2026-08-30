@@ -97,9 +97,18 @@ test('a practice game is created, scored, reloaded, finished and kept', async ({
   await expect(page.locator('.final-row').first()).toContainText('45');
   await expect(page.locator('.final-row').nth(1)).toContainText('0');
 
-  // Nobody is waiting for this file, so nothing is demanded before the screen can be left.
-  await expect(page.getByRole('heading', { name: 'Save a copy' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Download QBJ copy' })).toBeVisible();
+  // Nobody is waiting for this file, so nothing is demanded before the screen can be left. The
+  // optional exports stay out of the way until somebody asks for them.
+  const copy = page.locator('details.final-copy-details');
+  await expect(copy).toBeVisible();
+  await expect(copy.locator('summary')).toHaveText('Download or export a copy');
+  await expect(copy).not.toHaveAttribute('open', '');
+  await expect(copy.getByRole('button', { name: 'Download QBJ copy' })).toBeHidden();
+  await copy.locator('summary').click();
+  await expect(copy).toHaveAttribute('open', '');
+  await expect(copy).toContainText('This result is saved on this device.');
+  await expect(copy.getByRole('button', { name: 'Download QBJ copy' })).toBeVisible();
+  await expect(copy.getByRole('button', { name: 'Download Excel scoresheet' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'I uploaded the result' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Done' })).toBeEnabled();
 

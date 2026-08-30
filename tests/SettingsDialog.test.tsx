@@ -141,22 +141,22 @@ describe('homepage Settings entry and scorekeeper identity', () => {
     expect(screen.queryByRole('dialog', { name: 'Scorekeeper' })).toBeNull();
   });
 
-  test('practice stays on the homepage only until the device has game history', async () => {
+  test('practice stays on the homepage and is not hidden in Settings', async () => {
     writeOperatorNameAsked();
     await openApp();
 
     expect(screen.getByRole('button', { name: 'Practice scoring' })).toBeInTheDocument();
     let dialog = await openSettings();
-    expect(within(dialog).getByRole('button', { name: 'Practice scoring' })).toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: 'Practice scoring' })).toBeNull();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Close dialog' }));
 
     cleanup();
     await seedGame({ completed: true });
     await openApp();
 
-    expect(screen.queryByRole('button', { name: 'Practice scoring' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Practice scoring' })).toBeInTheDocument();
     dialog = await openSettings();
-    expect(within(dialog).getByRole('button', { name: 'Practice scoring' })).toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: 'Practice scoring' })).toBeNull();
   });
 
   test('a never-asked device still asks once, while an unfinished game keeps Resume in front', async () => {
@@ -452,7 +452,7 @@ describe('device navigation, reset, build identity, and dialog behavior', () => 
     expect(within(dialog).getByRole('button', { name: /Set name/ })).toBeInTheDocument();
     expect(within(dialog).getByRole('switch', { name: 'Keyboard scoring' })).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'View' })).toBeInTheDocument();
-    expect(within(dialog).getByRole('button', { name: 'Practice scoring' })).toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: 'Practice scoring' })).toBeNull();
     expect(within(dialog).getByRole('button', { name: 'Forget pairing…' })).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Check this device' })).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Reset device preferences…' })).toBeInTheDocument();

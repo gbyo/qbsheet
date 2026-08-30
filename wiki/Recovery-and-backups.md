@@ -32,9 +32,10 @@ Use a partial QBJ file when the device itself is gone.
 
 To write one during a game:
 
-1. Open the game menu.
-2. Select **Download current QBJ**.
-3. Keep the file. The name ends in `.partial.qbj`.
+1. Open the Game / More menu.
+2. Select **Export / backup…**.
+3. Select **Download current QBJ**.
+4. Keep the file. The name ends in `.partial.qbj`.
 
 The file holds the team and player statistics, the lineups, the per-question record, the notes, the
 room, and the identifiers. QBSheet can open the file again.
@@ -44,7 +45,7 @@ the file is a lifeboat for a dead Chromebook. It is not a substitute for the jou
 
 To read one back into a game in progress:
 
-1. Open the game menu.
+1. Open the Game / More menu.
 2. Select **Recover from QBJ**.
 3. Choose the file.
 

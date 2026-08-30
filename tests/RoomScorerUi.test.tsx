@@ -800,7 +800,7 @@ describe('the game menu', () => {
 
     // Matched loosely: what matters is that each tool is reachable from the scoring screen without
     // hunting, not which of the footer or the menu is holding it today.
-    for (const tool of [/players/i, /flag/i, /scoresheet review/i, /download qbj/i, /recover from qbj/i]) {
+    for (const tool of [/players/i, /flag/i, /scoresheet review/i, /export \/ backup/i, /recover from qbj/i]) {
       expect(
         controls.some((control) => tool.test(control)),
         `${tool} should be reachable`,
@@ -2043,11 +2043,10 @@ describe('operation notices', () => {
     expect(document.querySelector('.scorer-banner.is-info')?.getAttribute('role')).toBe('status');
   });
 
-  test('a warning stays, and says it is a warning', () => {
+  test('a rejected replacement stays discoverable as a warning', () => {
     vi.useFakeTimers();
     try {
       renderScorer(formatFor());
-      // A cleared question is an instruction about the next thing to do, not a receipt.
       fireEvent.click(screen.getByRole('button', { name: 'Game' }));
       fireEvent.click(screen.getByRole('menuitem', { name: 'Replace question 1' }));
       const dialog = screen.getByRole('dialog', { name: 'Replace question 1' });
@@ -2059,7 +2058,8 @@ describe('operation notices', () => {
         vi.advanceTimersByTime(operationNoticeMs * 3);
       });
 
-      expect(screen.getByText(/Question 1 was cleared/)).toBeTruthy();
+      expect(screen.getByText('Nothing has been recorded on that question yet.')).toBeTruthy();
+      expect(screen.getByText('Nothing has been recorded on that question yet.').closest('[role="alert"]')).toBeTruthy();
     } finally {
       vi.useRealTimers();
     }
