@@ -601,6 +601,7 @@ describe('the QBJ a practice produces', () => {
     await score('Sarah', 'C');
     await bonus('20');
 
+    await pressControl('Export / backup…');
     await pressControl('Download current QBJ');
 
     const document = JSON.parse(downloads.files[0].contents);

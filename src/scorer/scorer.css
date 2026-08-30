@@ -1173,6 +1173,7 @@ div.scorer-banner .scorer-banner-message {
 @media (max-width: 560px) {
   .scorer {
     --scorer-footer-height: 58px;
+
     padding-bottom: calc(var(--scorer-footer-height) + env(safe-area-inset-bottom));
   }
 

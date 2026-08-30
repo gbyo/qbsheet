@@ -350,33 +350,6 @@ function TeamLineup(props: {
           )}
         </span>
         <span className="scorer-lineup-tuh">{player.tossupsHeard} TUH</span>
-        {/*
-          Two buttons rather than a drag handle. This is a touchscreen a scorekeeper is using with
-          one hand while the other holds a pen, and a drag that ends one row off is a mis-seat
-          nobody notices until somebody buzzes.
-        */}
-        {canMove && (
-          <span className="scorer-lineup-move">
-            <button
-              type="button"
-              className="scorer-text-action"
-              aria-label={`Move ${player.name} up`}
-              disabled={seat === 0}
-              onClick={() => move(-1)}
-            >
-              &uarr;
-            </button>
-            <button
-              type="button"
-              className="scorer-text-action"
-              aria-label={`Move ${player.name} down`}
-              disabled={seat === playing.length - 1}
-              onClick={() => move(1)}
-            >
-              &darr;
-            </button>
-          </span>
-        )}
         {!reordering && active ? (
           <button
             type="button"

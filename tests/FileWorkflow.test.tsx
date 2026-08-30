@@ -116,6 +116,7 @@ describe('scoring, and getting the result out', () => {
     await score('Emma Chen', '+10');
     await bonus('10');
 
+    await pressControl('Export / backup…');
     await pressControl('Download QBJ backup');
 
     expect(downloads.files).toHaveLength(1);
