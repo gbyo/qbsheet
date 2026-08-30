@@ -1,7 +1,8 @@
 import { IScorekeeperFormat } from './ScorekeeperFormat';
 import { IRoomProcedure, protestBlocksCheckpoint, protestCheckpointPolicy } from './RoomProcedure';
 import deriveGame, { bonusFollows, IGameSetup, IDerivedGame, IDerivedQuestion } from './deriveGame';
-import { bonusEventPoints, ScoreEvent, usesTossupOpportunity } from './ScoreEvents';
+import { bonusEventPoints, ProcedureAllowance, ScoreEvent, usesTossupOpportunity } from './ScoreEvents';
+import { exceptionFacts, procedureAllowances, procedureExceptionLine } from './ProcedureExceptions';
 import { bonusPartProblem, bonusScoreProblem } from '../scorer/bonusOptions';
 
 export type ScoresheetProblemSeverity = 'blocker' | 'warning';
@@ -68,6 +69,7 @@ const knownEventTypes = new Set<ScoreEvent['type']>([
   'end-game-early',
   'adjustment',
   'forfeit',
+  'procedure-exception',
   'note',
 ]);
 
@@ -193,6 +195,16 @@ function isDerivableEvent(value: unknown, format: IScorekeeperFormat): value is 
         event.teams.length > 0 &&
         new Set(event.teams).size === event.teams.length &&
         event.teams.every(validTeam)
+      );
+    case 'procedure-exception':
+      return (
+        procedureAllowances.includes(event.allowance as ProcedureAllowance) &&
+        ['tournament-director', 'moderator', 'other'].includes(String(event.authority)) &&
+        typeof event.reason === 'string' &&
+        event.reason.trim() !== '' &&
+        (event.team === undefined || validTeam(event.team)) &&
+        (event.playerName === undefined ||
+          (typeof event.playerName === 'string' && event.playerName.trim() !== ''))
       );
     case 'note':
       return typeof event.text === 'string' && event.text.trim() !== '';
@@ -759,6 +771,35 @@ export default function validateScoresheet(
         'warning',
         'ended-short',
         `The game ended early after ${game.endedEarly.tossupsRead} tossups: ${game.endedEarly.reason}`,
+      ),
+    );
+  }
+  /*
+   * An authorized departure is a warning rather than a blocker, and it is worth saying twice: it is
+   * unusual but representable, so it goes to whoever accepts the result rather than stopping the room
+   * that recorded it. The line is `procedureExceptionLine`, so the review, this list and `Match.notes`
+   * all read identically.
+   */
+  const teamNames = { left: game.left.name, right: game.right.name };
+  for (const exception of safeEvents) {
+    if (exception.type !== 'procedure-exception') continue;
+    addUnique(
+      warnings,
+      problem(
+        'warning',
+        'procedure-exception',
+        procedureExceptionLine(exceptionFacts(exception, teamNames)),
+        exception.questionNumber,
+      ),
+    );
+  }
+  if (game.overtimeUnnecessary) {
+    addUnique(
+      warnings,
+      problem(
+        'warning',
+        'overtime-not-required',
+        'Overtime was played, but regulation was not tied on this scoresheet. Review the overtime questions, or record the ruling that allowed them.',
       ),
     );
   }

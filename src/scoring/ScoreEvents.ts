@@ -331,6 +331,70 @@ export interface IForfeitEvent extends IScoreEventBase {
   teams: LeftOrRight[];
 }
 
+/**
+ * What a procedural exception is permission to do.
+ *
+ * Narrow on purpose. This is not a switch that turns validation off — each value authorizes exactly
+ * one kind of departure from the configured procedure, and nothing else. A room granted an extra
+ * timeout has been granted an extra timeout; it has not been granted a lineup change at a tossup
+ * boundary its tournament forbids.
+ *
+ * `other` authorizes nothing at all. It exists because a director's ruling is sometimes a thing the
+ * room simply has to write down — "the replacement tossup was read only to Central" — and a
+ * scoresheet that can record it is better than one that makes the scorekeeper keep it in their head.
+ */
+export type ProcedureAllowance =
+  /** One timeout beyond what this room's procedure allows that team. */
+  | 'extra-timeout'
+  /** One lineup change at a point the substitution policy would not ordinarily offer. */
+  | 'substitution'
+  /** One break the schedule does not contain. */
+  | 'extra-break'
+  /** A scheduled break the room was told not to take. */
+  | 'skip-break'
+  /** One more regulation tossup than the format's length. */
+  | 'extra-tossup'
+  /** One more tossup in the initial overtime period than the format's minimum. */
+  | 'overtime-continuation'
+  /** A ruling worth recording that authorizes no particular action. */
+  | 'other';
+
+/** Who said so. Recorded because "the director said" and "the moderator decided" are different facts. */
+export type ProcedureAuthority = 'tournament-director' | 'moderator' | 'other';
+
+/**
+ * The room was explicitly told to do something the configured procedure does not allow.
+ *
+ * # Why this is not `force: true`
+ *
+ * Because the guard in front of the event list is the only thing standing between a tired
+ * scorekeeper's double tap and a game that gained ten points nobody scored — see
+ * `canApplyScoreEvent`. A general "record anything" mode would trade that protection away to solve a
+ * problem it does not have: what a room needs when a director grants an extra timeout is not fewer
+ * checks, it is *one more timeout*.
+ *
+ * So an exception is a grant, not a bypass. It names the one departure it permits, it is spent by
+ * the ordinary event that follows it, and everything else stays exactly as strict as it was. The
+ * derived game then looks normal — a timeout is a timeout — with this event beside it saying why
+ * that timeout was permitted.
+ *
+ * # Why a reason is required
+ *
+ * Because somebody will ask on Sunday. A scoresheet with two timeouts in a one-timeout tournament
+ * and nothing explaining the second is indistinguishable from one that was scored wrong.
+ */
+export interface IProcedureExceptionEvent extends IScoreEventBase {
+  type: 'procedure-exception';
+  allowance: ProcedureAllowance;
+  authority: ProcedureAuthority;
+  /** In the room's own words. Never empty. */
+  reason: string;
+  /** The team it concerned, where it concerned one. Required for the team-scoped allowances. */
+  team?: LeftOrRight;
+  /** The player it concerned, where it concerned one. Never part of any statistic. */
+  playerName?: string;
+}
+
 /** A note on the game, or a question flagged for tournament control. */
 export interface INoteEvent extends IScoreEventBase {
   type: 'note';
@@ -362,6 +426,7 @@ export type ScoreEvent =
   | IEndGameEarlyEvent
   | IAdjustmentEvent
   | IForfeitEvent
+  | IProcedureExceptionEvent
   | INoteEvent;
 
 /** Events that belong to a tossup cycle rather than to the game as a whole. */

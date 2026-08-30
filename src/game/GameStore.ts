@@ -169,12 +169,17 @@ export interface IGameStore {
   create(input: ICreateGameInput): Promise<IStoredGameRecord>;
   update(id: string, change: Partial<IStoredGameRecord>): Promise<IStoredGameRecord | null>;
   /**
-   * Record the event history for a game.
+   * Record the event history for a game, and optionally the rosters it is scored against.
+   *
+   * `setup` is passed only by a correction that changed a team or player name. It has to travel with
+   * the events because the two are one fact: a history whose buzzes name "Samir" and a journal whose
+   * roster still says "Sam" describes a player who is on no roster, and the reload after the write is
+   * exactly when that would be discovered.
    *
    * @returns whether the synchronous journal accepted the write. That, not the IndexedDB result, is
    * what the scoresheet may claim about the room's data being safe.
    */
-  saveEvents(id: string, events: ScoreEvent[]): boolean;
+  saveEvents(id: string, events: ScoreEvent[], setup?: IGameSetup): boolean;
   remove(id: string): Promise<void>;
   /** Drop finished games past the retention window. Never touches an unfinished one. */
   prune(now?: Date): Promise<number>;
@@ -484,18 +489,28 @@ export class GameStore implements IGameStore {
     });
   }
 
-  saveEvents(id: string, events: ScoreEvent[]): boolean {
+  saveEvents(id: string, events: ScoreEvent[], setup?: IGameSetup): boolean {
     // Written synchronously first. The durable mirror follows and is allowed to be slower; it is
     // never allowed to be the thing the room is told about.
     const cached = this.journalKeys.get(id);
     if (!cached) return false;
-    const written = saveGame(cached.gameKey, cached.setup, events);
+    const nextSetup = setup ?? cached.setup;
+    const written = saveGame(cached.gameKey, nextSetup, events);
+    // The cache is what a later `saveEvents` journals against, so a corrected roster has to land in
+    // it as well. Only once the journal accepted the write: a refused write leaves this device
+    // holding the game it had, and the cache must describe that game rather than the intended one.
+    if (written && setup !== undefined) this.journalKeys.set(id, { gameKey: cached.gameKey, setup });
     void this.enqueueWrite(id, async () => {
       const stored = await this.records.get(id);
       if (!stored) return false;
       const read = readStoredRecord(stored, this.readerOptions);
       if (read.record === null) return false;
-      return this.records.put({ ...read.record, events, updatedAt: new Date().toISOString() });
+      return this.records.put({
+        ...read.record,
+        events,
+        setup: nextSetup,
+        updatedAt: new Date().toISOString(),
+      });
     });
     return written;
   }

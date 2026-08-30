@@ -52,6 +52,7 @@
 import { IScorekeeperAnswerType, IScorekeeperFormat, scorekeeperFormatProblems } from './ScorekeeperFormat';
 import { IGameSetup, startingLineup } from './deriveGame';
 import { ScoreEvent } from './ScoreEvents';
+import { ICorrectionChange } from './gameCorrection';
 
 /** Compare short labels the way a scorekeeper would: the characters, not the whitespace or the case. */
 function buttonKey(answerType: IScorekeeperAnswerType): string {
@@ -61,23 +62,10 @@ function buttonKey(answerType: IScorekeeperAnswerType): string {
 /**
  * One thing a scorekeeper is about to change, in words.
  *
- * Every accepted correction produces at least one of these, and they are shown before anything is
- * written. A confirmation that says only "this will change the scoring rules" is a confirmation
- * nobody can meaningfully give.
+ * The shape every correction to the game's definition produces; see `gameCorrection`. Named here as
+ * well because this module established it and every caller already imports it under this name.
  */
-export interface IFormatChange {
-  /** What changed: `Power`, `Regulation length`, `Bonuses`. */
-  subject: string;
-  /** How it changes: `15 points → 20 points`. */
-  detail: string;
-  /**
-   * True when this restates points already on the board.
-   *
-   * A value change reprices questions that have been scored; a change to the overtime rules does
-   * not touch anything until overtime. The distinction decides how loud the confirmation is.
-   */
-  affectsRecordedScoring: boolean;
-}
+export type IFormatChange = ICorrectionChange;
 
 export type FormatCorrection =
   | {

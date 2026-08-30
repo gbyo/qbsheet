@@ -871,3 +871,82 @@
 }
 
 /* #endregion */
+
+/* #region game details */
+
+/*
+ * The game's own identity, as a scoresheet header rather than a form.
+ *
+ * Rows of fact with a quiet action beside the ones that can be corrected. The value carries the
+ * weight and the action does not, because somebody opening this mid-round is nearly always reading
+ * it rather than changing it.
+ */
+.scorer-detail-list {
+  margin: 0;
+}
+
+.scorer-detail-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--room-border);
+}
+
+.scorer-detail-row dt {
+  min-width: 140px;
+  font-size: 0.8125rem;
+  color: var(--room-muted);
+}
+
+.scorer-detail-row dd {
+  display: flex;
+  flex: 1 1 220px;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  margin: 0;
+}
+
+.scorer-detail-value {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.scorer-detail-roster {
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+  font-size: 0.875rem;
+}
+
+.scorer-detail-roster li {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--room-surface-sunken);
+}
+
+.scorer-detail-roster li span:first-child {
+  flex: 1 1 auto;
+}
+
+.scorer-detail-interventions {
+  margin-top: 20px;
+}
+
+/*
+ * A timeout choice and, only for a team that has run out, the way out beneath it. The column keeps
+ * the secondary action off the line the button is on, so an exhausted team's row does not become
+ * two things to aim at.
+ */
+.scorer-timeout-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+/* #endregion */

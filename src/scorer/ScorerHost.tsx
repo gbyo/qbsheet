@@ -41,7 +41,7 @@ import { IGameDefinition } from '../game/GameDefinition';
 import { IGamePackage } from '../game/GamePackage';
 import { ISpreadsheetGameMetadata } from '../scoring/SpreadsheetGame';
 import Scorer, { IScorerAlert, IScorerRecoveryStatus, IScorerSubmitResult } from './Scorer';
-import { IScoringRulesCorrection } from './ScoringRulesCorrectionDialog';
+import { IGameCorrection } from '../scoring/gameCorrection';
 import useGameEvents from './useGameEvents';
 import { loadGame } from './GameSession';
 import { readScorerRecovery } from './ScorerRecovery';
@@ -79,9 +79,11 @@ export interface IScorerHostProps {
   onDownload: (qbj: object) => void;
   /** Passed straight through to the scorer's menu. See `Scorer`. */
   onDownloadForm?: (game: IDerivedGame, form: 'partial' | 'legacy-match') => void;
-  /** Passed straight through to the scorer's menu. See `Scorer` and `formatCorrection`. */
-  onCorrectScoringRules?: (correction: IScoringRulesCorrection) => void | Promise<void>;
+  /** Passed straight through to Game details. See `Scorer` and `gameCorrection`. */
+  onCorrectGame?: (correction: IGameCorrection) => void | Promise<void>;
   onProgress?: (qbj: object, questionsPlayed: number) => void;
+  /** The tournament's player ids, so a name correction re-keys them rather than dropping them. */
+  qbjPlayerIds?: Record<string, string>;
   /**
    * The complete event history, whenever it changes.
    *
@@ -152,8 +154,9 @@ export default function ScorerHost(props: IScorerHostProps) {
     onSubmit,
     onDownload,
     onDownloadForm,
-    onCorrectScoringRules,
+    onCorrectGame,
     onProgress,
+    qbjPlayerIds,
     onEventsChanged,
     qbjMeta,
     onRequestControl,
@@ -319,9 +322,10 @@ export default function ScorerHost(props: IScorerHostProps) {
       onSubmit={onSubmit}
       onDownload={onDownload}
       onDownloadForm={onDownloadForm}
-      onCorrectScoringRules={onCorrectScoringRules}
+      onCorrectGame={onCorrectGame}
       onProgress={onProgress}
       qbjMeta={qbjMeta}
+      qbjPlayerIds={qbjPlayerIds}
       onRequestControl={onRequestControl}
       controlRequest={controlRequest}
       onRetryControlRequest={onRetryControlRequest}

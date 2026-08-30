@@ -41,16 +41,7 @@ import { ScoreEvent } from '../scoring/ScoreEvents';
 
 /** Which dialog an entry opens. The scorer's own `OpenDialog`, named here so this file is honest. */
 export type MenuDialog =
-  | 'notes'
-  | 'details'
-  | 'lightning'
-  | 'timeout'
-  | 'adjust'
-  | 'recovery'
-  | 'end-early'
-  | 'forfeit'
-  | 'scoring-rules'
-  | 'export';
+  'notes' | 'details' | 'lightning' | 'timeout' | 'adjust' | 'recovery' | 'end-early' | 'forfeit' | 'export';
 
 export interface IScorerMenuInput {
   game: IDerivedGame;
@@ -66,8 +57,14 @@ export interface IScorerMenuInput {
   submitting: boolean;
   /** Present only when the host can deliver a mid-game or legacy QBJ. */
   canDownloadForms: boolean;
-  /** Present only when the host can persist corrected scoring rules. See `formatCorrection`. */
-  canCorrectScoringRules: boolean;
+  /**
+   * Present only when the host can persist a correction to the game's definition.
+   *
+   * Read for nothing here any more. Correcting the rules, the procedure and the names all live in
+   * Game details now — they are corrections to what the game *is*, and one place for those is worth
+   * more than a menu entry each. Kept on the input so the menu still describes what the host can do.
+   */
+  canCorrectGame: boolean;
   /** Whether the phone-only More menu should expose the currently available redo action. */
   canRedo?: boolean;
 
@@ -98,7 +95,6 @@ export default function scorerMenuItems(input: IScorerMenuInput): IGameMenuItem[
     keyboardEnabled,
     submitting,
     canDownloadForms,
-    canCorrectScoringRules,
     canRedo = false,
     openDialog,
     setKeyboardEnabled,
@@ -217,16 +213,6 @@ export default function scorerMenuItems(input: IScorerMenuInput): IGameMenuItem[
     onSelect: () => openDialog('adjust'),
     disabled: submitting,
   });
-  if (canCorrectScoringRules) {
-    // Filed under review rather than under the game's own details because that is what it is: a
-    // correction to something already written down, in the same group as replacing a question.
-    review.push({
-      label: 'Correct scoring rules…',
-      icon: 'adjust',
-      onSelect: () => openDialog('scoring-rules'),
-      disabled: submitting,
-    });
-  }
 
   /** Getting the game off this device, or back on to it. */
   const file: IGameMenuItem[] = openExport
