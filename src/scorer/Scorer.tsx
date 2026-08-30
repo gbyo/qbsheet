@@ -51,6 +51,9 @@ import deriveGame, {
 import { IBonusEvent, IBonusPartResult, ScoreEvent } from '../scoring/ScoreEvents';
 import validateScoresheet from '../scoring/validateScoresheet';
 import toQbjMatch, { IQbjMatchMeta } from '../scoring/toQbjMatch';
+import { IGameDefinition } from '../game/GameDefinition';
+import { IGamePackage } from '../game/GamePackage';
+import { createSpreadsheetGameSnapshot, ISpreadsheetGameMetadata, serializeSpreadsheetGame } from '../spreadsheet';
 import { connectionTimeline } from '../app/ConnectionTimeline';
 import { RoomConnectionState } from '../app/ConnectionState';
 import TeamPanel from './TeamPanel';
@@ -145,6 +148,12 @@ export interface IScorerProps {
   procedure?: IRoomProcedure;
   /** Whoever is signed in to this room browser. Recorded on the result as the scorekeeper. */
   operatorName?: string;
+  /** The durable package used to build the canonical tournament-spreadsheet copy. */
+  gamePackage?: IGamePackage | IGameDefinition;
+  /** Existing stable record identity for unscheduled/manual games. */
+  stableGameId?: string;
+  /** Credential-free record facts that are safe to carry with the spreadsheet snapshot. */
+  spreadsheetMetadata?: ISpreadsheetGameMetadata;
   connection: RoomConnectionState;
   /**
    * What the status pill says, when the game's standing is not a network fact.
@@ -489,6 +498,9 @@ export default function Scorer(props: IScorerProps) {
     packetName,
     procedure,
     operatorName,
+    gamePackage,
+    stableGameId,
+    spreadsheetMetadata,
     connection,
     statusLabel,
     degradedMessage,
@@ -773,6 +785,39 @@ export default function Scorer(props: IScorerProps) {
   const qbj = useMemo(
     () => attachScorerRecovery(toQbjMatch(format, game, meta), setup, events.events),
     [format, game, meta, setup, events.events],
+  );
+  const spreadsheetTsv = useMemo(() => {
+    if (!gamePackage) return undefined;
+    try {
+      return serializeSpreadsheetGame(
+        createSpreadsheetGameSnapshot({
+          package: gamePackage,
+          setup,
+          events: events.events,
+          gameId: stableGameId ?? gameKey,
+          metadata: {
+            ...spreadsheetMetadata,
+            qbjMatchMeta: meta,
+            scorekeeper: meta?.scorekeeper ?? spreadsheetMetadata?.scorekeeper ?? operatorName,
+            moderator: meta?.moderator ?? spreadsheetMetadata?.moderator,
+            notes: meta?.notes ?? spreadsheetMetadata?.notes,
+          },
+        }),
+      );
+    } catch {
+      // A malformed host package should not take down the scoresheet. The ordinary QBJ/review
+      // actions remain available; the spreadsheet action simply stays unavailable until the host
+      // supplies a package that can be serialized.
+      return undefined;
+    }
+  }, [events.events, gameKey, gamePackage, meta, operatorName, setup, spreadsheetMetadata, stableGameId]);
+  const spreadsheetGameLabel = useMemo(
+    () => `${roundName} · ${game.left.name} ${game.left.points}–${game.right.points} ${game.right.name}`,
+    [game.left.name, game.left.points, game.right.name, game.right.points, roundName],
+  );
+  const spreadsheetSuggestedTabName = useMemo(
+    () => `${roundName} ${game.left.name}–${game.right.name}`,
+    [game.left.name, game.right.name, roundName],
   );
 
   /** The question anything recorded now belongs to. */
@@ -1902,6 +1947,9 @@ export default function Scorer(props: IScorerProps) {
               onSubmit={submit}
               onDownload={downloadQbj}
               onReview={() => openReviewAt(undefined)}
+              spreadsheetTsv={spreadsheetTsv}
+              spreadsheetGameLabel={spreadsheetGameLabel}
+              spreadsheetSuggestedTabName={spreadsheetSuggestedTabName}
             />
             {submitResult && (
               <div className={submitResult.ok ? 'scorer-complete-ok' : 'scorer-complete-warning'}>
