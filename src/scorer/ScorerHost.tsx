@@ -32,6 +32,9 @@ import { ScoreEvent } from '../scoring/ScoreEvents';
 import { RoomConnectionState } from '../app/ConnectionState';
 import { LeftOrRight } from '../scoring/types';
 import { IQbjMatchMeta } from '../scoring/toQbjMatch';
+import { IGameDefinition } from '../game/GameDefinition';
+import { IGamePackage } from '../game/GamePackage';
+import { ISpreadsheetGameMetadata } from '../scoring/SpreadsheetGame';
 import Scorer, { IScorerAlert, IScorerRecoveryStatus, IScorerSubmitResult } from './Scorer';
 import { IScoringRulesCorrection } from './ScoringRulesCorrectionDialog';
 import useGameEvents from './useGameEvents';
@@ -55,6 +58,12 @@ export interface IScorerHostProps {
   procedure?: IRoomProcedure;
   /** Whoever is signed in to this room browser, recorded on the result as the scorekeeper. */
   operatorName?: string;
+  /** Durable package used for the canonical tournament-spreadsheet copy. */
+  gamePackage?: IGamePackage | IGameDefinition;
+  /** Existing stable record identity for unscheduled/manual games. */
+  stableGameId?: string;
+  /** Credential-free record facts that are safe to carry with the spreadsheet snapshot. */
+  spreadsheetMetadata?: ISpreadsheetGameMetadata;
   /** Whether the complete game record is currently backed by a healthy durable store. */
   recordDurablyStored?: boolean;
   connection: RoomConnectionState;
@@ -128,6 +137,9 @@ export default function ScorerHost(props: IScorerHostProps) {
     packetName,
     procedure,
     operatorName,
+    gamePackage,
+    stableGameId,
+    spreadsheetMetadata,
     recordDurablyStored = true,
     connection,
     statusLabel,
@@ -290,6 +302,9 @@ export default function ScorerHost(props: IScorerHostProps) {
       packetName={packetName}
       procedure={procedure}
       operatorName={operatorName}
+      gamePackage={gamePackage}
+      stableGameId={stableGameId}
+      spreadsheetMetadata={spreadsheetMetadata}
       connection={connection}
       statusLabel={statusLabel}
       degradedMessage={degradedMessage}

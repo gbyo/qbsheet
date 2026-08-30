@@ -37,6 +37,7 @@ export * from '../scoring/deriveGame';
 export * from '../scoring/questionCorrection';
 export * from '../scoring/toQbjMatch';
 export * from '../scoring/validateScoresheet';
+export * from '../scoring/SpreadsheetGame';
 
 export * from '../scorer/ScorerRecovery';
 export * from '../scorer/bonusOptions';
