@@ -11,6 +11,7 @@ const updateState = vi.mocked(useAppUpdate);
 
 describe('UpdateNotice', () => {
   beforeEach(() => {
+    window.localStorage.removeItem(updateNoticeDismissalKey);
     updateState.mockReturnValue({ available: true, applying: false });
   });
 

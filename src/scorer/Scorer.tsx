@@ -72,6 +72,7 @@ import {
 } from './ProcedureDialogs';
 import { IGameEventsApi, newEventId } from './useGameEvents';
 import {
+  ExportDialog,
   FlagDialog,
   formatControlRequestTime,
   frameDescription,
@@ -236,6 +237,7 @@ type OpenDialog =
   | 'details'
   | 'connection'
   | 'scoring-rules'
+  | 'export'
   | null;
 
 /** How often, at most, to tell tournament control how the game is going. Matches MODAQ's old timer. */
@@ -1502,10 +1504,6 @@ export default function Scorer(props: IScorerProps) {
     canDownloadForms: onDownloadForm !== undefined,
     canCorrectScoringRules: onCorrectScoringRules !== undefined,
     openDialog: (next) => {
-      // The shared menu contract also knows about the optional export route. This scorer
-      // does not render that dialog yet, so keep it a no-op rather than widening local state
-      // to a route that would leave the user with no visible surface.
-      if (next === 'export') return;
       setDialog(next);
     },
     setKeyboardEnabled,
@@ -1516,6 +1514,7 @@ export default function Scorer(props: IScorerProps) {
     downloadQbjBackup: downloadQbj,
     downloadPartialQbj: () => onDownloadForm?.(game, 'partial'),
     downloadLegacyQbj: () => onDownloadForm?.(game, 'legacy-match'),
+    openExport: () => setDialog('export'),
     print,
   })
 
@@ -2511,6 +2510,14 @@ export default function Scorer(props: IScorerProps) {
           moderator={moderatorName}
           scorekeeper={operatorName ?? ''}
           onSave={setModeratorName}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog === 'export' && (
+        <ExportDialog
+          onDownloadQbjBackup={downloadQbj}
+          onDownloadPartialQbj={onDownloadForm ? () => onDownloadForm(game, 'partial') : undefined}
+          onDownloadLegacyQbj={onDownloadForm ? () => onDownloadForm(game, 'legacy-match') : undefined}
           onClose={() => setDialog(null)}
         />
       )}

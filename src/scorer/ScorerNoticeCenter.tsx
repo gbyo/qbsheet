@@ -6,7 +6,7 @@
  * scorekeeper's hand. This component keeps one reserved surface for the highest-priority fact and
  * leaves the rest available from a compact, deliberate issues view.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 export type ScorerNoticeTone = 'info' | 'warning' | 'error';
 
@@ -167,6 +167,11 @@ export default function ScorerNoticeCenter(props: { notices: IScorerNotice[] }) 
   const activeDuration = active
     ? active.autoDismissMs ?? (active.transient ? defaultTransientMs : undefined)
     : undefined;
+  const activeNoticeRef = useRef(active);
+
+  useEffect(() => {
+    activeNoticeRef.current = active;
+  }, [active]);
 
   const dismiss = useCallback((notice: IScorerNotice, expired = false) => {
     const key = noticeKey(notice);
@@ -176,10 +181,13 @@ export default function ScorerNoticeCenter(props: { notices: IScorerNotice[] }) 
   }, []);
 
   useEffect(() => {
-    if (!active || activeDuration === undefined || paused) return undefined;
-    const timer = window.setTimeout(() => dismiss(active, true), activeDuration);
+    if (activeKey === undefined || activeDuration === undefined || paused) return undefined;
+    const timer = window.setTimeout(() => {
+      const notice = activeNoticeRef.current;
+      if (notice && noticeKey(notice) === activeKey) dismiss(notice, true);
+    }, activeDuration);
     return () => window.clearTimeout(timer);
-  }, [active, activeDuration, activeKey, dismiss, paused]);
+  }, [activeDuration, activeKey, dismiss, paused]);
 
   const hiddenIssueCount = unresolved.filter((notice) => noticeKey(notice) !== activeKey).length;
   const showIssues = unresolved.length > 0 && (active === undefined || hiddenIssueCount > 0);

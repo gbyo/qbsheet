@@ -58,4 +58,19 @@ describe('ScorerNoticeCenter', () => {
     expect(document.activeElement).toBe(input);
     input.remove();
   });
+
+  test('does not restart a transient receipt timer when the same notice rerenders', () => {
+    vi.useFakeTimers();
+    const { rerender } = renderCenter([{ id: 'receipt', tone: 'info', message: 'Saved', transient: true, autoDismissMs: 3000 }]);
+
+    act(() => {
+      vi.advanceTimersByTime(2000);
+    });
+    rerender(<ScorerNoticeCenter notices={[{ id: 'receipt', tone: 'info', message: 'Saved', transient: true, autoDismissMs: 3000 }]} />);
+
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(screen.queryByText('Saved')).toBeNull();
+  });
 });
