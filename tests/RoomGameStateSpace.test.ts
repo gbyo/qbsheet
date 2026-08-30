@@ -597,6 +597,26 @@ function stateMachineActions(
     nextEvent({ type: 'roster-add', questionNumber: attachment, team: side, playerName: `${side} reserve` }),
     nextEvent({ type: 'substitution', questionNumber: activeBoundary, team: side, activePlayers }),
     nextEvent({ type: 'timeout', questionNumber: attachment, team: side }),
+    /*
+     * A director's ruling, offered as often as any other interruption. Most of these are refused in
+     * most states, which is the point: an exception is a grant that has to be legal on its own terms
+     * before it can make anything else legal.
+     */
+    nextEvent({
+      type: 'procedure-exception',
+      questionNumber: attachment,
+      allowance: random() < 0.5 ? 'extra-timeout' : 'substitution',
+      authority: 'tournament-director',
+      reason: `Seeded ruling ${step}`,
+      team: side,
+    }),
+    nextEvent({
+      type: 'procedure-exception',
+      questionNumber: attachment,
+      allowance: random() < 0.5 ? 'extra-break' : 'other',
+      authority: 'moderator',
+      reason: `Seeded ruling ${step}`,
+    }),
   ];
 
   if (phase.kind === 'tossup') {
@@ -1411,6 +1431,18 @@ describe('every score event variant', () => {
         before: [],
         candidate: nextEvent({ type: 'note', questionNumber: 1, text: 'Room note', flagged: true }),
       },
+      'procedure-exception': {
+        context: procedureContext,
+        before: [],
+        candidate: nextEvent({
+          type: 'procedure-exception',
+          questionNumber: 1,
+          allowance: 'extra-timeout',
+          authority: 'tournament-director',
+          reason: 'Director granted a second timeout',
+          team: 'left',
+        }),
+      },
     };
 
     for (const [type, scenario] of Object.entries(transitions)) {
@@ -1479,6 +1511,14 @@ describe('every score event variant', () => {
       },
       forfeit: { type: 'forfeit', questionNumber: 1, teams: ['right'] },
       note: { type: 'note', questionNumber: 1, text: 'Room note', flagged: true },
+      'procedure-exception': {
+        type: 'procedure-exception',
+        questionNumber: 1,
+        allowance: 'extra-timeout',
+        authority: 'tournament-director',
+        reason: 'Director granted a second timeout',
+        team: 'left',
+      },
     };
     const context = {
       format,

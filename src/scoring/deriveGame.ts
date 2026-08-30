@@ -27,11 +27,14 @@ import {
   IRosterAddEvent,
   ISubstitutionEvent,
   otherTeam,
+  ProcedureAllowance,
+  ProcedureAuthority,
   ProtestStatus,
   ProtestSubject,
   ScoreEvent,
   usesTossupOpportunity,
 } from './ScoreEvents';
+import { extraOvertimeTossups, extraRegulationTossups } from './ProcedureExceptions';
 
 /** One team as the game began. */
 export interface ITeamSetup {
@@ -166,6 +169,18 @@ export interface IDerivedVoid {
   reason: string;
 }
 
+/** An authorized departure from the configured procedure, as the room recorded it. */
+export interface IDerivedProcedureException {
+  eventId: string;
+  questionNumber: number;
+  allowance: ProcedureAllowance;
+  authority: ProcedureAuthority;
+  reason: string;
+  team?: LeftOrRight;
+  teamName?: string;
+  playerName?: string;
+}
+
 export interface IDerivedGame {
   left: IDerivedTeam;
   right: IDerivedTeam;
@@ -211,6 +226,19 @@ export interface IDerivedGame {
   endedEarly?: { reason: string; tossupsRead: number };
   /** Sides that still have to name a starting lineup before anything can be scored. */
   needsStartingLineup: LeftOrRight[];
+  /** Authorized departures from the configured procedure, in the order they were recorded. */
+  procedureExceptions: IDerivedProcedureException[];
+  /**
+   * Overtime was played, and the regulation result on the scoresheet does not call for it.
+   *
+   * Almost always the aftermath of a correction: a protest is upheld, question 6 changes hands, and
+   * the tie that sent the room into overtime is not there any more. The room is told rather than
+   * corrected — the tossups really were played, and whether they count is a ruling somebody has to
+   * make — and an explicit overtime continuation silences it, because then somebody already has.
+   */
+  overtimeUnnecessary: boolean;
+  /** Tossups in the initial overtime period, including any authorized continuation. */
+  overtimeMinimumQuestionCount: number;
 }
 
 function emptyPlayer(name: string): IDerivedPlayer {
@@ -321,10 +349,14 @@ function effectiveCycleHasBegun(events: ScoreEvent[], questionNumber: number): b
  * a boundary somebody already played through.
  */
 function periodBoundary(format: IScorekeeperFormat, events: ScoreEvent[]): number {
+  // An authorized extra tossup lengthens regulation rather than being smuggled in as overtime. The
+  // guard refuses to grant one once overtime has been played, so this can never reclassify a tossup
+  // the room has already played; see `ProcedureExceptions`.
+  const extra = extraRegulationTossups(events);
   const called = events.find((event): event is IEndRegulationEvent => event.type === 'end-regulation');
-  if (called) return called.lastRegulationQuestion ?? called.questionNumber;
+  if (called) return (called.lastRegulationQuestion ?? called.questionNumber) + extra;
   if (format.regulation.timed) return Number.POSITIVE_INFINITY;
-  return format.regulation.tossupCount;
+  return format.regulation.tossupCount + extra;
 }
 
 /**
@@ -332,9 +364,17 @@ function periodBoundary(format: IScorekeeperFormat, events: ScoreEvent[]): numbe
  *
  * True once the minimum has been played out, which is what the room should be telling a scorekeeper
  * so they know the round is about to end.
+ *
+ * @param extraOvertimeTossups tossups an authorized continuation added to the format's minimum. The
+ * engine derives this from the history (see `ProcedureExceptions`); a caller with only a format in
+ * hand omits it and gets the format's own answer, which is what this always returned.
  */
-export function overtimeIsSuddenDeath(format: IScorekeeperFormat, overtimeCyclesPlayed: number): boolean {
-  return overtimeCyclesPlayed + 1 >= Math.max(1, format.overtime.minimumQuestionCount);
+export function overtimeIsSuddenDeath(
+  format: IScorekeeperFormat,
+  overtimeCyclesPlayed: number,
+  extraOvertimeTossups = 0,
+): boolean {
+  return overtimeCyclesPlayed + 1 >= Math.max(1, format.overtime.minimumQuestionCount) + extraOvertimeTossups;
 }
 
 /**
@@ -397,6 +437,7 @@ export default function deriveGame(
   const integrityProblems: IDerivedGame['integrityProblems'] = [];
   const protests: IDerivedProtest[] = [];
   const voids: IDerivedVoid[] = [];
+  const procedureExceptions: IDerivedProcedureException[] = [];
   const halfBreaks: number[] = [];
   const timeouts: Record<LeftOrRight, number> = { left: 0, right: 0 };
   let activeTimeout: IDerivedGame['activeTimeout'];
@@ -478,6 +519,18 @@ export default function deriveGame(
         description: event.description,
         status: event.status,
         resolution: event.resolution,
+      });
+      continue;
+    }
+    if (event.type === 'procedure-exception') {
+      procedureExceptions.push({
+        eventId: event.id,
+        questionNumber: event.questionNumber,
+        allowance: event.allowance,
+        authority: event.authority,
+        reason: event.reason,
+        ...(event.team ? { team: event.team, teamName: teams[event.team].name } : {}),
+        ...(event.playerName ? { playerName: event.playerName } : {}),
       });
       continue;
     }
@@ -725,18 +778,33 @@ export default function deriveGame(
   const overtimeTossupsRead = heardCycles.filter((question) => question.period === 'overtime').length;
   const regulationCyclesPlayed = heardCycles.filter((question) => question.period === 'regulation').length;
 
+  /*
+   * Regulation is over.
+   *
+   * An untimed round ends on a count, which an authorized extra tossup raises — the extension is
+   * already in `boundary`, so comparing against it is the whole implementation and the allowance
+   * stops applying the moment the extra tossup has been played.
+   *
+   * A timed one ends when the moderator says so, and that is where it stays: the extra clause is
+   * guarded on there actually being an extension, because `lastRegulationQuestion` is absent on
+   * histories recorded before that field existed and their fallback can name a tossup nobody played.
+   */
+  const extraRegulation = extraRegulationTossups(events);
   const regulationComplete = format.regulation.timed
-    ? events.some((event) => event.type === 'end-regulation')
-    : regulationCyclesPlayed >= format.regulation.tossupCount;
+    ? events.some((event) => event.type === 'end-regulation') &&
+      (extraRegulation === 0 || (questions.at(-1)?.questionNumber ?? 0) >= boundary)
+    : regulationCyclesPlayed >= boundary;
 
   const needsStartingLineup = teamsNeedingStartingLineup(format, setup, events);
 
+  // An authorized continuation lengthens the initial overtime period rather than inventing a phase.
+  const overtimeMinimumQuestionCount =
+    Math.max(1, format.overtime.minimumQuestionCount) + extraOvertimeTossups(events);
+
   const suddenDeathStarted =
-    suddenDeathStartedByEvent ||
-    (overtimeStarted && overtimeCyclesPlayed > Math.max(1, format.overtime.minimumQuestionCount));
+    suddenDeathStartedByEvent || (overtimeStarted && overtimeCyclesPlayed > overtimeMinimumQuestionCount);
 
   const phase = derivePhase({
-    format,
     questions,
     teams,
     boundary,
@@ -749,7 +817,22 @@ export default function deriveGame(
     halfBreaks,
     endedEarly,
     needsStartingLineup,
+    overtimeMinimumQuestionCount,
   });
+
+  /*
+   * Overtime that the scoresheet no longer calls for.
+   *
+   * Measured at the end of regulation rather than at the end of the game, because that is the score
+   * the decision to play overtime was made on. A continuation somebody authorized answers the
+   * question already, so it is not asked again.
+   */
+  const lastRegulationQuestion = questions.filter((question) => question.period === 'regulation').at(-1);
+  const overtimeUnnecessary =
+    overtimeTossupsRead > 0 &&
+    lastRegulationQuestion !== undefined &&
+    lastRegulationQuestion.scoreAfter.left !== lastRegulationQuestion.scoreAfter.right &&
+    extraOvertimeTossups(events) === 0;
 
   // A lineup selected for the upcoming tossup should be visible immediately without inventing that
   // tossup. A bonus is still part of the current tossup, so personnel changes cannot apply until
@@ -783,6 +866,9 @@ export default function deriveGame(
     awaitingScoreCheck,
     endedEarly,
     needsStartingLineup,
+    procedureExceptions,
+    overtimeUnnecessary,
+    overtimeMinimumQuestionCount,
   };
 }
 
@@ -830,7 +916,6 @@ export function lineupChangeEffectiveQuestion(game: IDerivedGame, events: ScoreE
  * a reason to keep playing once regulation is actually over.
  */
 function derivePhase(input: {
-  format: IScorekeeperFormat;
   questions: IDerivedQuestion[];
   teams: Record<LeftOrRight, IDerivedTeam>;
   boundary: number;
@@ -843,9 +928,10 @@ function derivePhase(input: {
   halfBreaks: number[];
   endedEarly: IDerivedGame['endedEarly'];
   needsStartingLineup: LeftOrRight[];
+  /** The format's minimum, plus any authorized continuation. */
+  overtimeMinimumQuestionCount: number;
 }): ScoringPhase {
   const {
-    format,
     questions,
     teams,
     boundary,
@@ -858,6 +944,7 @@ function derivePhase(input: {
     halfBreaks,
     endedEarly,
     needsStartingLineup,
+    overtimeMinimumQuestionCount,
   } = input;
 
   if (teams.left.forfeited || teams.right.forfeited) return { kind: 'complete', reason: 'forfeit' };
@@ -930,8 +1017,7 @@ function derivePhase(input: {
     };
   }
 
-  const minimumOvertimeQuestionCount = Math.max(1, format.overtime.minimumQuestionCount);
-  if (!suddenDeathStarted && overtimeCyclesPlayed < minimumOvertimeQuestionCount) {
+  if (!suddenDeathStarted && overtimeCyclesPlayed < overtimeMinimumQuestionCount) {
     return {
       kind: 'tossup',
       questionNumber: nextQuestion,

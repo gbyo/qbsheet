@@ -5,6 +5,12 @@ menu. On a wide screen it is labelled **Game**; on a phone it is labelled **More
 
 The scoresheet works the same way for a file-only game and for a connected game.
 
+QBSheet follows the rules of the tournament during normal play. But a scoresheet must never trap a
+room when the real game is different from the setup. Use **Game details** to correct the game itself,
+and **Full scoresheet review** to correct what happened on a question. An unusual ruling from a
+tournament director goes on the record without a change to the normal way you score. See
+[When the setup does not match the room](#when-the-setup-does-not-match-the-room).
+
 ## The screen
 
 | Area | Purpose |
@@ -68,7 +74,7 @@ The menu shows only the items that apply at this moment.
 | Item | Purpose |
 | --- | --- |
 | **Notes** | Free text about the game |
-| **Game details** | The teams, the round, the room, and the format |
+| **Game details** | The game itself: the teams, the rosters, the rules, and the room procedure |
 
 Use **Flag** in the footer to open a protest or report an issue. Those live-play workflows do not
 appear a second time in this menu.
@@ -90,7 +96,6 @@ appear a second time in this menu.
 | **Full scoresheet review** | Every question, and the place to correct one |
 | **Replace question `<number>`** | Replace the current question |
 | **Adjust score** | Change a score directly, when no question-level fix fits |
-| **Correct scoring rules…** | Shown when the host supports a recorded rules correction |
 
 ### Files
 
@@ -106,6 +111,70 @@ appear a second time in this menu.
 | --- | --- |
 | **End game early…** | Stop the game before the end. This action is destructive. |
 | **Record forfeit** | Record a forfeit. This action is destructive. |
+
+## When the setup does not match the room
+
+QBSheet follows the rules of the tournament during normal play. But a scoresheet must never trap a
+room when the real game is different from the setup.
+
+There are two different situations, and QBSheet keeps them apart.
+
+| Situation | What to do |
+| --- | --- |
+| QBSheet recorded something wrong | Correct it |
+| The room was told to do something different | Record the ruling |
+
+### Correct the game
+
+Open **Game details** from the Game / More menu. The page shows what this game is: the teams, the
+rosters, the scoring rules, and the room procedure.
+
+Each line has a small action next to it when you can change that line.
+
+| Line | Action |
+| --- | --- |
+| A team | **Correct…** the name. Every question stays with the same team. |
+| A roster | **Correct…** a player name. All the statistics of that player follow the new name. |
+| Moderator | **Edit** the name of the reader |
+| Scoring rules | **Correct…** the rules. QBSheet calculates every question again. |
+| Room procedure | **Change…** the timeouts, the breaks, or the lineup rule |
+
+QBSheet shows what a correction does before it writes anything.
+
+Two names on one roster can be the same player. QBSheet does not combine them without a request. To
+combine them, select **They are the same person — combine them**.
+
+To correct what happened on a question, use **Full scoresheet review**. See
+[Correct an earlier question](#correct-an-earlier-question).
+
+### Record a ruling
+
+A tournament director can allow something the procedure does not. For example, an extra timeout, or
+a lineup change at a point the rules do not give.
+
+QBSheet offers the route where the block happens.
+
+1. Do the action. QBSheet refuses it and gives the reason.
+2. Select **Procedure changed?** next to the reason, or **Allowed another one?** under the team.
+3. Select **We were told we could, this once**.
+4. Say why. A reason is necessary.
+5. Select **Record this ruling**.
+
+The action is now available one time. QBSheet records the ruling on the result, and shows it in
+**Game details** and in the scoresheet review.
+
+If the room was set up wrong from the start, select **This room was set up wrong** instead. That
+changes the procedure for the rest of the game and keeps everything already recorded.
+
+### Overtime that a correction removes
+
+A correction can change the result of regulation. If regulation is no longer a tie, the overtime
+tossups can be wrong.
+
+QBSheet says this in **Full scoresheet review**. You have two answers:
+
+- **Strike out the overtime**, and QBSheet calculates the score from regulation alone; or
+- keep the tossups and record the ruling that allows them.
 
 ## Protests
 
@@ -126,6 +195,9 @@ The procedure can also stop a checkpoint. Overtime and sudden death are two such
 - Add a player to a roster at any time before the game is complete.
 - In a connected game, QBSheet sends a new player to the server. QBSheet marks a player that it did
   not send yet.
+- A player who arrives late gets only the tossups after the change of lineup.
+- To correct the name of a player, use **Game details**. To correct when a lineup started, open
+  **Full scoresheet review** and change the effective tossup of that lineup.
 
 ## Two things QBSheet says before you finish
 

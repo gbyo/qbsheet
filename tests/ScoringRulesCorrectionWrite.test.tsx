@@ -18,7 +18,7 @@
  *
  * So the property is that the journal is exactly what it was, and that the room is told so.
  */
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import ScoringScreen from '../src/app/ScoringScreen';
 import { GameStore, IStoredGameRecord } from '../src/game/GameStore';
@@ -133,10 +133,27 @@ async function press(name: string | RegExp, role: 'button' | 'menuitem' = 'butto
   });
 }
 
+/**
+ * Open the scoring-rules correction from the row it corrects.
+ *
+ * It used to be its own Game-menu entry. Corrections to the game's own definition are reached from
+ * Game details now, where the value being corrected is on screen beside the control -- so the row
+ * has to be found first, because "Correct…" on its own names three different buttons in there.
+ */
+async function openScoringRulesCorrection() {
+  await press(/^game$/i);
+  await press(/game details/i, 'menuitem');
+  const details = await screen.findByRole('dialog', { name: 'Game details' });
+  const row = within(details).getByText('Scoring rules').closest('.scorer-detail-row');
+  if (!(row instanceof HTMLElement)) throw new Error('the Scoring rules row is not on screen');
+  await act(async () => {
+    fireEvent.click(within(row).getByRole('button', { name: /correct/i }));
+  });
+}
+
 /** Propose the correction that moves indices: a tier above the power this game already recorded. */
 async function proposeSuperpower() {
-  await press(/^game$/i);
-  await press(/correct scoring rules/i, 'menuitem');
+  await openScoringRulesCorrection();
   await press(/add an answer type/i);
 
   const fill = (label: string, value: string) => {
@@ -187,6 +204,34 @@ describe('when the device accepts the history but refuses the corrected rules', 
     expect(refusal).toHaveTextContent(/could not be saved on this device/i);
     expect(screen.getAllByRole('alert')).toContain(refusal);
     expect(screen.getByRole('button', { name: /apply corrected rules/i })).not.toBeDisabled();
+  });
+
+  test('says so differently when the device will not take the scoresheet back either', async () => {
+    await openScoringScreen();
+
+    /*
+     * The rollback refused too. Rare -- a browser that withdrew storage between the two writes --
+     * and the one case where "nothing has changed" is itself false, so the room is told to get a
+     * backup out instead. This is a message only the host can know to send, which is why it travels
+     * as `GameCorrectionRefusal` rather than being the dialog's own wording; a plain `Error` here
+     * falls back to the reassuring sentence and the room never hears it.
+     */
+    const storage = Object.getPrototypeOf(window.localStorage) as Storage;
+    const setItem = storage.setItem;
+    let writes = 0;
+    storage.setItem = function refuseTheSecond(this: Storage, key: string, value: string) {
+      writes += 1;
+      if (writes > 1) throw new Error('quota');
+      return setItem.call(this, key, value);
+    };
+    try {
+      await proposeSuperpower();
+      const refusal = await screen.findByText(/would not put the scoresheet back/i);
+      expect(refusal).toHaveTextContent(/download the qbj backup/i);
+      expect(screen.getAllByRole('alert')).toContain(refusal);
+    } finally {
+      storage.setItem = setItem;
+    }
   });
 
   test('does not redraw the scoresheet under rules that exist only in memory', async () => {

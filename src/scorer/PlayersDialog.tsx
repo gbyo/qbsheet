@@ -52,6 +52,13 @@ export interface IPlayersDialogProps {
   /** Whether the current procedure allows a lineup change at this point in the game. */
   lineupChangeAllowed?: boolean;
   /**
+   * Teams that have been authorized one change the procedure would not otherwise offer.
+   *
+   * Separate from `lineupChangeAllowed` because a ruling is about one team: a director who lets a
+   * late arrival on for Central has said nothing about the other bench. See `ProcedureExceptions`.
+   */
+  lineupChangeAuthorized?: Record<LeftOrRight, boolean>;
+  /**
    * Whether somebody may be added to the roster at all.
    *
    * Separate from `lineupChangeAllowed` because they are separate acts: a player who has turned up
@@ -61,6 +68,14 @@ export interface IPlayersDialogProps {
   rosterAdditionAllowed?: boolean;
   /** Shown when the roster can be viewed but the procedure does not permit changing it yet. */
   lineupChangeReason?: string;
+  /**
+   * The way out when the procedure is what is standing in the way.
+   *
+   * Rendered only beside that explanation, so it exists exactly when a scorekeeper has just been
+   * told they cannot do the thing they opened this dialog to do. A room whose lineup changes are
+   * available — which is every room at every ordinary boundary — never sees it.
+   */
+  onProcedureQuery?: () => void;
   onSubstitute: (team: LeftOrRight, activePlayers: string[]) => void;
   /**
    * Add somebody to the roster, and say who should be on the floor afterwards.
@@ -197,6 +212,8 @@ function TeamLineup(props: {
   timeoutsUsed: number;
   timeoutsPerTeam: number;
   lineupChangeAllowed: boolean;
+  /** A ruling authorized one change for this team, whatever the procedure says. */
+  lineupChangeAuthorized: boolean;
   rosterAdditionAllowed: boolean;
   seatOrder: readonly string[];
   onRequestControl?: (team: LeftOrRight, playerName: string) => void;
@@ -213,7 +230,8 @@ function TeamLineup(props: {
     rosterSyncStatus,
     timeoutsUsed,
     timeoutsPerTeam,
-    lineupChangeAllowed,
+    lineupChangeAllowed: procedureAllowsChange,
+    lineupChangeAuthorized,
     rosterAdditionAllowed,
     seatOrder,
     onRequestControl,
@@ -221,6 +239,8 @@ function TeamLineup(props: {
     onSeatSubstitute,
   } = props;
   const [mode, setMode] = useState<PanelMode>({ kind: 'idle' });
+  // The procedure's answer, or the ruling that overrode it for this team alone.
+  const lineupChangeAllowed = procedureAllowsChange || lineupChangeAuthorized;
   const [newPlayer, setNewPlayer] = useState('');
   const addPlayerInput = useRef<HTMLInputElement>(null);
   const motion = useLineupMotion();
@@ -388,6 +408,9 @@ function TeamLineup(props: {
     <section className="scorer-lineup" aria-label={`${team.name} lineup`}>
       <div className="scorer-lineup-head">
         <h3 className="scorer-lineup-team">{team.name}</h3>
+        {!procedureAllowsChange && lineupChangeAuthorized && (
+          <p className="scorer-team-timeout">One lineup change was allowed</p>
+        )}
         {timeoutsPerTeam > 0 && (
           <p className="scorer-team-timeout">
             {timeoutsUsed === 0 &&
@@ -632,8 +655,10 @@ export default function PlayersDialog(props: IPlayersDialogProps) {
     timeouts = { left: 0, right: 0 },
     timeoutsPerTeam = 0,
     lineupChangeAllowed = true,
+    lineupChangeAuthorized = { left: false, right: false },
     rosterAdditionAllowed = true,
     lineupChangeReason,
+    onProcedureQuery,
     onRequestControl,
     seating = { left: [], right: [] },
     onMovePlayer,
@@ -641,12 +666,22 @@ export default function PlayersDialog(props: IPlayersDialogProps) {
     onClose,
   } = props;
 
+  const anyAuthorized = lineupChangeAuthorized.left || lineupChangeAuthorized.right;
+
   return (
     <ScorerDialog title="Players" wide onClose={onClose}>
       <p className="scorer-dialog-note">
-        {lineupChangeAllowed
+        {lineupChangeAllowed || anyAuthorized
           ? `Changes apply starting Tossup ${questionNumber}.`
           : (lineupChangeReason ?? 'Lineup changes are not available at this checkpoint.')}
+        {!lineupChangeAllowed && onProcedureQuery && (
+          <>
+            {' '}
+            <button type="button" className="scorer-text-action" onClick={onProcedureQuery}>
+              Procedure changed?
+            </button>
+          </>
+        )}
       </p>
       <div className="scorer-lineups">
         <TeamLineup
@@ -660,6 +695,7 @@ export default function PlayersDialog(props: IPlayersDialogProps) {
           timeoutsUsed={timeouts.left}
           timeoutsPerTeam={timeoutsPerTeam}
           lineupChangeAllowed={lineupChangeAllowed}
+          lineupChangeAuthorized={lineupChangeAuthorized.left}
           rosterAdditionAllowed={rosterAdditionAllowed}
           seatOrder={seating.left}
           onRequestControl={onRequestControl}
@@ -677,6 +713,7 @@ export default function PlayersDialog(props: IPlayersDialogProps) {
           timeoutsUsed={timeouts.right}
           timeoutsPerTeam={timeoutsPerTeam}
           lineupChangeAllowed={lineupChangeAllowed}
+          lineupChangeAuthorized={lineupChangeAuthorized.right}
           rosterAdditionAllowed={rosterAdditionAllowed}
           seatOrder={seating.right}
           onRequestControl={onRequestControl}

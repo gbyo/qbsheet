@@ -10,6 +10,8 @@ import { IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
 import { IDerivedGame, IDerivedTeam } from '../scoring/deriveGame';
 import { ScoreEvent } from '../scoring/ScoreEvents';
 import { editableQuestionFromEvents, IEditableQuestion } from '../scoring/questionCorrection';
+import { exceptionFacts, procedureExceptionLine } from '../scoring/ProcedureExceptions';
+import { overtimeQuestionNumbers } from '../scoring/overtimeCorrection';
 import { bonusScoreProblem, lightningTotalProblem } from './bonusOptions';
 import QuestionEditor from './QuestionEditor';
 import ScorerDialog from './ScorerDialog';
@@ -379,6 +381,9 @@ export function eventDescription(event: ScoreEvent, format: IScorekeeperFormat, 
     return `${event.scope === 'bonus' ? 'Bonus' : 'Question'} replaced: ${event.reason}`;
   if (event.type === 'end-game-early')
     return `Game ended early after ${event.tossupsRead} tossups: ${event.reason}`;
+  if (event.type === 'procedure-exception') {
+    return procedureExceptionLine(exceptionFacts(event, { left: game.left.name, right: game.right.name }));
+  }
   return `${event.flagged ? 'Flagged note' : 'Note'}: ${event.text}`;
 }
 
@@ -799,6 +804,14 @@ export function ScoresheetReviewDialog(props: {
   editQuestion?: number;
   /** Open the existing replacement workflow for the focused question. */
   onOpenReplacement?: (questionNumber: number) => void;
+  /**
+   * Strike out an overtime a correction has made unnecessary.
+   *
+   * Offered only when the engine says regulation is no longer tied — see `overtimeUnnecessary` — so
+   * it exists exactly in the situation it is for and in no other. Absent while a result is being
+   * submitted.
+   */
+  onRemoveOvertime?: () => void;
   onClose: () => void;
 }) {
   const {
@@ -811,6 +824,7 @@ export function ScoresheetReviewDialog(props: {
     focusQuestion,
     editQuestion,
     onOpenReplacement,
+    onRemoveOvertime,
     onClose,
   } = props;
   const [editing, setEditing] = useState<string | null>(null);
@@ -861,6 +875,37 @@ export function ScoresheetReviewDialog(props: {
               {problem.message}
             </p>
           ))}
+          {/*
+            The aftermath of a correction, and the one thing in this list somebody has to make a
+            ruling about rather than simply fix. Both answers are here: strike the tossups out, or
+            leave them and record the decision that let them stand.
+          */}
+          {game.overtimeUnnecessary && (
+            <div className="scorer-review-overtime" role="status">
+              <p className="scorer-problem">
+                Regulation is no longer tied on this scoresheet, so the {overtimeQuestionNumbers(game).length}{' '}
+                overtime tossup
+                {overtimeQuestionNumbers(game).length === 1 ? '' : 's'} may not count.
+              </p>
+              {onRemoveOvertime && (
+                <button
+                  type="button"
+                  className="scorer-text-action is-destructive"
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        'Strike out the overtime tossups? The score is recalculated from regulation alone.',
+                      )
+                    ) {
+                      onRemoveOvertime();
+                    }
+                  }}
+                >
+                  Strike out the overtime
+                </button>
+              )}
+            </div>
+          )}
           {!questionNumbers.length ? (
             <p className="scorer-rail-empty">Nothing has been recorded yet.</p>
           ) : (

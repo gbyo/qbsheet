@@ -36,18 +36,52 @@ import {
   roomTakesBreaks,
   substitutionOpportunityPhrase,
 } from './RoomProcedure';
+import {
+  allowanceNeedsTeam,
+  breaksSkipped,
+  extraBreakAvailable,
+  extraTimeoutsGranted,
+  procedureAllowances,
+  substitutionAllowed,
+} from './ProcedureExceptions';
 import deriveGame, {
   IGameSetup,
   IDerivedGame,
   lastPlayedQuestion,
   lineupChangeEffectiveQuestion,
 } from './deriveGame';
-import { ScoreEvent, usesTossupOpportunity } from './ScoreEvents';
+import { ProcedureAuthority, ScoreEvent, usesTossupOpportunity } from './ScoreEvents';
 
-export type ScoreEventVerdict = { ok: true } | { ok: false; reason: string };
+/**
+ * A configured rule the room may have got wrong, named so the refusal can offer a way out.
+ *
+ * Only ever set on a refusal that a *setting* caused. "Central A has already used its timeout" is
+ * one of these, because the number of timeouts is something a director states and a room can be told
+ * wrong. "Central A has already answered this tossup" is not, and never will be: there is no
+ * configuration under which it is false, and offering to reconsider the procedure there would be
+ * offering a way around the guard rather than a way out of a mismatch.
+ *
+ * The scorer turns this into one quiet secondary action beside the refusal. Nothing renders when it
+ * is absent, which is every ordinary refusal.
+ */
+export type ScoreEventEscape =
+  /** How many timeouts this team gets. */
+  | 'timeout-allowance'
+  /** When this room may change its lineup. */
+  | 'substitution-opportunity'
+  /** Where this room's breaks fall. */
+  | 'break-schedule'
+  /** How long regulation is. */
+  | 'regulation-length';
+
+export type ScoreEventVerdict = { ok: true } | { ok: false; reason: string; escape?: ScoreEventEscape };
 
 const allowed: ScoreEventVerdict = { ok: true };
-const refuse = (reason: string): ScoreEventVerdict => ({ ok: false, reason });
+const refuse = (reason: string, escape?: ScoreEventEscape): ScoreEventVerdict => ({
+  ok: false,
+  reason,
+  ...(escape === undefined ? {} : { escape }),
+});
 
 export interface IScoreEventContext {
   format: IScorekeeperFormat;
@@ -87,7 +121,13 @@ export default function canApplyScoreEvent(
 
   const complete = phase.kind === 'complete';
 
-  if (game.activeTimeout && candidate.type !== 'timeout-resume' && candidate.type !== 'substitution') {
+  if (
+    game.activeTimeout &&
+    candidate.type !== 'timeout-resume' &&
+    candidate.type !== 'substitution' &&
+    // Writing down what a director just said is never the thing to make a room wait for.
+    candidate.type !== 'procedure-exception'
+  ) {
     return refuse('A timeout is active. Resume play before scoring or changing the game.');
   }
 
@@ -134,8 +174,15 @@ export default function canApplyScoreEvent(
       if (phase.kind === 'score-check')
         return refuse('Confirm the score with the moderator before scoring again.');
       if (phase.kind === 'bonus') return refuse('Score the bonus before the next tossup.');
+      // Ahead of the generic phase refusal, because "this game is over" is a different sentence from
+      // "wait for the next checkpoint" and it is the one with a way out beside it.
+      if (complete) {
+        return refuse(
+          'This game is over. Reopen it from the scoresheet review to change it.',
+          'regulation-length',
+        );
+      }
       if (phase.kind !== 'tossup') return refuse('Wait for the next tossup checkpoint.');
-      if (complete) return refuse('This game is over. Reopen it from the scoresheet review to change it.');
       if (candidate.questionNumber !== phase.questionNumber) {
         return refuse(`That answer belongs to Tossup ${phase.questionNumber}.`);
       }
@@ -194,8 +241,13 @@ export default function canApplyScoreEvent(
       if (phase.kind === 'score-check')
         return refuse('Confirm the score with the moderator before scoring again.');
       if (phase.kind === 'bonus') return refuse('Score the bonus before the next tossup.');
+      if (complete) {
+        return refuse(
+          'This game is over. Reopen it from the scoresheet review to change it.',
+          'regulation-length',
+        );
+      }
       if (phase.kind !== 'tossup') return refuse('Wait for the next tossup checkpoint.');
-      if (complete) return refuse('This game is over. Reopen it from the scoresheet review to change it.');
       if (candidate.questionNumber !== phase.questionNumber) {
         return refuse(`That belongs to Tossup ${phase.questionNumber}.`);
       }
@@ -246,11 +298,19 @@ export default function canApplyScoreEvent(
           `The next safe lineup boundary is Tossup ${lineupChangeEffectiveQuestion(game, events)}.`,
         );
       }
-      if (!lineupChangeAllowedAtPhase(procedure?.substitutionPolicy ?? 'any-boundary', phase.kind)) {
+      if (
+        !lineupChangeAllowedAtPhase(procedure?.substitutionPolicy ?? 'any-boundary', phase.kind) &&
+        // One authorized change, spent by this event. A director who allowed a late player on has
+        // not thereby allowed every substitution for the rest of the round.
+        !substitutionAllowed(events, candidate.team)
+      ) {
         // Said from the configured breaks rather than from the usual case: a room whose breaks are
         // after tossups 5 and 10 and which is told to substitute "at halftime" has been told about a
         // break its tournament does not have.
-        return refuse(`Lineup changes are available ${substitutionOpportunityPhrase(procedure)}.`);
+        return refuse(
+          `Lineup changes are available ${substitutionOpportunityPhrase(procedure)}.`,
+          'substitution-opportunity',
+        );
       }
       return allowed;
     }
@@ -304,15 +364,19 @@ export default function canApplyScoreEvent(
      * break after tossup 7 and substitute there instead.
      */
     case 'half-break': {
-      if (!roomTakesBreaks(procedure)) return refuse('This room does not take breaks.');
       if (game.awaitingScoreCheck) return refuse('The score check for this break is still open.');
       if (complete) return refuse('This game is over.');
-      if (!roomMayBreakNow(procedure, game.halfBreaks, lastPlayedQuestion(game))) {
-        const upcoming = roomBreakUpcoming(procedure, game.halfBreaks);
+      // An authorized extra break is one break, wherever the schedule says the room should be.
+      if (extraBreakAvailable(events)) return allowed;
+      if (!roomTakesBreaks(procedure)) return refuse('This room does not take breaks.', 'break-schedule');
+      const skipped = breaksSkipped(events);
+      if (!roomMayBreakNow(procedure, game.halfBreaks, lastPlayedQuestion(game), skipped)) {
+        const upcoming = roomBreakUpcoming(procedure, game.halfBreaks, skipped);
         return refuse(
           upcoming === undefined
             ? 'This room has taken every break its procedure allows.'
             : `The next break is after Tossup ${upcoming.afterTossup}.`,
+          'break-schedule',
         );
       }
       return allowed;
@@ -325,11 +389,15 @@ export default function canApplyScoreEvent(
 
     case 'timeout': {
       if (complete) return refuse('This game is over.');
-      const permitted = procedure?.timeoutsPerTeam ?? 0;
-      if (permitted <= 0) return refuse('This tournament does not track timeouts.');
+      // Configured plus authorized. A ceiling rather than a bypass: the second one still has to have
+      // been allowed, and the third one still has to be allowed separately.
+      const configured = procedure?.timeoutsPerTeam ?? 0;
+      const permitted = configured + extraTimeoutsGranted(events, candidate.team);
+      if (permitted <= 0) return refuse('This tournament does not track timeouts.', 'timeout-allowance');
       if (game.timeouts[candidate.team] >= permitted) {
         return refuse(
           `${game[candidate.team].name} has already used ${permitted === 1 ? 'its timeout' : 'all its timeouts'}.`,
+          'timeout-allowance',
         );
       }
       return allowed;
@@ -337,8 +405,8 @@ export default function canApplyScoreEvent(
 
     case 'timeout-start': {
       if (complete) return refuse('This game is over.');
-      const permitted = procedure?.timeoutsPerTeam ?? 0;
-      if (permitted <= 0) return refuse('This tournament does not track timeouts.');
+      const permitted = (procedure?.timeoutsPerTeam ?? 0) + extraTimeoutsGranted(events, candidate.team);
+      if (permitted <= 0) return refuse('This tournament does not track timeouts.', 'timeout-allowance');
       if (game.activeTimeout) return refuse('A timeout is already active.');
       if (phase.kind !== 'tossup')
         return refuse('A timeout is available only before the current tossup begins.');
@@ -355,7 +423,7 @@ export default function canApplyScoreEvent(
         return refuse('A timeout is only available before the current tossup begins.');
       }
       if (game.timeouts[candidate.team] >= permitted) {
-        return refuse(`${game[candidate.team].name} has no timeouts remaining.`);
+        return refuse(`${game[candidate.team].name} has no timeouts remaining.`, 'timeout-allowance');
       }
       if (
         candidate.startedAt !== undefined &&
@@ -396,6 +464,58 @@ export default function canApplyScoreEvent(
 
     case 'protest': {
       if (candidate.description.trim() === '') return refuse('Say what is being protested.');
+      return allowed;
+    }
+
+    /**
+     * Recording that somebody with the standing to do so allowed a departure from procedure.
+     *
+     * Checked as strictly as anything else here, because an exception is a grant and a grant that
+     * could not have been made is worth no more than an event that could not have happened. What is
+     * deliberately *not* checked is whether the departure is one the configured procedure would
+     * permit — that is the entire point of the event.
+     */
+    case 'procedure-exception': {
+      if (!procedureAllowances.includes(candidate.allowance)) {
+        return refuse('That is not something this scoresheet knows how to allow.');
+      }
+      const authorities: ProcedureAuthority[] = ['tournament-director', 'moderator', 'other'];
+      if (!authorities.includes(candidate.authority)) return refuse('Say who allowed this.');
+      if (candidate.reason.trim() === '') return refuse('Say why this was allowed.');
+      if (allowanceNeedsTeam(candidate.allowance) && candidate.team === undefined) {
+        return refuse('Say which team this was allowed for.');
+      }
+      if (candidate.allowance === 'extra-tossup') {
+        /*
+         * Regulation is lengthened by moving its boundary, and a boundary that moves past a tossup
+         * already played in overtime would silently reclassify that tossup as regulation. That is a
+         * correction to what happened rather than permission to do something, and it belongs in the
+         * scoresheet review where the consequence can be shown.
+         */
+        if (game.overtimeTossupsRead > 0 || game.overtimeStarted) {
+          return refuse(
+            'Overtime has already begun, so regulation cannot be lengthened now. Correct the questions in the scoresheet review instead.',
+          );
+        }
+        if (format.regulation.timed && !game.regulationComplete) {
+          return refuse('End regulation first; then an extra tossup can be added to it.');
+        }
+      }
+      if (candidate.allowance === 'overtime-continuation' && !game.regulationComplete) {
+        return refuse('Overtime has not been reached yet.');
+      }
+      // The allowances that permit a later act mean nothing once there are no later acts. An extra
+      // tossup or an overtime continuation is precisely what a room reaches for on a game the
+      // scoresheet has already called over, so those two are exempt.
+      if (
+        complete &&
+        (candidate.allowance === 'extra-timeout' ||
+          candidate.allowance === 'substitution' ||
+          candidate.allowance === 'extra-break' ||
+          candidate.allowance === 'skip-break')
+      ) {
+        return refuse('This game is over.');
+      }
       return allowed;
     }
 
@@ -441,7 +561,7 @@ export function applyScoreEvents(
   context: IScoreEventContext,
   events: ScoreEvent[],
   added: ScoreEvent[],
-): { ok: true; events: ScoreEvent[] } | { ok: false; reason: string } {
+): { ok: true; events: ScoreEvent[] } | { ok: false; reason: string; escape?: ScoreEventEscape } {
   let working = events;
   for (const candidate of added) {
     const verdict = canApplyScoreEvent(context, working, candidate);
