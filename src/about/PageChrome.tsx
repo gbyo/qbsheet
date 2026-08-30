@@ -149,15 +149,7 @@ function current(slug: PageSlug, target: PageSlug): { 'aria-current'?: 'page' } 
  * nobody anything. The behaviour is announced in words instead, by the visually-hidden span, so the
  * two audiences are told the same thing in the form each can use.
  */
-function ExternalLink({
-  href,
-  children,
-  className,
-}: {
-  href: string;
-  children: string;
-  className?: string;
-}) {
+function ExternalLink({ href, children, className }: { href: string; children: string; className?: string }) {
   return (
     <a className={className} href={href} target="_blank" rel="noopener noreferrer">
       {children}

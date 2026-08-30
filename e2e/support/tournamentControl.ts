@@ -134,7 +134,16 @@ function legacyScoringFormat(): object {
 function legacyAssignmentFor(round: RoundNumber | null): object {
   const scoringFormat = legacyScoringFormat();
   if (round === null) {
-    return { roomId, roomName, tournamentName, tournamentKey: tournamentId, current: null, session: null, scoringFormat, timedRounds: false };
+    return {
+      roomId,
+      roomName,
+      tournamentName,
+      tournamentKey: tournamentId,
+      current: null,
+      session: null,
+      scoringFormat,
+      timedRounds: false,
+    };
   }
   const spec = rounds[round];
   return {
@@ -148,7 +157,10 @@ function legacyAssignmentFor(round: RoundNumber | null): object {
       roundName: spec.label,
       roundRevision: 1,
       leftTeam: { name: spec.left.name, players: spec.left.players.map((player) => ({ name: player.name })) },
-      rightTeam: { name: spec.right.name, players: spec.right.players.map((player) => ({ name: player.name })) },
+      rightTeam: {
+        name: spec.right.name,
+        players: spec.right.players.map((player) => ({ name: player.name })),
+      },
       status: 'ready',
     },
     session: null,
@@ -282,16 +294,20 @@ export async function startTournamentControl(protocol: ControlProtocol): Promise
           return;
         }
         const text = JSON.stringify(body);
-        response.writeHead(status, { 'Content-Type': contentType, 'Content-Length': Buffer.byteLength(text) });
+        response.writeHead(status, {
+          'Content-Type': contentType,
+          'Content-Length': Buffer.byteLength(text),
+        });
         response.end(text);
       };
       const refuse = (status: number, error: string, extra: object = {}) => send(status, { error, ...extra });
 
       const roomAuthorized = () => roomTokenValid && request.headers['x-yf-room-token'] === roomToken;
-      const sessionAuthorized = () => sessionTokenValid && request.headers['x-yf-session-token'] === sessionToken;
+      const sessionAuthorized = () =>
+        sessionTokenValid && request.headers['x-yf-session-token'] === sessionToken;
       const deviceForHelp = () => {
         const value = request.headers['x-yf-device-id'];
-        return Array.isArray(value) ? value[0] ?? '' : value ?? '';
+        return Array.isArray(value) ? (value[0] ?? '') : (value ?? '');
       };
 
       const helpVisibleToThisDevice = () =>
@@ -304,8 +320,8 @@ export async function startTournamentControl(protocol: ControlProtocol): Promise
         const legacyHelp = helpPath === `/api/v1/rooms/${roomId}/help`;
         const deleteMatch = qbtcpHelp
           ? null
-          : /^\/qbtcp\/v1\/help\/([^/]+)$/.exec(helpPath) ??
-            new RegExp(`^/api/v1/rooms/${roomId}/help/([^/]+)$`).exec(helpPath);
+          : (/^\/qbtcp\/v1\/help\/([^/]+)$/.exec(helpPath) ??
+            new RegExp(`^/api/v1/rooms/${roomId}/help/([^/]+)$`).exec(helpPath));
         if (!(qbtcpHelp || legacyHelp || deleteMatch)) return false;
         if (!roomAuthorized()) {
           refuse(401, 'This room is no longer paired.');
@@ -437,7 +453,9 @@ export async function startTournamentControl(protocol: ControlProtocol): Promise
             refuse(401, 'This room is no longer paired.');
             return;
           }
-          const open = [...openSessions].find(([, entry]) => assigned && entry.matchId === rounds[assigned].matchId);
+          const open = [...openSessions].find(
+            ([, entry]) => assigned && entry.matchId === rounds[assigned].matchId,
+          );
           send(200, {
             state: assigned === null ? 'none' : 'assigned',
             blocked_reason: null,
@@ -470,7 +488,10 @@ export async function startTournamentControl(protocol: ControlProtocol): Promise
             refuse(401, 'This room is no longer paired.');
             return;
           }
-          const body = JSON.parse((await readBody(request)) || '{}') as { match_id?: string; device_id?: string };
+          const body = JSON.parse((await readBody(request)) || '{}') as {
+            match_id?: string;
+            device_id?: string;
+          };
           if (!body.match_id) {
             refuse(400, 'A session needs a match.');
             return;
@@ -486,7 +507,10 @@ export async function startTournamentControl(protocol: ControlProtocol): Promise
             refuse(401, 'This session is not open.');
             return;
           }
-          const body = JSON.parse((await readBody(request)) || '{}') as { device_id?: string; take_over?: boolean };
+          const body = JSON.parse((await readBody(request)) || '{}') as {
+            device_id?: string;
+            take_over?: boolean;
+          };
           takeovers.push({ deviceId: body.device_id, takeOver: body.take_over });
           if (body.take_over !== true) {
             refuse(400, 'A change of writer has to be asked for explicitly.');

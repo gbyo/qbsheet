@@ -48,7 +48,10 @@ import { connectionTimeline } from './ConnectionTimeline';
 import { useAppUpdate } from '../pwa/useAppUpdate';
 import { updateDeferredAlert } from '../pwa/UpdateNotice';
 import { ResultDeliveryService } from './ResultDelivery';
-import { IScoringRulesCorrection, ScoringRulesCorrectionRefusal } from '../scorer/ScoringRulesCorrectionDialog';
+import {
+  IScoringRulesCorrection,
+  ScoringRulesCorrectionRefusal,
+} from '../scorer/ScoringRulesCorrectionDialog';
 
 /** The two totals, read back out of the payload rather than derived a second time. */
 export function scoreFromQbj(qbj: object): { left: number; right: number } | undefined {
@@ -69,7 +72,10 @@ export function scoreFromQbj(qbj: object): { left: number; right: number } | und
  * way, on the session id the record was keyed by, so an upgrade mid-tournament resumes rather than
  * silently dropping to offline scoring.
  */
-export function connectionBelongsTo(connection: IConnectedSession | null, record: IStoredGameRecord): boolean {
+export function connectionBelongsTo(
+  connection: IConnectedSession | null,
+  record: IStoredGameRecord,
+): boolean {
   if (!connection?.sessionId || !connection.sessionToken) return false;
   if (connection.gameRecordId !== undefined) return connection.gameRecordId === record.id;
   return connection.sessionId === record.gameKey;
@@ -222,12 +228,15 @@ export default function ScoringScreen(props: {
    */
   const mirror = useCallback(
     (events: ScoreEvent[], setup: IGameSetup) => {
-      void store.update(record.id, { events, setup }).then((updated) => {
-        if (!onScreen.current) return;
-        setRecordDurablyStored(updated !== null && store.durable && !store.storageDegraded);
-      }).catch(() => {
-        if (onScreen.current) setRecordDurablyStored(false);
-      });
+      void store
+        .update(record.id, { events, setup })
+        .then((updated) => {
+          if (!onScreen.current) return;
+          setRecordDurablyStored(updated !== null && store.durable && !store.storageDegraded);
+        })
+        .catch(() => {
+          if (onScreen.current) setRecordDurablyStored(false);
+        });
     },
     [record.id, store],
   );
@@ -238,12 +247,15 @@ export default function ScoringScreen(props: {
       if (written) {
         const at = new Date().toISOString();
         setDownloadedAt(at);
-        void store.update(record.id, { qbjDownloadedAt: at }).then((updated) => {
-          if (!onScreen.current) return;
-          if (updated === null || !store.durable || store.storageDegraded) setRecordDurablyStored(false);
-        }).catch(() => {
-          if (onScreen.current) setRecordDurablyStored(false);
-        });
+        void store
+          .update(record.id, { qbjDownloadedAt: at })
+          .then((updated) => {
+            if (!onScreen.current) return;
+            if (updated === null || !store.durable || store.storageDegraded) setRecordDurablyStored(false);
+          })
+          .catch(() => {
+            if (onScreen.current) setRecordDurablyStored(false);
+          });
       }
       return written;
     },
@@ -297,11 +309,15 @@ export default function ScoringScreen(props: {
       if (live) {
         // The capability is device-only. If this write is refused, the live send still happens and
         // the completed QBJ remains safe; only a post-reload retry cannot be promised.
-        resultDelivery.remember(record.id, {
-          baseUrl: live.client.baseUrl,
-          sessionId: live.credentials.sessionId,
-          sessionToken: live.credentials.token,
-        }, completedAt);
+        resultDelivery.remember(
+          record.id,
+          {
+            baseUrl: live.client.baseUrl,
+            sessionId: live.credentials.sessionId,
+            sessionToken: live.credentials.token,
+          },
+          completedAt,
+        );
 
         // Send exactly the object just committed as `finalQbj`. The internal scorer recovery layer
         // is for this device and must not be a second version of the portable QBTCP/file result.
@@ -448,7 +464,9 @@ export default function ScoringScreen(props: {
         onCorrectScoringRules={correctScoringRules}
         onDownload={write}
         onDownloadForm={(game, form) => downloadForm(game, form)}
-        onProgress={live ? (qbj) => runtime.reportProgress(qbjWithSourceMetadata(qbj, record.package)) : undefined}
+        onProgress={
+          live ? (qbj) => runtime.reportProgress(qbjWithSourceMetadata(qbj, record.package)) : undefined
+        }
         onEventsChanged={mirror}
         qbjMeta={{
           round: record.package.round.number,
@@ -546,8 +564,8 @@ function RepairConnectionDialog(props: {
     // behind it — so Tab reaching the tossup buttons is a real way to lose a question.
     <ScorerDialog title={`Repair the connection for ${roomName}`} onClose={onClose}>
       <p className="scorer-dialog-note">
-        Tournament control no longer recognizes this room. Ask for this room&apos;s pairing code and enter
-        it here. The game on screen is not affected, and scoring continues either way.
+        Tournament control no longer recognizes this room. Ask for this room&apos;s pairing code and enter it
+        here. The game on screen is not affected, and scoring continues either way.
       </p>
       <form className="connect-form" onSubmit={(event) => void submit(event)}>
         <label className="shell-label" htmlFor="repair-code">

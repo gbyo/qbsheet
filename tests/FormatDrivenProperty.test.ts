@@ -53,7 +53,10 @@ const bonusArbitrary: fc.Arbitrary<GeneratedBonus> = fc.boolean().chain((enabled
       .record({
         partRange: fc
           .tuple(fc.integer({ min: 1, max: 3 }), fc.integer({ min: 1, max: 4 }))
-          .map(([first, second]) => ({ minimumParts: Math.min(first, second), maximumParts: Math.max(first, second) })),
+          .map(([first, second]) => ({
+            minimumParts: Math.min(first, second),
+            maximumParts: Math.max(first, second),
+          })),
         divisor: fc.integer({ min: 1, max: 12 }),
         bounceBack: fc.boolean(),
       })
@@ -71,7 +74,9 @@ const bonusArbitrary: fc.Arbitrary<GeneratedBonus> = fc.boolean().chain((enabled
 
 const formatArbitrary: fc.Arbitrary<IScorekeeperFormat> = fc
   .record({
-    values: fc.array(fc.integer({ min: -20, max: 40 }), { minLength: 1, maxLength: 6 }).filter((values) => values.some((value) => value > 0)),
+    values: fc
+      .array(fc.integer({ min: -20, max: 40 }), { minLength: 1, maxLength: 6 })
+      .filter((values) => values.some((value) => value > 0)),
     timed: fc.boolean(),
     tossupCount: fc.integer({ min: 1, max: 5 }),
     maximumExtra: fc.integer({ min: 0, max: 2 }),
@@ -158,9 +163,17 @@ function completeGeneratedQuestions(format: IScorekeeperFormat, choices: number[
     const players = game[team].activePlayers;
     const playerName = players[choice % players.length];
     if (choice % 4 === 1) {
-      events = append(context, events, makeEvent({ type: 'tossup-no-penalty', questionNumber, team, playerName }));
+      events = append(
+        context,
+        events,
+        makeEvent({ type: 'tossup-no-penalty', questionNumber, team, playerName }),
+      );
       if (otherTeam) {
-        events = append(context, events, makeEvent({ type: 'tossup-no-penalty', questionNumber, team: otherTeam }));
+        events = append(
+          context,
+          events,
+          makeEvent({ type: 'tossup-no-penalty', questionNumber, team: otherTeam }),
+        );
       }
       continue;
     }
@@ -205,7 +218,11 @@ function completeGeneratedQuestions(format: IScorekeeperFormat, choices: number[
         }),
       );
     } else {
-      events = append(context, events, makeEvent({ type: 'tossup-no-penalty', questionNumber, team: otherTeam }));
+      events = append(
+        context,
+        events,
+        makeEvent({ type: 'tossup-no-penalty', questionNumber, team: otherTeam }),
+      );
     }
   }
   return events;
@@ -214,24 +231,30 @@ function completeGeneratedQuestions(format: IScorekeeperFormat, choices: number[
 describe('generated valid formats and legal event sequences', () => {
   test('arbitrary answer values, bonus shapes, player caps, and event order remain derivable', () => {
     fc.assert(
-      fc.property(formatArbitrary, fc.array(fc.integer({ min: 0, max: 100 }), { minLength: 1, maxLength: 8 }), (format, choices) => {
-        expect(scorekeeperFormatProblems(format)).toEqual([]);
-        const reread = readQbjScoringRules(writeQbjScoringRules(format), format.regulation.timed);
-        expect(reread.ok).toBe(true);
-        if (reread.ok) expect(reread.format).toEqual(format);
-        const events = completeGeneratedQuestions(format, choices);
-        const game = deriveGame(format, setup, events);
+      fc.property(
+        formatArbitrary,
+        fc.array(fc.integer({ min: 0, max: 100 }), { minLength: 1, maxLength: 8 }),
+        (format, choices) => {
+          expect(scorekeeperFormatProblems(format)).toEqual([]);
+          const reread = readQbjScoringRules(writeQbjScoringRules(format), format.regulation.timed);
+          expect(reread.ok).toBe(true);
+          if (reread.ok) expect(reread.format).toEqual(format);
+          const events = completeGeneratedQuestions(format, choices);
+          const game = deriveGame(format, setup, events);
 
-        expect(game.integrityProblems).toEqual([]);
-        expect(game.personnelProblems).toEqual([]);
-        expect(Number.isFinite(game.left.points)).toBe(true);
-        expect(Number.isFinite(game.right.points)).toBe(true);
-        const match = toQbjMatch(format, game) as { match_teams: { points: number }[] };
-        expect(match.match_teams.map((team) => team.points)).toEqual([game.left.points, game.right.points]);
-        expect(validateScoresheet(format, setup, events).blockers.filter((problem) => problem.code !== 'game-not-complete')).toEqual(
-          [],
-        );
-      }),
+          expect(game.integrityProblems).toEqual([]);
+          expect(game.personnelProblems).toEqual([]);
+          expect(Number.isFinite(game.left.points)).toBe(true);
+          expect(Number.isFinite(game.right.points)).toBe(true);
+          const match = toQbjMatch(format, game) as { match_teams: { points: number }[] };
+          expect(match.match_teams.map((team) => team.points)).toEqual([game.left.points, game.right.points]);
+          expect(
+            validateScoresheet(format, setup, events).blockers.filter(
+              (problem) => problem.code !== 'game-not-complete',
+            ),
+          ).toEqual([]);
+        },
+      ),
       { numRuns: 120, verbose: true },
     );
   }, 20_000);

@@ -4,6 +4,7 @@ import tseslint from 'typescript-eslint';
 import react from 'eslint-plugin-react';
 import reactHooks from 'eslint-plugin-react-hooks';
 import jsxA11y from 'eslint-plugin-jsx-a11y';
+import prettier from 'eslint-config-prettier';
 
 export default tseslint.config(
   // The last three are generated: a lint run after a browser-test run would otherwise spend its
@@ -63,4 +64,8 @@ export default tseslint.config(
     files: ['src/pwa/**/*.ts'],
     languageOptions: { globals: { ...globals.serviceworker, ...globals.browser } },
   },
+  // Last, so it wins: this turns off every rule about how the code looks. Prettier decides that now,
+  // and a lint error nobody can fix by hand — because the formatter will put it straight back — is
+  // worse than no rule at all.
+  prettier,
 );

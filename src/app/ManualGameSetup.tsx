@@ -62,6 +62,7 @@ import {
   substitutionOpportunityPhrase,
 } from '../scoring/RoomProcedure';
 import { numberValue } from './BasicScoringRulesEditor';
+import ControlIcon, { type ControlIconName } from '../scorer/ControlIcon';
 import ScoringRulesEditor from './ScoringRulesEditor';
 import useLeaveWarning from './useLeaveWarning';
 import HelpTooltip from './HelpTooltip';
@@ -105,7 +106,9 @@ export function readManualGameDraft(): IManualGameInput | null {
   const storage = manualDraftStorage();
   if (!storage) return null;
   try {
-    const parsed = JSON.parse(storage.getItem(manualDraftStorageKey) ?? 'null') as Partial<IManualGameInput> | null;
+    const parsed = JSON.parse(
+      storage.getItem(manualDraftStorageKey) ?? 'null',
+    ) as Partial<IManualGameInput> | null;
     if (
       !parsed ||
       typeof parsed.gameLabel !== 'string' ||
@@ -191,7 +194,10 @@ function presetStorageValue(value: IManualGamePreset): IManualGamePreset {
  */
 function cloneRules(rules: IScoringRulesInput): IScoringRulesInput {
   return rules.mode === 'advanced'
-    ? { mode: 'advanced', advanced: { ...rules.advanced, answerTypes: rules.advanced.answerTypes.map((row) => ({ ...row })) } }
+    ? {
+        mode: 'advanced',
+        advanced: { ...rules.advanced, answerTypes: rules.advanced.answerTypes.map((row) => ({ ...row })) },
+      }
     : { mode: 'basic', basic: { ...rules.basic } };
 }
 
@@ -202,42 +208,44 @@ export function readManualGamePresets(): IManualGamePreset[] {
   try {
     const parsed = JSON.parse(storage.getItem(manualPresetStorageKey) ?? '[]') as unknown;
     if (!Array.isArray(parsed)) return [];
-    return parsed.flatMap((value): IManualGamePreset[] => {
-      if (typeof value !== 'object' || value === null) return [];
-      const candidate = value as Partial<IManualGamePreset>;
-      if (
-        typeof candidate.id !== 'string' ||
-        typeof candidate.label !== 'string' ||
-        typeof candidate.savedAt !== 'string' ||
-        !isDraftTeam(candidate.left) ||
-        !isDraftTeam(candidate.right) ||
-        typeof candidate.options !== 'object' ||
-        candidate.options === null
-      ) {
-        return [];
-      }
-      const rules = readScoringRulesInput(candidate.rules);
-      if (!rules) return [];
-      const input: IManualGameInput = {
-        gameLabel: candidate.label,
-        left: candidate.left,
-        right: candidate.right,
-        rules,
-        options: { ...manualRoundOptionDefaults, ...(candidate.options as object) },
-      };
-      if (!defineManualGame(input).ok) return [];
-      return [
-        presetStorageValue({
-          id: candidate.id,
-          label: candidate.label,
-          left: input.left,
-          right: input.right,
-          rules: input.rules,
-          options: input.options,
-          savedAt: candidate.savedAt,
-        }),
-      ];
-    }).slice(0, 8);
+    return parsed
+      .flatMap((value): IManualGamePreset[] => {
+        if (typeof value !== 'object' || value === null) return [];
+        const candidate = value as Partial<IManualGamePreset>;
+        if (
+          typeof candidate.id !== 'string' ||
+          typeof candidate.label !== 'string' ||
+          typeof candidate.savedAt !== 'string' ||
+          !isDraftTeam(candidate.left) ||
+          !isDraftTeam(candidate.right) ||
+          typeof candidate.options !== 'object' ||
+          candidate.options === null
+        ) {
+          return [];
+        }
+        const rules = readScoringRulesInput(candidate.rules);
+        if (!rules) return [];
+        const input: IManualGameInput = {
+          gameLabel: candidate.label,
+          left: candidate.left,
+          right: candidate.right,
+          rules,
+          options: { ...manualRoundOptionDefaults, ...(candidate.options as object) },
+        };
+        if (!defineManualGame(input).ok) return [];
+        return [
+          presetStorageValue({
+            id: candidate.id,
+            label: candidate.label,
+            left: input.left,
+            right: input.right,
+            rules: input.rules,
+            options: input.options,
+            savedAt: candidate.savedAt,
+          }),
+        ];
+      })
+      .slice(0, 8);
   } catch {
     return [];
   }
@@ -264,8 +272,12 @@ export function rememberManualGamePreset(input: IManualGameInput): IManualGamePr
     preset,
     ...readManualGamePresets().filter(
       (existing) =>
-        JSON.stringify({ left: existing.left, right: existing.right, rules: existing.rules, options: existing.options }) !==
-        signature,
+        JSON.stringify({
+          left: existing.left,
+          right: existing.right,
+          rules: existing.rules,
+          options: existing.options,
+        }) !== signature,
     ),
   ].slice(0, 8);
   try {
@@ -274,6 +286,25 @@ export function rememberManualGamePreset(input: IManualGameInput): IManualGamePr
     // The current setup still starts; presets are only a convenience.
   }
   return next;
+}
+
+/**
+ * The mark beside a section heading.
+ *
+ * This screen is one long form, and its section headings are the small uppercase grey the rest of
+ * the application uses — legible when you are reading, invisible when you are scrolling past four
+ * of them looking for the rosters. A glyph gives each section a shape to aim at without adding a
+ * word to a screen that already has plenty.
+ *
+ * Decorative, and deliberately so: it is `aria-hidden` inside `ControlIcon`, and every heading it
+ * sits beside still says its own name. Nothing here is the only way to know what a section is.
+ */
+function SectionIcon(props: { name: ControlIconName }) {
+  return (
+    <span className="manual-section-icon">
+      <ControlIcon name={props.name} />
+    </span>
+  );
 }
 
 export default function ManualGameSetup(props: {
@@ -297,7 +328,9 @@ export default function ManualGameSetup(props: {
   const [presets, setPresets] = useState<IManualGamePreset[]>(() => readManualGamePresets());
   const [rosterPresetId, setRosterPresetId] = useState('');
   const [rulePresetId, setRulePresetId] = useState('defaults');
-  const [advancedSetupOpen, setAdvancedSetupOpen] = useState(() => hasMeaningfulAdvancedOptions(input.options));
+  const [advancedSetupOpen, setAdvancedSetupOpen] = useState(() =>
+    hasMeaningfulAdvancedOptions(input.options),
+  );
 
   const set = (patch: Partial<IManualGameInput>) => setInput((current) => ({ ...current, ...patch }));
   const setOptions = (patch: Partial<IManualRoundOptions>) =>
@@ -376,8 +409,8 @@ export default function ManualGameSetup(props: {
   useEffect(() => {
     if (submissions === 0 || problems.length === 0) return;
     const errorRefs = { teams: teamsErrors, rules: rulesErrors, options: optionsErrors };
-    const first = (['teams', 'rules', 'options'] as const).find(
-      (section) => problems.some((problem) => problem.section === section),
+    const first = (['teams', 'rules', 'options'] as const).find((section) =>
+      problems.some((problem) => problem.section === section),
     );
     if (first) errorRefs[first].current?.focus();
     // Only on a submission. Re-running as somebody types would drag focus out of the field they are
@@ -491,19 +524,20 @@ export default function ManualGameSetup(props: {
       <header className="shell-header">
         <h1 className="shell-title">Create a game</h1>
         <p className="shell-subtitle">
-          For a practice, scrimmage, tryout or pickup game. Once it starts it is an ordinary QBSheet
-          game, saved on this device like any other.
+          For a practice, scrimmage, tryout or pickup game. Once it starts it is an ordinary QBSheet game,
+          saved on this device like any other.
         </p>
       </header>
 
       <section className="shell-section manual-presets" aria-labelledby="manual-presets-heading">
         <details>
           <summary id="manual-presets-heading" className="shell-heading">
+            <SectionIcon name="clock" />
             Use recent setup
           </summary>
           <p className="shell-hint">
-            Successful setups stay on this device as a convenience. Loading one changes this draft; it
-            does not start a game.
+            Successful setups stay on this device as a convenience. Loading one changes this draft; it does
+            not start a game.
           </p>
           <div className="manual-preset-row">
             <div className="manual-preset-field">
@@ -549,216 +583,254 @@ export default function ManualGameSetup(props: {
               </button>
             </div>
           </div>
-          {presets.length === 0 && <p className="shell-hint">Your first successful setup will appear here.</p>}
+          {presets.length === 0 && (
+            <p className="shell-hint">Your first successful setup will appear here.</p>
+          )}
         </details>
       </section>
 
       <form aria-label="Create a game" noValidate onSubmit={submit}>
-      <section className="shell-section">
-        <h2 className="shell-heading">This game</h2>
-        <div className="manual-field">
-          <label className="shell-label" htmlFor="manual-label">
-            Game label
-          </label>
-          <input
-            id="manual-label"
-            className="shell-input"
-            type="text"
-            autoComplete="off"
-            placeholder={defaultManualGameLabel}
-            value={input.gameLabel}
-            onChange={(event) => set({ gameLabel: event.target.value })}
-          />
-          <p className="shell-hint">
-            What this game is called in headers, in Recent Games, and in an exported copy. Blank means
-            “{defaultManualGameLabel}”.
-          </p>
-        </div>
-      </section>
-
-      <section className="shell-section" aria-labelledby="manual-teams-heading">
-        <h2 id="manual-teams-heading" className="shell-heading">
-          Teams &amp; players
-        </h2>
-        <div className="manual-teams">{teamSide('left')}{teamSide('right')}</div>
-        <p className="shell-hint">
-          The teams do not have to be the same size, and substitutes can be added during the game.
-        </p>
-        <SectionErrors problems={problemsIn('teams')} show={showErrors} anchor={teamsErrors} />
-      </section>
-
-      <section className="shell-section" aria-labelledby="manual-rules-heading">
-        <h2 id="manual-rules-heading" className="shell-heading">
-          Scoring rules
-        </h2>
-        <ScoringRulesEditor
-          idPrefix="manual-rules"
-          basicVariant="full"
-          value={input.rules}
-          onChange={(rules: IScoringRulesInput) => set({ rules })}
-          timedHint="A timed round ends when the moderator calls time rather than after a fixed count. QBSheet can show a clock for each play segment if breaks are configured below; otherwise the moderator keeps time."
-        />
-        <SectionErrors problems={problemsIn('rules')} show={showErrors} anchor={rulesErrors} />
-      </section>
-
-      <section className="shell-section manual-advanced-section" aria-labelledby="manual-options-heading">
-        <details
-          className="manual-advanced-setup"
-          open={advancedSetupOpen}
-          onToggle={(event) => setAdvancedSetupOpen(event.currentTarget.open)}
-        >
-          <summary id="manual-options-heading" className="shell-heading manual-advanced-summary">
-            Advanced round setup
-          </summary>
-          <div className="manual-advanced-content">
-            <p className="shell-hint manual-options-intro">
-              Breaks, clocks, timeouts, substitutions, and other room-procedure options. None of this
-              changes what a tossup or bonus is worth.
-            </p>
-
-        <label className="rules-setup-check" htmlFor="manual-halves">
-          <input
-            id="manual-halves"
-            type="checkbox"
-            checked={input.options.halves}
-            onChange={(event) =>
-              // Turning breaks off takes the settings that only exist because they were on with it.
-              // A hidden break list would otherwise reach the procedure from a screen that had stopped
-              // showing it, which is the one way a room gets a rule nobody can see they configured.
-              setOptions(
-                event.target.checked
-                  ? { halves: true }
-                  : { halves: false, halfLengthMinutes: undefined, breaks: undefined },
-              )
-            }
-          />
-          The round has breaks
-        </label>
-
-        {input.options.halves && (
-          <div className="manual-field-inset">
-            <div className="manual-field">
-              <label className="shell-label" htmlFor="manual-half-length">
-                Minutes of play between breaks
-              </label>
-              <input
-                id="manual-half-length"
-                className="shell-input manual-number"
-                type="number"
-                min={1}
-                max={maximumHalfLengthMinutes}
-                step={1}
-                value={input.options.halfLengthMinutes === undefined ? '' : String(input.options.halfLengthMinutes)}
-                onChange={(event) => setOptions({ halfLengthMinutes: numberValue(event.target.value) })}
-              />
-              <p className="shell-hint">Blank means QBSheet does not run the clock.</p>
-            </div>
-
-            <ManualBreaksEditor
-              breaks={input.options.breaks ?? []}
-              substitutionPolicy={input.options.substitutionPolicy}
-              onChange={(breaks) => setOptions({ breaks })}
-            />
-          </div>
-        )}
-
-        <div className="manual-field">
-          <label className="shell-label" htmlFor="manual-timeouts">
-            Timeouts per team
-          </label>
-          <input
-            id="manual-timeouts"
-            className="shell-input manual-number"
-            type="number"
-            min={0}
-            max={maximumTimeoutsPerTeam}
-            step={1}
-            value={String(input.options.timeoutsPerTeam)}
-            onChange={(event) => setOptions({ timeoutsPerTeam: numberValue(event.target.value) ?? 0 })}
-          />
-        </div>
-
-        {input.options.timeoutsPerTeam > 0 && (
-          <div className="manual-field manual-field-inset">
-            <label className="shell-label" htmlFor="manual-timeout-length">
-              Timeout length in seconds
+        <section className="shell-section">
+          <h2 className="shell-heading">
+            <SectionIcon name="note" />
+            This game
+          </h2>
+          <div className="manual-field">
+            <label className="shell-label" htmlFor="manual-label">
+              Game label
             </label>
             <input
-              id="manual-timeout-length"
-              className="shell-input manual-number"
-              type="number"
-              min={1}
-              max={maximumTimeoutDurationSeconds}
-              step={1}
-              value={
-                input.options.timeoutDurationSeconds === undefined
-                  ? ''
-                  : String(input.options.timeoutDurationSeconds)
-              }
-              onChange={(event) => setOptions({ timeoutDurationSeconds: numberValue(event.target.value) })}
+              id="manual-label"
+              className="shell-input"
+              type="text"
+              autoComplete="off"
+              placeholder={defaultManualGameLabel}
+              value={input.gameLabel}
+              onChange={(event) => set({ gameLabel: event.target.value })}
             />
-            <p className="shell-hint">Blank means QBSheet records the timeout but does not count it down.</p>
-          </div>
-        )}
-
-        <fieldset className="manual-fieldset" aria-labelledby="manual-substitutions-legend">
-          <legend className="shell-label">
-            <span className="label-with-help">
-              <span id="manual-substitutions-legend">Substitutions</span>
-              <HelpTooltip label="About substitution timing">
-                A phase checkpoint is a format-defined pause, such as halftime or the end of regulation. The
-                stricter option only offers lineup changes at those pauses, configured breaks, and timeouts.
-              </HelpTooltip>
-            </span>
-          </legend>
-          {(
-            [
-              ['any-boundary', 'Between any tossups'],
-              ['breaks-timeouts-overtime', 'Only at breaks, timeouts, or phase checkpoints'],
-            ] as [SubstitutionPolicy, string][]
-          ).map(([policy, label]) => (
-            <label key={policy} className="rules-setup-check" htmlFor={`manual-subs-${policy}`}>
-              <input
-                id={`manual-subs-${policy}`}
-                type="radio"
-                name="manual-subs"
-                value={policy}
-                checked={input.options.substitutionPolicy === policy}
-                onChange={() => setOptions({ substitutionPolicy: policy })}
-              />
-              {label}
-            </label>
-          ))}
-          {/* The restrictive policy is only as precise as the breaks above it, so it says which ones
-              it means rather than leaving the director to work out whether "breaks" covers theirs. */}
-          {input.options.substitutionPolicy === 'breaks-timeouts-overtime' && (
-            <p className="shell-hint manual-subs-hint">
-              {`Lineup changes will be available ${substitutionOpportunityPhrase(manualRoomProcedure(input.options))}.`}
-              {!input.options.halves && ' This round has no breaks configured, so only timeouts and checkpoints qualify.'}
+            <p className="shell-hint">
+              What this game is called in headers, in Recent Games, and in an exported copy. Blank means “
+              {defaultManualGameLabel}”.
             </p>
-          )}
-        </fieldset>
-
-            <SectionErrors problems={problemsIn('options')} show={showErrors} anchor={optionsErrors} />
           </div>
-        </details>
-      </section>
+        </section>
 
-      {startError !== '' && <p className="shell-warning" role="alert">{startError}</p>}
-      {draftSaveState === 'saved' && <p className="shell-hint">Draft saved on this device while you type.</p>}
-      {draftSaveState === 'failed' && (
-        <p className="shell-warning" role="status">
-          This browser could not save the draft while you type. Keep this tab open or repair storage before leaving.
-        </p>
-      )}
-      <div className="shell-actions manual-actions">
-        <button type="submit" className="shell-button is-primary" disabled={starting}>
-          {starting ? 'Starting…' : 'Start game'}
-        </button>
-        <button type="button" className="shell-button" onClick={cancel}>
-          Cancel
-        </button>
-      </div>
+        <section className="shell-section" aria-labelledby="manual-teams-heading">
+          <h2 id="manual-teams-heading" className="shell-heading">
+            <SectionIcon name="players" />
+            Teams &amp; players
+          </h2>
+          <div className="manual-teams">
+            {teamSide('left')}
+            {teamSide('right')}
+          </div>
+          <p className="shell-hint">
+            The teams do not have to be the same size, and substitutes can be added during the game.
+          </p>
+          <SectionErrors problems={problemsIn('teams')} show={showErrors} anchor={teamsErrors} />
+        </section>
+
+        <section className="shell-section" aria-labelledby="manual-rules-heading">
+          <h2 id="manual-rules-heading" className="shell-heading">
+            <SectionIcon name="lightning" />
+            Scoring rules
+          </h2>
+          <ScoringRulesEditor
+            idPrefix="manual-rules"
+            basicVariant="full"
+            value={input.rules}
+            onChange={(rules: IScoringRulesInput) => set({ rules })}
+            timedHint="A timed round ends when the moderator calls time rather than after a fixed count. QBSheet can show a clock for each play segment if breaks are configured below; otherwise the moderator keeps time."
+          />
+          <SectionErrors problems={problemsIn('rules')} show={showErrors} anchor={rulesErrors} />
+        </section>
+
+        <section className="shell-section manual-advanced-section" aria-labelledby="manual-options-heading">
+          <details
+            className="manual-advanced-setup"
+            open={advancedSetupOpen}
+            onToggle={(event) => setAdvancedSetupOpen(event.currentTarget.open)}
+          >
+            <summary id="manual-options-heading" className="shell-heading manual-advanced-summary">
+              <SectionIcon name="adjust" />
+              Advanced round setup
+            </summary>
+            <div className="manual-advanced-content">
+              <p className="shell-hint manual-options-intro">
+                Breaks, clocks, timeouts, substitutions, and other room-procedure options. None of this
+                changes what a tossup or bonus is worth.
+              </p>
+
+              <fieldset className="field-group">
+                <legend className="field-group-legend">Breaks</legend>
+                <label className="rules-setup-check" htmlFor="manual-halves">
+                  <input
+                    id="manual-halves"
+                    type="checkbox"
+                    checked={input.options.halves}
+                    onChange={(event) =>
+                      // Turning breaks off takes the settings that only exist because they were on with it.
+                      // A hidden break list would otherwise reach the procedure from a screen that had stopped
+                      // showing it, which is the one way a room gets a rule nobody can see they configured.
+                      setOptions(
+                        event.target.checked
+                          ? { halves: true }
+                          : { halves: false, halfLengthMinutes: undefined, breaks: undefined },
+                      )
+                    }
+                  />
+                  The round has breaks
+                </label>
+
+                {input.options.halves && (
+                  <div className="manual-field-inset">
+                    <div className="manual-field">
+                      <label className="shell-label" htmlFor="manual-half-length">
+                        Minutes of play between breaks
+                      </label>
+                      <input
+                        id="manual-half-length"
+                        className="shell-input manual-number"
+                        type="number"
+                        min={1}
+                        max={maximumHalfLengthMinutes}
+                        step={1}
+                        value={
+                          input.options.halfLengthMinutes === undefined
+                            ? ''
+                            : String(input.options.halfLengthMinutes)
+                        }
+                        onChange={(event) =>
+                          setOptions({ halfLengthMinutes: numberValue(event.target.value) })
+                        }
+                      />
+                      <p className="shell-hint">Blank means QBSheet does not run the clock.</p>
+                    </div>
+
+                    <ManualBreaksEditor
+                      breaks={input.options.breaks ?? []}
+                      substitutionPolicy={input.options.substitutionPolicy}
+                      onChange={(breaks) => setOptions({ breaks })}
+                    />
+                  </div>
+                )}
+              </fieldset>
+
+              <fieldset className="field-group">
+                <legend className="field-group-legend">Timeouts</legend>
+                <div className="manual-field">
+                  <label className="shell-label" htmlFor="manual-timeouts">
+                    Timeouts per team
+                  </label>
+                  <input
+                    id="manual-timeouts"
+                    className="shell-input manual-number"
+                    type="number"
+                    min={0}
+                    max={maximumTimeoutsPerTeam}
+                    step={1}
+                    value={String(input.options.timeoutsPerTeam)}
+                    onChange={(event) =>
+                      setOptions({ timeoutsPerTeam: numberValue(event.target.value) ?? 0 })
+                    }
+                  />
+                </div>
+
+                {input.options.timeoutsPerTeam > 0 && (
+                  <div className="manual-field manual-field-inset">
+                    <label className="shell-label" htmlFor="manual-timeout-length">
+                      Timeout length in seconds
+                    </label>
+                    <input
+                      id="manual-timeout-length"
+                      className="shell-input manual-number"
+                      type="number"
+                      min={1}
+                      max={maximumTimeoutDurationSeconds}
+                      step={1}
+                      value={
+                        input.options.timeoutDurationSeconds === undefined
+                          ? ''
+                          : String(input.options.timeoutDurationSeconds)
+                      }
+                      onChange={(event) =>
+                        setOptions({ timeoutDurationSeconds: numberValue(event.target.value) })
+                      }
+                    />
+                    <p className="shell-hint">
+                      Blank means QBSheet records the timeout but does not count it down.
+                    </p>
+                  </div>
+                )}
+              </fieldset>
+
+              <fieldset className="field-group" aria-labelledby="manual-substitutions-legend">
+                <legend className="field-group-legend">
+                  <span className="label-with-help">
+                    <span id="manual-substitutions-legend">Substitutions</span>
+                    <HelpTooltip label="About substitution timing">
+                      A phase checkpoint is a format-defined pause, such as halftime or the end of regulation.
+                      The stricter option only offers lineup changes at those pauses, configured breaks, and
+                      timeouts.
+                    </HelpTooltip>
+                  </span>
+                </legend>
+                {(
+                  [
+                    ['any-boundary', 'Between any tossups'],
+                    ['breaks-timeouts-overtime', 'Only at breaks, timeouts, or phase checkpoints'],
+                  ] as [SubstitutionPolicy, string][]
+                ).map(([policy, label]) => (
+                  <label key={policy} className="rules-setup-check" htmlFor={`manual-subs-${policy}`}>
+                    <input
+                      id={`manual-subs-${policy}`}
+                      type="radio"
+                      name="manual-subs"
+                      value={policy}
+                      checked={input.options.substitutionPolicy === policy}
+                      onChange={() => setOptions({ substitutionPolicy: policy })}
+                    />
+                    {label}
+                  </label>
+                ))}
+                {/* The restrictive policy is only as precise as the breaks above it, so it says which ones
+              it means rather than leaving the director to work out whether "breaks" covers theirs. */}
+                {input.options.substitutionPolicy === 'breaks-timeouts-overtime' && (
+                  <p className="shell-hint manual-subs-hint">
+                    {`Lineup changes will be available ${substitutionOpportunityPhrase(manualRoomProcedure(input.options))}.`}
+                    {!input.options.halves &&
+                      ' This round has no breaks configured, so only timeouts and checkpoints qualify.'}
+                  </p>
+                )}
+              </fieldset>
+
+              <SectionErrors problems={problemsIn('options')} show={showErrors} anchor={optionsErrors} />
+            </div>
+          </details>
+        </section>
+
+        {startError !== '' && (
+          <p className="shell-warning" role="alert">
+            {startError}
+          </p>
+        )}
+        {draftSaveState === 'saved' && (
+          <p className="shell-hint">Draft saved on this device while you type.</p>
+        )}
+        {draftSaveState === 'failed' && (
+          <p className="shell-warning" role="status">
+            This browser could not save the draft while you type. Keep this tab open or repair storage before
+            leaving.
+          </p>
+        )}
+        <div className="shell-actions manual-actions">
+          <button type="submit" className="shell-button is-primary" disabled={starting}>
+            {starting ? 'Starting…' : 'Start game'}
+          </button>
+          <button type="button" className="shell-button" onClick={cancel}>
+            Cancel
+          </button>
+        </div>
       </form>
     </main>
   );
@@ -802,8 +874,8 @@ function ManualBreaksEditor(props: {
         <span className="label-with-help">
           <span id="manual-breaks-legend">Scheduled breaks</span>
           <HelpTooltip label="Explain automatic break timing">
-            Add the exact tossup numbers where QBSheet should pause automatically. Leave the list empty when the
-            moderator decides when to call the break.
+            Add the exact tossup numbers where QBSheet should pause automatically. Leave the list empty when
+            the moderator decides when to call the break.
           </HelpTooltip>
         </span>
       </legend>

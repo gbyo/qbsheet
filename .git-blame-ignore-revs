@@ -1,0 +1,11 @@
+# Commits that changed how the code looks and nothing about what it does.
+#
+# `git blame` skips these with:
+#
+#     git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# GitHub reads this file on its own. One entry per line, full SHA, with the
+# subject beside it so the list stays readable.
+
+# Format the tree with Prettier
+173e901ada96beb1550a70d6fc5d8e9675a970b4

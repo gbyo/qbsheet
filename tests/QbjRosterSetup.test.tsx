@@ -231,7 +231,9 @@ describe('the override path the form uses', () => {
     expect(defined.ok).toBe(true);
     if (!defined.ok) return;
     // Identity is the document's to give; the form supplied names only.
-    expect(defined.definition.qbjIdentity?.playerIds?.[playerIdentityKey('Ninety Six', 'Sarah')]).toBe('Player_Sarah');
+    expect(defined.definition.qbjIdentity?.playerIds?.[playerIdentityKey('Ninety Six', 'Sarah')]).toBe(
+      'Player_Sarah',
+    );
     expect(defined.definition.qbjIdentity?.teamIds).toEqual({ left: ninetySix.id, right: greenwood.id });
   });
 });

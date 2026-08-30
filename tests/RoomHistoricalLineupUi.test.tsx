@@ -281,9 +281,13 @@ describe('the historical lineup editor', () => {
     openReview();
     const editor = editEvent('Before Tossup 1, lineup changed');
 
-    expect(within(editor).getByRole('button', { name: 'Put Olivia Hart in' }).hasAttribute('disabled')).toBe(true);
+    expect(within(editor).getByRole('button', { name: 'Put Olivia Hart in' }).hasAttribute('disabled')).toBe(
+      true,
+    );
     fireEvent.click(within(editor).getByRole('button', { name: 'Bench Sarah Jones' }));
-    expect(within(editor).getByRole('button', { name: 'Put Olivia Hart in' }).hasAttribute('disabled')).toBe(false);
+    expect(within(editor).getByRole('button', { name: 'Put Olivia Hart in' }).hasAttribute('disabled')).toBe(
+      false,
+    );
   });
 
   test('a row that crossed between groups is marked, by the same helper the lineup screens use', () => {
@@ -342,7 +346,9 @@ describe('the historical lineup editor', () => {
     fireEvent.click(within(editor).getByRole('button', { name: 'Save correction' }));
 
     expect(
-      within(editor).getByText('Priya Raman was not on the roster at Tossup 1. Take them off, or move the tossup later.'),
+      within(editor).getByText(
+        'Priya Raman was not on the roster at Tossup 1. Take them off, or move the tossup later.',
+      ),
     ).toBeTruthy();
     // Nothing was written, and the lineup on record is the one it always was.
     expect(substitutions().find((event) => event.team === 'left')?.activePlayers).toEqual([

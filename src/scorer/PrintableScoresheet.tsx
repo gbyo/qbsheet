@@ -80,7 +80,16 @@ export default function PrintableScoresheet(props: {
   /** Injected by tests so the printed date is stable. */
   now?: Date;
 }) {
-  const { game, format, tournamentName, roundName, roomName, packetName, operatorName, now = new Date() } = props;
+  const {
+    game,
+    format,
+    tournamentName,
+    roundName,
+    roomName,
+    packetName,
+    operatorName,
+    now = new Date(),
+  } = props;
 
   /*
    * Running totals, accumulated down the page the way somebody keeping it by hand would, so a room
@@ -93,7 +102,10 @@ export default function PrintableScoresheet(props: {
   const questionPoints = (question: IDerivedQuestion, team: LeftOrRight): number => {
     const buzz = question.buzzes.find((candidate) => candidate.team === team)?.answerType.value ?? 0;
     if (!question.bonus) return buzz;
-    return buzz + (question.bonus.team === team ? question.bonus.controlledPoints : question.bonus.bouncebackPoints);
+    return (
+      buzz +
+      (question.bonus.team === team ? question.bonus.controlledPoints : question.bonus.bouncebackPoints)
+    );
   };
   const rows = game.questions.reduce<{ question: IDerivedQuestion; left: number; right: number }[]>(
     (accumulated, question) => {
@@ -200,10 +212,12 @@ export default function PrintableScoresheet(props: {
       {/* Keyed by side, not by name. Two teams can arrive with the same name -- a scrimmage between
           two squads from one school, a placeholder typed twice -- and duplicate React keys silently
           drop one of the two box scores. */}
-      {([
-        { side: 'left', team: game.left },
-        { side: 'right', team: game.right },
-      ] as const).map(({ side, team }) => (
+      {(
+        [
+          { side: 'left', team: game.left },
+          { side: 'right', team: game.right },
+        ] as const
+      ).map(({ side, team }) => (
         <table className="printable-table" key={side}>
           <caption>{team.name}</caption>
           <thead>
@@ -255,8 +269,8 @@ export default function PrintableScoresheet(props: {
       )}
 
       <p className="printable-footer">
-        Scored in QBSheet. If this game is finished on paper, give this sheet to the tournament
-        director — the device’s copy stops at question {lastQuestionNumber}.
+        Scored in QBSheet. If this game is finished on paper, give this sheet to the tournament director — the
+        device’s copy stops at question {lastQuestionNumber}.
       </p>
     </div>,
     document.body,

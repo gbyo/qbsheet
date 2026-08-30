@@ -37,7 +37,13 @@ describe('whole-scoresheet validation', () => {
   test('duplicate opportunities and a conversion marked dead are blockers', () => {
     const format = formatFor();
     const validation = validateScoresheet(format, setup, [
-      event({ type: 'tossup-buzz', questionNumber: 1, team: 'left', playerName: 'Sarah', answerTypeIndex: 1 }),
+      event({
+        type: 'tossup-buzz',
+        questionNumber: 1,
+        team: 'left',
+        playerName: 'Sarah',
+        answerTypeIndex: 1,
+      }),
       event({ type: 'tossup-no-penalty', questionNumber: 1, team: 'left', playerName: 'Sarah' }),
       event({ type: 'tossup-dead', questionNumber: 1 }),
     ]);
@@ -61,9 +67,21 @@ describe('whole-scoresheet validation', () => {
 
   test('validation preserves explicit read/resume timing and rejects markers after resolution', () => {
     const legal = validateCorrectedHistory(formatFor(), setup, [
-      event({ type: 'tossup-buzz', questionNumber: 1, team: 'left', playerName: 'Sarah', answerTypeIndex: 2 }),
+      event({
+        type: 'tossup-buzz',
+        questionNumber: 1,
+        team: 'left',
+        playerName: 'Sarah',
+        answerTypeIndex: 2,
+      }),
       event({ type: 'tossup-reading-resumed', questionNumber: 1 }),
-      event({ type: 'tossup-buzz', questionNumber: 1, team: 'right', playerName: 'Emma', answerTypeIndex: 2 }),
+      event({
+        type: 'tossup-buzz',
+        questionNumber: 1,
+        team: 'right',
+        playerName: 'Emma',
+        answerTypeIndex: 2,
+      }),
     ]);
     expect(legal.blockers).toEqual([]);
 
@@ -78,7 +96,13 @@ describe('whole-scoresheet validation', () => {
   test('a missing bonus blocks submission but is allowed while correcting the current question', () => {
     const format = formatFor();
     const events = [
-      event({ type: 'tossup-buzz', questionNumber: 1, team: 'left', playerName: 'Sarah', answerTypeIndex: 1 }),
+      event({
+        type: 'tossup-buzz',
+        questionNumber: 1,
+        team: 'left',
+        playerName: 'Sarah',
+        answerTypeIndex: 1,
+      }),
     ];
     const validation = validateScoresheet(format, setup, events);
     const corrected = validateCorrectedHistory(format, setup, events);
@@ -107,7 +131,9 @@ describe('whole-scoresheet validation', () => {
     [
       'sudden-death checkpoint',
       [
-        ...Array.from({ length: 20 }, (_, index) => event({ type: 'tossup-dead', questionNumber: index + 1 })),
+        ...Array.from({ length: 20 }, (_, index) =>
+          event({ type: 'tossup-dead', questionNumber: index + 1 }),
+        ),
         event({ type: 'begin-overtime', questionNumber: 20 }),
         event({ type: 'tossup-dead', questionNumber: 21 }),
       ],
@@ -157,13 +183,15 @@ describe('whole-scoresheet validation', () => {
     } as unknown as ScoreEvent;
 
     expect(() => validateScoresheet(formatFor(), setup, [malformed])).not.toThrow();
-    expect(validateScoresheet(formatFor(), setup, [malformed]).blockers.map((problem) => problem.code)).toContain(
-      'malformed-event',
-    );
+    expect(
+      validateScoresheet(formatFor(), setup, [malformed]).blockers.map((problem) => problem.code),
+    ).toContain('malformed-event');
   });
 
   test('explicit overtime transitions must match the derived checkpoint', () => {
-    const validation = validateScoresheet(formatFor(), setup, [event({ type: 'begin-overtime', questionNumber: 1 })]);
+    const validation = validateScoresheet(formatFor(), setup, [
+      event({ type: 'begin-overtime', questionNumber: 1 }),
+    ]);
 
     expect(validation.blockers.map((problem) => problem.code)).toContain('invalid-procedure-transition');
   });

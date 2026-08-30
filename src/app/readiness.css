@@ -20,18 +20,22 @@
 }
 
 /*
- * The cog beside "Check this device".
+ * The cog beside "Check this device", and the same control in the Home and paired-room headers.
  *
- * Square, so the glyph is not floating in a button shaped for words, and sized to the same 32px the
- * text button next to it ends up at so the pair reads as one control group rather than two.
+ * 32px tall, matching the text button next to it so the pair reads as one control group. The width
+ * only settles at 32px when the glyph is alone: these buttons carry a label at the widths that have
+ * room for one, and a fixed square would leave the word hanging outside the button — outside its
+ * hover and focus backgrounds with it. `min-width` plus symmetric padding gives the icon-only form
+ * the same square it had (16px glyph, 7px either side, 1px of border either side) and lets the
+ * labelled form grow to fit.
  */
 .shell-button-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
+  min-width: 32px;
   height: 32px;
-  padding: 0;
+  padding: 0 7px;
 }
 
 .readiness-shell {

@@ -8,7 +8,12 @@
  * changed by the time it arrives.
  */
 import { describe, expect, test } from 'vitest';
-import { portableQbj, readSourceMetadata, sourceExtensionKey, stripInternalState } from '../src/game/PortableQbj';
+import {
+  portableQbj,
+  readSourceMetadata,
+  sourceExtensionKey,
+  stripInternalState,
+} from '../src/game/PortableQbj';
 import { attachScorerRecovery, scorerRecoveryKey } from '../src/scorer/ScorerRecovery';
 import toQbjMatch from '../src/scoring/toQbjMatch';
 import deriveGame, { IGameSetup } from '../src/scoring/deriveGame';

@@ -140,7 +140,12 @@ export default function scorerMenuItems(input: IScorerMenuInput): IGameMenuItem[
     });
   }
   if ((procedure?.timeoutsPerTeam ?? 0) > 0 && phase.kind !== 'complete' && phase.kind !== 'timeout') {
-    round.push({ label: 'Timeout', icon: 'clock', onSelect: () => openDialog('timeout'), disabled: submitting });
+    round.push({
+      label: 'Timeout',
+      icon: 'clock',
+      onSelect: () => openDialog('timeout'),
+      disabled: submitting,
+    });
   }
   if (phase.kind === 'timeout') {
     round.push({
@@ -164,7 +169,12 @@ export default function scorerMenuItems(input: IScorerMenuInput): IGameMenuItem[
         // The boundary is the last tossup actually played, not the one on screen. A displayed
         // question with nothing recorded against it has not been read.
         onSelect: () =>
-          record({ id: newEventId(), type: 'half-break', questionNumber: currentQuestion, lastQuestion: lastPlayed }),
+          record({
+            id: newEventId(),
+            type: 'half-break',
+            questionNumber: currentQuestion,
+            lastQuestion: lastPlayed,
+          }),
         disabled: submitting,
       });
     }
@@ -201,7 +211,12 @@ export default function scorerMenuItems(input: IScorerMenuInput): IGameMenuItem[
       disabled: submitting,
     });
   }
-  review.push({ label: 'Adjust score', icon: 'adjust', onSelect: () => openDialog('adjust'), disabled: submitting });
+  review.push({
+    label: 'Adjust score',
+    icon: 'adjust',
+    onSelect: () => openDialog('adjust'),
+    disabled: submitting,
+  });
   if (canCorrectScoringRules) {
     // Filed under review rather than under the game's own details because that is what it is: a
     // correction to something already written down, in the same group as replacing a question.
@@ -225,7 +240,12 @@ export default function scorerMenuItems(input: IScorerMenuInput): IGameMenuItem[
     file.push({ label: 'Download current QBJ', icon: 'download', onSelect: downloadPartialQbj });
     file.push({ label: 'Download legacy match-only QBJ', icon: 'download', onSelect: downloadLegacyQbj });
   }
-  file.push({ label: 'Recover from QBJ', icon: 'upload', onSelect: () => openDialog('recovery'), disabled: submitting });
+  file.push({
+    label: 'Recover from QBJ',
+    icon: 'upload',
+    onSelect: () => openDialog('recovery'),
+    disabled: submitting,
+  });
   /*
    * Filed with the other ways a game leaves this device, because that is what it is — the one that
    * needs no file, no network, and no working battery on the other end.
@@ -256,5 +276,8 @@ export default function scorerMenuItems(input: IScorerMenuInput): IGameMenuItem[
     });
   }
 
-  return joinMenuGroups([general, round, review, file, ending], ['GAME', 'ROUND', 'REVIEW', 'FILES', 'END GAME']);
+  return joinMenuGroups(
+    [general, round, review, file, ending],
+    ['GAME', 'ROUND', 'REVIEW', 'FILES', 'END GAME'],
+  );
 }

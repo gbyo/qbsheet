@@ -15,7 +15,8 @@ interface IPracticeCoachProps {
 const helpTopics = [
   {
     title: 'I recorded the last action wrong',
-    answer: 'Use Undo, then record the call again. Redo is available until you make a different scoring action.',
+    answer:
+      'Use Undo, then record the call again. Redo is available until you make a different scoring action.',
   },
   {
     title: 'I found an older mistake',
@@ -132,7 +133,12 @@ export default function PracticeCoach(props: IPracticeCoachProps) {
   }
 
   return (
-    <aside id="practice-coach-panel" className="practice-coach" style={placementStyle} aria-label="Practice guide">
+    <aside
+      id="practice-coach-panel"
+      className="practice-coach"
+      style={placementStyle}
+      aria-label="Practice guide"
+    >
       {/* Wide enough to carry the name, the section tabs and the way out on one line. */}
       <header className="practice-coach-header">
         <div className="practice-coach-heading">

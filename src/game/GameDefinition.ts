@@ -124,6 +124,10 @@ export function playerIdentityKey(teamName: string, playerName: string): string 
 }
 
 /** Look up a player's QBJ id, when the source carried one. */
-export function playerQbjId(definition: IGameDefinition, teamName: string, playerName: string): string | undefined {
+export function playerQbjId(
+  definition: IGameDefinition,
+  teamName: string,
+  playerName: string,
+): string | undefined {
   return definition.qbjIdentity?.playerIds?.[playerIdentityKey(teamName, playerName)];
 }

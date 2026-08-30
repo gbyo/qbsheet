@@ -53,7 +53,10 @@ function validCapability(value: unknown): value is IResultDeliveryCapability {
 }
 
 function validStoredCapability(value: unknown): value is IStoredResultDeliveryCapability {
-  return validCapability(value) && typeof (value as Partial<IStoredResultDeliveryCapability>).expiresAt === 'string';
+  return (
+    validCapability(value) &&
+    typeof (value as Partial<IStoredResultDeliveryCapability>).expiresAt === 'string'
+  );
 }
 
 function discardDocument(storage: IResultDeliveryCapabilityStorage): void {
@@ -96,7 +99,10 @@ function readDocument(storage: IResultDeliveryCapabilityStorage | null): ICapabi
   }
 }
 
-function writeDocument(storage: IResultDeliveryCapabilityStorage | null, document: ICapabilityDocument): boolean {
+function writeDocument(
+  storage: IResultDeliveryCapabilityStorage | null,
+  document: ICapabilityDocument,
+): boolean {
   if (!storage) return false;
   try {
     storage.setItem(resultDeliveryCapabilityStorageKey, JSON.stringify(document));

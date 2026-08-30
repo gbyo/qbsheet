@@ -91,7 +91,10 @@ function readAnswerTypes(
   }
 
   const numericValues = value
-    .filter((entry): entry is QbjObject => isPlainObject(entry) && finiteNumber(entry.value) && Number.isInteger(entry.value))
+    .filter(
+      (entry): entry is QbjObject =>
+        isPlainObject(entry) && finiteNumber(entry.value) && Number.isInteger(entry.value),
+    )
     .map((entry) => Number(entry.value));
   const positiveValues = numericValues.filter((points) => points > 0);
   const highestPositive = positiveValues.length > 0 ? Math.max(...positiveValues) : undefined;
@@ -215,7 +218,9 @@ export function readQbjScoringRules(rules: QbjObject | null, timed?: boolean): Q
   const assumptions: string[] = [];
 
   if (timed !== true && timed !== false) {
-    problems.push('These scoring rules do not say whether the round is timed. Choose timed or untimed before scoring.');
+    problems.push(
+      'These scoring rules do not say whether the round is timed. Choose timed or untimed before scoring.',
+    );
   }
 
   // Read before the answer types, because the default for a silent `awards_bonus` depends on it.
@@ -239,7 +244,9 @@ export function readQbjScoringRules(rules: QbjObject | null, timed?: boolean): Q
   }
 
   // --- regulation -----------------------------------------------------------------------------
-  const regulationTossupCount = finiteNumber(rules.regulation_tossup_count) ? rules.regulation_tossup_count : undefined;
+  const regulationTossupCount = finiteNumber(rules.regulation_tossup_count)
+    ? rules.regulation_tossup_count
+    : undefined;
   const maximumRegulation = finiteNumber(rules.maximum_regulation_tossup_count)
     ? rules.maximum_regulation_tossup_count
     : undefined;
@@ -259,8 +266,12 @@ export function readQbjScoringRules(rules: QbjObject | null, timed?: boolean): Q
 
   // --- bonus ----------------------------------------------------------------------------------
   const pointsPerPart = finiteNumber(rules.points_per_bonus_part) ? rules.points_per_bonus_part : undefined;
-  const minimumParts = finiteNumber(rules.minimum_parts_per_bonus) ? rules.minimum_parts_per_bonus : undefined;
-  const maximumParts = finiteNumber(rules.maximum_parts_per_bonus) ? rules.maximum_parts_per_bonus : undefined;
+  const minimumParts = finiteNumber(rules.minimum_parts_per_bonus)
+    ? rules.minimum_parts_per_bonus
+    : undefined;
+  const maximumParts = finiteNumber(rules.maximum_parts_per_bonus)
+    ? rules.maximum_parts_per_bonus
+    : undefined;
   const maximumBonusScore = finiteNumber(rules.maximum_bonus_score) ? rules.maximum_bonus_score : undefined;
   const bonusDivisor = finiteNumber(rules.bonus_divisor) ? rules.bonus_divisor : undefined;
   if (rules.points_per_bonus_part !== undefined && pointsPerPart === undefined) {
@@ -335,10 +346,12 @@ export function readQbjScoringRules(rules: QbjObject | null, timed?: boolean): Q
     }
   }
   const lightningCount = rawLightningCount ?? 0;
-  const lightningDivisor = lightningCount > 0 ? rawLightningDivisor ?? 0 : 10;
+  const lightningDivisor = lightningCount > 0 ? (rawLightningDivisor ?? 0) : 10;
 
   // --- players --------------------------------------------------------------------------------
-  const maximumPlayers = finiteNumber(rules.maximum_players_per_team) ? rules.maximum_players_per_team : undefined;
+  const maximumPlayers = finiteNumber(rules.maximum_players_per_team)
+    ? rules.maximum_players_per_team
+    : undefined;
   if (maximumPlayers === undefined) {
     problems.push('These scoring rules do not say how many players may be active per team.');
   } else if (!Number.isInteger(maximumPlayers) || maximumPlayers < 1) {
@@ -399,7 +412,9 @@ export function readQbjScoringRules(rules: QbjObject | null, timed?: boolean): Q
   if (playability.length > 0) return { ok: false, problems: playability };
 
   if (statedTotalDivisor === undefined) {
-    assumptions.push(`The total score divisor was derived from the stated scoring increments (${derivedDivisor}).`);
+    assumptions.push(
+      `The total score divisor was derived from the stated scoring increments (${derivedDivisor}).`,
+    );
   }
 
   return { ok: true, format, assumptions };

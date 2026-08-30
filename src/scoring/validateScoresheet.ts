@@ -1,9 +1,5 @@
 import { IScorekeeperFormat } from './ScorekeeperFormat';
-import {
-  IRoomProcedure,
-  protestBlocksCheckpoint,
-  protestCheckpointPolicy,
-} from './RoomProcedure';
+import { IRoomProcedure, protestBlocksCheckpoint, protestCheckpointPolicy } from './RoomProcedure';
 import deriveGame, { bonusFollows, IGameSetup, IDerivedGame, IDerivedQuestion } from './deriveGame';
 import { bonusEventPoints, ScoreEvent, usesTossupOpportunity } from './ScoreEvents';
 import { bonusPartProblem, bonusScoreProblem } from '../scorer/bonusOptions';
@@ -34,7 +30,8 @@ function problem(
 }
 
 function addUnique(target: IScoresheetProblem[], next: IScoresheetProblem): void {
-  if (!target.some((existing) => existing.code === next.code && existing.message === next.message)) target.push(next);
+  if (!target.some((existing) => existing.code === next.code && existing.message === next.message))
+    target.push(next);
 }
 
 function isCycleEvent(event: ScoreEvent): boolean {
@@ -107,7 +104,8 @@ function isDerivableEvent(value: unknown, format: IScorekeeperFormat): value is 
     case 'tossup-no-penalty':
       return (
         validTeam(event.team) &&
-        (event.playerName === undefined || (typeof event.playerName === 'string' && event.playerName.trim() !== ''))
+        (event.playerName === undefined ||
+          (typeof event.playerName === 'string' && event.playerName.trim() !== ''))
       );
     case 'tossup-reading-resumed':
     case 'tossup-readout':
@@ -230,18 +228,29 @@ function questionFor(game: IDerivedGame, questionNumber: number): IDerivedQuesti
   return game.questions.find((question) => question.questionNumber === questionNumber);
 }
 
-function validateRuntimeShape(events: readonly ScoreEvent[], format: IScorekeeperFormat): IScoresheetProblem[] {
+function validateRuntimeShape(
+  events: readonly ScoreEvent[],
+  format: IScorekeeperFormat,
+): IScoresheetProblem[] {
   const problems: IScoresheetProblem[] = [];
   const ids = new Set<string>();
   for (const candidate of events as readonly unknown[]) {
     if (typeof candidate !== 'object' || candidate === null) {
-      problems.push(problem('blocker', 'malformed-event', 'The scoresheet contains a malformed scoring record.'));
+      problems.push(
+        problem('blocker', 'malformed-event', 'The scoresheet contains a malformed scoring record.'),
+      );
       continue;
     }
-    const event = candidate as Partial<ScoreEvent> & { id?: unknown; type?: unknown; questionNumber?: unknown };
+    const event = candidate as Partial<ScoreEvent> & {
+      id?: unknown;
+      type?: unknown;
+      questionNumber?: unknown;
+    };
     const { questionNumber } = event;
     if (!isDerivableEvent(candidate, format)) {
-      problems.push(problem('blocker', 'malformed-event', 'A scoring record contains invalid required data.'));
+      problems.push(
+        problem('blocker', 'malformed-event', 'A scoring record contains invalid required data.'),
+      );
       if (event.type === 'tossup-buzz' && Number.isInteger(questionNumber)) {
         problems.push(
           problem(
@@ -269,7 +278,9 @@ function validateRuntimeShape(events: readonly ScoreEvent[], format: IScorekeepe
       );
     } else ids.add(event.id);
     if (typeof event.type !== 'string' || !Number.isInteger(questionNumber) || Number(questionNumber) < 1) {
-      problems.push(problem('blocker', 'malformed-event', 'A scoring record has missing required question data.'));
+      problems.push(
+        problem('blocker', 'malformed-event', 'A scoring record has missing required question data.'),
+      );
       continue;
     }
   }
@@ -418,7 +429,12 @@ function validateQuestion(
       if (readout) {
         addUnique(
           blockers,
-          problem('blocker', 'duplicate-readout', `Question ${questionNumber} was read out more than once.`, questionNumber),
+          problem(
+            'blocker',
+            'duplicate-readout',
+            `Question ${questionNumber} was read out more than once.`,
+            questionNumber,
+          ),
         );
       }
       if (attemptsSeen >= 2 || conversionSeen || deadSeen) {
@@ -459,7 +475,10 @@ function validateQuestion(
 
   if (question) {
     for (const attempt of attempts) {
-      if (attempt.type === 'tossup-buzz' && !question.activePlayers[attempt.team].includes(attempt.playerName)) {
+      if (
+        attempt.type === 'tossup-buzz' &&
+        !question.activePlayers[attempt.team].includes(attempt.playerName)
+      ) {
         addUnique(
           blockers,
           problem(
@@ -584,7 +603,12 @@ function validateQuestion(
         if (partProblem) {
           addUnique(
             blockers,
-            problem('blocker', 'invalid-bonus-part', `Question ${questionNumber}: ${partProblem}`, questionNumber),
+            problem(
+              'blocker',
+              'invalid-bonus-part',
+              `Question ${questionNumber}: ${partProblem}`,
+              questionNumber,
+            ),
           );
         }
       }
@@ -740,7 +764,8 @@ export default function validateScoresheet(
   }
   for (const protest of game.protests.filter((entry) => entry.status === 'open')) {
     const policy = protestCheckpointPolicy(procedure);
-    const strict = protestBlocksCheckpoint(policy, 'overtime') || protestBlocksCheckpoint(policy, 'sudden-death');
+    const strict =
+      protestBlocksCheckpoint(policy, 'overtime') || protestBlocksCheckpoint(policy, 'sudden-death');
     addUnique(
       strict ? blockers : warnings,
       problem(
@@ -755,7 +780,10 @@ export default function validateScoresheet(
   }
 
   if (game.phase.kind !== 'complete') {
-    addUnique(blockers, problem('blocker', 'game-not-complete', 'Finish the game before submitting the scoresheet.'));
+    addUnique(
+      blockers,
+      problem('blocker', 'game-not-complete', 'Finish the game before submitting the scoresheet.'),
+    );
   }
   return { blockers, warnings, game, valid: blockers.length === 0 };
 }
@@ -773,7 +801,12 @@ export function validateCorrectedHistory(
     game.phase.kind === 'tossup' || game.phase.kind === 'bonus' || game.phase.kind === 'timeout'
       ? game.phase.questionNumber
       : undefined;
-  const allowedCodes = new Set(['unfinished-cycle', 'missing-derived-bonus', 'missing-bonus', 'game-not-complete']);
+  const allowedCodes = new Set([
+    'unfinished-cycle',
+    'missing-derived-bonus',
+    'missing-bonus',
+    'game-not-complete',
+  ]);
   const blockers = validation.blockers.filter(
     (candidate) =>
       !(

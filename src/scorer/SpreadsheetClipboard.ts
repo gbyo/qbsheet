@@ -52,9 +52,7 @@ export interface SpreadsheetClipboardError {
 }
 
 export type SpreadsheetClipboardResult =
-  | SpreadsheetClipboardSuccess
-  | SpreadsheetClipboardFallback
-  | SpreadsheetClipboardError;
+  SpreadsheetClipboardSuccess | SpreadsheetClipboardFallback | SpreadsheetClipboardError;
 
 /** Narrow a result before rendering the manual-copy UI. */
 export function needsSpreadsheetClipboardFallback(
@@ -108,12 +106,7 @@ export const parseSpreadsheetTsv = spreadsheetTsvToGrid;
  */
 export function spreadsheetGridToHtml(grid: SpreadsheetGrid): string {
   const rows = grid
-    .map(
-      (row) =>
-        `<tr>${row
-          .map((cell) => `<td>${escapeSpreadsheetHtmlText(cell)}</td>`)
-          .join('')}</tr>`,
-    )
+    .map((row) => `<tr>${row.map((cell) => `<td>${escapeSpreadsheetHtmlText(cell)}</td>`).join('')}</tr>`)
     .join('');
 
   return `<table data-qbsheet-clipboard="1"><tbody>${rows}</tbody></table>`;

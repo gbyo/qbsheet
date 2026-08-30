@@ -47,7 +47,9 @@ function objectValue(value: unknown): QbjObject | null {
 }
 
 function objectArray(value: unknown): QbjObject[] {
-  return Array.isArray(value) ? value.map(objectValue).filter((entry): entry is QbjObject => entry !== null) : [];
+  return Array.isArray(value)
+    ? value.map(objectValue).filter((entry): entry is QbjObject => entry !== null)
+    : [];
 }
 
 function textValue(value: unknown): string | undefined {
@@ -128,8 +130,10 @@ function cellXml(cell: Cell, reference: string, style: number): string {
     return `<c r="${reference}"${style ? ` s="${style}"` : ''}><f>${xmlText(cell.formula)}</f><v>${cell.value}</v></c>`;
   }
   if (isDateCell(cell)) return `<c r="${reference}" s="5"><v>${cell.excelDate}</v></c>`;
-  if (typeof cell === 'number') return `<c r="${reference}"${style ? ` s="${style}"` : ''}><v>${cell}</v></c>`;
-  if (typeof cell === 'boolean') return `<c r="${reference}" t="b"${style ? ` s="${style}"` : ''}><v>${cell ? 1 : 0}</v></c>`;
+  if (typeof cell === 'number')
+    return `<c r="${reference}"${style ? ` s="${style}"` : ''}><v>${cell}</v></c>`;
+  if (typeof cell === 'boolean')
+    return `<c r="${reference}" t="b"${style ? ` s="${style}"` : ''}><v>${cell ? 1 : 0}</v></c>`;
   return `<c r="${reference}" t="inlineStr"${style ? ` s="${style}"` : ''}><is><t xml:space="preserve">${xmlText(cell)}</t></is></c>`;
 }
 
@@ -141,8 +145,14 @@ function sheetXml(sheet: SheetDefinition): string {
     .map((row, rowIndex) => {
       const number = rowIndex + 1;
       const style = titleRows.has(number) ? 1 : sectionRows.has(number) ? 2 : headerRows.has(number) ? 3 : 0;
-      const cells = row.map((cell, columnIndex) => cellXml(cell, `${columnName(columnIndex)}${number}`, style)).join('');
-      const height = titleRows.has(number) ? ' ht="28" customHeight="1"' : headerRows.has(number) ? ' ht="22" customHeight="1"' : '';
+      const cells = row
+        .map((cell, columnIndex) => cellXml(cell, `${columnName(columnIndex)}${number}`, style))
+        .join('');
+      const height = titleRows.has(number)
+        ? ' ht="28" customHeight="1"'
+        : headerRows.has(number)
+          ? ' ht="22" customHeight="1"'
+          : '';
       return `<row r="${number}"${height}>${cells}</row>`;
     })
     .join('');
@@ -214,7 +224,9 @@ function answerTypes(record: IStoredGameRecord, teams: QbjObject[]): AnswerType[
       }
     }
   }
-  return [...found.values()].sort((left, right) => right.value - left.value || left.key.localeCompare(right.key));
+  return [...found.values()].sort(
+    (left, right) => right.value - left.value || left.key.localeCompare(right.key),
+  );
 }
 
 function countFor(player: QbjObject, answerType: AnswerType): number {
@@ -222,12 +234,18 @@ function countFor(player: QbjObject, answerType: AnswerType): number {
     const candidate = objectValue(count.answer_type);
     const id = textValue(candidate?.id);
     const value = numberValue(candidate?.value);
-    if (value !== undefined && answerTypeKey(id, value) === answerType.key) return numberValue(count.number) ?? 0;
+    if (value !== undefined && answerTypeKey(id, value) === answerType.key)
+      return numberValue(count.number) ?? 0;
   }
   return 0;
 }
 
-function formulaFromCounts(row: number, firstColumn: number, counts: number[], types: AnswerType[]): FormulaCell {
+function formulaFromCounts(
+  row: number,
+  firstColumn: number,
+  counts: number[],
+  types: AnswerType[],
+): FormulaCell {
   const terms = types.map((type, index) => `${columnName(firstColumn + index)}${row}*(${type.value})`);
   return {
     formula: terms.length > 0 ? terms.join('+') : '0',
@@ -262,13 +280,28 @@ function summarySheet(record: IStoredGameRecord, qbj: QbjObject, teams: QbjObjec
       ['Round', record.package.round.name, 'Round number', record.package.round.number],
       ['Room', record.package.room?.name ?? '', 'Completed', excelLocalDate(record.completedAt)],
       ['Moderator', textValue(qbj.moderator) ?? '', 'Scorekeeper', textValue(qbj.scorekeeper) ?? ''],
-      ['Tossups read', numberValue(qbj.tossups_read) ?? null, 'Overtime tossups', numberValue(qbj.overtime_tossups_read) ?? 0],
+      [
+        'Tossups read',
+        numberValue(qbj.tossups_read) ?? null,
+        'Overtime tossups',
+        numberValue(qbj.overtime_tossups_read) ?? 0,
+      ],
       ['Notes', textValue(qbj.notes) ?? '', null, null],
       [],
       ['Final score', null, null, null],
       ['Team', 'Score', 'Result', 'Forfeit'],
-      [leftName, leftScore, resultLabel(leftScore, rightScore), booleanValue(teams[0]?.forfeit_loss) ? 'Yes' : 'No'],
-      [rightName, rightScore, resultLabel(rightScore, leftScore), booleanValue(teams[1]?.forfeit_loss) ? 'Yes' : 'No'],
+      [
+        leftName,
+        leftScore,
+        resultLabel(leftScore, rightScore),
+        booleanValue(teams[0]?.forfeit_loss) ? 'Yes' : 'No',
+      ],
+      [
+        rightName,
+        rightScore,
+        resultLabel(rightScore, leftScore),
+        booleanValue(teams[1]?.forfeit_loss) ? 'Yes' : 'No',
+      ],
     ],
   };
 }
@@ -276,7 +309,11 @@ function summarySheet(record: IStoredGameRecord, qbj: QbjObject, teams: QbjObjec
 function playersSheet(record: IStoredGameRecord, teams: QbjObject[]): SheetDefinition {
   const types = answerTypes(record, teams);
   const headers = ['Team', 'Player', 'Tossups heard', ...types.map((type) => type.label), 'Tossup points'];
-  const rows: Cell[][] = [['Player statistics', ...Array.from({ length: headers.length - 1 }, () => null)], [], headers];
+  const rows: Cell[][] = [
+    ['Player statistics', ...Array.from({ length: headers.length - 1 }, () => null)],
+    [],
+    headers,
+  ];
   for (const [teamIndex, team] of teams.entries()) {
     const name = teamName(team, teamIndex === 0 ? record.package.left.name : record.package.right.name);
     for (const player of objectArray(team.match_players)) {
@@ -291,7 +328,11 @@ function playersSheet(record: IStoredGameRecord, teams: QbjObject[]): SheetDefin
       ]);
     }
   }
-  if (rows.length === 3) rows.push(['No player statistics were recorded.', ...Array.from({ length: headers.length - 1 }, () => null)]);
+  if (rows.length === 3)
+    rows.push([
+      'No player statistics were recorded.',
+      ...Array.from({ length: headers.length - 1 }, () => null),
+    ]);
   return {
     name: 'Players',
     columnWidths: [24, 24, 16, ...types.map(() => 15), 18],
@@ -317,7 +358,15 @@ function buzzText(question: QbjObject): string {
 }
 
 function questionsSheet(qbj: QbjObject): SheetDefinition {
-  const headers = ['Question', 'Buzzes', 'Tossup points', 'Controlled bonus', 'Bounceback bonus', 'Total awarded', 'Note'];
+  const headers = [
+    'Question',
+    'Buzzes',
+    'Tossup points',
+    'Controlled bonus',
+    'Bounceback bonus',
+    'Total awarded',
+    'Note',
+  ];
   const rows: Cell[][] = [['Question log', null, null, null, null, null, null], [], headers];
   for (const question of objectArray(qbj.match_questions)) {
     const buzzPoints = objectArray(question.buzzes).reduce(
@@ -338,7 +387,8 @@ function questionsSheet(qbj: QbjObject): SheetDefinition {
       replacement ? 'Replacement question' : '',
     ]);
   }
-  if (rows.length === 3) rows.push(['No question-level detail was recorded.', null, null, null, null, null, null]);
+  if (rows.length === 3)
+    rows.push(['No question-level detail was recorded.', null, null, null, null, null, null]);
   return {
     name: 'Questions',
     columnWidths: [12, 54, 16, 18, 18, 16, 24],
@@ -362,7 +412,10 @@ function workbookXml(sheets: SheetDefinition[]): string {
 
 function workbookRelationships(sheets: SheetDefinition[]): string {
   const sheetRelationships = sheets
-    .map((_, index) => `<Relationship Id="rId${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${index + 1}.xml"/>`)
+    .map(
+      (_, index) =>
+        `<Relationship Id="rId${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${index + 1}.xml"/>`,
+    )
     .join('');
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
@@ -422,9 +475,10 @@ const stylesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 </styleSheet>`;
 
 function coreProperties(record: IStoredGameRecord): string {
-  const completed = record.completedAt && Number.isFinite(new Date(record.completedAt).getTime())
-    ? new Date(record.completedAt).toISOString()
-    : new Date(0).toISOString();
+  const completed =
+    record.completedAt && Number.isFinite(new Date(record.completedAt).getTime())
+      ? new Date(record.completedAt).toISOString()
+      : new Date(0).toISOString();
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <dc:title>${xmlText(`${record.package.left.name} vs ${record.package.right.name}`)}</dc:title>

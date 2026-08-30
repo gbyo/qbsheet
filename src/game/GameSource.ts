@@ -15,9 +15,7 @@
 import { IGameDefinition } from './GameDefinition';
 import { IGamePackage } from './GamePackage';
 
-export type GameSourceResult =
-  | { ok: true; value: IGameDefinition }
-  | { ok: false; errors: string[] };
+export type GameSourceResult = { ok: true; value: IGameDefinition } | { ok: false; errors: string[] };
 
 export interface IGameSource {
   /** For the connection detail and for logs. Never shown as a brand. */

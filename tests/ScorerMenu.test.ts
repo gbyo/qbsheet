@@ -149,11 +149,12 @@ describe('ending a game', () => {
   });
 
   test('both are marked destructive, so the menu can set them apart', () => {
-    const built = items(
-      { currentQuestion: 2, lastPlayed: 1 },
-      [event({ type: 'tossup-dead', questionNumber: 1 })],
+    const built = items({ currentQuestion: 2, lastPlayed: 1 }, [
+      event({ type: 'tossup-dead', questionNumber: 1 }),
+    ]);
+    const ending = built.filter(
+      (item) => item.label === 'End game early…' || item.label === 'Record forfeit',
     );
-    const ending = built.filter((item) => item.label === 'End game early…' || item.label === 'Record forfeit');
     expect(ending).toHaveLength(2);
     ending.forEach((item) => expect(item.destructive).toBe(true));
   });

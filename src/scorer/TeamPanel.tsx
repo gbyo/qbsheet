@@ -160,9 +160,12 @@ export default function TeamPanel(props: ITeamPanelProps) {
    * Keyboard scoring deliberately does not enter this path. Its established `is-keyed` row wash is
    * the row acknowledgement, avoiding two nearly identical flashes on the same keystroke.
    */
-  const [recorded, setRecorded] = useState<
-    { playerName: string; answerTypeIndex: number | 'zero'; isNeg: boolean; token: number } | null
-  >(null);
+  const [recorded, setRecorded] = useState<{
+    playerName: string;
+    answerTypeIndex: number | 'zero';
+    isNeg: boolean;
+    token: number;
+  } | null>(null);
   const recordedSequence = useRef(0);
   useEffect(() => {
     if (substituting !== null) firstBenchChoice.current?.focus();
@@ -292,8 +295,8 @@ export default function TeamPanel(props: ITeamPanelProps) {
                 {player.name}{' '}
                 {recorded.answerTypeIndex === 'zero'
                   ? '0, wrong answer with no penalty'
-                  : answerTypes.find((answerType) => answerType.index === recorded.answerTypeIndex)?.label ??
-                    'ruling'}{' '}
+                  : (answerTypes.find((answerType) => answerType.index === recorded.answerTypeIndex)?.label ??
+                    'ruling')}{' '}
                 recorded.
               </span>
             )}
@@ -336,7 +339,8 @@ export default function TeamPanel(props: ITeamPanelProps) {
                   }`}
                   disabled={!scoringEnabled || !eligible}
                   onClick={() => {
-                    if (onBuzz(player.name, answerType)) acknowledgeRuling(player.name, answerType.index, answerType.isNeg);
+                    if (onBuzz(player.name, answerType))
+                      acknowledgeRuling(player.name, answerType.index, answerType.isNeg);
                   }}
                   aria-label={`${player.name} ${answerType.label}`}
                 >
@@ -351,7 +355,9 @@ export default function TeamPanel(props: ITeamPanelProps) {
               <button
                 type="button"
                 className={`scorer-answer scorer-answer-zero${
-                  recorded?.playerName === player.name && recorded.answerTypeIndex === 'zero' ? ' is-recorded' : ''
+                  recorded?.playerName === player.name && recorded.answerTypeIndex === 'zero'
+                    ? ' is-recorded'
+                    : ''
                 }`}
                 disabled={!scoringEnabled || !eligible}
                 onClick={() => {
@@ -417,7 +423,9 @@ export default function TeamPanel(props: ITeamPanelProps) {
             )}
           </li>
         ))}
-        {active.length === 0 && <li className="scorer-empty-roster">Nobody is on the floor for this team.</li>}
+        {active.length === 0 && (
+          <li className="scorer-empty-roster">Nobody is on the floor for this team.</li>
+        )}
       </ul>
     </section>
   );

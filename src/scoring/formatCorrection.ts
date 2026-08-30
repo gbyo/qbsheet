@@ -237,7 +237,8 @@ export default function correctFormat(
     unit?: string,
   ) => {
     if (before === after) return;
-    const say = (value: number | undefined) => (value === undefined ? 'not set' : `${value}${unit ? ` ${unit}` : ''}`);
+    const say = (value: number | undefined) =>
+      value === undefined ? 'not set' : `${value}${unit ? ` ${unit}` : ''}`;
     changes.push({ subject, detail: `${say(before)} → ${say(after)}`, affectsRecordedScoring });
   };
   const mapping = remapAnswerTypes(from, to);
@@ -406,8 +407,18 @@ export default function correctFormat(
       });
     }
   } else if (to.lightning.enabled) {
-    numericChange('Lightning rounds per team', from.lightning.countPerTeam, to.lightning.countPerTeam, lightningRecorded);
-    numericChange('Lightning score increment', from.lightning.divisor, to.lightning.divisor, lightningRecorded);
+    numericChange(
+      'Lightning rounds per team',
+      from.lightning.countPerTeam,
+      to.lightning.countPerTeam,
+      lightningRecorded,
+    );
+    numericChange(
+      'Lightning score increment',
+      from.lightning.divisor,
+      to.lightning.divisor,
+      lightningRecorded,
+    );
   }
 
   // --- players --------------------------------------------------------------------------------

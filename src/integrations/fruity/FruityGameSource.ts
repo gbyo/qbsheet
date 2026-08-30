@@ -23,7 +23,12 @@
  * reason, and everything else the assignment response carries for the room *page*. A package
  * describes one game.
  */
-import { IGamePackage, gamePackageFormat, gamePackageProducer, gamePackageVersion } from '../../game/GamePackage';
+import {
+  IGamePackage,
+  gamePackageFormat,
+  gamePackageProducer,
+  gamePackageVersion,
+} from '../../game/GamePackage';
 import { validateGamePackage } from '../../game/GamePackageValidation';
 import { GameSourceResult } from '../../game/GameSource';
 import { OpenGameResult, openGameValue } from '../../game/OpenGameDefinition';
@@ -77,14 +82,19 @@ export function assignmentToGamePackage({ assignment, matchup }: IAssignmentConv
       ...(matchup.packetName ? { packetName: matchup.packetName } : {}),
     },
     room: { id: assignment.roomId, name: assignment.roomName },
-    left: { name: matchup.leftTeam.name, players: matchup.leftTeam.players.map((player) => ({ name: player.name })) },
+    left: {
+      name: matchup.leftTeam.name,
+      players: matchup.leftTeam.players.map((player) => ({ name: player.name })),
+    },
     right: {
       name: matchup.rightTeam.name,
       players: matchup.rightTeam.players.map((player) => ({ name: player.name })),
     },
     scorekeeperFormat: assignment.scoringFormat,
     ...(assignment.roomProcedure ? { procedure: assignment.roomProcedure } : {}),
-    ...(assignment.resultHandoffInstruction ? { handoffInstruction: assignment.resultHandoffInstruction } : {}),
+    ...(assignment.resultHandoffInstruction
+      ? { handoffInstruction: assignment.resultHandoffInstruction }
+      : {}),
   };
 
   const validated = validateGamePackage(draft);

@@ -566,12 +566,16 @@ describe('the QBJ a practice produces', () => {
     expect(payload.match_teams[1].points).toBe(0);
     expect(payload.match_teams[0].team.name).toBe('Ninety Six');
     expect(payload.match_teams[1].team.name).toBe('Greenwood');
-    expect(payload.match_teams[0].match_players.map((player: { player: { name: string } }) => player.player.name)).toContain(
-      'Sarah',
-    );
+    expect(
+      payload.match_teams[0].match_players.map((player: { player: { name: string } }) => player.player.name),
+    ).toContain('Sarah');
 
     // The modest metadata a practice honestly has, and nothing pretending to be an assignment.
-    expect(payload._qbsheet_source).toMatchObject({ producer: 'QBSheet', tournamentName: 'Practice', roundNumber: 1 });
+    expect(payload._qbsheet_source).toMatchObject({
+      producer: 'QBSheet',
+      tournamentName: 'Practice',
+      roundNumber: 1,
+    });
     expect(payload._qbsheet_source.scheduledMatchId).toBeUndefined();
     expect(payload._qbsheet_source.tournamentId).toBeUndefined();
   });
@@ -610,8 +614,7 @@ describe('the QBJ a practice produces', () => {
     const tournament = objects.find((entry) => entry.type === 'Tournament');
     expect(tournament?.name).toBe('Practice');
     const rules = objects.find((entry) => entry.type === 'ScoringRules') as
-      | { answer_types: { value: number }[]; maximum_players_per_team: number }
-      | undefined;
+      { answer_types: { value: number }[]; maximum_players_per_team: number } | undefined;
     expect(rules?.answer_types.map((type) => type.value)).toEqual([15, 10, -5]);
     expect(objects.filter((entry) => entry.type === 'Team').map((entry) => entry.name)).toEqual([
       'Ninety Six',

@@ -68,7 +68,9 @@ function scheduled(afterTossups: number[], overrides: Partial<IRoomProcedure> = 
 }
 
 function deadTossups(count: number, from = 1): ScoreEvent[] {
-  return Array.from({ length: count }, (_, index) => event({ type: 'tossup-dead', questionNumber: from + index }));
+  return Array.from({ length: count }, (_, index) =>
+    event({ type: 'tossup-dead', questionNumber: from + index }),
+  );
 }
 
 /** Whether the room could open a break here, asked the way the scorer and the guard both ask it. */
@@ -183,7 +185,12 @@ describe('reading a schedule of breaks', () => {
 
   test('a version 1 or 2 procedure still reads, and gains no breaks it did not state', () => {
     for (const version of [1, 2]) {
-      const procedure = readRoomProcedure({ version, halves: true, halfLengthMinutes: 10, timeoutsPerTeam: 1 });
+      const procedure = readRoomProcedure({
+        version,
+        halves: true,
+        halfLengthMinutes: 10,
+        timeoutsPerTeam: 1,
+      });
 
       expect(procedure.version).toBe(roomProcedureVersion);
       expect(procedure.breaks).toBeUndefined();
@@ -192,9 +199,9 @@ describe('reading a schedule of breaks', () => {
   });
 
   test('a procedure from a later version is not interpreted at all', () => {
-    expect(readRoomProcedure({ version: roomProcedureVersion + 1, halves: true, breaks: [{ afterTossup: 5 }] })).toEqual(
-      defaultRoomProcedure(),
-    );
+    expect(
+      readRoomProcedure({ version: roomProcedureVersion + 1, halves: true, breaks: [{ afterTossup: 5 }] }),
+    ).toEqual(defaultRoomProcedure());
   });
 });
 
@@ -233,7 +240,9 @@ describe('which break the room is at', () => {
   });
 
   test('a break is named by its label, or numbered by its place in the schedule', () => {
-    const named = scheduled([5, 10], { breaks: [{ afterTossup: 5, label: 'End of set 1' }, { afterTossup: 10 }] });
+    const named = scheduled([5, 10], {
+      breaks: [{ afterTossup: 5, label: 'End of set 1' }, { afterTossup: 10 }],
+    });
 
     expect(roomBreakLabel(named, roomBreakTaken(named, 1))).toBe('End of set 1');
     expect(roomBreakLabel(named, roomBreakTaken(named, 2))).toBe('Break 2');
@@ -281,7 +290,9 @@ describe('a scheduled room may only stop where it was told to', () => {
 
     const verdict = breakVerdict(scheduled([5]), events);
     expect(verdict.ok).toBe(false);
-    expect(verdict.ok === false && verdict.reason).toBe('This room has taken every break its procedure allows.');
+    expect(verdict.ok === false && verdict.reason).toBe(
+      'This room has taken every break its procedure allows.',
+    );
   });
 
   test('an unscheduled room keeps the moderator-chosen break it has always had', () => {
@@ -339,7 +350,10 @@ describe('a scheduled room may only stop where it was told to', () => {
     const resumed = [...broke, event({ type: 'half-resume', questionNumber: 12 })];
     const afterResume = deriveGame(format, setup, resumed);
     // The break after tossup 10 was never taken, so it is owed the moment play resumes.
-    expect(roomBreakDue(named, afterResume.halfBreaks, 12)).toEqual({ afterTossup: 10, label: 'End of set 2' });
+    expect(roomBreakDue(named, afterResume.halfBreaks, 12)).toEqual({
+      afterTossup: 10,
+      label: 'End of set 2',
+    });
     expect(breakVerdict(named, resumed).ok).toBe(true);
 
     const second = [...resumed, event({ type: 'half-break', questionNumber: 12, lastQuestion: 12 })];
@@ -369,11 +383,15 @@ describe('breaks are what the restrictive substitution policy means', () => {
   test('the same substitution at a scheduled break is allowed', () => {
     const events = [...deadTossups(5), event({ type: 'half-break', questionNumber: 5, lastQuestion: 5 })];
 
-    expect(canApplyScoreEvent({ format, setup, procedure: restrictive }, events, substitution(6)).ok).toBe(true);
+    expect(canApplyScoreEvent({ format, setup, procedure: restrictive }, events, substitution(6)).ok).toBe(
+      true,
+    );
   });
 
   test('the phrase every surface uses says a break when there is no schedule to name', () => {
-    expect(substitutionOpportunityPhrase(undefined)).toBe('at a break, at a timeout, or at a phase checkpoint');
+    expect(substitutionOpportunityPhrase(undefined)).toBe(
+      'at a break, at a timeout, or at a phase checkpoint',
+    );
     expect(substitutionOpportunityPhrase(scheduled([10]))).toBe(
       'after tossup 10, at a timeout, or at a phase checkpoint',
     );

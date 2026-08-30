@@ -10,12 +10,7 @@ import deriveGame, {
   ScoringPhase,
 } from '../src/scoring/deriveGame';
 import { IRoomProcedure } from '../src/scoring/RoomProcedure';
-import {
-  bonusEventPoints,
-  IBonusPartResult,
-  otherTeam,
-  ScoreEvent,
-} from '../src/scoring/ScoreEvents';
+import { bonusEventPoints, IBonusPartResult, otherTeam, ScoreEvent } from '../src/scoring/ScoreEvents';
 import {
   editableQuestionFromEvents,
   eventsFromEditableQuestion,
@@ -88,19 +83,20 @@ function withRegulationLength(format: IScorekeeperFormat, tossupCount: number): 
   };
 }
 
-function totalBonusEvents(format: IScorekeeperFormat, questionNumber: number, team: 'left' | 'right'): ScoreEvent[] {
+function totalBonusEvents(
+  format: IScorekeeperFormat,
+  questionNumber: number,
+  team: 'left' | 'right',
+): ScoreEvent[] {
   const regular = regularBonusTotals(format.bonus);
   const step = Math.max(1, format.bonus.divisor);
-  const controlledOptions = regular ?? Array.from({ length: Math.floor(format.bonus.maximumScore / step) + 1 }, (_, i) => i * step);
+  const controlledOptions =
+    regular ?? Array.from({ length: Math.floor(format.bonus.maximumScore / step) + 1 }, (_, i) => i * step);
   const candidates: ScoreEvent[] = [];
   for (const controlledPoints of controlledOptions) {
-    const bouncebacks = format.bonus.bounceBack
-      ? bouncebackOptions(format.bonus, controlledPoints)
-      : [0];
+    const bouncebacks = format.bonus.bounceBack ? bouncebackOptions(format.bonus, controlledPoints) : [0];
     for (const bouncebackPoints of bouncebacks) {
-      candidates.push(
-        nextEvent({ type: 'bonus', questionNumber, team, controlledPoints, bouncebackPoints }),
-      );
+      candidates.push(nextEvent({ type: 'bonus', questionNumber, team, controlledPoints, bouncebackPoints }));
     }
   }
   return candidates;
@@ -128,7 +124,11 @@ function partOutcomes(format: IScorekeeperFormat): IBonusPartResult[][] {
   return combinations;
 }
 
-function bonusEvents(format: IScorekeeperFormat, questionNumber: number, team: 'left' | 'right'): ScoreEvent[] {
+function bonusEvents(
+  format: IScorekeeperFormat,
+  questionNumber: number,
+  team: 'left' | 'right',
+): ScoreEvent[] {
   return totalBonusEvents(format, questionNumber, team).concat(
     partOutcomes(format).map((parts) => nextEvent({ type: 'bonus', questionNumber, team, parts })),
   );
@@ -253,7 +253,10 @@ function questionSnapshot(format: IScorekeeperFormat, events: ScoreEvent[]) {
   };
 }
 
-function normalizedTossupCandidates(format: IScorekeeperFormat, game: ReturnType<typeof deriveGame>): ScoreEvent[] {
+function normalizedTossupCandidates(
+  format: IScorekeeperFormat,
+  game: ReturnType<typeof deriveGame>,
+): ScoreEvent[] {
   if (game.phase.kind !== 'tossup') return [];
   const positive = format.answerTypes.find((answerType) => answerType.value > 0);
   const negative = format.answerTypes.find((answerType) => answerType.isNeg);
@@ -467,7 +470,9 @@ function legalHistoryInvariants(
     expect(Number.isFinite(team.points)).toBe(true);
     expect(new Set(team.activePlayers).size).toBe(team.activePlayers.length);
     expect(team.activePlayers.length).toBeLessThanOrEqual(format.players.maximumActive);
-    expect(team.activePlayers.every((name) => team.players.some((player) => player.name === name))).toBe(true);
+    expect(team.activePlayers.every((name) => team.players.some((player) => player.name === name))).toBe(
+      true,
+    );
 
     for (const player of team.players) {
       const calculatedPoints = Array.from(player.answerCounts.entries()).reduce((sum, [index, count]) => {
@@ -484,13 +489,17 @@ function legalHistoryInvariants(
   }
 
   for (const question of game.questions) {
-    const attempts = question.buzzes.map((buzz) => buzz.team).concat(question.noPenalty.map((attempt) => attempt.team));
+    const attempts = question.buzzes
+      .map((buzz) => buzz.team)
+      .concat(question.noPenalty.map((attempt) => attempt.team));
     expect(new Set(attempts).size).toBe(attempts.length);
     expect(Object.values(question.scoreAfter).every(Number.isFinite)).toBe(true);
     for (const side of ['left', 'right'] as const) {
       expect(question.activePlayers[side].length).toBeLessThanOrEqual(format.players.maximumActive);
       expect(
-        question.activePlayers[side].every((name) => game[side].players.some((player) => player.name === name)),
+        question.activePlayers[side].every((name) =>
+          game[side].players.some((player) => player.name === name),
+        ),
       ).toBe(true);
     }
     const conversion = question.buzzes.find((buzz) => buzz.answerType.value > 0);
@@ -563,7 +572,12 @@ function stateMachineActions(
     (_, index) => availablePlayers[(lineupOffset + index) % availablePlayers.length],
   );
   const interruptions: ScoreEvent[] = [
-    nextEvent({ type: 'note', questionNumber: attachment, text: `Seeded room note ${step}`, flagged: step % 7 === 0 }),
+    nextEvent({
+      type: 'note',
+      questionNumber: attachment,
+      text: `Seeded room note ${step}`,
+      flagged: step % 7 === 0,
+    }),
     nextEvent({
       type: 'protest',
       questionNumber: attachment,
@@ -617,7 +631,12 @@ function stateMachineActions(
   }
   if (format.lightning.enabled) {
     interruptions.push(
-      nextEvent({ type: 'lightning', questionNumber: attachment, team: side, points: random() < 0.5 ? 0 : 20 }),
+      nextEvent({
+        type: 'lightning',
+        questionNumber: attachment,
+        team: side,
+        points: random() < 0.5 ? 0 : 20,
+      }),
     );
   }
   if (format.regulation.timed && !game.regulationComplete) {
@@ -694,161 +713,173 @@ describe('bounded exhaustive scoring state space', () => {
     }
   });
 
-  test('composes every normalized regulation, overtime, and sudden-death path', () => {
-    const format = compactFormat('transition matrix', CommonRuleSets.Acf, (rules) => {
-      rules.setUseBonuses(false);
-      rules.minimumOvertimeQuestionCount = 2;
-    });
-    const context = { format, setup };
-    const phases = new Set<string>();
-    let completed = 0;
-    let boundedTies = 0;
-    let visited = 0;
+  test(
+    'composes every normalized regulation, overtime, and sudden-death path',
+    () => {
+      const format = compactFormat('transition matrix', CommonRuleSets.Acf, (rules) => {
+        rules.setUseBonuses(false);
+        rules.minimumOvertimeQuestionCount = 2;
+      });
+      const context = { format, setup };
+      const phases = new Set<string>();
+      let completed = 0;
+      let boundedTies = 0;
+      let visited = 0;
 
-    const phaseKey = (phase: ScoringPhase) =>
-      phase.kind === 'checkpoint' ? `${phase.kind}:${phase.checkpoint}` : phase.kind === 'complete' ? `${phase.kind}:${phase.reason}` : phase.kind;
-
-    const visit = (events: ScoreEvent[]) => {
-      visited += 1;
-      const game = deriveGame(format, setup, events);
-      phases.add(phaseKey(game.phase));
-      expect(game.integrityProblems).toEqual([]);
-      expect(game.personnelProblems).toEqual([]);
-      expect({ left: game.left.points, right: game.right.points }).toEqual(expectedPoints(format, events));
-
-      if (game.phase.kind === 'complete') {
-        completed += 1;
-        expect(validateScoresheet(format, setup, events).blockers).toEqual([]);
-        return;
-      }
-      if (game.phase.kind === 'tossup' && game.phase.questionNumber > 5) {
-        boundedTies += 1;
-        return;
-      }
-
-      let candidates: ScoreEvent[] = [];
-      if (game.phase.kind === 'checkpoint') {
-        candidates = [
-          nextEvent({
-            type: game.phase.checkpoint === 'overtime' ? 'begin-overtime' : 'begin-sudden-death',
-            questionNumber: Math.max(1, game.phase.afterQuestion),
-          }),
-        ];
-      } else if (game.phase.kind === 'tossup') {
-        candidates = normalizedTossupCandidates(format, game);
-      }
-
-      let accepted = 0;
-      for (const candidate of candidates) {
-        const result = applyScoreEvents(context, events, [candidate]);
-        if (!result.ok) continue;
-        accepted += 1;
-        visit(result.events);
-      }
-      if (accepted === 0) throw new Error(`Transition matrix got stuck at ${JSON.stringify(game.phase)}.`);
-    };
-
-    visit([]);
-    expect(visited).toBeGreaterThan(1_000);
-    expect(completed).toBeGreaterThan(0);
-    expect(boundedTies).toBeGreaterThan(0);
-    expect(phases).toEqual(
-      new Set([
-        'tossup',
-        'checkpoint:overtime',
-        'checkpoint:sudden-death',
-        'complete:regulation',
-        'complete:overtime',
-      ]),
-    );
-  }, exhaustiveTraversalTimeoutMs);
-
-  test('composes every normalized timed-regulation stopping point and its overtime paths', () => {
-    const untimed = compactFormat('timed transition matrix', CommonRuleSets.Acf, (rules) => {
-      rules.setUseBonuses(false);
-      rules.minimumOvertimeQuestionCount = 1;
-    });
-    const format: IScorekeeperFormat = {
-      ...untimed,
-      regulation: { ...untimed.regulation, timed: true },
-    };
-    const context = { format, setup };
-    const phases = new Set<string>();
-    const regulationLengths = new Set<number>();
-    let completed = 0;
-    let boundedTies = 0;
-
-    const visit = (events: ScoreEvent[]) => {
-      const game = deriveGame(format, setup, events);
-      const phase = game.phase;
-      phases.add(
+      const phaseKey = (phase: ScoringPhase) =>
         phase.kind === 'checkpoint'
           ? `${phase.kind}:${phase.checkpoint}`
           : phase.kind === 'complete'
             ? `${phase.kind}:${phase.reason}`
-            : phase.kind,
-      );
-      expect(game.integrityProblems).toEqual([]);
-      expect(game.personnelProblems).toEqual([]);
-      expect({ left: game.left.points, right: game.right.points }).toEqual(expectedPoints(format, events));
+            : phase.kind;
 
-      if (phase.kind === 'complete') {
-        completed += 1;
-        regulationLengths.add(game.questions.filter((question) => question.period === 'regulation').length);
-        expect(validateScoresheet(format, setup, events).blockers).toEqual([]);
-        return;
-      }
-      if (phase.kind === 'tossup' && phase.period === 'overtime' && phase.questionNumber > 4) {
-        boundedTies += 1;
-        return;
-      }
+      const visit = (events: ScoreEvent[]) => {
+        visited += 1;
+        const game = deriveGame(format, setup, events);
+        phases.add(phaseKey(game.phase));
+        expect(game.integrityProblems).toEqual([]);
+        expect(game.personnelProblems).toEqual([]);
+        expect({ left: game.left.points, right: game.right.points }).toEqual(expectedPoints(format, events));
 
-      let candidates: ScoreEvent[] = [];
-      if (phase.kind === 'checkpoint') {
-        candidates = [
-          nextEvent({
-            type: phase.checkpoint === 'overtime' ? 'begin-overtime' : 'begin-sudden-death',
-            questionNumber: Math.max(1, phase.afterQuestion),
-          }),
-        ];
-      } else if (phase.kind === 'tossup') {
-        if (phase.period === 'regulation') {
-          const lastRegulationQuestion = game.questions.at(-1)?.questionNumber ?? 0;
-          candidates.push(
+        if (game.phase.kind === 'complete') {
+          completed += 1;
+          expect(validateScoresheet(format, setup, events).blockers).toEqual([]);
+          return;
+        }
+        if (game.phase.kind === 'tossup' && game.phase.questionNumber > 5) {
+          boundedTies += 1;
+          return;
+        }
+
+        let candidates: ScoreEvent[] = [];
+        if (game.phase.kind === 'checkpoint') {
+          candidates = [
             nextEvent({
-              type: 'end-regulation',
-              questionNumber: phase.questionNumber,
-              lastRegulationQuestion,
+              type: game.phase.checkpoint === 'overtime' ? 'begin-overtime' : 'begin-sudden-death',
+              questionNumber: Math.max(1, game.phase.afterQuestion),
             }),
-          );
-          if (phase.questionNumber <= 2) candidates.push(...normalizedTossupCandidates(format, game));
-        } else candidates = normalizedTossupCandidates(format, game);
-      }
+          ];
+        } else if (game.phase.kind === 'tossup') {
+          candidates = normalizedTossupCandidates(format, game);
+        }
 
-      let accepted = 0;
-      for (const candidate of candidates) {
-        const result = applyScoreEvents(context, events, [candidate]);
-        if (!result.ok) continue;
-        accepted += 1;
-        visit(result.events);
-      }
-      if (accepted === 0) throw new Error(`Timed transition matrix got stuck at ${JSON.stringify(phase)}.`);
-    };
+        let accepted = 0;
+        for (const candidate of candidates) {
+          const result = applyScoreEvents(context, events, [candidate]);
+          if (!result.ok) continue;
+          accepted += 1;
+          visit(result.events);
+        }
+        if (accepted === 0) throw new Error(`Transition matrix got stuck at ${JSON.stringify(game.phase)}.`);
+      };
 
-    visit([]);
-    expect(completed).toBeGreaterThan(0);
-    expect(boundedTies).toBeGreaterThan(0);
-    expect(regulationLengths).toEqual(new Set([0, 1, 2]));
-    expect(phases).toEqual(
-      new Set([
-        'tossup',
-        'checkpoint:overtime',
-        'checkpoint:sudden-death',
-        'complete:regulation',
-        'complete:overtime',
-      ]),
-    );
-  }, exhaustiveTraversalTimeoutMs);
+      visit([]);
+      expect(visited).toBeGreaterThan(1_000);
+      expect(completed).toBeGreaterThan(0);
+      expect(boundedTies).toBeGreaterThan(0);
+      expect(phases).toEqual(
+        new Set([
+          'tossup',
+          'checkpoint:overtime',
+          'checkpoint:sudden-death',
+          'complete:regulation',
+          'complete:overtime',
+        ]),
+      );
+    },
+    exhaustiveTraversalTimeoutMs,
+  );
+
+  test(
+    'composes every normalized timed-regulation stopping point and its overtime paths',
+    () => {
+      const untimed = compactFormat('timed transition matrix', CommonRuleSets.Acf, (rules) => {
+        rules.setUseBonuses(false);
+        rules.minimumOvertimeQuestionCount = 1;
+      });
+      const format: IScorekeeperFormat = {
+        ...untimed,
+        regulation: { ...untimed.regulation, timed: true },
+      };
+      const context = { format, setup };
+      const phases = new Set<string>();
+      const regulationLengths = new Set<number>();
+      let completed = 0;
+      let boundedTies = 0;
+
+      const visit = (events: ScoreEvent[]) => {
+        const game = deriveGame(format, setup, events);
+        const phase = game.phase;
+        phases.add(
+          phase.kind === 'checkpoint'
+            ? `${phase.kind}:${phase.checkpoint}`
+            : phase.kind === 'complete'
+              ? `${phase.kind}:${phase.reason}`
+              : phase.kind,
+        );
+        expect(game.integrityProblems).toEqual([]);
+        expect(game.personnelProblems).toEqual([]);
+        expect({ left: game.left.points, right: game.right.points }).toEqual(expectedPoints(format, events));
+
+        if (phase.kind === 'complete') {
+          completed += 1;
+          regulationLengths.add(game.questions.filter((question) => question.period === 'regulation').length);
+          expect(validateScoresheet(format, setup, events).blockers).toEqual([]);
+          return;
+        }
+        if (phase.kind === 'tossup' && phase.period === 'overtime' && phase.questionNumber > 4) {
+          boundedTies += 1;
+          return;
+        }
+
+        let candidates: ScoreEvent[] = [];
+        if (phase.kind === 'checkpoint') {
+          candidates = [
+            nextEvent({
+              type: phase.checkpoint === 'overtime' ? 'begin-overtime' : 'begin-sudden-death',
+              questionNumber: Math.max(1, phase.afterQuestion),
+            }),
+          ];
+        } else if (phase.kind === 'tossup') {
+          if (phase.period === 'regulation') {
+            const lastRegulationQuestion = game.questions.at(-1)?.questionNumber ?? 0;
+            candidates.push(
+              nextEvent({
+                type: 'end-regulation',
+                questionNumber: phase.questionNumber,
+                lastRegulationQuestion,
+              }),
+            );
+            if (phase.questionNumber <= 2) candidates.push(...normalizedTossupCandidates(format, game));
+          } else candidates = normalizedTossupCandidates(format, game);
+        }
+
+        let accepted = 0;
+        for (const candidate of candidates) {
+          const result = applyScoreEvents(context, events, [candidate]);
+          if (!result.ok) continue;
+          accepted += 1;
+          visit(result.events);
+        }
+        if (accepted === 0) throw new Error(`Timed transition matrix got stuck at ${JSON.stringify(phase)}.`);
+      };
+
+      visit([]);
+      expect(completed).toBeGreaterThan(0);
+      expect(boundedTies).toBeGreaterThan(0);
+      expect(regulationLengths).toEqual(new Set([0, 1, 2]));
+      expect(phases).toEqual(
+        new Set([
+          'tossup',
+          'checkpoint:overtime',
+          'checkpoint:sudden-death',
+          'complete:regulation',
+          'complete:overtime',
+        ]),
+      );
+    },
+    exhaustiveTraversalTimeoutMs,
+  );
 });
 
 describe('seeded state-machine stress coverage', () => {
@@ -878,226 +909,236 @@ describe('seeded state-machine stress coverage', () => {
       rules.lightningCountPerTeam = 10;
     }),
   ];
-  const deepFormats = ordinaryFormats.concat([
-    compactFormat('seeded no bonuses', CommonRuleSets.Acf, (rules) => rules.setUseBonuses(false)),
-    compactFormat('seeded regular bouncebacks', CommonRuleSets.AcfPowers, (rules) => {
-      rules.bonusesBounceBack = true;
-      rules.minimumPartsPerBonus = 2;
-      rules.maximumPartsPerBonus = 2;
-      rules.maximumBonusScore = 20;
-    }),
-    compactFormat('seeded irregular custom values', CommonRuleSets.Acf, (rules) => {
-      rules.answerTypes = [new AnswerType(7), new AnswerType(-3)];
-      rules.pointsPerBonusPart = undefined;
-      rules.minimumPartsPerBonus = 1;
-      rules.maximumPartsPerBonus = 4;
-      rules.maximumBonusScore = 20;
-      rules.bonusDivisor = 5;
-    }),
-  ]).map((format) => withRegulationLength(format, 12));
+  const deepFormats = ordinaryFormats
+    .concat([
+      compactFormat('seeded no bonuses', CommonRuleSets.Acf, (rules) => rules.setUseBonuses(false)),
+      compactFormat('seeded regular bouncebacks', CommonRuleSets.AcfPowers, (rules) => {
+        rules.bonusesBounceBack = true;
+        rules.minimumPartsPerBonus = 2;
+        rules.maximumPartsPerBonus = 2;
+        rules.maximumBonusScore = 20;
+      }),
+      compactFormat('seeded irregular custom values', CommonRuleSets.Acf, (rules) => {
+        rules.answerTypes = [new AnswerType(7), new AnswerType(-3)];
+        rules.pointsPerBonusPart = undefined;
+        rules.minimumPartsPerBonus = 1;
+        rules.maximumPartsPerBonus = 4;
+        rules.maximumBonusScore = 20;
+        rules.bonusDivisor = 5;
+      }),
+    ])
+    .map((format) => withRegulationLength(format, 12));
   const formats = deepStressEnabled ? deepFormats : ordinaryFormats;
 
-  test('checks invariants after every transition in many reproducible mixed-event games', async () => {
-    const acceptedTypes = new Set<ScoreEvent['type']>();
-    const recoveredAfterTypes = new Set<ScoreEvent['type']>();
-    const recoveredPhases = new Set<string>();
-    const phaseActions = new Set<string>();
-    const formatActions = new Set<string>();
-    const adjacentActions = new Set<string>();
-    const alwaysRecoverAfter = new Set<ScoreEvent['type']>([
-      'tossup-buzz',
-      'bonus',
-      'timeout-start',
-      'half-break',
-      'substitution',
-      'question-void',
-    ]);
-    let acceptedTransitions = 0;
-    let rejectedCandidates = 0;
-    let completedGames = 0;
-    let recoveryCycles = 0;
-
-    for (let seed = 1; seed <= generatedSeedCount; seed += 1) {
-      if (deepStressEnabled && seed % 32 === 0) await yieldToTestRunner();
-      const random = seededRandom(seed);
-      const format = formats[seed % formats.length];
-      const storage = memoryStorage();
-      const gameKey = `state-space-seed-${seed}`;
-      const now = new Date('2026-08-10T12:00:00.000Z');
-      let activeSetup = gameSetup;
-      let events: ScoreEvent[] = [];
-      let previousAction: ScoreEvent['type'] | undefined;
-
-      for (let step = 0; step < generatedActionLimit; step += 1) {
-        const context: IScoreEventContext = { format, setup: activeSetup, procedure };
-        const before = deriveGame(format, activeSetup, events);
-        const beforeSemantics = gameSemantics(before);
-        if (before.phase.kind === 'complete') {
-          completedGames += 1;
-          const rejected = applyScoreEvents(context, events, [
-            nextEvent({
-              type: 'tossup-dead',
-              questionNumber: (before.questions.at(-1)?.questionNumber ?? 0) + 1,
-            }),
-          ]);
-          withReplayDiagnostics(seed, step, format, events, () => expect(rejected.ok).toBe(false));
-          break;
-        }
-
-        const actions = stateMachineActions(format, activeSetup, events, procedure, random, step);
-        const preferInterruption = actions.interruptions.length > 0 && random() < 0.35;
-        const preferred = preferInterruption ? actions.interruptions : actions.progress;
-        const fallback = preferInterruption ? actions.progress : actions.interruptions;
-        const candidates = preferred.concat(fallback);
-        const offset = candidates.length === 0 ? 0 : Math.floor(random() * candidates.length);
-        let accepted: ScoreEvent | undefined;
-
-        for (let index = 0; index < candidates.length; index += 1) {
-          const candidate = candidates[(offset + index) % candidates.length];
-          const result = applyScoreEvents(context, events, [candidate]);
-          if (!result.ok) {
-            rejectedCandidates += 1;
-            continue;
-          }
-          events = result.events;
-          accepted = candidate;
-          break;
-        }
-
-        if (!accepted) {
-          withReplayDiagnostics(seed, step, format, events, () => {
-            throw new Error(`No legal action from ${JSON.stringify(before.phase)}.`);
-          });
-          break;
-        }
-        acceptedTypes.add(accepted.type);
-        acceptedTransitions += 1;
-        const beforePhase =
-          before.phase.kind === 'checkpoint'
-            ? `${before.phase.kind}:${before.phase.checkpoint}`
-            : before.phase.kind === 'tossup'
-              ? `${before.phase.kind}:${before.phase.period}`
-              : before.phase.kind;
-        phaseActions.add(`${beforePhase} -> ${accepted.type}`);
-        formatActions.add(`${format.name} -> ${accepted.type}`);
-        if (previousAction) adjacentActions.add(`${previousAction} -> ${accepted.type}`);
-        previousAction = accepted.type;
-
-        withReplayDiagnostics(seed, step, format, events, () => {
-          legalHistoryInvariants(format, activeSetup, events, procedure);
-
-          // Removing the event just accepted must recover the exact prior semantic state.
-          expect(gameSemantics(deriveGame(format, activeSetup, events.slice(0, -1)))).toEqual(beforeSemantics);
-
-          // JSON cloning is the serialization boundary used by local recovery.
-          const clonedEvents = JSON.parse(JSON.stringify(events)) as ScoreEvent[];
-          expect(gameSemantics(deriveGame(format, activeSetup, clonedEvents))).toEqual(
-            gameSemantics(deriveGame(format, activeSetup, events)),
-          );
-
-          // Audit-only notes must not alter scoring, personnel, or game flow.
-          if ((seed + step) % 4 === 0) {
-            const game = deriveGame(format, activeSetup, events);
-            const questionNumber =
-              game.phase.kind === 'tossup' || game.phase.kind === 'bonus' || game.phase.kind === 'timeout'
-                ? game.phase.questionNumber
-                : Math.max(1, game.questions.at(-1)?.questionNumber ?? 1);
-            const withNote = events.concat({
-              id: `metamorphic-note-${seed}-${step}`,
-              type: 'note',
-              questionNumber,
-              text: 'Metamorphic note',
-            });
-            expect(gameSemanticsWithoutNotes(deriveGame(format, activeSetup, withNote))).toEqual(
-              gameSemanticsWithoutNotes(game),
-            );
-          }
-        });
-
-        const after = deriveGame(format, activeSetup, events);
-        const afterPhase =
-          after.phase.kind === 'checkpoint' ? `${after.phase.kind}:${after.phase.checkpoint}` : after.phase.kind;
-        const shouldRecover =
-          alwaysRecoverAfter.has(accepted.type) || after.phase.kind === 'checkpoint' || random() < 0.2;
-        if (shouldRecover) {
-          withReplayDiagnostics(seed, step, format, events, () => {
-            const beforeRecovery = gameSemantics(after);
-            expect(saveGame(gameKey, activeSetup, events, now, storage)).toBe(true);
-            const recovered = loadGame(gameKey, now, storage);
-            expect(recovered).not.toBeNull();
-            if (!recovered) return;
-
-            const restored = deriveGame(format, recovered.setup, recovered.events);
-            expect(gameSemantics(restored)).toEqual(beforeRecovery);
-
-            // Unique identifiers are identity for editing, not part of scoring semantics.
-            const remappedIds = recovered.events.map((event, index) => ({
-              ...event,
-              id: `remapped-${seed}-${step}-${index}`,
-            }));
-            expect(gameSemantics(deriveGame(format, recovered.setup, remappedIds))).toEqual(beforeRecovery);
-
-            // Continue the next generated action from the deserialized setup and history.
-            activeSetup = recovered.setup;
-            events = recovered.events;
-          });
-          recoveredAfterTypes.add(accepted.type);
-          recoveredPhases.add(afterPhase);
-          recoveryCycles += 1;
-        }
-      }
-    }
-
-    expect(acceptedTransitions).toBeGreaterThan(generatedSeedCount * 8);
-    expect(rejectedCandidates).toBeGreaterThan(0);
-    expect(completedGames).toBeGreaterThan(0);
-    expect(recoveryCycles).toBeGreaterThan(generatedSeedCount * 3);
-    expect(phaseActions.size).toBeGreaterThan(25);
-    expect(Array.from(acceptedTypes)).toEqual(
-      expect.arrayContaining([
-        'tossup-buzz',
-        'tossup-no-penalty',
-        'tossup-dead',
-        'bonus',
-        'substitution',
-        'timeout-start',
-        'timeout-resume',
-        'protest',
-        'question-void',
-        'adjustment',
-        'end-regulation',
-      ]),
-    );
-    expect(Array.from(recoveredAfterTypes)).toEqual(
-      expect.arrayContaining([
+  test(
+    'checks invariants after every transition in many reproducible mixed-event games',
+    async () => {
+      const acceptedTypes = new Set<ScoreEvent['type']>();
+      const recoveredAfterTypes = new Set<ScoreEvent['type']>();
+      const recoveredPhases = new Set<string>();
+      const phaseActions = new Set<string>();
+      const formatActions = new Set<string>();
+      const adjacentActions = new Set<string>();
+      const alwaysRecoverAfter = new Set<ScoreEvent['type']>([
         'tossup-buzz',
         'bonus',
         'timeout-start',
         'half-break',
         'substitution',
         'question-void',
-      ]),
-    );
-    expect(Array.from(recoveredPhases)).toEqual(
-      expect.arrayContaining(['bonus', 'timeout', 'score-check', 'checkpoint:overtime']),
-    );
-    if (deepStressEnabled) {
-      console.info(
-        [
-          'Deep state-machine coverage',
-          `seeds=${generatedSeedCount}`,
-          `actionLimit=${generatedActionLimit}`,
-          `acceptedTransitions=${acceptedTransitions}`,
-          `recoveryCycles=${recoveryCycles}`,
-          `phaseActions=${phaseActions.size}`,
-          `formatActions=${formatActions.size}`,
-          `adjacentActions=${adjacentActions.size}`,
-          '',
-          ...Array.from(phaseActions).sort(),
-        ].join('\n'),
+      ]);
+      let acceptedTransitions = 0;
+      let rejectedCandidates = 0;
+      let completedGames = 0;
+      let recoveryCycles = 0;
+
+      for (let seed = 1; seed <= generatedSeedCount; seed += 1) {
+        if (deepStressEnabled && seed % 32 === 0) await yieldToTestRunner();
+        const random = seededRandom(seed);
+        const format = formats[seed % formats.length];
+        const storage = memoryStorage();
+        const gameKey = `state-space-seed-${seed}`;
+        const now = new Date('2026-08-10T12:00:00.000Z');
+        let activeSetup = gameSetup;
+        let events: ScoreEvent[] = [];
+        let previousAction: ScoreEvent['type'] | undefined;
+
+        for (let step = 0; step < generatedActionLimit; step += 1) {
+          const context: IScoreEventContext = { format, setup: activeSetup, procedure };
+          const before = deriveGame(format, activeSetup, events);
+          const beforeSemantics = gameSemantics(before);
+          if (before.phase.kind === 'complete') {
+            completedGames += 1;
+            const rejected = applyScoreEvents(context, events, [
+              nextEvent({
+                type: 'tossup-dead',
+                questionNumber: (before.questions.at(-1)?.questionNumber ?? 0) + 1,
+              }),
+            ]);
+            withReplayDiagnostics(seed, step, format, events, () => expect(rejected.ok).toBe(false));
+            break;
+          }
+
+          const actions = stateMachineActions(format, activeSetup, events, procedure, random, step);
+          const preferInterruption = actions.interruptions.length > 0 && random() < 0.35;
+          const preferred = preferInterruption ? actions.interruptions : actions.progress;
+          const fallback = preferInterruption ? actions.progress : actions.interruptions;
+          const candidates = preferred.concat(fallback);
+          const offset = candidates.length === 0 ? 0 : Math.floor(random() * candidates.length);
+          let accepted: ScoreEvent | undefined;
+
+          for (let index = 0; index < candidates.length; index += 1) {
+            const candidate = candidates[(offset + index) % candidates.length];
+            const result = applyScoreEvents(context, events, [candidate]);
+            if (!result.ok) {
+              rejectedCandidates += 1;
+              continue;
+            }
+            events = result.events;
+            accepted = candidate;
+            break;
+          }
+
+          if (!accepted) {
+            withReplayDiagnostics(seed, step, format, events, () => {
+              throw new Error(`No legal action from ${JSON.stringify(before.phase)}.`);
+            });
+            break;
+          }
+          acceptedTypes.add(accepted.type);
+          acceptedTransitions += 1;
+          const beforePhase =
+            before.phase.kind === 'checkpoint'
+              ? `${before.phase.kind}:${before.phase.checkpoint}`
+              : before.phase.kind === 'tossup'
+                ? `${before.phase.kind}:${before.phase.period}`
+                : before.phase.kind;
+          phaseActions.add(`${beforePhase} -> ${accepted.type}`);
+          formatActions.add(`${format.name} -> ${accepted.type}`);
+          if (previousAction) adjacentActions.add(`${previousAction} -> ${accepted.type}`);
+          previousAction = accepted.type;
+
+          withReplayDiagnostics(seed, step, format, events, () => {
+            legalHistoryInvariants(format, activeSetup, events, procedure);
+
+            // Removing the event just accepted must recover the exact prior semantic state.
+            expect(gameSemantics(deriveGame(format, activeSetup, events.slice(0, -1)))).toEqual(
+              beforeSemantics,
+            );
+
+            // JSON cloning is the serialization boundary used by local recovery.
+            const clonedEvents = JSON.parse(JSON.stringify(events)) as ScoreEvent[];
+            expect(gameSemantics(deriveGame(format, activeSetup, clonedEvents))).toEqual(
+              gameSemantics(deriveGame(format, activeSetup, events)),
+            );
+
+            // Audit-only notes must not alter scoring, personnel, or game flow.
+            if ((seed + step) % 4 === 0) {
+              const game = deriveGame(format, activeSetup, events);
+              const questionNumber =
+                game.phase.kind === 'tossup' || game.phase.kind === 'bonus' || game.phase.kind === 'timeout'
+                  ? game.phase.questionNumber
+                  : Math.max(1, game.questions.at(-1)?.questionNumber ?? 1);
+              const withNote = events.concat({
+                id: `metamorphic-note-${seed}-${step}`,
+                type: 'note',
+                questionNumber,
+                text: 'Metamorphic note',
+              });
+              expect(gameSemanticsWithoutNotes(deriveGame(format, activeSetup, withNote))).toEqual(
+                gameSemanticsWithoutNotes(game),
+              );
+            }
+          });
+
+          const after = deriveGame(format, activeSetup, events);
+          const afterPhase =
+            after.phase.kind === 'checkpoint'
+              ? `${after.phase.kind}:${after.phase.checkpoint}`
+              : after.phase.kind;
+          const shouldRecover =
+            alwaysRecoverAfter.has(accepted.type) || after.phase.kind === 'checkpoint' || random() < 0.2;
+          if (shouldRecover) {
+            withReplayDiagnostics(seed, step, format, events, () => {
+              const beforeRecovery = gameSemantics(after);
+              expect(saveGame(gameKey, activeSetup, events, now, storage)).toBe(true);
+              const recovered = loadGame(gameKey, now, storage);
+              expect(recovered).not.toBeNull();
+              if (!recovered) return;
+
+              const restored = deriveGame(format, recovered.setup, recovered.events);
+              expect(gameSemantics(restored)).toEqual(beforeRecovery);
+
+              // Unique identifiers are identity for editing, not part of scoring semantics.
+              const remappedIds = recovered.events.map((event, index) => ({
+                ...event,
+                id: `remapped-${seed}-${step}-${index}`,
+              }));
+              expect(gameSemantics(deriveGame(format, recovered.setup, remappedIds))).toEqual(beforeRecovery);
+
+              // Continue the next generated action from the deserialized setup and history.
+              activeSetup = recovered.setup;
+              events = recovered.events;
+            });
+            recoveredAfterTypes.add(accepted.type);
+            recoveredPhases.add(afterPhase);
+            recoveryCycles += 1;
+          }
+        }
+      }
+
+      expect(acceptedTransitions).toBeGreaterThan(generatedSeedCount * 8);
+      expect(rejectedCandidates).toBeGreaterThan(0);
+      expect(completedGames).toBeGreaterThan(0);
+      expect(recoveryCycles).toBeGreaterThan(generatedSeedCount * 3);
+      expect(phaseActions.size).toBeGreaterThan(25);
+      expect(Array.from(acceptedTypes)).toEqual(
+        expect.arrayContaining([
+          'tossup-buzz',
+          'tossup-no-penalty',
+          'tossup-dead',
+          'bonus',
+          'substitution',
+          'timeout-start',
+          'timeout-resume',
+          'protest',
+          'question-void',
+          'adjustment',
+          'end-regulation',
+        ]),
       );
-    }
-  }, generatedStateMachineTimeoutMs);
+      expect(Array.from(recoveredAfterTypes)).toEqual(
+        expect.arrayContaining([
+          'tossup-buzz',
+          'bonus',
+          'timeout-start',
+          'half-break',
+          'substitution',
+          'question-void',
+        ]),
+      );
+      expect(Array.from(recoveredPhases)).toEqual(
+        expect.arrayContaining(['bonus', 'timeout', 'score-check', 'checkpoint:overtime']),
+      );
+      if (deepStressEnabled) {
+        console.info(
+          [
+            'Deep state-machine coverage',
+            `seeds=${generatedSeedCount}`,
+            `actionLimit=${generatedActionLimit}`,
+            `acceptedTransitions=${acceptedTransitions}`,
+            `recoveryCycles=${recoveryCycles}`,
+            `phaseActions=${phaseActions.size}`,
+            `formatActions=${formatActions.size}`,
+            `adjacentActions=${adjacentActions.size}`,
+            '',
+            ...Array.from(phaseActions).sort(),
+          ].join('\n'),
+        );
+      }
+    },
+    generatedStateMachineTimeoutMs,
+  );
 
   test('rejects seeded malformed recovery histories without throwing or producing non-finite totals', () => {
     const format = formats[0];
@@ -1135,7 +1176,13 @@ describe('seeded state-machine stress coverage', () => {
       { type: 'bonus', id: 'bad-bonus', questionNumber: 1, team: 'left', parts: [null] },
       { type: 'substitution', id: 'bad-lineup', questionNumber: 1, team: 'left', activePlayers: [] },
       { type: 'timeout-start', id: 'bad-clock', questionNumber: 1, team: 'left', startedAt: Number.NaN },
-      { type: 'adjustment', id: 'bad-adjustment', questionNumber: 1, team: 'left', points: Number.POSITIVE_INFINITY },
+      {
+        type: 'adjustment',
+        id: 'bad-adjustment',
+        questionNumber: 1,
+        team: 'left',
+        points: Number.POSITIVE_INFINITY,
+      },
       {
         type: 'protest',
         id: 'bad-protest',
@@ -1237,7 +1284,9 @@ describe('every score event variant', () => {
       },
       'tossup-reading-resumed': {
         context: ordinaryContext,
-        before: [nextEvent({ type: 'tossup-no-penalty', questionNumber: 1, team: 'left', playerName: 'Sarah' })],
+        before: [
+          nextEvent({ type: 'tossup-no-penalty', questionNumber: 1, team: 'left', playerName: 'Sarah' }),
+        ],
         candidate: nextEvent({ type: 'tossup-reading-resumed', questionNumber: 1 }),
       },
       'tossup-readout': {
@@ -1263,7 +1312,12 @@ describe('every score event variant', () => {
       substitution: {
         context: ordinaryContext,
         before: [],
-        candidate: nextEvent({ type: 'substitution', questionNumber: 1, team: 'left', activePlayers: ['Sarah'] }),
+        candidate: nextEvent({
+          type: 'substitution',
+          questionNumber: 1,
+          team: 'left',
+          activePlayers: ['Sarah'],
+        }),
       },
       'roster-add': {
         context: ordinaryContext,
@@ -1325,7 +1379,12 @@ describe('every score event variant', () => {
       'question-void': {
         context: ordinaryContext,
         before: [firstDead],
-        candidate: nextEvent({ type: 'question-void', questionNumber: 1, scope: 'tossup', reason: 'Wrong packet' }),
+        candidate: nextEvent({
+          type: 'question-void',
+          questionNumber: 1,
+          scope: 'tossup',
+          reason: 'Wrong packet',
+        }),
       },
       'end-game-early': {
         context: ordinaryContext,
@@ -1368,8 +1427,19 @@ describe('every score event variant', () => {
       rules.lightningCountPerTeam = 10;
     });
     const samples: Record<ScoreEvent['type'], EventInput> = {
-      'tossup-buzz': { type: 'tossup-buzz', questionNumber: 1, team: 'left', playerName: 'Sarah', answerTypeIndex: 0 },
-      'tossup-no-penalty': { type: 'tossup-no-penalty', questionNumber: 1, team: 'left', playerName: 'Sarah' },
+      'tossup-buzz': {
+        type: 'tossup-buzz',
+        questionNumber: 1,
+        team: 'left',
+        playerName: 'Sarah',
+        answerTypeIndex: 0,
+      },
+      'tossup-no-penalty': {
+        type: 'tossup-no-penalty',
+        questionNumber: 1,
+        team: 'left',
+        playerName: 'Sarah',
+      },
       'tossup-reading-resumed': { type: 'tossup-reading-resumed', questionNumber: 1 },
       'tossup-readout': { type: 'tossup-readout', questionNumber: 1 },
       'tossup-dead': { type: 'tossup-dead', questionNumber: 1 },
@@ -1394,8 +1464,19 @@ describe('every score event variant', () => {
         status: 'open',
       },
       'question-void': { type: 'question-void', questionNumber: 1, scope: 'tossup', reason: 'Wrong packet' },
-      'end-game-early': { type: 'end-game-early', questionNumber: 1, reason: 'Director stopped play', tossupsRead: 0 },
-      adjustment: { type: 'adjustment', questionNumber: 1, team: 'left', points: 5, reason: 'Control ruling' },
+      'end-game-early': {
+        type: 'end-game-early',
+        questionNumber: 1,
+        reason: 'Director stopped play',
+        tossupsRead: 0,
+      },
+      adjustment: {
+        type: 'adjustment',
+        questionNumber: 1,
+        team: 'left',
+        points: 5,
+        reason: 'Control ruling',
+      },
       forfeit: { type: 'forfeit', questionNumber: 1, teams: ['right'] },
       note: { type: 'note', questionNumber: 1, text: 'Room note', flagged: true },
     };

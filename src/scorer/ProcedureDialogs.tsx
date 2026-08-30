@@ -7,11 +7,7 @@
  * tap on it. They live behind the Game menu for the same reason forfeits do.
  */
 import { useState } from 'react';
-import {
-  ControlRequestState,
-  HelpClearResult,
-  HelpRequestResult,
-} from '../app/HelpRequests';
+import { ControlRequestState, HelpClearResult, HelpRequestResult } from '../app/HelpRequests';
 import { LeftOrRight } from '../scoring/types';
 import { IDerivedGame, IDerivedProtest } from '../scoring/deriveGame';
 import { ProtestStatus, ProtestSubject } from '../scoring/ScoreEvents';
@@ -164,7 +160,11 @@ export function ProtestDialog(props: {
         <h3 className="scorer-dialog-subhead">New protest on question {questionNumber}</h3>
         <label htmlFor="scorer-protest-team">
           Protesting team
-          <select id="scorer-protest-team" value={side} onChange={(e) => setSide(e.target.value as LeftOrRight)}>
+          <select
+            id="scorer-protest-team"
+            value={side}
+            onChange={(e) => setSide(e.target.value as LeftOrRight)}
+          >
             <option value="left">{game.left.name}</option>
             <option value="right">{game.right.name}</option>
           </select>
@@ -280,8 +280,9 @@ export function ReplaceQuestionDialog(props: {
   return (
     <ScorerDialog title={`Replace question ${questionNumber}`} onClose={onClose}>
       <p className="scorer-dialog-note">
-        For a question that cannot stand &mdash; read from the wrong packet, spoiled, or already heard. What was
-        recorded on it is removed and the same cycle is played again, so nobody is charged the tossup twice.
+        For a question that cannot stand &mdash; read from the wrong packet, spoiled, or already heard. What
+        was recorded on it is removed and the same cycle is played again, so nobody is charged the tossup
+        twice.
       </p>
       {/*
         The dialog opens on whichever of these is already selected. Naming the decision is the whole
@@ -333,7 +334,9 @@ export function ReplaceQuestionDialog(props: {
             onChange={(e) => setReason(e.target.value)}
           />
         </label>
-        <p className="scorer-dialog-note">Required. It is recorded on the result next to the replaced question.</p>
+        <p className="scorer-dialog-note">
+          Required. It is recorded on the result next to the replaced question.
+        </p>
         <button type="submit" className="scorer-danger" disabled={reason.trim() === ''}>
           Replace {scope === 'bonus' ? 'the bonus' : `question ${questionNumber}`}
         </button>
@@ -363,8 +366,8 @@ export function EndGameEarlyDialog(props: {
   return (
     <ScorerDialog title="End game early" onClose={onClose}>
       <p className="scorer-dialog-note">
-        The game ends now with {played} tossup{played === 1 ? '' : 's'} heard, out of {regulationTossupCount} in a full
-        round. The score stands as it is.
+        The game ends now with {played} tossup{played === 1 ? '' : 's'} heard, out of {regulationTossupCount}{' '}
+        in a full round. The score stands as it is.
       </p>
       <p className="scorer-complete-score">
         <span>
@@ -454,8 +457,8 @@ export function GameDetailsDialog(props: {
           />
         </label>
         <p className="scorer-dialog-note">
-          Scorekeeper: {scorekeeper || 'not signed in on this device'}. Both are recorded on the result for later
-          auditing and neither affects scoring.
+          Scorekeeper: {scorekeeper || 'not signed in on this device'}. Both are recorded on the result for
+          later auditing and neither affects scoring.
         </p>
         <button type="submit" className="scorer-choice">
           Save

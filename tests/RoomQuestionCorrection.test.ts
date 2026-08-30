@@ -31,7 +31,13 @@ describe('question-level corrections', () => {
   test('round-trips a complete question and keeps non-scoring audit events', () => {
     const format = formatFor();
     const events: ScoreEvent[] = [
-      event({ type: 'tossup-buzz', questionNumber: 1, team: 'left', playerName: 'Sarah', answerTypeIndex: 1 }),
+      event({
+        type: 'tossup-buzz',
+        questionNumber: 1,
+        team: 'left',
+        playerName: 'Sarah',
+        answerTypeIndex: 1,
+      }),
       event({ type: 'bonus', questionNumber: 1, team: 'left', controlledPoints: 20 }),
       event({ type: 'note', questionNumber: 1, text: 'Reader checked the ruling.', flagged: true }),
       event({
@@ -88,11 +94,23 @@ describe('question-level corrections', () => {
   test('correcting a replaced question keeps the new cycle after its question-void', () => {
     const format = formatFor();
     const events: ScoreEvent[] = [
-      event({ type: 'tossup-buzz', questionNumber: 7, team: 'left', playerName: 'Sarah', answerTypeIndex: 1 }),
+      event({
+        type: 'tossup-buzz',
+        questionNumber: 7,
+        team: 'left',
+        playerName: 'Sarah',
+        answerTypeIndex: 1,
+      }),
       event({ type: 'bonus', questionNumber: 7, team: 'left', controlledPoints: 20 }),
       event({ type: 'note', questionNumber: 7, text: 'Replacement approved.' }),
       event({ type: 'question-void', questionNumber: 7, scope: 'tossup', reason: 'Bad packet' }),
-      event({ type: 'tossup-buzz', questionNumber: 7, team: 'left', playerName: 'Sarah', answerTypeIndex: 1 }),
+      event({
+        type: 'tossup-buzz',
+        questionNumber: 7,
+        team: 'left',
+        playerName: 'Sarah',
+        answerTypeIndex: 1,
+      }),
       event({ type: 'bonus', questionNumber: 7, team: 'left', controlledPoints: 10 }),
       event({
         type: 'protest',
@@ -105,7 +123,10 @@ describe('question-level corrections', () => {
     ];
     const model = editableQuestionFromEvents(events, 7);
     const replacement = eventsFromEditableQuestion(
-      { ...model, bonus: model.bonus ? { ...model.bonus, controlledPoints: 20, bouncebackPoints: 0 } : undefined },
+      {
+        ...model,
+        bonus: model.bonus ? { ...model.bonus, controlledPoints: 20, bouncebackPoints: 0 } : undefined,
+      },
       (() => {
         let id = 0;
         return () => `corrected-${++id}`;
@@ -114,7 +135,8 @@ describe('question-level corrections', () => {
     const next = replaceQuestionEvents(events, 7, replacement);
     const voidIndex = next.findIndex((candidate) => candidate.type === 'question-void');
     const correctedIndex = next.findIndex(
-      (candidate, index) => index > voidIndex && (candidate.type === 'tossup-buzz' || candidate.type === 'tossup-dead'),
+      (candidate, index) =>
+        index > voidIndex && (candidate.type === 'tossup-buzz' || candidate.type === 'tossup-dead'),
     );
 
     expect(correctedIndex).toBeGreaterThan(voidIndex);
@@ -123,7 +145,9 @@ describe('question-level corrections', () => {
     const correctedGame = deriveGame(format, setup, next);
     expect(correctedGame.questions.find((question) => question.questionNumber === 7)?.replaced).toBe(true);
     expect(correctedGame.left.points).toBe(30);
-    const qbj = toQbjMatch(format, correctedGame) as { match_questions?: { tossup_question?: { type: string } }[] };
+    const qbj = toQbjMatch(format, correctedGame) as {
+      match_questions?: { tossup_question?: { type: string } }[];
+    };
     expect(qbj.match_questions?.find((question) => question.tossup_question)?.tossup_question).toEqual({
       type: 'replacement',
     });
@@ -143,18 +167,29 @@ describe('question-level corrections', () => {
     };
 
     expect(validateEditableQuestion(format, game, model)).toEqual([]);
-    expect(eventsFromEditableQuestion(model, () => 'replacement-dead').map((candidate) => candidate.type)).toEqual([
-      'tossup-no-penalty',
-      'tossup-dead',
-    ]);
+    expect(
+      eventsFromEditableQuestion(model, () => 'replacement-dead').map((candidate) => candidate.type),
+    ).toEqual(['tossup-no-penalty', 'tossup-dead']);
   });
 
   test('correction round-trips an explicit resume and readout state', () => {
     const format = formatFor();
     const events: ScoreEvent[] = [
-      event({ type: 'tossup-buzz', questionNumber: 1, team: 'left', playerName: 'Sarah', answerTypeIndex: 2 }),
+      event({
+        type: 'tossup-buzz',
+        questionNumber: 1,
+        team: 'left',
+        playerName: 'Sarah',
+        answerTypeIndex: 2,
+      }),
       event({ type: 'tossup-reading-resumed', questionNumber: 1 }),
-      event({ type: 'tossup-buzz', questionNumber: 1, team: 'right', playerName: 'Emma', answerTypeIndex: 1 }),
+      event({
+        type: 'tossup-buzz',
+        questionNumber: 1,
+        team: 'right',
+        playerName: 'Emma',
+        answerTypeIndex: 1,
+      }),
     ];
     const model = editableQuestionFromEvents(events, 1);
 
@@ -162,36 +197,46 @@ describe('question-level corrections', () => {
     expect(model.readout).toBe(false);
     expect(validateEditableQuestion(format, deriveGame(format, setup, events), model)).toEqual([]);
 
-    const replacement = eventsFromEditableQuestion(model, (() => {
-      let next = 0;
-      return () => `resume-correction-${++next}`;
-    })());
+    const replacement = eventsFromEditableQuestion(
+      model,
+      (() => {
+        let next = 0;
+        return () => `resume-correction-${++next}`;
+      })(),
+    );
     expect(replacement.map((candidate) => candidate.type)).toEqual([
       'tossup-buzz',
       'tossup-reading-resumed',
       'tossup-buzz',
     ]);
-    expect(validateEditableQuestion(format, deriveGame(format, setup, replacement), editableQuestionFromEvents(replacement, 1))).toEqual(
-      [],
-    );
+    expect(
+      validateEditableQuestion(
+        format,
+        deriveGame(format, setup, replacement),
+        editableQuestionFromEvents(replacement, 1),
+      ),
+    ).toEqual([]);
 
     const readoutModel = {
       ...model,
-      attempts: [
-        model.attempts[0],
-        { ...model.attempts[1], answerTypeIndex: 2 },
-      ],
+      attempts: [model.attempts[0], { ...model.attempts[1], answerTypeIndex: 2 }],
       readout: true,
     };
-    expect(validateEditableQuestion(format, deriveGame(format, setup, events), readoutModel).join('\n')).toContain(
-      'cannot have a second-team neg',
-    );
+    expect(
+      validateEditableQuestion(format, deriveGame(format, setup, events), readoutModel).join('\n'),
+    ).toContain('cannot have a second-team neg');
   });
 
   test('rejects every incompatible part of an atomic question correction', () => {
     const format = formatFor();
     const events: ScoreEvent[] = [
-      event({ type: 'tossup-buzz', questionNumber: 1, team: 'left', playerName: 'Sarah', answerTypeIndex: 1 }),
+      event({
+        type: 'tossup-buzz',
+        questionNumber: 1,
+        team: 'left',
+        playerName: 'Sarah',
+        answerTypeIndex: 1,
+      }),
       event({ type: 'bonus', questionNumber: 1, team: 'left', controlledPoints: 20 }),
       event({ type: 'tossup-dead', questionNumber: 2 }),
     ];
@@ -273,7 +318,7 @@ describe('question-level corrections', () => {
           parts: [{ controlledPoints: 10 }, { controlledPoints: 10 }, { controlledPoints: 0 }],
         },
       }),
-    ).toContain("bonus parts do not match its totals");
+    ).toContain('bonus parts do not match its totals');
     expect(
       problems({
         ...conversion,
@@ -302,7 +347,13 @@ describe('question-level corrections', () => {
       dead: false,
     });
     const events: ScoreEvent[] = [
-      event({ type: 'tossup-buzz', questionNumber: 1, team: 'left', playerName: 'Sarah', answerTypeIndex: 1 }),
+      event({
+        type: 'tossup-buzz',
+        questionNumber: 1,
+        team: 'left',
+        playerName: 'Sarah',
+        answerTypeIndex: 1,
+      }),
       event({ type: 'bonus', questionNumber: 1, team: 'left', controlledPoints: 20 }),
       event({ type: 'tossup-dead', questionNumber: 2 }),
     ];
@@ -335,7 +386,13 @@ describe('question-level corrections', () => {
       // Reach overtime the way the engine does: regulation ends, and the next cycle is overtime.
       const overtimeEvents: ScoreEvent[] = [
         event({ type: 'end-regulation', questionNumber: 1 }),
-        event({ type: 'tossup-buzz', questionNumber: 2, team: 'left', playerName: 'Sarah', answerTypeIndex: 1 }),
+        event({
+          type: 'tossup-buzz',
+          questionNumber: 2,
+          team: 'left',
+          playerName: 'Sarah',
+          answerTypeIndex: 1,
+        }),
       ];
       const game = deriveGame(format, setup, overtimeEvents);
       expect(game.questions.find((question) => question.questionNumber === 2)?.period).toBe('overtime');
@@ -355,7 +412,13 @@ describe('question-level corrections', () => {
       format.overtime = { ...format.overtime, includesBonuses: true };
       const overtimeEvents: ScoreEvent[] = [
         event({ type: 'end-regulation', questionNumber: 1 }),
-        event({ type: 'tossup-buzz', questionNumber: 2, team: 'left', playerName: 'Sarah', answerTypeIndex: 1 }),
+        event({
+          type: 'tossup-buzz',
+          questionNumber: 2,
+          team: 'left',
+          playerName: 'Sarah',
+          answerTypeIndex: 1,
+        }),
       ];
       const game = deriveGame(format, setup, overtimeEvents);
 
@@ -378,7 +441,13 @@ describe('question-level corrections', () => {
       bonus: { team: 'left', controlledPoints: 20, bouncebackPoints: 0 },
     };
     const events: ScoreEvent[] = [
-      event({ type: 'tossup-buzz', questionNumber: 1, team: 'left', playerName: 'Sarah', answerTypeIndex: 1 }),
+      event({
+        type: 'tossup-buzz',
+        questionNumber: 1,
+        team: 'left',
+        playerName: 'Sarah',
+        answerTypeIndex: 1,
+      }),
       event({ type: 'bonus', questionNumber: 1, team: 'left', controlledPoints: 20 }),
     ];
 

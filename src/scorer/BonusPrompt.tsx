@@ -128,11 +128,17 @@ function PartEntry(props: {
   }, [selectionMotion]);
 
   const choiceClass = (index: number, outcome: BonusPartOutcome, selected: boolean) =>
-    ['scorer-choice', selected ? 'is-selected' : '', selectionMotion?.index === index && selectionMotion.outcome === outcome ? 'is-part-recorded' : '']
+    [
+      'scorer-choice',
+      selected ? 'is-selected' : '',
+      selectionMotion?.index === index && selectionMotion.outcome === outcome ? 'is-part-recorded' : '',
+    ]
       .filter(Boolean)
       .join(' ');
   const selectionToken = (index: number, outcome: BonusPartOutcome) =>
-    selectionMotion?.index === index && selectionMotion.outcome === outcome ? selectionMotion.token : undefined;
+    selectionMotion?.index === index && selectionMotion.outcome === outcome
+      ? selectionMotion.token
+      : undefined;
 
   const parts: IBonusPartResult[] = outcomes.map((outcome) =>
     bonusPartForOutcome(format.bonus, outcome ?? 'missed'),
@@ -186,7 +192,11 @@ function PartEntry(props: {
         ))}
       </ol>
       <p className="scorer-part-total">
-        <MotionNumber value={controlledTotal} minimumDigits={2} aria-label={`${controlledTotal} controlled points`} />
+        <MotionNumber
+          value={controlledTotal}
+          minimumDigits={2}
+          aria-label={`${controlledTotal} controlled points`}
+        />
         {bouncesBack && bouncebackTotal > 0 && (
           <>
             {' '}
@@ -358,88 +368,14 @@ export default function BonusPrompt(props: IBonusPromptProps) {
             </span>
           </p>
           {stageOptions ? (
-          <div className="scorer-choices">
-            {stageOptions.map((points) => (
-              <button key={points} type="button" className="scorer-choice" onClick={() => onRecord(controlled, points)}>
-                {points}
-              </button>
-            ))}
-          </div>
-          ) : (
-          <form
-            className="scorer-inline-form"
-            onSubmit={(submitEvent) => {
-              submitEvent.preventDefault();
-              if (typed === '' || typedProblem) return;
-              onRecord(controlled, Number(typed));
-            }}
-          >
-            <label htmlFor="scorer-bounceback-points">
-              Bounceback points
-              <input
-                id="scorer-bounceback-points"
-                type="number"
-                inputMode="numeric"
-                step={format.bonus.divisor || 1}
-                min={0}
-                max={availableBounceback}
-                value={typed}
-                onChange={(changeEvent) => setTyped(changeEvent.target.value)}
-                aria-invalid={typedProblem !== null}
-                aria-describedby={typedProblem ? typedErrorId : undefined}
-                // eslint-disable-next-line jsx-a11y/no-autofocus
-                autoFocus
-              />
-            </label>
-            <button type="submit" className="scorer-choice" disabled={typed === '' || typedProblem !== null}>
-              Record
-            </button>
-            {typedProblem && (
-              <p id={typedErrorId} className="scorer-problem" role="alert" aria-live="polite">
-                {typedProblem}
-              </p>
-            )}
-          </form>
-          )}
-          {/*
-            The way back to the controlling team's total.
-
-            Escape has always done this, and Escape is the wrong and only answer for a scorekeeper
-            working a touchscreen: the total they mistyped is on screen, in the subtitle, and until
-            now there was nothing to press. Nothing is recorded until both halves are known, so this
-            is a genuine cancel rather than an undo — it takes the same path the key does.
-          */}
-          <button type="button" className="scorer-text-action scorer-prompt-back" onClick={() => setControlled(null)}>
-            ← Change {controllingTeamName} bonus ({controlled})
-          </button>
-        </div>
-      </section>
-    );
-  }
-
-  return (
-    <section className="scorer-prompt" aria-label="Bonus">
-      <div className="scorer-prompt-content">
-      <p className="scorer-prompt-title">
-        <span className="scorer-prompt-team">{controllingTeamName}</span> bonus
-        <span className="scorer-prompt-context">Q{questionNumber}</span>
-      </p>
-
-      {byParts && partCount !== null ? (
-        <PartEntry
-          format={format}
-          partCount={partCount}
-          controllingTeamName={controllingTeamName}
-          opponentName={opponentName}
-          onRecord={onRecordParts}
-          onCancel={() => setByParts(false)}
-        />
-      ) : (
-        <>
-          {totals ? (
             <div className="scorer-choices">
-              {totals.map((points) => (
-                <button key={points} type="button" className="scorer-choice" onClick={() => finish(points)}>
+              {stageOptions.map((points) => (
+                <button
+                  key={points}
+                  type="button"
+                  className="scorer-choice"
+                  onClick={() => onRecord(controlled, points)}
+                >
                   {points}
                 </button>
               ))}
@@ -450,18 +386,18 @@ export default function BonusPrompt(props: IBonusPromptProps) {
               onSubmit={(submitEvent) => {
                 submitEvent.preventDefault();
                 if (typed === '' || typedProblem) return;
-                finish(Number(typed));
+                onRecord(controlled, Number(typed));
               }}
             >
-              <label htmlFor="scorer-bonus-points">
-                Bonus points
+              <label htmlFor="scorer-bounceback-points">
+                Bounceback points
                 <input
-                  id="scorer-bonus-points"
+                  id="scorer-bounceback-points"
                   type="number"
                   inputMode="numeric"
                   step={format.bonus.divisor || 1}
                   min={0}
-                  max={format.bonus.maximumScore}
+                  max={availableBounceback}
                   value={typed}
                   onChange={(changeEvent) => setTyped(changeEvent.target.value)}
                   aria-invalid={typedProblem !== null}
@@ -470,7 +406,11 @@ export default function BonusPrompt(props: IBonusPromptProps) {
                   autoFocus
                 />
               </label>
-              <button type="submit" className="scorer-choice" disabled={typed === '' || typedProblem !== null}>
+              <button
+                type="submit"
+                className="scorer-choice"
+                disabled={typed === '' || typedProblem !== null}
+              >
                 Record
               </button>
               {typedProblem && (
@@ -480,13 +420,100 @@ export default function BonusPrompt(props: IBonusPromptProps) {
               )}
             </form>
           )}
-          {partCount !== null && (
-            <button type="button" className="scorer-text-action" onClick={() => setByParts(true)}>
-              Parts&hellip;
-            </button>
-          )}
-        </>
-      )}
+          {/*
+            The way back to the controlling team's total.
+
+            Escape has always done this, and Escape is the wrong and only answer for a scorekeeper
+            working a touchscreen: the total they mistyped is on screen, in the subtitle, and until
+            now there was nothing to press. Nothing is recorded until both halves are known, so this
+            is a genuine cancel rather than an undo — it takes the same path the key does.
+          */}
+          <button
+            type="button"
+            className="scorer-text-action scorer-prompt-back"
+            onClick={() => setControlled(null)}
+          >
+            ← Change {controllingTeamName} bonus ({controlled})
+          </button>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="scorer-prompt" aria-label="Bonus">
+      <div className="scorer-prompt-content">
+        <p className="scorer-prompt-title">
+          <span className="scorer-prompt-team">{controllingTeamName}</span> bonus
+          <span className="scorer-prompt-context">Q{questionNumber}</span>
+        </p>
+
+        {byParts && partCount !== null ? (
+          <PartEntry
+            format={format}
+            partCount={partCount}
+            controllingTeamName={controllingTeamName}
+            opponentName={opponentName}
+            onRecord={onRecordParts}
+            onCancel={() => setByParts(false)}
+          />
+        ) : (
+          <>
+            {totals ? (
+              <div className="scorer-choices">
+                {totals.map((points) => (
+                  <button key={points} type="button" className="scorer-choice" onClick={() => finish(points)}>
+                    {points}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <form
+                className="scorer-inline-form"
+                onSubmit={(submitEvent) => {
+                  submitEvent.preventDefault();
+                  if (typed === '' || typedProblem) return;
+                  finish(Number(typed));
+                }}
+              >
+                <label htmlFor="scorer-bonus-points">
+                  Bonus points
+                  <input
+                    id="scorer-bonus-points"
+                    type="number"
+                    inputMode="numeric"
+                    step={format.bonus.divisor || 1}
+                    min={0}
+                    max={format.bonus.maximumScore}
+                    value={typed}
+                    onChange={(changeEvent) => setTyped(changeEvent.target.value)}
+                    aria-invalid={typedProblem !== null}
+                    aria-describedby={typedProblem ? typedErrorId : undefined}
+                    // eslint-disable-next-line jsx-a11y/no-autofocus
+                    autoFocus
+                  />
+                </label>
+                <button
+                  type="submit"
+                  className="scorer-choice"
+                  disabled={typed === '' || typedProblem !== null}
+                >
+                  Record
+                </button>
+                {typedProblem && (
+                  <p id={typedErrorId} className="scorer-problem" role="alert" aria-live="polite">
+                    {typedProblem}
+                  </p>
+                )}
+              </form>
+            )}
+            {partCount !== null && (
+              <button type="button" className="scorer-text-action" onClick={() => setByParts(true)}>
+                Parts&hellip;
+              </button>
+            )}
+          </>
+        )}
       </div>
     </section>
   );

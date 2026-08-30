@@ -126,7 +126,13 @@ describe('a crash that comes back after the reload', () => {
   test('offers the journal even though nothing in the application can be reached', () => {
     window.localStorage.setItem(
       'yellowfruit.room.game.v1.game-7',
-      JSON.stringify({ version: 1, gameKey: 'game-7', events: [], setup: {}, updatedAt: '2026-08-20T14:00:00.000Z' }),
+      JSON.stringify({
+        version: 1,
+        gameKey: 'game-7',
+        events: [],
+        setup: {},
+        updatedAt: '2026-08-20T14:00:00.000Z',
+      }),
     );
     const write = vi.fn().mockReturnValue(true);
 
@@ -159,7 +165,13 @@ describe('a crash that comes back after the reload', () => {
   test('does not claim to have saved a file the browser refused', () => {
     window.localStorage.setItem(
       'yellowfruit.room.game.v1.game-7',
-      JSON.stringify({ version: 1, gameKey: 'game-7', events: [], setup: {}, updatedAt: '2026-08-20T14:00:00.000Z' }),
+      JSON.stringify({
+        version: 1,
+        gameKey: 'game-7',
+        events: [],
+        setup: {},
+        updatedAt: '2026-08-20T14:00:00.000Z',
+      }),
     );
     render(
       <RenderErrorBoundary storage={fakeStorage()} write={() => false}>
@@ -228,7 +240,12 @@ describe('exporting the journal without judging it', () => {
     // Too old for `gameSessionMaxAgeMs`, and with an event list `validEvent` would reject.
     window.localStorage.setItem(
       'yellowfruit.room.game.v1.stale',
-      JSON.stringify({ version: 1, gameKey: 'stale', events: ['nonsense'], updatedAt: '2020-01-01T00:00:00.000Z' }),
+      JSON.stringify({
+        version: 1,
+        gameKey: 'stale',
+        events: ['nonsense'],
+        updatedAt: '2020-01-01T00:00:00.000Z',
+      }),
     );
     window.localStorage.setItem('qbsheet.unrelated', 'not a journal');
 
@@ -239,6 +256,8 @@ describe('exporting the journal without judging it', () => {
 
   test('a storage that cannot be enumerated gives back nothing rather than throwing', () => {
     expect(exportJournals(null)).toEqual({});
-    expect(exportJournals({ getItem: () => null, setItem: () => undefined, removeItem: () => undefined })).toEqual({});
+    expect(
+      exportJournals({ getItem: () => null, setItem: () => undefined, removeItem: () => undefined }),
+    ).toEqual({});
   });
 });

@@ -126,7 +126,10 @@ export interface IConnectedRuntime {
   reportProgress: (qbj: object) => void;
   submitFinal: (qbj: object) => Promise<IFinalDelivery>;
   recoverFromServer: () => Promise<object | null>;
-  syncRosterPlayer: (teamName: string, playerName: string) => Promise<{ ok: boolean; error?: string; rejected?: boolean }>;
+  syncRosterPlayer: (
+    teamName: string,
+    playerName: string,
+  ) => Promise<{ ok: boolean; error?: string; rejected?: boolean }>;
   requestControl: (category: HelpRequestCategory, message: string) => Promise<HelpRequestResult>;
   retryControlRequest: () => Promise<HelpRequestResult | null>;
   cancelControlRequest: () => Promise<HelpClearResult | null>;
@@ -190,8 +193,7 @@ export function forbiddenIn(result: ApiResult<unknown>): string | null {
 const helpMessageLimit = 500;
 
 type HelpDraftOutcome =
-  | { kind: 'failed'; status?: number }
-  | { kind: 'refused'; status: number; retryable: boolean };
+  { kind: 'failed'; status?: number } | { kind: 'refused'; status: number; retryable: boolean };
 
 interface IHelpDraft {
   category: HelpRequestCategory;
@@ -213,7 +215,8 @@ function readHelpDraft(key: string): IHelpDraft | null {
     const raw = window.sessionStorage.getItem(key);
     if (!raw) return null;
     const parsed: unknown = JSON.parse(raw);
-    if (!isRecordLike(parsed) || !isHelpCategory(parsed.category) || typeof parsed.message !== 'string') return null;
+    if (!isRecordLike(parsed) || !isHelpCategory(parsed.category) || typeof parsed.message !== 'string')
+      return null;
     if (parsed.message.trim() === '' || parsed.message.length > helpMessageLimit) return null;
     const rawOutcome = isRecordLike(parsed.outcome) ? parsed.outcome : undefined;
     const outcome: HelpDraftOutcome | undefined =
@@ -277,7 +280,14 @@ function controlFailureState(
 ): ControlRequestState {
   if (result.kind === 'unsupported') return result;
   if (result.kind === 'refused') {
-    return { kind: 'refused', category, message, error: result.error, status: result.status, retryable: result.retryable };
+    return {
+      kind: 'refused',
+      category,
+      message,
+      error: result.error,
+      status: result.status,
+      retryable: result.retryable,
+    };
   }
   return {
     kind: 'failed',
@@ -402,7 +412,13 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
   const helpClearInFlight = useRef<Promise<HelpClearResult> | null>(null);
   const helpMutationVersion = useRef(0);
   const helpRoomCredentialProblem = useRef(false);
-  const { deviceId: helpDeviceId, operatorName: helpOperatorName, roomId: helpRoomId, roomName: helpRoomName, token: helpToken } = identity;
+  const {
+    deviceId: helpDeviceId,
+    operatorName: helpOperatorName,
+    roomId: helpRoomId,
+    roomName: helpRoomName,
+    token: helpToken,
+  } = identity;
   const helpIdentity = useMemo(
     () => ({
       roomId: helpRoomId,
@@ -556,7 +572,9 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
           request: result.request,
           requestedAt: at.value,
           requestedAtSource: at.source,
-          ...(current.kind === 'outstanding' && current.request.id === result.request.id && current.canCancel === false
+          ...(current.kind === 'outstanding' &&
+          current.request.id === result.request.id &&
+          current.canCancel === false
             ? { canCancel: false }
             : {}),
         });
@@ -590,12 +608,21 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
         noteHelpCredentialProblem();
         timeline.record('room-refused');
       }
-      if (current.kind !== 'outstanding') setControlRequestValue(readFailureState(helpDraftRef.current, result));
+      if (current.kind !== 'outstanding')
+        setControlRequestValue(readFailureState(helpDraftRef.current, result));
       return result;
     } finally {
       if (helpReadInFlight.current === read) helpReadInFlight.current = null;
     }
-  }, [client, enabled, helpIdentity, helpStorageKey, noteHelpCredentialProblem, setControlRequestValue, timeline]);
+  }, [
+    client,
+    enabled,
+    helpIdentity,
+    helpStorageKey,
+    noteHelpCredentialProblem,
+    setControlRequestValue,
+    timeline,
+  ]);
 
   /** Ask control to come, or return the one already outstanding without a duplicate POST. */
   const requestControl = useCallback(
@@ -613,7 +640,10 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
 
       const send = Promise.resolve()
         .then(() => client.requestHelp(helpIdentity, draft.category, draft.message))
-        .catch((): HelpRequestResult => ({ kind: 'unreachable', error: 'Could not reach tournament control.' }));
+        .catch((): HelpRequestResult => ({
+          kind: 'unreachable',
+          error: 'Could not reach tournament control.',
+        }));
       helpSendInFlight.current = send;
       try {
         const result = await send;
@@ -641,7 +671,10 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
         setControlRequestValue(controlFailureState(draft.category, draft.message, result));
         if (result.kind === 'unreachable' || result.kind === 'server-error') {
           const status = result.kind === 'server-error' ? result.status : undefined;
-          helpDraftRef.current = { ...draft, outcome: { kind: 'failed', ...(status !== undefined ? { status } : {}) } };
+          helpDraftRef.current = {
+            ...draft,
+            outcome: { kind: 'failed', ...(status !== undefined ? { status } : {}) },
+          };
           writeHelpDraft(helpStorageKey, helpDraftRef.current);
         } else if (result.kind === 'refused') {
           helpDraftRef.current = {
@@ -841,7 +874,7 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
       if (!result.ok) {
         setDegradedMessage(
           classified.connection === RoomConnectionState.Degraded
-            ? result.detail ?? 'Tournament control answered, but not with anything this room could use.'
+            ? (result.detail ?? 'Tournament control answered, but not with anything this room could use.')
             : undefined,
         );
         return;

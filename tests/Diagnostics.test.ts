@@ -61,8 +61,20 @@ describe('what the bundle contains', () => {
     const bundle = buildDiagnostics({
       now: at,
       checks: [
-        { id: 'game-storage', title: 'Game storage', state: 'pass', kind: 'required', detail: 'IndexedDB is writable.' },
-        { id: 'local-network', title: 'Local network access', state: 'fail', kind: 'connected', detail: 'Denied.' },
+        {
+          id: 'game-storage',
+          title: 'Game storage',
+          state: 'pass',
+          kind: 'required',
+          detail: 'IndexedDB is writable.',
+        },
+        {
+          id: 'local-network',
+          title: 'Local network access',
+          state: 'fail',
+          kind: 'connected',
+          detail: 'Denied.',
+        },
       ],
     });
 
@@ -89,8 +101,17 @@ describe('what the bundle contains', () => {
   test('persistence health and how many games are on the device', () => {
     const bundle = buildDiagnostics({
       now: at,
-      persistence: { recordStoreDurable: false, localStorageWorks: true, persistentStorage: false, storageUsage: 2048 },
-      games: { saved: 11, unfinished: 1, unreadable: [{ id: 'r5', readability: 'too-new', storedVersion: 2 }] },
+      persistence: {
+        recordStoreDurable: false,
+        localStorageWorks: true,
+        persistentStorage: false,
+        storageUsage: 2048,
+      },
+      games: {
+        saved: 11,
+        unfinished: 1,
+        unreadable: [{ id: 'r5', readability: 'too-new', storedVersion: 2 }],
+      },
     });
 
     expect(bundle.persistence.recordStoreDurable).toBe(false);
@@ -209,7 +230,9 @@ describe('addresses', () => {
   });
 
   test('something unparseable is redacted rather than passed through', () => {
-    expect(safeAddress('not a url at all abcdefghijklmnopqrstuvwxyz')).not.toContain('abcdefghijklmnopqrstuvwxyz');
+    expect(safeAddress('not a url at all abcdefghijklmnopqrstuvwxyz')).not.toContain(
+      'abcdefghijklmnopqrstuvwxyz',
+    );
   });
 
   test('nothing in, nothing out', () => {
@@ -279,9 +302,10 @@ describe('refusing to write a file with a credential in it', () => {
   );
 
   test('an unlabelled token-shaped value is caught even with no secret list', () => {
-    const bundle = { ...buildDiagnostics({ now: at }), note: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9' } as unknown as ReturnType<
-      typeof buildDiagnostics
-    >;
+    const bundle = {
+      ...buildDiagnostics({ now: at }),
+      note: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9',
+    } as unknown as ReturnType<typeof buildDiagnostics>;
 
     expect(findLeaks(bundle).length).toBeGreaterThan(0);
   });

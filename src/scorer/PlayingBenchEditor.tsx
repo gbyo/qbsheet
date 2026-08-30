@@ -77,11 +77,7 @@ export default function PlayingBenchEditor(props: IPlayingBenchEditorProps) {
     const detail = detailFor?.(name);
     const note = noteFor?.(name);
     return (
-      <li
-        key={name}
-        ref={motion.rowRef(name)}
-        className={motion.rowClassName(name, 'scorer-lineup-entry')}
-      >
+      <li key={name} ref={motion.rowRef(name)} className={motion.rowClassName(name, 'scorer-lineup-entry')}>
         <span className="scorer-lineup-player">
           <span className="scorer-lineup-name">{name}</span>
           {note && <span className="scorer-lineup-note">{note}</span>}

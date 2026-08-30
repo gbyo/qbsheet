@@ -277,5 +277,7 @@ export function downloadDiagnostics(
   const leaks = findLeaks(bundle, secrets);
   if (leaks.length > 0) return { ok: false, reason: 'unsafe', leaks };
   const fileName = diagnosticsFilename(bundle);
-  return write(serializeDiagnostics(bundle), fileName) ? { ok: true, fileName } : { ok: false, reason: 'no-download' };
+  return write(serializeDiagnostics(bundle), fileName)
+    ? { ok: true, fileName }
+    : { ok: false, reason: 'no-download' };
 }

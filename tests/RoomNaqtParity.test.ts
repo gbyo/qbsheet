@@ -63,7 +63,13 @@ function typeIndex(format: IScorekeeperFormat, value: number): number {
 }
 
 function buzz(questionNumber: number, team: 'left' | 'right', playerName: string, value: number): ScoreEvent {
-  return event({ type: 'tossup-buzz', questionNumber, team, playerName, answerTypeIndex: typeIndex(naqt, value) });
+  return event({
+    type: 'tossup-buzz',
+    questionNumber,
+    team,
+    playerName,
+    answerTypeIndex: typeIndex(naqt, value),
+  });
 }
 
 function bonus(questionNumber: number, team: 'left' | 'right', controlledPoints: number): ScoreEvent {

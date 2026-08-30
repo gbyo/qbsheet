@@ -105,9 +105,9 @@ describe('guided practice scenario', () => {
 
     // Only the four steps that are genuinely mouse work go unannotated.
     const mouseOnly = ['lineup', 'q5-correction', 'substitution', 'submit'];
-    expect(practiceSteps.filter((step) => practiceKeystroke(step.id) === null).map((step) => step.id)).toEqual(
-      mouseOnly,
-    );
+    expect(
+      practiceSteps.filter((step) => practiceKeystroke(step.id) === null).map((step) => step.id),
+    ).toEqual(mouseOnly);
   });
 
   it('numbers the bonus digits from the totals the format can produce', () => {
@@ -145,27 +145,62 @@ describe('guided practice scenario', () => {
 
   it('allows the Question 5 correction after Question 4 ends without a conversion', () => {
     const events: ScoreEvent[] = [
-      ...lineupEvents(
-        ['Gibson', 'Jeremy', 'Owen', 'Lachlan'],
-        ['Tucker', 'Phillip', 'Efren', 'Valerie'],
-      ),
-      { id: 'q1-tu', type: 'tossup-buzz', questionNumber: 1, team: 'left', playerName: 'Gibson', answerTypeIndex: 0 },
+      ...lineupEvents(['Gibson', 'Jeremy', 'Owen', 'Lachlan'], ['Tucker', 'Phillip', 'Efren', 'Valerie']),
+      {
+        id: 'q1-tu',
+        type: 'tossup-buzz',
+        questionNumber: 1,
+        team: 'left',
+        playerName: 'Gibson',
+        answerTypeIndex: 0,
+      },
       { id: 'q1-bonus', type: 'bonus', questionNumber: 1, team: 'left', controlledPoints: 20 },
-      { id: 'q2-tu', type: 'tossup-buzz', questionNumber: 2, team: 'right', playerName: 'Tucker', answerTypeIndex: 1 },
+      {
+        id: 'q2-tu',
+        type: 'tossup-buzz',
+        questionNumber: 2,
+        team: 'right',
+        playerName: 'Tucker',
+        answerTypeIndex: 1,
+      },
       { id: 'q2-bonus', type: 'bonus', questionNumber: 2, team: 'right', controlledPoints: 10 },
-      { id: 'q3-neg', type: 'tossup-buzz', questionNumber: 3, team: 'left', playerName: 'Jeremy', answerTypeIndex: 2 },
-      { id: 'q3-tu', type: 'tossup-buzz', questionNumber: 3, team: 'right', playerName: 'Tucker', answerTypeIndex: 1 },
+      {
+        id: 'q3-neg',
+        type: 'tossup-buzz',
+        questionNumber: 3,
+        team: 'left',
+        playerName: 'Jeremy',
+        answerTypeIndex: 2,
+      },
+      {
+        id: 'q3-tu',
+        type: 'tossup-buzz',
+        questionNumber: 3,
+        team: 'right',
+        playerName: 'Tucker',
+        answerTypeIndex: 1,
+      },
       { id: 'q3-bonus', type: 'bonus', questionNumber: 3, team: 'right', controlledPoints: 30 },
       { id: 'q4-wrong', type: 'tossup-no-penalty', questionNumber: 4, team: 'left', playerName: 'Owen' },
       { id: 'q4-dead', type: 'tossup-dead', questionNumber: 4 },
-      { id: 'q5-tu', type: 'tossup-buzz', questionNumber: 5, team: 'left', playerName: 'Lachlan', answerTypeIndex: 1 },
+      {
+        id: 'q5-tu',
+        type: 'tossup-buzz',
+        questionNumber: 5,
+        team: 'left',
+        playerName: 'Lachlan',
+        answerTypeIndex: 1,
+      },
       { id: 'q5-bonus', type: 'bonus', questionNumber: 5, team: 'left', controlledPoints: 20 },
     ];
     const validation = validateCorrectedHistory(
       practiceFormat,
       {
         left: { name: practiceLeftTeam.name, players: practiceLeftTeam.players.map((player) => player.name) },
-        right: { name: practiceRightTeam.name, players: practiceRightTeam.players.map((player) => player.name) },
+        right: {
+          name: practiceRightTeam.name,
+          players: practiceRightTeam.players.map((player) => player.name),
+        },
       },
       events,
     );

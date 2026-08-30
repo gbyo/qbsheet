@@ -80,7 +80,12 @@ export function loadSeating(
   try {
     const raw = storage.getItem(storageKey(gameKey));
     if (!raw) return emptySeating();
-    const parsed = JSON.parse(raw) as { version?: number; updatedAt?: unknown; left?: unknown; right?: unknown };
+    const parsed = JSON.parse(raw) as {
+      version?: number;
+      updatedAt?: unknown;
+      left?: unknown;
+      right?: unknown;
+    };
     if (parsed?.version !== playerSeatingVersion) return emptySeating();
     const updated = typeof parsed.updatedAt === 'string' ? new Date(parsed.updatedAt).getTime() : NaN;
     if (!Number.isFinite(updated)) return emptySeating();
@@ -128,7 +133,11 @@ export function clearSeating(gameKey: string, storage: ISeatingStorage | null = 
  * preference left over from a roster that has since changed degrades to "no preference" one name at
  * a time instead of all at once.
  */
-export function orderBySeating<T>(items: readonly T[], preferred: readonly string[], nameOf: (item: T) => string): T[] {
+export function orderBySeating<T>(
+  items: readonly T[],
+  preferred: readonly string[],
+  nameOf: (item: T) => string,
+): T[] {
   const rank = new Map(preferred.map((name, index) => [name, index]));
   return items
     .map((item, index) => ({ item, index, rank: rank.get(nameOf(item)) ?? Infinity }))

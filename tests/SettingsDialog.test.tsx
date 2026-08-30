@@ -3,11 +3,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, test } from 'vitest';
 import { setupFromPackage } from '../src/app/App';
-import {
-  connectionStorageKey,
-  readConnection,
-  writeConnection,
-} from '../src/app/ConnectedSession';
+import { connectionStorageKey, readConnection, writeConnection } from '../src/app/ConnectedSession';
 import {
   operatorNameAskedStorageKey,
   operatorNameStorageKey,
@@ -77,7 +73,9 @@ const completedAt = new Date(Date.now() - 60_000).toISOString();
 const qbjDownloadedAt = new Date(Date.now() - 50_000).toISOString();
 const handoffAcknowledgedAt = new Date(Date.now() - 40_000).toISOString();
 
-async function seedGame(options: { connected?: boolean; completed?: boolean } = {}): Promise<IStoredGameRecord> {
+async function seedGame(
+  options: { connected?: boolean; completed?: boolean } = {},
+): Promise<IStoredGameRecord> {
   const packageValue = validPackage();
   const store = new GameStore(await openRecordStore<IStoredGameRecord>());
   const record = await store.create({
@@ -268,7 +266,8 @@ describe('tournament connection safety', () => {
 
     cleanup();
     rememberConnection({
-      baseUrl: 'http://url-user:url-password@192.168.1.20:8787/control?room_token=query-secret#fragment-secret',
+      baseUrl:
+        'http://url-user:url-password@192.168.1.20:8787/control?room_token=query-secret#fragment-secret',
     });
     await openApp();
     dialog = await openSettings();
@@ -308,7 +307,9 @@ describe('tournament connection safety', () => {
     expect(screen.queryByText('Tournament connection')).toBeNull();
     expect(screen.queryByRole('dialog', { name: 'Settings' })).toBeNull();
     expect(screen.getByRole('status')).toHaveTextContent('Tournament pairing forgotten.');
-    expect((await new GameStore(await openRecordStore<IStoredGameRecord>()).get(saved.id))?.id).toBe(saved.id);
+    expect((await new GameStore(await openRecordStore<IStoredGameRecord>()).get(saved.id))?.id).toBe(
+      saved.id,
+    );
   });
 
   test('forget is blocked while an unfinished connected game still depends on this pairing', async () => {
@@ -320,10 +321,14 @@ describe('tournament connection safety', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Forget pairing…' }));
 
     const confirmation = screen.getByRole('dialog', { name: 'Forget tournament pairing?' });
-    expect(within(confirmation).getByRole('alert')).toHaveTextContent(/resume and finish the game, or ask tournament control/i);
+    expect(within(confirmation).getByRole('alert')).toHaveTextContent(
+      /resume and finish the game, or ask tournament control/i,
+    );
     expect(within(confirmation).getByRole('button', { name: 'Forget Room 204' })).toBeDisabled();
     expect(readConnection()).not.toBeNull();
-    expect((await new GameStore(await openRecordStore<IStoredGameRecord>()).get(unfinished.id))?.id).toBe(unfinished.id);
+    expect((await new GameStore(await openRecordStore<IStoredGameRecord>()).get(unfinished.id))?.id).toBe(
+      unfinished.id,
+    );
   });
 
   test('an unreadable game named by the connection still protects the pairing', async () => {
@@ -404,7 +409,9 @@ describe('device navigation, reset, build identity, and dialog behavior', () => 
     expect(screen.getByRole('status')).toHaveTextContent('Device preferences reset.');
     expect(window.localStorage.getItem('qbsheet.unrelated-sentinel')).toBe('keep');
     expect(capabilities.has(saved.id)).toBe(true);
-    expect((await new GameStore(await openRecordStore<IStoredGameRecord>()).get(saved.id))?.id).toBe(saved.id);
+    expect((await new GameStore(await openRecordStore<IStoredGameRecord>()).get(saved.id))?.id).toBe(
+      saved.id,
+    );
 
     cleanup();
     await openApp();
@@ -428,7 +435,9 @@ describe('device navigation, reset, build identity, and dialog behavior', () => 
     expect(readOperatorNameAsked()).toBe(true);
     expect(keyboardEnabled()).toBe(true);
     expect(readConnection()).not.toBeNull();
-    expect((await new GameStore(await openRecordStore<IStoredGameRecord>()).get(unfinished.id))?.id).toBe(unfinished.id);
+    expect((await new GameStore(await openRecordStore<IStoredGameRecord>()).get(unfinished.id))?.id).toBe(
+      unfinished.id,
+    );
   });
 
   test('the footer uses the canonical build label, Escape closes, and focus returns to the cog', async () => {
@@ -447,7 +456,11 @@ describe('device navigation, reset, build identity, and dialog behavior', () => 
 
   test('all Settings actions remain reachable in the narrow layout', () => {
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 320 });
-    render(<SettingsDialog {...defaultSettingsProps({ connection: { roomName: 'Room 204', address: connection.baseUrl } })} />);
+    render(
+      <SettingsDialog
+        {...defaultSettingsProps({ connection: { roomName: 'Room 204', address: connection.baseUrl } })}
+      />,
+    );
     const dialog = screen.getByRole('dialog', { name: 'Settings' });
     expect(within(dialog).getByRole('button', { name: /Set name/ })).toBeInTheDocument();
     expect(within(dialog).getByRole('switch', { name: 'Keyboard scoring' })).toBeInTheDocument();

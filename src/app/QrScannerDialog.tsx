@@ -198,8 +198,8 @@ export default function QrScannerDialog(props: {
       bodyClassName="qr-dialog-body"
     >
       <p className="scorer-dialog-note">
-        Point the camera at the QR code tournament control is showing. QBSheet will not connect to
-        anything until you confirm.
+        Point the camera at the QR code tournament control is showing. QBSheet will not connect to anything
+        until you confirm.
       </p>
       {/*
         No alternative text and no label. The preview carries no information a person who cannot see

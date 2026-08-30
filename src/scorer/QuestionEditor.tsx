@@ -156,7 +156,9 @@ function rulingValue(attempt: IEditableAttempt): string {
 }
 
 function firstActive(game: IDerivedGame, team: 'left' | 'right'): string {
-  return game.questions.find((question) => question.activePlayers[team].length > 0)?.activePlayers[team][0] ?? '';
+  return (
+    game.questions.find((question) => question.activePlayers[team].length > 0)?.activePlayers[team][0] ?? ''
+  );
 }
 
 /**
@@ -230,7 +232,8 @@ function conversionTeam(model: IEditableQuestion, format: IScorekeeperFormat): '
  */
 function noBonusReason(format: IScorekeeperFormat, model: IEditableQuestion, overtime: boolean): string {
   if (!format.bonus.enabled) return 'This format does not use bonuses.';
-  if (overtime && !format.overtime.includesBonuses) return 'Overtime does not include bonuses in this format.';
+  if (overtime && !format.overtime.includesBonuses)
+    return 'Overtime does not include bonuses in this format.';
   const converted = conversion(model, format);
   if (!converted) return 'A bonus follows a converted tossup. No team converted this one.';
   const index = converted.answerTypeIndex;
@@ -240,7 +243,10 @@ function noBonusReason(format: IScorekeeperFormat, model: IEditableQuestion, ove
 }
 
 /** The points this question contributes, independent of the running score around it. */
-function questionPoints(model: IEditableQuestion, format: IScorekeeperFormat): { left: number; right: number } {
+function questionPoints(
+  model: IEditableQuestion,
+  format: IScorekeeperFormat,
+): { left: number; right: number } {
   const points = { left: 0, right: 0 };
   for (const attempt of model.attempts) {
     if (attempt.kind === 'buzz' && attempt.answerTypeIndex !== undefined) {
@@ -277,7 +283,9 @@ export default function QuestionEditor(props: {
   const [model, setModel] = useState<IEditableQuestion>(() => ({
     ...initial,
     attempts: initial.attempts.map((attempt) => ({ ...attempt })),
-    bonus: initial.bonus ? { ...initial.bonus, parts: initial.bonus.parts?.map((part) => ({ ...part })) } : undefined,
+    bonus: initial.bonus
+      ? { ...initial.bonus, parts: initial.bonus.parts?.map((part) => ({ ...part })) }
+      : undefined,
   }));
   const [errors, setErrors] = useState<string[]>([]);
   const [bonusDrafts, setBonusDrafts] = useState<IBonusDrafts>({});
@@ -311,9 +319,14 @@ export default function QuestionEditor(props: {
   const question = game.questions.find((candidate) => candidate.questionNumber === model.questionNumber);
   const active = question?.activePlayers ?? { left: [], right: [] };
   const questionProtests = game.protests.filter((protest) => protest.questionNumber === model.questionNumber);
-  const questionFlags = game.notes.filter((note) => note.questionNumber === model.questionNumber && note.flagged);
+  const questionFlags = game.notes.filter(
+    (note) => note.questionNumber === model.questionNumber && note.flagged,
+  );
 
-  const teamPlayers = useMemo(() => ({ left: active.left, right: active.right }), [active.left, active.right]);
+  const teamPlayers = useMemo(
+    () => ({ left: active.left, right: active.right }),
+    [active.left, active.right],
+  );
   const teamName = (team: 'left' | 'right') => (team === 'left' ? game.left.name : game.right.name);
   const quickTotals = regularBonusTotals(format.bonus);
   const orderedTypes = orderedRulingTypes(format);
@@ -441,7 +454,10 @@ export default function QuestionEditor(props: {
 
   /** Hold what was typed; only commit it to the model once it is a number. */
   const updateBonusTotal = (field: 'controlledPoints' | 'bouncebackPoints', raw: string) => {
-    setBonusDrafts((current) => ({ ...current, [field === 'controlledPoints' ? 'controlled' : 'bounceback']: raw }));
+    setBonusDrafts((current) => ({
+      ...current,
+      [field === 'controlledPoints' ? 'controlled' : 'bounceback']: raw,
+    }));
     const parsed = Number(raw);
     if (raw.trim() === '' || !Number.isFinite(parsed)) return;
     setBonus({ [field]: parsed, parts: undefined });
@@ -540,7 +556,9 @@ export default function QuestionEditor(props: {
     : model.bonus.controlledPoints === 0 && model.bonus.bouncebackPoints === 0
       ? 'Nobody scored this bonus.'
       : `${controllingName} ${pointsLabel(model.bonus.controlledPoints)}${
-          format.bonus.bounceBack ? ` · ${opponentName} ${pointsLabel(model.bonus.bouncebackPoints)} bounceback` : ''
+          format.bonus.bounceBack
+            ? ` · ${opponentName} ${pointsLabel(model.bonus.bouncebackPoints)} bounceback`
+            : ''
         }`;
 
   return (
@@ -556,13 +574,15 @@ export default function QuestionEditor(props: {
           <p className="scorer-question-intro-title">First time here?</p>
           <ul>
             <li>
-              This is the whole of Question {model.questionNumber} — every buzz on it and its bonus — not just the one
-              action you selected.
+              This is the whole of Question {model.questionNumber} — every buzz on it and its bonus — not just
+              the one action you selected.
             </li>
-            <li>Nothing changes until you choose Save changes. Every later question is then worked out again.</li>
             <li>
-              To leave it exactly as it is, use <strong>Cancel</strong> below or the <strong>×</strong> button at the top
-              right. Escape works too.
+              Nothing changes until you choose Save changes. Every later question is then worked out again.
+            </li>
+            <li>
+              To leave it exactly as it is, use <strong>Cancel</strong> below or the <strong>×</strong> button
+              at the top right. Escape works too.
             </li>
           </ul>
           <button
@@ -708,9 +728,7 @@ export default function QuestionEditor(props: {
               type="checkbox"
               checked={model.dead}
               disabled={converted !== undefined}
-              onChange={(event) =>
-                reviseTossup((current) => ({ ...current, dead: event.target.checked }))
-              }
+              onChange={(event) => reviseTossup((current) => ({ ...current, dead: event.target.checked }))}
             />
             {model.attempts.length === 0 ? 'No buzz' : 'No team converted'}
           </label>
@@ -810,8 +828,8 @@ export default function QuestionEditor(props: {
         )}
         {model.bonus && !earnsBonus && (
           <p className="scorer-question-empty">
-            {noBonusReason(format, model, overtime)} Remove this bonus, or change the tossup ruling that should have
-            earned it.
+            {noBonusReason(format, model, overtime)} Remove this bonus, or change the tossup ruling that
+            should have earned it.
           </p>
         )}
         {model.bonus && earnsBonus && (
@@ -823,13 +841,19 @@ export default function QuestionEditor(props: {
                     <span className="scorer-question-total-label" id={`${controlledId}-label`}>
                       {controlledLabel}
                     </span>
-                    <div className="scorer-question-totals" role="group" aria-labelledby={`${controlledId}-label`}>
+                    <div
+                      className="scorer-question-totals"
+                      role="group"
+                      aria-labelledby={`${controlledId}-label`}
+                    >
                       {quickTotals.map((total) => (
                         <button
                           key={total}
                           type="button"
                           className={
-                            model.bonus?.controlledPoints === total ? 'scorer-choice is-selected' : 'scorer-choice'
+                            model.bonus?.controlledPoints === total
+                              ? 'scorer-choice is-selected'
+                              : 'scorer-choice'
                           }
                           aria-pressed={model.bonus?.controlledPoints === total}
                           onClick={() => setBonus({ controlledPoints: total, parts: undefined })}
@@ -878,13 +902,19 @@ export default function QuestionEditor(props: {
                         {bouncebackLabel}
                       </span>
                       {/* Bounded by what the controlling team left: `bouncebackOptions` is the rule. */}
-                      <div className="scorer-question-totals" role="group" aria-labelledby={`${bouncebackId}-label`}>
+                      <div
+                        className="scorer-question-totals"
+                        role="group"
+                        aria-labelledby={`${bouncebackId}-label`}
+                      >
                         {bouncebackOptions(format.bonus, model.bonus.controlledPoints).map((points) => (
                           <button
                             key={points}
                             type="button"
                             className={
-                              model.bonus?.bouncebackPoints === points ? 'scorer-choice is-selected' : 'scorer-choice'
+                              model.bonus?.bouncebackPoints === points
+                                ? 'scorer-choice is-selected'
+                                : 'scorer-choice'
                             }
                             aria-pressed={model.bonus?.bouncebackPoints === points}
                             onClick={() => setBonus({ bouncebackPoints: points, parts: undefined })}
@@ -911,7 +941,9 @@ export default function QuestionEditor(props: {
                 <div className="scorer-question-parts">
                   <div
                     className={
-                      format.bonus.bounceBack ? 'scorer-question-part-head' : 'scorer-question-part-head is-two-way'
+                      format.bonus.bounceBack
+                        ? 'scorer-question-part-head'
+                        : 'scorer-question-part-head is-two-way'
                     }
                     aria-hidden="true"
                   >
@@ -934,11 +966,20 @@ export default function QuestionEditor(props: {
                         {label}
                       </button>
                     );
-                    const row = ['scorer-question-part', format.bonus.bounceBack ? '' : 'is-two-way', outcome === null ? 'is-unanswered' : '']
+                    const row = [
+                      'scorer-question-part',
+                      format.bonus.bounceBack ? '' : 'is-two-way',
+                      outcome === null ? 'is-unanswered' : '',
+                    ]
                       .filter(Boolean)
                       .join(' ');
                     return (
-                      <div key={`part-${index}`} className={row} role="group" aria-label={`Bonus part ${index + 1} outcome`}>
+                      <div
+                        key={`part-${index}`}
+                        className={row}
+                        role="group"
+                        aria-label={`Bonus part ${index + 1} outcome`}
+                      >
                         <span className="scorer-question-part-label">Part {index + 1}</span>
                         {choice(
                           'controlled',
@@ -968,15 +1009,19 @@ export default function QuestionEditor(props: {
                   <p className="scorer-question-part-summary">{bonusSummary}</p>
                   {unanswered.length > 0 && (
                     <p className="scorer-question-part-pending">
-                      Still to answer: {joinParts(unanswered)}. The bonus keeps the total above until every part has
-                      an outcome.
+                      Still to answer: {joinParts(unanswered)}. The bonus keeps the total above until every
+                      part has an outcome.
                     </p>
                   )}
                 </div>
               )
             )}
             {partOutcomesAvailable && (
-              <button type="button" className="scorer-text-action" onClick={partDraft ? editTotals : editParts}>
+              <button
+                type="button"
+                className="scorer-text-action"
+                onClick={partDraft ? editTotals : editParts}
+              >
                 {partDraft ? 'Enter totals instead' : 'Edit individual parts…'}
               </button>
             )}
@@ -1014,7 +1059,9 @@ export default function QuestionEditor(props: {
                 type="checkbox"
                 checked={model.readingResumed === true}
                 disabled={model.attempts.length === 0}
-                onChange={(event) => setModel((current) => ({ ...current, readingResumed: event.target.checked }))}
+                onChange={(event) =>
+                  setModel((current) => ({ ...current, readingResumed: event.target.checked }))
+                }
               />
               Reading resumed after the first answer
             </label>

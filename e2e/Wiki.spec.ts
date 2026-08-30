@@ -15,9 +15,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 /** Whether the document fits its own viewport. A sideways scrollbar on a phone is a defect. */
 async function fits(page: Page): Promise<boolean> {
-  return page.evaluate(
-    () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
-  );
+  return page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
 }
 
 test('the site navigation enters the wiki at its own front page', async ({ page }) => {
@@ -25,11 +23,17 @@ test('the site navigation enters the wiki at its own front page', async ({ page 
 
   // There is no index page above the articles. The wiki's `Home` is its front page, so that is what
   // the navigation entry has to reach — and a link to `about/wiki/` would be served by nothing.
-  await page.getByRole('navigation', { name: 'Primary navigation' }).getByRole('link', { name: 'Wiki' }).click();
+  await page
+    .getByRole('navigation', { name: 'Primary navigation' })
+    .getByRole('link', { name: 'Wiki' })
+    .click();
   await expect(page).toHaveURL(/\/about\/wiki\/home\/$/);
   await expect(page.getByRole('heading', { level: 1, name: 'QBSheet' })).toBeVisible();
 
-  await page.getByRole('navigation', { name: 'Wiki navigation' }).getByRole('link', { name: 'Start here' }).click();
+  await page
+    .getByRole('navigation', { name: 'Wiki navigation' })
+    .getByRole('link', { name: 'Start here' })
+    .click();
   await expect(page).toHaveURL(/\/about\/wiki\/start-here\/$/);
   await expect(page.getByRole('heading', { level: 1, name: 'Start here' })).toBeVisible();
   expect(await fits(page)).toBe(true);
@@ -72,7 +76,10 @@ test('a cross-page anchor arrives at its section', async ({ page }) => {
 test('the site navigation resolves from three directories deep', async ({ page }) => {
   await page.goto('/about/wiki/start-here/');
 
-  await page.getByRole('navigation', { name: 'Primary navigation' }).getByRole('link', { name: 'FAQ' }).click();
+  await page
+    .getByRole('navigation', { name: 'Primary navigation' })
+    .getByRole('link', { name: 'FAQ' })
+    .click();
   await expect(page).toHaveURL(/\/about\/faq\/$/);
   await expect(page.getByRole('heading', { level: 1, name: 'Frequently asked questions' })).toBeVisible();
 });

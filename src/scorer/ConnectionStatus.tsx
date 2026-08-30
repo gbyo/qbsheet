@@ -142,8 +142,8 @@ export default function ScorerBanners(props: {
         <div className="scorer-banner is-error" role="alert">
           <strong>Temporary — do not close this tab.</strong>
           <span>
-            The complete game record is not currently durable on this device. Download a QBJ backup now and again
-            when the game ends.
+            The complete game record is not currently durable on this device. Download a QBJ backup now and
+            again when the game ends.
           </span>
           <button type="button" className="scorer-text-action" onClick={onDownload}>
             Download QBJ backup
@@ -154,7 +154,8 @@ export default function ScorerBanners(props: {
         <div className="scorer-banner is-error" role="alert">
           <strong>Event journal save failed — do not reload or close this tab.</strong>
           <span>
-            The game currently exists only on this screen. Download a QBJ backup now and again when the game ends.
+            The game currently exists only on this screen. Download a QBJ backup now and again when the game
+            ends.
           </span>
           <button type="button" className="scorer-text-action" onClick={onDownload}>
             Download QBJ backup
@@ -240,8 +241,8 @@ export function ConnectionTimelineList(props: { entries: ITimelineEntry[]; limit
       </ol>
       {entries.length > shown.length && (
         <p className="scorer-timeline-more">
-          {entries.length - shown.length} earlier {entries.length - shown.length === 1 ? 'entry' : 'entries'} are in
-          the downloadable diagnostics.
+          {entries.length - shown.length} earlier {entries.length - shown.length === 1 ? 'entry' : 'entries'}{' '}
+          are in the downloadable diagnostics.
         </p>
       )}
     </div>

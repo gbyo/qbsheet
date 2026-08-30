@@ -88,7 +88,11 @@ async function enableKeyboardScoring(page: Page): Promise<void> {
   await expect(page.getByLabel('Keyboard scoring')).toBeVisible();
 }
 
-async function pressModifiedKey(page: Page, modifier: 'Alt' | 'Control' | 'Shift', key: string): Promise<void> {
+async function pressModifiedKey(
+  page: Page,
+  modifier: 'Alt' | 'Control' | 'Shift',
+  key: string,
+): Promise<void> {
   await page.keyboard.down(modifier);
   await page.keyboard.press(key);
   await page.keyboard.up(modifier);
@@ -109,7 +113,9 @@ async function openReviewWithKeyboard(page: Page): Promise<void> {
   await expect(page.getByRole('dialog', { name: 'Full scoresheet review' })).toBeVisible();
 }
 
-test('production keyboard scoring records seat rulings, bonuses, and safe focus boundaries', async ({ page }) => {
+test('production keyboard scoring records seat rulings, bonuses, and safe focus boundaries', async ({
+  page,
+}) => {
   await page.goto('/');
   await openGeneratedGame(page);
   await enableKeyboardScoring(page);
@@ -175,7 +181,9 @@ test('production keyboard scoring records seat rulings, bonuses, and safe focus 
   await expect(questions.filter({ hasText: 'Q3' })).toContainText('No buzz');
 });
 
-test('a real scorer session survives fast input, reload, correction, completion, and export', async ({ page }) => {
+test('a real scorer session survives fast input, reload, correction, completion, and export', async ({
+  page,
+}) => {
   const browserErrors: string[] = [];
   page.on('pageerror', (error) => browserErrors.push(error.message));
   page.on('console', (message) => {
@@ -219,7 +227,10 @@ test('a real scorer session survives fast input, reload, correction, completion,
   await chooseRuling(page, 'Power (+15)');
   await page.getByRole('group', { name: 'Bonus points' }).getByRole('button', { name: '20' }).click();
   await page.getByRole('button', { name: 'Save changes' }).click();
-  await page.getByRole('dialog', { name: 'Full scoresheet review' }).getByRole('button', { name: 'Close' }).click();
+  await page
+    .getByRole('dialog', { name: 'Full scoresheet review' })
+    .getByRole('button', { name: 'Close' })
+    .click();
 
   await expect(page.getByLabel('Greenwood score')).toHaveText('35');
   await page.getByRole('button', { name: 'Game', exact: true }).click();
@@ -252,7 +263,10 @@ test('a real scorer session survives fast input, reload, correction, completion,
   expect(qbj.match_questions[0].buzzes).toHaveLength(1);
   const greenwood = qbj.match_teams.find((team) => team.team.name === 'Greenwood');
   const jordan = greenwood?.match_players.find((player) => player.player.name === 'Jordan Blake');
-  expect(jordan?.answer_counts).toContainEqual({ number: 1, answer_type: { id: 'AnswerType_15', value: 15 } });
+  expect(jordan?.answer_counts).toContainEqual({
+    number: 1,
+    answer_type: { id: 'AnswerType_15', value: 15 },
+  });
   await expect(page.getByRole('button', { name: 'Done' })).toBeEnabled();
   expect(browserErrors).toEqual([]);
 });

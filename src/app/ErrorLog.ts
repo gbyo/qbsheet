@@ -73,7 +73,9 @@ export function describeThrown(value: unknown): string {
   if (value === null || value === undefined) return 'Nothing was thrown, which is itself the problem';
   try {
     const serialized = JSON.stringify(value);
-    return serialized === undefined ? 'An unserializable value was thrown' : serialized.slice(0, messageLimit);
+    return serialized === undefined
+      ? 'An unserializable value was thrown'
+      : serialized.slice(0, messageLimit);
   } catch {
     // A circular object, or one with a throwing getter. The fact that something was thrown is still
     // worth a line.

@@ -4,12 +4,7 @@ import { buildLabel } from '../pwa/BuildVersion';
 import { IWorkerBuild, serviceWorkerBuild } from '../pwa/AppUpdate';
 import { useAppUpdate } from '../pwa/useAppUpdate';
 import { IUnreadableRecord } from '../game/GameRecordUpgrade';
-import {
-  DiagnosticsOutcome,
-  IDiagnosticServer,
-  downloadDiagnostics,
-  safeAddress,
-} from './Diagnostics';
+import { DiagnosticsOutcome, IDiagnosticServer, downloadDiagnostics, safeAddress } from './Diagnostics';
 import { isSafariBrowser } from './browserCompatibility';
 
 type CheckState = 'pass' | 'warn' | 'fail' | 'info';
@@ -303,7 +298,10 @@ export default function DeviceReadiness(props: {
       }
     } catch {
       if (serverTestSequence.current === sequence) {
-        setServerTest({ kind: 'failed', message: 'Tournament control could not be tested from this browser.' });
+        setServerTest({
+          kind: 'failed',
+          message: 'Tournament control could not be tested from this browser.',
+        });
       }
     }
   };
@@ -342,7 +340,8 @@ export default function DeviceReadiness(props: {
         return {
           id: 'offline',
           title: 'Offline app',
-          detail: 'The offline worker is installed but is not controlling this tab yet. Reload once before the tournament.',
+          detail:
+            'The offline worker is installed but is not controlling this tab yet. Reload once before the tournament.',
           state: 'warn',
           kind: 'recommended',
         };
@@ -381,7 +380,8 @@ export default function DeviceReadiness(props: {
           ? {
               id: 'local-network',
               title: 'Local network access',
-              detail: 'Local network access is denied. Connected scoring cannot reach a LAN tournament server until it is allowed.',
+              detail:
+                'Local network access is denied. Connected scoring cannot reach a LAN tournament server until it is allowed.',
               state: 'fail',
               kind: 'connected',
             }
@@ -389,14 +389,16 @@ export default function DeviceReadiness(props: {
             ? {
                 id: 'local-network',
                 title: 'Local network access',
-                detail: 'Not granted yet. Testing tournament control below should trigger the browser permission prompt.',
+                detail:
+                  'Not granted yet. Testing tournament control below should trigger the browser permission prompt.',
                 state: 'info',
                 kind: 'connected',
               }
             : {
                 id: 'local-network',
                 title: 'Local network access',
-                detail: 'This browser does not expose the Local Network Access permission state. Use the connection test below to verify it directly.',
+                detail:
+                  'This browser does not expose the Local Network Access permission state. Use the connection test below to verify it directly.',
                 state: 'info',
                 kind: 'connected',
               };
@@ -414,27 +416,32 @@ export default function DeviceReadiness(props: {
           ? {
               id: 'downloads',
               title: 'Backup downloads',
-              detail: 'The test file did not download. Fix browser download restrictions before relying on QBJ backup.',
+              detail:
+                'The test file did not download. Fix browser download restrictions before relying on QBJ backup.',
               state: 'fail',
               kind: 'required',
             }
           : {
               id: 'downloads',
               title: 'Backup downloads',
-              detail: 'Not tested yet. QBSheet cannot verify a completed browser download without asking you.',
+              detail:
+                'Not tested yet. QBSheet cannot verify a completed browser download without asking you.',
               state: 'info',
               kind: 'required',
             };
 
-    const probeFailureCheck: IReadinessCheck[] = snapshot.probeFailures.length > 0
-      ? [{
-          id: 'readiness-probes',
-          title: 'Device check details',
-          detail: `QBSheet could not check ${snapshot.probeFailures.join(' or ')}. The other results are still shown; retry this check before the tournament.`,
-          state: 'warn',
-          kind: 'recommended',
-        }]
-      : [];
+    const probeFailureCheck: IReadinessCheck[] =
+      snapshot.probeFailures.length > 0
+        ? [
+            {
+              id: 'readiness-probes',
+              title: 'Device check details',
+              detail: `QBSheet could not check ${snapshot.probeFailures.join(' or ')}. The other results are still shown; retry this check before the tournament.`,
+              state: 'warn',
+              kind: 'recommended',
+            },
+          ]
+        : [];
 
     return [
       ...probeFailureCheck,
@@ -550,10 +557,16 @@ export default function DeviceReadiness(props: {
     );
   };
 
-  const requiredFailures = checks.filter((check) => check.kind === 'required' && check.state === 'fail').length;
-  const connectedFailures = checks.filter((check) => check.kind === 'connected' && check.state === 'fail').length;
+  const requiredFailures = checks.filter(
+    (check) => check.kind === 'required' && check.state === 'fail',
+  ).length;
+  const connectedFailures = checks.filter(
+    (check) => check.kind === 'connected' && check.state === 'fail',
+  ).length;
   const connectedIntent = serverAddress.trim() !== '' || serverTest.kind !== 'untested';
-  const recommendations = checks.filter((check) => check.kind === 'recommended' && check.state === 'warn').length;
+  const recommendations = checks.filter(
+    (check) => check.kind === 'recommended' && check.state === 'warn',
+  ).length;
   const requiredUntested = checks.some((check) => check.kind === 'required' && check.state === 'info');
   const connectedBlocked = connectedIntent && connectedFailures > 0;
   const summaryHeadline =
@@ -608,12 +621,8 @@ export default function DeviceReadiness(props: {
           className={`readiness-summary ${requiredFailures > 0 || connectedBlocked ? 'is-failed' : requiredUntested ? 'is-pending' : 'is-ready'}`}
           aria-live="polite"
         >
-          <strong>
-            {summaryHeadline}
-          </strong>
-          <span>
-            {summaryDetail}
-          </span>
+          <strong>{summaryHeadline}</strong>
+          <span>{summaryDetail}</span>
         </section>
       )}
 
@@ -647,17 +656,29 @@ export default function DeviceReadiness(props: {
                           </button>
                         )}
                       {check.id === 'downloads' && downloadState === 'untested' && (
-                        <button type="button" className="shell-button readiness-inline-action" onClick={startDownloadTest}>
+                        <button
+                          type="button"
+                          className="shell-button readiness-inline-action"
+                          onClick={startDownloadTest}
+                        >
                           Test download
                         </button>
                       )}
                       {check.id === 'downloads' && downloadState === 'waiting' && (
                         <div className="readiness-confirm">
                           <span>Did qbsheet-download-test.txt download?</span>
-                          <button type="button" className="shell-button" onClick={() => setDownloadState('passed')}>
+                          <button
+                            type="button"
+                            className="shell-button"
+                            onClick={() => setDownloadState('passed')}
+                          >
                             Yes
                           </button>
-                          <button type="button" className="shell-button" onClick={() => setDownloadState('failed')}>
+                          <button
+                            type="button"
+                            className="shell-button"
+                            onClick={() => setDownloadState('failed')}
+                          >
                             No
                           </button>
                         </div>
@@ -697,7 +718,9 @@ export default function DeviceReadiness(props: {
         </form>
         {serverTest.kind === 'passed' && (
           <>
-            <p className="readiness-test-result is-pass" role="status">✓ {serverTest.message}</p>
+            <p className="readiness-test-result is-pass" role="status">
+              ✓ {serverTest.message}
+            </p>
             <p className="readiness-detail">
               Protocol: {serverTest.protocol}.{' '}
               {serverTest.canonical
@@ -716,10 +739,10 @@ export default function DeviceReadiness(props: {
       <section className="shell-section">
         <h2 className="shell-heading">Diagnostics</h2>
         <p className="readiness-detail">
-          Saves one file describing this device: the build it is running, the browser and screen, every
-          check above, what tournament control answered, storage health, recent connection activity and
-          any recent errors. It contains no pairing code, no room or session token, and nothing typed into
-          a message box, so it is safe to send to whoever is helping.
+          Saves one file describing this device: the build it is running, the browser and screen, every check
+          above, what tournament control answered, storage health, recent connection activity and any recent
+          errors. It contains no pairing code, no room or session token, and nothing typed into a message box,
+          so it is safe to send to whoever is helping.
         </p>
         <button type="button" className="shell-button readiness-inline-action" onClick={saveDiagnostics}>
           Download diagnostics

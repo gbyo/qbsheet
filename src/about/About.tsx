@@ -216,8 +216,8 @@ export default function About() {
             <p className="about-kicker">OPEN BY DESIGN</p>
             <h2 id="open-heading">Your games aren&apos;t locked into QBSheet.</h2>
             <p>
-              QBSheet uses open formats and an open protocol, so tournament data can move between the scoresheet and
-              compatible tournament software.
+              QBSheet uses open formats and an open protocol, so tournament data can move between the
+              scoresheet and compatible tournament software.
             </p>
           </div>
           <dl className="about-definition-list">

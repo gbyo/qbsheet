@@ -64,8 +64,8 @@ export default function ScoringRulesEditor(props: {
               Advanced rules
             </button>
             <p className="shell-hint rules-mode-hint">
-              For more than one power tier, more than one neg, a zero-point answer, or bonuses whose
-              parts are not all worth the same.
+              For more than one power tier, more than one neg, a zero-point answer, or bonuses whose parts are
+              not all worth the same.
             </p>
           </>
         ) : (

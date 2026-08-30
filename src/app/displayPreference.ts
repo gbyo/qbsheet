@@ -166,7 +166,10 @@ export function subscribeDisplayPreferences(listener: () => void): () => void {
   };
 }
 
-export function setAppearance(value: Appearance, storage: IPreferenceStorage | null = browserStorage()): void {
+export function setAppearance(
+  value: Appearance,
+  storage: IPreferenceStorage | null = browserStorage(),
+): void {
   if (value === appearance) return;
   appearance = value;
   try {

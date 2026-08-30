@@ -58,7 +58,9 @@ async function stubCamera(page: Page, payload: string | null): Promise<void> {
         canvas.width = 320;
         canvas.height = 240;
         canvas.getContext('2d')?.fillRect(0, 0, 320, 240);
-        const stream = (canvas as unknown as { captureStream: (fps: number) => MediaStream }).captureStream(5);
+        const stream = (canvas as unknown as { captureStream: (fps: number) => MediaStream }).captureStream(
+          5,
+        );
         for (const track of stream.getTracks()) {
           const stop = track.stop.bind(track);
           track.stop = () => {
@@ -102,7 +104,9 @@ test.describe('a pairing deep link', () => {
     await page.getByRole('button', { name: 'Connect and pair' }).click();
 
     await expect(page.locator('.connected-room-shell')).toBeVisible();
-    expect(control.requests.some((entry) => entry.method === 'POST' && entry.path === '/qbtcp/v1/pair')).toBe(true);
+    expect(control.requests.some((entry) => entry.method === 'POST' && entry.path === '/qbtcp/v1/pair')).toBe(
+      true,
+    );
   });
 
   test('the pairing survives a reload without asking for anything again', async ({ page }) => {
@@ -129,10 +133,14 @@ test.describe('a pairing deep link', () => {
     await expect(page.getByRole('button', { name: /^(Start|Resume) scoring$/ })).toBeEnabled();
   });
 
-  test('a link this build cannot read is scrubbed anyway and says so without repeating itself', async ({ page }) => {
+  test('a link this build cannot read is scrubbed anyway and says so without repeating itself', async ({
+    page,
+  }) => {
     await page.goto(launchUrl({ version: '9' }));
 
-    await expect(page.getByText('This pairing link uses a version this build does not support.')).toBeVisible();
+    await expect(
+      page.getByText('This pairing link uses a version this build does not support.'),
+    ).toBeVisible();
     expect(page.url()).not.toContain(pairingCode);
     expect(page.url()).not.toContain('qbtcp-pair');
     // Left on the ordinary homepage, with the manual path untouched.
@@ -188,8 +196,12 @@ test.describe('the homepage button', () => {
 });
 
 test.describe('the scanner dialog', () => {
-  test('opens as a real modal, decodes, and hands the result to the pairing flow', async ({ page, baseURL }) => {
-    if (baseURL === undefined) throw new Error('Pairing launch e2e requires a configured Playwright baseURL.');
+  test('opens as a real modal, decodes, and hands the result to the pairing flow', async ({
+    page,
+    baseURL,
+  }) => {
+    if (baseURL === undefined)
+      throw new Error('Pairing launch e2e requires a configured Playwright baseURL.');
     await stubCamera(
       page,
       `${new URL(baseURL).origin}/#qbtcp-pair?v=1&server=${encodeURIComponent(control.origin)}&code=${pairingCode}&room=room-204`,
@@ -252,11 +264,12 @@ test.describe('the scanner dialog', () => {
 
   test('a browser that refuses the camera leaves the typed address working', async ({ page }) => {
     await page.addInitScript(() => {
-      (navigator.mediaDevices as unknown as { getUserMedia: () => Promise<MediaStream> }).getUserMedia = () => {
-        const denial = new Error('denied');
-        denial.name = 'NotAllowedError';
-        return Promise.reject(denial);
-      };
+      (navigator.mediaDevices as unknown as { getUserMedia: () => Promise<MediaStream> }).getUserMedia =
+        () => {
+          const denial = new Error('denied');
+          denial.name = 'NotAllowedError';
+          return Promise.reject(denial);
+        };
     });
     await page.goto('/');
 

@@ -194,9 +194,10 @@ export default function WelcomeScreen(props: {
   const [addressError, setAddressError] = useState('');
   const [addressUnreachable, setAddressUnreachable] = useState(false);
   const [addressBusy, setAddressBusy] = useState(false);
-  const [alreadyPlayed, setAlreadyPlayed] = useState<{ record: IStoredGameRecord; opened: IGamePackage } | null>(
-    null,
-  );
+  const [alreadyPlayed, setAlreadyPlayed] = useState<{
+    record: IStoredGameRecord;
+    opened: IGamePackage;
+  } | null>(null);
   const [settingsView, setSettingsView] = useState<'settings' | 'scorekeeper' | null>(null);
   const [scanning, setScanning] = useState(false);
   /**
@@ -321,7 +322,11 @@ export default function WelcomeScreen(props: {
           {unreadableNotice(unreadable)}
         </p>
       )}
-      {notice !== '' && <p className="shell-notice" role="status">{notice}</p>}
+      {notice !== '' && (
+        <p className="shell-notice" role="status">
+          {notice}
+        </p>
+      )}
 
       <UpdateNotice />
 
@@ -335,7 +340,11 @@ export default function WelcomeScreen(props: {
                 <p className="resume-matchup">{gamePackageMatchup(record.package)}</p>
                 <p className="resume-progress">{progressLabel(record)}</p>
               </div>
-              <button type="button" className="shell-button is-primary" onClick={() => void onOpenRecord(record)}>
+              <button
+                type="button"
+                className="shell-button is-primary"
+                onClick={() => void onOpenRecord(record)}
+              >
                 Resume
               </button>
             </div>
@@ -365,7 +374,9 @@ export default function WelcomeScreen(props: {
               <h3 id="welcome-control-heading" className="welcome-option-heading">
                 Connect to tournament control
               </h3>
-              <p className="welcome-option-copy">Connect this room to receive its game and send back the result.</p>
+              <p className="welcome-option-copy">
+                Connect this room to receive its game and send back the result.
+              </p>
               <form className="connect-form welcome-connect-form" onSubmit={submitAddress}>
                 <label className="shell-label" htmlFor="control-address">
                   Tournament control address
@@ -378,7 +389,7 @@ export default function WelcomeScreen(props: {
                     inputMode="url"
                     autoComplete="off"
                     spellCheck={false}
-                    placeholder="Paste the address shown by tournament control"
+                    placeholder="192.168.1.50:8080"
                     value={address}
                     required
                     onChange={(event) => {
@@ -387,7 +398,11 @@ export default function WelcomeScreen(props: {
                       setAddressUnreachable(false);
                     }}
                   />
-                  <button type="submit" className="shell-button is-primary" disabled={addressBusy || addressEmpty}>
+                  <button
+                    type="submit"
+                    className="shell-button is-primary"
+                    disabled={addressBusy || addressEmpty}
+                  >
                     {addressBusy ? 'Connecting…' : 'Connect'}
                   </button>
                   <button
@@ -431,7 +446,9 @@ export default function WelcomeScreen(props: {
       ) : (
         <section className="shell-section welcome-start welcome-other-scoring">
           <h2 className="shell-heading">Other scoring options</h2>
-          <p className="welcome-option-copy">Use a game file or enter a local game when this room is not using its assigned game.</p>
+          <p className="welcome-option-copy">
+            Use a game file or enter a local game when this room is not using its assigned game.
+          </p>
           <div className="welcome-other-scoring-actions">
             <GameFileOpen onOpen={openPackage} />
             <button type="button" className="shell-button" onClick={onCreateGame}>
@@ -447,7 +464,11 @@ export default function WelcomeScreen(props: {
       <section className="shell-section welcome-practice">
         <div>
           <h2 className="shell-heading">
-            {practiceInProgress ? 'Practice game in progress' : hasGameHistory ? 'Practice scoring' : 'New to QBSheet?'}
+            {practiceInProgress
+              ? 'Practice game in progress'
+              : hasGameHistory
+                ? 'Practice scoring'
+                : 'New to QBSheet?'}
           </h2>
           <p className="welcome-practice-copy">
             {practiceInProgress
@@ -504,7 +525,8 @@ export default function WelcomeScreen(props: {
         >
           <p>This game has already been completed on this device.</p>
           <p>
-            {gamePackageLabel(alreadyPlayed.record.package)} · {gamePackageMatchup(alreadyPlayed.record.package)}
+            {gamePackageLabel(alreadyPlayed.record.package)} ·{' '}
+            {gamePackageMatchup(alreadyPlayed.record.package)}
           </p>
           <div className="shell-modal-actions">
             <button

@@ -17,7 +17,11 @@ import {
   roomProcedureIsActive,
   roomProcedureVersion,
 } from '../src/scoring/RoomProcedure';
-import { protestNoteLine, unresolvedProtestLines, unresolvedProtestMarker } from '../src/scoring/ProtestNotes';
+import {
+  protestNoteLine,
+  unresolvedProtestLines,
+  unresolvedProtestMarker,
+} from '../src/scoring/ProtestNotes';
 import deriveGame, { IGameSetup } from '../src/scoring/deriveGame';
 import toQbjMatch from '../src/scoring/toQbjMatch';
 import { ScoreEvent } from '../src/scoring/ScoreEvents';
@@ -49,11 +53,17 @@ describe('a procedure nobody configured does nothing', () => {
   test('anything unrecognizable reads back as the default rather than throwing', () => {
     expect(readRoomProcedure(undefined)).toEqual(defaultRoomProcedure());
     expect(readRoomProcedure('halves please')).toEqual(defaultRoomProcedure());
-    expect(readRoomProcedure({ version: 99, halves: true, timeoutsPerTeam: 3 })).toEqual(defaultRoomProcedure());
+    expect(readRoomProcedure({ version: 99, halves: true, timeoutsPerTeam: 3 })).toEqual(
+      defaultRoomProcedure(),
+    );
   });
 
   test('a clock length with no halves to apply it to is dropped', () => {
-    const procedure = readRoomProcedure({ version: roomProcedureVersion, halves: false, halfLengthMinutes: 10 });
+    const procedure = readRoomProcedure({
+      version: roomProcedureVersion,
+      halves: false,
+      halfLengthMinutes: 10,
+    });
 
     expect(procedure.halfLengthMinutes).toBeUndefined();
   });
@@ -71,8 +81,12 @@ describe('a procedure nobody configured does nothing', () => {
   });
 
   test('a configured procedure is recognized as worth sending to a room', () => {
-    expect(roomProcedureIsActive({ version: roomProcedureVersion, halves: true, timeoutsPerTeam: 0 })).toBe(true);
-    expect(roomProcedureIsActive({ version: roomProcedureVersion, halves: false, timeoutsPerTeam: 1 })).toBe(true);
+    expect(roomProcedureIsActive({ version: roomProcedureVersion, halves: true, timeoutsPerTeam: 0 })).toBe(
+      true,
+    );
+    expect(roomProcedureIsActive({ version: roomProcedureVersion, halves: false, timeoutsPerTeam: 1 })).toBe(
+      true,
+    );
   });
 
   test('documented default policy values remain inert when explicitly present', () => {
@@ -175,9 +189,9 @@ describe('what a room-level event does to the exported match', () => {
     expect(eventDescription(event({ type: 'timeout', questionNumber: 1, team: 'left' }), format, game)).toBe(
       'Timeout: Ninety Six B',
     );
-    expect(eventDescription(event({ type: 'timeout-start', questionNumber: 1, team: 'left' }), format, game)).toBe(
-      'Timeout started: Ninety Six B',
-    );
+    expect(
+      eventDescription(event({ type: 'timeout-start', questionNumber: 1, team: 'left' }), format, game),
+    ).toBe('Timeout started: Ninety Six B');
   });
 
   test('a game ended early says so on the result', () => {
@@ -226,7 +240,13 @@ describe('what a room-level event does to the exported match', () => {
   test('a bonus collected part by part travels as parts', () => {
     const powerIndex = format.answerTypes.find((answerType) => answerType.value === 10)!.index;
     const game = deriveGame(format, setup, [
-      event({ type: 'tossup-buzz', questionNumber: 1, team: 'left', playerName: 'Sarah', answerTypeIndex: powerIndex }),
+      event({
+        type: 'tossup-buzz',
+        questionNumber: 1,
+        team: 'left',
+        playerName: 'Sarah',
+        answerTypeIndex: powerIndex,
+      }),
       event({
         type: 'bonus',
         questionNumber: 1,

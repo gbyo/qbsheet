@@ -154,7 +154,10 @@ describe('a format, back into the form that produces one', () => {
     const format = scoringRulesToScorekeeperFormat(new ScoringRules(CommonRuleSets.Acf));
     const contradictory: IScorekeeperFormat = {
       ...format,
-      answerTypes: format.answerTypes.map((answerType) => ({ ...answerType, awardsBonus: answerType.value > 0 })),
+      answerTypes: format.answerTypes.map((answerType) => ({
+        ...answerType,
+        awardsBonus: answerType.value > 0,
+      })),
       bonus: { ...format.bonus, enabled: false },
     };
     expect(advancedFromFormat(contradictory).useBonuses).toBe(false);

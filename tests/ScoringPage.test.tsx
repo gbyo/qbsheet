@@ -54,7 +54,12 @@ describe('the scoring page', () => {
     const { container } = render(<Scoring />);
 
     expect(screen.getByRole('heading', { level: 2, name: 'Corrections and recovery' })).toBeInTheDocument();
-    for (const title of ['Undo and redo', 'Correcting an earlier question', 'Lineup changes', 'Local recovery']) {
+    for (const title of [
+      'Undo and redo',
+      'Correcting an earlier question',
+      'Lineup changes',
+      'Local recovery',
+    ]) {
       expect(screen.getByRole('heading', { level: 3, name: title })).toBeInTheDocument();
     }
 
@@ -64,7 +69,9 @@ describe('the scoring page', () => {
     // A correction is recorded rather than an overwrite, and the journal write is synchronous. Both
     // are properties of the implementation.
     expect(said).toContain('the correction is recorded rather than replacing the original silently');
-    expect(said).toContain('written to the device as it is scored, in the same operation rather than afterwards');
+    expect(said).toContain(
+      'written to the device as it is scored, in the same operation rather than afterwards',
+    );
     // When substitutions are permitted belongs to the tournament, never to QBSheet.
     expect(said).toContain('When substitutions are permitted is set by the tournament’s room procedure');
   });
@@ -140,7 +147,15 @@ describe('the scoring page', () => {
 
     // The page most likely to break this rule, and the reason the rule is worth a test here. See the
     // note at the top of this file.
-    for (const assumption of ['naqt', 'acf', 'power', 'neg', 'bounce', 'four players a side', 'between tossups']) {
+    for (const assumption of [
+      'naqt',
+      'acf',
+      'power',
+      'neg',
+      'bounce',
+      'four players a side',
+      'between tossups',
+    ]) {
       expect(said).not.toContain(assumption);
     }
   });

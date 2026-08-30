@@ -145,7 +145,11 @@ export function redact(text: string): string {
 }
 
 /** Which kinds describe the connection itself, and so are only worth recording when they change. */
-const stateKinds: ReadonlySet<TimelineEventKind> = new Set<TimelineEventKind>(['connected', 'degraded', 'offline']);
+const stateKinds: ReadonlySet<TimelineEventKind> = new Set<TimelineEventKind>([
+  'connected',
+  'degraded',
+  'offline',
+]);
 
 export class ConnectionTimeline {
   private buffer: ITimelineEntry[] = [];
@@ -179,7 +183,14 @@ export class ConnectionTimeline {
 
     const at = this.now();
     this.sequence += 1;
-    this.buffer.push({ seq: this.sequence, at, lastAt: at, count: 1, kind, ...(safe ? { detail: safe } : {}) });
+    this.buffer.push({
+      seq: this.sequence,
+      at,
+      lastAt: at,
+      count: 1,
+      kind,
+      ...(safe ? { detail: safe } : {}),
+    });
     // Oldest first out. A room debugging a problem cares about the last twenty minutes, and the
     // alternative — refusing to record once full — would silently stop the history at the moment
     // something started going wrong.

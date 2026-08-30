@@ -200,8 +200,10 @@ function combineNotes(game: IDerivedGame, meta: IQbjMatchMeta): string | undefin
   const lines: string[] = [];
   if (meta.notes) lines.push(meta.notes);
 
-  for (const protest of game.protests.filter((entry) => entry.status === 'open')) lines.push(protestLine(protest));
-  for (const protest of game.protests.filter((entry) => entry.status !== 'open')) lines.push(protestLine(protest));
+  for (const protest of game.protests.filter((entry) => entry.status === 'open'))
+    lines.push(protestLine(protest));
+  for (const protest of game.protests.filter((entry) => entry.status !== 'open'))
+    lines.push(protestLine(protest));
 
   if (game.endedEarly) {
     lines.push(`Game ended early after ${game.endedEarly.tossupsRead} tossups: ${game.endedEarly.reason}`);

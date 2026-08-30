@@ -23,13 +23,7 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 // Build-time only. Nothing in the client graph imports these, so neither the wiki content nor the
 // Markdown renderer reaches any bundle. See the note at the top of `wikiContent`.
-import {
-  editUrlFor,
-  readWikiPage,
-  readWikiSections,
-  slugFor,
-  wikiPageNames,
-} from './src/about/wikiContent';
+import { editUrlFor, readWikiPage, readWikiSections, slugFor, wikiPageNames } from './src/about/wikiContent';
 import { readFileSync } from 'node:fs';
 import { posix, resolve, sep } from 'node:path';
 

@@ -27,7 +27,11 @@
  * sudden death and a three-question overtime — and a bug that only appears under one of them is
  * exactly the bug worth catching.
  */
-import { IScorekeeperAnswerType, IScorekeeperFormat, scorekeeperFormatVersion } from '../src/scoring/ScorekeeperFormat';
+import {
+  IScorekeeperAnswerType,
+  IScorekeeperFormat,
+  scorekeeperFormatVersion,
+} from '../src/scoring/ScorekeeperFormat';
 import AnswerType from './AnswerType';
 
 export enum CommonRuleSets {

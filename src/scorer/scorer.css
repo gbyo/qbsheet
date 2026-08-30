@@ -1006,7 +1006,11 @@ div.scorer-banner .scorer-banner-message {
   width: 100%;
   min-height: 132px;
   padding: 8px;
-  font: 0.75rem/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font:
+    0.75rem/1.35 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
   color: var(--room-text);
   background: var(--room-surface);
   border: 1px solid var(--room-border-strong);
@@ -1333,7 +1337,6 @@ div.scorer-banner .scorer-banner-message {
     right: 0;
     left: auto;
   }
-
 }
 
 /* #endregion */

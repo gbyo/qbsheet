@@ -90,7 +90,9 @@ export default function ScoringRulesCorrectionDialog(props: {
   disabled?: boolean;
 }) {
   const { format, events, setup, onCorrect, onClose, disabled = false } = props;
-  const [input, setInput] = useState<IScoringRulesInput>(() => advancedRulesInput(advancedFromFormat(format)));
+  const [input, setInput] = useState<IScoringRulesInput>(() =>
+    advancedRulesInput(advancedFromFormat(format)),
+  );
   const [confirming, setConfirming] = useState(false);
   const [saving, setSaving] = useState(false);
   const [failure, setFailure] = useState('');
@@ -188,8 +190,8 @@ export default function ScoringRulesCorrectionDialog(props: {
         </dl>
 
         <p className="scorer-dialog-note">
-          Every question stays exactly as the scorekeeper recorded it. Only what those answers are
-          worth changes, and the scoresheet is recalculated from the start of the game.
+          Every question stays exactly as the scorekeeper recorded it. Only what those answers are worth
+          changes, and the scoresheet is recalculated from the start of the game.
         </p>
 
         {failure !== '' && (
@@ -199,10 +201,20 @@ export default function ScoringRulesCorrectionDialog(props: {
         )}
 
         <div className="rules-correction-actions">
-          <button type="button" className="scorer-action" onClick={() => setConfirming(false)} disabled={saving}>
+          <button
+            type="button"
+            className="scorer-action"
+            onClick={() => setConfirming(false)}
+            disabled={saving}
+          >
             Back
           </button>
-          <button type="button" className="scorer-choice" onClick={() => void apply()} disabled={saving || disabled}>
+          <button
+            type="button"
+            className="scorer-choice"
+            onClick={() => void apply()}
+            disabled={saving || disabled}
+          >
             {saving ? 'Applying…' : 'Apply corrected rules'}
           </button>
         </div>
@@ -213,8 +225,8 @@ export default function ScoringRulesCorrectionDialog(props: {
   return (
     <ScorerDialog title="Correct the scoring rules" onClose={onClose} wide>
       <p className="scorer-dialog-note">
-        For a tournament that has corrected its own rules mid-round. The questions already scored are
-        kept and recalculated; nothing is re-entered.
+        For a tournament that has corrected its own rules mid-round. The questions already scored are kept and
+        recalculated; nothing is re-entered.
       </p>
 
       <ScoringRulesEditor value={input} onChange={setInput} idPrefix="rules-correction" />

@@ -27,7 +27,10 @@ async function openGameWithBouncebacks(page: Page): Promise<void> {
   await expect(page.getByRole('heading', { name: 'Who is starting?' })).toBeVisible();
   const prompt = page.getByLabel('Starting lineups');
   for (const player of ['Sarah Mitchell', 'James Okafor']) {
-    await prompt.getByLabel('Ninety Six A starters').getByRole('button', { name: `Start ${player}` }).click();
+    await prompt
+      .getByLabel('Ninety Six A starters')
+      .getByRole('button', { name: `Start ${player}` })
+      .click();
   }
   for (const player of ['Emma Chen', 'Jordan Blake']) {
     await prompt
@@ -62,9 +65,11 @@ async function partEditorLayout(page: Page) {
       right: bounds.right,
       clientWidth: element.clientWidth,
       scrollWidth: element.scrollWidth,
-      headingVisible: element.querySelector('.scorer-question-part-head') !== null
-        ? getComputedStyle(element.querySelector('.scorer-question-part-head') as Element).display !== 'none'
-        : false,
+      headingVisible:
+        element.querySelector('.scorer-question-part-head') !== null
+          ? getComputedStyle(element.querySelector('.scorer-question-part-head') as Element).display !==
+            'none'
+          : false,
       rows,
     };
   });
@@ -81,7 +86,9 @@ async function openPartEditor(page: Page): Promise<void> {
   await expect(page.getByRole('group', { name: 'Bonus part 1 outcome' })).toBeVisible();
 }
 
-test('the part editor lays out as columns on a scorer screen and as blocks on a narrow one', async ({ page }) => {
+test('the part editor lays out as columns on a scorer screen and as blocks on a narrow one', async ({
+  page,
+}) => {
   await page.setViewportSize({ width: 1366, height: 768 });
   await openGameWithBouncebacks(page);
   await openPartEditor(page);
@@ -119,9 +126,13 @@ test('the part editor lays out as columns on a scorer screen and as blocks on a 
 
   // And it still works down there: answering all three parts commits the breakdown.
   await page.getByRole('button', { name: 'Bonus part 1 to Ninety Six A' }).click();
-  await page.getByRole('button', { name: 'Bonus part 2 bounced back to Greenwood Consolidated Regional' }).click();
+  await page
+    .getByRole('button', { name: 'Bonus part 2 bounced back to Greenwood Consolidated Regional' })
+    .click();
   await page.getByRole('button', { name: 'Bonus part 3 to Ninety Six A' }).click();
-  await expect(page.getByText('Ninety Six A +20 · Greenwood Consolidated Regional +10 bounceback')).toBeVisible();
+  await expect(
+    page.getByText('Ninety Six A +20 · Greenwood Consolidated Regional +10 bounceback'),
+  ).toBeVisible();
   await page.getByRole('button', { name: 'Save changes' }).click();
   await expect(page.getByLabel('Ninety Six A score')).toHaveText('30');
   await expect(page.getByLabel('Greenwood Consolidated Regional score')).toHaveText('10');

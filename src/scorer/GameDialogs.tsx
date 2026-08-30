@@ -160,8 +160,8 @@ export function AdjustDialog(props: {
   return (
     <ScorerDialog title="Adjust score" onClose={onClose}>
       <p className="scorer-dialog-note">
-        For matching a total tournament control has already accepted. Ordinary corrections are better made by editing
-        the question that was wrong.
+        For matching a total tournament control has already accepted. Ordinary corrections are better made by
+        editing the question that was wrong.
       </p>
       <form
         className="scorer-note-form"

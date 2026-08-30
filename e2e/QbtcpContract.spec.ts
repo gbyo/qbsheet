@@ -75,7 +75,10 @@ async function startAssignedGame(page: Page, round: 4 | 5): Promise<void> {
 
 async function scoreTossup(page: Page, player: string, ruling: string, bonus: number): Promise<void> {
   await page.getByRole('button', { name: `${player} ${ruling}`, exact: true }).click();
-  await page.getByLabel('Bonus').getByRole('button', { name: String(bonus), exact: true }).click();
+  await page
+    .getByLabel('Bonus')
+    .getByRole('button', { name: String(bonus), exact: true })
+    .click();
 }
 
 async function endGameAndSubmit(page: Page): Promise<void> {
@@ -251,7 +254,9 @@ test.describe('a server that speaks only QBTCP', () => {
     const moreIssues = status.getByRole('button', { name: /more|Issues/ });
     await expect(moreIssues).toBeVisible();
     await moreIssues.click();
-    await expect(status.getByLabel('Open issues')).toContainText('Tournament control requested · Question / packet issue');
+    await expect(status.getByLabel('Open issues')).toContainText(
+      'Tournament control requested · Question / packet issue',
+    );
     await expect.poll(() => control.helpPosts.length).toBe(1);
     expect(control.helpPosts[0]).toEqual({
       category: 'question-packet',
@@ -273,9 +278,12 @@ test.describe('a server that speaks only QBTCP', () => {
     const reloadedIssues = status.getByRole('button', { name: /more|Issues/ });
     await expect(reloadedIssues).toBeVisible();
     await reloadedIssues.click();
-    await expect(status.getByLabel('Open issues')).toContainText('Tournament control requested · Question / packet issue', {
-      timeout: 20_000,
-    });
+    await expect(status.getByLabel('Open issues')).toContainText(
+      'Tournament control requested · Question / packet issue',
+      {
+        timeout: 20_000,
+      },
+    );
     // Reconciliation is GET-only on reload; restoring the banner must not notify control again.
     expect(control.helpPosts).toHaveLength(1);
 
@@ -295,7 +303,9 @@ test.describe('a server that speaks only QBTCP', () => {
     expect(await page.getByLabel('Ninety Six score').textContent()).toBe('35');
   });
 
-  test('saves an issue locally when help POST fails and retries only the control request', async ({ page }) => {
+  test('saves an issue locally when help POST fails and retries only the control request', async ({
+    page,
+  }) => {
     await pairRoom(page, control);
     await startAssignedGame(page, 4);
     control.failNextHelp(503, 'Tournament control is temporarily unavailable.');
@@ -310,7 +320,9 @@ test.describe('a server that speaks only QBTCP', () => {
     // note really is saved whatever the wire did, and the failure has one persistent home with the
     // retry in it rather than a second permanent copy above the scoresheet.
     const status = page.getByRole('region', { name: 'Game status' });
-    const recovery = status.locator('.scorer-banner').filter({ hasText: "Couldn't check tournament control for recovery" });
+    const recovery = status
+      .locator('.scorer-banner')
+      .filter({ hasText: "Couldn't check tournament control for recovery" });
     if (await recovery.count()) {
       await recovery.getByRole('button', { name: /Dismiss/ }).click();
     }
@@ -335,7 +347,9 @@ test.describe('a server that speaks only QBTCP', () => {
 
     await page.getByRole('button', { name: 'Game', exact: true }).click();
     await page.getByRole('menuitem', { name: 'Full scoresheet review' }).click();
-    await expect(page.getByText('Flagged note: Question / packet issue: A failure that must stay on the scoresheet.')).toBeVisible();
+    await expect(
+      page.getByText('Flagged note: Question / packet issue: A failure that must stay on the scoresheet.'),
+    ).toBeVisible();
   });
 
   test('automatically retries a pending final and releases the room after acceptance', async ({ page }) => {
@@ -453,7 +467,9 @@ test.describe('a server that speaks only QBTCP', () => {
     await startAssignedGame(page, 5);
   });
 
-  test('waits rather than asking for a code when tournament control has nothing assigned', async ({ page }) => {
+  test('waits rather than asking for a code when tournament control has nothing assigned', async ({
+    page,
+  }) => {
     control.assign(null);
     await pairRoom(page, control);
 
@@ -470,11 +486,17 @@ test.describe('a server that speaks only QBTCP', () => {
     await expect(page.locator('.assignment-team').nth(1)).toHaveText('Greenwood');
 
     control.revokeRoomToken();
-    await expect(page.getByRole('button', { name: `Pair ${roomName} again` })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole('button', { name: `Pair ${roomName} again` })).toBeVisible({
+      timeout: 20_000,
+    });
     await page.getByRole('button', { name: `Pair ${roomName} again` }).click();
 
     await expect(page.getByLabel('Pairing code')).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByText(/Tournament control no longer recognizes this room\. The address and room are already known/)).toBeVisible();
+    await expect(
+      page.getByText(
+        /Tournament control no longer recognizes this room\. The address and room are already known/,
+      ),
+    ).toBeVisible();
   });
 
   /**
@@ -517,7 +539,9 @@ test.describe('a server that speaks only QBTCP', () => {
 
     // And the person is told, without being sent to a pairing code: a writer conflict is somebody
     // else's device, not a credential this room has lost.
-    const conflict = page.locator('.scorer-banner').filter({ hasText: 'Another device is scoring this game' });
+    const conflict = page
+      .locator('.scorer-banner')
+      .filter({ hasText: 'Another device is scoring this game' });
     await expect(conflict).toBeVisible({ timeout: 20_000 });
     await expect(page.getByLabel('Pairing code')).toHaveCount(0);
 

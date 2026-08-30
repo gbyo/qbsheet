@@ -10,9 +10,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 /** Whether the document fits its own viewport. A sideways scrollbar on a phone is a defect. */
 async function fits(page: Page): Promise<boolean> {
-  return page.evaluate(
-    () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
-  );
+  return page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
 }
 
 test('the self-hosting page explains what hosting QBSheet involves', async ({ page }) => {
@@ -34,7 +32,10 @@ test('the self-hosting page explains what hosting QBSheet involves', async ({ pa
 test('the product page links to it from the header', async ({ page }) => {
   await page.goto('/about/');
 
-  await page.getByRole('navigation', { name: 'Primary navigation' }).getByRole('link', { name: 'Self-host' }).click();
+  await page
+    .getByRole('navigation', { name: 'Primary navigation' })
+    .getByRole('link', { name: 'Self-host' })
+    .click();
   await expect(page).toHaveURL(/\/about\/self-host\/$/);
   await expect(page.getByRole('heading', { level: 1, name: 'Host QBSheet yourself' })).toBeVisible();
 });
@@ -47,7 +48,10 @@ test('the product page links to it and it links back', async ({ page }) => {
   await expect(page.getByRole('heading', { level: 1, name: 'Host QBSheet yourself' })).toBeVisible();
 
   // Back up one directory, not two. This is the assertion that catches a path written from `about/`.
-  await page.getByRole('navigation', { name: 'Primary navigation' }).getByRole('link', { name: 'About' }).click();
+  await page
+    .getByRole('navigation', { name: 'Primary navigation' })
+    .getByRole('link', { name: 'About' })
+    .click();
   await expect(page).toHaveURL(/\/about\/$/);
   await expect(page.getByRole('heading', { level: 1, name: 'The simpler way to keep score.' })).toBeVisible();
 });
@@ -55,7 +59,10 @@ test('the product page links to it and it links back', async ({ page }) => {
 test('the scorer is two directories up from the self-hosting page', async ({ page }) => {
   await page.goto('/about/self-host/');
 
-  await page.getByRole('navigation', { name: 'Primary navigation' }).getByRole('link', { name: 'Open QBSheet' }).click();
+  await page
+    .getByRole('navigation', { name: 'Primary navigation' })
+    .getByRole('link', { name: 'Open QBSheet' })
+    .click();
   await expect(page.getByRole('link', { name: 'About QBSheet' })).toBeVisible();
 });
 

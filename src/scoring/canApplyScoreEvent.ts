@@ -36,7 +36,12 @@ import {
   roomTakesBreaks,
   substitutionOpportunityPhrase,
 } from './RoomProcedure';
-import deriveGame, { IGameSetup, IDerivedGame, lastPlayedQuestion, lineupChangeEffectiveQuestion } from './deriveGame';
+import deriveGame, {
+  IGameSetup,
+  IDerivedGame,
+  lastPlayedQuestion,
+  lineupChangeEffectiveQuestion,
+} from './deriveGame';
 import { ScoreEvent, usesTossupOpportunity } from './ScoreEvents';
 
 export type ScoreEventVerdict = { ok: true } | { ok: false; reason: string };
@@ -91,9 +96,11 @@ export default function canApplyScoreEvent(
 
     case 'tossup-reading-resumed':
     case 'tossup-readout': {
-      if (openProtestStopsSuddenDeath) return refuse('Resolve the open protest before the next sudden-death tossup.');
+      if (openProtestStopsSuddenDeath)
+        return refuse('Resolve the open protest before the next sudden-death tossup.');
       if (phase.kind === 'lineup') return refuse('Choose who is starting before scoring the first tossup.');
-      if (phase.kind === 'score-check') return refuse('Confirm the score with the moderator before scoring again.');
+      if (phase.kind === 'score-check')
+        return refuse('Confirm the score with the moderator before scoring again.');
       if (phase.kind === 'bonus') return refuse('Score the bonus before the next tossup.');
       if (phase.kind !== 'tossup') return refuse('Wait for the next tossup checkpoint.');
       if (candidate.questionNumber !== phase.questionNumber) {
@@ -109,7 +116,8 @@ export default function canApplyScoreEvent(
       if (candidate.type === 'tossup-reading-resumed') {
         if (recordedQuestion?.readout) return refuse('The question has already been read out.');
         if (answered.size === 0) return refuse('Reading can resume only after a team has answered.');
-        if (recordedQuestion?.resolved || answered.size >= 2) return refuse('This tossup is already resolved.');
+        if (recordedQuestion?.resolved || answered.size >= 2)
+          return refuse('This tossup is already resolved.');
         if (recordedQuestion?.readingResumed) return refuse('Reading has already resumed on this tossup.');
         return allowed;
       }
@@ -120,9 +128,11 @@ export default function canApplyScoreEvent(
 
     case 'tossup-buzz':
     case 'tossup-no-penalty': {
-      if (openProtestStopsSuddenDeath) return refuse('Resolve the open protest before the next sudden-death tossup.');
+      if (openProtestStopsSuddenDeath)
+        return refuse('Resolve the open protest before the next sudden-death tossup.');
       if (phase.kind === 'lineup') return refuse('Choose who is starting before scoring the first tossup.');
-      if (phase.kind === 'score-check') return refuse('Confirm the score with the moderator before scoring again.');
+      if (phase.kind === 'score-check')
+        return refuse('Confirm the score with the moderator before scoring again.');
       if (phase.kind === 'bonus') return refuse('Score the bonus before the next tossup.');
       if (phase.kind !== 'tossup') return refuse('Wait for the next tossup checkpoint.');
       if (complete) return refuse('This game is over. Reopen it from the scoresheet review to change it.');
@@ -133,7 +143,8 @@ export default function canApplyScoreEvent(
       const recordedQuestion = game.questions.find(
         (question) => question.questionNumber === candidate.questionNumber,
       );
-      const activePlayers = recordedQuestion?.activePlayers[candidate.team] ?? game[candidate.team].activePlayers;
+      const activePlayers =
+        recordedQuestion?.activePlayers[candidate.team] ?? game[candidate.team].activePlayers;
       if (candidate.playerName !== undefined) {
         if (candidate.playerName.trim() === '') return refuse('Choose who answered the tossup.');
         if (!activePlayers.includes(candidate.playerName)) {
@@ -148,7 +159,11 @@ export default function canApplyScoreEvent(
       if (answered.has(candidate.team)) {
         return refuse(`${game[candidate.team].name} has already answered this tossup.`);
       }
-      if (events.some((event) => event.type === 'tossup-dead' && event.questionNumber === candidate.questionNumber)) {
+      if (
+        events.some(
+          (event) => event.type === 'tossup-dead' && event.questionNumber === candidate.questionNumber,
+        )
+      ) {
         return refuse('This tossup has already gone dead.');
       }
 
@@ -164,7 +179,8 @@ export default function canApplyScoreEvent(
        */
       if (
         answerType.isNeg &&
-        (recordedQuestion?.readout === true || (answered.size > 0 && recordedQuestion?.readingResumed !== true))
+        (recordedQuestion?.readout === true ||
+          (answered.size > 0 && recordedQuestion?.readingResumed !== true))
       ) {
         return refuse(`${game[candidate.team].name} heard the whole question, so this cannot be a neg.`);
       }
@@ -172,16 +188,22 @@ export default function canApplyScoreEvent(
     }
 
     case 'tossup-dead': {
-      if (openProtestStopsSuddenDeath) return refuse('Resolve the open protest before the next sudden-death tossup.');
+      if (openProtestStopsSuddenDeath)
+        return refuse('Resolve the open protest before the next sudden-death tossup.');
       if (phase.kind === 'lineup') return refuse('Choose who is starting before scoring the first tossup.');
-      if (phase.kind === 'score-check') return refuse('Confirm the score with the moderator before scoring again.');
+      if (phase.kind === 'score-check')
+        return refuse('Confirm the score with the moderator before scoring again.');
       if (phase.kind === 'bonus') return refuse('Score the bonus before the next tossup.');
       if (phase.kind !== 'tossup') return refuse('Wait for the next tossup checkpoint.');
       if (complete) return refuse('This game is over. Reopen it from the scoresheet review to change it.');
       if (candidate.questionNumber !== phase.questionNumber) {
         return refuse(`That belongs to Tossup ${phase.questionNumber}.`);
       }
-      if (events.some((event) => event.type === 'tossup-dead' && event.questionNumber === candidate.questionNumber)) {
+      if (
+        events.some(
+          (event) => event.type === 'tossup-dead' && event.questionNumber === candidate.questionNumber,
+        )
+      ) {
         return refuse('This tossup has already gone dead.');
       }
       return allowed;
@@ -220,7 +242,9 @@ export default function canApplyScoreEvent(
       }
       if (complete) return refuse('This game is over.');
       if (candidate.questionNumber !== lineupChangeEffectiveQuestion(game, events)) {
-        return refuse(`The next safe lineup boundary is Tossup ${lineupChangeEffectiveQuestion(game, events)}.`);
+        return refuse(
+          `The next safe lineup boundary is Tossup ${lineupChangeEffectiveQuestion(game, events)}.`,
+        );
       }
       if (!lineupChangeAllowedAtPhase(procedure?.substitutionPolicy ?? 'any-boundary', phase.kind)) {
         // Said from the configured breaks rather than from the usual case: a room whose breaks are
@@ -241,7 +265,8 @@ export default function canApplyScoreEvent(
     // #region procedure
 
     case 'end-regulation': {
-      if (!format.regulation.timed) return refuse('This format ends regulation on a tossup count, not a clock.');
+      if (!format.regulation.timed)
+        return refuse('This format ends regulation on a tossup count, not a clock.');
       if (game.regulationComplete) return refuse('Regulation has already ended.');
       if (complete) return refuse('This game is over.');
       return allowed;
@@ -315,7 +340,8 @@ export default function canApplyScoreEvent(
       const permitted = procedure?.timeoutsPerTeam ?? 0;
       if (permitted <= 0) return refuse('This tournament does not track timeouts.');
       if (game.activeTimeout) return refuse('A timeout is already active.');
-      if (phase.kind !== 'tossup') return refuse('A timeout is available only before the current tossup begins.');
+      if (phase.kind !== 'tossup')
+        return refuse('A timeout is available only before the current tossup begins.');
       if (candidate.questionNumber !== phase.questionNumber) {
         return refuse(`That timeout belongs to Tossup ${phase.questionNumber}.`);
       }
@@ -331,7 +357,10 @@ export default function canApplyScoreEvent(
       if (game.timeouts[candidate.team] >= permitted) {
         return refuse(`${game[candidate.team].name} has no timeouts remaining.`);
       }
-      if (candidate.startedAt !== undefined && (!Number.isFinite(candidate.startedAt) || candidate.startedAt < 0)) {
+      if (
+        candidate.startedAt !== undefined &&
+        (!Number.isFinite(candidate.startedAt) || candidate.startedAt < 0)
+      ) {
         return refuse('A timeout start needs a valid timestamp.');
       }
       return allowed;
@@ -357,7 +386,8 @@ export default function canApplyScoreEvent(
       if (candidate.reason.trim() === '') return refuse('Say what went wrong with the question.');
       const cycle = game.questions.find((question) => question.questionNumber === candidate.questionNumber);
       if (candidate.scope === 'bonus') {
-        if (!cycle || (!cycle.bonus && !cycle.awaitingBonus)) return refuse('There is no bonus on that question.');
+        if (!cycle || (!cycle.bonus && !cycle.awaitingBonus))
+          return refuse('There is no bonus on that question.');
         return allowed;
       }
       if (!cycle) return refuse('Nothing has been recorded on that question yet.');

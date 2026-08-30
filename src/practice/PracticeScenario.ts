@@ -122,7 +122,8 @@ function tossup(questionNumber: number, team: 'left' | 'right', playerName: stri
 
 function bonus(questionNumber: number, team: 'left' | 'right', points: number) {
   return (event: ScoreEvent) => {
-    if (event.type !== 'bonus' || event.questionNumber !== questionNumber || event.team !== team) return false;
+    if (event.type !== 'bonus' || event.questionNumber !== questionNumber || event.team !== team)
+      return false;
     return bonusEventPoints(event)[0] === points;
   };
 }
@@ -207,8 +208,7 @@ export const practiceSteps: IPracticeStep[] = [
     call: 'Before the game starts, each team has five players available.',
     instruction:
       'Start Gibson, Jeremy, Owen and Lachlan for Ninety Six, and Tucker, Phillip, Efren and Valerie for Greenwood — in that order — then choose Start game.',
-    hint:
-      'Only four of each five may start, so leave Olivia and Bella on the Bench. Each Start action adds the player to the next available seat, and the ↑/↓ controls change that order without starting again. Start game stays disabled until both teams have four starters.',
+    hint: 'Only four of each five may start, so leave Olivia and Bella on the Bench. Each Start action adds the player to the next available seat, and the ↑/↓ controls change that order without starting again. Start game stays disabled until both teams have four starters.',
     success: 'Good. The scorer now knows who should receive tossups heard from question 1.',
     section: 'Get ready',
     expectation: { kind: 'lineup' },
@@ -218,8 +218,7 @@ export const practiceSteps: IPracticeStep[] = [
     title: 'Tossup 1',
     call: 'Reader: “Power, Gibson on Ninety Six.”',
     instruction: `Press ${powerButton} on Gibson’s row, on the Ninety Six side.`,
-    hint:
-      `Every player has their own rulings on their own row, in the same columns down both teams: ${powerButton} is a power, ${correctButton} an ordinary correct answer, ${negButton} a neg, and ${zeroButton} an answer that was simply wrong. Gibson is the top row on the Ninety Six side, and a power is 15 in this practice format.`,
+    hint: `Every player has their own rulings on their own row, in the same columns down both teams: ${powerButton} is a power, ${correctButton} an ordinary correct answer, ${negButton} a neg, and ${zeroButton} an answer that was simply wrong. Gibson is the top row on the Ninety Six side, and a power is 15 in this practice format.`,
     success: 'Correct — a power is worth 15 in this practice format.',
     section: 'Score the game',
     expectation: { kind: 'event', matches: tossup(1, 'left', 'Gibson', 0) },
@@ -229,8 +228,7 @@ export const practiceSteps: IPracticeStep[] = [
     title: 'Bonus 1',
     call: 'Ninety Six gets 20 points on the bonus.',
     instruction: 'Press 20 in the bonus prompt that has just appeared.',
-    hint:
-      'A converted tossup opens the bonus on its own — there is no Tossup/Bonus switch to set. The totals shown are the ones this format can produce; Parts… is there when you would rather record each part.',
+    hint: 'A converted tossup opens the bonus on its own — there is no Tossup/Bonus switch to set. The totals shown are the ones this format can produce; Parts… is there when you would rather record each part.',
     success: 'Right — the bonus adds 20 to Ninety Six.',
     section: 'Score the game',
     expectation: { kind: 'event', matches: bonus(1, 'left', 20) },
@@ -260,8 +258,7 @@ export const practiceSteps: IPracticeStep[] = [
     title: 'Tossup 3',
     call: 'Jeremy on Ninety Six interrupts and negs.',
     instruction: `Press ${negButton} on Jeremy’s row.`,
-    hint:
-      `${negButton} is the neg, worth −5 here. Watch what happens afterwards: Ninety Six’s buttons go quiet because they have had their answer, and Greenwood’s stay live because the tossup is not over.`,
+    hint: `${negButton} is the neg, worth −5 here. Watch what happens afterwards: Ninety Six’s buttons go quiet because they have had their answer, and Greenwood’s stay live because the tossup is not over.`,
     success: 'Correct — Ninety Six loses 5, and Greenwood can still answer.',
     section: 'Score the game',
     expectation: { kind: 'event', matches: tossup(3, 'left', 'Jeremy', 2) },
@@ -269,11 +266,9 @@ export const practiceSteps: IPracticeStep[] = [
   {
     id: 'q3-rebound',
     title: 'Tossup 3 continues',
-    call:
-      'Still on Tossup 3. The question is read out to the end, and Tucker answers it correctly for Greenwood.',
+    call: 'Still on Tossup 3. The question is read out to the end, and Tucker answers it correctly for Greenwood.',
     instruction: `Press ${correctButton} on Tucker’s row. Stay on Tossup 3 — do not use No buzz and do not advance the question.`,
-    hint:
-      `Nothing needs advancing: the header still says Tossup 3 and it stays there until the tossup is settled. Ninety Six’s rulings are greyed out because they have used their answer, and Greenwood no longer shows ${negButton} — a team that has heard the whole question cannot be negged. No buzz would mean Greenwood never answered, which is not what happened.`,
+    hint: `Nothing needs advancing: the header still says Tossup 3 and it stays there until the tossup is settled. Ninety Six’s rulings are greyed out because they have used their answer, and Greenwood no longer shows ${negButton} — a team that has heard the whole question cannot be negged. No buzz would mean Greenwood never answered, which is not what happened.`,
     success: 'That is the common neg-and-rebound sequence.',
     section: 'Score the game',
     expectation: { kind: 'event', matches: tossup(3, 'right', 'Tucker', 1) },
@@ -293,9 +288,9 @@ export const practiceSteps: IPracticeStep[] = [
     title: 'Tossup 4: wrong, no penalty',
     call: 'Owen answers after the question is finished. The answer is wrong, but there is no penalty.',
     instruction: `Press the ${zeroButton} button on Owen’s row — the last one in the row, beside ${negButton}.`,
-    hint:
-      `Three different things that all score nothing, and they are not interchangeable: ${negButton} is a neg and costs 5, ${zeroButton} is an answer that was simply wrong, and No buzz means nobody answered at all. Owen answered, so it is ${zeroButton}.`,
-    success: 'Correct — Owen answered, so that attempt belongs on the scoresheet even though it changed no points.',
+    hint: `Three different things that all score nothing, and they are not interchangeable: ${negButton} is a neg and costs 5, ${zeroButton} is an answer that was simply wrong, and No buzz means nobody answered at all. Owen answered, so it is ${zeroButton}.`,
+    success:
+      'Correct — Owen answered, so that attempt belongs on the scoresheet even though it changed no points.',
     section: 'Score the game',
     expectation: { kind: 'event', matches: wrongNoPenalty(4, 'left', 'Owen') },
   },
@@ -304,8 +299,7 @@ export const practiceSteps: IPracticeStep[] = [
     title: 'Tossup 4 continues',
     call: 'Greenwood does not buzz after Owen’s answer.',
     instruction: 'Press the No buzz button below the two teams.',
-    hint:
-      'The line beside it names Greenwood, because they are the only team left who could have buzzed. Owen’s 0 stays on the scoresheet; this only closes the tossup with nobody converting it, so there is no bonus.',
+    hint: 'The line beside it names Greenwood, because they are the only team left who could have buzzed. Owen’s 0 stays on the scoresheet; this only closes the tossup with nobody converting it, so there is no bonus.',
     success: 'Right — the scoresheet now distinguishes the wrong answer from the team that never buzzed.',
     section: 'Score the game',
     expectation: { kind: 'event', matches: dead(4) },
@@ -336,9 +330,9 @@ export const practiceSteps: IPracticeStep[] = [
     call: 'The moderator checks the paper: Lachlan, not Gibson, answered Tossup 5.',
     instruction:
       'Select Q5 in the Recent column on the right, change Player to Lachlan, then choose Save changes.',
-    hint:
-      'The Recent column lists what you have scored; selecting a question opens the whole of it — every buzz on it and its bonus — in one editor. Change the Player dropdown from Gibson to Lachlan and leave the ruling alone. Nothing is written until Save changes, and Cancel, the × button, or Escape leaves the question exactly as it was.',
-    success: 'Fixed. QBSheet recalculated the player stats without changing the team score or later questions.',
+    hint: 'The Recent column lists what you have scored; selecting a question opens the whole of it — every buzz on it and its bonus — in one editor. Change the Player dropdown from Gibson to Lachlan and leave the ruling alone. Nothing is written until Save changes, and Cancel, the × button, or Escape leaves the question exactly as it was.',
+    success:
+      'Fixed. QBSheet recalculated the player stats without changing the team score or later questions.',
     section: 'Fix mistakes',
     expectation: {
       kind: 'history',
@@ -367,8 +361,7 @@ export const practiceSteps: IPracticeStep[] = [
      * for somebody who asked for the keys.
      */
     instruction: `Press Undo in the bottom-left toolbar (${keyboardShortcutLabels.undo} also works).`,
-    hint:
-      'Undo is for the thing you have just done; the question editor is for an older mistake. Never fix a wrong ruling by adjusting the team total — the score is worked out from the rulings, so a hand-patched total makes the player stats disagree with it.',
+    hint: 'Undo is for the thing you have just done; the question editor is for an older mistake. Never fix a wrong ruling by adjusting the team total — the score is worked out from the rulings, so a hand-patched total makes the player stats disagree with it.',
     success: 'Good — undo removes the event instead of making you reverse the arithmetic yourself.',
     section: 'Fix mistakes',
     expectation: { kind: 'undo' },
@@ -398,8 +391,7 @@ export const practiceSteps: IPracticeStep[] = [
     title: 'Substitution before Tossup 7',
     call: 'Ninety Six substitutes Olivia in for Owen.',
     instruction: 'Press ⇄ on Owen’s row, then choose Olivia.',
-    hint:
-      'Every player on the floor has a ⇄ button beside their rulings: it already knows who is coming off, so it only asks who comes on. Players in the bottom toolbar does the same thing and more — adding somebody to the roster, reordering the seats, or changing several players at once at halftime.',
+    hint: 'Every player on the floor has a ⇄ button beside their rulings: it already knows who is coming off, so it only asks who comes on. Players in the bottom toolbar does the same thing and more — adding somebody to the roster, reordering the seats, or changing several players at once at halftime.',
     success: 'Correct — Olivia will receive tossups heard starting with Tossup 7.',
     section: 'Fix mistakes',
     expectation: {
@@ -457,8 +449,7 @@ export const practiceSteps: IPracticeStep[] = [
     title: 'Finish the game',
     call: 'The round is over and the scoresheet is complete.',
     instruction: 'Read the finish review, then press the submit button at the bottom of it.',
-    hint:
-      'The review lists anything worth a second look before a result leaves the room, and refuses to send while a real blocker is outstanding. Nothing is uploaded or saved here — this is practice.',
+    hint: 'The review lists anything worth a second look before a result leaves the room, and refuses to send while a real blocker is outstanding. Nothing is uploaded or saved here — this is practice.',
     success: 'Practice complete.',
     section: 'Finish safely',
     expectation: { kind: 'submit' },

@@ -11,9 +11,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 /** Whether the document fits its own viewport. A sideways scrollbar on a phone is a defect. */
 async function fits(page: Page): Promise<boolean> {
-  return page.evaluate(
-    () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
-  );
+  return page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
 }
 
 test('the about page introduces QBSheet and links to the real product', async ({ page }) => {
@@ -64,7 +62,9 @@ test.describe('without JavaScript', () => {
 
     // Every section, from a document that ran no script. This is what prerendering buys and it is the
     // assertion that fails the moment somebody puts the page back behind a client-side mount.
-    await expect(page.getByRole('heading', { level: 1, name: 'The simpler way to keep score.' })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { level: 1, name: 'The simpler way to keep score.' }),
+    ).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Built around how you actually score' })).toBeVisible();
     await expect(page.getByText('Start with a game.')).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Made for tournament day' })).toBeVisible();

@@ -23,6 +23,15 @@
  * Like `BasicScoringRulesEditor`: it renders `IAdvancedScoringRulesInput` and reports edits. What the
  * values mean is `AdvancedScoringRules`, which builds a standard `ScoringRules` object and reads it
  * back through the same mapper a file goes through.
+ *
+ * # Grouped the same way, in the same order
+ *
+ * The fields are grouped — the answer types, the bonuses, the round, overtime — with the same
+ * `field-group` treatment and in the same order as the simple form, because the button between them
+ * says these are two ways of stating one thing. A scorekeeper who presses Advanced rules should find
+ * the form they were already reading with more in it, not a different form; groups that sat in a
+ * different order, or that only one of the two had, would make the switch feel like losing their
+ * place. See `BasicScoringRulesEditor` for why the groups are the ones they are.
  */
 import {
   IAdvancedAnswerTypeInput,
@@ -65,8 +74,8 @@ export default function AdvancedScoringRulesEditor(props: {
 
   return (
     <div className="rules-fields">
-      <fieldset className="manual-fieldset answer-types" aria-labelledby={id('answer-types-legend')}>
-        <legend className="shell-label">
+      <fieldset className="field-group answer-types" aria-labelledby={id('answer-types-legend')}>
+        <legend className="field-group-legend">
           <span className="label-with-help">
             <span id={id('answer-types-legend')}>Answer types</span>
             <HelpTooltip label="Explain tossup ruling choices">
@@ -76,8 +85,8 @@ export default function AdvancedScoringRulesEditor(props: {
           </span>
         </legend>
         <p className="shell-hint answer-types-hint">
-          Every way a tossup can be answered, and what each is worth. Use a negative value for a neg.
-          The scorer shows them highest value first, whatever order they are in here.
+          Every way a tossup can be answered, and what each is worth. Use a negative value for a neg. The
+          scorer shows them highest value first, whatever order they are in here.
         </p>
 
         {value.answerTypes.length === 0 && (
@@ -197,7 +206,9 @@ export default function AdvancedScoringRulesEditor(props: {
             // A new row follows the format it is being added to, so a bonus-free one does not open
             // with a bonus checked and a complaint about it.
             onClick={() =>
-              set({ answerTypes: [...value.answerTypes, newAdvancedAnswerType({ awardsBonus: value.useBonuses })] })
+              set({
+                answerTypes: [...value.answerTypes, newAdvancedAnswerType({ awardsBonus: value.useBonuses })],
+              })
             }
           >
             Add an answer type
@@ -205,233 +216,243 @@ export default function AdvancedScoringRulesEditor(props: {
         )}
       </fieldset>
 
-      <div className="rules-setup-grid">
-        <label htmlFor={id('tossup-count')}>
-          Tossups in regulation
+      <fieldset className="field-group">
+        <legend className="field-group-legend">Bonuses</legend>
+        <label className="rules-setup-check" htmlFor={id('bonuses')}>
           <input
-            id={id('tossup-count')}
-            type="number"
-            min={1}
-            step={1}
-            value={value.tossupCount === undefined ? '' : String(value.tossupCount)}
-            onChange={(event) => set({ tossupCount: numberValue(event.target.value) })}
+            id={id('bonuses')}
+            type="checkbox"
+            checked={value.useBonuses}
+            onChange={(event) =>
+              set({
+                useBonuses: event.target.checked,
+                ...(event.target.checked
+                  ? {}
+                  : {
+                      bonusesBounceBack: false,
+                      overtimeIncludesBonuses: false,
+                      answerTypes: value.answerTypes.map((row) => ({ ...row, awardsBonus: false })),
+                    }),
+              })
+            }
           />
+          Use bonuses
         </label>
-        <div>
-          <div className="label-with-help">
-            <label htmlFor={id('max-tossup-count')}>Most tossups possible</label>
-            <HelpTooltip label="Explain the extended-regulation limit">
-              A hard cap for formats where regulation may extend beyond its usual count. Leave it blank if
-              regulation can never run long.
-            </HelpTooltip>
-          </div>
-          <input
-            id={id('max-tossup-count')}
-            type="number"
-            min={1}
-            step={1}
-            value={value.maximumTossupCount === undefined ? '' : String(value.maximumTossupCount)}
-            onChange={(event) => set({ maximumTossupCount: numberValue(event.target.value) })}
-          />
-        </div>
-        <label htmlFor={id('max-active')}>
-          Players playing at once
-          <input
-            id={id('max-active')}
-            type="number"
-            min={1}
-            step={1}
-            value={value.maximumPlayersPerTeam === undefined ? '' : String(value.maximumPlayersPerTeam)}
-            onChange={(event) => set({ maximumPlayersPerTeam: numberValue(event.target.value) })}
-          />
-        </label>
-      </div>
-      <p className="shell-hint rules-fields-hint">
-        Blank “Most tossups possible” means regulation cannot run long.
-      </p>
 
-      <label className="rules-setup-check" htmlFor={id('bonuses')}>
-        <input
-          id={id('bonuses')}
-          type="checkbox"
-          checked={value.useBonuses}
-          onChange={(event) =>
-            set({
-              useBonuses: event.target.checked,
-              ...(event.target.checked
-                ? {}
-                : {
-                    bonusesBounceBack: false,
-                    overtimeIncludesBonuses: false,
-                    answerTypes: value.answerTypes.map((row) => ({ ...row, awardsBonus: false })),
-                  }),
-            })
-          }
-        />
-        Use bonuses
-      </label>
+        {value.useBonuses && (
+          <div className="manual-field-inset">
+            <fieldset className="manual-fieldset" aria-labelledby={id('bonus-structure-legend')}>
+              <legend className="shell-label">
+                <span className="label-with-help">
+                  <span id={id('bonus-structure-legend')}>Bonus structure</span>
+                  <HelpTooltip label="Explain regular and irregular bonuses">
+                    Choose regular when every bonus has the same number of equally valued parts. Otherwise
+                    QBSheet records the total directly.
+                  </HelpTooltip>
+                </span>
+              </legend>
+              {(
+                [
+                  ['regular', 'Every bonus is the same: fixed parts, each worth the same'],
+                  ['irregular', 'Bonuses vary in parts or in what a part is worth'],
+                ] as const
+              ).map(([structure, label]) => (
+                <label key={structure} className="rules-setup-check" htmlFor={id(`bonus-${structure}`)}>
+                  <input
+                    id={id(`bonus-${structure}`)}
+                    type="radio"
+                    name={id('bonus-structure')}
+                    value={structure}
+                    checked={value.bonusStructure === structure}
+                    onChange={() => set({ bonusStructure: structure })}
+                  />
+                  {label}
+                </label>
+              ))}
+              <p className="shell-hint answer-types-hint">
+                {value.bonusStructure === 'regular'
+                  ? 'The scorer offers fixed total-score buttons first; Parts opens an optional part-by-part view.'
+                  : 'The scorer takes the bonus total as a number, because there is no fixed set of parts to offer.'}
+              </p>
+            </fieldset>
 
-      {value.useBonuses && (
-        <div className="manual-field-inset">
-          <fieldset className="manual-fieldset" aria-labelledby={id('bonus-structure-legend')}>
-            <legend className="shell-label">
-              <span className="label-with-help">
-                <span id={id('bonus-structure-legend')}>Bonus structure</span>
-                <HelpTooltip label="Explain regular and irregular bonuses">
-                  Choose regular when every bonus has the same number of equally valued parts. Otherwise QBSheet
-                  records the total directly.
-                </HelpTooltip>
-              </span>
-            </legend>
-            {(
-              [
-                ['regular', 'Every bonus is the same: fixed parts, each worth the same'],
-                ['irregular', 'Bonuses vary in parts or in what a part is worth'],
-              ] as const
-            ).map(([structure, label]) => (
-              <label key={structure} className="rules-setup-check" htmlFor={id(`bonus-${structure}`)}>
-                <input
-                  id={id(`bonus-${structure}`)}
-                  type="radio"
-                  name={id('bonus-structure')}
-                  value={structure}
-                  checked={value.bonusStructure === structure}
-                  onChange={() => set({ bonusStructure: structure })}
-                />
-                {label}
-              </label>
-            ))}
-            <p className="shell-hint answer-types-hint">
-              {value.bonusStructure === 'regular'
-                ? 'The scorer offers fixed total-score buttons first; Parts opens an optional part-by-part view.'
-                : 'The scorer takes the bonus total as a number, because there is no fixed set of parts to offer.'}
-            </p>
-          </fieldset>
-
-          {value.bonusStructure === 'regular' ? (
-            <div className="rules-setup-grid">
-              <label htmlFor={id('bonus-part')}>
-                Points per bonus part
+            {value.bonusStructure === 'regular' ? (
+              <div className="rules-setup-grid">
+                <label htmlFor={id('bonus-part')}>
+                  Points per bonus part
                   <input
                     id={id('bonus-part')}
                     type="number"
                     min={1}
                     step={1}
-                  value={value.pointsPerBonusPart === undefined ? '' : String(value.pointsPerBonusPart)}
-                  onChange={(event) => set({ pointsPerBonusPart: numberValue(event.target.value) })}
-                />
-              </label>
-              <label htmlFor={id('bonus-parts')}>
-                Parts per bonus
+                    value={value.pointsPerBonusPart === undefined ? '' : String(value.pointsPerBonusPart)}
+                    onChange={(event) => set({ pointsPerBonusPart: numberValue(event.target.value) })}
+                  />
+                </label>
+                <label htmlFor={id('bonus-parts')}>
+                  Parts per bonus
                   <input
                     id={id('bonus-parts')}
                     type="number"
                     min={1}
                     step={1}
-                  value={value.partsPerBonus === undefined ? '' : String(value.partsPerBonus)}
-                  onChange={(event) => set({ partsPerBonus: numberValue(event.target.value) })}
-                />
-              </label>
-            </div>
-          ) : (
-            <>
-              <div className="rules-setup-grid">
-                <label htmlFor={id('bonus-max')}>
-                  Most a bonus is worth
-                  <input
-                    id={id('bonus-max')}
-                    type="number"
-                    min={1}
-                    step={1}
-                    value={value.maximumBonusScore === undefined ? '' : String(value.maximumBonusScore)}
-                    onChange={(event) => set({ maximumBonusScore: numberValue(event.target.value) })}
-                  />
-                </label>
-                <div>
-                  <div className="label-with-help">
-                    <label htmlFor={id('bonus-divisor')}>Bonus score increment</label>
-                    <HelpTooltip label="Explain valid bonus-total steps">
-                      The smallest step between possible bonus totals. For example, use 10 when totals can be 0,
-                      10, 20, 30, and so on.
-                    </HelpTooltip>
-                  </div>
-                  <input
-                    id={id('bonus-divisor')}
-                    type="number"
-                    min={1}
-                    step={1}
-                    value={value.bonusDivisor === undefined ? '' : String(value.bonusDivisor)}
-                    onChange={(event) => set({ bonusDivisor: numberValue(event.target.value) })}
-                  />
-                </div>
-                <label htmlFor={id('bonus-min-parts')}>
-                  Fewest parts
-                  <input
-                    id={id('bonus-min-parts')}
-                    type="number"
-                    min={1}
-                    step={1}
-                    value={value.minimumPartsPerBonus === undefined ? '' : String(value.minimumPartsPerBonus)}
-                    onChange={(event) => set({ minimumPartsPerBonus: numberValue(event.target.value) })}
-                  />
-                </label>
-                <label htmlFor={id('bonus-max-parts')}>
-                  Most parts
-                  <input
-                    id={id('bonus-max-parts')}
-                    type="number"
-                    min={1}
-                    step={1}
-                    value={value.maximumPartsPerBonus === undefined ? '' : String(value.maximumPartsPerBonus)}
-                    onChange={(event) => set({ maximumPartsPerBonus: numberValue(event.target.value) })}
+                    value={value.partsPerBonus === undefined ? '' : String(value.partsPerBonus)}
+                    onChange={(event) => set({ partsPerBonus: numberValue(event.target.value) })}
                   />
                 </label>
               </div>
-              <p className="shell-hint rules-fields-hint">
-                The increment is the largest number that always divides a bonus total. For parts worth
-                10, 10 and 20 that is 10.
-              </p>
-            </>
-          )}
+            ) : (
+              <>
+                <div className="rules-setup-grid">
+                  <label htmlFor={id('bonus-max')}>
+                    Most a bonus is worth
+                    <input
+                      id={id('bonus-max')}
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={value.maximumBonusScore === undefined ? '' : String(value.maximumBonusScore)}
+                      onChange={(event) => set({ maximumBonusScore: numberValue(event.target.value) })}
+                    />
+                  </label>
+                  <div>
+                    <div className="label-with-help">
+                      <label htmlFor={id('bonus-divisor')}>Bonus score increment</label>
+                      <HelpTooltip label="Explain valid bonus-total steps">
+                        The smallest step between possible bonus totals. For example, use 10 when totals can
+                        be 0, 10, 20, 30, and so on.
+                      </HelpTooltip>
+                    </div>
+                    <input
+                      id={id('bonus-divisor')}
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={value.bonusDivisor === undefined ? '' : String(value.bonusDivisor)}
+                      onChange={(event) => set({ bonusDivisor: numberValue(event.target.value) })}
+                    />
+                  </div>
+                  <label htmlFor={id('bonus-min-parts')}>
+                    Fewest parts
+                    <input
+                      id={id('bonus-min-parts')}
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={
+                        value.minimumPartsPerBonus === undefined ? '' : String(value.minimumPartsPerBonus)
+                      }
+                      onChange={(event) => set({ minimumPartsPerBonus: numberValue(event.target.value) })}
+                    />
+                  </label>
+                  <label htmlFor={id('bonus-max-parts')}>
+                    Most parts
+                    <input
+                      id={id('bonus-max-parts')}
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={
+                        value.maximumPartsPerBonus === undefined ? '' : String(value.maximumPartsPerBonus)
+                      }
+                      onChange={(event) => set({ maximumPartsPerBonus: numberValue(event.target.value) })}
+                    />
+                  </label>
+                </div>
+                <p className="shell-hint rules-fields-hint">
+                  The increment is the largest number that always divides a bonus total. For parts worth 10,
+                  10 and 20 that is 10.
+                </p>
+              </>
+            )}
 
-          <div className="rules-check-with-help">
-            <label className="rules-setup-check" htmlFor={id('bounce-back')}>
-              <input
-                id={id('bounce-back')}
-                type="checkbox"
-                checked={value.bonusesBounceBack}
-                onChange={(event) => set({ bonusesBounceBack: event.target.checked })}
-              />
-              Missed parts bounce back
-            </label>
-            <HelpTooltip label="What does bonus bounceback mean?">
-              When the team controlling a bonus misses a part, the other team gets a chance to answer that part.
-            </HelpTooltip>
+            <div className="rules-check-with-help">
+              <label className="rules-setup-check" htmlFor={id('bounce-back')}>
+                <input
+                  id={id('bounce-back')}
+                  type="checkbox"
+                  checked={value.bonusesBounceBack}
+                  onChange={(event) => set({ bonusesBounceBack: event.target.checked })}
+                />
+                Missed parts bounce back
+              </label>
+              <HelpTooltip label="What does bonus bounceback mean?">
+                When the team controlling a bonus misses a part, the other team gets a chance to answer that
+                part.
+              </HelpTooltip>
+            </div>
           </div>
+        )}
+      </fieldset>
+
+      <fieldset className="field-group">
+        <legend className="field-group-legend">The round</legend>
+        <div className="rules-setup-grid">
+          <label htmlFor={id('tossup-count')}>
+            Tossups in regulation
+            <input
+              id={id('tossup-count')}
+              type="number"
+              min={1}
+              step={1}
+              value={value.tossupCount === undefined ? '' : String(value.tossupCount)}
+              onChange={(event) => set({ tossupCount: numberValue(event.target.value) })}
+            />
+          </label>
+          <div>
+            <div className="label-with-help">
+              <label htmlFor={id('max-tossup-count')}>Most tossups possible</label>
+              <HelpTooltip label="Explain the extended-regulation limit">
+                A hard cap for formats where regulation may extend beyond its usual count. Leave it blank if
+                regulation can never run long.
+              </HelpTooltip>
+            </div>
+            <input
+              id={id('max-tossup-count')}
+              type="number"
+              min={1}
+              step={1}
+              value={value.maximumTossupCount === undefined ? '' : String(value.maximumTossupCount)}
+              onChange={(event) => set({ maximumTossupCount: numberValue(event.target.value) })}
+            />
+          </div>
+          <label htmlFor={id('max-active')}>
+            Players playing at once
+            <input
+              id={id('max-active')}
+              type="number"
+              min={1}
+              step={1}
+              value={value.maximumPlayersPerTeam === undefined ? '' : String(value.maximumPlayersPerTeam)}
+              onChange={(event) => set({ maximumPlayersPerTeam: numberValue(event.target.value) })}
+            />
+          </label>
         </div>
-      )}
+        <p className="shell-hint rules-fields-hint">
+          Blank “Most tossups possible” means regulation cannot run long.
+        </p>
+        <div className="rules-check-with-help">
+          <label className="rules-setup-check" htmlFor={id('timed')}>
+            <input
+              id={id('timed')}
+              type="checkbox"
+              checked={value.timed === true}
+              onChange={(event) => set({ timed: event.target.checked })}
+            />
+            Round is timed
+          </label>
+          <HelpTooltip label="About timed rounds">
+            In a timed round, regulation ends when the moderator calls time; the tossup count is still used as
+            a maximum.
+          </HelpTooltip>
+        </div>
+        {timedHint && <p className="shell-hint rules-fields-hint">{timedHint}</p>}
+      </fieldset>
 
-      <div className="rules-check-with-help">
-        <label className="rules-setup-check" htmlFor={id('timed')}>
-          <input
-            id={id('timed')}
-            type="checkbox"
-            checked={value.timed === true}
-            onChange={(event) => set({ timed: event.target.checked })}
-          />
-          Round is timed
-        </label>
-        <HelpTooltip label="About timed rounds">
-          In a timed round, regulation ends when the moderator calls time; the tossup count is still used as a
-          maximum.
-        </HelpTooltip>
-      </div>
-      {timedHint && <p className="shell-hint rules-fields-hint">{timedHint}</p>}
-
-      <section className="rules-advanced" aria-labelledby={id('advanced-heading')}>
-        <h3 id={id('advanced-heading')} className="rules-advanced-heading">
+      <fieldset className="field-group" aria-labelledby={id('advanced-heading')}>
+        <legend id={id('advanced-heading')} className="field-group-legend">
           Overtime and lightning
-        </h3>
+        </legend>
         <div className="rules-setup-grid">
           <div>
             <div className="label-with-help">
@@ -501,7 +522,7 @@ export default function AdvancedScoringRulesEditor(props: {
             </label>
           </div>
         )}
-      </section>
+      </fieldset>
     </div>
   );
 }

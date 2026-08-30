@@ -431,7 +431,9 @@ body {
   visibility: hidden;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 120ms ease, visibility 120ms ease;
+  transition:
+    opacity 120ms ease,
+    visibility 120ms ease;
 }
 
 .help-tooltip:not([data-dismissed='true']):hover .help-tooltip-popover,
@@ -1764,17 +1766,99 @@ body {
   color: var(--room-muted);
 }
 
-.rules-setup-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 8px 12px;
-  margin: 8px 0;
+/*
+ * A named group of related fields — the scoring rules' four parts, the round-setup panel's three.
+ *
+ * A left rule and an indent rather than a card. The fields inside a group are already boxes, and
+ * putting a box around boxes is how a form starts looking like a settings panel; a rule down the
+ * side says "these belong to the caption above" with one line and no chrome. It also survives the
+ * groups being different heights, and being different heights at different times — half of them
+ * grow a dependent field when a checkbox above is ticked — which a row of cards would not.
+ *
+ * `<fieldset>` brings its own border, padding and margin, and all three have to go before the rule
+ * is the only edge on screen.
+ */
+.field-group {
+  min-width: 0;
+  margin: 0;
+  padding: 0 0 0 14px;
+  border: 0;
+  border-left: 2px solid var(--room-border-strong);
 }
 
-.rules-setup-grid label {
+.field-group + .field-group {
+  margin-top: 20px;
+}
+
+/*
+ * The caption on a group.
+ *
+ * A shade darker and heavier than the field captions inside it, so the eye reads the group name
+ * before the fields, and `float: left` because a `<legend>` in a flow layout will not take a plain
+ * margin the same way in every engine.
+ */
+.field-group-legend {
+  float: left;
+  width: 100%;
+  padding: 0;
+  margin-bottom: 8px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--room-text);
+}
+
+/*
+ * The float has to be cleared or the first field sits beside its own caption, and the caption owns
+ * the space under itself — whatever comes first in a group drops its own top margin so every group
+ * opens on the same rhythm whether it starts with a field grid or a checkbox.
+ */
+.field-group-legend + * {
+  clear: both;
+  margin-top: 0;
+}
+
+/*
+ * The numeric fields a scoring format is stated in.
+ *
+ * Every cell is the same shape — caption over box, boxes the same size, bottoms on one line. That
+ * used to not be true, and the reason is worth writing down: a field with a help tooltip cannot nest
+ * its `<label>` around its input, so half these cells are a `<label>` and half are a `<div>`. The old
+ * rules styled the labels only, which stretched a `<label>` cell's input across its whole track and
+ * left a `<div>` cell's input at whatever width the browser gives a bare number box. Two sizes of
+ * box, alternating down the form, for a reason nothing on screen could account for. Both wrappers
+ * are addressed together now, so the markup difference stays where it belongs.
+ *
+ * The boxes are narrow because every value here is one or two digits. A track-wide input holding "3"
+ * reads as a field somebody left blank, and eight of them read as a screen of empty boxes.
+ */
+.rules-setup-grid {
+  display: grid;
+
+  /* Wide enough for the longest caption plus its tooltip, so a row is captions and boxes rather
+   * than captions wrapping over boxes. `auto-fill` rather than `auto-fit`: the rules are split
+   * across several of these grids — the tossup values, the bonus values, overtime — and auto-fit
+   * would collapse the unused tracks in the short ones, so a two-field grid would set its columns
+   * somewhere the five-field grid above it does not have any. Keeping the empty tracks keeps every
+   * grid on the screen on the same columns. */
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  align-items: end;
+  gap: 12px 18px;
+  margin: 10px 0;
+  max-width: 46rem;
+}
+
+/*
+ * Both cell wrappers, styled as one. See the note above for why there are two of them.
+ *
+ * `align-items: end` on the grid does the rest: a caption that wraps to two lines at a narrow width
+ * makes its cell taller without pushing its box out of line with the others in the row.
+ */
+.rules-setup-grid > label,
+.rules-setup-grid > div {
   display: flex;
+  min-width: 0;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
   font-size: 0.8125rem;
   color: var(--room-muted);
 }
@@ -1789,22 +1873,50 @@ body {
   font-size: 0.8125rem;
 }
 
+/*
+ * The same box as `.shell-input`, capped.
+ *
+ * Padding, border, radius and type size are copied rather than varied on purpose: a screen that puts
+ * "Tossups in regulation" beside "Timeouts per team" in two different sizes of box reads as two
+ * forms that happened to land on one page. The cap is the only difference, and it is what stops a
+ * two-digit answer from sitting in a box built for a team name.
+ */
 .rules-setup-grid input {
-  padding: 4px 6px;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 6.5rem;
+  padding: 8px 10px;
   border: 1px solid var(--room-border-strong);
+  border-radius: 3px;
   background: var(--room-surface);
   font: inherit;
-  font-size: 0.875rem;
   color: var(--room-text);
+}
+
+.rules-setup-grid input:focus-visible {
+  outline: 2px solid var(--room-accent);
+  outline-offset: -1px;
 }
 
 .rules-setup-check {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin: 6px 0;
+  margin: 8px 0;
   font-size: 0.8125rem;
   color: var(--room-text);
+}
+
+/*
+ * The box's own margin, removed.
+ *
+ * Every engine gives a checkbox or radio a few pixels of margin of its own, which is enough to set a
+ * row of them a hair right of the field captions stacked above — the sort of misalignment nobody can
+ * name but everybody reads as untidy. The gap on the flex row does the spacing instead.
+ */
+.rules-setup-check :is(input[type='checkbox'], input[type='radio']) {
+  flex: 0 0 auto;
+  margin: 0;
 }
 
 .rules-check-with-help {
@@ -1945,6 +2057,30 @@ body {
   display: list-item;
 }
 
+/*
+ * The glyph in front of a Create-a-game section heading. See `SectionIcon` in `ManualGameSetup`.
+ *
+ * Inline rather than a flex row, because two of the five headings are `<summary>` elements carrying
+ * a `display: list-item` disclosure marker, and flex would take the marker with it. An inline-flex
+ * box sits in the text the same way in both, so all five marks line up.
+ *
+ * Accent-coloured against the muted heading text: this is the one place on the screen a small piece
+ * of colour is doing work, marking where each section starts for an eye that is scrolling rather
+ * than reading. Sized a little under the 16px the scorer's controls use, so it reads as part of the
+ * heading rather than as a button that lost its label.
+ */
+.manual-section-icon {
+  display: inline-flex;
+  margin-right: 7px;
+  color: var(--room-accent);
+  vertical-align: -0.2em;
+}
+
+.manual-section-icon .scorer-control-icon {
+  width: 15px;
+  height: 15px;
+}
+
 .manual-preset-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -2000,8 +2136,10 @@ body {
   margin-left: 22px;
 }
 
+/* The same cap the rules grid puts on its number boxes, so every short numeric answer on Create a
+ * game is the same size regardless of which part of the form it is in. */
 .manual-number {
-  max-width: 140px;
+  max-width: 6.5rem;
 }
 
 .manual-teams {
@@ -2124,26 +2262,6 @@ body {
 
 .rules-fields-hint {
   margin-top: 0;
-}
-
-/*
- * Overtime and lightning.
- *
- * Under the rules a practice actually changes rather than beside them, because almost nobody
- * changes these and a form that shows every field at equal weight makes the four that matter harder
- * to find. A rule above it, not a box around it.
- */
-.rules-advanced {
-  margin-top: 12px;
-  padding-top: 10px;
-  border-top: 1px solid var(--room-border);
-}
-
-.rules-advanced-heading {
-  margin: 0;
-  font-size: 0.8125rem;
-  font-weight: 600;
-  color: var(--room-muted);
 }
 
 /*

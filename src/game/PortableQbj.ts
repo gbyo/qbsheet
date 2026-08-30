@@ -137,7 +137,11 @@ export function sourceMetadata(packageValue: IGamePackage): IQbjSourceMetadata {
  * fingerprint that moved when the transport metadata moved would report every backup as a conflict,
  * which is the exact failure the fingerprint exists to prevent.
  */
-const ignoredForFingerprint = new Set<string>([qbtcpExtensionKey, sourceExtensionKey, legacySourceExtensionKey]);
+const ignoredForFingerprint = new Set<string>([
+  qbtcpExtensionKey,
+  sourceExtensionKey,
+  legacySourceExtensionKey,
+]);
 
 /** Canonical JSON for a portable result, with object-key order made irrelevant. */
 function canonicalPortableJson(value: unknown): string {
@@ -240,9 +244,14 @@ export function readSourceMetadata(qbj: unknown): IQbjSourceMetadata | null {
   if (typeof block !== 'object' || block === null) return null;
   const candidate = block as Partial<IQbjSourceMetadata>;
   if (candidate.producer !== undefined && candidate.producer !== gamePackageProducer) return null;
-  if (typeof candidate.gamePackageVersion !== 'number' || !Number.isInteger(candidate.gamePackageVersion)) return null;
+  if (typeof candidate.gamePackageVersion !== 'number' || !Number.isInteger(candidate.gamePackageVersion))
+    return null;
   if (typeof candidate.tournamentName !== 'string' || candidate.tournamentName.trim() === '') return null;
-  if (typeof candidate.roundNumber !== 'number' || !Number.isInteger(candidate.roundNumber) || candidate.roundNumber < 1)
+  if (
+    typeof candidate.roundNumber !== 'number' ||
+    !Number.isInteger(candidate.roundNumber) ||
+    candidate.roundNumber < 1
+  )
     return null;
   if (
     typeof candidate.roundRevision !== 'number' ||
@@ -253,6 +262,7 @@ export function readSourceMetadata(qbj: unknown): IQbjSourceMetadata | null {
   if (candidate.tournamentId !== undefined && typeof candidate.tournamentId !== 'string') return null;
   if (candidate.scheduledMatchId !== undefined && typeof candidate.scheduledMatchId !== 'string') return null;
   if (candidate.roomName !== undefined && typeof candidate.roomName !== 'string') return null;
-  if (candidate.resultFingerprint !== undefined && typeof candidate.resultFingerprint !== 'string') return null;
+  if (candidate.resultFingerprint !== undefined && typeof candidate.resultFingerprint !== 'string')
+    return null;
   return candidate as IQbjSourceMetadata;
 }

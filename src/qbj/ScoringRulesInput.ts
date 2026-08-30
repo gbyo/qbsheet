@@ -52,7 +52,9 @@ export type IScoringRulesInput = IBasicRulesInput | IAdvancedRulesInput;
 
 // Each constructor returns its own branch rather than the union, so a caller that just built an
 // advanced value can reach into it without re-narrowing something it already knows the shape of.
-export function basicRulesInput(basic: IBasicScoringRulesInput = basicScoringRulesDefaults): IBasicRulesInput {
+export function basicRulesInput(
+  basic: IBasicScoringRulesInput = basicScoringRulesDefaults,
+): IBasicRulesInput {
   return { mode: 'basic', basic: { ...basic } };
 }
 
@@ -108,7 +110,7 @@ export function scoringRulesInputIsTimed(input: IScoringRulesInput): boolean {
 
 /** How many tossups regulation is, which the round-options validation needs to place a break. */
 export function scoringRulesInputTossupCount(input: IScoringRulesInput): number {
-  return input.mode === 'advanced' ? input.advanced.tossupCount ?? 0 : input.basic.tossupCount ?? 0;
+  return input.mode === 'advanced' ? (input.advanced.tossupCount ?? 0) : (input.basic.tossupCount ?? 0);
 }
 
 /**

@@ -56,7 +56,10 @@ export default function useAutomaticResultDelivery(input: IAutomaticResultDelive
       const now = Date.now();
       const due = eligible()
         .filter((record) => automaticResultRetryAt(record) <= now)
-        .sort((first, second) => completionTime(first) - completionTime(second) || first.id.localeCompare(second.id));
+        .sort(
+          (first, second) =>
+            completionTime(first) - completionTime(second) || first.id.localeCompare(second.id),
+        );
       if (due.length === 0) {
         schedule();
         return;

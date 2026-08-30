@@ -31,7 +31,12 @@ function typeIndex(format: IScorekeeperFormat, value: number): number {
   return found.index;
 }
 
-function buzz(questionNumber: number, team: 'left' | 'right', playerName: string, answerTypeIndex: number): ScoreEvent {
+function buzz(
+  questionNumber: number,
+  team: 'left' | 'right',
+  playerName: string,
+  answerTypeIndex: number,
+): ScoreEvent {
   return event({ type: 'tossup-buzz', questionNumber, team, playerName, answerTypeIndex });
 }
 function dead(questionNumber: number): ScoreEvent {
@@ -55,7 +60,10 @@ function convertedCycle(
   value: number,
   bonusPoints: number,
 ): ScoreEvent[] {
-  return [buzz(questionNumber, team, playerName, typeIndex(format, value)), bonus(questionNumber, team, bonusPoints)];
+  return [
+    buzz(questionNumber, team, playerName, typeIndex(format, value)),
+    bonus(questionNumber, team, bonusPoints),
+  ];
 }
 
 describe('a single tossup', () => {
@@ -105,7 +113,12 @@ describe('multi-attempt tossups', () => {
 
     const game = deriveGame(format, setup, events);
 
-    expect(game.phase).toEqual({ kind: 'tossup', questionNumber: 1, period: 'regulation', eligibleTeams: ['right'] });
+    expect(game.phase).toEqual({
+      kind: 'tossup',
+      questionNumber: 1,
+      period: 'regulation',
+      eligibleTeams: ['right'],
+    });
     expect(game.questions[0].resolved).toBe(false);
   });
 
@@ -227,7 +240,10 @@ describe('bouncebacks', () => {
     const format = formatFor((rules) => {
       rules.bonusesBounceBack = true;
     });
-    const game = deriveGame(format, setup, [buzz(1, 'left', 'Sarah', typeIndex(format, 10)), bonus(1, 'left', 20, 10)]);
+    const game = deriveGame(format, setup, [
+      buzz(1, 'left', 'Sarah', typeIndex(format, 10)),
+      bonus(1, 'left', 20, 10),
+    ]);
 
     expect(game.left.bonusPoints).toBe(20);
     expect(game.left.points).toBe(30);
@@ -415,14 +431,21 @@ describe('substitutions', () => {
       rules.maximumPlayersPerTeam = 1;
     });
     const played = Array.from({ length: 12 }, (_, index) => dead(index + 1));
-    const atEleven = event({ type: 'substitution', questionNumber: 11, team: 'left', activePlayers: ['Alex'] });
+    const atEleven = event({
+      type: 'substitution',
+      questionNumber: 11,
+      team: 'left',
+      activePlayers: ['Alex'],
+    });
     const corrected = { ...atEleven, questionNumber: 9 };
 
     expect(
-      deriveGame(format, setup, [...played, atEleven]).left.players.find((p) => p.name === 'Alex')!.tossupsHeard,
+      deriveGame(format, setup, [...played, atEleven]).left.players.find((p) => p.name === 'Alex')!
+        .tossupsHeard,
     ).toBe(2);
     expect(
-      deriveGame(format, setup, [...played, corrected]).left.players.find((p) => p.name === 'Alex')!.tossupsHeard,
+      deriveGame(format, setup, [...played, corrected]).left.players.find((p) => p.name === 'Alex')!
+        .tossupsHeard,
     ).toBe(4);
   });
 
@@ -518,7 +541,10 @@ describe('regulation and overtime', () => {
       rules.minimumOvertimeQuestionCount = 1;
       rules.overtimeIncludesBonuses = false;
     });
-    const game = deriveGame(format, setup, [...deadTossups(20), buzz(21, 'left', 'Sarah', typeIndex(format, 10))]);
+    const game = deriveGame(format, setup, [
+      ...deadTossups(20),
+      buzz(21, 'left', 'Sarah', typeIndex(format, 10)),
+    ]);
 
     // No bonus phase, and the conversion doesn't count as a bonus heard.
     expect(game.phase).toEqual({ kind: 'complete', reason: 'overtime' });
@@ -530,7 +556,10 @@ describe('regulation and overtime', () => {
       rules.minimumOvertimeQuestionCount = 1;
       rules.overtimeIncludesBonuses = true;
     });
-    const game = deriveGame(format, setup, [...deadTossups(20), buzz(21, 'left', 'Sarah', typeIndex(format, 10))]);
+    const game = deriveGame(format, setup, [
+      ...deadTossups(20),
+      buzz(21, 'left', 'Sarah', typeIndex(format, 10)),
+    ]);
 
     expect(game.phase).toEqual({ kind: 'bonus', questionNumber: 21, period: 'overtime', team: 'left' });
     expect(game.left.bonusesHeard).toBe(1);
@@ -540,7 +569,10 @@ describe('regulation and overtime', () => {
     const format = formatFor((rules) => {
       rules.minimumOvertimeQuestionCount = 1;
     });
-    const game = deriveGame(format, setup, [...deadTossups(20), buzz(21, 'left', 'Sarah', typeIndex(format, 10))]);
+    const game = deriveGame(format, setup, [
+      ...deadTossups(20),
+      buzz(21, 'left', 'Sarah', typeIndex(format, 10)),
+    ]);
 
     expect(game.left.overtimeBuzzes.get(typeIndex(format, 10))).toBe(1);
     expect(game.right.overtimeBuzzes.size).toBe(0);
@@ -599,7 +631,9 @@ describe('forfeits', () => {
 
   test('a double forfeit marks both teams', () => {
     const format = formatFor();
-    const game = deriveGame(format, setup, [event({ type: 'forfeit', questionNumber: 1, teams: ['left', 'right'] })]);
+    const game = deriveGame(format, setup, [
+      event({ type: 'forfeit', questionNumber: 1, teams: ['left', 'right'] }),
+    ]);
 
     expect(game.left.forfeited).toBe(true);
     expect(game.right.forfeited).toBe(true);
@@ -643,21 +677,30 @@ describe('undo and correction', () => {
       if (scoreEvent.type === 'tossup-buzz' && scoreEvent.questionNumber === 1) {
         return { ...scoreEvent, answerTypeIndex: typeIndex(format, 10) };
       }
-      if (scoreEvent.type === 'bonus' && scoreEvent.questionNumber === 1) return { ...scoreEvent, controlledPoints: 0 };
+      if (scoreEvent.type === 'bonus' && scoreEvent.questionNumber === 1)
+        return { ...scoreEvent, controlledPoints: 0 };
       return scoreEvent;
     });
 
     const game = deriveGame(format, setup, corrected);
 
     expect(game.left.points).toBe(50);
-    expect(game.left.players.find((p) => p.name === 'Sarah')!.answerCounts.get(typeIndex(format, 15))).toBeUndefined();
+    expect(
+      game.left.players.find((p) => p.name === 'Sarah')!.answerCounts.get(typeIndex(format, 15)),
+    ).toBeUndefined();
   });
 
   test('a manual adjustment is recorded as itself and reaches the score', () => {
     const format = formatFor();
     const game = deriveGame(format, setup, [
       ...convertedCycle(format, 1, 'left', 'Sarah', 10, 20),
-      event({ type: 'adjustment', questionNumber: 1, team: 'left', points: 5, reason: 'Agreed with control' }),
+      event({
+        type: 'adjustment',
+        questionNumber: 1,
+        team: 'left',
+        points: 5,
+        reason: 'Agreed with control',
+      }),
     ]);
 
     expect(game.left.adjustmentPoints).toBe(5);
@@ -949,7 +992,10 @@ describe('halves and timeouts', () => {
 
   test('timeouts are counted per team and change nothing about the score', () => {
     const format = formatFor();
-    const game = deriveGame(format, setup, [dead(1), event({ type: 'timeout', questionNumber: 2, team: 'left' })]);
+    const game = deriveGame(format, setup, [
+      dead(1),
+      event({ type: 'timeout', questionNumber: 2, team: 'left' }),
+    ]);
 
     expect(game.timeouts).toEqual({ left: 1, right: 0 });
     expect(game.left.points).toBe(0);

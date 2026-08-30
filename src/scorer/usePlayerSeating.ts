@@ -36,7 +36,9 @@ export interface IPlayerSeatingApi {
 }
 
 export default function usePlayerSeating(gameKey: string): IPlayerSeatingApi {
-  const [seating, setSeating] = useState<PlayerSeating>(() => (gameKey === '' ? emptySeating() : loadSeating(gameKey)));
+  const [seating, setSeating] = useState<PlayerSeating>(() =>
+    gameKey === '' ? emptySeating() : loadSeating(gameKey),
+  );
 
   const commit = useCallback(
     (next: PlayerSeating) => {

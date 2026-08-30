@@ -151,17 +151,14 @@ export function useLineupMotion(): ILineupMotion {
     );
   }, []);
 
-  const beginMove = useCallback(
-    (name: string) => {
-      // The painted positions, transforms and all: an interrupted move continues from where the eye
-      // last saw the row rather than from where it was going.
-      before.current = measure(rows.current);
-      setMoved(name);
-      window.clearTimeout(settle.current);
-      settle.current = window.setTimeout(() => setMoved(null), lineupMoveMs + lineupSettleMs);
-    },
-    [],
-  );
+  const beginMove = useCallback((name: string) => {
+    // The painted positions, transforms and all: an interrupted move continues from where the eye
+    // last saw the row rather than from where it was going.
+    before.current = measure(rows.current);
+    setMoved(name);
+    window.clearTimeout(settle.current);
+    settle.current = window.setTimeout(() => setMoved(null), lineupMoveMs + lineupSettleMs);
+  }, []);
 
   useLayoutEffect(() => {
     const previous = before.current;

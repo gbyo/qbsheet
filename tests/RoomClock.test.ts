@@ -68,15 +68,18 @@ describe('timestamp-based room clock', () => {
   });
 
   test('malformed running state recovers to a safe idle clock', () => {
-    expect(normalizeRoomClock({ version: 2, durationMs: 60_000, status: 'running', accumulatedMs: 0 }, 60_000)).toEqual(
-      idleRoomClock(60_000),
-    );
+    expect(
+      normalizeRoomClock({ version: 2, durationMs: 60_000, status: 'running', accumulatedMs: 0 }, 60_000),
+    ).toEqual(idleRoomClock(60_000));
   });
 
   test.each([
     [{ version: 2, durationMs: 60_000, status: 'idle', accumulatedMs: 60_000 }, 'expired'],
     [{ version: 2, durationMs: 60_000, status: 'expired', accumulatedMs: 0 }, 'expired'],
-    [{ version: 2, durationMs: 60_000, status: 'paused', accumulatedMs: 60_000, runningSince: 10 }, 'expired'],
+    [
+      { version: 2, durationMs: 60_000, status: 'paused', accumulatedMs: 60_000, runningSince: 10 },
+      'expired',
+    ],
   ])('canonicalizes invalid terminal state %#', (raw, status) => {
     expect(normalizeRoomClock(raw, 60_000)).toMatchObject({ status, accumulatedMs: 60_000 });
     expect(normalizeRoomClock(raw, 60_000)).not.toHaveProperty('runningSince');
@@ -98,8 +101,8 @@ describe('timestamp-based room clock', () => {
   });
 
   test('reset returns an expired segment to a fresh idle clock', () => {
-    expect(resetRoomClock({ version: 2, durationMs: 60_000, status: 'expired', accumulatedMs: 60_000 })).toEqual(
-      idleRoomClock(60_000),
-    );
+    expect(
+      resetRoomClock({ version: 2, durationMs: 60_000, status: 'expired', accumulatedMs: 60_000 }),
+    ).toEqual(idleRoomClock(60_000));
   });
 });

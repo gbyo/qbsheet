@@ -56,7 +56,9 @@ export default function DuplicateTabNotice(props: {
             </div>
             <div>
               <dt>Last saved</dt>
-              <dd>{new Date(record.updatedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</dd>
+              <dd>
+                {new Date(record.updatedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+              </dd>
             </div>
           </dl>
         </section>

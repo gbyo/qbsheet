@@ -172,7 +172,9 @@ export default function SettingsDialog(props: {
               <div className="settings-row">
                 <div>
                   <span className="settings-row-label">Scorekeeper</span>
-                  <span className="settings-row-detail">{operatorName.trim() === '' ? 'Not set' : operatorName}</span>
+                  <span className="settings-row-detail">
+                    {operatorName.trim() === '' ? 'Not set' : operatorName}
+                  </span>
                 </div>
                 <button
                   type="button"
@@ -201,7 +203,10 @@ export default function SettingsDialog(props: {
                 label="Appearance"
                 detail="Match device follows this Chromebook's own setting"
                 value={appearance}
-                options={appearanceOrder.map((option) => ({ value: option, label: appearanceLabels[option] }))}
+                options={appearanceOrder.map((option) => ({
+                  value: option,
+                  label: appearanceLabels[option],
+                }))}
                 onChange={(next) => setAppearance(next)}
               />
               <ChoiceRow
@@ -263,7 +268,9 @@ export default function SettingsDialog(props: {
                       type="button"
                       className="settings-inline-action"
                       disabled={pairingProtection !== undefined}
-                      aria-describedby={pairingProtection ? 'settings-change-tournament-protection' : undefined}
+                      aria-describedby={
+                        pairingProtection ? 'settings-change-tournament-protection' : undefined
+                      }
                       onClick={() => {
                         onClose();
                         onChangeTournament();
@@ -349,7 +356,8 @@ export default function SettingsDialog(props: {
         {view === 'shortcuts' && (
           <div className="settings-detail-view">
             <p className="settings-detail-intro">
-              Keyboard scoring is optional. Choose a seat, then the ruling when that ruling exists in the current format.
+              Keyboard scoring is optional. Choose a seat, then the ruling when that ruling exists in the
+              current format.
             </p>
             <dl className="settings-shortcuts">
               <div>
@@ -390,7 +398,8 @@ export default function SettingsDialog(props: {
               </div>
             </dl>
             <p className="settings-detail-note">
-              Exact rulings and point values depend on the tournament format. The live scorer’s contextual map is authoritative.
+              Exact rulings and point values depend on the tournament format. The live scorer’s contextual map
+              is authoritative.
             </p>
             <button
               type="button"
@@ -409,7 +418,8 @@ export default function SettingsDialog(props: {
               Forget <strong>{connection.roomName}</strong> on this device?
             </p>
             <p>
-              This removes this device’s saved tournament-control pairing. Saved games are not deleted, and the device can be paired again later.
+              This removes this device’s saved tournament-control pairing. Saved games are not deleted, and
+              the device can be paired again later.
             </p>
             {pairingProtection && (
               <p className="shell-warning" role="alert">
@@ -446,8 +456,8 @@ export default function SettingsDialog(props: {
           <div className="settings-detail-view">
             <p>Reset this device’s QBSheet preferences?</p>
             <p>
-              This clears the scorekeeper name, first-run answer, keyboard-scoring choice, appearance
-              and text size, and tournament pairing. Saved games are not deleted.
+              This clears the scorekeeper name, first-run answer, keyboard-scoring choice, appearance and text
+              size, and tournament pairing. Saved games are not deleted.
             </p>
             {pairingProtection && (
               <p className="shell-warning" role="alert">

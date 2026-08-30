@@ -344,7 +344,11 @@ function TeamLineup(props: {
           <span className="scorer-lineup-name">{player.name}</span>
           {syncLabel && <span className="scorer-lineup-sync">{syncLabel}</span>}
           {sync === 'rejected' && onRequestControl && (
-            <button type="button" className="scorer-sync-action" onClick={() => onRequestControl(side, player.name)}>
+            <button
+              type="button"
+              className="scorer-sync-action"
+              onClick={() => onRequestControl(side, player.name)}
+            >
               Request tournament control
             </button>
           )}
@@ -445,7 +449,9 @@ function TeamLineup(props: {
               onChange={(changeEvent) => setNewPlayer(changeEvent.target.value)}
               onKeyDown={handleAddKeyDown}
               aria-describedby={
-                newPlayer !== '' && newPlayerValidation.problem ? `scorer-add-player-error-${side}` : undefined
+                newPlayer !== '' && newPlayerValidation.problem
+                  ? `scorer-add-player-error-${side}`
+                  : undefined
               }
             />
             <button
@@ -486,7 +492,10 @@ function TeamLineup(props: {
           )}
           <h4 className="scorer-lineup-group">Playing</h4>
           {mode.kind === 'reorder' ? (
-            <ul className="scorer-lineup-list scorer-lineup-reorder-list" aria-label={`${team.name} playing seats`}>
+            <ul
+              className="scorer-lineup-list scorer-lineup-reorder-list"
+              aria-label={`${team.name} playing seats`}
+            >
               {playing.map((player, seat) => playerRow(player, true, seat, true))}
             </ul>
           ) : (
@@ -518,7 +527,10 @@ function TeamLineup(props: {
               Everybody on the roster is already playing. Add a player first to bring somebody else on.
             </p>
           ) : (
-            <ul className="scorer-lineup-list scorer-replacement-list" aria-label={`Replacements for ${mode.out}`}>
+            <ul
+              className="scorer-lineup-list scorer-replacement-list"
+              aria-label={`Replacements for ${mode.out}`}
+            >
               {bench.map((player) => (
                 <li key={player.name}>
                   <button
@@ -545,7 +557,10 @@ function TeamLineup(props: {
         <div className="scorer-lineup-step">
           <p className="scorer-lineup-step-title">Put {mode.incoming} in</p>
           <p className="scorer-dialog-note">Replace:</p>
-          <ul className="scorer-lineup-list scorer-replacement-list" aria-label={`Player replaced by ${mode.incoming}`}>
+          <ul
+            className="scorer-lineup-list scorer-replacement-list"
+            aria-label={`Player replaced by ${mode.incoming}`}
+          >
             {playing.map((player) => (
               <li key={player.name}>
                 <button
@@ -631,7 +646,7 @@ export default function PlayersDialog(props: IPlayersDialogProps) {
       <p className="scorer-dialog-note">
         {lineupChangeAllowed
           ? `Changes apply starting Tossup ${questionNumber}.`
-          : lineupChangeReason ?? 'Lineup changes are not available at this checkpoint.'}
+          : (lineupChangeReason ?? 'Lineup changes are not available at this checkpoint.')}
       </p>
       <div className="scorer-lineups">
         <TeamLineup

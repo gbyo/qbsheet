@@ -114,7 +114,10 @@ export function readQbtcpExtension(value: unknown): IQbtcpExtension | null {
     extension.roundRevision = Number(raw.round_revision);
   }
   if (nonBlankString(raw.room_id)) extension.roomId = raw.room_id;
-  if (typeof raw.handoff_instruction === 'string' && raw.handoff_instruction.length <= maxHandoffInstructionLength) {
+  if (
+    typeof raw.handoff_instruction === 'string' &&
+    raw.handoff_instruction.length <= maxHandoffInstructionLength
+  ) {
     if (raw.handoff_instruction.trim() !== '') extension.handoffInstruction = raw.handoff_instruction;
   }
   if (isPlainObject(raw.procedure)) {
@@ -124,7 +127,8 @@ export function readQbtcpExtension(value: unknown): IQbtcpExtension | null {
       // Zero for a procedure with no usable version on it at all, which is the same problem: rules
       // were sent and this build cannot tell what they say.
       const stated = raw.procedure.version;
-      extension.unsupportedProcedureVersion = typeof stated === 'number' && Number.isFinite(stated) ? stated : 0;
+      extension.unsupportedProcedureVersion =
+        typeof stated === 'number' && Number.isFinite(stated) ? stated : 0;
     }
   } else if (raw.procedure !== undefined) {
     // Present but not an object at all — null, an array, a string. Every other field here degrades to
@@ -197,7 +201,10 @@ export function buildQbtcpExtension(extension: Omit<IQbtcpExtension, 'version'>)
 }
 
 /** Attach the extension to a QBJ object, when there is one to attach. */
-export function withQbtcpExtension(target: QbjObject, extension: Omit<IQbtcpExtension, 'version'>): QbjObject {
+export function withQbtcpExtension(
+  target: QbjObject,
+  extension: Omit<IQbtcpExtension, 'version'>,
+): QbjObject {
   const block = buildQbtcpExtension(extension);
   if (!block) return target;
   return { ...target, [qbtcpExtensionKey]: block };

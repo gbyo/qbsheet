@@ -38,7 +38,9 @@ export function availableAnswerTypes(
 
 /** Every answer worth something, cheapest first. */
 function correctTypes(format: IScorekeeperFormat): IScorekeeperAnswerType[] {
-  return format.answerTypes.filter((type) => type.value > 0).sort((first, second) => first.value - second.value);
+  return format.answerTypes
+    .filter((type) => type.value > 0)
+    .sort((first, second) => first.value - second.value);
 }
 
 /**

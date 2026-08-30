@@ -32,7 +32,12 @@ import {
 
 const leftTeam = {
   name: 'Ninety Six',
-  players: [{ name: 'Sarah Jones' }, { name: 'Michael Smith' }, { name: 'Alex Brown' }, { name: 'Jordan Hall' }],
+  players: [
+    { name: 'Sarah Jones' },
+    { name: 'Michael Smith' },
+    { name: 'Alex Brown' },
+    { name: 'Jordan Hall' },
+  ],
 };
 const rightTeam = { name: 'Greenwood', players: [{ name: 'Emma Turner' }, { name: 'Taylor Adams' }] };
 
@@ -49,7 +54,10 @@ let gameKey = '';
  * Four on the roster and three seats, so there is a bench to substitute from and a starting-lineup
  * question to answer first. `chooseStarters` answers it the way a scorekeeper would.
  */
-function renderScorer(maximumActive = 3, starters: string[] = ['Sarah Jones', 'Michael Smith', 'Alex Brown']) {
+function renderScorer(
+  maximumActive = 3,
+  starters: string[] = ['Sarah Jones', 'Michael Smith', 'Alex Brown'],
+) {
   gameCounter += 1;
   gameKey = `seating-game-${gameCounter}`;
   render(
@@ -293,7 +301,12 @@ describe('the ordering rules themselves', () => {
 
   test('reordering the players on the floor leaves the bench where it was', () => {
     // Jordan is benched and stays in his place while the other three are rearranged around him.
-    expect(applyOrder([], roster, ['Alex', 'Sarah', 'Michael'])).toEqual(['Alex', 'Sarah', 'Michael', 'Jordan']);
+    expect(applyOrder([], roster, ['Alex', 'Sarah', 'Michael'])).toEqual([
+      'Alex',
+      'Sarah',
+      'Michael',
+      'Jordan',
+    ]);
   });
 
   test('a substitute takes the outgoing player’s place', () => {
@@ -315,7 +328,9 @@ describe('the ordering rules themselves', () => {
     saveSeating('game-1', { left: ['Alex'], right: [] }, saved, storage);
 
     expect(loadSeating('game-1', new Date(saved.getTime() + 1000), storage).left).toEqual(['Alex']);
-    expect(loadSeating('game-1', new Date(saved.getTime() + playerSeatingMaxAgeMs + 1000), storage).left).toEqual([]);
+    expect(
+      loadSeating('game-1', new Date(saved.getTime() + playerSeatingMaxAgeMs + 1000), storage).left,
+    ).toEqual([]);
   });
 
   test('a corrupt preference degrades to no preference rather than taking the game down', () => {

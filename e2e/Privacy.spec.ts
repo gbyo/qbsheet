@@ -13,9 +13,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 /** Whether the document fits its own viewport. A sideways scrollbar on a phone is a defect. */
 async function fits(page: Page): Promise<boolean> {
-  return page.evaluate(
-    () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
-  );
+  return page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
 }
 
 test('the privacy page describes what QBSheet does with data', async ({ page }) => {
@@ -40,7 +38,10 @@ test('the footer reaches it from the product page, and it comes back', async ({ 
   await expect(page).toHaveURL(/\/about\/privacy\/$/);
   await expect(page.getByRole('heading', { level: 1, name: 'Privacy' })).toBeVisible();
 
-  await page.getByRole('navigation', { name: 'Footer navigation' }).getByRole('link', { name: 'About' }).click();
+  await page
+    .getByRole('navigation', { name: 'Footer navigation' })
+    .getByRole('link', { name: 'About' })
+    .click();
   await expect(page).toHaveURL(/\/about\/$/);
   await expect(page.getByRole('heading', { level: 1, name: 'The simpler way to keep score.' })).toBeVisible();
 });

@@ -58,11 +58,7 @@ function describe(markdown) {
 
 /** Attribute-safe, because a page title or an opening line may contain either kind of quote. */
 const attribute = (value) =>
-  value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+  value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 function documentFor(name, markdown) {
   const slug = slugFor(name);
@@ -150,9 +146,7 @@ writeFileSync(
   replaceRegion(
     readFileSync(sitemapPath, 'utf8'),
     'pages',
-    pages
-      .map((page) => `  <url>\n    <loc>${siteUrl}/about/wiki/${page.slug}/</loc>\n  </url>`)
-      .join('\n'),
+    pages.map((page) => `  <url>\n    <loc>${siteUrl}/about/wiki/${page.slug}/</loc>\n  </url>`).join('\n'),
     'public/sitemap.xml',
   ),
 );

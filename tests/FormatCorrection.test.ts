@@ -115,7 +115,14 @@ describe('correcting the scoring rules of a game already in progress', () => {
     const withSuperpower: IScorekeeperFormat = {
       ...format,
       answerTypes: [
-        { ...format.answerTypes[0], index: 0, value: 20, label: 'Superpower', shortLabel: 'SP', qbjId: 'super' },
+        {
+          ...format.answerTypes[0],
+          index: 0,
+          value: 20,
+          label: 'Superpower',
+          shortLabel: 'SP',
+          qbjId: 'super',
+        },
         ...format.answerTypes.map((answerType, offset) => ({ ...answerType, index: offset + 1 })),
       ],
     };
@@ -178,9 +185,7 @@ describe('correcting the scoring rules of a game already in progress', () => {
 
     test('regulation cannot be shortened below the questions already played', () => {
       const format = powersFormat();
-      const events = [
-        event({ type: 'tossup-dead', questionNumber: 14 }),
-      ];
+      const events = [event({ type: 'tossup-dead', questionNumber: 14 })];
       const shortened: IScorekeeperFormat = {
         ...format,
         regulation: { ...format.regulation, tossupCount: 10, maximumTossupCount: 10 },

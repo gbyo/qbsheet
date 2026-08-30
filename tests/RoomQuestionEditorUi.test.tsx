@@ -51,7 +51,9 @@ function renderScorer(format: IScorekeeperFormat) {
 }
 
 function buttonsFor(player: string) {
-  return screen.getAllByRole('button').filter((button) => button.getAttribute('aria-label')?.startsWith(player));
+  return screen
+    .getAllByRole('button')
+    .filter((button) => button.getAttribute('aria-label')?.startsWith(player));
 }
 
 function scoreOf(team: string): string {
@@ -226,7 +228,11 @@ describe('what the editor leads with', () => {
 
     chooseRuling('Neg (-5)');
 
-    expect(within(screen.getByRole('region', { name: 'Tossup attempts' })).getByRole('button', { name: '+ Add attempt' })).toBeTruthy();
+    expect(
+      within(screen.getByRole('region', { name: 'Tossup attempts' })).getByRole('button', {
+        name: '+ Add attempt',
+      }),
+    ).toBeTruthy();
   });
 
   /**
@@ -609,16 +615,19 @@ describe('the bonus', () => {
 
     // Two sides, each named, rather than "Points" and "Bounceback" saying nothing about who scores.
     const bonus = within(editor()).getByRole('group', { name: 'Ninety Six bonus' });
-    expect(within(bonus).getAllByRole('button').map((button) => button.textContent)).toEqual([
-      '0',
-      '10',
-      '20',
-      '30',
-    ]);
+    expect(
+      within(bonus)
+        .getAllByRole('button')
+        .map((button) => button.textContent),
+    ).toEqual(['0', '10', '20', '30']);
     expect(within(bonus).getByRole('button', { name: '20' })).toHaveAttribute('aria-pressed', 'true');
     // The opponent is offered only what the controlling team left on the bonus.
     const bounceback = within(editor()).getByRole('group', { name: 'Greenwood bounceback' });
-    expect(within(bounceback).getAllByRole('button').map((button) => button.textContent)).toEqual(['0', '10']);
+    expect(
+      within(bounceback)
+        .getAllByRole('button')
+        .map((button) => button.textContent),
+    ).toEqual(['0', '10']);
     expect(within(bounceback).getByRole('button', { name: '10' })).toHaveAttribute('aria-pressed', 'true');
   });
 
@@ -772,7 +781,11 @@ describe('who got each bonus part', () => {
     ]);
 
     // One control per outcome, each saying whose points it is and what it is worth.
-    expect(within(partOutcomes(2)).getAllByRole('button').map((button) => button.getAttribute('aria-label'))).toEqual([
+    expect(
+      within(partOutcomes(2))
+        .getAllByRole('button')
+        .map((button) => button.getAttribute('aria-label')),
+    ).toEqual([
       'Bonus part 2 to Ninety Six',
       'Bonus part 2 bounced back to Greenwood',
       'Bonus part 2 missed',
@@ -804,12 +817,19 @@ describe('who got each bonus part', () => {
 
     fireEvent.click(outcomeButton(1, 'Bonus part 1 bounced back to Greenwood'));
     expect(outcomeButton(1, 'Bonus part 1 to Ninety Six')).toHaveAttribute('aria-pressed', 'false');
-    expect(outcomeButton(1, 'Bonus part 1 bounced back to Greenwood')).toHaveAttribute('aria-pressed', 'true');
+    expect(outcomeButton(1, 'Bonus part 1 bounced back to Greenwood')).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
     expect(outcomeButton(1, 'Bonus part 1 missed')).toHaveAttribute('aria-pressed', 'false');
     expect(within(editor()).getByText('Ninety Six 0 · Greenwood +20 bounceback')).toBeTruthy();
 
     fireEvent.click(outcomeButton(2, 'Bonus part 2 missed'));
-    expect(chosenOutcomes(3)).toEqual(['Bonus part 1 bounced back to Greenwood', 'Bonus part 2 missed', 'Bonus part 3 missed']);
+    expect(chosenOutcomes(3)).toEqual([
+      'Bonus part 1 bounced back to Greenwood',
+      'Bonus part 2 missed',
+      'Bonus part 3 missed',
+    ]);
     expect(within(editor()).getByText('Ninety Six 0 · Greenwood +10 bounceback')).toBeTruthy();
   });
 
@@ -850,10 +870,11 @@ describe('who got each bonus part', () => {
     openEditorFromRecent(1);
     fireEvent.click(screen.getByText('Edit individual parts…'));
 
-    expect(within(partOutcomes(1)).getAllByRole('button').map((button) => button.getAttribute('aria-label'))).toEqual([
-      'Bonus part 1 to Ninety Six',
-      'Bonus part 1 missed',
-    ]);
+    expect(
+      within(partOutcomes(1))
+        .getAllByRole('button')
+        .map((button) => button.getAttribute('aria-label')),
+    ).toEqual(['Bonus part 1 to Ninety Six', 'Bonus part 1 missed']);
     expect(editor().querySelector('.scorer-question-part-head')?.textContent).toBe('Ninety Six');
 
     fireEvent.click(outcomeButton(1, 'Bonus part 1 to Ninety Six'));

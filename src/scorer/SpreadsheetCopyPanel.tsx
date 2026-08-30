@@ -57,7 +57,12 @@ export default function SpreadsheetCopyPanel(props: ISpreadsheetCopyPanelProps) 
 
   return (
     <section className="scorer-spreadsheet-copy" aria-label="Tournament spreadsheet copy">
-      <button type="button" className="scorer-action" onClick={() => void copy()} disabled={disabled || copying}>
+      <button
+        type="button"
+        className="scorer-action"
+        onClick={() => void copy()}
+        disabled={disabled || copying}
+      >
         {copying ? 'Copying…' : 'Copy game for tournament spreadsheet'}
       </button>
 
@@ -67,8 +72,8 @@ export default function SpreadsheetCopyPanel(props: ISpreadsheetCopyPanelProps) 
             <strong>Game copied</strong>: {gameLabel}
           </p>
           <p>
-            Create a <strong>NEW BLANK TAB</strong> in the tournament spreadsheet, click <strong>A1</strong>, and
-            paste.
+            Create a <strong>NEW BLANK TAB</strong> in the tournament spreadsheet, click <strong>A1</strong>,
+            and paste.
           </p>
           <p className="scorer-spreadsheet-sequence">
             <strong>NEW TAB → A1 → PASTE</strong>
@@ -77,7 +82,9 @@ export default function SpreadsheetCopyPanel(props: ISpreadsheetCopyPanelProps) 
             <strong>Never paste into a tab that already contains a QBSheet game.</strong>
           </p>
           {suggestedTabName && (
-            <p className="scorer-spreadsheet-suggestion">Suggested tab name: {suggestedTabName} (cosmetic only)</p>
+            <p className="scorer-spreadsheet-suggestion">
+              Suggested tab name: {suggestedTabName} (cosmetic only)
+            </p>
           )}
         </div>
       )}
@@ -85,8 +92,8 @@ export default function SpreadsheetCopyPanel(props: ISpreadsheetCopyPanelProps) 
       {result && needsSpreadsheetClipboardFallback(result) && (
         <div className="scorer-spreadsheet-fallback" role="alert">
           <p>
-            This browser could not place the game on the clipboard. Select the complete text below, copy it, then
-            create a <strong>NEW BLANK TAB</strong>, click <strong>A1</strong>, and paste.
+            This browser could not place the game on the clipboard. Select the complete text below, copy it,
+            then create a <strong>NEW BLANK TAB</strong>, click <strong>A1</strong>, and paste.
           </p>
           <p>
             <strong>Never paste into a tab that already contains a QBSheet game.</strong>

@@ -32,7 +32,12 @@ function typeIndex(format: IScorekeeperFormat, value: number): number {
   return found.index;
 }
 
-function buzz(questionNumber: number, team: 'left' | 'right', playerName: string, answerTypeIndex: number): ScoreEvent {
+function buzz(
+  questionNumber: number,
+  team: 'left' | 'right',
+  playerName: string,
+  answerTypeIndex: number,
+): ScoreEvent {
   return event({ type: 'tossup-buzz', questionNumber, team, playerName, answerTypeIndex });
 }
 
@@ -65,7 +70,9 @@ describe('one answer per team per tossup', () => {
   test('the other team may still answer', () => {
     const events = [buzz(1, 'left', 'Sarah', typeIndex(format, -5))];
 
-    expect(canApplyScoreEvent(context, events, buzz(1, 'right', 'Emma', typeIndex(format, 10))).ok).toBe(true);
+    expect(canApplyScoreEvent(context, events, buzz(1, 'right', 'Emma', typeIndex(format, 10))).ok).toBe(
+      true,
+    );
   });
 });
 
@@ -97,9 +104,9 @@ describe('a team that heard the whole question cannot be penalized', () => {
 
     expect(afterResume.ok).toBe(true);
     if (!afterResume.ok) return;
-    expect(canApplyScoreEvent(context, afterResume.events, buzz(1, 'right', 'Emma', typeIndex(format, -5))).ok).toBe(
-      true,
-    );
+    expect(
+      canApplyScoreEvent(context, afterResume.events, buzz(1, 'right', 'Emma', typeIndex(format, -5))).ok,
+    ).toBe(true);
   });
 
   test('a readout marker blocks a neg even when no team has answered yet', () => {
@@ -108,12 +115,16 @@ describe('a team that heard the whole question cannot be penalized', () => {
 
     expect(afterReadout.ok).toBe(true);
     if (!afterReadout.ok) return;
-    const verdict = canApplyScoreEvent(context, afterReadout.events, buzz(1, 'left', 'Sarah', typeIndex(format, -5)));
+    const verdict = canApplyScoreEvent(
+      context,
+      afterReadout.events,
+      buzz(1, 'left', 'Sarah', typeIndex(format, -5)),
+    );
     expect(verdict.ok).toBe(false);
     expect(verdict.ok === false && verdict.reason).toContain('whole question');
-    expect(canApplyScoreEvent(context, afterReadout.events, buzz(1, 'left', 'Sarah', typeIndex(format, 10))).ok).toBe(
-      true,
-    );
+    expect(
+      canApplyScoreEvent(context, afterReadout.events, buzz(1, 'left', 'Sarah', typeIndex(format, 10))).ok,
+    ).toBe(true);
   });
 });
 
@@ -153,7 +164,9 @@ describe('bonuses follow conversions', () => {
   test('a tossup cannot be scored while a bonus is owed', () => {
     const events = [buzz(1, 'left', 'Sarah', typeIndex(format, 10))];
 
-    expect(canApplyScoreEvent(context, events, buzz(2, 'right', 'Emma', typeIndex(format, 10))).ok).toBe(false);
+    expect(canApplyScoreEvent(context, events, buzz(2, 'right', 'Emma', typeIndex(format, 10))).ok).toBe(
+      false,
+    );
   });
 });
 
@@ -162,7 +175,9 @@ describe('a dead tossup is over', () => {
     const events = [event({ type: 'tossup-dead', questionNumber: 1 })];
 
     // The phase has already moved to tossup 2, so this is refused as belonging to the wrong question.
-    expect(canApplyScoreEvent(context, events, buzz(1, 'left', 'Sarah', typeIndex(format, 10))).ok).toBe(false);
+    expect(canApplyScoreEvent(context, events, buzz(1, 'left', 'Sarah', typeIndex(format, 10))).ok).toBe(
+      false,
+    );
   });
 
   test('it cannot go dead twice', () => {
@@ -180,7 +195,9 @@ describe('a finished game stays finished', () => {
   test('nothing more can be scored once a team has forfeited', () => {
     const events = [event({ type: 'forfeit', questionNumber: 1, teams: ['right'] })];
 
-    expect(canApplyScoreEvent(context, events, buzz(1, 'left', 'Sarah', typeIndex(format, 10))).ok).toBe(false);
+    expect(canApplyScoreEvent(context, events, buzz(1, 'left', 'Sarah', typeIndex(format, 10))).ok).toBe(
+      false,
+    );
   });
 });
 
@@ -209,8 +226,11 @@ describe('the starting lineup comes first', () => {
     expect(applied.ok).toBe(true);
 
     expect(
-      canApplyScoreEvent(bigContext, applied.ok ? applied.events : [], buzz(1, 'left', 'Sarah', typeIndex(format, 10)))
-        .ok,
+      canApplyScoreEvent(
+        bigContext,
+        applied.ok ? applied.events : [],
+        buzz(1, 'left', 'Sarah', typeIndex(format, 10)),
+      ).ok,
     ).toBe(true);
   });
 
@@ -282,7 +302,11 @@ describe('the starting lineup comes first', () => {
 
 describe('procedure actions', () => {
   test('timeouts are refused when the tournament does not track them', () => {
-    const verdict = canApplyScoreEvent(context, [], event({ type: 'timeout', questionNumber: 1, team: 'left' }));
+    const verdict = canApplyScoreEvent(
+      context,
+      [],
+      event({ type: 'timeout', questionNumber: 1, team: 'left' }),
+    );
 
     expect(verdict.ok).toBe(false);
   });
@@ -297,15 +321,19 @@ describe('procedure actions', () => {
 
     expect(canApplyScoreEvent(withTimeouts, [], events[0]).ok).toBe(true);
     expect(
-      canApplyScoreEvent(withTimeouts, events, event({ type: 'timeout', questionNumber: 1, team: 'left' })).ok,
+      canApplyScoreEvent(withTimeouts, events, event({ type: 'timeout', questionNumber: 1, team: 'left' }))
+        .ok,
     ).toBe(false);
     expect(
-      canApplyScoreEvent(withTimeouts, events, event({ type: 'timeout', questionNumber: 1, team: 'right' })).ok,
+      canApplyScoreEvent(withTimeouts, events, event({ type: 'timeout', questionNumber: 1, team: 'right' }))
+        .ok,
     ).toBe(true);
   });
 
   test('regulation cannot be ended on a format that is not timed', () => {
-    expect(canApplyScoreEvent(context, [], event({ type: 'end-regulation', questionNumber: 3 })).ok).toBe(false);
+    expect(canApplyScoreEvent(context, [], event({ type: 'end-regulation', questionNumber: 3 })).ok).toBe(
+      false,
+    );
   });
 
   test('nothing can be scored while a score check is open', () => {
@@ -361,12 +389,7 @@ describe('malformed and out-of-phase administrative events fail closed', () => {
     expectRefused(context, [], buzz(2, 'left', 'Sarah', typeIndex(format, 10)), 'Tossup 1');
     expectRefused(context, [], buzz(1, 'left', '', typeIndex(format, 10)), 'Choose who');
     expectRefused(context, [], buzz(1, 'left', 'Sarah', 99), 'not a ruling');
-    expectRefused(
-      context,
-      [],
-      event({ type: 'tossup-dead', questionNumber: 2 }),
-      'Tossup 1',
-    );
+    expectRefused(context, [], event({ type: 'tossup-dead', questionNumber: 2 }), 'Tossup 1');
   });
 
   test('substitutions validate the complete next lineup and boundary', () => {
@@ -379,7 +402,12 @@ describe('malformed and out-of-phase administrative events fail closed', () => {
     expectRefused(
       context,
       [],
-      event({ type: 'substitution', questionNumber: 1, team: 'left', activePlayers: ['Sarah', 'James', 'Alex'] }),
+      event({
+        type: 'substitution',
+        questionNumber: 1,
+        team: 'left',
+        activePlayers: ['Sarah', 'James', 'Alex'],
+      }),
       'at most 2',
     );
     expectRefused(
@@ -405,14 +433,14 @@ describe('malformed and out-of-phase administrative events fail closed', () => {
   test('timeouts and breaks reject impossible state transitions', () => {
     const procedureContext = {
       ...context,
-      procedure: { version: 2 as const, halves: true, timeoutsPerTeam: 1, substitutionPolicy: 'any-boundary' as const },
+      procedure: {
+        version: 2 as const,
+        halves: true,
+        timeoutsPerTeam: 1,
+        substitutionPolicy: 'any-boundary' as const,
+      },
     };
-    expectRefused(
-      procedureContext,
-      [],
-      event({ type: 'half-resume', questionNumber: 1 }),
-      'no break',
-    );
+    expectRefused(procedureContext, [], event({ type: 'half-resume', questionNumber: 1 }), 'no break');
     expectRefused(
       procedureContext,
       [],
@@ -462,7 +490,14 @@ describe('malformed and out-of-phase administrative events fail closed', () => {
     expectRefused(
       context,
       [],
-      event({ type: 'protest', questionNumber: 1, team: 'left', subject: 'procedure', description: ' ', status: 'open' }),
+      event({
+        type: 'protest',
+        questionNumber: 1,
+        team: 'left',
+        subject: 'procedure',
+        description: ' ',
+        status: 'open',
+      }),
       'being protested',
     );
     expectRefused(context, [], event({ type: 'forfeit', questionNumber: 1, teams: [] }), 'who forfeited');
@@ -478,6 +513,11 @@ describe('malformed and out-of-phase administrative events fail closed', () => {
       event({ type: 'adjustment', questionNumber: 1, team: 'left', points: 0, reason: 'Control ruling' }),
       'non-zero whole number',
     );
-    expectRefused(context, [], event({ type: 'note', questionNumber: 1, text: ' ', flagged: false }), 'some text');
+    expectRefused(
+      context,
+      [],
+      event({ type: 'note', questionNumber: 1, text: ' ', flagged: false }),
+      'some text',
+    );
   });
 });

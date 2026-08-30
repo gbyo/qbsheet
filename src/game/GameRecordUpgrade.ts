@@ -119,7 +119,9 @@ function isRosterTeam(value: unknown): boolean {
     isObject(value) &&
     typeof value.name === 'string' &&
     Array.isArray(value.players) &&
-    value.players.every((player) => isObject(player) && typeof player.name === 'string' && player.name.trim() !== '') &&
+    value.players.every(
+      (player) => isObject(player) && typeof player.name === 'string' && player.name.trim() !== '',
+    ) &&
     (value.startingLineup === undefined || isNonEmptyStringArray(value.startingLineup))
   );
 }
@@ -131,7 +133,7 @@ function isScorekeeperFormat(value: unknown): boolean {
   const overtime = value.overtime;
   const lightning = value.lightning;
   const players = value.players;
-  const structurallyValid = (
+  const structurallyValid =
     isInteger(value.version) &&
     typeof value.name === 'string' &&
     Array.isArray(value.answerTypes) &&
@@ -170,8 +172,7 @@ function isScorekeeperFormat(value: unknown): boolean {
     isFiniteNumber(lightning.divisor) &&
     isObject(players) &&
     isInteger(players.maximumActive) &&
-    isFiniteNumber(value.totalDivisor)
-  );
+    isFiniteNumber(value.totalDivisor);
   return structurallyValid && scorekeeperFormatProblems(value as unknown as IScorekeeperFormat).length === 0;
 }
 

@@ -65,16 +65,11 @@ export default function ScoringRulesSetup(props: {
         </p>
       ))}
       <p className="rules-setup-reason">
-        Enter the rules this game is played under. Ask tournament control to include scoring rules in
-        the QBJ to avoid this next time.
+        Enter the rules this game is played under. Ask tournament control to include scoring rules in the QBJ
+        to avoid this next time.
       </p>
 
-      <ScoringRulesEditor
-        idPrefix="rules"
-        basicVariant="full"
-        value={input}
-        onChange={setInput}
-      />
+      <ScoringRulesEditor idPrefix="rules" basicVariant="full" value={input} onChange={setInput} />
 
       {submitted && problems.length > 0 && (
         <div className="shell-errors" role="alert">

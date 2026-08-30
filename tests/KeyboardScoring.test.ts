@@ -20,7 +20,9 @@ import { negRuling, normalCorrect, powerCorrect, unreachableAnswerTypes } from '
 import { IScorekeeperAnswerType, IScorekeeperFormat } from '../src/scoring/ScorekeeperFormat';
 import { validPackage } from './packages';
 
-function answerType(overrides: Partial<IScorekeeperAnswerType> & { index: number; value: number }): IScorekeeperAnswerType {
+function answerType(
+  overrides: Partial<IScorekeeperAnswerType> & { index: number; value: number },
+): IScorekeeperAnswerType {
   return {
     label: String(overrides.value),
     shortLabel: String(overrides.value),
@@ -68,7 +70,8 @@ describe('the numeric seat layout', () => {
 
   test('nothing outside 1–8 addresses a seat', () => {
     for (const value of [0, 9, -1, 1.5, '0', '9', 'x']) expect(seatForNumber(value)).toBeNull();
-    for (const code of ['Digit0', 'Digit9', 'KeyA', 'Space', 'Numpad0']) expect(numberForCode(code)).toBeNull();
+    for (const code of ['Digit0', 'Digit9', 'KeyA', 'Space', 'Numpad0'])
+      expect(numberForCode(code)).toBeNull();
   });
 
   test('the map exposes four global numbers per side', () => {
@@ -209,7 +212,13 @@ describe('bonus digits', () => {
   });
 
   test('the values come from the caller, not from an assumption about thirty', () => {
-    expect(bonusKeyLegend([0, 5, 10, 15, 20]).map((row) => row.meaning)).toEqual(['0', '5', '10', '15', '20']);
+    expect(bonusKeyLegend([0, 5, 10, 15, 20]).map((row) => row.meaning)).toEqual([
+      '0',
+      '5',
+      '10',
+      '15',
+      '20',
+    ]);
     // A five-point part renumbers itself: four parts converted is still the key 4.
     expect(bonusKeyLegend([0, 5, 10, 15, 20]).map((row) => row.keys)).toEqual(['0', '1', '2', '3', '4']);
   });

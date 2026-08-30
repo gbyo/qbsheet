@@ -15,7 +15,14 @@ describe('ScorerNoticeCenter', () => {
   test('shows only the highest-priority expanded notice and keeps the rest discoverable', () => {
     renderCenter([
       { id: 'offline', tone: 'warning', message: 'Offline — keep scoring.', persistent: true, priority: 40 },
-      { id: 'save', tone: 'error', title: 'Save failed', body: 'Download a backup.', persistent: true, priority: 1 },
+      {
+        id: 'save',
+        tone: 'error',
+        title: 'Save failed',
+        body: 'Download a backup.',
+        persistent: true,
+        priority: 1,
+      },
     ]);
 
     expect(screen.getByText('Save failed')).toBeTruthy();
@@ -61,12 +68,18 @@ describe('ScorerNoticeCenter', () => {
 
   test('does not restart a transient receipt timer when the same notice rerenders', () => {
     vi.useFakeTimers();
-    const { rerender } = renderCenter([{ id: 'receipt', tone: 'info', message: 'Saved', transient: true, autoDismissMs: 3000 }]);
+    const { rerender } = renderCenter([
+      { id: 'receipt', tone: 'info', message: 'Saved', transient: true, autoDismissMs: 3000 },
+    ]);
 
     act(() => {
       vi.advanceTimersByTime(2000);
     });
-    rerender(<ScorerNoticeCenter notices={[{ id: 'receipt', tone: 'info', message: 'Saved', transient: true, autoDismissMs: 3000 }]} />);
+    rerender(
+      <ScorerNoticeCenter
+        notices={[{ id: 'receipt', tone: 'info', message: 'Saved', transient: true, autoDismissMs: 3000 }]}
+      />,
+    );
 
     act(() => {
       vi.advanceTimersByTime(1000);

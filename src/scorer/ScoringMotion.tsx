@@ -47,7 +47,10 @@ export default function MotionNumber(props: {
     const next = numberMotion(from, value, sequence.current);
     setMotion(next);
     if (!next) return undefined;
-    const timer = window.setTimeout(() => setMotion((current) => (current?.token === next.token ? null : current)), numberMotionMs);
+    const timer = window.setTimeout(
+      () => setMotion((current) => (current?.token === next.token ? null : current)),
+      numberMotionMs,
+    );
     return () => window.clearTimeout(timer);
   }, [value]);
 

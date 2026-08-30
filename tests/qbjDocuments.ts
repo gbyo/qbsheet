@@ -44,14 +44,20 @@ export const clinton: IQbjTeamFixture = {
   id: 'Team_Clinton',
   registrationId: 'Registration_Clinton',
   name: 'Clinton',
-  players: [{ id: 'Player_Riley', name: 'Riley' }, { id: 'Player_Quinn', name: 'Quinn' }],
+  players: [
+    { id: 'Player_Riley', name: 'Riley' },
+    { id: 'Player_Quinn', name: 'Quinn' },
+  ],
 };
 
 export const emerald: IQbjTeamFixture = {
   id: 'Team_Emerald',
   registrationId: 'Registration_Emerald',
   name: 'Emerald',
-  players: [{ id: 'Player_Sam', name: 'Sam' }, { id: 'Player_Drew', name: 'Drew' }],
+  players: [
+    { id: 'Player_Sam', name: 'Sam' },
+    { id: 'Player_Drew', name: 'Drew' },
+  ],
 };
 
 /** ACF-with-powers scoring rules, as standard QBJ. */
@@ -74,9 +80,30 @@ export function acfPowersScoringRules(overrides: QbjObject = {}): QbjObject {
     points_per_bonus_part: 10,
     bonuses_bounce_back: false,
     answer_types: [
-      { type: 'AnswerType', id: 'AnswerType_15', value: 15, label: 'Power', short_label: 'P', awards_bonus: true },
-      { type: 'AnswerType', id: 'AnswerType_10', value: 10, label: 'Correct', short_label: 'C', awards_bonus: true },
-      { type: 'AnswerType', id: 'AnswerType_-5', value: -5, label: 'Neg', short_label: 'N', awards_bonus: false },
+      {
+        type: 'AnswerType',
+        id: 'AnswerType_15',
+        value: 15,
+        label: 'Power',
+        short_label: 'P',
+        awards_bonus: true,
+      },
+      {
+        type: 'AnswerType',
+        id: 'AnswerType_10',
+        value: 10,
+        label: 'Correct',
+        short_label: 'C',
+        awards_bonus: true,
+      },
+      {
+        type: 'AnswerType',
+        id: 'AnswerType_-5',
+        value: -5,
+        label: 'Neg',
+        short_label: 'N',
+        awards_bonus: false,
+      },
     ],
     ...overrides,
   };
@@ -147,22 +174,20 @@ export interface IAssignmentOptions {
  */
 export function assignmentDocument(options: IAssignmentOptions = {}): object {
   const teams = options.teams ?? [ninetySix, greenwood];
-  const matches =
-    options.matches ??
-    [
-      matchObject({
-        id: 'Match_sm-4471',
-        left: teams[0],
-        right: teams[1],
-        location: 'Room 204',
-        qbtcp: {
-          round_revision: 3,
-          room_id: 'room-204',
-          handoff_instruction: 'Upload to the Round 4 folder.',
-          scorekeeper: { timed: false },
-        },
-      }),
-    ];
+  const matches = options.matches ?? [
+    matchObject({
+      id: 'Match_sm-4471',
+      left: teams[0],
+      right: teams[1],
+      location: 'Room 204',
+      qbtcp: {
+        round_revision: 3,
+        room_id: 'room-204',
+        handoff_instruction: 'Upload to the Round 4 folder.',
+        scorekeeper: { timed: false },
+      },
+    }),
+  ];
   const rules = options.scoringRules === null ? null : (options.scoringRules ?? acfPowersScoringRules());
 
   const round: QbjObject = {
@@ -254,8 +279,20 @@ export function tournamentDocument(): object {
             id: 'Phase_Prelims',
             name: 'Prelims',
             rounds: [
-              { type: 'Round', id: 'Round_3', name: '3', number: 3, matches: roundThree.map((m) => ({ $ref: m.id as string })) },
-              { type: 'Round', id: 'Round_4', name: '4', number: 4, matches: roundFour.map((m) => ({ $ref: m.id as string })) },
+              {
+                type: 'Round',
+                id: 'Round_3',
+                name: '3',
+                number: 3,
+                matches: roundThree.map((m) => ({ $ref: m.id as string })),
+              },
+              {
+                type: 'Round',
+                id: 'Round_4',
+                name: '4',
+                number: 4,
+                matches: roundFour.map((m) => ({ $ref: m.id as string })),
+              },
             ],
           },
         ],
@@ -280,7 +317,11 @@ export function modaqMatchOnly(): object {
         team: { name: 'Ninety Six', players: [{ name: 'Sarah' }, { name: 'James' }] },
         points: 315,
         match_players: [
-          { player: { name: 'Sarah' }, tossups_heard: 20, answer_counts: [{ number: 3, answer_type: { value: 15 } }] },
+          {
+            player: { name: 'Sarah' },
+            tossups_heard: 20,
+            answer_counts: [{ number: 3, answer_type: { value: 15 } }],
+          },
         ],
       },
       {

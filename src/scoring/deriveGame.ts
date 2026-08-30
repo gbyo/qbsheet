@@ -245,10 +245,18 @@ export function teamsNeedingStartingLineup(
   return (['left', 'right'] as LeftOrRight[]).filter((side) => {
     const team = setup[side];
     if (team.startingLineup && team.startingLineup.length > 0) return false;
-    if (events.some((event) => event.type === 'substitution' && event.team === side && event.questionNumber <= 1)) {
+    if (
+      events.some(
+        (event) => event.type === 'substitution' && event.team === side && event.questionNumber <= 1,
+      )
+    ) {
       return false;
     }
-    return team.startingLineup !== undefined || team.players.length === 0 || team.players.length > format.players.maximumActive;
+    return (
+      team.startingLineup !== undefined ||
+      team.players.length === 0 ||
+      team.players.length > format.players.maximumActive
+    );
   });
 }
 
@@ -264,7 +272,11 @@ export function teamsNeedingStartingLineup(
  * of them consulted before the button was drawn. Everything that needs to know whether a bonus
  * follows a conversion asks this.
  */
-export function bonusFollows(format: IScorekeeperFormat, answerType: IScorekeeperAnswerType, period: GamePeriod): boolean {
+export function bonusFollows(
+  format: IScorekeeperFormat,
+  answerType: IScorekeeperAnswerType,
+  period: GamePeriod,
+): boolean {
   if (!format.bonus.enabled) return false;
   if (!answerType.awardsBonus) return false;
   if (period === 'overtime' && !format.overtime.includesBonuses) return false;
@@ -332,7 +344,11 @@ export function overtimeIsSuddenDeath(format: IScorekeeperFormat, overtimeCycles
  * @param setup who is playing
  * @param events everything the scorekeeper recorded, in the order they recorded it
  */
-export default function deriveGame(format: IScorekeeperFormat, setup: IGameSetup, events: ScoreEvent[]): IDerivedGame {
+export default function deriveGame(
+  format: IScorekeeperFormat,
+  setup: IGameSetup,
+  events: ScoreEvent[],
+): IDerivedGame {
   const { answerTypes } = format;
   const byIndex = (index: number): IScorekeeperAnswerType | undefined => answerTypes[index];
 
@@ -384,7 +400,9 @@ export default function deriveGame(format: IScorekeeperFormat, setup: IGameSetup
   const halfBreaks: number[] = [];
   const timeouts: Record<LeftOrRight, number> = { left: 0, right: 0 };
   let activeTimeout: IDerivedGame['activeTimeout'];
-  const overtimeStartedByEvent = events.some((event): event is IBeginOvertimeEvent => event.type === 'begin-overtime');
+  const overtimeStartedByEvent = events.some(
+    (event): event is IBeginOvertimeEvent => event.type === 'begin-overtime',
+  );
   const suddenDeathStartedByEvent = events.some(
     (event): event is IBeginSuddenDeathEvent => event.type === 'begin-sudden-death',
   );
@@ -407,7 +425,10 @@ export default function deriveGame(format: IScorekeeperFormat, setup: IGameSetup
       (event): event is ISubstitutionEvent | IRosterAddEvent =>
         event.type === 'substitution' || event.type === 'roster-add',
     )
-    .sort((left, right) => left.questionNumber - right.questionNumber || events.indexOf(left) - events.indexOf(right));
+    .sort(
+      (left, right) =>
+        left.questionNumber - right.questionNumber || events.indexOf(left) - events.indexOf(right),
+    );
   // A roster addition makes the player available locally immediately. Its question number is only
   // the earliest lineup boundary at which that player may become active.
   for (const event of personnelEvents) {
@@ -510,7 +531,8 @@ export default function deriveGame(format: IScorekeeperFormat, setup: IGameSetup
   const orderedCycles = Array.from(cycleNumbers).sort((a, b) => a - b);
   // Old recovery payloads have no explicit checkpoint events. Once they contain an OT question,
   // infer that the first checkpoint was already crossed so loading them does not strand the game.
-  const overtimeStarted = overtimeStartedByEvent || orderedCycles.some((questionNumber) => questionNumber > boundary);
+  const overtimeStarted =
+    overtimeStartedByEvent || orderedCycles.some((questionNumber) => questionNumber > boundary);
 
   const questions: IDerivedQuestion[] = [];
   let overtimeCyclesPlayed = 0;
@@ -614,7 +636,10 @@ export default function deriveGame(format: IScorekeeperFormat, setup: IGameSetup
 
     for (const buzz of buzzes) {
       const record = playerRecord(buzz.team, buzz.playerName);
-      record.answerCounts.set(buzz.answerType.index, (record.answerCounts.get(buzz.answerType.index) ?? 0) + 1);
+      record.answerCounts.set(
+        buzz.answerType.index,
+        (record.answerCounts.get(buzz.answerType.index) ?? 0) + 1,
+      );
       record.points += buzz.answerType.value;
       teams[buzz.team].tossupPoints += buzz.answerType.value;
       running[buzz.team] += buzz.answerType.value;
@@ -657,7 +682,9 @@ export default function deriveGame(format: IScorekeeperFormat, setup: IGameSetup
       if (entry.questionNumber <= questionNumber) scoreAfter[entry.team] += entry.points;
     }
     for (const side of ['left', 'right'] as LeftOrRight[]) {
-      const applicable = lightningAt.filter((entry) => entry.team === side && entry.questionNumber <= questionNumber);
+      const applicable = lightningAt.filter(
+        (entry) => entry.team === side && entry.questionNumber <= questionNumber,
+      );
       if (applicable.length > 0) scoreAfter[side] += applicable[applicable.length - 1].points;
     }
 
@@ -674,8 +701,9 @@ export default function deriveGame(format: IScorekeeperFormat, setup: IGameSetup
       awaitingBonus,
       activePlayers,
       scoreAfter,
-      openProtests: protests.filter((protest) => protest.questionNumber === questionNumber && protest.status === 'open')
-        .length,
+      openProtests: protests.filter(
+        (protest) => protest.questionNumber === questionNumber && protest.status === 'open',
+      ).length,
       replaced: replacedCycles.has(questionNumber),
     });
   }
@@ -685,7 +713,11 @@ export default function deriveGame(format: IScorekeeperFormat, setup: IGameSetup
   for (const side of ['left', 'right'] as LeftOrRight[]) {
     const team = teams[side];
     team.points =
-      team.tossupPoints + team.bonusPoints + team.bonusBouncebackPoints + team.lightningPoints + team.adjustmentPoints;
+      team.tossupPoints +
+      team.bonusPoints +
+      team.bonusBouncebackPoints +
+      team.lightningPoints +
+      team.adjustmentPoints;
   }
 
   const heardCycles = questions.filter((question) => question.resolved);
@@ -881,23 +913,41 @@ function derivePhase(input: {
   const tied = teams.left.points === teams.right.points;
 
   if (!regulationComplete) {
-    return { kind: 'tossup', questionNumber: nextQuestion, period: 'regulation', eligibleTeams: ['left', 'right'] };
+    return {
+      kind: 'tossup',
+      questionNumber: nextQuestion,
+      period: 'regulation',
+      eligibleTeams: ['left', 'right'],
+    };
   }
 
   if (!overtimeStarted) {
     if (!tied) return { kind: 'complete', reason: 'regulation' };
-    return { kind: 'checkpoint', checkpoint: 'overtime', afterQuestion: questions.at(-1)?.questionNumber ?? 0 };
+    return {
+      kind: 'checkpoint',
+      checkpoint: 'overtime',
+      afterQuestion: questions.at(-1)?.questionNumber ?? 0,
+    };
   }
 
   const minimumOvertimeQuestionCount = Math.max(1, format.overtime.minimumQuestionCount);
   if (!suddenDeathStarted && overtimeCyclesPlayed < minimumOvertimeQuestionCount) {
-    return { kind: 'tossup', questionNumber: nextQuestion, period: 'overtime', eligibleTeams: ['left', 'right'] };
+    return {
+      kind: 'tossup',
+      questionNumber: nextQuestion,
+      period: 'overtime',
+      eligibleTeams: ['left', 'right'],
+    };
   }
 
   // At the end of the configured initial OT block, make the tie explicit before sudden death.
   if (!suddenDeathStarted) {
     if (!tied) return { kind: 'complete', reason: 'overtime' };
-    return { kind: 'checkpoint', checkpoint: 'sudden-death', afterQuestion: questions.at(-1)?.questionNumber ?? 0 };
+    return {
+      kind: 'checkpoint',
+      checkpoint: 'sudden-death',
+      afterQuestion: questions.at(-1)?.questionNumber ?? 0,
+    };
   }
 
   // Sudden death is a live phase: the next score change ends the game, while a dead tossup simply

@@ -227,10 +227,10 @@ export function scorekeeperFormatProblems(format: IScorekeeperFormat): string[] 
       if (typeof answerType.shortLabel !== 'string' || answerType.shortLabel.trim() === '') {
         problems.push(`Answer type ${position + 1} has no short label.`);
       }
-      if (answerType.isPower !== (answerType.value > 10)) {
+      if (answerType.isPower !== answerType.value > 10) {
         problems.push(`Answer type ${position + 1} has an inconsistent power flag.`);
       }
-      if (answerType.isNeg !== (answerType.value < 0)) {
+      if (answerType.isNeg !== answerType.value < 0) {
         problems.push(`Answer type ${position + 1} has an inconsistent penalty flag.`);
       }
       if (typeof answerType.awardsBonus !== 'boolean') {
@@ -244,7 +244,11 @@ export function scorekeeperFormatProblems(format: IScorekeeperFormat): string[] 
         ids.add(answerType.qbjId);
       }
     });
-    if (!format.answerTypes.some((answerType) => answerType && typeof answerType === 'object' && answerType.value > 0)) {
+    if (
+      !format.answerTypes.some(
+        (answerType) => answerType && typeof answerType === 'object' && answerType.value > 0,
+      )
+    ) {
       problems.push('This tournament has no way to score points on a tossup.');
     }
   }
@@ -279,13 +283,25 @@ export function scorekeeperFormatProblems(format: IScorekeeperFormat): string[] 
   } else if (typeof bonus.regular !== 'boolean') {
     problems.push('The regular-bonus flag is not usable.');
   } else if (bonus.enabled) {
-    if (!Number.isInteger(bonus.divisor) || bonus.divisor < 1 || bonus.divisor > scorekeeperFormatLimits.points) {
+    if (
+      !Number.isInteger(bonus.divisor) ||
+      bonus.divisor < 1 ||
+      bonus.divisor > scorekeeperFormatLimits.points
+    ) {
       problems.push('Bonuses need a positive whole-number scoring divisor.');
     }
-    if (!Number.isInteger(bonus.minimumParts) || bonus.minimumParts < 1 || bonus.minimumParts > scorekeeperFormatLimits.count) {
+    if (
+      !Number.isInteger(bonus.minimumParts) ||
+      bonus.minimumParts < 1 ||
+      bonus.minimumParts > scorekeeperFormatLimits.count
+    ) {
       problems.push('Bonuses need a usable minimum part count.');
     }
-    if (!Number.isInteger(bonus.maximumParts) || bonus.maximumParts < 1 || bonus.maximumParts > scorekeeperFormatLimits.count) {
+    if (
+      !Number.isInteger(bonus.maximumParts) ||
+      bonus.maximumParts < 1 ||
+      bonus.maximumParts > scorekeeperFormatLimits.count
+    ) {
       problems.push('Bonuses need a usable maximum part count.');
     }
     if (
@@ -295,14 +311,20 @@ export function scorekeeperFormatProblems(format: IScorekeeperFormat): string[] 
     ) {
       problems.push('A bonus maximum part count cannot be less than its minimum.');
     }
-    if (!Number.isInteger(bonus.maximumScore) || bonus.maximumScore < 0 || bonus.maximumScore > scorekeeperFormatLimits.points) {
+    if (
+      !Number.isInteger(bonus.maximumScore) ||
+      bonus.maximumScore < 0 ||
+      bonus.maximumScore > scorekeeperFormatLimits.points
+    ) {
       problems.push('Bonuses need a usable maximum score.');
     }
-    if (bonus.pointsPerPart !== undefined && (!Number.isInteger(bonus.pointsPerPart) || bonus.pointsPerPart < 1)) {
+    if (
+      bonus.pointsPerPart !== undefined &&
+      (!Number.isInteger(bonus.pointsPerPart) || bonus.pointsPerPart < 1)
+    ) {
       problems.push('A bonus part value must be a positive whole number.');
     }
-    const shouldBeRegular =
-      bonus.pointsPerPart !== undefined && bonus.minimumParts === bonus.maximumParts;
+    const shouldBeRegular = bonus.pointsPerPart !== undefined && bonus.minimumParts === bonus.maximumParts;
     if (bonus.regular !== shouldBeRegular) {
       problems.push('The regular-bonus flag does not match the stated part structure.');
     }
@@ -336,7 +358,10 @@ export function scorekeeperFormatProblems(format: IScorekeeperFormat): string[] 
   } else if (overtime.minimumQuestionCount > scorekeeperFormatLimits.count) {
     problems.push('This tournament has an implausibly long overtime period.');
   }
-  if (typeof overtime?.suddenDeath === 'boolean' && overtime.suddenDeath !== (overtime?.minimumQuestionCount === 1)) {
+  if (
+    typeof overtime?.suddenDeath === 'boolean' &&
+    overtime.suddenDeath !== (overtime?.minimumQuestionCount === 1)
+  ) {
     problems.push('The sudden-death flag does not match the overtime question count.');
   }
   if (overtime?.includesBonuses && !bonus?.enabled) {
@@ -349,10 +374,18 @@ export function scorekeeperFormatProblems(format: IScorekeeperFormat): string[] 
   } else if (typeof lightning.enabled !== 'boolean') {
     problems.push('The lightning enabled flag is not usable.');
   } else if (lightning.enabled) {
-    if (!Number.isInteger(lightning.countPerTeam) || lightning.countPerTeam < 1 || lightning.countPerTeam > scorekeeperFormatLimits.count) {
+    if (
+      !Number.isInteger(lightning.countPerTeam) ||
+      lightning.countPerTeam < 1 ||
+      lightning.countPerTeam > scorekeeperFormatLimits.count
+    ) {
       problems.push('Lightning needs a positive whole-number count per team.');
     }
-    if (!Number.isInteger(lightning.divisor) || lightning.divisor < 1 || lightning.divisor > scorekeeperFormatLimits.points) {
+    if (
+      !Number.isInteger(lightning.divisor) ||
+      lightning.divisor < 1 ||
+      lightning.divisor > scorekeeperFormatLimits.points
+    ) {
       problems.push('Lightning needs a positive whole-number scoring divisor.');
     }
   } else if (lightning.countPerTeam !== 0) {
@@ -365,7 +398,11 @@ export function scorekeeperFormatProblems(format: IScorekeeperFormat): string[] 
     problems.push('This tournament allows an implausible number of active players.');
   }
 
-  if (!Number.isInteger(format.totalDivisor) || format.totalDivisor < 1 || format.totalDivisor > scorekeeperFormatLimits.points) {
+  if (
+    !Number.isInteger(format.totalDivisor) ||
+    format.totalDivisor < 1 ||
+    format.totalDivisor > scorekeeperFormatLimits.points
+  ) {
     problems.push('The total score divisor must be a positive whole number.');
   } else if (Array.isArray(format.answerTypes)) {
     for (const answerType of format.answerTypes) {
@@ -389,7 +426,11 @@ export function scorekeeperFormatProblems(format: IScorekeeperFormat): string[] 
     ) {
       problems.push('The total score divisor must divide the bonus part value.');
     }
-    if (lightning?.enabled && Number.isInteger(lightning.divisor) && lightning.divisor % format.totalDivisor !== 0) {
+    if (
+      lightning?.enabled &&
+      Number.isInteger(lightning.divisor) &&
+      lightning.divisor % format.totalDivisor !== 0
+    ) {
       problems.push('The total score divisor must divide the lightning divisor.');
     }
   }

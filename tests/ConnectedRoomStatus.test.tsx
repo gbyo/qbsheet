@@ -116,7 +116,10 @@ beforeEach(() => {
   sessionCalls = 0;
   helpMessages = [];
   answer = ok(assignmentOf());
-  sessionAnswer = async () => ({ ok: true as const, value: { sessionId: 'session-1', token: 'session-token' } });
+  sessionAnswer = async () => ({
+    ok: true as const,
+    value: { sessionId: 'session-1', token: 'session-token' },
+  });
 });
 
 afterEach(() => {
@@ -195,9 +198,10 @@ describe('the established room', () => {
   test('disables room navigation and abandons a stale Start transaction on unmount', async () => {
     let finishSession: ((value: unknown) => void) | undefined;
     answer = ok(assignmentOf({ state: 'assigned', scheduledMatchId: 'match-5', definition }));
-    sessionAnswer = () => new Promise((resolve) => {
-      finishSession = resolve;
-    });
+    sessionAnswer = () =>
+      new Promise((resolve) => {
+        finishSession = resolve;
+      });
     const onStart = vi.fn(() => ({ ok: true as const }));
     renderRoom({ onStart });
     await settle();
@@ -238,7 +242,11 @@ describe('the established room', () => {
     renderRoom();
     await settle();
 
-    expect(screen.getByText('Tournament control has not supplied enough information to start yet. QBSheet will keep checking.')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Tournament control has not supplied enough information to start yet. QBSheet will keep checking.',
+      ),
+    ).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Start scoring' })).toBeNull();
   });
 
@@ -247,19 +255,31 @@ describe('the established room', () => {
     renderRoom();
     await settle();
 
-    expect(screen.getByText('Tournament control assigned a game, but its details are not ready. QBSheet will keep checking.')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Tournament control assigned a game, but its details are not ready. QBSheet will keep checking.',
+      ),
+    ).toBeInTheDocument();
   });
 
   test('reports a failed Start as an action error rather than a failed poll', async () => {
     answer = ok(assignmentOf({ state: 'assigned', scheduledMatchId: 'match-5', definition }));
-    sessionAnswer = async () => ({ ok: false as const, status: 500, error: 'Tournament control did not answer.' });
+    sessionAnswer = async () => ({
+      ok: false as const,
+      status: 500,
+      error: 'Tournament control did not answer.',
+    });
     renderRoom();
     await settle();
 
     fireEvent.click(screen.getByRole('button', { name: 'Start scoring' }));
     await settle();
 
-    expect(screen.getByText('Tournament control could not start this game. Tournament control did not answer. No scoring has started. Try Start scoring again.')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Tournament control could not start this game. Tournament control did not answer. No scoring has started. Try Start scoring again.',
+      ),
+    ).toBeInTheDocument();
     expect(screen.queryByText('QBSheet will keep trying automatically.')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Try now' })).toBeNull();
   });
@@ -309,7 +329,9 @@ describe('the established room', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Tell tournament control' }));
     await settle();
 
-    expect(screen.getByText('Tournament control has been notified about the assignment.')).toBeInTheDocument();
+    expect(
+      screen.getByText('Tournament control has been notified about the assignment.'),
+    ).toBeInTheDocument();
 
     answer = ok(assignmentOf({ state: 'assigned', scheduledMatchId: 'match-6', definition }));
     await poll();
