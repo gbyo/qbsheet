@@ -58,7 +58,7 @@ Read [During the game](During-the-game) for the controls, the corrections, and t
 ## Step 6. Hand over the result
 
 1. End the game. Read [Finish a game](Finish-a-game).
-2. Select **Download QBJ backup**.
+2. Select **Export / backup…**, then **Download QBJ backup**.
 3. Give the file to the staff. Follow the instruction for your room.
 
 The file name looks like this:

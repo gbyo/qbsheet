@@ -69,8 +69,19 @@ function greatestCommonDivisor(values: number[]): number {
  * without bonus structure is also treated as incomplete rather than silently disabling the bonus.
  * `isPower` and `isNeg` are derived exactly as the reference implementation derives them, so a
  * format read from QBJ and the same format read from a `.qbg` agree.
+ *
+ * @param useBonuses whether this rule set uses bonuses at all, which is what the *default* for a
+ * silent `awards_bonus` depends on. "A positive answer earns a bonus" is a statement about a format
+ * that has bonuses; asserted about one that does not, it produces an answer type claiming a bonus in
+ * a rule set with no bonuses to claim — a contradiction nothing downstream can act on, and one that
+ * `advancedFromFormat` cannot put back into the rules form. An explicit flag is never overruled:
+ * `bonusesAreUsed` already reads a single explicit `true` as bonuses being in play, so when this is
+ * false the only values reaching the default are absent ones.
  */
-function readAnswerTypes(value: unknown): { types: IScorekeeperAnswerType[]; problems: string[] } {
+function readAnswerTypes(
+  value: unknown,
+  useBonuses: boolean,
+): { types: IScorekeeperAnswerType[]; problems: string[] } {
   const problems: string[] = [];
   if (!Array.isArray(value) || value.length === 0) {
     return { types: [], problems: ['These scoring rules do not say how a tossup can be answered.'] };
@@ -140,7 +151,7 @@ function readAnswerTypes(value: unknown): { types: IScorekeeperAnswerType[]; pro
       shortLabel,
       isPower: points > 10,
       isNeg: points < 0,
-      awardsBonus: typeof entry.awards_bonus === 'boolean' ? entry.awards_bonus : points > 0,
+      awardsBonus: typeof entry.awards_bonus === 'boolean' ? entry.awards_bonus : useBonuses && points > 0,
       qbjId,
     });
   });
@@ -207,10 +218,12 @@ export function readQbjScoringRules(rules: QbjObject | null, timed?: boolean): Q
     problems.push('These scoring rules do not say whether the round is timed. Choose timed or untimed before scoring.');
   }
 
-  const { types: answerTypes, problems: answerProblems } = readAnswerTypes(rules.answer_types);
+  // Read before the answer types, because the default for a silent `awards_bonus` depends on it.
+  const useBonuses = bonusesAreUsed(rules);
+
+  const { types: answerTypes, problems: answerProblems } = readAnswerTypes(rules.answer_types, useBonuses);
   problems.push(...answerProblems);
 
-  const useBonuses = bonusesAreUsed(rules);
   if (useBonuses && typeof rules.bonuses_bounce_back !== 'boolean') {
     problems.push('These scoring rules use bonuses but do not say whether missed parts bounce back.');
   }

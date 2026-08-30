@@ -3,14 +3,11 @@
  */
 
 /**
- * The one button beside the address field.
+ * The two stable actions beside the address field.
  *
- * The homepage did not gain a QR feature; it gained a second state for a control it already had.
- * That distinction is the whole design and it is easy to lose to a well-meant refactor, so what is
- * asserted here is mostly about what did *not* change: still one action beside the field, still the
- * same form, still the same manual path from an address on a projector to a pairing code, and no
- * mode picker anywhere. The QR state is what an empty field offers instead of a Connect button that
- * has nothing to connect to.
+ * Connect always uses the address field, while Scan QR always opens the existing scanner. Keeping
+ * both visible makes the actions predictable and avoids a button that changes meaning as somebody
+ * types, while preserving the same pairing flow and no mode picker.
  */
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { act, fireEvent, screen, within } from '@testing-library/react';
@@ -68,27 +65,28 @@ afterEach(() => {
   takePairingLaunch();
 });
 
-describe('the connect action beside the address field', () => {
-  test('an empty field offers to scan, with an understandable name', async () => {
+describe('the connect actions beside the address field', () => {
+  test('an empty field keeps Connect disabled while Scan QR remains available', async () => {
     await openApp();
 
-    const action = within(connectSection()).getByRole('button', { name: 'Scan QR' });
-    expect(action).toBeInTheDocument();
-    // One action, not two. A permanent second button is the thing this design is avoiding.
-    expect(within(connectSection()).getAllByRole('button')).toHaveLength(1);
-    expect(within(connectSection()).queryByRole('button', { name: 'Connect' })).toBeNull();
+    const section = within(connectSection());
+    const action = section.getByRole('button', { name: 'Scan QR' });
+    expect(action).toBeEnabled();
+    expect(section.getByRole('button', { name: 'Connect' })).toBeDisabled();
+    expect(section.getAllByRole('button')).toHaveLength(2);
     // The glyph is decoration; the name is the word.
     expect(action.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
   });
 
-  test('typing an address turns that same control into Connect', async () => {
+  test('typing an address enables Connect without hiding Scan QR', async () => {
     await openApp();
 
     await type('192.168.1.24:3000');
 
-    expect(within(connectSection()).getByRole('button', { name: 'Connect' })).toBeInTheDocument();
-    expect(within(connectSection()).queryByRole('button', { name: 'Scan QR' })).toBeNull();
-    expect(within(connectSection()).getAllByRole('button')).toHaveLength(1);
+    const section = within(connectSection());
+    expect(section.getByRole('button', { name: 'Connect' })).toBeEnabled();
+    expect(section.getByRole('button', { name: 'Scan QR' })).toBeEnabled();
+    expect(section.getAllByRole('button')).toHaveLength(2);
   });
 
   test('clearing the address turns it back', async () => {
@@ -97,7 +95,9 @@ describe('the connect action beside the address field', () => {
     await type('192.168.1.24:3000');
     await type('');
 
-    expect(within(connectSection()).getByRole('button', { name: 'Scan QR' })).toBeInTheDocument();
+    const section = within(connectSection());
+    expect(section.getByRole('button', { name: 'Scan QR' })).toBeInTheDocument();
+    expect(section.getByRole('button', { name: 'Connect' })).toBeDisabled();
   });
 
   test('an address of nothing but spaces is still nothing to connect to', async () => {
@@ -105,7 +105,9 @@ describe('the connect action beside the address field', () => {
 
     await type('   ');
 
-    expect(within(connectSection()).getByRole('button', { name: 'Scan QR' })).toBeInTheDocument();
+    const section = within(connectSection());
+    expect(section.getByRole('button', { name: 'Scan QR' })).toBeInTheDocument();
+    expect(section.getByRole('button', { name: 'Connect' })).toBeDisabled();
   });
 
   test('Connect opens the pairing step in the same gesture', async () => {

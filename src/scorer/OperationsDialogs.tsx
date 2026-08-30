@@ -286,6 +286,49 @@ export function FlagDialog(props: {
   );
 }
 
+/**
+ * The file actions in one ordinary dialog.
+ *
+ * A live scoresheet should offer one clear way out rather than making somebody scan three nearly
+ * identical download rows in the Game menu. Hosts omit forms they cannot produce; the backup is
+ * always present because it is the local recovery escape hatch.
+ */
+export function ExportDialog(props: {
+  onDownloadQbjBackup: () => void;
+  onDownloadPartialQbj?: () => void;
+  onDownloadLegacyQbj?: () => void;
+  onClose: () => void;
+}) {
+  const { onDownloadQbjBackup, onDownloadPartialQbj, onDownloadLegacyQbj, onClose } = props;
+  const choose = (action: () => void) => {
+    action();
+    onClose();
+  };
+
+  return (
+    <ScorerDialog title="Export / backup" onClose={onClose}>
+      <p className="scorer-dialog-note">
+        Save a portable copy of this game. Keep the QBJ backup until the result has been received and checked.
+      </p>
+      <div className="scorer-export-options">
+        <button type="button" className="scorer-choice" onClick={() => choose(onDownloadQbjBackup)}>
+          Download QBJ backup
+        </button>
+        {onDownloadPartialQbj && (
+          <button type="button" className="scorer-choice" onClick={() => choose(onDownloadPartialQbj)}>
+            Download current QBJ
+          </button>
+        )}
+        {onDownloadLegacyQbj && (
+          <button type="button" className="scorer-choice" onClick={() => choose(onDownloadLegacyQbj)}>
+            Download legacy match-only QBJ
+          </button>
+        )}
+      </div>
+    </ScorerDialog>
+  );
+}
+
 function signed(value: number): string {
   return value > 0 ? `+${value}` : String(value);
 }

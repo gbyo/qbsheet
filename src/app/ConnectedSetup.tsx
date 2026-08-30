@@ -204,24 +204,22 @@ export default function ConnectedSetup(props: {
                 inputMode="url"
                 autoComplete="off"
                 spellCheck={false}
-                placeholder="http://"
+                placeholder="Paste the address shown by tournament control"
                 value={address}
                 onChange={(event) => setAddress(event.target.value)}
               />
-              {addressEmpty ? (
-                <button
-                  type="button"
-                  className="shell-button is-primary welcome-scan-button"
-                  onClick={() => setScanning(true)}
-                >
-                  <ControlIcon name="qr" />
-                  Scan QR
-                </button>
-              ) : (
-                <button type="submit" className="shell-button is-primary" disabled={busy}>
-                  {busy ? 'Connecting…' : 'Connect'}
-                </button>
-              )}
+              <button type="submit" className="shell-button is-primary" disabled={busy || addressEmpty}>
+                {busy ? 'Connecting…' : 'Connect'}
+              </button>
+              <button
+                type="button"
+                className="shell-button welcome-scan-button"
+                onClick={() => setScanning(true)}
+                disabled={busy}
+              >
+                <ControlIcon name="qr" />
+                Scan QR
+              </button>
             </div>
           </form>
         </section>
@@ -287,7 +285,7 @@ export default function ConnectedSetup(props: {
             from a file.
           </p>
           <button type="button" className="shell-button is-primary" onClick={onOtherScoring}>
-            Open a game file
+            Other scoring options
           </button>
         </section>
       )}

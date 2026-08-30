@@ -61,6 +61,22 @@ function rememberConnection(overrides: Partial<typeof connection> = {}): void {
   writeConnection({ ...connection, ...overrides });
 }
 
+/**
+ * When the seeded game finished, relative to whenever this suite runs.
+ *
+ * These were fixed dates in August 2026, and both of the things that age a completed game are
+ * measured against the real clock: `GameStore.prune` drops a record past
+ * `completedGameRetentionMs`, and a delivery capability expires on the same seven-day window. So the
+ * suite passed for a week and then failed everywhere, asserting that a game it had just seeded was
+ * still there while the application correctly pruned it as a fortnight old.
+ *
+ * Nothing here asserts the literal timestamps -- they are only written -- so the fix is to seed a
+ * game that finished a minute ago instead of one that finished last week.
+ */
+const completedAt = new Date(Date.now() - 60_000).toISOString();
+const qbjDownloadedAt = new Date(Date.now() - 50_000).toISOString();
+const handoffAcknowledgedAt = new Date(Date.now() - 40_000).toISOString();
+
 async function seedGame(options: { connected?: boolean; completed?: boolean } = {}): Promise<IStoredGameRecord> {
   const packageValue = validPackage();
   const store = new GameStore(await openRecordStore<IStoredGameRecord>());
@@ -72,7 +88,7 @@ async function seedGame(options: { connected?: boolean; completed?: boolean } = 
   });
   if (!options.completed) return record;
   return (await store.update(record.id, {
-    completedAt: '2026-08-12T12:00:00.000Z',
+    completedAt,
     finalQbj: { type: 'Match' },
     finalScore: { left: 10, right: 0 },
     serverDelivery: options.connected ? 'pending' : 'none',
@@ -125,22 +141,22 @@ describe('homepage Settings entry and scorekeeper identity', () => {
     expect(screen.queryByRole('dialog', { name: 'Scorekeeper' })).toBeNull();
   });
 
-  test('practice stays on the homepage only until the device has game history', async () => {
+  test('practice stays on the homepage and is not hidden in Settings', async () => {
     writeOperatorNameAsked();
     await openApp();
 
     expect(screen.getByRole('button', { name: 'Practice scoring' })).toBeInTheDocument();
     let dialog = await openSettings();
-    expect(within(dialog).getByRole('button', { name: 'Practice scoring' })).toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: 'Practice scoring' })).toBeNull();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Close dialog' }));
 
     cleanup();
     await seedGame({ completed: true });
     await openApp();
 
-    expect(screen.queryByRole('button', { name: 'Practice scoring' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Practice scoring' })).toBeInTheDocument();
     dialog = await openSettings();
-    expect(within(dialog).getByRole('button', { name: 'Practice scoring' })).toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: 'Practice scoring' })).toBeNull();
   });
 
   test('a never-asked device still asks once, while an unfinished game keeps Resume in front', async () => {
@@ -351,8 +367,8 @@ describe('device navigation, reset, build identity, and dialog behavior', () => 
     const saved = await seedGame({ connected: true, completed: true });
     const store = new GameStore(await openRecordStore<IStoredGameRecord>());
     await store.update(saved.id, {
-      qbjDownloadedAt: '2026-08-12T12:01:00.000Z',
-      handoffAcknowledgedAt: '2026-08-12T12:02:00.000Z',
+      qbjDownloadedAt,
+      handoffAcknowledgedAt,
     });
     rememberConnection({ gameRecordId: saved.id });
     const capabilities = new ResultDeliveryCapabilityStore();
@@ -436,7 +452,7 @@ describe('device navigation, reset, build identity, and dialog behavior', () => 
     expect(within(dialog).getByRole('button', { name: /Set name/ })).toBeInTheDocument();
     expect(within(dialog).getByRole('switch', { name: 'Keyboard scoring' })).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'View' })).toBeInTheDocument();
-    expect(within(dialog).getByRole('button', { name: 'Practice scoring' })).toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: 'Practice scoring' })).toBeNull();
     expect(within(dialog).getByRole('button', { name: 'Forget pairing…' })).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Check this device' })).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Reset device preferences…' })).toBeInTheDocument();

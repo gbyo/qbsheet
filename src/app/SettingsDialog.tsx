@@ -7,6 +7,15 @@ import {
 } from '../scorer/KeyboardScoring';
 import { setKeyboardEnabled } from '../scorer/keyboardPreference';
 import useKeyboardEnabled from '../scorer/useKeyboardEnabled';
+import {
+  Appearance,
+  TextSize,
+  appearanceLabels,
+  setAppearance,
+  setTextSize,
+  textSizeLabels,
+} from './displayPreference';
+import useDisplayPreferences from './useDisplayPreferences';
 import { buildLabel } from '../pwa/BuildVersion';
 import NativeDialog from './NativeDialog';
 
@@ -27,6 +36,58 @@ function dialogTitle(view: SettingsView, firstRun: boolean): string {
   return 'Settings';
 }
 
+/** Fixed display order, lightest-touch first, so the list reads as an escalation rather than a set. */
+const appearanceOrder: Appearance[] = ['system', 'light', 'dark'];
+const textSizeOrder: TextSize[] = ['standard', 'comfortable', 'large'];
+
+/**
+ * One labelled row of mutually exclusive choices.
+ *
+ * A real `radiogroup` of real radio inputs, styled as a segmented control. The inputs are visually
+ * hidden rather than replaced, so arrow-key navigation, the accessibility tree and the grouping all
+ * come from the browser instead of from an implementation of them here -- which matters more than
+ * usual on a screen whose whole purpose is being usable by somebody the default was failing.
+ */
+function ChoiceRow<T extends string>(props: {
+  name: string;
+  label: string;
+  detail: string;
+  value: T;
+  options: { value: T; label: string }[];
+  onChange: (value: T) => void;
+}) {
+  const { name, label, detail, value, options, onChange } = props;
+  const labelId = `${name}-label`;
+  return (
+    <div className="settings-row settings-row-stacked">
+      <div>
+        <span className="settings-row-label" id={labelId}>
+          {label}
+        </span>
+        <span className="settings-row-detail">{detail}</span>
+      </div>
+      <div className="settings-choices" role="radiogroup" aria-labelledby={labelId}>
+        {options.map((option) => (
+          <label
+            key={option.value}
+            className={`settings-choice${option.value === value ? ' is-selected' : ''}`}
+          >
+            <input
+              type="radio"
+              className="visually-hidden"
+              name={name}
+              value={option.value}
+              checked={option.value === value}
+              onChange={() => onChange(option.value)}
+            />
+            <span>{option.label}</span>
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function SettingsDialog(props: {
   operatorName: string;
   onOperatorNameChange: (value: string) => void;
@@ -35,11 +96,16 @@ export default function SettingsDialog(props: {
   pairingProtection?: string;
   onForgetPairing: () => void;
   onResetDevicePreferences: () => void;
-  practiceInProgress: boolean;
-  onPractice: () => void;
   onReadiness: () => void;
-  /** Leave the room deliberately to use file/manual scoring workflows. */
+  /**
+   * Retained as an optional compatibility prop for callers compiled against older builds. General
+   * scoring navigation now lives on Welcome/ConnectedRoom, not in Settings.
+   */
   onOtherScoring?: () => void;
+  /** Retained for the same compatibility reason; practice has its own quiet home entry. */
+  onPractice?: () => void;
+  /** Whether practice has a saved in-progress game; navigation is no longer rendered here. */
+  practiceInProgress?: boolean;
   /** Begin a fresh pairing flow without silently clearing the current room. */
   onChangeTournament?: () => void;
   onClose: () => void;
@@ -53,10 +119,7 @@ export default function SettingsDialog(props: {
     pairingProtection,
     onForgetPairing,
     onResetDevicePreferences,
-    practiceInProgress,
-    onPractice,
     onReadiness,
-    onOtherScoring,
     onChangeTournament,
     onClose,
     initialView = 'settings',
@@ -68,6 +131,7 @@ export default function SettingsDialog(props: {
   const [acknowledgement, setAcknowledgement] = useState('');
   const body = useRef<HTMLDivElement>(null);
   const keyboardEnabled = useKeyboardEnabled();
+  const { appearance, textSize } = useDisplayPreferences();
 
   useEffect(() => {
     body.current?.querySelector<HTMLElement>('[data-settings-view-autofocus]')?.focus();
@@ -122,6 +186,34 @@ export default function SettingsDialog(props: {
               </div>
             </section>
 
+            <section className="settings-section" aria-labelledby="settings-display-heading">
+              <h3 id="settings-display-heading" className="settings-section-title">
+                Display
+              </h3>
+              {/*
+                Radio groups rather than switches or a select. Three named states each, all of them
+                worth seeing at once, and a scorekeeper changing these is usually doing it because
+                the screen is hard to read -- which is the worst moment to hide two of the three
+                choices behind a dropdown they have to open to compare.
+              */}
+              <ChoiceRow
+                name="settings-appearance"
+                label="Appearance"
+                detail="Match device follows this Chromebook's own setting"
+                value={appearance}
+                options={appearanceOrder.map((option) => ({ value: option, label: appearanceLabels[option] }))}
+                onChange={(next) => setAppearance(next)}
+              />
+              <ChoiceRow
+                name="settings-text-size"
+                label="Text size"
+                detail="Scales on top of this browser's own font size"
+                value={textSize}
+                options={textSizeOrder.map((option) => ({ value: option, label: textSizeLabels[option] }))}
+                onChange={(next) => setTextSize(next)}
+              />
+            </section>
+
             <section className="settings-section" aria-labelledby="settings-scoring-heading">
               <h3 id="settings-scoring-heading" className="settings-section-title">
                 Scoring
@@ -148,30 +240,6 @@ export default function SettingsDialog(props: {
                   View
                 </button>
               </div>
-              <button
-                type="button"
-                className="settings-navigation-row"
-                onClick={() => {
-                  onClose();
-                  onPractice();
-                }}
-              >
-                <span>{practiceInProgress ? 'Resume practice' : 'Practice scoring'}</span>
-                <span aria-hidden="true">›</span>
-              </button>
-              {onOtherScoring && (
-                <button
-                  type="button"
-                  className="settings-navigation-row"
-                  onClick={() => {
-                    onClose();
-                    onOtherScoring();
-                  }}
-                >
-                  <span>Other scoring options</span>
-                  <span aria-hidden="true">›</span>
-                </button>
-              )}
             </section>
 
             {connection && (
@@ -378,7 +446,8 @@ export default function SettingsDialog(props: {
           <div className="settings-detail-view">
             <p>Reset this device’s QBSheet preferences?</p>
             <p>
-              This clears the scorekeeper name, first-run answer, keyboard-scoring choice, and tournament pairing. Saved games are not deleted.
+              This clears the scorekeeper name, first-run answer, keyboard-scoring choice, appearance
+              and text size, and tournament pairing. Saved games are not deleted.
             </p>
             {pairingProtection && (
               <p className="shell-warning" role="alert">

@@ -4,7 +4,7 @@ This page tells you how to close a game and how to hand over the result.
 
 ## Step 1. End regulation play
 
-1. Open the game menu.
+1. Open the Game / More menu.
 2. Select **End regulation**.
 
 If the format needs overtime, QBSheet starts overtime with the rules from the format.

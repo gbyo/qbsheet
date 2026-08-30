@@ -159,7 +159,12 @@ test.describe('a server that speaks only QBTCP', () => {
     // move on. The backup is still one press away and the game is still on this device.
     const next = page.getByRole('button', { name: `Next game in ${roomName}` });
     await expect(next).toBeEnabled();
-    await expect(page.getByRole('button', { name: 'Download QBJ backup' })).toBeVisible();
+    const copy = page.locator('details.final-copy-details');
+    await expect(copy).toBeVisible();
+    await expect(copy.locator('summary')).toHaveText('Download or export a copy');
+    await expect(copy.getByRole('button', { name: 'Download QBJ backup' })).toBeHidden();
+    await copy.locator('summary').click();
+    await expect(copy.getByRole('button', { name: 'Download QBJ backup' })).toBeVisible();
 
     // --- back to the room, which is where the next assignment turns up -------------------------
     control.assign(5);
@@ -181,7 +186,10 @@ test.describe('a server that speaks only QBTCP', () => {
 
     await page.getByRole('button', { name: 'Settings' }).click();
     const settings = page.getByRole('dialog', { name: 'Settings' });
-    await settings.getByRole('button', { name: 'Other scoring options' }).click();
+    // General scoring routes live in the room, not in device settings. Close settings before using
+    // the room-level escape hatch so the dialog remains a focused preferences surface.
+    await settings.getByRole('button', { name: 'Close dialog' }).click();
+    await page.getByRole('button', { name: 'Other scoring options' }).click();
     await expect(page.locator('.welcome-shell')).toBeVisible();
 
     // Score the assignment from a file first. This record is deliberately offline, even though the
@@ -236,7 +244,14 @@ test.describe('a server that speaks only QBTCP', () => {
     await page.getByLabel('Ask tournament control to come', { exact: true }).check();
     await page.getByRole('button', { name: 'Save and request control', exact: true }).click();
 
-    await expect(page.getByText(/Issue saved and was sent to tournament control/)).toBeVisible();
+    // The local receipt and the persistent room summons share the notice center now. The receipt
+    // can yield to a higher-priority recovery notice, so verify the durable summons through its
+    // deliberate issues detail instead of requiring one particular expanded slot.
+    const status = page.getByRole('region', { name: 'Game status' });
+    const moreIssues = status.getByRole('button', { name: /more|Issues/ });
+    await expect(moreIssues).toBeVisible();
+    await moreIssues.click();
+    await expect(status.getByLabel('Open issues')).toContainText('Tournament control requested · Question / packet issue');
     await expect.poll(() => control.helpPosts.length).toBe(1);
     expect(control.helpPosts[0]).toEqual({
       category: 'question-packet',
@@ -253,7 +268,12 @@ test.describe('a server that speaks only QBTCP', () => {
     await page.getByRole('button', { name: 'Resume scoring', exact: true }).click();
     await expect(page.getByText('Tossup 2 of 20', { exact: true })).toBeVisible();
     await expect(page.getByLabel('Ninety Six score')).toHaveText('35');
-    await expect(page.getByText('Tournament control requested · Question / packet issue')).toBeVisible({
+    // A recovery acknowledgement owns the expanded slot after reload. The durable summons stays
+    // visible behind the compact issues route; open that route before asserting its contents.
+    const reloadedIssues = status.getByRole('button', { name: /more|Issues/ });
+    await expect(reloadedIssues).toBeVisible();
+    await reloadedIssues.click();
+    await expect(status.getByLabel('Open issues')).toContainText('Tournament control requested · Question / packet issue', {
       timeout: 20_000,
     });
     // Reconciliation is GET-only on reload; restoring the banner must not notify control again.
@@ -263,7 +283,7 @@ test.describe('a server that speaks only QBTCP', () => {
     await expect(page.getByLabel('Greenwood score')).toHaveText('20');
 
     control.resolveHelpRequest();
-    await expect(page.getByText('Tournament control requested · Question / packet issue')).toBeHidden({
+    await expect(status.getByText('Tournament control requested · Question / packet issue')).toHaveCount(0, {
       timeout: 20_000,
     });
     expect(control.helpPosts).toHaveLength(1);
@@ -289,14 +309,23 @@ test.describe('a server that speaks only QBTCP', () => {
     // The scoresheet fact and the network fact, split between the two things that own them: the
     // note really is saved whatever the wire did, and the failure has one persistent home with the
     // retry in it rather than a second permanent copy above the scoresheet.
-    await expect(page.getByText('Issue saved on the scoresheet.')).toBeVisible();
-    await expect(page.getByText('Tournament control was not reached.', { exact: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Try request again', exact: true }).first()).toBeVisible();
+    const status = page.getByRole('region', { name: 'Game status' });
+    const recovery = status.locator('.scorer-banner').filter({ hasText: "Couldn't check tournament control for recovery" });
+    if (await recovery.count()) {
+      await recovery.getByRole('button', { name: /Dismiss/ }).click();
+    }
+    await expect(status.getByRole('button', { name: 'Try request again', exact: true })).toBeVisible();
+    await expect(status.locator('.scorer-banner')).toContainText('Tournament control was not reached.');
     await expect.poll(() => control.helpPosts.length).toBe(1);
     expect(control.helpRequests).toHaveLength(0);
 
-    await page.getByRole('button', { name: 'Try request again', exact: true }).first().click();
-    await expect(page.getByText(/Tournament control requested · Question \/ packet issue/)).toBeVisible({
+    await status.getByRole('button', { name: 'Try request again', exact: true }).click();
+    // The local receipt stays in the expanded slot after a successful retry. The accepted summons
+    // remains discoverable from the compact issues route rather than adding a second banner.
+    const retriedIssues = status.getByRole('button', { name: /more|Issues/ });
+    await expect(retriedIssues).toBeVisible();
+    await retriedIssues.click();
+    await expect(status.getByLabel('Open issues')).toContainText('Question / packet issue', {
       timeout: 20_000,
     });
     await expect.poll(() => control.helpPosts.length).toBe(2);
@@ -385,9 +414,10 @@ test.describe('a server that speaks only QBTCP', () => {
     await expect(page.getByText('Waiting for the next assignment.')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Start scoring' })).toHaveCount(0);
 
-    // The screen says the checking is happening, and there is no manual button in the healthy room.
+    // A healthy room is quiet: its compact Connected indicator replaces implementation telemetry.
+    await expect(page.getByText('Connected', { exact: true })).toBeVisible();
     const checkStatus = page.locator('.assignment-check');
-    await expect(checkStatus).toContainText('checks automatically');
+    await expect(checkStatus).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Check now' })).toHaveCount(0);
 
     // Mark the block showing the waiting line, so its replacement is something that can be seen.

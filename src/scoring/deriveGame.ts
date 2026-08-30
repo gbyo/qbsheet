@@ -226,7 +226,7 @@ function emptyPlayer(name: string): IDerivedPlayer {
  * Quietly starting the first four names in registration order is how a player ends up with a game's
  * worth of tossups heard that they spent on the bench.
  */
-function startingLineup(team: ITeamSetup, maximumActive: number): string[] {
+export function startingLineup(team: ITeamSetup, maximumActive: number): string[] {
   if (team.startingLineup) return team.startingLineup.slice(0, maximumActive);
   return team.players.slice(0, maximumActive);
 }

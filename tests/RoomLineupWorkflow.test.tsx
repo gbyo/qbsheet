@@ -648,8 +648,9 @@ describe('the Sub button on a player row', () => {
     const panel = screen.getByLabelText('Ninety Six');
     const row = within(panel).getByText('Sarah Jones').closest('li') as HTMLElement;
     const control = within(row).getByRole('button', { name: 'Substitute for Sarah Jones' });
-    // The name is what has to be read at a glance on this line; the control says its job with arrows.
-    expect(control.textContent).toBe('\u21c4');
+    // The name is what has to be read at a glance on this line; the control says its job with a
+    // decorative swap icon and an accessible label rather than repeating a word on every row.
+    expect(control.querySelector('svg.scorer-control-icon')).not.toBeNull();
     expect(within(panel).queryAllByText('Sub')).toEqual([]);
   });
 

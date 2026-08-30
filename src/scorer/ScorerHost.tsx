@@ -33,6 +33,7 @@ import { RoomConnectionState } from '../app/ConnectionState';
 import { LeftOrRight } from '../scoring/types';
 import { IQbjMatchMeta } from '../scoring/toQbjMatch';
 import Scorer, { IScorerAlert, IScorerRecoveryStatus, IScorerSubmitResult } from './Scorer';
+import { IScoringRulesCorrection } from './ScoringRulesCorrectionDialog';
 import useGameEvents from './useGameEvents';
 import { loadGame } from './GameSession';
 import { readScorerRecovery } from './ScorerRecovery';
@@ -64,6 +65,8 @@ export interface IScorerHostProps {
   onDownload: (qbj: object) => void;
   /** Passed straight through to the scorer's menu. See `Scorer`. */
   onDownloadForm?: (game: IDerivedGame, form: 'partial' | 'legacy-match') => void;
+  /** Passed straight through to the scorer's menu. See `Scorer` and `formatCorrection`. */
+  onCorrectScoringRules?: (correction: IScoringRulesCorrection) => void | Promise<void>;
   onProgress?: (qbj: object, questionsPlayed: number) => void;
   /**
    * The complete event history, whenever it changes.
@@ -95,6 +98,8 @@ export interface IScorerHostProps {
    * means there is nothing to recover from, which is not an error.
    */
   onRecoverFromServer?: () => Promise<object | null>;
+  /** Passed through to replace the opening banner. See `Scorer`. */
+  openingNotice?: string;
   /** Room-level warnings about the connection, credentials or assignment. */
   alerts?: IScorerAlert[];
   /** Facts for the connection detail. Only claims the room can actually prove. */
@@ -130,6 +135,7 @@ export default function ScorerHost(props: IScorerHostProps) {
     onSubmit,
     onDownload,
     onDownloadForm,
+    onCorrectScoringRules,
     onProgress,
     onEventsChanged,
     qbjMeta,
@@ -142,6 +148,7 @@ export default function ScorerHost(props: IScorerHostProps) {
     onSyncRosterPlayer,
     onRecoverFromServer,
     alerts,
+    openingNotice,
     recovery,
   } = props;
 
@@ -290,6 +297,7 @@ export default function ScorerHost(props: IScorerHostProps) {
       onSubmit={onSubmit}
       onDownload={onDownload}
       onDownloadForm={onDownloadForm}
+      onCorrectScoringRules={onCorrectScoringRules}
       onProgress={onProgress}
       qbjMeta={qbjMeta}
       onRequestControl={onRequestControl}
@@ -306,6 +314,7 @@ export default function ScorerHost(props: IScorerHostProps) {
       }
       onSyncRosterPlayer={onSyncRosterPlayer}
       recovered={recovered !== null && recovered.events.length > 0}
+      openingNotice={openingNotice}
       recoveryNotice={serverRecoveryNotice}
       alerts={allAlerts}
       recovery={{

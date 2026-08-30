@@ -15,7 +15,42 @@
  * Derived from YellowFruit's room stylesheet, which is where the tokens below come from.
  */
 
+/*
+ * The palette, in one place, three times.
+ *
+ * # Why the light values sit on bare `:root`
+ *
+ * Every colour the application uses is defined here first, unconditionally. The dark blocks below
+ * restate the same names and nothing else -- they never introduce a token, and they never remove
+ * one. So a stylesheet that reaches for `--room-warning-bg` gets an answer in every appearance, and
+ * a token added later cannot be accidentally light-only: it is defined here or it does not exist.
+ *
+ * # Why there are two dark blocks
+ *
+ * Appearance has three states and only two of them are a media query. `system` is the default and
+ * follows the device, which is `prefers-color-scheme`. `light` and `dark` are deliberate choices by
+ * the scorekeeper, written to the root element as `data-theme` by `displayPreference`.
+ *
+ * The media block is therefore guarded with `:not([data-theme='light'])` -- a device set to dark
+ * whose scorekeeper explicitly asked for light must get light -- and the attribute block repeats the
+ * values so that a device set to light whose scorekeeper asked for dark gets dark. Both directions
+ * have to win, which is why the values appear twice rather than once.
+ *
+ * `color-scheme` moves with them. That is the declaration that tells the browser how to paint the
+ * parts the application does not: scrollbars, `<select>` popups, form controls, autofill, the
+ * `<dialog>` backdrop. `index.html` previously claimed `light dark` while every rule here painted
+ * light, so those widgets rendered dark on white surfaces. It is now the truth in all three states.
+ */
 :root {
+  color-scheme: light;
+
+  /*
+   * Multiplied into the root font size by `displayPreference`. Declared here so that the stylesheet
+   * is coherent on its own -- a page rendered before the script runs, or with scripting off, gets
+   * the browser's own font-size preference rather than nothing.
+   */
+  --room-text-scale: 1;
+
   --room-text: #1c1d20;
   --room-muted: #5c6066;
   --room-faint: #8a8f96;
@@ -25,6 +60,9 @@
   --room-surface-sunken: #f6f7f8;
   --room-accent: #1565c0;
   --room-accent-hover: #10529c;
+  /* Text drawn on top of `--room-accent`. A token because the two themes disagree about it: the
+     light accent is dark enough for white, the dark accent is light enough to need near-black. */
+  --room-on-accent: #ffffff;
   --room-success: #1e6b32;
   --room-success-bg: #e8f3ea;
   --room-warning: #8a5300;
@@ -35,7 +73,134 @@
   --room-error-border: #d9534f;
   --room-info-bg: #eaf3fb;
   --room-info-border: #6aa9dd;
+
+  /* Elevation and scrims, tokenized for the same reason the colours are: black at 40% over a white
+     page is a dimmer, and over a near-black one it is invisible. */
+  --room-scrim: rgb(0 0 0 / 40%);
+  --room-shadow-raised: 0 1px 3px rgb(20 24 28 / 12%);
+  --room-shadow-strong: 0 5px 18px rgb(0 0 0 / 18%);
+  /* Cast upward, by a bar that sits above content rather than on it. */
+  --room-shadow-lifted: 0 -3px 12px rgb(25 28 32 / 8%);
+
+  /*
+   * The inverted pill: keyboard status, tooltips, anything drawn on `--room-text` instead of on a
+   * surface. Its ground flips with the theme, so anything layered on top of it has to flip the other
+   * way. Without these two the seat box and its tick are white-on-white the moment dark is on.
+   */
+  --room-inverted-key: rgb(255 255 255 / 18%);
+  --room-inverted-success: #7fd39b;
 }
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+
+    /* Not pure black. A scoresheet is read for four hours, and #000 under a white-on-black grid
+       produces the halation that makes long reading tiring. This is the same near-black the camera
+       preview already used. */
+    --room-text: #e7e9ec;
+    --room-muted: #a6acb5;
+    --room-faint: #7b818a;
+    --room-border: #33363b;
+    --room-border-strong: #4a4f57;
+    --room-surface: #16171a;
+    --room-surface-sunken: #1f2125;
+    /* Lightened until it clears 4.5:1 on the surface above. The light accent is #1565c0, which on
+       this ground is 2.4:1 -- readable as a shape, not as text. */
+    --room-accent: #7ab3ee;
+    --room-accent-hover: #9ac9f8;
+    --room-on-accent: #10151c;
+    --room-success: #7fd39b;
+    --room-success-bg: #15281c;
+    --room-warning: #e5b264;
+    --room-warning-bg: #2a2013;
+    --room-warning-border: #7c5b21;
+    --room-error: #f3948d;
+    --room-error-bg: #2c1917;
+    --room-error-border: #8e3b35;
+    --room-info-bg: #13202d;
+    --room-info-border: #35638f;
+
+    /* A scrim has to darken a ground that is already dark, so it is heavier here; a shadow cannot
+       darken one at all, so elevation is carried by the sunken/raised surface pair instead and the
+       shadows step back to a hairline. */
+    --room-scrim: rgb(0 0 0 / 62%);
+    --room-shadow-raised: 0 1px 3px rgb(0 0 0 / 45%);
+    --room-shadow-strong: 0 5px 18px rgb(0 0 0 / 55%);
+    --room-shadow-lifted: 0 -3px 12px rgb(0 0 0 / 50%);
+
+    --room-inverted-key: rgb(0 0 0 / 14%);
+    --room-inverted-success: #1e6b32;
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --room-text: #e7e9ec;
+  --room-muted: #a6acb5;
+  --room-faint: #7b818a;
+  --room-border: #33363b;
+  --room-border-strong: #4a4f57;
+  --room-surface: #16171a;
+  --room-surface-sunken: #1f2125;
+  --room-accent: #7ab3ee;
+  --room-accent-hover: #9ac9f8;
+  --room-on-accent: #10151c;
+  --room-success: #7fd39b;
+  --room-success-bg: #15281c;
+  --room-warning: #e5b264;
+  --room-warning-bg: #2a2013;
+  --room-warning-border: #7c5b21;
+  --room-error: #f3948d;
+  --room-error-bg: #2c1917;
+  --room-error-border: #8e3b35;
+  --room-info-bg: #13202d;
+  --room-info-border: #35638f;
+
+  --room-scrim: rgb(0 0 0 / 62%);
+  --room-shadow-raised: 0 1px 3px rgb(0 0 0 / 45%);
+  --room-shadow-strong: 0 5px 18px rgb(0 0 0 / 55%);
+  --room-shadow-lifted: 0 -3px 12px rgb(0 0 0 / 50%);
+
+  --room-inverted-key: rgb(0 0 0 / 14%);
+  --room-inverted-success: #1e6b32;
+}
+
+/*
+ * The root font size, and the whole of what makes text sizing work.
+ *
+ * `100%` is the browser's own font-size preference. Type throughout the application is expressed in
+ * `rem`, so a scorekeeper who set 20px as their default now gets a scoresheet sized for them --
+ * which the previous 234 hard-coded pixel sizes silently ignored. `--room-text-scale` is the
+ * in-application step on top of that, set by `displayPreference`.
+ */
+html {
+  font-size: calc(100% * var(--room-text-scale, 1));
+}
+
+/*
+ * Breakpoints, and the fact that there are five of them.
+ *
+ * There were fourteen: 360, 420, 430, 520, 560, 600, 620, 680, 700, 760, 820, 1000, 1050 and 1100,
+ * spread over five stylesheets. Every one of them was a reasonable answer to the layout in front of
+ * whoever wrote it, and together they meant no two components changed shape at the same width — so a
+ * window dragged from wide to narrow rearranged itself in fourteen separate steps, and nobody adding
+ * a rule could tell which of the nearby numbers was the one to reuse.
+ *
+ * These are the five, and they are stated here because CSS has no way to state them once: custom
+ * properties are not allowed in media queries, and `@custom-media` is not in any browser this ships
+ * to. A new rule picks the nearest tier rather than the width that happens to suit it.
+ *
+ *   440px   Compact phone, portrait. Rows stop being rows; anything paired stacks.
+ *   560px   Large phone. Dense tables lose their headers and go two lines to a row.
+ *   700px   Small tablet, or a narrow window on a laptop. Two-column grids become one.
+ *   820px   Tablet. The scoresheet's two team panels stop sitting side by side.
+ *   1100px  Small laptop. The widest arrangements step down; below this nothing is at full width.
+ *
+ * The one compound query in `about.css` uses 821px as its lower edge, which is this ladder's 820
+ * plus one, and is a band rather than a sixth tier.
+ */
 
 * {
   box-sizing: border-box;
@@ -53,12 +218,26 @@
   border: 0;
 }
 
+/*
+ * Type is in `rem` throughout this application, without exception.
+ *
+ * Every size here was a hard-coded pixel value -- 234 of them across six stylesheets, as small as
+ * 10px -- which meant a scorekeeper who had raised their browser's default font size got a
+ * scoresheet that ignored them completely. `rem` resolves against the root size, and the root size
+ * is the browser's own preference times the scorekeeper's chosen step; see the `html` rule above.
+ *
+ * Spacing, control heights and borders stay in pixels on purpose. Growing the type inside a stable
+ * grid is what keeps the scoresheet legible at 1366x768; growing everything together is just zoom,
+ * which the browser already offers and which this change also fixed.
+ *
+ * A new pixel font-size anywhere in these files silently opts that one label out of all of it.
+ */
 body {
   margin: 0;
   font-family: 'IBM Plex Sans', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   color: var(--room-text);
   background: var(--room-surface);
-  font-size: 14px;
+  font-size: 0.875rem;
   line-height: 1.45;
   -webkit-font-smoothing: antialiased;
 }
@@ -90,7 +269,7 @@ body {
 
 .shell-title {
   margin: 0;
-  font-size: 20px;
+  font-size: 1.25rem;
   font-weight: 600;
 }
 
@@ -107,7 +286,7 @@ body {
 .shell-subtitle,
 .shell-loading {
   margin: 4px 0 0;
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--room-muted);
 }
 
@@ -123,7 +302,7 @@ body {
 /* Sections read as a list of headings, so they are small and quiet rather than large and loud. */
 .shell-heading {
   margin: 0 0 8px;
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -132,7 +311,7 @@ body {
 
 .shell-hint {
   margin: 8px 0 0;
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--room-muted);
 }
 
@@ -141,7 +320,7 @@ body {
   padding: 8px 12px;
   background: var(--room-info-bg);
   border-left: 3px solid var(--room-info-border);
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 .shell-warning {
@@ -150,7 +329,7 @@ body {
   background: var(--room-warning-bg);
   border-left: 3px solid var(--room-warning-border);
   color: var(--room-warning);
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 .shell-errors {
@@ -159,7 +338,7 @@ body {
   background: var(--room-error-bg);
   border-left: 3px solid var(--room-error-border);
   color: var(--room-error);
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 .shell-errors ul {
@@ -173,7 +352,7 @@ body {
 
 .shell-label {
   display: block;
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--room-muted);
   margin-bottom: 4px;
 }
@@ -215,7 +394,7 @@ body {
   background: var(--room-surface);
   color: var(--room-muted);
   font: inherit;
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-weight: 700;
   line-height: 1;
   cursor: help;
@@ -243,8 +422,8 @@ body {
   border-radius: 4px;
   background: var(--room-text);
   color: var(--room-surface);
-  box-shadow: 0 5px 18px rgb(0 0 0 / 18%);
-  font-size: 12px;
+  box-shadow: var(--room-shadow-strong);
+  font-size: 0.75rem;
   font-weight: 400;
   line-height: 1.4;
   text-align: left;
@@ -271,7 +450,7 @@ body {
   margin-bottom: 0;
 }
 
-@media (max-width: 600px) {
+@media (max-width: 700px) {
   .help-tooltip-popover {
     position: fixed;
     top: auto;
@@ -305,7 +484,7 @@ body {
 }
 
 .shell-button.is-primary {
-  color: #fff;
+  color: var(--room-on-accent);
   background: var(--room-accent);
   border-color: var(--room-accent);
 }
@@ -330,6 +509,12 @@ body {
   color: var(--room-text);
   background: var(--room-surface-sunken);
   border-color: var(--room-border);
+}
+
+/* Header actions carry a text label at the widths where there is room for one. Compact phones keep
+ * the icon-only treatment, but the accessible name remains on the button in either form. */
+.shell-button-label {
+  margin-left: 6px;
 }
 
 .shell-button.is-destructive {
@@ -395,7 +580,7 @@ body {
 
 .welcome-option-heading {
   margin: 0;
-  font-size: 15px;
+  font-size: 0.9375rem;
   font-weight: 600;
 }
 
@@ -403,7 +588,7 @@ body {
 .welcome-option-note,
 .welcome-practice-copy {
   margin: 4px 0 12px;
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--room-muted);
 }
 
@@ -520,7 +705,7 @@ body {
 
 .welcome-footer a {
   color: var(--room-muted);
-  font-size: 12px;
+  font-size: 0.75rem;
   text-underline-offset: 2px;
 }
 
@@ -542,7 +727,7 @@ body {
   outline-offset: 4px;
 }
 
-@media (max-width: 620px) {
+@media (max-width: 700px) {
   .welcome-start-options {
     grid-template-columns: 1fr;
   }
@@ -560,7 +745,17 @@ body {
   }
 }
 
-@media (max-width: 420px) {
+@media (max-width: 440px) {
+  .shell-button-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
+
   .welcome-connect-fields {
     align-items: flex-start;
     flex-direction: column;
@@ -598,19 +793,19 @@ body {
 .resume-context,
 .recent-context {
   margin: 0;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--room-muted);
 }
 
 .resume-matchup {
   margin: 2px 0 0;
-  font-size: 15px;
+  font-size: 0.9375rem;
   font-weight: 600;
 }
 
 .resume-progress {
   margin: 2px 0 0;
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--room-muted);
   overflow-wrap: anywhere;
   font-variant-numeric: tabular-nums;
@@ -623,7 +818,7 @@ body {
 
 .room-title-line {
   margin: 18px 0 0;
-  font-size: 18px;
+  font-size: 1.125rem;
   font-weight: 600;
 }
 
@@ -638,7 +833,7 @@ body {
 
 .assignment-context {
   margin: 0;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -647,7 +842,7 @@ body {
 
 .assignment-team {
   margin: 12px 0 0;
-  font-size: 24px;
+  font-size: 1.5rem;
   line-height: 1.2;
   font-weight: 600;
   overflow-wrap: anywhere;
@@ -660,7 +855,7 @@ body {
 .assignment-vs {
   margin: 8px 0 0;
   color: var(--room-muted);
-  font-size: 14px;
+  font-size: 0.875rem;
 }
 
 .room-primary-actions {
@@ -719,7 +914,7 @@ body {
 
 .welcome-greeting-line {
   margin: 0;
-  font-size: 15px;
+  font-size: 0.9375rem;
   font-weight: 600;
 }
 
@@ -728,7 +923,7 @@ body {
   margin-top: 2px;
   padding: 0;
   font: inherit;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 400;
   color: var(--room-muted);
   background: none;
@@ -778,7 +973,7 @@ body {
 
 .settings-section-title {
   margin: 0 0 4px;
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -811,14 +1006,14 @@ body {
 .settings-row-detail {
   margin-top: 1px;
   color: var(--room-muted);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .settings-action,
 .settings-inline-action {
   padding: 4px 0;
   font: inherit;
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--room-accent);
   background: none;
   border: 0;
@@ -914,7 +1109,7 @@ body {
 .settings-address {
   overflow-wrap: anywhere;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .settings-navigation-row {
@@ -931,14 +1126,14 @@ body {
 
 .settings-navigation-row span:last-child {
   color: var(--room-muted);
-  font-size: 22px;
+  font-size: 1.375rem;
   line-height: 1;
 }
 
 .settings-build {
   padding-top: 14px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 11px;
+  font-size: 0.6875rem;
   color: var(--room-faint);
   text-align: center;
 }
@@ -948,7 +1143,7 @@ body {
   padding: 8px 10px;
   color: var(--room-success);
   background: var(--room-success-bg);
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 .settings-detail-view > p:first-child,
@@ -958,10 +1153,10 @@ body {
 
 .settings-detail-note {
   color: var(--room-muted);
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
-@media (max-width: 420px) {
+@media (max-width: 440px) {
   .settings-dialog {
     width: calc(100% - 24px);
     max-height: calc(100% - 24px);
@@ -1006,7 +1201,7 @@ body {
 
 .recent-primary {
   margin: 2px 0 0;
-  font-size: 15px;
+  font-size: 0.9375rem;
   font-variant-numeric: tabular-nums;
 }
 
@@ -1033,7 +1228,7 @@ body {
 
 .recent-when {
   margin: 2px 0 0;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--room-muted);
 }
 
@@ -1041,13 +1236,13 @@ body {
   display: grid;
   gap: 2px;
   margin: 8px 0 0;
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .recent-details {
   grid-area: details;
   min-width: 0;
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .recent-details summary {
@@ -1086,7 +1281,7 @@ body {
 .recent-receipt {
   margin-top: 2px;
   color: var(--room-muted);
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-variant-numeric: normal;
 }
 
@@ -1128,7 +1323,7 @@ body {
   gap: 6px;
   padding: 4px 0;
   font: inherit;
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--room-muted);
   white-space: nowrap;
   background: none;
@@ -1146,7 +1341,7 @@ body {
   outline-offset: 2px;
 }
 
-@media (max-width: 760px) {
+@media (max-width: 820px) {
   .recent-item {
     grid-template-areas:
       'main'
@@ -1160,7 +1355,7 @@ body {
   }
 }
 
-@media (max-width: 420px) {
+@media (max-width: 440px) {
   .recent-item .recent-status div {
     align-items: flex-start;
     flex-direction: column;
@@ -1185,13 +1380,13 @@ body {
 }
 
 .final-team {
-  font-size: 16px;
+  font-size: 1rem;
   font-weight: 600;
 }
 
 /* The two totals share a baseline and a width so they can be compared without being read. */
 .final-points {
-  font-size: 28px;
+  font-size: 1.75rem;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   min-width: 3ch;
@@ -1246,9 +1441,47 @@ body {
   border-top: 1px solid var(--room-border);
 }
 
+.final-copy-details {
+  margin: 0;
+}
+
+.final-copy-details > summary {
+  display: list-item;
+  margin: 0;
+  color: var(--room-muted);
+  cursor: pointer;
+}
+
+.final-copy-content {
+  padding-top: 12px;
+}
+
+.final-copy-content .shell-actions {
+  margin-top: 12px;
+}
+
+.final-more-formats {
+  align-self: flex-start;
+  min-width: 0;
+}
+
+.final-more-formats > summary {
+  padding: 8px 0;
+  color: var(--room-muted);
+  cursor: pointer;
+}
+
+.final-more-formats-content {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding-top: 4px;
+}
+
 .assignment-matchup {
   margin: 0;
-  font-size: 16px;
+  font-size: 1rem;
   font-weight: 600;
 }
 
@@ -1275,7 +1508,7 @@ body {
 
 .assignment-check {
   margin: 6px 0 0;
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--room-faint);
 }
 
@@ -1291,10 +1524,51 @@ body {
 .assignment-next-label {
   flex: none;
   color: var(--room-faint);
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+}
+
+.room-connection-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 0;
+  font-size: 0.75rem;
+  color: var(--room-success);
+}
+
+.room-connection-indicator::before {
+  width: 7px;
+  height: 7px;
+  content: '';
+  background: currentcolor;
+  border-radius: 50%;
+}
+
+.room-secondary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.assignment-details {
+  margin-top: 14px;
+  border-top: 1px solid var(--room-border);
+}
+
+.assignment-details summary {
+  padding-top: 10px;
+  color: var(--room-muted);
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
+.assignment-details .shell-hint {
+  margin-top: 8px;
 }
 
 /* #endregion */
@@ -1308,7 +1582,7 @@ body {
   align-items: center;
   justify-content: center;
   padding: 16px;
-  background: rgb(0 0 0 / 40%);
+  background: var(--room-scrim);
 }
 
 .shell-modal-body {
@@ -1321,7 +1595,7 @@ body {
 
 .shell-modal-body h2 {
   margin: 0 0 8px;
-  font-size: 16px;
+  font-size: 1rem;
 }
 
 .shell-modal-actions {
@@ -1346,6 +1620,9 @@ body {
 
 .qr-preview {
   overflow: hidden;
+  /* Deliberately literal, and deliberately dark in both appearances: this is the ground behind a
+     camera preview, not a surface. A themed background here would flash white on a light device in
+     the moment before the first frame arrives, which is the one thing the dark ground prevents. */
   background: #16171a;
   border: 1px solid var(--room-border-strong);
   border-radius: 3px;
@@ -1361,7 +1638,7 @@ body {
 .qr-status {
   margin: 8px 0 0;
   min-height: 1.4em;
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--room-muted);
 }
 
@@ -1384,7 +1661,7 @@ body {
   margin: 0;
   padding: 8px 12px;
   border-bottom: 1px solid var(--room-border);
-  font-size: 14px;
+  font-size: 0.875rem;
   font-weight: 600;
   color: var(--room-text);
 }
@@ -1394,7 +1671,7 @@ body {
   padding: 6px 12px;
   background: var(--room-surface-sunken);
   border-bottom: 1px solid var(--room-border);
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -1420,7 +1697,7 @@ body {
   border: 0;
   background: none;
   font: inherit;
-  font-size: 14px;
+  font-size: 0.875rem;
   color: var(--room-text);
   text-align: left;
   cursor: pointer;
@@ -1443,7 +1720,7 @@ body {
 /* A game that already carries a result. Stated, not hidden, and never offered first. */
 .game-picker-state {
   flex: 0 0 auto;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--room-warning);
 }
 
@@ -1453,7 +1730,7 @@ body {
   padding: 6px 12px;
   background: var(--room-info-bg);
   border-bottom: 1px solid var(--room-info-border);
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--room-text);
 }
 
@@ -1477,13 +1754,13 @@ body {
 
 .rules-setup-title {
   margin: 0 0 6px;
-  font-size: 14px;
+  font-size: 0.875rem;
   font-weight: 600;
 }
 
 .rules-setup-reason {
   margin: 0 0 6px;
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--room-muted);
 }
 
@@ -1498,7 +1775,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 3px;
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--room-muted);
 }
 
@@ -1509,7 +1786,7 @@ body {
 .rules-setup-grid .label-with-help {
   min-height: 18px;
   color: var(--room-muted);
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 .rules-setup-grid input {
@@ -1517,7 +1794,7 @@ body {
   border: 1px solid var(--room-border-strong);
   background: var(--room-surface);
   font: inherit;
-  font-size: 14px;
+  font-size: 0.875rem;
   color: var(--room-text);
 }
 
@@ -1526,7 +1803,7 @@ body {
   align-items: center;
   gap: 6px;
   margin: 6px 0;
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--room-text);
 }
 
@@ -1559,13 +1836,13 @@ body {
 
 .roster-setup-title {
   margin: 0 0 6px;
-  font-size: 14px;
+  font-size: 0.875rem;
   font-weight: 600;
 }
 
 .roster-setup-reason {
   margin: 0 0 6px;
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--room-muted);
 }
 
@@ -1583,7 +1860,7 @@ body {
 }
 
 .roster-setup-team-name {
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 600;
   color: var(--room-text);
 }
@@ -1593,14 +1870,14 @@ body {
   border: 1px solid var(--room-border-strong);
   background: var(--room-surface);
   font: inherit;
-  font-size: 14px;
+  font-size: 0.875rem;
   line-height: 1.4;
   color: var(--room-text);
   resize: vertical;
 }
 
 .roster-setup-count {
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--room-faint);
 }
 
@@ -1635,6 +1912,33 @@ body {
 .manual-presets details > summary {
   cursor: pointer;
   list-style-position: inside;
+}
+
+.manual-advanced-section {
+  padding-top: 12px;
+}
+
+.manual-advanced-setup {
+  min-width: 0;
+}
+
+.manual-advanced-summary {
+  display: list-item;
+  margin-bottom: 0;
+  padding: 2px 0;
+  color: var(--room-text);
+  font-size: 0.875rem;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  cursor: pointer;
+}
+
+.manual-advanced-setup[open] > .manual-advanced-summary {
+  margin-bottom: 8px;
+}
+
+.manual-advanced-content {
+  padding-top: 2px;
 }
 
 .manual-presets .shell-heading {
@@ -1741,7 +2045,7 @@ body {
 
 .manual-roster-count {
   margin-top: 4px;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--room-faint);
 }
 
@@ -1837,7 +2141,7 @@ body {
 
 .rules-advanced-heading {
   margin: 0;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 600;
   color: var(--room-muted);
 }
@@ -1948,14 +2252,44 @@ body {
 
 .update-notice-title {
   margin: 0;
-  font-size: 14px;
+  font-size: 0.875rem;
   font-weight: 600;
 }
 
 .update-notice-copy {
   margin: 4px 0 0;
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--room-muted);
+}
+
+.update-notice-quiet {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: transparent;
+  border-color: var(--room-border);
+}
+
+.update-notice-quiet-copy {
+  margin-right: auto;
+  font-size: 0.75rem;
+  color: var(--room-muted);
+}
+
+@media (max-width: 560px) {
+  .update-notice {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .update-notice > div {
+    flex: 1 1 100%;
+  }
+
+  .update-notice-quiet-copy {
+    flex: 1 1 auto;
+  }
 }
 
 /*
@@ -1972,7 +2306,7 @@ body {
 
 .pregame-context {
   margin: 0;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 600;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -1981,14 +2315,14 @@ body {
 
 .pregame-matchup {
   margin: 8px 0 0;
-  font-size: 26px;
+  font-size: 1.625rem;
   line-height: 1.25;
   font-weight: 600;
 }
 
 .pregame-packet {
   margin: 12px 0 0;
-  font-size: 20px;
+  font-size: 1.25rem;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
@@ -1996,14 +2330,14 @@ body {
 /* A round with no packet named is not an error, but it is the case where a wrong packet cannot be
    caught by reading the screen, so it does not get to look like a confirmed fact. */
 .pregame-packet.is-missing {
-  font-size: 15px;
+  font-size: 0.9375rem;
   font-weight: 400;
   color: var(--room-muted);
 }
 
 .pregame-tournament {
   margin: 4px 0 0;
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--room-muted);
 }
 
@@ -2012,12 +2346,12 @@ body {
   width: 100%;
   margin: 24px 0 0;
   padding: 14px 16px;
-  font-size: 16px;
+  font-size: 1rem;
 }
 
 .pregame-problem-heading {
   margin: 24px 0 8px;
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -2044,3 +2378,163 @@ body {
 .pregame-back {
   margin-top: 24px;
 }
+
+/* #region Crash screen */
+
+/*
+ * The fallback `RenderErrorBoundary` draws when the application cannot draw itself.
+ *
+ * Deliberately styled with nothing but the tokens at the top of this file. It cannot reuse
+ * `.shell-*` for the same reason the component cannot reuse the shell's components: whatever threw
+ * is somewhere in that tree, and a fallback sharing machinery with the thing it is standing in for
+ * is a fallback that can fail the same way twice.
+ *
+ * Centred, plain, and calm on purpose. Nobody reading this is having a good morning, and a red
+ * full-bleed error page would make a recoverable reload look like a lost game.
+ */
+.crash-screen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px 16px;
+  background: var(--room-surface);
+  color: var(--room-text);
+}
+
+.crash-panel {
+  width: 100%;
+  max-width: 560px;
+}
+
+.crash-title {
+  margin: 0 0 12px;
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.crash-lead {
+  margin: 0 0 8px;
+  font-size: 1rem;
+}
+
+.crash-body {
+  margin: 0 0 24px;
+  color: var(--room-muted);
+}
+
+.crash-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.crash-button {
+  min-height: 44px;
+  padding: 8px 14px;
+  font: inherit;
+  color: var(--room-text);
+  background: var(--room-surface);
+  border: 1px solid var(--room-border-strong);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.crash-button:hover {
+  background: var(--room-surface-sunken);
+}
+
+.crash-button.is-primary {
+  color: var(--room-on-accent);
+  background: var(--room-accent);
+  border-color: var(--room-accent);
+}
+
+.crash-button.is-primary:hover {
+  background: var(--room-accent-hover);
+  border-color: var(--room-accent-hover);
+}
+
+.crash-button:focus-visible {
+  outline: 2px solid var(--room-accent);
+  outline-offset: 1px;
+}
+
+.crash-note {
+  margin: 16px 0 0;
+  font-size: 0.8125rem;
+  color: var(--room-muted);
+}
+
+.crash-details {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--room-border);
+  font-size: 0.8125rem;
+  color: var(--room-muted);
+}
+
+.crash-details summary {
+  cursor: pointer;
+}
+
+.crash-thrown {
+  margin: 8px 0 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
+/* #endregion */
+
+/* #region Settings choices */
+
+/*
+ * The segmented control behind Appearance and Text size.
+ *
+ * The real radio input is inside each label and only visually hidden, so focus, arrow-key movement
+ * and the accessibility tree are the browser's rather than a reimplementation. `:focus-within` is
+ * what carries the ring across, since the element actually focused has no box of its own.
+ */
+.settings-row-stacked {
+  flex-wrap: wrap;
+}
+
+.settings-choices {
+  display: flex;
+  flex: none;
+  border: 1px solid var(--room-border-strong);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.settings-choice {
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  padding: 4px 12px;
+  font-size: 0.8125rem;
+  color: var(--room-muted);
+  background: var(--room-surface);
+  cursor: pointer;
+}
+
+.settings-choice + .settings-choice {
+  border-left: 1px solid var(--room-border-strong);
+}
+
+.settings-choice:hover {
+  background: var(--room-surface-sunken);
+}
+
+.settings-choice.is-selected {
+  color: var(--room-on-accent);
+  background: var(--room-accent);
+}
+
+.settings-choice:focus-within {
+  outline: 2px solid var(--room-accent);
+  outline-offset: -2px;
+}
+
+/* #endregion */
