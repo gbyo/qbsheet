@@ -39,6 +39,22 @@ export * from '../scoring/toQbjMatch';
 export * from '../scoring/validateScoresheet';
 export * from '../scoring/SpreadsheetGame';
 
+/*
+ * Correcting the game itself, rather than what happened in it. A host that can score a game has to
+ * be able to correct one — the rules it was set up with, the room's procedure, a team or player name
+ * — and every one of these is a pure transformation over the same event history the engine derives
+ * from. See `gameCorrection`.
+ */
+export * from '../scoring/ProcedureExceptions';
+export * from '../scoring/gameCorrection';
+export * from '../scoring/formatCorrection';
+export * from '../scoring/identityCorrection';
+export * from '../scoring/overtimeCorrection';
+export * from '../scoring/procedureCorrection';
+export { default as correctFormat } from '../scoring/formatCorrection';
+export { default as correctProcedure } from '../scoring/procedureCorrection';
+export { default as removeOvertime } from '../scoring/overtimeCorrection';
+
 export * from '../scorer/ScorerRecovery';
 export * from '../scorer/bonusOptions';
 

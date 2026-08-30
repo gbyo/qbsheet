@@ -35,23 +35,7 @@ import { IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
 import { IGameSetup } from '../scoring/deriveGame';
 import { ScoreEvent } from '../scoring/ScoreEvents';
 import correctFormat, { IFormatChange } from '../scoring/formatCorrection';
-
-/**
- * A refusal whose message the room is meant to read.
- *
- * The host's write can fail in two materially different ways — nothing was written, or nothing could
- * be put back — and only the host can tell them apart, so only the host can supply the sentence. But
- * "show whatever was thrown" is not the way to let it: an exception out of IndexedDB carries an
- * internal message, and this application redacts error text everywhere else it displays any (see
- * `ErrorLog` and `redact`). So the permission is explicit, and anything else falls back to the
- * dialog's own wording.
- */
-export class ScoringRulesCorrectionRefusal extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'ScoringRulesCorrectionRefusal';
-  }
-}
+import { GameCorrectionRefusal } from '../scoring/gameCorrection';
 
 export interface IScoringRulesCorrection {
   format: IScorekeeperFormat;
@@ -155,9 +139,9 @@ export default function ScoringRulesCorrectionDialog(props: {
        */
       setSaving(false);
       setFailure(
-        thrown instanceof ScoringRulesCorrectionRefusal && thrown.message.trim() !== ''
+        thrown instanceof GameCorrectionRefusal && thrown.message.trim() !== ''
           ? thrown.message
-          : 'Those rules could not be saved on this device. Nothing has changed; try again.',
+          : 'That correction could not be saved on this device. Nothing has changed; try again.',
       );
       return;
     }

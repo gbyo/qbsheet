@@ -1736,10 +1736,19 @@ describe('a dialog opens on the thing it is asking for', () => {
     expect(screen.getByLabelText('What happened?')).toHaveFocus();
   });
 
-  test('Game details starts in the moderator name', () => {
+  /*
+   * Game details opens as a summary rather than as a form, so there is no field to land in: somebody
+   * checking which packet this round is on must not be one keystroke from renaming the moderator.
+   * Editing the one thing it has always been able to change is still one press, and *that* lands in
+   * the field.
+   */
+  test('Game details opens on the summary, and Edit starts in the moderator name', () => {
     renderScorer(formatFor());
 
     pressControl('Game details');
+    expect(screen.queryByLabelText('Moderator / reader')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
 
     expect(screen.getByLabelText('Moderator / reader')).toHaveFocus();
   });

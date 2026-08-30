@@ -49,7 +49,7 @@ function items(overrides: Partial<IScorerMenuInput> = {}, events: ScoreEvent[] =
     keyboardEnabled: false,
     submitting: false,
     canDownloadForms: false,
-    canCorrectScoringRules: false,
+    canCorrectGame: false,
     openDialog: vi.fn(),
     setKeyboardEnabled: vi.fn(),
     record: vi.fn().mockReturnValue(true),
@@ -130,9 +130,15 @@ describe('what depends on the host, and is absent rather than disabled', () => {
     expect(menu({ canDownloadForms: true })).toContain('Download legacy match-only QBJ');
   });
 
-  test('correcting the rules belongs to a host that can persist the correction', () => {
-    expect(menu({ canCorrectScoringRules: false })).not.toContain('Correct scoring rules…');
-    expect(menu({ canCorrectScoringRules: true })).toContain('Correct scoring rules…');
+  /*
+   * Corrections to the game's own definition are not menu entries any more. They live beside the
+   * thing they correct, in Game details -- which is one entry whether the host can persist a
+   * correction or not, because reading what the game is configured for is always available.
+   */
+  test('correcting the game itself is reached through Game details rather than the menu', () => {
+    expect(menu({ canCorrectGame: true })).not.toContain('Correct scoring rules…');
+    expect(menu({ canCorrectGame: false })).toContain('Game details');
+    expect(menu({ canCorrectGame: true })).toContain('Game details');
   });
 });
 
@@ -162,12 +168,12 @@ describe('ending a game', () => {
 
 describe('while a result is being submitted', () => {
   test('everything that would change the game is unavailable, and the backup is not', () => {
-    const built = items({ submitting: true, canCorrectScoringRules: true });
+    const built = items({ submitting: true, canCorrectGame: true });
     const by = (label: string) => built.find((item) => item.label === label);
 
     expect(by('Adjust score')?.disabled).toBe(true);
-    expect(by('Correct scoring rules…')?.disabled).toBe(true);
     expect(by('Notes')?.disabled).toBe(true);
+    expect(by('Full scoresheet review')?.disabled).toBe(true);
     // Getting a copy off the device is never the dangerous operation.
     expect(by('Download QBJ backup')?.disabled).toBeUndefined();
     expect(by('Print scoresheet')?.disabled).toBeUndefined();

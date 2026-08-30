@@ -127,6 +127,15 @@ const eventPropertyKeys = {
   'end-game-early': ['reason', 'tossupsRead'],
   adjustment: ['team', 'points', 'reason'],
   forfeit: ['teams'],
+  /*
+   * `allowance` and `authority` are deliberately absent, which sends them to `extras` as JSON
+   * rather than to columns of their own. Both are closed vocabularies belonging to the procedure
+   * rules, and giving them columns would widen the grid -- a change to the schema every existing
+   * sheet is read against, so a `spreadsheetSchemaVersion` bump rather than an addition. `extras`
+   * round-trips them exactly (see the `Object.assign` in the event parser), so nothing is lost
+   * meanwhile; promoting them to columns is a schema decision, not a merge decision.
+   */
+  'procedure-exception': ['reason', 'team', 'playerName'],
   note: ['text', 'flagged'],
 } satisfies Record<ScoreEvent['type'], readonly string[]>;
 
@@ -1639,6 +1648,18 @@ function parseEvent(row: string[], rowNumber: number): ScoreEvent {
       });
     return team;
   };
+  /** The same check, for the events where the allowance need not have concerned a team. */
+  const readOptionalTeam = () => {
+    const team = valueAt(row, 4);
+    if (team === '') return undefined;
+    if (team !== 'left' && team !== 'right')
+      dataError('invalid-team', `The event team ${team} is unknown.`, {
+        section,
+        row: rowNumber,
+        column: 'team',
+      });
+    return team;
+  };
   const readOptionalNumber = (index: number, column: string) =>
     decodeOptionalNumber(valueAt(row, index), { section, row: rowNumber, column });
   const readOptionalText = (index: number, column: string) =>
@@ -1737,6 +1758,15 @@ function parseEvent(row: string[], rowNumber: number): ScoreEvent {
       break;
     case 'forfeit':
       raw.teams = decodeOptionalJson(valueAt(row, 23), { section, row: rowNumber, column: 'teams' });
+      break;
+    case 'procedure-exception':
+      raw.team = readOptionalTeam();
+      raw.playerName = readOptionalText(5, 'player_name');
+      raw.reason = decodeText(requiredCell(row, 19, { section, row: rowNumber, column: 'reason' }), {
+        section,
+        row: rowNumber,
+        column: 'reason',
+      });
       break;
     case 'note':
       raw.text = decodeText(requiredCell(row, 21, { section, row: rowNumber, column: 'text' }), {

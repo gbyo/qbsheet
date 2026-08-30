@@ -37,7 +37,7 @@ import { ScoreEvent } from '../scoring/ScoreEvents';
 import { IGameSetup } from '../scoring/deriveGame';
 import { portableQbj, qbjWithSourceMetadata } from '../game/PortableQbj';
 import { downloadQbj, downloadLegacyMatchOnly, downloadQbjDocument } from '../integrations/file/QbjDownload';
-import { IGameDefinition } from '../game/GameDefinition';
+import { IGameDefinition, IQbjIdentity } from '../game/GameDefinition';
 import { buildLegacyMatchOnly, buildResultDocument } from '../qbj/QbjResult';
 import { IDerivedGame } from '../scoring/deriveGame';
 import { RoomConnectionState } from './ConnectionState';
@@ -48,10 +48,7 @@ import { connectionTimeline } from './ConnectionTimeline';
 import { useAppUpdate } from '../pwa/useAppUpdate';
 import { updateDeferredAlert } from '../pwa/UpdateNotice';
 import { ResultDeliveryService } from './ResultDelivery';
-import {
-  IScoringRulesCorrection,
-  ScoringRulesCorrectionRefusal,
-} from '../scorer/ScoringRulesCorrectionDialog';
+import { correctionSentence, GameCorrectionRefusal, IGameCorrection } from '../scoring/gameCorrection';
 
 /** The two totals, read back out of the payload rather than derived a second time. */
 export function scoreFromQbj(qbj: object): { left: number; right: number } | undefined {
@@ -79,6 +76,11 @@ export function connectionBelongsTo(
   if (!connection?.sessionId || !connection.sessionToken) return false;
   if (connection.gameRecordId !== undefined) return connection.gameRecordId === record.id;
   return connection.sessionId === record.gameKey;
+}
+
+/** The package's roster shape, rebuilt from the names a correction settled on. */
+function rosterFrom(team: { players: string[] }): { name: string }[] {
+  return team.players.map((name) => ({ name }));
 }
 
 export default function ScoringScreen(props: {
@@ -116,11 +118,13 @@ export default function ScoringScreen(props: {
   } = props;
   const [downloadedAt, setDownloadedAt] = useState<string | undefined>(record.qbjDownloadedAt);
   /**
-   * How many times the rules have been corrected in this sitting. Part of the scorer's key.
+   * How many times the game's own definition has been corrected in this sitting. Part of the
+   * scorer's key.
    *
-   * A correction changes the format and, when an answer type moved position, the events that point
-   * at it. Those two have to take effect together or the scoresheet spends a render pricing buzzes
-   * against the wrong buttons — a render that `onProgress` could sample and send to tournament
+   * A correction changes the definition and, where the correction needed it, the events — an answer
+   * type that moved position, a player whose name every buzz refers to. Those have to take effect
+   * together or the scoresheet spends a render pricing buzzes against the wrong buttons, or naming a
+   * player who is on no roster — a render that `onProgress` could sample and send to tournament
    * control. Remounting the scorer makes it re-read both from the journal in one pass, which is the
    * only place the pair is atomic.
    *
@@ -128,7 +132,9 @@ export default function ScoringScreen(props: {
    * "undo" across a rules change would have to mean undoing the change or undoing a question priced
    * under rules that no longer apply, and neither is what anybody would press it for.
    */
-  const [ruleRevision, setRuleRevision] = useState(0);
+  const [correctionRevision, setCorrectionRevision] = useState(0);
+  /** What the last correction was, so the reopened scoresheet says what happened rather than "recovered". */
+  const [correctionNotice, setCorrectionNotice] = useState('');
   const [recordDurablyStored, setRecordDurablyStored] = useState(durable && !storageDegraded);
   const [repairing, setRepairing] = useState(false);
   const update = useAppUpdate();
@@ -338,16 +344,17 @@ export default function ScoringScreen(props: {
   );
 
   /**
-   * Apply corrected scoring rules to this game.
+   * Apply a correction to this game's own definition — its rules, its procedure, its names.
    *
    * The order matters and is the same order every other write on this screen follows: the copy that
    * survives a reload goes first. `saveEvents` writes the synchronous journal before it queues the
-   * durable mirror. The reverse order would leave a reload holding a format the events no longer
-   * match.
+   * durable mirror. The reverse order would leave a reload holding a definition the events no
+   * longer match.
    *
-   * See `formatCorrection` for what has already been checked by the time this runs: the correction
-   * itself is known to be applicable. What is not known is whether this device will accept it, and
-   * both writes can refuse -- a locked-down profile, a full quota, a database that has gone away.
+   * See `formatCorrection`, `procedureCorrection` and `identityCorrection` for what has already been
+   * checked by the time this runs: the correction itself is known to be applicable. What is not known
+   * is whether this device will accept it, and both writes can refuse -- a locked-down profile, a
+   * full quota, a database that has gone away.
    *
    * # Half of a correction is worse than none of it
    *
@@ -369,33 +376,69 @@ export default function ScoringScreen(props: {
    *
    * A refusal is reported rather than absorbed. The screen stops claiming the record is durably
    * stored, the scorer is *not* remounted, and the throw reaches the dialog, which stays open with
-   * the reason on it. Bumping `ruleRevision` on a failed write would be the worst outcome available:
-   * the scoresheet would redraw under rules that exist only in memory, and the next reload would
-   * silently undo scores the room had already been shown.
+   * the reason on it. Bumping the revision on a failed write would be the worst outcome available:
+   * the scoresheet would redraw under a definition that exists only in memory, and the next reload
+   * would silently undo what the room had already been shown.
    */
-  const correctScoringRules = useCallback(
-    async ({ format, events, previousEvents }: IScoringRulesCorrection) => {
+  const correctGame = useCallback(
+    async ({
+      format,
+      procedure,
+      setup,
+      playerIds,
+      events,
+      summary,
+      previousEvents,
+      previousSetup,
+    }: IGameCorrection) => {
       const refuse = (message: string) => {
         if (onScreen.current) setRecordDurablyStored(false);
-        throw new ScoringRulesCorrectionRefusal(message);
+        throw new GameCorrectionRefusal(message);
       };
-      const nothingWritten = 'Those rules could not be saved on this device. Nothing has changed; try again.';
-      // The history first, and no format written at all if it was refused. A format the events do
-      // not match is the one combination neither this dialog nor a reload can recover from.
-      if (!store.saveEvents(record.id, events)) refuse(nothingWritten);
+      const nothingWritten =
+        'That correction could not be saved on this device. Nothing has changed; try again.';
+      /*
+       * The history and the rosters first, and no definition written at all if they were refused. A
+       * definition the events do not match is the one combination neither this dialog nor a reload
+       * can recover from.
+       */
+      if (!store.saveEvents(record.id, events, setup)) refuse(nothingWritten);
+
+      const identity = (record.package as IGameDefinition).qbjIdentity;
+      const nextIdentity: IQbjIdentity | undefined =
+        playerIds && identity ? { ...identity, playerIds } : identity;
       const updated = await store.update(record.id, {
-        package: { ...record.package, scorekeeperFormat: format },
+        ...(setup ? { setup } : {}),
+        package: {
+          ...record.package,
+          ...(format ? { scorekeeperFormat: format } : {}),
+          ...(procedure ? { procedure } : {}),
+          // Team and player names live in two places -- the frozen `setup` the scorer derives from,
+          // and the package that names the game for every export and filename. They are one fact, so
+          // the package's copy is rebuilt from the corrected setup rather than edited beside it.
+          ...(setup
+            ? {
+                left: { ...record.package.left, name: setup.left.name, players: rosterFrom(setup.left) },
+                right: { ...record.package.right, name: setup.right.name, players: rosterFrom(setup.right) },
+              }
+            : {}),
+          ...(nextIdentity ? { qbjIdentity: nextIdentity } : {}),
+        } as IGameDefinition,
       });
       if (updated === null) {
-        const restored = store.saveEvents(record.id, previousEvents);
+        // `previousSetup` as well as `previousEvents`: a name correction rewrote the rosters in the
+        // same journal write, so putting only the history back would leave buzzes naming players
+        // who are on no roster -- which is the exact shape `validateScoresheet` refuses.
+        const restored = store.saveEvents(record.id, previousEvents, previousSetup);
         refuse(
           restored
             ? nothingWritten
-            : 'Those rules could not be saved, and this device would not put the scoresheet back either. Download the QBJ backup from the Game menu before scoring anything else.',
+            : 'That correction could not be saved, and this device would not put the scoresheet back either. Download the QBJ backup from the Game menu before scoring anything else.',
         );
       }
       await onRecordChanged();
-      setRuleRevision((revision) => revision + 1);
+      setCorrectionNotice(summary);
+      setCorrectionRevision((revision) => revision + 1);
     },
     [record.id, record.package, store, onRecordChanged],
   );
@@ -415,13 +458,16 @@ export default function ScoringScreen(props: {
   return (
     <>
       <ScorerHost
-        key={`${record.gameKey}:${ruleRevision}`}
+        key={`${record.gameKey}:${correctionRevision}`}
         /*
          * The remount above is deliberate, so the scoresheet must not greet it as a recovery. See
-         * the note on `ruleRevision`, and `openingNotice` in `Scorer`.
+         * the note on `correctionRevision`, and `openingNotice` in `Scorer`. The sentence is the
+         * correction's own, so a room that renamed a team is not told its scoring rules changed.
          */
         openingNotice={
-          ruleRevision > 0 ? 'Scoring rules corrected. Every question has been recalculated.' : undefined
+          correctionRevision > 0
+            ? `${correctionSentence(correctionNotice) || 'The game was corrected'}. Every question has been recalculated.`
+            : undefined
         }
         gameKey={record.gameKey}
         format={record.package.scorekeeperFormat}
@@ -461,7 +507,7 @@ export default function ScoringScreen(props: {
         recordDurablyStored={recordDurablyStored}
         degradedMessage={live ? runtime.degradedMessage : undefined}
         onSubmit={submit}
-        onCorrectScoringRules={correctScoringRules}
+        onCorrectGame={correctGame}
         onDownload={write}
         onDownloadForm={(game, form) => downloadForm(game, form)}
         onProgress={
@@ -472,6 +518,7 @@ export default function ScoringScreen(props: {
           round: record.package.round.number,
           location: record.package.room?.name,
         }}
+        qbjPlayerIds={(record.package as IGameDefinition).qbjIdentity?.playerIds}
         onRequestControl={live ? runtime.requestControl : undefined}
         controlRequest={live ? runtime.controlRequest : undefined}
         onRetryControlRequest={live ? runtime.retryControlRequest : undefined}

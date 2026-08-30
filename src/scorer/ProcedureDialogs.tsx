@@ -217,14 +217,29 @@ export function ProtestDialog(props: {
   );
 }
 
-/** A team's timeout. Unobtrusive by design: two presses, and the count shows on the team panel. */
+/**
+ * A team's timeout. Unobtrusive by design: two presses, and the count shows on the team panel.
+ *
+ * # The one place this says anything unusual
+ *
+ * A team that has used every timeout it is allowed gets a disabled button, which is correct and
+ * which used to be the end of the conversation — leaving a room whose director has just granted an
+ * extra one with nothing to press. So the exhausted team, and only the exhausted team, gets one
+ * quiet line under its button offering the way out. A team with a timeout left sees nothing new,
+ * which is both teams in an ordinary game.
+ */
 export function TimeoutDialog(props: {
   game: IDerivedGame;
   timeoutsPerTeam: number;
+  /** Timeouts each team has been granted beyond the configured allocation. */
+  extraTimeouts?: Record<LeftOrRight, number>;
+  /** Opens the procedure/exception route. Absent when the host cannot record either. */
+  onProcedureQuery?: (team: LeftOrRight) => void;
   onRecord: (team: LeftOrRight) => void;
   onClose: () => void;
 }) {
-  const { game, timeoutsPerTeam, onRecord, onClose } = props;
+  const { game, timeoutsPerTeam, extraTimeouts, onProcedureQuery, onRecord, onClose } = props;
+  const allowed = (side: LeftOrRight) => timeoutsPerTeam + (extraTimeouts?.[side] ?? 0);
 
   return (
     <ScorerDialog title="Timeout" onClose={onClose}>
@@ -235,21 +250,27 @@ export function TimeoutDialog(props: {
       <div className="scorer-choices">
         {(['left', 'right'] as LeftOrRight[]).map((side) => {
           const used = game.timeouts[side];
-          const exhausted = used >= timeoutsPerTeam;
+          const exhausted = used >= allowed(side);
           return (
-            <button
-              key={side}
-              type="button"
-              className="scorer-choice"
-              disabled={exhausted}
-              onClick={() => {
-                onRecord(side);
-                onClose();
-              }}
-            >
-              {game[side].name}
-              {used > 0 && <> ({used} used)</>}
-            </button>
+            <div key={side} className="scorer-timeout-choice">
+              <button
+                type="button"
+                className="scorer-choice"
+                disabled={exhausted}
+                onClick={() => {
+                  onRecord(side);
+                  onClose();
+                }}
+              >
+                {game[side].name}
+                {used > 0 && <> ({used} used)</>}
+              </button>
+              {exhausted && onProcedureQuery && (
+                <button type="button" className="scorer-text-action" onClick={() => onProcedureQuery(side)}>
+                  Allowed another one?
+                </button>
+              )}
+            </div>
           );
         })}
       </div>
@@ -411,57 +432,6 @@ export function EndGameEarlyDialog(props: {
         </p>
         <button type="submit" className="scorer-danger" disabled={reason.trim() === ''}>
           End the game now
-        </button>
-      </form>
-    </ScorerDialog>
-  );
-}
-
-/**
- * Who was in the room.
- *
- * `toQbjMatch` has carried `moderator` and `scorekeeper` all along and the room has never filled
- * them in. The scorekeeper is known already — it is whoever is signed in to the room browser — so it
- * is filled in for them. The reader is not known to anything, so it is asked for once, optionally,
- * and never again.
- */
-export function GameDetailsDialog(props: {
-  moderator: string;
-  scorekeeper: string;
-  onSave: (moderator: string) => void;
-  onClose: () => void;
-}) {
-  const { moderator, scorekeeper, onSave, onClose } = props;
-  const [name, setName] = useState(moderator);
-
-  return (
-    <ScorerDialog title="Game details" onClose={onClose}>
-      <form
-        className="scorer-note-form"
-        onSubmit={(submitEvent) => {
-          submitEvent.preventDefault();
-          onSave(name.trim());
-          onClose();
-        }}
-      >
-        {/* The only field in the dialog, and the only reason to have opened it. */}
-        <label htmlFor="scorer-moderator">
-          Moderator / reader
-          <input
-            id="scorer-moderator"
-            data-dialog-autofocus
-            value={name}
-            maxLength={120}
-            placeholder="Optional"
-            onChange={(e) => setName(e.target.value)}
-          />
-        </label>
-        <p className="scorer-dialog-note">
-          Scorekeeper: {scorekeeper || 'not signed in on this device'}. Both are recorded on the result for
-          later auditing and neither affects scoring.
-        </p>
-        <button type="submit" className="scorer-choice">
-          Save
         </button>
       </form>
     </ScorerDialog>

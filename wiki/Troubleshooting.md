@@ -111,6 +111,27 @@ is open.
 2. Select **Protest / disputed ruling**.
 3. Resolve the protest.
 
+## QBSheet refuses an action the room was told to do
+
+For example, a team asks for a second timeout in a tournament with one, or a coach asks for a
+substitution between two tossups.
+
+QBSheet gives the reason and, next to it, a way out.
+
+1. Select **Procedure changed?**, or **Allowed another one?** under the team.
+2. Say whether a director allowed it this one time, or whether the room was set up wrong.
+3. Say why, if you record a ruling.
+
+QBSheet then allows that one action and puts the reason on the result. See
+[During the game](During-the-game#when-the-setup-does-not-match-the-room).
+
+## A team name or a player name is wrong
+
+Open the Game / More menu and select **Game details**. Select **Correct…** next to the line.
+
+All the questions already recorded stay with the same team and the same player. The statistics of
+that player do not change.
+
 ## QBSheet will not send the result
 
 The review lists a blocker. A blocker is not a warning.

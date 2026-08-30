@@ -9,6 +9,9 @@ import deriveGame, { IGameSetup, lineupChangeEffectiveQuestion } from '../src/sc
 import { IRoomProcedure } from '../src/scoring/RoomProcedure';
 import { ScoreEvent } from '../src/scoring/ScoreEvents';
 import validateScoresheet from '../src/scoring/validateScoresheet';
+import toQbjMatch from '../src/scoring/toQbjMatch';
+import { correctPlayerName } from '../src/scoring/identityCorrection';
+import { extraTimeoutsGranted } from '../src/scoring/ProcedureExceptions';
 import { bouncebackOptions, regularBonusTotals } from '../src/scorer/bonusOptions';
 
 const propertyRunCount = 300;
@@ -97,6 +100,8 @@ type ActionKind =
   | 'lightning'
   | 'end-regulation'
   | 'note'
+  | 'exception'
+  | 'rename'
   | 'undo'
   | 'clone';
 
@@ -278,10 +283,47 @@ function administrativeCandidate(real: IReal, intent: IActionIntent): ScoreEvent
         text: `Property note ${intent.choice}`,
         flagged: intent.choice % 2 === 0,
       });
+    case 'exception': {
+      // Every allowance, including the ones the guard will refuse in most states. A generated
+      // exception that is accepted must never authorize anything except the thing it names, which is
+      // what `assertInvariants` checks once it has landed.
+      const allowances = [
+        'extra-timeout',
+        'substitution',
+        'extra-break',
+        'skip-break',
+        'extra-tossup',
+        'overtime-continuation',
+        'other',
+      ] as const;
+      const allowance = allowances[intent.choice % allowances.length];
+      return nextEvent(real, {
+        type: 'procedure-exception',
+        questionNumber,
+        allowance,
+        authority: intent.choice % 2 === 0 ? 'tournament-director' : 'moderator',
+        reason: `Property ruling ${intent.choice}`,
+        ...(allowance === 'extra-timeout' || allowance === 'substitution' ? { team: intent.team } : {}),
+      });
+    }
+    case 'rename':
     case 'undo':
     case 'clone':
       return undefined;
   }
+}
+
+/** Every statistic a player carries, keyed by name, for comparing a game against itself. */
+function statistics(game: ReturnType<typeof deriveGame>, side: 'left' | 'right'): Map<string, string> {
+  return new Map(
+    game[side].players.map((player) => [
+      player.name,
+      `${player.tossupsHeard}|${player.points}|${Array.from(player.answerCounts)
+        .sort(([first], [second]) => first - second)
+        .map(([index, count]) => `${index}:${count}`)
+        .join(',')}`,
+    ]),
+  );
 }
 
 function assertInvariants(real: IReal): void {
@@ -290,6 +332,39 @@ function assertInvariants(real: IReal): void {
   expect(game.integrityProblems).toEqual([]);
   expect(game.personnelProblems).toEqual([]);
   expect(game.tossupsRead).toBe(game.questions.filter((question) => question.resolved).length);
+
+  /*
+   * No sequence of supported actions may produce two players with one name, or a recorded buzz
+   * naming somebody the roster does not have. Both are the failure a rename can cause and neither is
+   * something derivation would otherwise complain about.
+   */
+  for (const side of ['left', 'right'] as const) {
+    const names = game[side].players.map((player) => player.name);
+    expect(new Set(names).size).toBe(names.length);
+    for (const event of real.events) {
+      if (event.type === 'tossup-buzz' && event.team === side) expect(names).toContain(event.playerName);
+      if (event.type === 'substitution' && event.team === side) {
+        for (const name of event.activePlayers) expect(names).toContain(name);
+      }
+    }
+  }
+
+  /*
+   * An exception authorizes the thing it names and nothing else. The timeout ceiling is the one that
+   * can be read straight off the history, so it is the one asserted: however many rulings a
+   * generated sequence produced, a team's timeouts never exceed what it was configured and granted.
+   */
+  for (const side of ['left', 'right'] as const) {
+    const permitted = (real.procedure?.timeoutsPerTeam ?? 0) + extraTimeoutsGranted(real.events, side);
+    expect(game.timeouts[side]).toBeLessThanOrEqual(permitted);
+  }
+
+  // Exporting is a read. A game that changed because somebody looked at it would be a game whose
+  // result depends on whether anybody pressed Download.
+  const beforeExport = deriveGame(real.format, real.setup, real.events);
+  const exported = toQbjMatch(real.format, game) as { match_teams?: { points?: number }[] };
+  expect(exported.match_teams?.map((team) => team.points)).toEqual([game.left.points, game.right.points]);
+  expect(deriveGame(real.format, real.setup, real.events)).toEqual(beforeExport);
 
   for (const side of ['left', 'right'] as const) {
     const team = game[side];
@@ -346,6 +421,33 @@ class GeneratedCommand implements Command<IModel, IReal> {
   run(model: IModel, real: IReal): void {
     if (this.intent.kind === 'undo') {
       real.events = real.events.slice(0, -1);
+    } else if (this.intent.kind === 'rename') {
+      /*
+       * Correcting a display name must move no statistic anywhere. Checked by name-keyed comparison
+       * rather than by index, because the whole hazard is a rename that splits one player into two.
+       */
+      const roster = real.setup[this.intent.team].players;
+      const from = roster[this.intent.choice % roster.length];
+      const to = `${from}-corrected-${this.intent.choice}`;
+      const before = deriveGame(real.format, real.setup, real.events);
+      const corrected = correctPlayerName(
+        { setup: real.setup, events: real.events },
+        this.intent.team,
+        from,
+        to,
+      );
+      if (corrected.ok) {
+        real.setup = corrected.setup;
+        real.events = corrected.events;
+        const after = deriveGame(real.format, real.setup, real.events);
+        expect(after[this.intent.team].points).toBe(before[this.intent.team].points);
+        const wasStatistics = statistics(before, this.intent.team);
+        const isStatistics = statistics(after, this.intent.team);
+        expect(isStatistics.get(to)).toBe(wasStatistics.get(from));
+        expect(isStatistics.has(from)).toBe(false);
+        const other = this.intent.team === 'left' ? 'right' : 'left';
+        expect(statistics(after, other)).toEqual(statistics(before, other));
+      }
     } else if (this.intent.kind === 'clone') {
       const before = deriveGame(real.format, real.setup, real.events);
       real.events = JSON.parse(JSON.stringify(real.events)) as ScoreEvent[];
@@ -394,6 +496,8 @@ const commandArbitrary = fc
       'lightning',
       'end-regulation',
       'note',
+      'exception',
+      'rename',
       'undo',
       'clone',
     ),
