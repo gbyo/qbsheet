@@ -14,8 +14,8 @@
  *
  * # One menu, one level, grouped by rules
  *
- * The grouping is carried by `IGameMenuItem.dividerBefore` rather than by headings or nesting; see
- * `joinMenuGroups`. What is deliberately not here is Protests and Issue, both of which are reached
+ * The grouping is carried by quiet labels and dividers on the first surviving item in each group;
+ * see `joinMenuGroups`. What is deliberately not here is Protests and Issue, both of which are reached
  * from Flag — a permanent footer control beside this one, and a live-play action with two entry
  * points is a live-play action a scorekeeper has to choose between under time pressure.
  *
@@ -49,7 +49,8 @@ export type MenuDialog =
   | 'recovery'
   | 'end-early'
   | 'forfeit'
-  | 'scoring-rules';
+  | 'scoring-rules'
+  | 'export';
 
 export interface IScorerMenuInput {
   game: IDerivedGame;
@@ -67,6 +68,8 @@ export interface IScorerMenuInput {
   canDownloadForms: boolean;
   /** Present only when the host can persist corrected scoring rules. See `formatCorrection`. */
   canCorrectScoringRules: boolean;
+  /** Whether the phone-only More menu should expose the currently available redo action. */
+  canRedo?: boolean;
 
   openDialog: (dialog: MenuDialog) => void;
   setKeyboardEnabled: (enabled: boolean) => void;
@@ -78,6 +81,10 @@ export interface IScorerMenuInput {
   downloadPartialQbj: () => void;
   downloadLegacyQbj: () => void;
   print: () => void;
+  /** Shared redo route; the desktop footer still owns the always-visible button. */
+  onRedo?: () => void;
+  /** Opens the ordinary export dialog when the scorer host provides it. */
+  openExport?: () => void;
 }
 
 export default function scorerMenuItems(input: IScorerMenuInput): IGameMenuItem[] {
@@ -92,6 +99,7 @@ export default function scorerMenuItems(input: IScorerMenuInput): IGameMenuItem[
     submitting,
     canDownloadForms,
     canCorrectScoringRules,
+    canRedo = false,
     openDialog,
     setKeyboardEnabled,
     record,
@@ -102,9 +110,14 @@ export default function scorerMenuItems(input: IScorerMenuInput): IGameMenuItem[
     downloadPartialQbj,
     downloadLegacyQbj,
     print,
+    onRedo,
+    openExport,
   } = input;
 
   const general: IGameMenuItem[] = [
+    ...(canRedo && onRedo
+      ? [{ label: 'Redo', icon: 'redo' as const, onSelect: onRedo, phoneOnly: true }]
+      : []),
     {
       // Named for what it does rather than for the state it is in, and stating the current state
       // after it, because a menu entry that reads "Keyboard scoring" tells nobody whether it is on.
@@ -201,8 +214,12 @@ export default function scorerMenuItems(input: IScorerMenuInput): IGameMenuItem[
   }
 
   /** Getting the game off this device, or back on to it. */
-  const file: IGameMenuItem[] = [{ label: 'Download QBJ backup', icon: 'download', onSelect: downloadQbjBackup }];
-  if (canDownloadForms) {
+  const file: IGameMenuItem[] = openExport
+    ? [{ label: 'Export / backup…', icon: 'download', onSelect: openExport }]
+    : [{ label: 'Download QBJ backup', icon: 'download', onSelect: downloadQbjBackup }];
+  // Keep the direct entries as a compatibility fallback for hosts that have not yet adopted the
+  // export dialog. Once `openExport` is supplied, all forms live behind that one deliberate action.
+  if (canDownloadForms && !openExport) {
     // The mid-game portable copy. Not a substitute for local recovery, which keeps the event
     // history this cannot represent; see `docs/QBJ_ASSIGNMENT_PROFILE.md`.
     file.push({ label: 'Download current QBJ', icon: 'download', onSelect: downloadPartialQbj });
@@ -239,5 +256,5 @@ export default function scorerMenuItems(input: IScorerMenuInput): IGameMenuItem[
     });
   }
 
-  return joinMenuGroups([general, round, review, file, ending]);
+  return joinMenuGroups([general, round, review, file, ending], ['GAME', 'ROUND', 'REVIEW', 'FILES', 'END GAME']);
 }

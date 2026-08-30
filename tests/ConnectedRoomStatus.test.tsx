@@ -131,7 +131,8 @@ describe('the established room', () => {
 
     expect(assignmentCalls).toBe(1);
     expect(screen.getByText('Waiting for the next assignment.')).toBeInTheDocument();
-    expect(screen.getByText('QBSheet checks automatically · checked just now')).toBeInTheDocument();
+    expect(screen.getByText('Connected')).toBeInTheDocument();
+    expect(screen.queryByText(/QBSheet checks automatically/)).toBeNull();
     expect(screen.queryByRole('button', { name: 'Check now' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Start scoring' })).toBeNull();
 

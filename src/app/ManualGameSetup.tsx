@@ -144,6 +144,25 @@ function hasManualInput(input: IManualGameInput): boolean {
   return JSON.stringify(input) !== JSON.stringify(emptyInput());
 }
 
+/**
+ * Whether a saved setup has anything beyond the ordinary, uncomplicated round procedure.
+ *
+ * The advanced disclosure starts closed for a fresh setup, but a restored draft or preset that
+ * deliberately configures timing, breaks, timeouts, or substitution checkpoints should open back to
+ * the controls that explain that choice. This is presentation state only; the options remain the
+ * same object that is persisted and passed to `defineManualGame`.
+ */
+function hasMeaningfulAdvancedOptions(options: IManualRoundOptions): boolean {
+  return (
+    options.halves ||
+    options.halfLengthMinutes !== undefined ||
+    options.timeoutsPerTeam > 0 ||
+    options.timeoutDurationSeconds !== undefined ||
+    options.substitutionPolicy !== manualRoundOptionDefaults.substitutionPolicy ||
+    (options.breaks?.length ?? 0) > 0
+  );
+}
+
 export interface IManualGamePreset {
   id: string;
   label: string;
@@ -278,6 +297,7 @@ export default function ManualGameSetup(props: {
   const [presets, setPresets] = useState<IManualGamePreset[]>(() => readManualGamePresets());
   const [rosterPresetId, setRosterPresetId] = useState('');
   const [rulePresetId, setRulePresetId] = useState('defaults');
+  const [advancedSetupOpen, setAdvancedSetupOpen] = useState(() => hasMeaningfulAdvancedOptions(input.options));
 
   const set = (patch: Partial<IManualGameInput>) => setInput((current) => ({ ...current, ...patch }));
   const setOptions = (patch: Partial<IManualRoundOptions>) =>
@@ -290,7 +310,7 @@ export default function ManualGameSetup(props: {
     );
 
   const result = useMemo(() => defineManualGame(input), [input]);
-  const problems = result.ok ? [] : result.problems;
+  const problems = useMemo(() => (result.ok ? [] : result.problems), [result]);
   const rulePresets = useMemo(
     () => [
       {
@@ -362,8 +382,7 @@ export default function ManualGameSetup(props: {
     if (first) errorRefs[first].current?.focus();
     // Only on a submission. Re-running as somebody types would drag focus out of the field they are
     // fixing the problem in, which is the opposite of helping.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [submissions]);
+  }, [submissions, problems]);
 
   const submit = async (event?: FormEvent<HTMLFormElement>) => {
     event?.preventDefault();
@@ -371,7 +390,12 @@ export default function ManualGameSetup(props: {
     setSubmissions((count) => count + 1);
     setStartError('');
     const defined = defineManualGame(input);
-    if (!defined.ok) return;
+    if (!defined.ok) {
+      // An invalid option can be hidden inside the closed advanced disclosure. Open it in the
+      // submission handler so the following focus effect lands on an error the operator can see.
+      if (defined.problems.some((problem) => problem.section === 'options')) setAdvancedSetupOpen(true);
+      return;
+    }
     startInFlight.current = true;
     setStarting(true);
     try {
@@ -417,6 +441,7 @@ export default function ManualGameSetup(props: {
       JSON.stringify(input.options) !== JSON.stringify(defaults.options);
     if (hasRuleDraft && !window.confirm('Replace the scoring rules and round options in this draft?')) return;
     setInput((current) => ({ ...current, rules: cloneRules(preset.rules), options: { ...preset.options } }));
+    if (hasMeaningfulAdvancedOptions(preset.options)) setAdvancedSetupOpen(true);
   };
 
   const teamSide = (side: 'left' | 'right') => {
@@ -474,7 +499,7 @@ export default function ManualGameSetup(props: {
       <section className="shell-section manual-presets" aria-labelledby="manual-presets-heading">
         <details>
           <summary id="manual-presets-heading" className="shell-heading">
-            Reuse recent teams and rules
+            Use recent setup
           </summary>
           <p className="shell-hint">
             Successful setups stay on this device as a convenience. Loading one changes this draft; it
@@ -576,13 +601,20 @@ export default function ManualGameSetup(props: {
         <SectionErrors problems={problemsIn('rules')} show={showErrors} anchor={rulesErrors} />
       </section>
 
-      <section className="shell-section" aria-labelledby="manual-options-heading">
-        <h2 id="manual-options-heading" className="shell-heading">
-          Round options
-        </h2>
-        <p className="shell-hint manual-options-intro">
-          How the room runs the game. None of this changes what anything is worth.
-        </p>
+      <section className="shell-section manual-advanced-section" aria-labelledby="manual-options-heading">
+        <details
+          className="manual-advanced-setup"
+          open={advancedSetupOpen}
+          onToggle={(event) => setAdvancedSetupOpen(event.currentTarget.open)}
+        >
+          <summary id="manual-options-heading" className="shell-heading manual-advanced-summary">
+            Advanced round setup
+          </summary>
+          <div className="manual-advanced-content">
+            <p className="shell-hint manual-options-intro">
+              Breaks, clocks, timeouts, substitutions, and other room-procedure options. None of this
+              changes what a tossup or bonus is worth.
+            </p>
 
         <label className="rules-setup-check" htmlFor="manual-halves">
           <input
@@ -707,7 +739,9 @@ export default function ManualGameSetup(props: {
           )}
         </fieldset>
 
-        <SectionErrors problems={problemsIn('options')} show={showErrors} anchor={optionsErrors} />
+            <SectionErrors problems={problemsIn('options')} show={showErrors} anchor={optionsErrors} />
+          </div>
+        </details>
       </section>
 
       {startError !== '' && <p className="shell-warning" role="alert">{startError}</p>}

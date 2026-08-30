@@ -511,6 +511,12 @@ body {
   border-color: var(--room-border);
 }
 
+/* Header actions carry a text label at the widths where there is room for one. Compact phones keep
+ * the icon-only treatment, but the accessible name remains on the button in either form. */
+.shell-button-label {
+  margin-left: 6px;
+}
+
 .shell-button.is-destructive {
   color: var(--room-error);
   border-color: var(--room-error-border);
@@ -740,6 +746,16 @@ body {
 }
 
 @media (max-width: 440px) {
+  .shell-button-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
+
   .welcome-connect-fields {
     align-items: flex-start;
     flex-direction: column;
@@ -1425,6 +1441,44 @@ body {
   border-top: 1px solid var(--room-border);
 }
 
+.final-copy-details {
+  margin: 0;
+}
+
+.final-copy-details > summary {
+  display: list-item;
+  margin: 0;
+  color: var(--room-muted);
+  cursor: pointer;
+}
+
+.final-copy-content {
+  padding-top: 12px;
+}
+
+.final-copy-content .shell-actions {
+  margin-top: 12px;
+}
+
+.final-more-formats {
+  align-self: flex-start;
+  min-width: 0;
+}
+
+.final-more-formats > summary {
+  padding: 8px 0;
+  color: var(--room-muted);
+  cursor: pointer;
+}
+
+.final-more-formats-content {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding-top: 4px;
+}
+
 .assignment-matchup {
   margin: 0;
   font-size: 1rem;
@@ -1474,6 +1528,47 @@ body {
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+}
+
+.room-connection-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 0;
+  font-size: 0.75rem;
+  color: var(--room-success);
+}
+
+.room-connection-indicator::before {
+  width: 7px;
+  height: 7px;
+  content: '';
+  background: currentcolor;
+  border-radius: 50%;
+}
+
+.room-secondary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.assignment-details {
+  margin-top: 14px;
+  border-top: 1px solid var(--room-border);
+}
+
+.assignment-details summary {
+  padding-top: 10px;
+  color: var(--room-muted);
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
+.assignment-details .shell-hint {
+  margin-top: 8px;
 }
 
 /* #endregion */
@@ -1819,6 +1914,33 @@ body {
   list-style-position: inside;
 }
 
+.manual-advanced-section {
+  padding-top: 12px;
+}
+
+.manual-advanced-setup {
+  min-width: 0;
+}
+
+.manual-advanced-summary {
+  display: list-item;
+  margin-bottom: 0;
+  padding: 2px 0;
+  color: var(--room-text);
+  font-size: 0.875rem;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  cursor: pointer;
+}
+
+.manual-advanced-setup[open] > .manual-advanced-summary {
+  margin-bottom: 8px;
+}
+
+.manual-advanced-content {
+  padding-top: 2px;
+}
+
 .manual-presets .shell-heading {
   display: list-item;
 }
@@ -2138,6 +2260,36 @@ body {
   margin: 4px 0 0;
   font-size: 0.8125rem;
   color: var(--room-muted);
+}
+
+.update-notice-quiet {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: transparent;
+  border-color: var(--room-border);
+}
+
+.update-notice-quiet-copy {
+  margin-right: auto;
+  font-size: 0.75rem;
+  color: var(--room-muted);
+}
+
+@media (max-width: 560px) {
+  .update-notice {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .update-notice > div {
+    flex: 1 1 100%;
+  }
+
+  .update-notice-quiet-copy {
+    flex: 1 1 auto;
+  }
 }
 
 /*

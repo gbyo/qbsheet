@@ -15,12 +15,15 @@
  * The running score is here for the same reason a paper sheet has a score column: it is what the
  * moderator reads out at the break and what the room checks against, and reconstructing it by adding
  * up a rail is exactly the arithmetic this software exists to remove.
+ *
+ * On narrower layouts this same source renders only its latest line in a fixed-height compact strip;
+ * older activity remains behind scoresheet review instead of moving below the scoring controls.
  */
 import { IDerivedGame, IDerivedQuestion } from '../scoring/deriveGame';
 
 export interface IRecentRailProps {
   game: IDerivedGame;
-  /** How many questions to show. The rail is narrow; older questions live in the scoresheet review. */
+  /** How many questions to show on the wide rail; older questions live in the scoresheet review. */
   limit?: number;
   /** Open the full scoresheet review at this question. */
   onInspect?: (questionNumber: number) => void;
@@ -138,70 +141,115 @@ export default function RecentRail(props: IRecentRailProps) {
   const teamNames = { left: game.left.name, right: game.right.name };
   const recent = game.questions.slice(-limit).reverse();
   const flaggedQuestions = new Set(game.notes.filter((note) => note.flagged).map((note) => note.questionNumber));
+  const latest = recent[0] ?? (motion?.kind === 'undo' ? motion.snapshot : undefined);
+  const latestLines = latest ? questionLines(latest, teamNames) : [];
+  const latestSummary = latest
+    ? latestLines.map((line) => `${line.what}${line.points ? ` ${line.points}` : ''}`).join(' · ')
+    : 'Nothing scored yet';
+  const latestMarked = latest ? latest.openProtests > 0 || flaggedQuestions.has(latest.questionNumber) : false;
 
   return (
     <aside className="scorer-rail" aria-label="Recent activity">
-      <h2 className="scorer-rail-heading">Recent</h2>
-      {recent.length === 0 && !(motion?.kind === 'undo' && motion.snapshot) ? (
-        <p className="scorer-rail-empty">Nothing scored yet.</p>
-      ) : (
-        <ol className="scorer-rail-list">
-          {motion?.kind === 'undo' &&
-            motion.snapshot &&
-            !recent.some((question) => question.questionNumber === motion.questionNumber) && (
-              <li
-                key={`undo-${motion.token}`}
-                className="scorer-rail-item is-motion-ghost is-undoing"
-                aria-hidden="true"
-              >
-                <QuestionBody question={motion.snapshot} teamNames={teamNames} marked={false} />
-              </li>
-            )}
-          {recent.map((question) => {
-            const marked = question.openProtests > 0 || flaggedQuestions.has(question.questionNumber);
-            const status = [
-              question.replaced ? 'replaced question' : '',
-              question.openProtests > 0 ? 'protest outstanding' : '',
-              flaggedQuestions.has(question.questionNumber) && question.openProtests === 0
-                ? 'flagged for tournament control'
+      <div className="scorer-rail-wide">
+        <h2 className="scorer-rail-heading">Recent</h2>
+        {recent.length === 0 && !(motion?.kind === 'undo' && motion.snapshot) ? (
+          <p className="scorer-rail-empty">Nothing scored yet.</p>
+        ) : (
+          <ol className="scorer-rail-list">
+            {motion?.kind === 'undo' &&
+              motion.snapshot &&
+              !recent.some((question) => question.questionNumber === motion.questionNumber) && (
+                <li
+                  key={`undo-${motion.token}`}
+                  className="scorer-rail-item is-motion-ghost is-undoing"
+                  aria-hidden="true"
+                >
+                  <QuestionBody question={motion.snapshot} teamNames={teamNames} marked={false} />
+                </li>
+              )}
+            {recent.map((question) => {
+              const marked = question.openProtests > 0 || flaggedQuestions.has(question.questionNumber);
+              const status = [
+                question.replaced ? 'replaced question' : '',
+                question.openProtests > 0 ? 'protest outstanding' : '',
+                flaggedQuestions.has(question.questionNumber) && question.openProtests === 0
+                  ? 'flagged for tournament control'
+                  : '',
+              ]
+                .filter(Boolean)
+                .join(', ');
+              const body = <QuestionBody question={question} teamNames={teamNames} marked={marked} statusText={status} />;
+              const isMotionTarget = question.questionNumber === motion?.questionNumber;
+
+              return (
+                <li
+                  key={isMotionTarget ? `${question.questionNumber}-${motion.token}` : question.questionNumber}
+                  // The class is the whole emphasis: the button inside it is untouched, so a row being
+                  // pointed at is still a row that opens the question when it is pressed.
+                  className={[
+                    'scorer-rail-item',
+                    question.questionNumber === emphasizeQuestion ? 'is-emphasized' : '',
+                    isMotionTarget ? (motion.kind === 'undo' ? 'is-undoing' : 'is-redoing') : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' ')}
+                  data-motion-token={isMotionTarget ? motion.token : undefined}
+                >
+                  {onInspect ? (
+                    <button
+                      type="button"
+                      className="scorer-rail-open"
+                      onClick={() => onInspect(question.questionNumber)}
+                      aria-label={`Review question ${question.questionNumber}${status ? `, ${status}` : ''}`}
+                    >
+                      {body}
+                    </button>
+                  ) : (
+                    body
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+        )}
+      </div>
+      <div className="scorer-rail-compact">
+        {latest && onInspect ? (
+          <button
+            type="button"
+            className={[
+              'scorer-rail-compact-open',
+              latest.questionNumber === emphasizeQuestion ? 'is-emphasized' : '',
+              latest.questionNumber === motion?.questionNumber
+                ? motion.kind === 'undo'
+                  ? 'is-undoing'
+                  : 'is-redoing'
                 : '',
             ]
               .filter(Boolean)
-              .join(', ');
-            const body = <QuestionBody question={question} teamNames={teamNames} marked={marked} statusText={status} />;
-            const isMotionTarget = question.questionNumber === motion?.questionNumber;
-
-            return (
-              <li
-                key={isMotionTarget ? `${question.questionNumber}-${motion.token}` : question.questionNumber}
-                // The class is the whole emphasis: the button inside it is untouched, so a row being
-                // pointed at is still a row that opens the question when it is pressed.
-                className={[
-                  'scorer-rail-item',
-                  question.questionNumber === emphasizeQuestion ? 'is-emphasized' : '',
-                  isMotionTarget ? (motion.kind === 'undo' ? 'is-undoing' : 'is-redoing') : '',
-                ]
-                  .filter(Boolean)
-                  .join(' ')}
-                data-motion-token={isMotionTarget ? motion.token : undefined}
-              >
-                {onInspect ? (
-                  <button
-                    type="button"
-                    className="scorer-rail-open"
-                    onClick={() => onInspect(question.questionNumber)}
-                    aria-label={`Review question ${question.questionNumber}${status ? `, ${status}` : ''}`}
-                  >
-                    {body}
-                  </button>
-                ) : (
-                  body
-                )}
-              </li>
-            );
-          })}
-        </ol>
-      )}
+              .join(' ')}
+            data-motion-token={latest.questionNumber === motion?.questionNumber ? motion.token : undefined}
+            onClick={() => onInspect(latest.questionNumber)}
+            aria-label={`Review latest question ${latest.questionNumber}${latestMarked ? ', flagged' : ''}`}
+          >
+            <span className="scorer-rail-compact-label">Recent</span>
+            <span className="scorer-rail-compact-summary">
+              Q{latest.questionNumber} · {latestSummary}
+            </span>
+            <span className="scorer-rail-compact-score" aria-label="Latest running score">
+              {latest.scoreAfter.left}&ndash;{latest.scoreAfter.right}
+            </span>
+          </button>
+        ) : (
+          <span className="scorer-rail-compact-empty">
+            <span className="scorer-rail-compact-label">Recent</span>
+            <span className="scorer-rail-compact-summary">Nothing scored yet</span>
+            <span className="scorer-rail-compact-score" aria-hidden="true">
+              {game.left.points}&ndash;{game.right.points}
+            </span>
+          </span>
+        )}
+      </div>
     </aside>
   );
 }
