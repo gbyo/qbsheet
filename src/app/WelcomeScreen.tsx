@@ -378,7 +378,7 @@ export default function WelcomeScreen(props: {
                     inputMode="url"
                     autoComplete="off"
                     spellCheck={false}
-                    placeholder="Paste the address shown by tournament control"
+                    placeholder="192.168.1.50:8080"
                     value={address}
                     required
                     onChange={(event) => {

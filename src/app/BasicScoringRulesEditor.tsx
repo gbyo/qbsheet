@@ -18,8 +18,25 @@
  *
  * `basic` is the compact four-question surface. `full` adds the controls a game being described
  * from scratch or a rule-less imported game needs — how many players are on the floor, bouncebacks,
- * the shape of overtime, lightning — under a quiet advanced heading rather than in the main grid,
- * because a practice game almost never changes them.
+ * the shape of overtime, lightning — because a practice game almost never changes them but has to be
+ * able to.
+ *
+ * # Four groups, because a format has four parts
+ *
+ * The fields used to be one run of numbers and checkboxes with a rule drawn across it before the
+ * overtime settings, and it read as a screen of boxes rather than as a format: "Points per bonus
+ * part" sat under a checkbox that turned it on with nothing to say they belonged together, and
+ * "Tossups in regulation" — a fact about the round's length — sat in the middle of what a tossup is
+ * worth.
+ *
+ * So they are grouped by the question each one answers: what an answer scores, whether there are
+ * bonuses and what they are worth, how long the round is, and what happens if it ends tied. Real
+ * `<fieldset>`s with `<legend>`s, so the grouping is in the accessibility tree rather than only in
+ * the styling — a screen reader announces the group when focus enters it, which is the same help the
+ * captions give a sighted reader.
+ *
+ * The order is the order a format is usually stated in, and it puts the fields a practice game
+ * actually edits first.
  *
  * No rule set is named anywhere. A format is what its numbers say, and a scorer that recognized
  * "NAQT" would mis-score the first tournament that edited its powers.
@@ -60,165 +77,175 @@ export default function BasicScoringRulesEditor(props: {
 
   return (
     <div className="rules-fields">
-      <div className="rules-setup-grid">
-        <label htmlFor={id('tossup')}>
-          Correct tossup
-          <input
-            id={id('tossup')}
-            type="number"
-            min={1}
-            step={1}
-            value={value.tossupValue === undefined ? '' : String(value.tossupValue)}
-            onChange={(event) => set({ tossupValue: numberValue(event.target.value) })}
-          />
-        </label>
-        <div>
-          <div className="label-with-help">
-            <label htmlFor={id('power')}>Power (blank for none)</label>
-            <HelpTooltip label="What is a power?">
-              A power is a tossup answered before the power mark for extra points. Leave this blank if the format
-              does not use powers.
-            </HelpTooltip>
-          </div>
-          <input
-            id={id('power')}
-            type="number"
-            step={1}
-            inputMode="decimal"
-            value={value.powerValue === undefined ? '' : String(value.powerValue)}
-            onChange={(event) => set({ powerValue: numberValue(event.target.value) })}
-          />
-        </div>
-        <div>
-          <div className="label-with-help">
-            <label htmlFor={id('neg')}>Neg (blank for none)</label>
-            <HelpTooltip label="What is a neg?">
-              A neg is the penalty for an incorrect buzz before the tossup ends. Enter the value as a negative
-              number, or leave it blank when there is no penalty.
-            </HelpTooltip>
-          </div>
-          <input
-            id={id('neg')}
-            type="number"
-            step={1}
-            inputMode="decimal"
-            value={value.negValue === undefined ? '' : String(value.negValue)}
-            onChange={(event) => set({ negValue: numberValue(event.target.value) })}
-          />
-        </div>
-        <label htmlFor={id('tossup-count')}>
-          Tossups in regulation
-          <input
-            id={id('tossup-count')}
-            type="number"
-            min={1}
-            step={1}
-            value={value.tossupCount === undefined ? '' : String(value.tossupCount)}
-            onChange={(event) => set({ tossupCount: numberValue(event.target.value) })}
-          />
-        </label>
-        {variant === 'full' && (
-          <div>
-            <div className="label-with-help">
-              <label htmlFor={id('max-active')}>Players playing at once</label>
-              <HelpTooltip label="Explain the player limit">
-                The maximum number of active players per team. Additional rostered players begin on the bench.
-              </HelpTooltip>
-            </div>
+      <fieldset className="field-group">
+        <legend className="field-group-legend">Tossup values</legend>
+        <div className="rules-setup-grid">
+          <label htmlFor={id('tossup')}>
+            Correct tossup
             <input
-              id={id('max-active')}
+              id={id('tossup')}
               type="number"
               min={1}
               step={1}
-              value={value.maximumPlayersPerTeam === undefined ? '' : String(value.maximumPlayersPerTeam)}
-              onChange={(event) => set({ maximumPlayersPerTeam: numberValue(event.target.value) })}
+              value={value.tossupValue === undefined ? '' : String(value.tossupValue)}
+              onChange={(event) => set({ tossupValue: numberValue(event.target.value) })}
             />
-          </div>
-        )}
-      </div>
-
-      <label className="rules-setup-check" htmlFor={id('bonuses')}>
-        <input
-          id={id('bonuses')}
-          type="checkbox"
-          checked={value.useBonuses}
-          onChange={(event) =>
-            set({
-              useBonuses: event.target.checked,
-              ...(event.target.checked ? {} : { bonusesBounceBack: false, overtimeIncludesBonuses: false }),
-            })
-          }
-        />
-        {variant === 'full' ? 'Use bonuses' : 'This tournament uses bonuses'}
-      </label>
-
-      {value.useBonuses && (
-        <>
-          <div className="rules-setup-grid">
-            <label htmlFor={id('bonus-part')}>
-              Points per bonus part
-              <input
-                id={id('bonus-part')}
-                type="number"
-                min={1}
-                step={1}
-                value={value.pointsPerBonusPart === undefined ? '' : String(value.pointsPerBonusPart)}
-                onChange={(event) => set({ pointsPerBonusPart: numberValue(event.target.value) })}
-              />
-            </label>
-            <label htmlFor={id('bonus-parts')}>
-              Parts per bonus
-              <input
-                id={id('bonus-parts')}
-                type="number"
-                min={1}
-                step={1}
-                value={value.partsPerBonus === undefined ? '' : String(value.partsPerBonus)}
-                onChange={(event) => set({ partsPerBonus: numberValue(event.target.value) })}
-              />
-            </label>
-          </div>
-          {variant === 'full' && (
-            <div className="rules-check-with-help">
-              <label className="rules-setup-check" htmlFor={id('bounce-back')}>
-                <input
-                  id={id('bounce-back')}
-                  type="checkbox"
-                  checked={value.bonusesBounceBack === true}
-                  onChange={(event) => set({ bonusesBounceBack: event.target.checked })}
-                />
-                Missed parts bounce back
-              </label>
-              <HelpTooltip label="What does bonus bounceback mean?">
-                When the team controlling a bonus misses a part, the other team gets a chance to answer that part.
+          </label>
+          <div>
+            <div className="label-with-help">
+              <label htmlFor={id('power')}>Power (blank for none)</label>
+              <HelpTooltip label="What is a power?">
+                A power is a tossup answered before the power mark for extra points. Leave this blank if the format
+                does not use powers.
               </HelpTooltip>
             </div>
-          )}
-        </>
-      )}
+            <input
+              id={id('power')}
+              type="number"
+              step={1}
+              inputMode="decimal"
+              value={value.powerValue === undefined ? '' : String(value.powerValue)}
+              onChange={(event) => set({ powerValue: numberValue(event.target.value) })}
+            />
+          </div>
+          <div>
+            <div className="label-with-help">
+              <label htmlFor={id('neg')}>Neg (blank for none)</label>
+              <HelpTooltip label="What is a neg?">
+                A neg is the penalty for an incorrect buzz before the tossup ends. Enter the value as a negative
+                number, or leave it blank when there is no penalty.
+              </HelpTooltip>
+            </div>
+            <input
+              id={id('neg')}
+              type="number"
+              step={1}
+              inputMode="decimal"
+              value={value.negValue === undefined ? '' : String(value.negValue)}
+              onChange={(event) => set({ negValue: numberValue(event.target.value) })}
+            />
+          </div>
+        </div>
+      </fieldset>
 
-      <div className="rules-check-with-help">
-        <label className="rules-setup-check" htmlFor={id('timed')}>
+      <fieldset className="field-group">
+        <legend className="field-group-legend">Bonuses</legend>
+        <label className="rules-setup-check" htmlFor={id('bonuses')}>
           <input
-            id={id('timed')}
+            id={id('bonuses')}
             type="checkbox"
-            checked={value.timed === true}
-            onChange={(event) => set({ timed: event.target.checked })}
+            checked={value.useBonuses}
+            onChange={(event) =>
+              set({
+                useBonuses: event.target.checked,
+                ...(event.target.checked ? {} : { bonusesBounceBack: false, overtimeIncludesBonuses: false }),
+              })
+            }
           />
-          {variant === 'full' ? 'Round is timed' : 'Rounds run on a clock'}
+          {variant === 'full' ? 'Use bonuses' : 'This tournament uses bonuses'}
         </label>
-        <HelpTooltip label="About timed rounds">
-          In a timed round, regulation ends when the moderator calls time; the tossup count is still used as a
-          maximum.
-        </HelpTooltip>
-      </div>
-      {timedHint && <p className="shell-hint rules-fields-hint">{timedHint}</p>}
+
+        {value.useBonuses && (
+          <>
+            <div className="rules-setup-grid">
+              <label htmlFor={id('bonus-part')}>
+                Points per bonus part
+                <input
+                  id={id('bonus-part')}
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={value.pointsPerBonusPart === undefined ? '' : String(value.pointsPerBonusPart)}
+                  onChange={(event) => set({ pointsPerBonusPart: numberValue(event.target.value) })}
+                />
+              </label>
+              <label htmlFor={id('bonus-parts')}>
+                Parts per bonus
+                <input
+                  id={id('bonus-parts')}
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={value.partsPerBonus === undefined ? '' : String(value.partsPerBonus)}
+                  onChange={(event) => set({ partsPerBonus: numberValue(event.target.value) })}
+                />
+              </label>
+            </div>
+            {variant === 'full' && (
+              <div className="rules-check-with-help">
+                <label className="rules-setup-check" htmlFor={id('bounce-back')}>
+                  <input
+                    id={id('bounce-back')}
+                    type="checkbox"
+                    checked={value.bonusesBounceBack === true}
+                    onChange={(event) => set({ bonusesBounceBack: event.target.checked })}
+                  />
+                  Missed parts bounce back
+                </label>
+                <HelpTooltip label="What does bonus bounceback mean?">
+                  When the team controlling a bonus misses a part, the other team gets a chance to answer that part.
+                </HelpTooltip>
+              </div>
+            )}
+          </>
+        )}
+      </fieldset>
+
+      <fieldset className="field-group">
+        <legend className="field-group-legend">The round</legend>
+        <div className="rules-setup-grid">
+          <label htmlFor={id('tossup-count')}>
+            Tossups in regulation
+            <input
+              id={id('tossup-count')}
+              type="number"
+              min={1}
+              step={1}
+              value={value.tossupCount === undefined ? '' : String(value.tossupCount)}
+              onChange={(event) => set({ tossupCount: numberValue(event.target.value) })}
+            />
+          </label>
+          {variant === 'full' && (
+            <div>
+              <div className="label-with-help">
+                <label htmlFor={id('max-active')}>Players playing at once</label>
+                <HelpTooltip label="Explain the player limit">
+                  The maximum number of active players per team. Additional rostered players begin on the bench.
+                </HelpTooltip>
+              </div>
+              <input
+                id={id('max-active')}
+                type="number"
+                min={1}
+                step={1}
+                value={value.maximumPlayersPerTeam === undefined ? '' : String(value.maximumPlayersPerTeam)}
+                onChange={(event) => set({ maximumPlayersPerTeam: numberValue(event.target.value) })}
+              />
+            </div>
+          )}
+        </div>
+
+        <div className="rules-check-with-help">
+          <label className="rules-setup-check" htmlFor={id('timed')}>
+            <input
+              id={id('timed')}
+              type="checkbox"
+              checked={value.timed === true}
+              onChange={(event) => set({ timed: event.target.checked })}
+            />
+            {variant === 'full' ? 'Round is timed' : 'Rounds run on a clock'}
+          </label>
+          <HelpTooltip label="About timed rounds">
+            In a timed round, regulation ends when the moderator calls time; the tossup count is still used as a
+            maximum.
+          </HelpTooltip>
+        </div>
+        {timedHint && <p className="shell-hint rules-fields-hint">{timedHint}</p>}
+      </fieldset>
 
       {variant === 'full' && (
-        <section className="rules-advanced" aria-labelledby={id('advanced-heading')}>
-          <h3 id={id('advanced-heading')} className="rules-advanced-heading">
-            Overtime and lightning
-          </h3>
+        <fieldset className="field-group">
+          <legend className="field-group-legend">Overtime and lightning</legend>
           <div className="rules-setup-grid">
             <div>
               <div className="label-with-help">
@@ -294,7 +321,7 @@ export default function BasicScoringRulesEditor(props: {
               </label>
             </div>
           )}
-        </section>
+        </fieldset>
       )}
     </div>
   );

@@ -62,6 +62,7 @@ import {
   substitutionOpportunityPhrase,
 } from '../scoring/RoomProcedure';
 import { numberValue } from './BasicScoringRulesEditor';
+import ControlIcon, { type ControlIconName } from '../scorer/ControlIcon';
 import ScoringRulesEditor from './ScoringRulesEditor';
 import useLeaveWarning from './useLeaveWarning';
 import HelpTooltip from './HelpTooltip';
@@ -274,6 +275,25 @@ export function rememberManualGamePreset(input: IManualGameInput): IManualGamePr
     // The current setup still starts; presets are only a convenience.
   }
   return next;
+}
+
+/**
+ * The mark beside a section heading.
+ *
+ * This screen is one long form, and its section headings are the small uppercase grey the rest of
+ * the application uses — legible when you are reading, invisible when you are scrolling past four
+ * of them looking for the rosters. A glyph gives each section a shape to aim at without adding a
+ * word to a screen that already has plenty.
+ *
+ * Decorative, and deliberately so: it is `aria-hidden` inside `ControlIcon`, and every heading it
+ * sits beside still says its own name. Nothing here is the only way to know what a section is.
+ */
+function SectionIcon(props: { name: ControlIconName }) {
+  return (
+    <span className="manual-section-icon">
+      <ControlIcon name={props.name} />
+    </span>
+  );
 }
 
 export default function ManualGameSetup(props: {
@@ -499,6 +519,7 @@ export default function ManualGameSetup(props: {
       <section className="shell-section manual-presets" aria-labelledby="manual-presets-heading">
         <details>
           <summary id="manual-presets-heading" className="shell-heading">
+            <SectionIcon name="clock" />
             Use recent setup
           </summary>
           <p className="shell-hint">
@@ -555,7 +576,10 @@ export default function ManualGameSetup(props: {
 
       <form aria-label="Create a game" noValidate onSubmit={submit}>
       <section className="shell-section">
-        <h2 className="shell-heading">This game</h2>
+        <h2 className="shell-heading">
+          <SectionIcon name="note" />
+          This game
+        </h2>
         <div className="manual-field">
           <label className="shell-label" htmlFor="manual-label">
             Game label
@@ -578,6 +602,7 @@ export default function ManualGameSetup(props: {
 
       <section className="shell-section" aria-labelledby="manual-teams-heading">
         <h2 id="manual-teams-heading" className="shell-heading">
+          <SectionIcon name="players" />
           Teams &amp; players
         </h2>
         <div className="manual-teams">{teamSide('left')}{teamSide('right')}</div>
@@ -589,6 +614,7 @@ export default function ManualGameSetup(props: {
 
       <section className="shell-section" aria-labelledby="manual-rules-heading">
         <h2 id="manual-rules-heading" className="shell-heading">
+          <SectionIcon name="lightning" />
           Scoring rules
         </h2>
         <ScoringRulesEditor
@@ -608,6 +634,7 @@ export default function ManualGameSetup(props: {
           onToggle={(event) => setAdvancedSetupOpen(event.currentTarget.open)}
         >
           <summary id="manual-options-heading" className="shell-heading manual-advanced-summary">
+            <SectionIcon name="adjust" />
             Advanced round setup
           </summary>
           <div className="manual-advanced-content">
@@ -616,93 +643,99 @@ export default function ManualGameSetup(props: {
               changes what a tossup or bonus is worth.
             </p>
 
-        <label className="rules-setup-check" htmlFor="manual-halves">
-          <input
-            id="manual-halves"
-            type="checkbox"
-            checked={input.options.halves}
-            onChange={(event) =>
-              // Turning breaks off takes the settings that only exist because they were on with it.
-              // A hidden break list would otherwise reach the procedure from a screen that had stopped
-              // showing it, which is the one way a room gets a rule nobody can see they configured.
-              setOptions(
-                event.target.checked
-                  ? { halves: true }
-                  : { halves: false, halfLengthMinutes: undefined, breaks: undefined },
-              )
-            }
-          />
-          The round has breaks
-        </label>
+        <fieldset className="field-group">
+          <legend className="field-group-legend">Breaks</legend>
+          <label className="rules-setup-check" htmlFor="manual-halves">
+            <input
+              id="manual-halves"
+              type="checkbox"
+              checked={input.options.halves}
+              onChange={(event) =>
+                // Turning breaks off takes the settings that only exist because they were on with it.
+                // A hidden break list would otherwise reach the procedure from a screen that had stopped
+                // showing it, which is the one way a room gets a rule nobody can see they configured.
+                setOptions(
+                  event.target.checked
+                    ? { halves: true }
+                    : { halves: false, halfLengthMinutes: undefined, breaks: undefined },
+                )
+              }
+            />
+            The round has breaks
+          </label>
 
-        {input.options.halves && (
-          <div className="manual-field-inset">
-            <div className="manual-field">
-              <label className="shell-label" htmlFor="manual-half-length">
-                Minutes of play between breaks
+          {input.options.halves && (
+            <div className="manual-field-inset">
+              <div className="manual-field">
+                <label className="shell-label" htmlFor="manual-half-length">
+                  Minutes of play between breaks
+                </label>
+                <input
+                  id="manual-half-length"
+                  className="shell-input manual-number"
+                  type="number"
+                  min={1}
+                  max={maximumHalfLengthMinutes}
+                  step={1}
+                  value={input.options.halfLengthMinutes === undefined ? '' : String(input.options.halfLengthMinutes)}
+                  onChange={(event) => setOptions({ halfLengthMinutes: numberValue(event.target.value) })}
+                />
+                <p className="shell-hint">Blank means QBSheet does not run the clock.</p>
+              </div>
+
+              <ManualBreaksEditor
+                breaks={input.options.breaks ?? []}
+                substitutionPolicy={input.options.substitutionPolicy}
+                onChange={(breaks) => setOptions({ breaks })}
+              />
+            </div>
+          )}
+        </fieldset>
+
+        <fieldset className="field-group">
+          <legend className="field-group-legend">Timeouts</legend>
+          <div className="manual-field">
+            <label className="shell-label" htmlFor="manual-timeouts">
+              Timeouts per team
+            </label>
+            <input
+              id="manual-timeouts"
+              className="shell-input manual-number"
+              type="number"
+              min={0}
+              max={maximumTimeoutsPerTeam}
+              step={1}
+              value={String(input.options.timeoutsPerTeam)}
+              onChange={(event) => setOptions({ timeoutsPerTeam: numberValue(event.target.value) ?? 0 })}
+            />
+          </div>
+
+          {input.options.timeoutsPerTeam > 0 && (
+            <div className="manual-field manual-field-inset">
+              <label className="shell-label" htmlFor="manual-timeout-length">
+                Timeout length in seconds
               </label>
               <input
-                id="manual-half-length"
+                id="manual-timeout-length"
                 className="shell-input manual-number"
                 type="number"
                 min={1}
-                max={maximumHalfLengthMinutes}
+                max={maximumTimeoutDurationSeconds}
                 step={1}
-                value={input.options.halfLengthMinutes === undefined ? '' : String(input.options.halfLengthMinutes)}
-                onChange={(event) => setOptions({ halfLengthMinutes: numberValue(event.target.value) })}
+                value={
+                  input.options.timeoutDurationSeconds === undefined
+                    ? ''
+                    : String(input.options.timeoutDurationSeconds)
+                }
+                onChange={(event) => setOptions({ timeoutDurationSeconds: numberValue(event.target.value) })}
               />
-              <p className="shell-hint">Blank means QBSheet does not run the clock.</p>
+              <p className="shell-hint">Blank means QBSheet records the timeout but does not count it down.</p>
             </div>
+          )}
+        </fieldset>
 
-            <ManualBreaksEditor
-              breaks={input.options.breaks ?? []}
-              substitutionPolicy={input.options.substitutionPolicy}
-              onChange={(breaks) => setOptions({ breaks })}
-            />
-          </div>
-        )}
-
-        <div className="manual-field">
-          <label className="shell-label" htmlFor="manual-timeouts">
-            Timeouts per team
-          </label>
-          <input
-            id="manual-timeouts"
-            className="shell-input manual-number"
-            type="number"
-            min={0}
-            max={maximumTimeoutsPerTeam}
-            step={1}
-            value={String(input.options.timeoutsPerTeam)}
-            onChange={(event) => setOptions({ timeoutsPerTeam: numberValue(event.target.value) ?? 0 })}
-          />
-        </div>
-
-        {input.options.timeoutsPerTeam > 0 && (
-          <div className="manual-field manual-field-inset">
-            <label className="shell-label" htmlFor="manual-timeout-length">
-              Timeout length in seconds
-            </label>
-            <input
-              id="manual-timeout-length"
-              className="shell-input manual-number"
-              type="number"
-              min={1}
-              max={maximumTimeoutDurationSeconds}
-              step={1}
-              value={
-                input.options.timeoutDurationSeconds === undefined
-                  ? ''
-                  : String(input.options.timeoutDurationSeconds)
-              }
-              onChange={(event) => setOptions({ timeoutDurationSeconds: numberValue(event.target.value) })}
-            />
-            <p className="shell-hint">Blank means QBSheet records the timeout but does not count it down.</p>
-          </div>
-        )}
-
-        <fieldset className="manual-fieldset" aria-labelledby="manual-substitutions-legend">
-          <legend className="shell-label">
+        <fieldset className="field-group" aria-labelledby="manual-substitutions-legend">
+          <legend className="field-group-legend">
             <span className="label-with-help">
               <span id="manual-substitutions-legend">Substitutions</span>
               <HelpTooltip label="About substitution timing">
