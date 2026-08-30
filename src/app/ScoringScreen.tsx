@@ -416,6 +416,21 @@ export default function ScoringScreen(props: {
         roomName={record.package.room?.name}
         packetName={record.package.round.packetName}
         operatorName={operatorName}
+        gamePackage={record.package}
+        stableGameId={record.identity}
+        spreadsheetMetadata={{
+          recordIdentity: record.identity,
+          attempt: record.attempt,
+          connected: record.connected,
+          createdAt: record.createdAt,
+          updatedAt: record.updatedAt,
+          completedAt: record.completedAt,
+          serverDelivery: record.serverDelivery,
+          serverDeliveryDetail: record.serverDeliveryDetail,
+          serverDeliveryLedger: record.serverDeliveryLedger,
+          qbjDownloadedAt: record.qbjDownloadedAt,
+          handoffAcknowledgedAt: record.handoffAcknowledgedAt,
+        }}
         procedure={record.package.procedure}
         connection={live ? runtime.connection : RoomConnectionState.Connected}
         /*

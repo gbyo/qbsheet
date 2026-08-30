@@ -90,6 +90,10 @@ test('a practice game is created, scored, reloaded, finished and kept', async ({
   }
 
   await expect(page.getByLabel('Final score confirmed with both teams')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Copy game for tournament spreadsheet' })).toBeVisible();
+  await page.getByRole('button', { name: 'Copy game for tournament spreadsheet' }).click();
+  await expect(page.locator('.scorer-spreadsheet-copy')).toContainText('NEW BLANK TAB');
+  await expect(page.locator('.scorer-spreadsheet-copy')).toContainText('A1');
   await page.getByLabel('Final score confirmed with both teams').check();
   await page.getByRole('button', { name: 'Submit result' }).click();
 

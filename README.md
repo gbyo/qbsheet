@@ -15,6 +15,7 @@ QBSheet works as a website or an installable PWA. Standalone scoring does not re
 * **Local recovery**: QBSheet saves an in-progress game on the device.
 * **Corrections and substitutions**: Correct scoring errors and change lineups during a game.
 * **Portable results**: Download completed or in-progress games as QBJ files.
+* **Tournament spreadsheet copy**: Copy one completed game to a new spreadsheet tab; see [the spreadsheet clipboard workflow](docs/SPREADSHEET_CLIPBOARD.md).
 * **Guided practice**: Learn how to use the scorer with a built-in tutorial.
 * **Static hosting**: Host QBSheet without a QBSheet application server.
 
@@ -121,6 +122,7 @@ The service worker provides the application shell for offline use.
 | [QBTCP](docs/QBTCP.md)                                   | Protocol for communication with tournament-control software |
 | [QBJ assignment profile](docs/QBJ_ASSIGNMENT_PROFILE.md) | How QBSheet reads and writes QBJ                            |
 | [QBG migration](docs/QBG_MIGRATION.md)                   | Compatibility information for the older QBG and API formats |
+| [Spreadsheet clipboard](docs/SPREADSHEET_CLIPBOARD.md)   | Copy one complete game into a shared tournament spreadsheet |
 | [Test file generation](docs/TEST_FILE_GENERATION.md)     | Information about test files and development fixtures       |
 
 ## Contributing
