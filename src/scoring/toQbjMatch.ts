@@ -35,6 +35,7 @@
 import { LeftOrRight } from './types';
 import { IScorekeeperFormat } from './ScorekeeperFormat';
 import { protestNoteLine, unresolvedProtestMarker } from './ProtestNotes';
+import { procedureExceptionLine } from './ProcedureExceptions';
 import { IDerivedGame, IDerivedTeam } from './deriveGame';
 import { ProtestSubject } from './ScoreEvents';
 
@@ -207,6 +208,19 @@ function combineNotes(game: IDerivedGame, meta: IQbjMatchMeta): string | undefin
 
   if (game.endedEarly) {
     lines.push(`Game ended early after ${game.endedEarly.tossupsRead} tossups: ${game.endedEarly.reason}`);
+  }
+  /*
+   * Authorized departures from procedure.
+   *
+   * Standard QBJ has nowhere to say "the director allowed a second timeout": `Match` carries no
+   * procedure at all, so there is no field to lose it from and none to invent. What it does carry is
+   * the aggregate the departure produced — the timeout is simply a timeout — and `notes`, which is
+   * where the room's explanation of it goes. So the result stays exactly as truthful as the schema
+   * allows, and the part the schema cannot hold is beside it in words rather than discarded.
+   */
+  for (const exception of game.procedureExceptions) lines.push(procedureExceptionLine(exception));
+  if (game.overtimeUnnecessary) {
+    lines.push('Overtime was played although regulation was not tied on the final scoresheet.');
   }
   for (const voided of game.voids) {
     const what = voided.scope === 'bonus' ? 'bonus' : 'tossup';

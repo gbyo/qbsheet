@@ -411,3 +411,17 @@
     font-size: 0.8125rem;
   }
 }
+
+/*
+ * The one thing in the review that asks for a ruling rather than a fix.
+ *
+ * Kept as a block rather than a line so the action underneath does not read as part of the sentence
+ * above it: striking out three tossups is not the only answer, and the other one is to leave them.
+ */
+.scorer-review-overtime {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  margin-bottom: 12px;
+}

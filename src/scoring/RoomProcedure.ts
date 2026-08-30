@@ -184,8 +184,16 @@ export function roomTakesBreaks(procedure: IRoomProcedure | undefined): boolean 
 export function roomBreakUpcoming(
   procedure: IRoomProcedure | undefined,
   breaksTaken: readonly number[],
+  /**
+   * Scheduled breaks the room was explicitly told not to take.
+   *
+   * Moves the cursor along without pretending a break happened. A room told to skip the break after
+   * tossup 5 owes the break after tossup 10 next, and its scoresheet still says — correctly — that
+   * it stopped once rather than twice. See `ProcedureExceptions`.
+   */
+  breaksSkipped = 0,
 ): IRoomBreak | undefined {
-  return roomBreaks(procedure)[breaksTaken.length];
+  return roomBreaks(procedure)[breaksTaken.length + Math.max(0, breaksSkipped)];
 }
 
 /**
@@ -203,8 +211,9 @@ export function roomBreakDue(
   procedure: IRoomProcedure | undefined,
   breaksTaken: readonly number[],
   lastPlayedQuestion: number,
+  breaksSkipped = 0,
 ): IRoomBreak | undefined {
-  const next = roomBreakUpcoming(procedure, breaksTaken);
+  const next = roomBreakUpcoming(procedure, breaksTaken, breaksSkipped);
   return next !== undefined && next.afterTossup <= lastPlayedQuestion ? next : undefined;
 }
 
@@ -218,9 +227,10 @@ export function roomMayBreakNow(
   procedure: IRoomProcedure | undefined,
   breaksTaken: readonly number[],
   lastPlayedQuestion: number,
+  breaksSkipped = 0,
 ): boolean {
   if (roomBreaksAreScheduled(procedure)) {
-    return roomBreakDue(procedure, breaksTaken, lastPlayedQuestion) !== undefined;
+    return roomBreakDue(procedure, breaksTaken, lastPlayedQuestion, breaksSkipped) !== undefined;
   }
   return procedure?.halves === true;
 }
@@ -256,9 +266,10 @@ export function roomBreakLabel(
 export function roomBreakTaken(
   procedure: IRoomProcedure | undefined,
   breaksTakenCount: number,
+  breaksSkipped = 0,
 ): IRoomBreak | undefined {
   if (breaksTakenCount < 1) return undefined;
-  return roomBreaks(procedure)[breaksTakenCount - 1];
+  return roomBreaks(procedure)[breaksTakenCount - 1 + Math.max(0, breaksSkipped)];
 }
 
 /** `"5, 10 or 15"` — the breaks as a phrase, for a sentence about when the room stops. */

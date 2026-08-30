@@ -41,6 +41,7 @@
  * same `IDerivedGame` the screen is drawn from.
  */
 import { createPortal } from 'react-dom';
+import { procedureExceptionLine } from '../scoring/ProcedureExceptions';
 import { IDerivedGame, IDerivedQuestion } from '../scoring/deriveGame';
 import { IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
 import { LeftOrRight } from '../scoring/types';
@@ -255,10 +256,18 @@ export default function PrintableScoresheet(props: {
         </table>
       ))}
 
-      {game.notes.length > 0 && (
+      {(game.notes.length > 0 || game.procedureExceptions.length > 0) && (
         <section className="printable-notes">
           <h2>Notes</h2>
           <ul>
+            {/*
+              A ruling that let the room do something its procedure does not is exactly the thing a
+              director asks about afterwards, so it belongs on the sheet that gets handed over rather
+              than only in the file. Same sentence as everywhere else; see `ProcedureExceptions`.
+            */}
+            {game.procedureExceptions.map((exception) => (
+              <li key={exception.eventId}>{procedureExceptionLine(exception)}</li>
+            ))}
             {game.notes.map((note) => (
               <li key={`${note.questionNumber}-${note.text}`}>
                 Q{note.questionNumber}: {note.text}

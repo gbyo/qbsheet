@@ -70,13 +70,7 @@ import PlayersDialog, { rosterSyncKey } from './PlayersDialog';
 import StartingLineupPrompt from './StartingLineupPrompt';
 import PreSubmitReview, { HalftimeCheck } from './PreSubmitReview';
 import { AdjustDialog, ForfeitDialog, LightningDialog, NotesDialog } from './GameDialogs';
-import {
-  EndGameEarlyDialog,
-  GameDetailsDialog,
-  ProtestDialog,
-  ReplaceQuestionDialog,
-  TimeoutDialog,
-} from './ProcedureDialogs';
+import { EndGameEarlyDialog, ProtestDialog, ReplaceQuestionDialog, TimeoutDialog } from './ProcedureDialogs';
 import { IGameEventsApi, newEventId } from './useGameEvents';
 import {
   ExportDialog,
@@ -91,6 +85,19 @@ import {
 import PrintableScoresheet from './PrintableScoresheet';
 import usePrinting from './usePrinting';
 import ScoringRulesCorrectionDialog, { IScoringRulesCorrection } from './ScoringRulesCorrectionDialog';
+import GameDetailsDialog from './GameDetailsDialog';
+import ProcedureCorrectionDialog, {
+  IProcedureExceptionInput,
+  ProcedureTopic,
+} from './ProcedureCorrectionDialog';
+import {
+  correctionNote,
+  correctionSummary,
+  IGameCorrection,
+  IProposedGameCorrection,
+} from '../scoring/gameCorrection';
+import { correctPlayerName, correctTeamName } from '../scoring/identityCorrection';
+import canApplyScoreEvent from '../scoring/canApplyScoreEvent';
 import { attachScorerRecovery } from './ScorerRecovery';
 import useRoomClock from './useRoomClock';
 import usePlayerSeating from './usePlayerSeating';
@@ -120,6 +127,8 @@ import MotionNumber, {
   recentMotionMs,
 } from './ScoringMotion';
 import { bouncebackNeedsTypedEntry, bouncebackOptions, regularBonusTotals } from './bonusOptions';
+import { extraTimeoutsGranted, substitutionAllowed } from '../scoring/ProcedureExceptions';
+import removeOvertime, { overtimeQuestionNumbers, overtimeRemovalNote } from '../scoring/overtimeCorrection';
 
 export type { IScorerAlert, IScorerRecoveryStatus } from './ConnectionStatus';
 
@@ -186,17 +195,26 @@ export interface IScorerProps {
    */
   onDownloadForm?: (game: IDerivedGame, form: 'partial' | 'legacy-match') => void;
   /**
-   * Apply corrected scoring rules to this game.
+   * Apply a correction to this game's own definition: its rules, its procedure, its names.
    *
    * Absent when nothing above the scorer can persist the change — the practice screen, chiefly, whose
-   * format belongs to the scenario rather than to a tournament. An absent callback removes the menu
-   * entry rather than disabling it, exactly as `onDownloadForm` does. See `formatCorrection`.
+   * format belongs to the scenario rather than to a tournament. An absent callback removes the action
+   * beside each Game details row rather than disabling it, exactly as `onDownloadForm` does for the
+   * menu. See `gameCorrection`.
    */
-  onCorrectScoringRules?: (correction: IScoringRulesCorrection) => void | Promise<void>;
+  onCorrectGame?: (correction: IGameCorrection) => void | Promise<void>;
   /** Called as the game changes, so tournament control can watch progress. */
   onProgress?: (qbj: object, questionsPlayed: number) => void;
   /** Round number and the rest of the non-scoring metadata for the exported match. */
   qbjMeta?: IQbjMatchMeta;
+  /**
+   * The tournament's own player ids, keyed by team and player name.
+   *
+   * Passed in only so a name correction can re-key them rather than dropping them; see
+   * `identityCorrection`. Nothing on this screen reads them otherwise, and a game that arrived
+   * without any simply has none.
+   */
+  qbjPlayerIds?: Record<string, string>;
   /** Sends an operational issue to tournament control for the assigned-room workflow. */
   onRequestControl?: (category: HelpRequestCategory, message: string) => Promise<HelpRequestResult>;
   controlRequest?: ControlRequestState;
@@ -252,6 +270,7 @@ type OpenDialog =
   | 'connection'
   | 'scoring-rules'
   | 'export'
+  | 'procedure'
   | null;
 
 /** How often, at most, to tell tournament control how the game is going. Matches MODAQ's old timer. */
@@ -540,9 +559,10 @@ export default function Scorer(props: IScorerProps) {
     onSubmit,
     onDownload,
     onDownloadForm,
-    onCorrectScoringRules,
+    onCorrectGame,
     onProgress,
     qbjMeta,
+    qbjPlayerIds,
     onRequestControl,
     controlRequest: suppliedControlRequest,
     onRetryControlRequest,
@@ -571,6 +591,14 @@ export default function Scorer(props: IScorerProps) {
   );
 
   const [dialog, setDialog] = useState<OpenDialog>(null);
+  /**
+   * What the procedure dialog was opened about.
+   *
+   * Set only when a refusal sent the scorekeeper there; see `ScoreEventEscape`. Undefined means they
+   * arrived from Game details, where they have already said which half of the question they want.
+   */
+  const [procedureTopic, setProcedureTopic] = useState<ProcedureTopic | undefined>(undefined);
+  const [procedureTeam, setProcedureTeam] = useState<LeftOrRight | undefined>(undefined);
   // Mounts the paper copy for the length of a print and not otherwise. See `usePrinting`.
   const { printing, print } = usePrinting();
   /**
@@ -1439,6 +1467,17 @@ export default function Scorer(props: IScorerProps) {
   }, [dialog, bonusStage, phase.kind, playBlockedByProtest, format, anyNegAvailable]);
 
   const lineupChangeAllowed = lineupChangeAllowedAtPhase(substitutionPolicy(procedure), phase.kind);
+  /**
+   * A lineup change somebody authorized for this team but the procedure would not otherwise offer.
+   *
+   * The screen has to know as well as the guard does. A room that records a director's ruling and
+   * then finds Sub still greyed out has been given a way in and no way through, which is the dead
+   * end this whole route exists to remove.
+   */
+  const lineupChangeAuthorized: Record<LeftOrRight, boolean> = {
+    left: phase.kind !== 'complete' && substitutionAllowed(events.events, 'left'),
+    right: phase.kind !== 'complete' && substitutionAllowed(events.events, 'right'),
+  };
   const rosterAdditionAllowed = phase.kind !== 'complete';
   const substitutionMessage =
     phase.kind === 'complete'
@@ -1561,32 +1600,190 @@ export default function Scorer(props: IScorerProps) {
   const downloadQbj = useCallback(() => onDownload(qbj), [onDownload, qbj]);
 
   /**
-   * Apply a rules correction, and leave a record of it in the game itself.
+   * Apply a correction to the game's definition, and leave a record of it in the game itself.
    *
    * The note is the whole reason this is not the prop passed straight down. A result whose scores
-   * were repriced mid-game and says nothing about it is a result that looks, to whoever imports it on
-   * Monday, exactly like one scored wrong. A note event travels into the QBJ with everything else, so
-   * the answer is in the document rather than in somebody's memory of the morning.
+   * were repriced, or whose roster was renamed, mid-game and says nothing about it is a result that
+   * looks, to whoever imports it on Monday, exactly like one scored wrong. A note event travels into
+   * the QBJ with everything else, so the answer is in the document rather than in somebody's memory
+   * of the morning.
    *
    * Written into the history handed upward rather than appended through `events.append`, because the
-   * two have to be persisted together: `ScoringScreen` writes this array and the corrected format as
-   * one operation, and an `append` here would be a third write racing the other two.
+   * two have to be persisted together: `ScoringScreen` writes this array and the corrected definition
+   * as one operation, and an `append` here would be a third write racing the other two.
    */
-  const applyScoringRulesCorrection = async (correction: IScoringRulesCorrection) => {
-    if (!onCorrectScoringRules) return;
-    const summary = correction.changes.map((change) => `${change.subject}: ${change.detail}`).join('; ');
+  const applyCorrection = async (correction: IProposedGameCorrection) => {
+    if (!onCorrectGame) return;
     const note: ScoreEvent = {
       id: newEventId(),
       // `currentQuestion`, not `lastPlayedQuestion`: cycles are 1-based, and a correction made
       // before the first tossup has been scored would otherwise file its note against question zero.
       questionNumber: currentQuestion,
       type: 'note',
-      text: summary === '' ? 'Scoring rules corrected.' : `Scoring rules corrected — ${summary}.`,
+      text: correction.summary === '' ? correctionNote('The game was corrected') : correction.summary,
     };
-    // The note goes on `events` and deliberately not on `previousEvents`: the second is the history
-    // to restore if the write is refused, and a game that was not corrected must not come back
-    // carrying a note saying it was.
-    await onCorrectScoringRules({ ...correction, events: [...correction.events, note] });
+    await onCorrectGame({
+      ...correction,
+      events: [...correction.events, note],
+      /*
+       * The way back, supplied here because this is the only place that still knows it.
+       *
+       * The host writes the history and the definition to two different storages and the second can
+       * be refused after the first has been accepted; see `correctGame` in `ScoringScreen` for what
+       * that leaves behind. Nothing about a rewritten array says where it came from, so the way back
+       * has to travel with it.
+       *
+       * The note goes on `events` and deliberately not on `previousEvents`: the second is the
+       * history to restore if the write is refused, and a game that was not corrected must not come
+       * back carrying a note saying it was.
+       *
+       * `previousSetup` only when the correction rewrote the rosters. A correction that left them
+       * alone must not hand back a `setup` for the journal to rewrite on the way out.
+       */
+      previousEvents: events.events,
+      previousSetup: correction.setup ? setup : undefined,
+    });
+  };
+
+  const applyScoringRulesCorrection = async (correction: IScoringRulesCorrection) => {
+    const detail = correctionSummary(correction.changes);
+    await applyCorrection({
+      ...correction,
+      summary: correctionNote(detail === '' ? 'Scoring rules updated' : `Scoring rules: ${detail}`),
+    });
+  };
+
+  /**
+   * The two name corrections, computed by the engine and persisted by the host.
+   *
+   * Both run the pure function first and only then write, so a refusal — a name that would make the
+   * two teams indistinguishable, a merge nobody asked for — never reaches persistence at all. The
+   * preview functions beside them are the same calls with the write left off, which is how the field
+   * can complain while somebody is still typing rather than at Save.
+   */
+  const teamNameProblem = (side: LeftOrRight, name: string): string[] => {
+    const attempt = correctTeamName({ setup, events: events.events }, side, name);
+    return attempt.ok ? [] : attempt.problems;
+  };
+  const playerNameProblem = (side: LeftOrRight, from: string, to: string) => {
+    const attempt = correctPlayerName({ setup, events: events.events }, side, from, to);
+    if (attempt.ok) return { problems: [] };
+    return {
+      problems: attempt.problems,
+      ...(attempt.mergeAvailable
+        ? {
+            mergeWith: setup[side].players.find(
+              (player) => player.trim().toLowerCase() === to.trim().toLowerCase(),
+            ),
+          }
+        : {}),
+    };
+  };
+  const applyTeamNameCorrection = async (side: LeftOrRight, name: string) => {
+    const attempt = correctTeamName({ setup, events: events.events, playerIds: qbjPlayerIds }, side, name);
+    if (!attempt.ok || attempt.changes.length === 0) return;
+    await applyCorrection({
+      events: attempt.events,
+      setup: attempt.setup,
+      ...(attempt.playerIds ? { playerIds: attempt.playerIds } : {}),
+      changes: attempt.changes,
+      summary: attempt.summary,
+    });
+  };
+  const applyPlayerNameCorrection = async (side: LeftOrRight, from: string, to: string, merge: boolean) => {
+    const attempt = correctPlayerName(
+      { setup, events: events.events, playerIds: qbjPlayerIds },
+      side,
+      from,
+      to,
+      { merge },
+    );
+    if (!attempt.ok || attempt.changes.length === 0) return;
+    await applyCorrection({
+      events: attempt.events,
+      setup: attempt.setup,
+      ...(attempt.playerIds ? { playerIds: attempt.playerIds } : {}),
+      changes: attempt.changes,
+      summary: attempt.summary,
+    });
+  };
+
+  /**
+   * Whether the engine would accept this exception, asked before the form offers to record it.
+   *
+   * The same guard the append goes through, so the dialog cannot present a grant that Save would
+   * then refuse — and so the one grant the engine genuinely will not make (lengthening regulation
+   * after overtime has begun) explains itself in the form rather than as a rejected action.
+   */
+  const exceptionRefusal = (input: IProcedureExceptionInput): string | undefined => {
+    const verdict = canApplyScoreEvent(
+      { format, setup, procedure },
+      events.events,
+      {
+        id: 'procedure-exception-preview',
+        type: 'procedure-exception',
+        questionNumber: currentQuestion,
+        allowance: input.allowance,
+        authority: input.authority,
+        reason: input.reason,
+        ...(input.team ? { team: input.team } : {}),
+      },
+      game,
+    );
+    return verdict.ok ? undefined : verdict.reason;
+  };
+
+  const recordProcedureException = (input: IProcedureExceptionInput) => {
+    if (submitting) return;
+    const accepted = record({
+      id: newEventId(),
+      type: 'procedure-exception',
+      questionNumber: currentQuestion,
+      allowance: input.allowance,
+      authority: input.authority,
+      reason: input.reason,
+      ...(input.team ? { team: input.team } : {}),
+    });
+    if (accepted) acknowledge('Recorded what the room was told.', currentQuestion);
+  };
+
+  const applyProcedureCorrection = async (next: IRoomProcedure, summary: string) => {
+    await applyCorrection({
+      events: events.events,
+      procedure: next,
+      changes: [],
+      summary,
+    });
+  };
+
+  /**
+   * Strike out an overtime a correction has made unnecessary.
+   *
+   * The note goes in with the removal rather than after it, so the two are one write and the result
+   * can never hold the second without the first. See `overtimeCorrection`.
+   */
+  const removeOvertimeTossups = () => {
+    if (submitting) return;
+    const removed = overtimeQuestionNumbers(game);
+    const next = removeOvertime(events.events, game);
+    if (next.length === events.events.length) return;
+    const applied = events.correctHistory([
+      ...next,
+      {
+        id: newEventId(),
+        type: 'note',
+        questionNumber: currentQuestion,
+        text: overtimeRemovalNote(removed),
+      },
+    ]);
+    if (applied) acknowledge('Overtime struck out. The score is regulation alone.');
+  };
+
+  /** Open the procedure dialog on whatever was just refused, or on nothing in particular. */
+  const openProcedureDialog = (topic?: ProcedureTopic, team?: LeftOrRight) => {
+    setProcedureTopic(topic);
+    setProcedureTeam(team);
+    setDialog('procedure');
   };
 
   // `onRedo` intentionally closes over the scorer's event/motion refs; it is invoked by the menu,
@@ -1605,7 +1802,7 @@ export default function Scorer(props: IScorerProps) {
     canRedo: events.canRedo,
     onRedo: redoWithFeedback,
     canDownloadForms: onDownloadForm !== undefined,
-    canCorrectScoringRules: onCorrectScoringRules !== undefined,
+    canCorrectGame: onCorrectGame !== undefined,
     openDialog: (next) => {
       setDialog(next);
     },
@@ -1756,6 +1953,22 @@ export default function Scorer(props: IScorerProps) {
         fingerprint: events.rejection,
         tone: 'warning',
         message: events.rejection,
+        /*
+         * The way out of a dead end, and only where there is one.
+         *
+         * `rejectionEscape` is set by the guard for the refusals a *setting* caused, so this appears
+         * beside "Central A has already used its timeout" and never beside "Central A has already
+         * answered this tossup". Nothing renders for an ordinary refusal.
+         */
+        actions:
+          events.rejectionEscape !== undefined
+            ? [
+                {
+                  label: 'Procedure changed?',
+                  onSelect: () => openProcedureDialog(events.rejectionEscape),
+                },
+              ]
+            : undefined,
         priority: 24,
         // Keep a rejected score action discoverable until the next accepted event. It is easy to
         // miss while looking at the players, and silently losing it after a short timer would make
@@ -1860,6 +2073,7 @@ export default function Scorer(props: IScorerProps) {
     downloadQbj,
     events.clearRejection,
     events.rejection,
+    events.rejectionEscape,
     onCancelControlRequest,
     onRetryControlRequest,
     operationNotice,
@@ -2053,7 +2267,7 @@ export default function Scorer(props: IScorerProps) {
                 onWrongNoPenalty={(playerName) => recordWrongNoPenalty('left', playerName)}
                 onSubstitute={(outgoing, incoming) => substituteFromRow('left', outgoing, incoming)}
                 benchPlayers={benchFor('left')}
-                substitutionAllowed={lineupChangeAllowed}
+                substitutionAllowed={lineupChangeAllowed || lineupChangeAuthorized.left}
                 substitutionBlockedReason={lineupChangeReason}
                 substitutionQuestionNumber={lineupQuestion}
               />
@@ -2073,7 +2287,7 @@ export default function Scorer(props: IScorerProps) {
                 onWrongNoPenalty={(playerName) => recordWrongNoPenalty('right', playerName)}
                 onSubstitute={(outgoing, incoming) => substituteFromRow('right', outgoing, incoming)}
                 benchPlayers={benchFor('right')}
-                substitutionAllowed={lineupChangeAllowed}
+                substitutionAllowed={lineupChangeAllowed || lineupChangeAuthorized.right}
                 substitutionBlockedReason={lineupChangeReason}
                 substitutionQuestionNumber={lineupQuestion}
               />
@@ -2316,8 +2530,12 @@ export default function Scorer(props: IScorerProps) {
           timeouts={game.timeouts}
           timeoutsPerTeam={procedure?.timeoutsPerTeam ?? 0}
           lineupChangeAllowed={lineupChangeAllowed}
+          lineupChangeAuthorized={lineupChangeAuthorized}
           rosterAdditionAllowed={rosterAdditionAllowed}
           lineupChangeReason={lineupChangeReason}
+          // Only rendered when a lineup change is currently refused, which is a phase an ordinary
+          // game passes through without ever opening this dialog.
+          onProcedureQuery={() => openProcedureDialog('substitution-opportunity')}
           seating={seating.seating}
           onMovePlayer={(team, visibleNames, playerName, direction) => {
             if (submitting) return;
@@ -2503,6 +2721,7 @@ export default function Scorer(props: IScorerProps) {
             return applied;
           }}
           onOpenReplacement={openReplacementAt}
+          onRemoveOvertime={submitting ? undefined : removeOvertimeTossups}
           onClose={() => {
             setDialog(null);
             setReviewFocus(undefined);
@@ -2581,6 +2800,13 @@ export default function Scorer(props: IScorerProps) {
         <TimeoutDialog
           game={game}
           timeoutsPerTeam={procedure?.timeoutsPerTeam ?? 0}
+          extraTimeouts={{
+            left: extraTimeoutsGranted(events.events, 'left'),
+            right: extraTimeoutsGranted(events.events, 'right'),
+          }}
+          // Offered only from the team that has actually run out; see `TimeoutDialog`. There is no
+          // such control on a team with a timeout left, which is every team in an ordinary game.
+          onProcedureQuery={(team) => openProcedureDialog('timeout-allowance', team)}
           onRecord={(team) =>
             record({
               id: newEventId(),
@@ -2671,9 +2897,20 @@ export default function Scorer(props: IScorerProps) {
       )}
       {dialog === 'details' && (
         <GameDetailsDialog
+          identity={{ tournamentName, roundName, roomName, packetName }}
+          game={game}
+          format={format}
+          procedure={procedure}
+          events={events.events}
           moderator={moderatorName}
           scorekeeper={operatorName ?? ''}
-          onSave={setModeratorName}
+          onSaveModerator={setModeratorName}
+          onCorrectTeamName={onCorrectGame && !submitting ? applyTeamNameCorrection : undefined}
+          onCorrectPlayerName={onCorrectGame && !submitting ? applyPlayerNameCorrection : undefined}
+          teamNameProblem={teamNameProblem}
+          playerNameProblem={playerNameProblem}
+          onCorrectScoringRules={onCorrectGame && !submitting ? () => setDialog('scoring-rules') : undefined}
+          onCorrectProcedure={onCorrectGame && !submitting ? () => openProcedureDialog() : undefined}
           onClose={() => setDialog(null)}
         />
       )}
@@ -2683,6 +2920,24 @@ export default function Scorer(props: IScorerProps) {
           onDownloadPartialQbj={onDownloadForm ? () => onDownloadForm(game, 'partial') : undefined}
           onDownloadLegacyQbj={onDownloadForm ? () => onDownloadForm(game, 'legacy-match') : undefined}
           onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog === 'procedure' && (
+        <ProcedureCorrectionDialog
+          game={game}
+          events={events.events}
+          procedure={procedure}
+          topic={procedureTopic}
+          team={procedureTeam}
+          disabled={submitting}
+          refusalFor={exceptionRefusal}
+          onRecordException={recordProcedureException}
+          onCorrect={applyProcedureCorrection}
+          onClose={() => {
+            setProcedureTopic(undefined);
+            setProcedureTeam(undefined);
+            setDialog(null);
+          }}
         />
       )}
       {dialog === 'connection' && (
@@ -2714,7 +2969,7 @@ export default function Scorer(props: IScorerProps) {
           operatorName={operatorName}
         />
       )}
-      {dialog === 'scoring-rules' && onCorrectScoringRules && (
+      {dialog === 'scoring-rules' && onCorrectGame && (
         <ScoringRulesCorrectionDialog
           format={format}
           events={events.events}

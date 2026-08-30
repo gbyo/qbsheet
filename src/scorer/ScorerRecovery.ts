@@ -1,5 +1,6 @@
 import { IGameSetup } from '../scoring/deriveGame';
-import { ScoreEvent } from '../scoring/ScoreEvents';
+import { ProcedureAllowance, ScoreEvent } from '../scoring/ScoreEvents';
+import { procedureAllowances } from '../scoring/ProcedureExceptions';
 
 export const scorerRecoveryKey = '_yf_scorekeeper_recovery';
 export const scorerRecoveryVersion = 1;
@@ -33,10 +34,12 @@ const eventTypes = new Set([
   'end-game-early',
   'adjustment',
   'forfeit',
+  'procedure-exception',
   'note',
 ]);
 
 const protestSubjects = new Set(['tossup-answer', 'bonus-answer', 'question', 'procedure', 'other']);
+const procedureAuthorities = new Set(['tournament-director', 'moderator', 'other']);
 const protestStatuses = new Set(['open', 'upheld', 'declined', 'withdrawn']);
 
 function validTeam(value: unknown): value is 'left' | 'right' {
@@ -173,6 +176,15 @@ export function validEvent(value: unknown): value is ScoreEvent {
       typeof event.reason === 'string' &&
       Number.isInteger(event.tossupsRead) &&
       Number(event.tossupsRead) >= 0
+    );
+  if (event.type === 'procedure-exception')
+    return (
+      procedureAllowances.includes(event.allowance as ProcedureAllowance) &&
+      procedureAuthorities.has(String(event.authority)) &&
+      typeof event.reason === 'string' &&
+      event.reason.trim() !== '' &&
+      (event.playerName === undefined ||
+        (typeof event.playerName === 'string' && event.playerName.trim() !== ''))
     );
   return true;
 }

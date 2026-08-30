@@ -24,7 +24,7 @@ import { ScoreEvent } from '../scoring/ScoreEvents';
 import deriveGame, { IGameSetup } from '../scoring/deriveGame';
 import { IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
 import { IRoomProcedure } from '../scoring/RoomProcedure';
-import { applyScoreEvents } from '../scoring/canApplyScoreEvent';
+import { applyScoreEvents, ScoreEventEscape } from '../scoring/canApplyScoreEvent';
 import {
   IEditableQuestion,
   eventsFromEditableQuestion,
@@ -70,6 +70,17 @@ export interface IGameEventsApi {
   replaceQuestion: (questionNumber: number, question: IEditableQuestion) => boolean;
   /** Replace the game from a verified recovery file. */
   restore: (restored: ScoreEvent[]) => void;
+  /**
+   * Replace the whole history with a corrected one, if it is coherent.
+   *
+   * For the corrections that are not about a single question and not about the game's definition —
+   * striking out an overtime a protest has just made unnecessary is the one that exists. Validated
+   * as a whole through `validateCorrectedHistory` rather than through `canApplyScoreEvent`, for the
+   * reason `replaceQuestion` is: this is editing what happened, and no forward transition allows it.
+   *
+   * @returns whether it was accepted. `rejection` says why when it was not.
+   */
+  correctHistory: (next: ScoreEvent[]) => boolean;
   canUndo: boolean;
   canRedo: boolean;
   /** False when the last write to local storage was refused, so nothing promises the game is safe. */
@@ -78,6 +89,14 @@ export interface IGameEventsApi {
   savedAt: number | null;
   /** Why the last action was refused, if it was. Cleared by the next accepted one. */
   rejection: string;
+  /**
+   * The configured rule behind the refusal, when a setting caused it.
+   *
+   * The seam that lets a dead end become a door: the scorer renders one quiet secondary action
+   * beside the refusal, and only for the refusals that name a rule somebody could have been told
+   * wrong. See `ScoreEventEscape`.
+   */
+  rejectionEscape?: ScoreEventEscape;
   clearRejection: () => void;
 }
 
@@ -116,12 +135,18 @@ export default function useGameEvents(
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [history, setHistory] = useState({ canUndo: false, canRedo: false });
   const [rejection, setRejection] = useState('');
+  const [rejectionEscape, setRejectionEscape] = useState<ScoreEventEscape | undefined>(undefined);
   /** The authority. State follows it; it never follows state. See the note at the top of the file. */
   const current = useRef<ScoreEvent[]>(initialEvents);
   /** Sizes of the actions that can be undone, oldest first. */
   const undoStack = useRef<UndoFrame[]>([]);
   /** Events taken off by undo, newest action last, so redo can put them back. */
   const redoStack = useRef<ScoreEvent[][]>([]);
+  /** Both halves of a refusal go together: an escape route with no refusal beside it is noise. */
+  const clearRejectionState = useCallback(() => {
+    setRejection('');
+    setRejectionEscape(undefined);
+  }, []);
   const syncHistory = useCallback(() => {
     setHistory({ canUndo: undoStack.current.length > 0, canRedo: redoStack.current.length > 0 });
   }, []);
@@ -144,15 +169,16 @@ export default function useGameEvents(
       const result = applyScoreEvents({ format, setup, procedure }, current.current, added);
       if (!result.ok) {
         setRejection(result.reason);
+        setRejectionEscape(result.escape);
         return false;
       }
-      setRejection('');
+      clearRejectionState();
       undoStack.current.push(added.length);
       redoStack.current = [];
       commit(result.events);
       return true;
     },
-    [commit, format, procedure, setup],
+    [clearRejectionState, commit, format, procedure, setup],
   );
 
   const undo = useCallback(() => {
@@ -162,19 +188,19 @@ export default function useGameEvents(
     const cut = Math.max(0, existing.length - frame);
     const removed = existing.slice(cut);
     redoStack.current.push(removed);
-    setRejection('');
+    clearRejectionState();
     commit(existing.slice(0, cut));
     return removed;
-  }, [commit]);
+  }, [clearRejectionState, commit]);
 
   const redo = useCallback(() => {
     const frame = redoStack.current.pop();
     if (frame === undefined) return null;
     undoStack.current.push(frame.length);
-    setRejection('');
+    clearRejectionState();
     commit(current.current.concat(frame));
     return frame;
-  }, [commit]);
+  }, [clearRejectionState, commit]);
 
   /**
    * Editing an earlier question is not undoable in the same sense — there is no "before" to step
@@ -189,10 +215,10 @@ export default function useGameEvents(
     (id: string, nextEvent: ScoreEvent) => {
       undoStack.current = [];
       redoStack.current = [];
-      setRejection('');
+      clearRejectionState();
       commit(current.current.map((event) => (event.id === id ? nextEvent : event)));
     },
-    [commit],
+    [clearRejectionState, commit],
   );
 
   const replaceQuestion = useCallback(
@@ -201,6 +227,7 @@ export default function useGameEvents(
       const questionErrors = validateEditableQuestion(format, currentGame, question);
       if (questionErrors.length > 0) {
         setRejection(questionErrors[0]);
+        setRejectionEscape(undefined);
         return false;
       }
       const proposed = replaceQuestionEvents(
@@ -211,38 +238,56 @@ export default function useGameEvents(
       const validation = validateCorrectedHistory(format, setup, proposed, procedure);
       if (validation.blockers.length > 0) {
         setRejection(validation.blockers[0].message);
+        setRejectionEscape(undefined);
         return false;
       }
       undoStack.current = [];
       redoStack.current = [];
-      setRejection('');
+      clearRejectionState();
       commit(proposed);
       return true;
     },
-    [commit, format, procedure, setup],
+    [clearRejectionState, commit, format, procedure, setup],
   );
 
   const remove = useCallback(
     (id: string) => {
       undoStack.current = [];
       redoStack.current = [];
-      setRejection('');
+      clearRejectionState();
       commit(current.current.filter((event) => event.id !== id));
     },
-    [commit],
+    [clearRejectionState, commit],
+  );
+
+  const correctHistory = useCallback(
+    (next: ScoreEvent[]) => {
+      const validation = validateCorrectedHistory(format, setup, next, procedure);
+      if (validation.blockers.length > 0) {
+        setRejection(validation.blockers[0].message);
+        setRejectionEscape(undefined);
+        return false;
+      }
+      undoStack.current = [];
+      redoStack.current = [];
+      clearRejectionState();
+      commit(next.map((event) => ({ ...event })));
+      return true;
+    },
+    [clearRejectionState, commit, format, procedure, setup],
   );
 
   const restore = useCallback(
     (restored: ScoreEvent[]) => {
       undoStack.current = [];
       redoStack.current = [];
-      setRejection('');
+      clearRejectionState();
       commit(restored.map((event) => ({ ...event })));
     },
-    [commit],
+    [clearRejectionState, commit],
   );
 
-  const clearRejection = useCallback(() => setRejection(''), []);
+  const clearRejection = clearRejectionState;
 
   return useMemo(
     () => ({
@@ -254,11 +299,13 @@ export default function useGameEvents(
       remove,
       replaceQuestion,
       restore,
+      correctHistory,
       canUndo: history.canUndo,
       canRedo: history.canRedo,
       saved,
       savedAt,
       rejection,
+      rejectionEscape,
       clearRejection,
     }),
     [
@@ -270,10 +317,12 @@ export default function useGameEvents(
       remove,
       replaceQuestion,
       restore,
+      correctHistory,
       history,
       saved,
       savedAt,
       rejection,
+      rejectionEscape,
       clearRejection,
     ],
   );
