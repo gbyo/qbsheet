@@ -2287,7 +2287,9 @@ describe('operation notices', () => {
 
     expect(screen.getByText('Recovered the in-progress game saved on this device.')).toBeTruthy();
     const dismiss = screen.getByRole('button', { name: 'Dismiss recovery notice' });
-    expect(dismiss).toHaveTextContent('×');
+    // The × is drawn by .scorer-notice-dismiss::before, so it is a class here rather than text.
+    expect(dismiss.classList.contains('scorer-notice-dismiss')).toBe(true);
+    expect(dismiss.textContent).toBe('');
 
     fireEvent.click(dismiss);
 
