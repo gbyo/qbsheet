@@ -19,7 +19,7 @@ import {
   readStoredRecord,
   upgradeSteps,
 } from '../src/game/GameRecordUpgrade';
-import { GameStore, IStoredGameRecord, isActive } from '../src/game/GameStore';
+import { GameRecordConflictError, GameStore, IStoredGameRecord, isActive } from '../src/game/GameStore';
 import { IRecordStore, MemoryRecordStore } from '../src/persistence/GameDatabase';
 import deriveGame from '../src/scoring/deriveGame';
 import { validPackage } from './packages';
@@ -367,6 +367,28 @@ describe('the store, across a version change', () => {
     // But still there, so the build that wrote it finds it again. This is the assertion the old
     // implementation would have failed at the next prune.
     expect(await records.list()).toHaveLength(1);
+  });
+
+  test('a create cannot overwrite an unreadable record that owns its local id', async () => {
+    const records = new MemoryRecordStore<IStoredGameRecord>();
+    const packageValue = validPackage();
+    const setup = setupFromPackage(packageValue);
+    const seeded = await new GameStore(records).create({
+      package: packageValue,
+      setup,
+      connected: false,
+    });
+    // Simulate a later build having written the same record. `list()` will intentionally omit it,
+    // but an import that picked the same first-attempt id must still leave its raw bytes alone.
+    await records.put({ ...seeded, version: gameRecordVersion + 99 });
+
+    await expect(
+      new GameStore(records).create({ package: packageValue, setup, connected: false }),
+    ).rejects.toEqual(expect.objectContaining({ name: 'GameRecordConflictError', recordId: seeded.id }));
+    await expect(
+      new GameStore(records).create({ package: packageValue, setup, connected: false }),
+    ).rejects.toBeInstanceOf(GameRecordConflictError);
+    expect(await records.get(seeded.id)).toMatchObject({ id: seeded.id, version: gameRecordVersion + 99 });
   });
 
   test('a record this build cannot read survives a prune', async () => {

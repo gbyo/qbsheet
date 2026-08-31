@@ -35,6 +35,11 @@ export interface IScorerKeyboardInput {
   dialogOpen: boolean;
   /** True when a tossup may be recorded as unanswered. Preserves the existing Space behaviour. */
   noBuzzAllowed: boolean;
+  /**
+   * Identity of the visible seat layout. A pending seat belongs to one layout and must not survive
+   * a presentation-only reordering (for example, swapping the teams on screen).
+   */
+  seatLayoutKey?: string;
   onBuzz: (side: LeftOrRight, playerName: string, answerType: IScorekeeperAnswerType) => void;
   /** Record a wrong answer that costs nothing and still uses the player's chance. */
   onWrongNoPenalty: (side: LeftOrRight, playerName: string) => void;
@@ -106,6 +111,10 @@ export default function useScorerKeyboard(input: IScorerKeyboardInput): void {
   useEffect(() => {
     if (input.dialogOpen || !input.scoringEnabled || !input.keyboardEnabled) clearPending();
   }, [input.dialogOpen, input.scoringEnabled, input.keyboardEnabled, clearPending]);
+
+  useLayoutEffect(() => {
+    clearPending();
+  }, [input.seatLayoutKey, clearPending]);
 
   useEffect(() => {
     const armPending = (seat: IPendingSeat) => {

@@ -24,9 +24,26 @@ import { IGameSetup } from '../scoring/deriveGame';
 import { validEvent, validSetup } from './ScorerRecovery';
 
 /** Bumped when the stored shape changes. An unrecognized version is treated as no saved game. */
-export const gameSessionVersion = 1;
+export const gameSessionVersion = 2;
+/** The shape written before action-level recovery metadata existed. */
+export const legacyGameSessionVersion = 1;
 
-const storagePrefix = `yellowfruit.room.game.v${gameSessionVersion}.`;
+/*
+ * Keep the original key as the write location. The shape, rather than the key, is versioned: this
+ * lets a v2 build upgrade a v1 journal in place without leaving a second copy of the same game
+ * behind. `loadGame` also checks the v2 key so a short-lived build that used versioned keys can be
+ * recovered safely.
+ */
+const storagePrefix = 'yellowfruit.room.game.v1.';
+const alternateStoragePrefix = `yellowfruit.room.game.v${gameSessionVersion}.`;
+
+/** The auxiliary undo/redo state. The event list remains the source of truth. */
+export interface IGameSessionHistory {
+  /** Sizes of user actions, oldest first. A frame may contain several events. */
+  undo: number[];
+  /** Events removed by undo, newest action last. */
+  redo: ScoreEvent[][];
+}
 
 /** Everything needed to put a half-scored game back on the screen. */
 export interface IStoredGame {
@@ -35,6 +52,8 @@ export interface IStoredGame {
   gameKey: string;
   setup: IGameSetup;
   events: ScoreEvent[];
+  /** Optional because v1 journals predate action history, and an empty history need not be written. */
+  history?: IGameSessionHistory;
   /** ISO 8601. Used to retire games left behind by a previous tournament. */
   updatedAt: string;
 }
@@ -65,6 +84,69 @@ function storageKey(gameKey: string): string {
   return `${storagePrefix}${gameKey}`;
 }
 
+function alternateStorageKey(gameKey: string): string {
+  return `${alternateStoragePrefix}${gameKey}`;
+}
+
+function copyHistory(history: IGameSessionHistory | undefined): IGameSessionHistory | undefined {
+  if (!history) return undefined;
+  return {
+    undo: history.undo.slice(),
+    redo: history.redo.map((frame) => frame.map((event) => ({ ...event }))),
+  };
+}
+
+/**
+ * Validate auxiliary action metadata without making it a second event journal.
+ *
+ * A bad frame is discarded as a whole. In particular, never trim or repair an undo frame: doing so
+ * would make the button remove a different action from the event list than the one the scorekeeper
+ * originally performed.
+ */
+function parseHistory(value: unknown, events: ScoreEvent[]): IGameSessionHistory | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const history = value as Partial<IGameSessionHistory>;
+  // Each stack is auxiliary on its own. Preserve a good stack when the other one is malformed, but
+  // never repair a bad frame or leave a malformed frame available to the scorer.
+  const undo = Array.isArray(history.undo)
+    ? history.undo.every((frame) => typeof frame === 'number' && Number.isInteger(frame) && frame > 0) &&
+      history.undo.reduce((sum, frame) => sum + frame, 0) <= events.length
+      ? history.undo.slice()
+      : []
+    : [];
+  const redo = Array.isArray(history.redo)
+    ? history.redo.every(
+        (frame) => Array.isArray(frame) && frame.length > 0 && frame.every((event) => validEvent(event)),
+      )
+      ? history.redo.map((frame) => frame.map((event) => ({ ...event })))
+      : []
+    : [];
+  return undo.length > 0 || redo.length > 0 ? { undo, redo } : undefined;
+}
+
+function parseStored(
+  raw: string | null,
+  gameKey: string,
+): (Omit<IStoredGame, 'updatedAt'> & { updatedAt: string }) | null {
+  if (!raw) return null;
+  const parsed = JSON.parse(raw) as Partial<IStoredGame>;
+  if (parsed?.version !== gameSessionVersion && parsed?.version !== legacyGameSessionVersion) return null;
+  if (parsed.gameKey !== gameKey) return null;
+  if (!Array.isArray(parsed.events) || !parsed.events.every(validEvent)) return null;
+  if (!validSetup(parsed.setup)) return null;
+  if (typeof parsed.updatedAt !== 'string') return null;
+  // Auxiliary metadata is explicitly best effort. A malformed history must not hide a usable game.
+  const history = parseHistory(parsed.history, parsed.events);
+  return {
+    version: gameSessionVersion,
+    gameKey,
+    setup: parsed.setup,
+    events: parsed.events,
+    ...(history ? { history } : {}),
+    updatedAt: parsed.updatedAt,
+  };
+}
+
 /**
  * Save the game as it stands.
  *
@@ -77,6 +159,7 @@ export function saveGame(
   events: ScoreEvent[],
   now: Date = new Date(),
   storage: IStorageLike | null = browserStorage(),
+  history?: IGameSessionHistory,
 ): boolean {
   if (!storage || gameKey === '') return false;
   const stored: IStoredGame = {
@@ -84,6 +167,9 @@ export function saveGame(
     gameKey,
     setup,
     events,
+    ...(history && (history.undo.length > 0 || history.redo.length > 0)
+      ? { history: copyHistory(history) }
+      : {}),
     updatedAt: now.toISOString(),
   };
   try {
@@ -109,27 +195,19 @@ export function loadGame(
 ): IStoredGame | null {
   if (!storage || gameKey === '') return null;
   try {
-    const raw = storage.getItem(storageKey(gameKey));
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<IStoredGame>;
-    if (parsed?.version !== gameSessionVersion) return null;
-    if (parsed.gameKey !== gameKey) return null;
-    if (!Array.isArray(parsed.events) || !parsed.events.every(validEvent)) return null;
-    if (!validSetup(parsed.setup)) return null;
-    if (typeof parsed.updatedAt !== 'string') return null;
-
-    const updated = new Date(parsed.updatedAt).getTime();
-    if (!Number.isFinite(updated)) return null;
-    const age = now.getTime() - updated;
-    if (age < 0 || age > gameSessionMaxAgeMs) return null;
-
-    return {
-      version: parsed.version,
-      gameKey,
-      setup: parsed.setup,
-      events: parsed.events,
-      updatedAt: parsed.updatedAt,
-    };
+    const candidates = [
+      parseStored(storage.getItem(alternateStorageKey(gameKey)), gameKey),
+      parseStored(storage.getItem(storageKey(gameKey)), gameKey),
+    ].filter((candidate): candidate is IStoredGame => candidate !== null);
+    const current = candidates
+      .map((candidate) => ({ candidate, updated: new Date(candidate.updatedAt).getTime() }))
+      .filter(({ updated }) => Number.isFinite(updated))
+      .filter(({ updated }) => {
+        const age = now.getTime() - updated;
+        return age >= 0 && age <= gameSessionMaxAgeMs;
+      })
+      .sort((first, second) => second.updated - first.updated)[0];
+    return current?.candidate ?? null;
   } catch {
     return null;
   }
@@ -139,6 +217,7 @@ export function loadGame(
 export function clearGame(gameKey: string, storage: IStorageLike | null = browserStorage()): void {
   try {
     storage?.removeItem(storageKey(gameKey));
+    storage?.removeItem(alternateStorageKey(gameKey));
   } catch {
     // The age check is the backstop.
   }
@@ -164,16 +243,50 @@ export function clearGame(gameKey: string, storage: IStorageLike | null = browse
  */
 export function exportJournals(storage: IStorageLike | null = browserStorage()): Record<string, string> {
   const found: Record<string, string> = {};
+  const timestamps = new Map<string, number | null>();
+  const prefixes = new Map<string, string>();
+  const timestampOf = (raw: string): number | null => {
+    try {
+      const updatedAt = (JSON.parse(raw) as { updatedAt?: unknown }).updatedAt;
+      const timestamp = typeof updatedAt === 'string' ? new Date(updatedAt).getTime() : NaN;
+      return Number.isFinite(timestamp) ? timestamp : null;
+    } catch {
+      return null;
+    }
+  };
   try {
     const enumerable = storage as
       (IStorageLike & { length?: number; key?: (index: number) => string | null }) | null;
     if (!enumerable || typeof enumerable.length !== 'number' || typeof enumerable.key !== 'function')
       return found;
     for (let index = 0; index < enumerable.length; index += 1) {
-      const key = enumerable.key(index);
-      if (key === null || !key.startsWith(storagePrefix)) continue;
+      const key: string | null = enumerable.key(index);
+      const prefix = key?.startsWith(alternateStoragePrefix)
+        ? alternateStoragePrefix
+        : key?.startsWith(storagePrefix)
+          ? storagePrefix
+          : null;
+      if (key === null || prefix === null) continue;
       const raw = enumerable.getItem(key);
-      if (raw !== null) found[key.slice(storagePrefix.length)] = raw;
+      if (raw !== null) {
+        const gameKey = key.slice(prefix.length);
+        const timestamp = timestampOf(raw);
+        const priorTimestamp = timestamps.get(gameKey);
+        const priorPrefix = prefixes.get(gameKey);
+        // A short-lived build used the alternate key. If both survive, retain the newest timestamp
+        // just as `loadGame` does. An unreadable timestamp is still worth exporting; ties and two
+        // unreadable copies prefer the current write key so one raw bucket remains deterministic.
+        if (
+          found[gameKey] === undefined ||
+          (timestamp !== null &&
+            (priorTimestamp === null || priorTimestamp === undefined || timestamp > priorTimestamp)) ||
+          (timestamp === priorTimestamp && prefix === storagePrefix && priorPrefix !== storagePrefix)
+        ) {
+          found[gameKey] = raw;
+          timestamps.set(gameKey, timestamp);
+          prefixes.set(gameKey, prefix);
+        }
+      }
     }
   } catch {
     // A profile that refuses enumeration gives back whatever was collected before it refused.

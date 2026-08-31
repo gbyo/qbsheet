@@ -72,7 +72,10 @@ export default function RosterSetup(props: {
           {line}
         </p>
       ))}
-      <p className="roster-setup-reason">One player per line. Substitutes can be added during the game.</p>
+      <p className="roster-setup-reason">
+        One player per line. Spreadsheet rows with tabs use the first column; substitutes can be added during
+        the game.
+      </p>
 
       <div className="roster-setup-teams">
         {teams.map((team) => (

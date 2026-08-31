@@ -20,6 +20,7 @@
  * older activity remains behind scoresheet review instead of moving below the scoring controls.
  */
 import { IDerivedGame, IDerivedQuestion } from '../scoring/deriveGame';
+import { DisplaySideMapping, identityDisplaySideMapping, mapSides } from './DisplaySideMapping';
 
 export interface IRecentRailProps {
   game: IDerivedGame;
@@ -43,6 +44,8 @@ export interface IRecentRailProps {
   emphasizeQuestion?: number;
   /** One presentation frame for the question an undo removed or a redo restored. */
   motion?: IRecentMotion;
+  /** The screen order for score totals; event ownership remains canonical. */
+  displaySides?: DisplaySideMapping;
 }
 
 export interface IRecentMotion {
@@ -98,10 +101,12 @@ function questionLines(question: IDerivedQuestion, teamNames: { left: string; ri
 function QuestionBody(props: {
   question: IDerivedQuestion;
   teamNames: { left: string; right: string };
+  displaySides: DisplaySideMapping;
   marked: boolean;
   statusText?: string;
 }) {
-  const { question, teamNames, marked, statusText } = props;
+  const { question, teamNames, displaySides, marked, statusText } = props;
+  const displayedScore = mapSides(question.scoreAfter, displaySides);
   return (
     <>
       <span className="scorer-rail-q">
@@ -133,14 +138,21 @@ function QuestionBody(props: {
         ))}
       </span>
       <span className="scorer-rail-running" aria-label="Score after this question">
-        {question.scoreAfter.left}&ndash;{question.scoreAfter.right}
+        {displayedScore.left}&ndash;{displayedScore.right}
       </span>
     </>
   );
 }
 
 export default function RecentRail(props: IRecentRailProps) {
-  const { game, limit = 8, onInspect, emphasizeQuestion, motion } = props;
+  const {
+    game,
+    limit = 8,
+    onInspect,
+    emphasizeQuestion,
+    motion,
+    displaySides = identityDisplaySideMapping,
+  } = props;
   const teamNames = { left: game.left.name, right: game.right.name };
   const recent = game.questions.slice(-limit).reverse();
   const flaggedQuestions = new Set(
@@ -171,7 +183,12 @@ export default function RecentRail(props: IRecentRailProps) {
                   className="scorer-rail-item is-motion-ghost is-undoing"
                   aria-hidden="true"
                 >
-                  <QuestionBody question={motion.snapshot} teamNames={teamNames} marked={false} />
+                  <QuestionBody
+                    question={motion.snapshot}
+                    teamNames={teamNames}
+                    displaySides={displaySides}
+                    marked={false}
+                  />
                 </li>
               )}
             {recent.map((question) => {
@@ -186,7 +203,13 @@ export default function RecentRail(props: IRecentRailProps) {
                 .filter(Boolean)
                 .join(', ');
               const body = (
-                <QuestionBody question={question} teamNames={teamNames} marked={marked} statusText={status} />
+                <QuestionBody
+                  question={question}
+                  teamNames={teamNames}
+                  displaySides={displaySides}
+                  marked={marked}
+                  statusText={status}
+                />
               );
               const isMotionTarget = question.questionNumber === motion?.questionNumber;
 
@@ -248,7 +271,8 @@ export default function RecentRail(props: IRecentRailProps) {
               Q{latest.questionNumber} · {latestSummary}
             </span>
             <span className="scorer-rail-compact-score" aria-label="Latest running score">
-              {latest.scoreAfter.left}&ndash;{latest.scoreAfter.right}
+              {mapSides(latest.scoreAfter, displaySides).left}&ndash;
+              {mapSides(latest.scoreAfter, displaySides).right}
             </span>
           </button>
         ) : (
@@ -256,7 +280,7 @@ export default function RecentRail(props: IRecentRailProps) {
             <span className="scorer-rail-compact-label">Recent</span>
             <span className="scorer-rail-compact-summary">Nothing scored yet</span>
             <span className="scorer-rail-compact-score" aria-hidden="true">
-              {game.left.points}&ndash;{game.right.points}
+              {game[displaySides.left].points}&ndash;{game[displaySides.right].points}
             </span>
           </span>
         )}

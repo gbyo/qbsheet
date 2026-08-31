@@ -1,5 +1,9 @@
 /** A timestamp-based room clock. The displayed seconds are never the source of truth. */
 export const roomClockVersion = 2;
+// The state version stays at 2; storage gets its own namespace so old ambiguous keys are never
+// enumerated as though they belonged to a newly encoded game identity.
+const roomClockStorageVersion = 3;
+const legacyRoomClockStorageVersion = 2;
 
 export type RoomClockSegment = string;
 
@@ -42,6 +46,8 @@ interface IClockStorage {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
   removeItem(key: string): void;
+  length?: number;
+  key?: (index: number) => string | null;
 }
 
 function browserStorage(): IClockStorage | null {
@@ -52,8 +58,22 @@ function browserStorage(): IClockStorage | null {
   }
 }
 
+/** Keep the separator out of a game identity, so a dotted key cannot prefix another game's clock. */
+function encodedGameKey(gameKey: string): string {
+  return encodeURIComponent(gameKey).replace(/\./g, '%2E');
+}
+
+function storagePrefix(gameKey: string): string {
+  return `yellowfruit.room.clock.v${roomClockStorageVersion}.${encodedGameKey(gameKey)}.`;
+}
+
 function storageKey(gameKey: string, segment: RoomClockSegment): string {
-  return `yellowfruit.room.clock.v${roomClockVersion}.${encodeURIComponent(gameKey)}.${encodeURIComponent(segment)}`;
+  return `${storagePrefix(gameKey)}${encodeURIComponent(segment)}`;
+}
+
+/** Read and clear clocks written before dots in game keys were encoded as a separator-safe value. */
+function legacyStorageKey(gameKey: string, segment: RoomClockSegment): string {
+  return `yellowfruit.room.clock.v${legacyRoomClockStorageVersion}.${encodeURIComponent(gameKey)}.${encodeURIComponent(segment)}`;
 }
 
 export function idleRoomClock(durationMs: number): IRoomClockState {
@@ -160,6 +180,19 @@ export function expireRoomClock(state: IRoomClockState, now = Date.now()): IRoom
   };
 }
 
+/**
+ * Freeze a clock for transfer to another device.
+ *
+ * A portable file must not carry a `runningSince` wall-clock timestamp: moving a file between
+ * Chromebooks is not time played. Running clocks are therefore snapshotted at the export instant
+ * and restored paused. Same-device recovery continues to use `loadRoomClock` and its normal wall
+ * clock semantics.
+ */
+export function snapshotRoomClock(state: IRoomClockState, now = Date.now()): IRoomClockState {
+  if (state.status !== 'running') return normalizeRoomClock(state, state.durationMs);
+  return normalizeRoomClock(pauseRoomClock(state, 'manual', now), state.durationMs);
+}
+
 export function loadRoomClock(
   gameKey: string,
   durationMs: number,
@@ -168,8 +201,10 @@ export function loadRoomClock(
 ): IRoomClockState {
   if (!storage || gameKey === '') return idleRoomClock(durationMs);
   try {
+    const key = storageKey(gameKey, segment);
+    const legacyKey = legacyStorageKey(gameKey, segment);
     return normalizeRoomClock(
-      JSON.parse(storage.getItem(storageKey(gameKey, segment)) ?? 'null'),
+      JSON.parse(storage.getItem(key) ?? (legacyKey === key ? null : storage.getItem(legacyKey)) ?? 'null'),
       durationMs,
     );
   } catch {
@@ -198,9 +233,91 @@ export function clearRoomClock(
   segment: RoomClockSegment = 'regulation',
 ): void {
   try {
-    storage?.removeItem(storageKey(gameKey, segment));
+    const key = storageKey(gameKey, segment);
+    storage?.removeItem(key);
+    const legacyKey = legacyStorageKey(gameKey, segment);
+    if (legacyKey !== key) storage?.removeItem(legacyKey);
   } catch {
     // Clock persistence is a recovery convenience, never a reason to stop scoring.
+  }
+}
+
+/**
+ * Read every persisted segment for one game as transfer-safe snapshots.
+ *
+ * Clock storage is auxiliary. A missing, inaccessible or malformed segment simply disappears from
+ * the returned map; the scoring history remains usable and a destination can start that segment's
+ * clock from idle if necessary.
+ */
+export function exportRoomClocks(
+  gameKey: string,
+  now = Date.now(),
+  storage: IClockStorage | null = browserStorage(),
+): Record<string, IRoomClockState> {
+  const found: Record<string, IRoomClockState> = {};
+  if (!storage || gameKey === '' || typeof storage.length !== 'number' || typeof storage.key !== 'function')
+    return found;
+  const prefix = storagePrefix(gameKey);
+  try {
+    for (let index = 0; index < storage.length; index += 1) {
+      const key = storage.key(index);
+      if (key === null || !key.startsWith(prefix)) continue;
+      const encodedSegment = key.slice(prefix.length);
+      let segment: string;
+      try {
+        segment = decodeURIComponent(encodedSegment);
+      } catch {
+        continue;
+      }
+      if (segment === '') continue;
+      const raw = storage.getItem(key);
+      if (!raw) continue;
+      let value: unknown;
+      try {
+        value = JSON.parse(raw);
+      } catch {
+        continue;
+      }
+      if (typeof value !== 'object' || value === null) continue;
+      const durationMs = (value as Partial<IRoomClockState>).durationMs;
+      if (typeof durationMs !== 'number' || !Number.isFinite(durationMs) || durationMs < 0) continue;
+      const state = normalizeRoomClock(value, durationMs);
+      found[segment] = snapshotRoomClock(state, now);
+    }
+  } catch {
+    // Return whatever was collected before storage refused enumeration.
+  }
+  return found;
+}
+
+/** Restore transfer-safe segment snapshots under a new local game key. */
+export function restoreRoomClocks(
+  gameKey: string,
+  clocks: Record<string, IRoomClockState> | undefined,
+  storage: IClockStorage | null = browserStorage(),
+): void {
+  if (!storage || gameKey === '' || !clocks) return;
+  for (const [segment, state] of Object.entries(clocks)) {
+    if (segment === '' || !/^[A-Za-z0-9._-]+$/.test(segment)) continue;
+    const normalized =
+      typeof state?.durationMs === 'number' && Number.isFinite(state.durationMs) && state.durationMs >= 0
+        ? normalizeRoomClock(state, state.durationMs)
+        : null;
+    if (!normalized) continue;
+    // A transferred clock is always paused, even if a caller supplied `running`. The export already
+    // measured a running clock at its own snapshot instant; using Date.now() here would charge the
+    // time spent copying the file as if the room were still playing.
+    const paused: IRoomClockState =
+      normalized.status === 'running'
+        ? {
+            version: normalized.version,
+            durationMs: normalized.durationMs,
+            status: 'paused',
+            accumulatedMs: normalized.accumulatedMs,
+            pauseReason: 'manual',
+          }
+        : normalized;
+    saveRoomClock(gameKey, paused, storage, segment);
   }
 }
 

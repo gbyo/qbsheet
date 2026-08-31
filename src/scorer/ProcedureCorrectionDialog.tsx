@@ -43,6 +43,12 @@ import {
 } from '../scoring/RoomProcedure';
 import correctProcedure from '../scoring/procedureCorrection';
 import { ScoreEventEscape } from '../scoring/canApplyScoreEvent';
+import {
+  canonicalSideForDisplay,
+  DisplaySideMapping,
+  displaySideForCanonical,
+  identityDisplaySideMapping,
+} from './DisplaySideMapping';
 
 /**
  * Which configured rule the scorekeeper arrived here about.
@@ -97,12 +103,24 @@ export function ProcedureExceptionForm(props: {
   refusalFor: (input: IProcedureExceptionInput) => string | undefined;
   onRecord: (input: IProcedureExceptionInput) => void;
   disabled?: boolean;
+  /** Team choices follow the screen while the emitted exception remains canonical. */
+  displaySides?: DisplaySideMapping;
 }) {
-  const { game, topic, team, refusalFor, onRecord, disabled = false } = props;
+  const {
+    game,
+    topic,
+    team,
+    refusalFor,
+    onRecord,
+    disabled = false,
+    displaySides = identityDisplaySideMapping,
+  } = props;
   const [allowance, setAllowance] = useState<ProcedureAllowance>(
     topic ? topicAllowance[topic] : 'extra-timeout',
   );
-  const [side, setSide] = useState<LeftOrRight>(team ?? 'left');
+  const [side, setSide] = useState<LeftOrRight>(
+    team === undefined ? 'left' : displaySideForCanonical(displaySides, team),
+  );
   const [authority, setAuthority] = useState<ProcedureAuthority>('tournament-director');
   const [reason, setReason] = useState('');
 
@@ -111,7 +129,7 @@ export function ProcedureExceptionForm(props: {
     allowance,
     authority,
     reason: reason.trim(),
-    ...(needsTeam ? { team: side } : {}),
+    ...(needsTeam ? { team: canonicalSideForDisplay(displaySides, side) } : {}),
   };
   // Asked of the engine rather than restated here, so the form can never offer a grant the guard
   // would then refuse — the defect `expectsBonus` was extracted to prevent, one dialog along.
@@ -148,8 +166,8 @@ export function ProcedureExceptionForm(props: {
             value={side}
             onChange={(changeEvent) => setSide(changeEvent.target.value as LeftOrRight)}
           >
-            <option value="left">{game.left.name}</option>
-            <option value="right">{game.right.name}</option>
+            <option value="left">{game[displaySides.left].name}</option>
+            <option value="right">{game[displaySides.right].name}</option>
           </select>
         </label>
       )}
@@ -408,6 +426,8 @@ export default function ProcedureCorrectionDialog(props: {
   onCorrect: (procedure: IRoomProcedure, summary: string) => void | Promise<void>;
   onClose: () => void;
   disabled?: boolean;
+  /** Team choices follow the screen while corrections remain canonical. */
+  displaySides?: DisplaySideMapping;
 }) {
   const {
     game,
@@ -420,6 +440,7 @@ export default function ProcedureCorrectionDialog(props: {
     onCorrect,
     onClose,
     disabled = false,
+    displaySides = identityDisplaySideMapping,
   } = props;
   type Step = 'ask' | 'exception' | 'procedure';
   const [step, setStep] = useState<Step>(topic === undefined ? 'procedure' : 'ask');
@@ -457,6 +478,7 @@ export default function ProcedureCorrectionDialog(props: {
           game={game}
           topic={topic}
           team={team}
+          displaySides={displaySides}
           refusalFor={refusalFor}
           disabled={disabled}
           onRecord={(input) => {

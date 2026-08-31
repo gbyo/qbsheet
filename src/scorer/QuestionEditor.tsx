@@ -85,6 +85,7 @@ import {
   regularBonusTotals,
 } from './bonusOptions';
 import { powerCorrect } from './tossupRulings';
+import { DisplaySideMapping, identityDisplaySideMapping } from './DisplaySideMapping';
 
 const noPenaltyValue = 'no-penalty';
 const unchosenValue = '';
@@ -265,11 +266,21 @@ export default function QuestionEditor(props: {
   game: IDerivedGame;
   format: IScorekeeperFormat;
   initial: IEditableQuestion;
+  /** Labels and side order follow the visible scoresheet; edits remain canonical. */
+  displaySides?: DisplaySideMapping;
   onSave: (question: IEditableQuestion) => boolean;
   onCancel: () => void;
   onOpenReplacement?: () => void;
 }) {
-  const { game, format, initial, onSave, onCancel, onOpenReplacement } = props;
+  const {
+    game,
+    format,
+    initial,
+    displaySides = identityDisplaySideMapping,
+    onSave,
+    onCancel,
+    onOpenReplacement,
+  } = props;
   /*
    * Part-by-part entry, and only where a part has a value to be worth.
    *
@@ -328,6 +339,10 @@ export default function QuestionEditor(props: {
     [active.left, active.right],
   );
   const teamName = (team: 'left' | 'right') => (team === 'left' ? game.left.name : game.right.name);
+  const displayedTeams = useMemo(
+    () => ({ left: game[displaySides.left], right: game[displaySides.right] }),
+    [displaySides, game],
+  );
   const quickTotals = regularBonusTotals(format.bonus);
   const orderedTypes = orderedRulingTypes(format);
   const rulingOption = (answerType: (typeof format.answerTypes)[number]) => ({
@@ -431,7 +446,9 @@ export default function QuestionEditor(props: {
    * worse than no default: the ruling is the one thing on this row nothing can infer.
    */
   const addAttempt = () => {
-    const team = model.attempts.some((attempt) => attempt.team === 'left') ? 'right' : 'left';
+    const firstTeam = displaySides.left;
+    const secondTeam = displaySides.right;
+    const team = model.attempts.some((attempt) => attempt.team === firstTeam) ? secondTeam : firstTeam;
     reviseTossup((current) => ({
       ...current,
       dead: false,
@@ -600,8 +617,16 @@ export default function QuestionEditor(props: {
       <table className="scorer-question-score" aria-label={`Question ${model.questionNumber} score impact`}>
         <caption>Score impact</caption>
         <tbody>
-          {scoreImpactRow(game.left.name, initialPoints.left, proposedPoints.left)}
-          {scoreImpactRow(game.right.name, initialPoints.right, proposedPoints.right)}
+          {scoreImpactRow(
+            displayedTeams.left.name,
+            initialPoints[displaySides.left],
+            proposedPoints[displaySides.left],
+          )}
+          {scoreImpactRow(
+            displayedTeams.right.name,
+            initialPoints[displaySides.right],
+            proposedPoints[displaySides.right],
+          )}
         </tbody>
       </table>
 
@@ -648,8 +673,11 @@ export default function QuestionEditor(props: {
                   value={attempt.team}
                   onChange={(event) => updateAttempt(index, { team: event.target.value as 'left' | 'right' })}
                 >
-                  <option value="left">{game.left.name}</option>
-                  <option value="right">{game.right.name}</option>
+                  {(['left', 'right'] as const).map((displaySide) => (
+                    <option key={displaySide} value={displaySides[displaySide]}>
+                      {displayedTeams[displaySide].name}
+                    </option>
+                  ))}
                 </select>
               </label>
               <label className="scorer-question-field">
@@ -1050,8 +1078,10 @@ export default function QuestionEditor(props: {
           aria-label="Correction details"
         >
           <p className="scorer-dialog-note">
-            On the floor — {game.left.name}: {active.left.length > 0 ? active.left.join(', ') : 'none'};{' '}
-            {game.right.name}: {active.right.length > 0 ? active.right.join(', ') : 'none'}.
+            On the floor — {displayedTeams.left.name}:{' '}
+            {active[displaySides.left].length > 0 ? active[displaySides.left].join(', ') : 'none'};{' '}
+            {displayedTeams.right.name}:{' '}
+            {active[displaySides.right].length > 0 ? active[displaySides.right].join(', ') : 'none'}.
           </p>
           <div className="scorer-question-reading-state">
             <label className="scorer-checkbox">

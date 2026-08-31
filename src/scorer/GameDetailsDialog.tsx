@@ -28,13 +28,18 @@ import ScorerDialog from './ScorerDialog';
 import { LeftOrRight } from '../scoring/types';
 import { IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
 import { IDerivedGame } from '../scoring/deriveGame';
-import { IRoomProcedure, roomTakesBreaks } from '../scoring/RoomProcedure';
-import { breaksPhrase } from '../scoring/procedureCorrection';
+import { IRoomProcedure } from '../scoring/RoomProcedure';
+import { formatSummary, procedureSummary } from '../scoring/gameFormatSummary';
 import { exceptionFacts, procedureExceptionLine, procedureExceptions } from '../scoring/ProcedureExceptions';
 import { ScoreEvent } from '../scoring/ScoreEvents';
 import { playerNameMaxLength } from '../game/Roster';
 import { teamNameMaxLength } from '../scoring/identityCorrection';
 import { correctionSentence, isCorrectionNote } from '../scoring/gameCorrection';
+import {
+  canonicalSideForDisplay,
+  DisplaySideMapping,
+  identityDisplaySideMapping,
+} from './DisplaySideMapping';
 
 export interface IGameIdentityFacts {
   tournamentName: string;
@@ -63,32 +68,6 @@ function DetailRow(props: {
       </dd>
     </div>
   );
-}
-
-/** How the scoring rules read in one line: what a correct answer is worth, and what follows it. */
-function formatSummary(format: IScorekeeperFormat): string {
-  const values = format.answerTypes.map((answerType) =>
-    answerType.value > 0 ? `+${answerType.value}` : String(answerType.value),
-  );
-  const length = format.regulation.timed ? 'timed round' : `${format.regulation.tossupCount} tossups`;
-  const bonus = format.bonus.enabled
-    ? `bonuses to ${format.bonus.maximumScore}${format.bonus.bounceBack ? ', bouncing back' : ''}`
-    : 'no bonuses';
-  return `${format.name} · ${values.join(' / ')} · ${length} · ${bonus}`;
-}
-
-/** How the room procedure reads in one line. */
-function procedureSummary(procedure: IRoomProcedure | undefined): string {
-  const timeouts =
-    (procedure?.timeoutsPerTeam ?? 0) === 0
-      ? 'no timeouts tracked'
-      : `${procedure?.timeoutsPerTeam} timeout${procedure?.timeoutsPerTeam === 1 ? '' : 's'} each`;
-  const breaks = roomTakesBreaks(procedure) ? `breaks ${breaksPhrase(procedure)}` : 'no breaks';
-  const substitutions =
-    procedure?.substitutionPolicy === 'breaks-timeouts-overtime'
-      ? 'lineups change at breaks only'
-      : 'lineups change at any boundary';
-  return `${timeouts} · ${breaks} · ${substitutions}`;
 }
 
 /** Rename one team or one player, without offering a whole roster editor to do it. */
@@ -185,6 +164,10 @@ export interface IGameDetailsDialogProps {
   ) => { problems: string[]; mergeWith?: string };
   onCorrectScoringRules?: () => void;
   onCorrectProcedure?: () => void;
+  /** Current presentation order; scoring facts and corrections remain canonical. */
+  displaySides?: DisplaySideMapping;
+  /** Swap only the two displayed columns. This must not write a score event. */
+  onSwapSides?: () => void;
   onClose: () => void;
 }
 
@@ -211,6 +194,8 @@ export default function GameDetailsDialog(props: IGameDetailsDialogProps) {
     playerNameProblem,
     onCorrectScoringRules,
     onCorrectProcedure,
+    displaySides = identityDisplaySideMapping,
+    onSwapSides,
     onClose,
   } = props;
   const [editing, setEditing] = useState<Editing>({ kind: 'none' });
@@ -368,30 +353,41 @@ export default function GameDetailsDialog(props: IGameDetailsDialogProps) {
           value={[identity.roundName, identity.roomName].filter(Boolean).join(' · ')}
         />
         {identity.packetName && <DetailRow label="Packet" value={identity.packetName} />}
-        {(['left', 'right'] as LeftOrRight[]).map((side) => (
-          <DetailRow
-            key={side}
-            label={side === 'left' ? 'Left team' : 'Right team'}
-            value={`${game[side].name} · ${game[side].players.length} on the roster`}
-            action={
-              onCorrectTeamName
-                ? { label: 'Correct…', onSelect: () => setEditing({ kind: 'team', side }) }
-                : undefined
-            }
-          />
-        ))}
-        {(['left', 'right'] as LeftOrRight[]).map((side) => (
-          <DetailRow
-            key={`${side}-roster`}
-            label={`${game[side].name} roster`}
-            value={game[side].players.map((player) => player.name).join(', ') || 'nobody yet'}
-            action={
-              onCorrectPlayerName
-                ? { label: 'Correct…', onSelect: () => setEditing({ kind: 'roster', side }) }
-                : undefined
-            }
-          />
-        ))}
+        {(['left', 'right'] as LeftOrRight[]).map((displaySide) => {
+          const side = canonicalSideForDisplay(displaySides, displaySide);
+          return (
+            <DetailRow
+              key={displaySide}
+              label={displaySide === 'left' ? 'Left team' : 'Right team'}
+              value={`${game[side].name} · ${game[side].players.length} on the roster`}
+              action={
+                onCorrectTeamName
+                  ? { label: 'Correct…', onSelect: () => setEditing({ kind: 'team', side }) }
+                  : undefined
+              }
+            />
+          );
+        })}
+        {(['left', 'right'] as LeftOrRight[]).map((displaySide) => {
+          const side = canonicalSideForDisplay(displaySides, displaySide);
+          return (
+            <DetailRow
+              key={`${displaySide}-roster`}
+              label={`${game[side].name} roster`}
+              value={game[side].players.map((player) => player.name).join(', ') || 'nobody yet'}
+              action={
+                onCorrectPlayerName
+                  ? { label: 'Correct…', onSelect: () => setEditing({ kind: 'roster', side }) }
+                  : undefined
+              }
+            />
+          );
+        })}
+        <DetailRow
+          label="Sides on screen"
+          value={`${game[displaySides.left].name} on left · ${game[displaySides.right].name} on right`}
+          action={onSwapSides ? { label: 'Swap team sides', onSelect: onSwapSides } : undefined}
+        />
         <DetailRow
           label="Moderator"
           value={moderator || 'not recorded'}

@@ -19,7 +19,7 @@ import { maxQbjBytes } from '../../qbj/QbjSerialization';
  * `.qbj` leads because that is what a file is now. `.qbg` stays because a director's folder of them
  * still opens, and neither extension is consulted when deciding how to read what is inside.
  */
-export const gameFileAccept = '.qbj,.qbg,.json,application/json';
+export const gameFileAccept = '.qbj,.qbg,.qbsheet,.json,application/json';
 
 export class FileGameSource implements IGameSource {
   readonly kind = 'file';
@@ -56,6 +56,12 @@ export class FileGameSource implements IGameSource {
     if (!opened.ok) return { ok: false, errors: opened.errors };
     if (opened.kind === 'choice') {
       return { ok: false, errors: ['This file contains more than one game. Choose which one to score.'] };
+    }
+    if (opened.kind === 'backup') {
+      return {
+        ok: false,
+        errors: ['A QBSheet backup restores a game through the Open game file screen.'],
+      };
     }
     return { ok: true, value: opened.definition };
   }

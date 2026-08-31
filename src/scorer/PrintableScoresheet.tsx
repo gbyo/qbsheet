@@ -45,6 +45,7 @@ import { procedureExceptionLine } from '../scoring/ProcedureExceptions';
 import { IDerivedGame, IDerivedQuestion } from '../scoring/deriveGame';
 import { IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
 import { LeftOrRight } from '../scoring/types';
+import { DisplaySideMapping, identityDisplaySideMapping } from './DisplaySideMapping';
 
 /**
  * How many blank rows follow the last recorded question.
@@ -78,6 +79,8 @@ export default function PrintableScoresheet(props: {
   roomName?: string;
   packetName?: string;
   operatorName?: string;
+  /** Optional screen order; QBJ and result data remain canonical. */
+  displaySides?: DisplaySideMapping;
   /** Injected by tests so the printed date is stable. */
   now?: Date;
 }) {
@@ -89,6 +92,7 @@ export default function PrintableScoresheet(props: {
     roomName,
     packetName,
     operatorName,
+    displaySides = identityDisplaySideMapping,
     now = new Date(),
   } = props;
 
@@ -145,7 +149,7 @@ export default function PrintableScoresheet(props: {
     <div className="printable-scoresheet" aria-hidden="true">
       <header className="printable-header">
         <h1 className="printable-title">
-          {game.left.name} vs {game.right.name}
+          {game[displaySides.left].name} vs {game[displaySides.right].name}
         </h1>
         <p className="printable-meta">
           {[tournamentName, roundName, roomName, packetName ? `Packet ${packetName}` : undefined]
@@ -159,8 +163,8 @@ export default function PrintableScoresheet(props: {
       </header>
 
       <p className="printable-score">
-        {game.left.name} <strong>{game.left.points}</strong> · {game.right.name}{' '}
-        <strong>{game.right.points}</strong>
+        {game[displaySides.left].name} <strong>{game[displaySides.left].points}</strong> ·{' '}
+        {game[displaySides.right].name} <strong>{game[displaySides.right].points}</strong>
         {game.tossupsRead > 0 ? ` · after ${game.tossupsRead} tossups` : ''}
       </p>
 
@@ -169,31 +173,35 @@ export default function PrintableScoresheet(props: {
         <thead>
           <tr>
             <th scope="col">#</th>
-            <th scope="col">{game.left.name}</th>
+            <th scope="col">{game[displaySides.left].name}</th>
             <th scope="col">Bonus</th>
-            <th scope="col">{game.right.name}</th>
+            <th scope="col">{game[displaySides.right].name}</th>
             <th scope="col">Bonus</th>
             <th scope="col">TU+B</th>
           </tr>
         </thead>
         <tbody>
-          {rows.map(({ question, left, right }) => (
-            <tr key={question.questionNumber}>
-              <th scope="row">
-                {question.questionNumber}
-                {question.period === 'overtime' ? ' OT' : ''}
-              </th>
-              <td>{cell(question, 'left')}</td>
-              <td>{bonusCell(question, 'left')}</td>
-              <td>{cell(question, 'right')}</td>
-              <td>{bonusCell(question, 'right')}</td>
-              {/* Slash-separated rather than the en dash a score line would normally take: a running
+          {rows.map(({ question, left, right }) => {
+            const displayedLeft = displaySides.left === 'left' ? left : right;
+            const displayedRight = displaySides.right === 'left' ? left : right;
+            return (
+              <tr key={question.questionNumber}>
+                <th scope="row">
+                  {question.questionNumber}
+                  {question.period === 'overtime' ? ' OT' : ''}
+                </th>
+                <td>{cell(question, displaySides.left)}</td>
+                <td>{bonusCell(question, displaySides.left)}</td>
+                <td>{cell(question, displaySides.right)}</td>
+                <td>{bonusCell(question, displaySides.right)}</td>
+                {/* Slash-separated rather than the en dash a score line would normally take: a running
                   total can legitimately be negative, and `45–-5` is not a score anybody can read. */}
-              <td>
-                {left} / {right}
-              </td>
-            </tr>
-          ))}
+                <td>
+                  {displayedLeft} / {displayedRight}
+                </td>
+              </tr>
+            );
+          })}
           {/* Ruled, empty, and the reason this document is worth printing before anything goes wrong. */}
           {Array.from({ length: continuationRows }, (_unused, offset) => (
             <tr key={`blank-${offset}`} className="printable-blank">
@@ -215,8 +223,8 @@ export default function PrintableScoresheet(props: {
           drop one of the two box scores. */}
       {(
         [
-          { side: 'left', team: game.left },
-          { side: 'right', team: game.right },
+          { side: 'left', team: game[displaySides.left] },
+          { side: 'right', team: game[displaySides.right] },
         ] as const
       ).map(({ side, team }) => (
         <table className="printable-table" key={side}>

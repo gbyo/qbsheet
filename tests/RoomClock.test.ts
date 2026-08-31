@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import {
   elapsedRoomClock,
+  exportRoomClocks,
   expireRoomClock,
   formatClock,
   idleRoomClock,
@@ -9,6 +10,7 @@ import {
   pauseRoomClock,
   remainingRoomClock,
   resetRoomClock,
+  restoreRoomClocks,
   roomClockSegment,
   resumeRoomClock,
   saveRoomClock,
@@ -21,6 +23,10 @@ function storage() {
     getItem: (key: string) => values.get(key) ?? null,
     setItem: (key: string, value: string) => values.set(key, value),
     removeItem: (key: string) => values.delete(key),
+    get length() {
+      return values.size;
+    },
+    key: (index: number) => [...values.keys()][index] ?? null,
   };
 }
 
@@ -65,6 +71,43 @@ describe('timestamp-based room clock', () => {
     expect(loadRoomClock('game-1', 60_000, durable, 'half-1')).toEqual(running);
     expect(loadRoomClock('game-1', 60_000, durable, 'half-2')).toEqual(idleRoomClock(60_000));
     expect(loadRoomClock('game-1', 90_000, durable, 'half-1')).toEqual(idleRoomClock(90_000));
+  });
+
+  test('portable clock export snapshots every segment and restores paused', () => {
+    const durable = storage();
+    const running = startRoomClock(idleRoomClock(60_000), 1_000);
+    const paused = pauseRoomClock(startRoomClock(idleRoomClock(60_000), 1_000), 'checkpoint', 6_000);
+    saveRoomClock('game-1', running, durable, 'half-1');
+    saveRoomClock('game-1', paused, durable, 'half-2');
+
+    const exported = exportRoomClocks('game-1', 31_000, durable);
+    expect(exported['half-1']).toMatchObject({ status: 'paused', accumulatedMs: 30_000 });
+    expect(exported['half-1']).not.toHaveProperty('runningSince');
+    expect(exported['half-2']).toMatchObject({ status: 'paused', accumulatedMs: 5_000 });
+
+    restoreRoomClocks('new-game', exported, durable);
+    expect(loadRoomClock('new-game', 60_000, durable, 'half-1')).toEqual(exported['half-1']);
+    expect(loadRoomClock('new-game', 60_000, durable, 'half-2')).toEqual(exported['half-2']);
+  });
+
+  test('does not export a dotted game key as a segment of its prefix', () => {
+    const durable = storage();
+    const first = pauseRoomClock(startRoomClock(idleRoomClock(60_000), 1_000), 'manual', 6_000);
+    const second = pauseRoomClock(startRoomClock(idleRoomClock(60_000), 1_000), 'manual', 11_000);
+
+    saveRoomClock('g1', first, durable, 'half-1');
+    saveRoomClock('g1.retry', second, durable, 'half-1');
+
+    expect(exportRoomClocks('g1', 12_000, durable)).toEqual({ 'half-1': first });
+    expect(exportRoomClocks('g1.retry', 12_000, durable)).toEqual({ 'half-1': second });
+
+    // The old v2 key grammar could not tell this key from a `retry.half-1` segment of g1. It stays
+    // readable by its exact game-and-segment key, but the new v3 export namespace never enumerates
+    // it under the wrong game.
+    const legacyOnly = storage();
+    legacyOnly.setItem('yellowfruit.room.clock.v2.g1.retry.half-1', JSON.stringify(second));
+    expect(loadRoomClock('g1.retry', 60_000, legacyOnly, 'half-1')).toEqual(second);
+    expect(exportRoomClocks('g1', 12_000, legacyOnly)).toEqual({});
   });
 
   test('malformed running state recovers to a safe idle clock', () => {

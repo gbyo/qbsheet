@@ -20,8 +20,8 @@
  *
  * # The order of a submission
  *
- *   1. Build the portable result and write it to the local record, with the completion time.
- *   2. If that write failed, say so and stay. Nothing else happens.
+ *   1. Build the portable result and durably write it to the local record, with the completion time.
+ *   2. If that write failed or storage is not durable, say so and stay. Nothing else happens.
  *   3. Only then, try to deliver it to tournament control.
  *   4. Whatever became of step 3, move to the completion screen, which asks for the backup.
  *
@@ -36,8 +36,14 @@ import { IStoredGameRecord, GameStore } from '../game/GameStore';
 import { ScoreEvent } from '../scoring/ScoreEvents';
 import { IGameSetup } from '../scoring/deriveGame';
 import { portableQbj, qbjWithSourceMetadata } from '../game/PortableQbj';
-import { downloadQbj, downloadLegacyMatchOnly, downloadQbjDocument } from '../integrations/file/QbjDownload';
+import {
+  downloadQbj,
+  downloadLegacyMatchOnly,
+  downloadQbjDocument,
+  downloadQbsheetBackup,
+} from '../integrations/file/QbjDownload';
 import { IGameDefinition, IQbjIdentity } from '../game/GameDefinition';
+import { IQbsheetBackup } from '../scorer/QBSheetBackup';
 import { buildLegacyMatchOnly, buildResultDocument } from '../qbj/QbjResult';
 import { IDerivedGame } from '../scoring/deriveGame';
 import { RoomConnectionState } from './ConnectionState';
@@ -49,6 +55,7 @@ import { useAppUpdate } from '../pwa/useAppUpdate';
 import { updateDeferredAlert } from '../pwa/UpdateNotice';
 import { ResultDeliveryService } from './ResultDelivery';
 import { correctionSentence, GameCorrectionRefusal, IGameCorrection } from '../scoring/gameCorrection';
+import { IGameSessionHistory } from '../scorer/GameSession';
 
 /** The two totals, read back out of the payload rather than derived a second time. */
 export function scoreFromQbj(qbj: object): { left: number; right: number } | undefined {
@@ -233,7 +240,11 @@ export default function ScoringScreen(props: {
    * quota and where it survives the journal being cleared. Nothing waits on it.
    */
   const mirror = useCallback(
-    (events: ScoreEvent[], setup: IGameSetup) => {
+    (events: ScoreEvent[], setup: IGameSetup, history: IGameSessionHistory) => {
+      // Keep the synchronous recovery journal in step with the durable mirror. The scorer already
+      // writes it before this effect runs, but this explicit history argument prevents a later
+      // mirror/save path from replacing a v2 journal with an event-only v1-shaped write.
+      store.saveEvents(record.id, events, setup, history);
       void store
         .update(record.id, { events, setup })
         .then((updated) => {
@@ -268,6 +279,12 @@ export default function ScoringScreen(props: {
     [record.id, record.package, store],
   );
 
+  /** Write the exact QBSheet recovery envelope without treating it as the canonical QBJ handoff. */
+  const writeQbsheetBackup = useCallback(
+    (backup: IQbsheetBackup) => downloadQbsheetBackup(backup, record.package),
+    [record.package],
+  );
+
   /**
    * The portable copies offered from the game menu.
    *
@@ -294,6 +311,19 @@ export default function ScoringScreen(props: {
 
   const submit = useCallback(
     async (qbj: object): Promise<IScorerSubmitResult> => {
+      // `GameStore` deliberately lets a memory fallback keep a live room usable, which means an
+      // update can return a value without promising it survives a reload. Refuse *before* setting
+      // the completion fields, so a room is never told a result was unsafe while the stored record
+      // already looks finished to a later reload.
+      if (!store.durable || store.storageDegraded) {
+        if (onScreen.current) setRecordDurablyStored(false);
+        return {
+          ok: false,
+          message:
+            'This device could not durably save the finished result. Do not close this tab. Download the QBJ backup now.',
+          durablySaved: false,
+        };
+      }
       const portable = portableQbj(qbj, record.package);
       const completedAt = new Date().toISOString();
       const saved = await store.update(record.id, {
@@ -301,12 +331,16 @@ export default function ScoringScreen(props: {
         finalQbj: portable,
         finalScore: scoreFromQbj(portable),
       });
-      if (!saved) {
+      // Completion is different from ordinary progress: moving to the handoff screen would let the
+      // room leave behind a final score that existed only in this tab. Keep the scorer open and make
+      // the portable backup action available instead.
+      if (!saved || !store.durable || store.storageDegraded) {
         if (onScreen.current) setRecordDurablyStored(false);
         return {
           ok: false,
           message:
-            'This device could not save the finished result. Do not close this tab. Download the QBJ backup now.',
+            'This device could not durably save the finished result. Do not close this tab. Download the QBJ backup now.',
+          durablySaved: false,
         };
       }
       if (onScreen.current) setRecordDurablyStored(store.durable && !store.storageDegraded);
@@ -338,6 +372,7 @@ export default function ScoringScreen(props: {
         message: acceptedByTournamentControl
           ? 'Tournament control accepted the result.'
           : 'The result is saved on this device.',
+        durablySaved: true,
       };
     },
     [record.id, record.package, store, resultDelivery, live, runtime, onComplete],
@@ -505,10 +540,13 @@ export default function ScoringScreen(props: {
          */
         statusLabel={live ? undefined : 'On this device'}
         recordDurablyStored={recordDurablyStored}
+        durableSetup={record.setup}
+        durableEvents={record.events}
         degradedMessage={live ? runtime.degradedMessage : undefined}
         onSubmit={submit}
         onCorrectGame={correctGame}
         onDownload={write}
+        onDownloadQbsheetBackup={writeQbsheetBackup}
         onDownloadForm={(game, form) => downloadForm(game, form)}
         onProgress={
           live ? (qbj) => runtime.reportProgress(qbjWithSourceMetadata(qbj, record.package)) : undefined

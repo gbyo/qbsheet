@@ -2053,6 +2053,16 @@ body {
   padding-top: 2px;
 }
 
+.manual-format-summary-line {
+  margin: 5px 0 0;
+  font-size: 0.8125rem;
+  color: var(--room-muted);
+}
+
+.manual-format-summary-line:first-of-type {
+  margin-top: 0;
+}
+
 .manual-presets .shell-heading {
   display: list-item;
 }

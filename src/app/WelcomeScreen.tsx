@@ -70,6 +70,7 @@ import { ControlOpenResult } from './ControlPairing';
 import UpdateNotice from '../pwa/UpdateNotice';
 import ControlIcon from '../scorer/ControlIcon';
 import GameFileOpen from './GameFileOpen';
+import { IQbsheetBackup } from '../scorer/QBSheetBackup';
 import RecentGames from './RecentGames';
 import NativeDialog from './NativeDialog';
 import QrScannerDialog from './QrScannerDialog';
@@ -158,6 +159,7 @@ export default function WelcomeScreen(props: {
    */
   onPairingLaunch: (intent: IPairingLaunchIntent) => void;
   onOpenPackage: (packageValue: IGamePackage, attempt?: number) => void | Promise<void>;
+  onOpenBackup: (backup: IQbsheetBackup) => void | Promise<void>;
   onOpenRecord: (record: IStoredGameRecord) => void | Promise<void>;
   onRetryResult: (recordId: string) => void | Promise<void>;
   canRetryResult: (record: IStoredGameRecord) => boolean;
@@ -185,6 +187,7 @@ export default function WelcomeScreen(props: {
     onConnect,
     onPairingLaunch,
     onOpenPackage,
+    onOpenBackup,
     onOpenRecord,
     onRetryResult,
     canRetryResult,
@@ -428,8 +431,10 @@ export default function WelcomeScreen(props: {
               <h3 id="welcome-file-heading" className="welcome-option-heading">
                 Open a game file
               </h3>
-              <p className="welcome-option-copy">Open a QBJ or QBG file provided by tournament staff.</p>
-              <GameFileOpen onOpen={openPackage} />
+              <p className="welcome-option-copy">
+                Open a QBJ, QBG, or QBSheet backup provided by tournament staff.
+              </p>
+              <GameFileOpen onOpen={openPackage} onOpenBackup={onOpenBackup} />
             </section>
           </div>
 
@@ -450,7 +455,7 @@ export default function WelcomeScreen(props: {
             Use a game file or enter a local game when this room is not using its assigned game.
           </p>
           <div className="welcome-other-scoring-actions">
-            <GameFileOpen onOpen={openPackage} />
+            <GameFileOpen onOpen={openPackage} onOpenBackup={onOpenBackup} />
             <button type="button" className="shell-button" onClick={onCreateGame}>
               Create a game
             </button>

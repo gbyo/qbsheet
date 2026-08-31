@@ -20,14 +20,14 @@
 import { IGameDefinition } from '../game/GameDefinition';
 import { IGamePackage } from '../game/GamePackage';
 
-export default function GameOriginNotice(props: { packageValue: IGamePackage }) {
+export default function GameOriginNotice(props: { packageValue: IGamePackage; notice?: string }) {
   // Records written before definitions carried provenance simply have neither field, and a game
   // stored by an older build must not start throwing because of a banner.
   const definition = props.packageValue as Partial<IGameDefinition>;
   const legacy = definition.origin === 'qbg';
   const assumptions = definition.assumptions ?? [];
 
-  if (!legacy && assumptions.length === 0) return null;
+  if (!legacy && assumptions.length === 0 && !props.notice) return null;
 
   return (
     <div className="game-origin-notice" role="status">
@@ -39,6 +39,7 @@ export default function GameOriginNotice(props: { packageValue: IGamePackage }) 
       {assumptions.map((assumption) => (
         <p key={assumption}>{assumption}</p>
       ))}
+      {props.notice && <p>{props.notice}</p>}
     </div>
   );
 }

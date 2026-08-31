@@ -1,7 +1,8 @@
 # Files and formats
 
-Every public QBSheet file is QBJ. This page tells you which shapes QBSheet reads, which shape
-QBSheet writes, and what QBSheet does when a file leaves something out.
+QBJ is QBSheet's public interchange format. QBSheet also writes a QBSheet-specific `.qbsheet`
+recovery file when an unfinished game must move between devices. This page tells you which shapes
+QBSheet reads, which shape QBSheet writes, and what QBSheet does when a file leaves something out.
 
 The normative document is
 [`docs/QBJ_ASSIGNMENT_PROFILE.md`](https://github.com/gbyo/qbsheet/blob/main/docs/QBJ_ASSIGNMENT_PROFILE.md).
@@ -15,7 +16,8 @@ Read it before you write software that makes a file for QBSheet.
 | Media type | `application/vnd.quizbowl.qbj+json` |
 | File extension | `.qbj` |
 
-There is no `.qbs` format. There will not be one.
+There is no `.qbs` format. `.qbsheet` is not a QBJ replacement: it is the versioned, credential-free
+QBSheet recovery envelope described in [Recovery and backups](Recovery-and-backups).
 
 ## What QBSheet reads
 
@@ -23,9 +25,10 @@ There is no `.qbs` format. There will not be one.
 | --- | --- |
 | An official serialised QBJ document, `{version, objects}` | Preferred. One game or a whole tournament. |
 | A match-only QBJ document, a bare `Match` object | Supported for compatibility. MODAQ writes this shape. |
+| A versioned `.qbsheet` recovery envelope | Supported for exact, credential-free local restore. It opens offline. |
 | A legacy `.qbg` game package | Import only. Deprecated. |
 
-All three shapes go through one parser and one set of validation rules. A network assignment goes
+All supported file shapes go through one parser and one set of validation rules. A network assignment goes
 through the same parser. So the file path and the network path cannot drift apart.
 
 ## What QBSheet writes
@@ -34,6 +37,7 @@ through the same parser. So the file path and the network path cannot drift apar
 | --- | --- |
 | An official serialised QBJ document | The default download |
 | A match-only QBJ document | Under a **More…** menu, for another tool |
+| A QBSheet recovery backup | Under **Export / backup…**, for moving an unfinished game |
 
 QBSheet does not write `.qbg`.
 
@@ -44,6 +48,7 @@ QBSheet does not write `.qbg`.
 | An assignment | `R04_Room-204_Ninety-Six_vs_Greenwood.assignment.qbj` |
 | A completed result | `R04_Room-204_Ninety-Six_vs_Greenwood.result.qbj` |
 | A mid-game backup | `R04_Room-204_Ninety-Six_vs_Greenwood.partial.qbj` |
+| A QBSheet recovery backup | `R04_Room-204_Ninety-Six_vs_Greenwood.qbsheet` |
 
 **A file name is guidance for a person.** No software reads a file name to decide what a document is,
 or to decide which game it belongs to. The identifiers inside the document carry the identity. Two

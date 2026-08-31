@@ -11,6 +11,7 @@
 import { DragEvent, useRef, useState } from 'react';
 import { FileGameSource, fileFromDrop, gameFileAccept } from '../integrations/file/FileGameSource';
 import { IGameDefinition } from '../game/GameDefinition';
+import { IQbsheetBackup } from '../scorer/QBSheetBackup';
 import { chooseGame } from '../game/OpenGameDefinition';
 import {
   IGameDefinitionOverrides,
@@ -55,8 +56,9 @@ interface IPendingPlayedGame {
 export default function GameFileOpen(props: {
   label?: string;
   onOpen: (definition: IGameDefinition) => void | Promise<void>;
+  onOpenBackup: (backup: IQbsheetBackup) => void | Promise<void>;
 }) {
-  const { label = 'Open game file', onOpen } = props;
+  const { label = 'Open game file', onOpen, onOpenBackup } = props;
   const input = useRef<HTMLInputElement | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
   const [diagnostic, setDiagnostic] = useState('');
@@ -103,6 +105,10 @@ export default function GameFileOpen(props: {
       }
       if (result.kind === 'choice') {
         setChoice({ source: result.source, candidates: orderCandidates(result.source.candidates) });
+        return;
+      }
+      if (result.kind === 'backup') {
+        await onOpenBackup(result.backup);
         return;
       }
       if (result.state === 'unplayed') {

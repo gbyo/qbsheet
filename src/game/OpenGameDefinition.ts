@@ -29,6 +29,7 @@ import {
   scoreableWithoutChoice,
 } from '../qbj/ParseQbjAssignment';
 import { parseQbjText } from '../qbj/QbjSerialization';
+import { IQbsheetBackup, qbsheetBackupKind, readQbsheetBackup } from '../scorer/QBSheetBackup';
 
 /** Promote a validated legacy package to the internal type. Shape is identical; provenance is not. */
 export function gamePackageToDefinition(packageValue: IGamePackage): IGameDefinition {
@@ -54,6 +55,8 @@ export type OpenGameResult =
     }
   /** Several games in one document. The caller shows the picker and calls `chooseGame`. */
   | { ok: true; kind: 'choice'; source: IQbjSource }
+  /** An exact QBSheet recovery envelope, restored by the application rather than scored directly. */
+  | { ok: true; kind: 'backup'; backup: IQbsheetBackup }
   /** A single QBJ game that could not be defined without more from the scorekeeper. */
   | {
       ok: false;
@@ -87,6 +90,17 @@ export function openGameText(text: string): OpenGameResult {
  * @param value untrusted parsed JSON — from a file, from a drop, or from a QBTCP response body
  */
 export function openGameValue(value: unknown): OpenGameResult {
+  // A backup is deliberately checked before the ordinary package/QBJ readers. It has its own
+  // version gate and a stricter event-history validator; treating it as a generic JSON file would
+  // either discard the recovery layer or accidentally turn a portable restore into a new game.
+  if (
+    typeof value === 'object' &&
+    value !== null &&
+    (value as { kind?: unknown }).kind === qbsheetBackupKind
+  ) {
+    const backup = readQbsheetBackup(value);
+    return backup.ok ? { ok: true, kind: 'backup', backup: backup.value } : backup;
+  }
   const legacyPackage = validateGamePackage(value);
   if (legacyPackage.ok) {
     // A legacy package describes an assignment; it has no scoring in it by construction.

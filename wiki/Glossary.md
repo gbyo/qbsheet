@@ -21,6 +21,9 @@ source.
 
 **Partial** — A QBJ file that holds a game in progress. Its name ends in `.partial.qbj`.
 
+**QBSheet backup** — A versioned `.qbsheet` file containing an allowlisted exact scoring state for
+moving an unfinished game between devices. It contains no credentials and restores offline.
+
 **Practice mode** — A guided game that teaches the scoresheet. It changes no tournament data.
 
 **Result** — A QBJ file that holds a completed game. Its name ends in `.result.qbj`.
@@ -63,7 +66,8 @@ write this shape.
 
 **PWA** — A progressive web application. An installed copy starts without a network connection.
 
-**QBJ** — The quiz bowl interchange format. Every public QBSheet file is QBJ.
+**QBJ** — The quiz bowl interchange format. QBSheet uses it for assignments, interoperable results,
+and partial result lifeboats. QBSheet recovery backups use the separate `.qbsheet` format.
 
 **QBTCP** — The Quiz Bowl Tournament Control Protocol. It runs over HTTP with JSON bodies. It is not a
 transport protocol.

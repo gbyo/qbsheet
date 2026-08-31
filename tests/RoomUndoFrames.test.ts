@@ -15,6 +15,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, test } from 'vitest';
 import useGameEvents from '../src/scorer/useGameEvents';
+import { loadGame, saveGame } from '../src/scorer/GameSession';
 import { ScoreEvent } from '../src/scoring/ScoreEvents';
 import { IGameSetup } from '../src/scoring/deriveGame';
 import scoringRulesToScorekeeperFormat, { CommonRuleSets, ScoringRules } from './rules';
@@ -194,5 +195,92 @@ describe('the frame undo and redo report', () => {
     expect(accepted).toBe(false);
     expect(hook.result.current.rejection).not.toBe('');
     expect(hook.result.current.events.map((event) => event.id)).toEqual(['a']);
+  });
+});
+
+describe('recovery of action frames', () => {
+  test('a single-event action keeps Undo after a reload', () => {
+    const key = 'undo-recovery-single';
+    const first = renderHook(() => useGameEvents(key, format, setup));
+    act(() => {
+      first.result.current.append(buzz('reload-a', 1, 'Sarah Mitchell'));
+    });
+    const saved = loadGame(key, new Date(), window.localStorage);
+    first.unmount();
+
+    expect(saved?.history).toEqual({ undo: [1], redo: [] });
+    const restored = renderHook(() =>
+      useGameEvents(key, format, setup, saved?.events ?? [], undefined, saved?.history),
+    );
+    expect(restored.result.current.canUndo).toBe(true);
+    act(() => {
+      restored.result.current.undo();
+    });
+    expect(restored.result.current.events).toEqual([]);
+  });
+
+  test('a multi-event action remains one Undo frame after a reload', () => {
+    const key = 'undo-recovery-multi';
+    const first = renderHook(() => useGameEvents(key, format, setup));
+    act(() => {
+      first.result.current.append(buzz('reload-buzz', 1, 'Sarah Mitchell'), bonus('reload-bonus', 1));
+    });
+    const saved = loadGame(key, new Date(), window.localStorage)!;
+    first.unmount();
+
+    const restored = renderHook(() =>
+      useGameEvents(key, format, setup, saved.events, undefined, saved.history),
+    );
+    expect(restored.result.current.canUndo).toBe(true);
+    act(() => {
+      restored.result.current.undo();
+    });
+    expect(restored.result.current.events).toEqual([]);
+  });
+
+  test('Undo, reload, and Redo restores the same action', () => {
+    const key = 'undo-recovery-redo';
+    const first = renderHook(() => useGameEvents(key, format, setup));
+    act(() => {
+      first.result.current.append(buzz('reload-redo', 1, 'Sarah Mitchell'));
+      first.result.current.undo();
+    });
+    const saved = loadGame(key, new Date(), window.localStorage)!;
+    first.unmount();
+
+    const restored = renderHook(() =>
+      useGameEvents(key, format, setup, saved.events, undefined, saved.history),
+    );
+    expect(restored.result.current.canRedo).toBe(true);
+    act(() => {
+      restored.result.current.redo();
+    });
+    expect(restored.result.current.events.map((event) => event.id)).toEqual(['reload-redo']);
+  });
+
+  test('a structurally valid but impossible redo frame is discarded on recovery', () => {
+    const key = 'undo-recovery-invalid-redo';
+    const current = [buzz('current', 1, 'Sarah Mitchell')];
+    const impossible = [
+      {
+        id: 'wrong-frame',
+        type: 'tossup-buzz' as const,
+        questionNumber: 1,
+        team: 'left' as const,
+        playerName: 'James Robinson',
+        answerTypeIndex: 1,
+      },
+    ];
+    saveGame(key, setup, current, new Date(), window.localStorage, { undo: [1], redo: [impossible] });
+    const saved = loadGame(key, new Date(), window.localStorage)!;
+    const restored = renderHook(() =>
+      useGameEvents(key, format, setup, saved.events, undefined, saved.history),
+    );
+
+    expect(restored.result.current.events.map((event) => event.id)).toEqual(['current']);
+    // The event list survives and the valid Undo stack remains useful, but the impossible redo
+    // branch is discarded before it can become a scoring transition.
+    expect(restored.result.current.canUndo).toBe(true);
+    expect(restored.result.current.canRedo).toBe(false);
   });
 });

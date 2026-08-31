@@ -16,6 +16,11 @@ import { IGamePackage } from '../../game/GamePackage';
 import { IGameDefinition } from '../../game/GameDefinition';
 import { portableQbj, portableQbjDocument } from '../../game/PortableQbj';
 import { qbjFileName as qbjResultFileName } from '../../qbj/QbjResult';
+import {
+  IQbsheetBackup,
+  qbsheetBackupFileExtension,
+  serializeQbsheetBackup,
+} from '../../scorer/QBSheetBackup';
 
 /** One filename component: letters, digits and single hyphens, with nothing that needs escaping. */
 export function sanitizeFileNamePart(value: string, fallback = 'Unknown'): string {
@@ -44,6 +49,12 @@ export function qbjFileName(packageValue: IGamePackage): string {
   parts.push('vs');
   parts.push(sanitizeFileNamePart(packageValue.right.name, 'Team-2'));
   return `${parts.join('_')}.qbj`;
+}
+
+/** The explicit QBSheet transfer name for the same game. */
+export function qbsheetBackupFileName(packageValue: IGamePackage): string {
+  const qbjName = qbjFileName(packageValue);
+  return `${qbjName.slice(0, -'.qbj'.length)}${qbsheetBackupFileExtension}`;
 }
 
 /** The exact text written to the file. */
@@ -114,6 +125,21 @@ export function downloadQbj(
     qbjFileName(packageValue),
     environment,
   );
+}
+
+/**
+ * Save QBSheet's exact, credential-free recovery envelope.
+ *
+ * This is intentionally a separate action from `downloadQbj`: QBJ remains the canonical result
+ * exchange format, while this file keeps the action history, paused room clocks and presentation
+ * mapping needed to continue scoring on another device.
+ */
+export function downloadQbsheetBackup(
+  backup: IQbsheetBackup,
+  packageValue: IGamePackage,
+  environment: IDownloadEnvironment | null = defaultDownloadEnvironment(),
+): boolean {
+  return downloadFile(serializeQbsheetBackup(backup), qbsheetBackupFileName(packageValue), environment);
 }
 
 /**
