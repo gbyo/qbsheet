@@ -19,7 +19,7 @@
  * and the game gains an answer nobody gave. The ref is the authority and the state is what renders
  * from it, so every append is judged against everything already recorded.
  */
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ScoreEvent } from '../scoring/ScoreEvents';
 import deriveGame, { IGameSetup } from '../scoring/deriveGame';
 import { IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
@@ -32,7 +32,8 @@ import {
   validateEditableQuestion,
 } from '../scoring/questionCorrection';
 import { validateCorrectedHistory } from '../scoring/validateScoresheet';
-import { saveGame } from './GameSession';
+import { IGameSessionHistory, saveGame } from './GameSession';
+import { validEvent } from './ScorerRecovery';
 
 export interface IGameEventsApi {
   events: ScoreEvent[];
@@ -98,6 +99,8 @@ export interface IGameEventsApi {
    */
   rejectionEscape?: ScoreEventEscape;
   clearRejection: () => void;
+  /** A defensive copy of the auxiliary action history, for exact QBSheet backup export. */
+  recoveryHistory: () => IGameSessionHistory;
 }
 
 /**
@@ -108,6 +111,56 @@ export interface IGameEventsApi {
  * "take back what I just did", not "take back half of it".
  */
 type UndoFrame = number;
+
+/**
+ * Keep only recovery metadata whose redo path is a real scoring path for this game.
+ *
+ * `GameSession` can validate the JSON shape without knowing the format. Once the hook has that
+ * format, it must also reject a forged or stale redo frame: `validEvent` alone would let an
+ * unrelated, structurally valid event be appended after an undo and silently change the score.
+ * The stack is auxiliary, so losing it is safe; the event journal remains authoritative.
+ */
+function usableInitialHistory(
+  history: IGameSessionHistory | undefined,
+  format: IScorekeeperFormat,
+  setup: IGameSetup,
+  procedure: IRoomProcedure | undefined,
+  events: ScoreEvent[],
+): IGameSessionHistory | undefined {
+  if (!history) return undefined;
+  const undo =
+    Array.isArray(history.undo) &&
+    history.undo.every((frame) => Number.isInteger(frame) && frame > 0) &&
+    history.undo.reduce((sum, frame) => sum + frame, 0) <= events.length
+      ? history.undo.slice()
+      : [];
+  let redo: ScoreEvent[][] = [];
+  const structurallyValidRedo =
+    Array.isArray(history.redo) &&
+    history.redo.every((frame) => frame.length > 0 && frame.every((event) => validEvent(event)));
+
+  // `redo` is popped from the end. Replay in that same order, so the validation is about the
+  // transition the next click would actually make rather than the order in which frames are stored.
+  let replay = events;
+  if (structurallyValidRedo) {
+    for (let index = history.redo.length - 1; index >= 0; index -= 1) {
+      const result = applyScoreEvents({ format, setup, procedure }, replay, history.redo[index]);
+      if (!result.ok) {
+        // A bad redo path should not cost a good Undo stack. The invalid auxiliary branch is the
+        // only thing dropped; the event list remains authoritative.
+        redo = [];
+        break;
+      }
+      replay = result.events;
+      redo = history.redo.map((frame) => frame.map((event) => ({ ...event })));
+    }
+  }
+  if (undo.length === 0 && redo.length === 0) return undefined;
+  return {
+    undo,
+    redo,
+  };
+}
 
 let sequence = 0;
 
@@ -123,7 +176,11 @@ export default function useGameEvents(
   setup: IGameSetup,
   initialEvents: ScoreEvent[] = [],
   procedure: IRoomProcedure | undefined = undefined,
+  initialHistory?: IGameSessionHistory,
+  /** A durable record reopened without a valid fast journal should re-attempt that journal write. */
+  persistInitialRecovery = false,
 ): IGameEventsApi {
+  const recoveredHistory = usableInitialHistory(initialHistory, format, setup, procedure, initialEvents);
   const [events, setEvents] = useState<ScoreEvent[]>(initialEvents);
   const [saved, setSaved] = useState(true);
   /**
@@ -133,29 +190,54 @@ export default function useGameEvents(
    * a scorekeeper deciding whether it is safe to reload deserves a timestamp we can prove.
    */
   const [savedAt, setSavedAt] = useState<number | null>(null);
-  const [history, setHistory] = useState({ canUndo: false, canRedo: false });
+  const [history, setHistory] = useState({
+    canUndo: (recoveredHistory?.undo.length ?? 0) > 0,
+    canRedo: (recoveredHistory?.redo.length ?? 0) > 0,
+  });
   const [rejection, setRejection] = useState('');
   const [rejectionEscape, setRejectionEscape] = useState<ScoreEventEscape | undefined>(undefined);
   /** The authority. State follows it; it never follows state. See the note at the top of the file. */
   const current = useRef<ScoreEvent[]>(initialEvents);
   /** Sizes of the actions that can be undone, oldest first. */
-  const undoStack = useRef<UndoFrame[]>([]);
+  const undoStack = useRef<UndoFrame[]>(recoveredHistory?.undo.slice() ?? []);
   /** Events taken off by undo, newest action last, so redo can put them back. */
-  const redoStack = useRef<ScoreEvent[][]>([]);
+  const redoStack = useRef<ScoreEvent[][]>(
+    recoveredHistory?.redo.map((frame) => frame.map((event) => ({ ...event }))) ?? [],
+  );
+  const initialRecoveryPersisted = useRef(false);
   /** Both halves of a refusal go together: an escape route with no refusal beside it is noise. */
   const clearRejectionState = useCallback(() => {
     setRejection('');
     setRejectionEscape(undefined);
-  }, []);
+  }, [setRejection, setRejectionEscape]);
   const syncHistory = useCallback(() => {
     setHistory({ canUndo: undoStack.current.length > 0, canRedo: redoStack.current.length > 0 });
   }, []);
+
+  // The ordinary recovery path just read this exact journal, so writing it again would add no
+  // safety. A durable-record fallback is different: it got here precisely because `loadGame` had
+  // no usable local copy. Re-attempt the synchronous journal write after mount, and make the
+  // recovery status reflect the answer rather than claiming the imported game is safe before the
+  // browser has accepted it.
+  useEffect(() => {
+    if (!persistInitialRecovery || initialRecoveryPersisted.current) return;
+    initialRecoveryPersisted.current = true;
+    const written = saveGame(gameKey, setup, current.current, new Date(), undefined, {
+      undo: undoStack.current,
+      redo: redoStack.current,
+    });
+    setSaved(written);
+    if (written) setSavedAt(Date.now());
+  }, [gameKey, persistInitialRecovery, setup]);
 
   const commit = useCallback(
     (next: ScoreEvent[]) => {
       current.current = next;
       setEvents(next);
-      const written = saveGame(gameKey, setup, next);
+      const written = saveGame(gameKey, setup, next, new Date(), undefined, {
+        undo: undoStack.current,
+        redo: redoStack.current,
+      });
       setSaved(written);
       if (written) setSavedAt(Date.now());
       syncHistory();
@@ -196,11 +278,20 @@ export default function useGameEvents(
   const redo = useCallback(() => {
     const frame = redoStack.current.pop();
     if (frame === undefined) return null;
+    const result = applyScoreEvents({ format, setup, procedure }, current.current, frame);
+    if (!result.ok) {
+      // A stale or malformed auxiliary frame must never become a new scoring transition. Drop the
+      // frame and leave the authoritative event list untouched; a subsequent action can continue.
+      syncHistory();
+      setRejection(result.reason);
+      setRejectionEscape(undefined);
+      return null;
+    }
     undoStack.current.push(frame.length);
     clearRejectionState();
-    commit(current.current.concat(frame));
+    commit(result.events);
     return frame;
-  }, [clearRejectionState, commit]);
+  }, [clearRejectionState, commit, format, procedure, setup, syncHistory]);
 
   /**
    * Editing an earlier question is not undoable in the same sense — there is no "before" to step
@@ -289,6 +380,14 @@ export default function useGameEvents(
 
   const clearRejection = clearRejectionState;
 
+  const recoveryHistory = useCallback<() => IGameSessionHistory>(
+    () => ({
+      undo: undoStack.current.slice(),
+      redo: redoStack.current.map((frame) => frame.map((event) => ({ ...event }))),
+    }),
+    [],
+  );
+
   return useMemo(
     () => ({
       events,
@@ -307,6 +406,7 @@ export default function useGameEvents(
       rejection,
       rejectionEscape,
       clearRejection,
+      recoveryHistory,
     }),
     [
       events,
@@ -324,6 +424,7 @@ export default function useGameEvents(
       rejection,
       rejectionEscape,
       clearRejection,
+      recoveryHistory,
     ],
   );
 }

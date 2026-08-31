@@ -9,18 +9,21 @@
  * # The order recovery is attempted in
  *
  *   1. This device's own ScoreEvent history, read synchronously before the first render.
- *   2. The authenticated server snapshot for this same session, fetched afterwards.
+ *   2. This device's durable game record, when the fast journal has gone away.
+ *   3. The authenticated server snapshot for this same session, fetched afterwards.
  *
  * The local copy wins, always, and the server is never consulted while it exists. Two reasons: the
  * local history is the scorer's own event model, so it restores editing, undo and per-question
  * correction exactly, and it is by definition at least as new as anything the server has — the
  * server's copy is a throttled echo of it.
  *
- * The server's copy is a real fallback rather than a formality because our own snapshots carry the
- * same event list inside them (see `attachScorerRecovery`), so a Chromebook whose localStorage was
- * wiped can be handed its game back intact. A snapshot with no such layer — one MODAQ produced, or
- * one from a build that did not attach it — is not reconstructed: no events are invented, and the
- * room is told plainly that the file has to come back through the QBJ recovery workflow instead.
+ * The durable record is deliberately second: it preserves the event list and frozen setup, while
+ * only the fast journal preserves per-action undo/redo metadata. The server's copy is a real final
+ * fallback rather than a formality because our own snapshots carry the same event list inside them
+ * (see `attachScorerRecovery`), so a Chromebook whose localStorage was wiped can be handed its game
+ * back intact. A snapshot with no such layer — one MODAQ produced, or one from a build that did not
+ * attach it — is not reconstructed: no events are invented, and the room is told plainly that the
+ * file has to come back through the QBJ recovery workflow instead.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
@@ -43,8 +46,9 @@ import { ISpreadsheetGameMetadata } from '../scoring/SpreadsheetGame';
 import Scorer, { IScorerAlert, IScorerRecoveryStatus, IScorerSubmitResult } from './Scorer';
 import { IGameCorrection } from '../scoring/gameCorrection';
 import useGameEvents from './useGameEvents';
-import { loadGame } from './GameSession';
+import { IGameSessionHistory, loadGame } from './GameSession';
 import { readScorerRecovery } from './ScorerRecovery';
+import { IQbsheetBackup } from './QBSheetBackup';
 
 export interface IScorerHostProps {
   /** The session or emergency game id. Also what the saved game is filed under. */
@@ -71,12 +75,23 @@ export interface IScorerHostProps {
   spreadsheetMetadata?: ISpreadsheetGameMetadata;
   /** Whether the complete game record is currently backed by a healthy durable store. */
   recordDurablyStored?: boolean;
+  /**
+   * The durable record's frozen setup and event list.
+   *
+   * These are a recovery fallback only: a valid synchronous journal always wins, because it is the
+   * only copy that can also restore action-level Undo and Redo. They let an imported game reopen
+   * even when the browser refused that journal write.
+   */
+  durableSetup?: IGameSetup;
+  durableEvents?: ScoreEvent[];
   connection: RoomConnectionState;
   /** Overrides the word in the header when the game's standing is not a network fact. See `Scorer`. */
   statusLabel?: string;
   degradedMessage?: string;
   onSubmit: (qbj: object) => Promise<IScorerSubmitResult>;
   onDownload: (qbj: object) => void;
+  /** Passed through for an exact, credential-free QBSheet recovery export. */
+  onDownloadQbsheetBackup?: (backup: IQbsheetBackup) => void;
   /** Passed straight through to the scorer's menu. See `Scorer`. */
   onDownloadForm?: (game: IDerivedGame, form: 'partial' | 'legacy-match') => void;
   /** Passed straight through to Game details. See `Scorer` and `gameCorrection`. */
@@ -93,7 +108,7 @@ export interface IScorerHostProps {
    * and that still has the game when the journal has been cleared. It is called after the journal
    * write, never instead of it, and nothing waits on what the host does with it.
    */
-  onEventsChanged?: (events: ScoreEvent[], setup: IGameSetup) => void;
+  onEventsChanged?: (events: ScoreEvent[], setup: IGameSetup, history: IGameSessionHistory) => void;
   qbjMeta?: IQbjMatchMeta;
   onRequestControl?: (category: HelpRequestCategory, message: string) => Promise<HelpRequestResult>;
   controlRequest?: ControlRequestState;
@@ -148,11 +163,14 @@ export default function ScorerHost(props: IScorerHostProps) {
     stableGameId,
     spreadsheetMetadata,
     recordDurablyStored = true,
+    durableSetup,
+    durableEvents,
     connection,
     statusLabel,
     degradedMessage,
     onSubmit,
     onDownload,
+    onDownloadQbsheetBackup,
     onDownloadForm,
     onCorrectGame,
     onProgress,
@@ -182,6 +200,13 @@ export default function ScorerHost(props: IScorerHostProps) {
   }, [gameKey]);
 
   const [setup] = useState<IGameSetup>(() => toSetup(leftTeam, rightTeam));
+  // Like the assignment setup above, capture the record at mount. A record update must remount this
+  // component (as ScoringScreen does after a correction) rather than change the event context under
+  // a live scorer.
+  const [durableFallback] = useState(() => ({
+    setup: durableSetup,
+    events: durableEvents ?? [],
+  }));
   /**
    * Whatever this device had for this game.
    *
@@ -190,8 +215,18 @@ export default function ScorerHost(props: IScorerHostProps) {
    * it from the schedule would silently move players around underneath the events.
    */
   const [recovered] = useState(() => loadGame(gameKey));
-  const activeSetup = recovered?.setup ?? setup;
-  const events = useGameEvents(gameKey, format, activeSetup, recovered?.events ?? [], procedure);
+  const activeSetup = recovered?.setup ?? durableFallback.setup ?? setup;
+  const initialEvents = recovered?.events ?? durableFallback.events;
+  const recoveringFromDurableRecord = recovered === null && durableFallback.events.length > 0;
+  const events = useGameEvents(
+    gameKey,
+    format,
+    activeSetup,
+    initialEvents,
+    procedure,
+    recovered?.history,
+    recoveringFromDurableRecord,
+  );
   const [serverRecoveryNotice, setServerRecoveryNotice] = useState('');
   const [serverRecoveryError, setServerRecoveryError] = useState('');
   const [serverRecoveryAttempt, setServerRecoveryAttempt] = useState(0);
@@ -211,8 +246,8 @@ export default function ScorerHost(props: IScorerHostProps) {
   // that replaces a question without changing the count is mirrored too.
   const eventList = events.events;
   useEffect(() => {
-    if (onEventsChanged) onEventsChanged(eventList, activeSetup);
-  }, [onEventsChanged, eventList, activeSetup]);
+    if (onEventsChanged) onEventsChanged(eventList, activeSetup, events.recoveryHistory());
+  }, [onEventsChanged, eventList, activeSetup, events]);
   const lastServerRecoveryAttempt = useRef(-1);
   // Mirrored from a committed effect rather than during render: the only reader is the retry button,
   // which runs long after the commit, and a render that React throws away must not leave a count
@@ -321,6 +356,7 @@ export default function ScorerHost(props: IScorerHostProps) {
       saved={events.saved}
       onSubmit={onSubmit}
       onDownload={onDownload}
+      onDownloadQbsheetBackup={onDownloadQbsheetBackup}
       onDownloadForm={onDownloadForm}
       onCorrectGame={onCorrectGame}
       onProgress={onProgress}
@@ -339,7 +375,7 @@ export default function ScorerHost(props: IScorerHostProps) {
           : undefined
       }
       onSyncRosterPlayer={onSyncRosterPlayer}
-      recovered={recovered !== null && recovered.events.length > 0}
+      recovered={(recovered !== null && recovered.events.length > 0) || recoveringFromDurableRecord}
       openingNotice={openingNotice}
       recoveryNotice={serverRecoveryNotice}
       alerts={allAlerts}

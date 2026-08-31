@@ -18,6 +18,7 @@ import { IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
 import { IDerivedGame, IDerivedTeam } from '../scoring/deriveGame';
 import { protestStatusLabels, protestSubjectLabels } from './ProcedureDialogs';
 import SpreadsheetCopyPanel from './SpreadsheetCopyPanel';
+import { DisplaySideMapping, identityDisplaySideMapping, mapSides } from './DisplaySideMapping';
 
 /** "+15" / "-5". */
 function signed(value: number): string {
@@ -99,6 +100,8 @@ export function HalftimeCheck(props: {
   substitutionMessage?: string;
   onPlayers: () => void;
   onContinue: () => void;
+  /** Screen order only; the derived game remains canonical. */
+  displaySides?: DisplaySideMapping;
 }) {
   const {
     game,
@@ -107,7 +110,9 @@ export function HalftimeCheck(props: {
     substitutionMessage = 'Lineup changes can be recorded here; follow the tournament procedure.',
     onPlayers,
     onContinue,
+    displaySides = identityDisplaySideMapping,
   } = props;
+  const displayedScore = mapSides({ left: game.left.points, right: game.right.points }, displaySides);
 
   return (
     <section className="scorer-score-check" aria-label={`${breakName} score check`}>
@@ -116,10 +121,10 @@ export function HalftimeCheck(props: {
       </p>
       <p className="scorer-complete-score">
         <span>
-          {game.left.name} <strong>{game.left.points}</strong>
+          {game[displaySides.left].name} <strong>{displayedScore.left}</strong>
         </span>
         <span>
-          {game.right.name} <strong>{game.right.points}</strong>
+          {game[displaySides.right].name} <strong>{displayedScore.right}</strong>
         </span>
       </p>
       <p className="scorer-dialog-note">Read the score to the moderator. {substitutionMessage}</p>
@@ -152,6 +157,8 @@ export interface IPreSubmitReviewProps {
   spreadsheetTsv?: string;
   spreadsheetGameLabel?: string;
   spreadsheetSuggestedTabName?: string;
+  /** Screen order only; canonical event and result semantics are unchanged. */
+  displaySides?: DisplaySideMapping;
 }
 
 export default function PreSubmitReview(props: IPreSubmitReviewProps) {
@@ -168,6 +175,7 @@ export default function PreSubmitReview(props: IPreSubmitReviewProps) {
     spreadsheetTsv,
     spreadsheetGameLabel,
     spreadsheetSuggestedTabName,
+    displaySides = identityDisplaySideMapping,
   } = props;
   // Confirmation belongs to the exact derived result shown here. A correction, undo, or redo
   // replaces `game`, so identity makes a previous acknowledgement invalid without an effect-driven
@@ -177,6 +185,7 @@ export default function PreSubmitReview(props: IPreSubmitReviewProps) {
 
   const openProtests = game.protests.filter((protest) => protest.status === 'open');
   const totalTuh = game.tossupsRead;
+  const displayedScore = mapSides({ left: game.left.points, right: game.right.points }, displaySides);
 
   return (
     <div className="scorer-presubmit">
@@ -187,10 +196,10 @@ export default function PreSubmitReview(props: IPreSubmitReviewProps) {
       </p>
       <p className="scorer-complete-score">
         <span>
-          {game.left.name} <strong>{game.left.points}</strong>
+          {game[displaySides.left].name} <strong>{displayedScore.left}</strong>
         </span>
         <span>
-          {game.right.name} <strong>{game.right.points}</strong>
+          {game[displaySides.right].name} <strong>{displayedScore.right}</strong>
         </span>
       </p>
       <p className="scorer-complete-detail">
@@ -200,8 +209,8 @@ export default function PreSubmitReview(props: IPreSubmitReviewProps) {
       </p>
 
       <div className="scorer-check-teams">
-        <TeamLines format={format} team={game.left} />
-        <TeamLines format={format} team={game.right} />
+        <TeamLines format={format} team={game[displaySides.left]} />
+        <TeamLines format={format} team={game[displaySides.right]} />
       </div>
 
       {openProtests.length > 0 && (

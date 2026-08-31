@@ -12,6 +12,8 @@ import { openApp, pressControl, score, startLineups } from './appHarness';
 import { claimResponseTimeoutMs } from '../src/persistence/TabClaim';
 import { assignmentDocument, tournamentDocument } from './qbjDocuments';
 import { packageText } from './packages';
+import { createQbsheetBackup, serializeQbsheetBackup } from '../src/scorer/QBSheetBackup';
+import { validPackage } from './packages';
 
 afterEach(cleanup);
 
@@ -123,6 +125,112 @@ describe('opening QBJ from the welcome screen', () => {
     expect(screen.queryByText(/NAQT/)).not.toBeInTheDocument();
     expect(screen.queryByText(/ACF/)).not.toBeInTheDocument();
   });
+
+  test('a QBSheet backup restores through the same Open game file path as a QBJ', async () => {
+    const packageValue = validPackage({ producer: 'QBSheet' });
+    const setup = {
+      left: {
+        name: packageValue.left.name,
+        players: packageValue.left.players.map((player) => player.name),
+        startingLineup: packageValue.left.players.slice(0, 2).map((player) => player.name),
+      },
+      right: {
+        name: packageValue.right.name,
+        players: packageValue.right.players.map((player) => player.name),
+        startingLineup: packageValue.right.players.slice(0, 2).map((player) => player.name),
+      },
+    };
+    const backup = createQbsheetBackup({
+      gamePackage: packageValue,
+      setup,
+      events: [{ id: 'backup-dead', type: 'tossup-dead', questionNumber: 1 }],
+      history: { undo: [1], redo: [] },
+    });
+
+    await openApp();
+    await choose(fileOf(serializeQbsheetBackup(backup), 'recovery.qbsheet'));
+
+    await waitFor(() => expect(screen.getByText('On this device')).toBeInTheDocument());
+    expect(screen.getByText('Ninety Six A')).toBeInTheDocument();
+    expect(screen.getByText('Greenwood')).toBeInTheDocument();
+  });
+
+  test('a backup beside an active local copy is restored as a separate attempt', async () => {
+    const packageValue = validPackage({ producer: 'QBSheet' });
+    const setup = {
+      left: {
+        name: packageValue.left.name,
+        players: packageValue.left.players.map((player) => player.name),
+        startingLineup: packageValue.left.players.slice(0, 2).map((player) => player.name),
+      },
+      right: {
+        name: packageValue.right.name,
+        players: packageValue.right.players.map((player) => player.name),
+        startingLineup: packageValue.right.players.slice(0, 2).map((player) => player.name),
+      },
+    };
+    const backup = createQbsheetBackup({
+      gamePackage: packageValue,
+      setup,
+      events: [{ id: 'backup-dead', type: 'tossup-dead', questionNumber: 1 }],
+    });
+    const file = fileOf(serializeQbsheetBackup(backup), 'recovery.qbsheet');
+
+    await openApp();
+    await choose(file);
+    await waitFor(() => expect(screen.getByText('On this device')).toBeInTheDocument());
+
+    // A reload leaves an unfinished file game at Home, where the same familiar file action is
+    // available again. The second import must never silently resume the older local copy instead.
+    cleanup();
+    await openApp();
+    await choose(file);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/already in progress\. This QBSheet backup was restored as a separate copy/i),
+      ).toBeInTheDocument();
+    });
+  });
+
+  test('a roster-only backup from the starting-lineup prompt restores to that prompt', async () => {
+    const ordinaryPackage = validPackage({ producer: 'QBSheet' });
+    const packageValue = {
+      ...ordinaryPackage,
+      scorekeeperFormat: {
+        ...ordinaryPackage.scorekeeperFormat,
+        players: { ...ordinaryPackage.scorekeeperFormat.players, maximumActive: 2 },
+      },
+    };
+    const backup = createQbsheetBackup({
+      gamePackage: packageValue,
+      setup: {
+        left: {
+          name: packageValue.left.name,
+          players: packageValue.left.players.map((player) => player.name),
+        },
+        right: {
+          name: packageValue.right.name,
+          players: packageValue.right.players.map((player) => player.name),
+        },
+      },
+      events: [
+        {
+          id: 'late-arrival',
+          type: 'roster-add',
+          questionNumber: 1,
+          team: 'left',
+          playerName: 'Taylor Morgan',
+        },
+      ],
+    });
+
+    await openApp();
+    await choose(fileOf(serializeQbsheetBackup(backup), 'before-lineup.qbsheet'));
+
+    await waitFor(() => expect(screen.getByLabelText('Starting lineups')).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Start Taylor Morgan' })).toBeInTheDocument();
+  });
 });
 
 /**
@@ -202,6 +310,23 @@ describe('downloading QBJ during a game', () => {
     await pressControl('Download current QBJ');
 
     expect(downloads.files[0].name).toBe('R04_Room-204_Ninety-Six_vs_Greenwood.partial.qbj');
+  });
+
+  test('the QBSheet backup action writes the exact transfer envelope', async () => {
+    const downloads = captureDownloads();
+    await openAssignmentAndStart();
+
+    await pressControl('Export / backup…');
+    await pressControl('Download QBSheet backup');
+
+    expect(downloads.files).toHaveLength(1);
+    expect(downloads.files[0].name).toBe('R04_Room-204_Ninety-Six_vs_Greenwood.qbsheet');
+    const written = JSON.parse(downloads.files[0].contents);
+    expect(written.kind).toBe('qbsheet-backup');
+    expect(written.version).toBe(1);
+    expect(written.package.left.name).toBe('Ninety Six');
+    expect(Array.isArray(written.events)).toBe(true);
+    expect(downloads.files[0].contents).not.toContain('runningSince');
   });
 
   test('the compatibility entry still writes a bare match', async () => {

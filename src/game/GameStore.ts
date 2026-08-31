@@ -29,7 +29,7 @@ import { IGameSetup } from '../scoring/deriveGame';
 import { IGamePackage, gamePackageIdentity } from './GamePackage';
 import { isManualGame } from './GameDefinition';
 import { IRecordStore, MemoryRecordStore } from '../persistence/GameDatabase';
-import { clearGame, loadGame, saveGame } from '../scorer/GameSession';
+import { clearGame, IGameSessionHistory, loadGame, saveGame } from '../scorer/GameSession';
 import {
   IUnreadableRecord,
   UpgradeStep,
@@ -178,8 +178,12 @@ export interface IGameStore {
    *
    * @returns whether the synchronous journal accepted the write. That, not the IndexedDB result, is
    * what the scoresheet may claim about the room's data being safe.
+   *
+   * `history` is optional because historical corrections intentionally clear action-level recovery.
+   * When supplied by the ordinary scorer mirror, it must be forwarded rather than replaced by an
+   * event-only journal write.
    */
-  saveEvents(id: string, events: ScoreEvent[], setup?: IGameSetup): boolean;
+  saveEvents(id: string, events: ScoreEvent[], setup?: IGameSetup, history?: IGameSessionHistory): boolean;
   remove(id: string): Promise<void>;
   /** Drop finished games past the retention window. Never touches an unfinished one. */
   prune(now?: Date): Promise<number>;
@@ -282,6 +286,22 @@ export function isDelivered(record: IStoredGameRecord): boolean {
 
 function recordId(identity: string, attempt: number): string {
   return attempt <= 1 ? identity : `${identity}#${attempt}`;
+}
+
+/**
+ * A create request found a record under the exact id it would have written.
+ *
+ * This is deliberately distinct from a storage refusal. A caller importing a portable backup may
+ * safely try the next local attempt after this error, while a database that refused a write must
+ * never be treated as though it had merely asked for another id. Most importantly, this protects
+ * records that this build cannot parse: their id is still occupied even though `list()` cannot show
+ * them as a readable game.
+ */
+export class GameRecordConflictError extends Error {
+  constructor(readonly recordId: string) {
+    super(`A local game record already uses ${recordId}.`);
+    this.name = 'GameRecordConflictError';
+  }
 }
 
 /**
@@ -454,14 +474,21 @@ export class GameStore implements IGameStore {
       updatedAt: now.toISOString(),
       serverDelivery: input.connected ? 'pending' : 'none',
     };
-    const written = await this.records.put(record);
-    // The in-memory fallback is intentionally allowed to keep the current tab useful, but an
-    // IndexedDB-backed store that refuses this first write must not let the scorer start with a
-    // record that cannot be rediscovered after a reload.
-    if (!written && this.records.durable) {
-      throw new Error('The game could not be committed to the local database.');
-    }
-    return record;
+    return this.enqueueWrite(id, async () => {
+      // Do not use `list()` here. It deliberately omits records a build cannot read, but an
+      // unreadable future record is still recoverable data and must never be overwritten by a new
+      // game or imported backup that happened to choose the same local id.
+      if ((await this.records.get(id)) !== null) throw new GameRecordConflictError(id);
+
+      const written = await this.records.put(record);
+      // The in-memory fallback is intentionally allowed to keep the current tab useful, but an
+      // IndexedDB-backed store that refuses this first write must not let the scorer start with a
+      // record that cannot be rediscovered after a reload.
+      if (!written && this.records.durable) {
+        throw new Error('The game could not be committed to the local database.');
+      }
+      return record;
+    });
   }
 
   async update(id: string, change: Partial<IStoredGameRecord>): Promise<IStoredGameRecord | null> {
@@ -489,13 +516,13 @@ export class GameStore implements IGameStore {
     });
   }
 
-  saveEvents(id: string, events: ScoreEvent[], setup?: IGameSetup): boolean {
+  saveEvents(id: string, events: ScoreEvent[], setup?: IGameSetup, history?: IGameSessionHistory): boolean {
     // Written synchronously first. The durable mirror follows and is allowed to be slower; it is
     // never allowed to be the thing the room is told about.
     const cached = this.journalKeys.get(id);
     if (!cached) return false;
     const nextSetup = setup ?? cached.setup;
-    const written = saveGame(cached.gameKey, nextSetup, events);
+    const written = saveGame(cached.gameKey, nextSetup, events, new Date(), undefined, history);
     // The cache is what a later `saveEvents` journals against, so a corrected roster has to land in
     // it as well. Only once the journal accepted the write: a refused write leaves this device
     // holding the game it had, and the cache must describe that game rather than the intended one.

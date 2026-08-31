@@ -20,6 +20,7 @@ import ScorerHost from '../src/scorer/ScorerHost';
 import { operationNoticeMs, recoveryNoticeMs } from '../src/scorer/Scorer';
 import type { IScorerSubmitResult } from '../src/scorer/Scorer';
 import { saveGame } from '../src/scorer/GameSession';
+import { resetKeyboardPreference, saveKeyboardEnabled } from '../src/scorer/keyboardPreference';
 import { IRoomProcedure } from '../src/scoring/RoomProcedure';
 import { ITeamRoster } from '../src/game/Roster';
 import { RoomConnectionState } from '../src/app/ConnectionState';
@@ -81,12 +82,13 @@ function renderScorer(
   rosterOptions: IRosterSyncTestOptions = {},
   controlOptions: IControlRequestTestOptions = {},
   recovered = false,
+  gameKeyOverride?: string,
 ) {
   const submit: SubmitMock =
     onSubmit ??
     vi.fn<(qbj: object) => Promise<IScorerSubmitResult>>().mockResolvedValue({ ok: true, message: 'Sent' });
   gameCounter += 1;
-  const gameKey = `test-game-${gameCounter}`;
+  const gameKey = gameKeyOverride ?? `test-game-${gameCounter}`;
   if (recovered) {
     saveGame(
       gameKey,
@@ -126,6 +128,7 @@ function renderScorer(
   const view = render(scorer(controlOptions.connection ?? RoomConnectionState.Connected));
   return {
     onSubmit: submit,
+    unmount: view.unmount,
     rerenderConnection: (connection: RoomConnectionState) => view.rerender(scorer(connection)),
   };
 }
@@ -163,6 +166,13 @@ function pressControl(name: string | RegExp) {
   }
   fireEvent.click(screen.getByRole('button', { name: 'Game' }));
   fireEvent.click(screen.getByRole('menuitem', { name }));
+}
+
+/** The presentation preference lives with the rest of the game definition, not in live-play controls. */
+function swapSides() {
+  pressControl('Game details');
+  fireEvent.click(screen.getByRole('button', { name: 'Swap team sides' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Close dialog' }));
 }
 
 /**
@@ -279,11 +289,15 @@ function installDialogMethods() {
 
 beforeEach(() => {
   installLocalStorage();
+  saveKeyboardEnabled(false);
+  resetKeyboardPreference();
   installDialogMethods();
 });
 
 afterEach(() => {
   cleanup();
+  saveKeyboardEnabled(false);
+  resetKeyboardPreference();
   vi.useRealTimers();
 });
 
@@ -924,6 +938,110 @@ describe('the game menu', () => {
     expect(children[destructiveStart - 1]?.getAttribute('role')).toBe('separator');
   });
 
+  test('Swap team sides is quiet, discoverable, and maps a displayed-left buzz canonically', () => {
+    let latestEvents: unknown[] = [];
+    renderScorer(
+      formatFor(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {},
+      {
+        onEventsChanged: (events) => {
+          latestEvents = events;
+        },
+      },
+    );
+
+    const panelNames = () =>
+      Array.from(document.querySelectorAll('.scorer-team-name')).map((team) => team.textContent);
+    expect(panelNames()).toEqual(['Ninety Six', 'Greenwood']);
+
+    swapSides();
+
+    expect(panelNames()).toEqual(['Greenwood', 'Ninety Six']);
+    // The orientation is a view preference, so it is not itself an event.
+    expect(latestEvents).toHaveLength(0);
+
+    fireEvent.click(buttonsFor('Emma Turner')[1]); // displayed left, canonical right
+
+    expect(scoreOf('Greenwood')).toBe('10');
+    expect(latestEvents).toContainEqual(
+      expect.objectContaining({ type: 'tossup-buzz', team: 'right', playerName: 'Emma Turner' }),
+    );
+  });
+
+  test('a swapped orientation drives keyboard seat one to the canonical right team', () => {
+    renderScorer(formatFor());
+
+    swapSides();
+    fireEvent.click(screen.getByRole('button', { name: 'Game' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Keyboard scoring: off' }));
+
+    fireEvent.keyDown(document, { code: 'Digit1', key: '1' });
+    fireEvent.keyDown(document, { code: 'KeyC', key: 'c' });
+
+    expect(scoreOf('Greenwood')).toBe('10');
+    expect(scoreOf('Ninety Six')).toBe('0');
+  });
+
+  test('the swapped orientation survives remounting the same game', () => {
+    const gameKey = 'display-side-reload';
+    const first = renderScorer(
+      formatFor(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {},
+      {},
+      false,
+      gameKey,
+    );
+
+    swapSides();
+    first.unmount();
+
+    renderScorer(formatFor(), undefined, undefined, undefined, undefined, {}, {}, false, gameKey);
+    expect(
+      Array.from(document.querySelectorAll('.scorer-team-name')).map((team) => team.textContent),
+    ).toEqual(['Greenwood', 'Ninety Six']);
+  });
+
+  test('the displayed-left lineup routes a substitution to the canonical right team', () => {
+    let latestEvents: unknown[] = [];
+    renderScorer(
+      formatFor((rules) => {
+        rules.maximumPlayersPerTeam = 1;
+      }),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {},
+      {
+        onEventsChanged: (events) => {
+          latestEvents = events;
+        },
+      },
+    );
+    chooseStarters(['Sarah Mitchell', 'Emma Turner']);
+
+    swapSides();
+    pressControl('Players');
+
+    const displayedLeft = screen.getByLabelText('Greenwood lineup');
+    fireEvent.click(within(displayedLeft).getByText('Replace'));
+    fireEvent.click(within(displayedLeft).getByText('Jordan Lee'));
+    fireEvent.click(within(displayedLeft).getByText('Confirm'));
+
+    expect(within(screen.getByLabelText('Greenwood')).getByText('Jordan Lee')).toBeTruthy();
+    expect(latestEvents).toContainEqual(
+      expect.objectContaining({ type: 'substitution', team: 'right', activePlayers: ['Jordan Lee'] }),
+    );
+  });
+
   test('lightning is offered only when the format has lightning rounds', () => {
     renderScorer(formatFor());
     fireEvent.click(screen.getByText('Game'));
@@ -1559,6 +1677,79 @@ describe('recovering a game', () => {
     expect(scoreOf('Ninety Six')).toBe('45');
     expect(screen.getByText('Tossup 2 of 20')).toBeTruthy();
   });
+
+  test('a durable record reopens the scoresheet when the fast journal is unavailable', () => {
+    const format = formatFor();
+    gameCounter += 1;
+    const gameKey = `durable-recovery-${gameCounter}`;
+    const durableSetup = {
+      left: { name: leftTeam.name, players: leftTeam.players.map((player) => player.name) },
+      right: { name: rightTeam.name, players: rightTeam.players.map((player) => player.name) },
+    };
+
+    render(
+      <ScorerHost
+        gameKey={gameKey}
+        format={format}
+        leftTeam={leftTeam}
+        rightTeam={rightTeam}
+        tournamentName="Ninety Six Invitational"
+        roundName="Round 4"
+        connection={RoomConnectionState.Connected}
+        onDownload={() => undefined}
+        onSubmit={vi.fn()}
+        durableSetup={durableSetup}
+        durableEvents={[{ id: 'durable-dead', type: 'tossup-dead', questionNumber: 1 }]}
+      />,
+    );
+
+    expect(screen.getByText('Tossup 2 of 20')).toBeTruthy();
+    expect(screen.getByText('Recovered the in-progress game saved on this device.')).toBeTruthy();
+  });
+
+  test('a valid fast journal still takes precedence over its durable mirror', () => {
+    const format = formatFor();
+    gameCounter += 1;
+    const gameKey = `journal-precedence-${gameCounter}`;
+    const setup = {
+      left: { name: leftTeam.name, players: leftTeam.players.map((player) => player.name) },
+      right: { name: rightTeam.name, players: rightTeam.players.map((player) => player.name) },
+    };
+    saveGame(
+      gameKey,
+      setup,
+      [
+        {
+          id: 'journal-buzz',
+          type: 'tossup-buzz',
+          questionNumber: 1,
+          team: 'left',
+          playerName: 'Sarah Mitchell',
+          answerTypeIndex: 0,
+        },
+      ],
+      new Date(),
+      window.localStorage,
+    );
+
+    render(
+      <ScorerHost
+        gameKey={gameKey}
+        format={format}
+        leftTeam={leftTeam}
+        rightTeam={rightTeam}
+        tournamentName="Ninety Six Invitational"
+        roundName="Round 4"
+        connection={RoomConnectionState.Connected}
+        onDownload={() => undefined}
+        onSubmit={vi.fn()}
+        durableSetup={setup}
+        durableEvents={[{ id: 'durable-dead', type: 'tossup-dead', questionNumber: 1 }]}
+      />,
+    );
+
+    expect(scoreOf('Ninety Six')).toBe('15');
+  });
 });
 
 describe('a wrong answer that costs nothing', () => {
@@ -1639,6 +1830,34 @@ describe('halves and timeouts, when the tournament asked for them', () => {
     fireEvent.click(within(screen.getByLabelText('Timeout')).getByText('Ninety Six'));
 
     expect(screen.getByText('0 remaining (1 used)')).toBeTruthy();
+  });
+
+  test('a swapped timeout choice is displayed first but records the canonical right team', () => {
+    let latestEvents: unknown[] = [];
+    renderScorer(
+      formatFor(),
+      undefined,
+      undefined,
+      procedure,
+      undefined,
+      {},
+      {
+        onEventsChanged: (events) => {
+          latestEvents = events;
+        },
+      },
+    );
+
+    swapSides();
+    pressControl('Timeout');
+    const timeout = screen.getByLabelText('Timeout');
+    expect(
+      Array.from(timeout.querySelectorAll('.scorer-choice')).map((button) => button.textContent),
+    ).toEqual(['Greenwood', 'Ninety Six']);
+    fireEvent.click(within(timeout).getByText('Greenwood'));
+
+    expect(screen.getByText('0 remaining (1 used)')).toBeTruthy();
+    expect(latestEvents).toContainEqual(expect.objectContaining({ type: 'timeout-start', team: 'right' }));
   });
 });
 

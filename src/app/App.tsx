@@ -42,7 +42,13 @@
  * to the list that does. See `AppUpdate`.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { GameStore, IStoredGameRecord, isActive, needsHandoff } from '../game/GameStore';
+import {
+  GameRecordConflictError,
+  GameStore,
+  IStoredGameRecord,
+  isActive,
+  needsHandoff,
+} from '../game/GameStore';
 import { IUnreadableRecord } from '../game/GameRecordUpgrade';
 import { IGamePackage, gamePackageIdentity, gamePackageLabel } from '../game/GamePackage';
 import { IGameDefinition, isManualGame } from '../game/GameDefinition';
@@ -50,7 +56,11 @@ import { newManualRecordIdentity } from '../game/ManualGame';
 import { openRecordStore } from '../persistence/GameDatabase';
 import { claimGame, IGameClaim, newTabId } from '../persistence/TabClaim';
 import { IGameSetup } from '../scoring/deriveGame';
-import { loadGame } from '../scorer/GameSession';
+import { loadGame, saveGame } from '../scorer/GameSession';
+import { IQbsheetBackup } from '../scorer/QBSheetBackup';
+import { restoreRoomClocks } from '../scorer/RoomClock';
+import { parseDisplaySideMapping, saveDisplaySideMapping } from '../scorer/DisplaySideMapping';
+import { saveSeating } from '../scorer/PlayerSeating';
 import PracticeScreen, { practiceGameKey } from '../practice/PracticeScreen';
 import {
   IConnectedSession,
@@ -301,6 +311,8 @@ export default function App() {
   const [connection, setConnection] = useState<IConnectedSession | null>(null);
   const [pendingBaseUrl, setPendingBaseUrl] = useState('');
   const [notice, setNotice] = useState('');
+  /** Shown beside a restored backup rather than disappearing with the file picker it came through. */
+  const [backupRestoreNotice, setBackupRestoreNotice] = useState('');
   /**
    * The pairing link this page was opened with, read exactly once.
    *
@@ -582,10 +594,134 @@ export default function App() {
       const created = await ensureRecord(packageValue, options);
       if (!created) return null;
       setNotice('');
+      setBackupRestoreNotice('');
       await openRecord(created);
       return created;
     },
     [ensureRecord, openRecord],
+  );
+
+  /**
+   * Restore an exact QBSheet backup as a new offline record.
+   *
+   * A backup intentionally carries no session id, device id or credentials, so this path assigns
+   * a fresh local record/game key and never reconnects it to tournament control. An active local
+   * copy stays untouched; the imported backup is deliberately put in its own local attempt so a
+   * newer copy is never silently discarded or used to overwrite recoverable data.
+   */
+  const restoreQbsheetBackup = useCallback(
+    async (backup: IQbsheetBackup) => {
+      if (!store) return;
+      setBackupRestoreNotice('');
+      const identity = gamePackageIdentity(backup.package);
+      const existing = await store.findByIdentity(identity);
+      const restoringAlongsideActive = existing.some(isActive);
+      let attempt = Math.max(0, ...existing.map((record) => record.attempt)) + 1;
+      let created: IStoredGameRecord | null = null;
+      let journalSaved = false;
+      let committed: IStoredGameRecord | null = null;
+      let skippedOccupiedSlot = false;
+      try {
+        // `findByIdentity` only returns readable records. A future or corrupt record can still own
+        // one of this identity's local ids, so retry a distinct attempt only when `create` proves
+        // that exact id is occupied. Never overwrite an unreadable record to make an import fit.
+        for (let candidates = 0; candidates < 100; candidates += 1) {
+          try {
+            created = await store.create({
+              package: backup.package,
+              setup: backup.setup,
+              connected: false,
+              attempt,
+            });
+            break;
+          } catch (error) {
+            if (!(error instanceof GameRecordConflictError)) throw error;
+            skippedOccupiedSlot = true;
+            attempt += 1;
+          }
+        }
+        if (!created) throw new Error('No unused local record slot was available for this backup.');
+        journalSaved = saveGame(
+          created.gameKey,
+          backup.setup,
+          backup.events,
+          new Date(),
+          undefined,
+          backup.history,
+        );
+        const updated = await store.update(created.id, {
+          setup: backup.setup,
+          events: backup.events,
+        });
+        if (!updated) throw new Error('The backup could not be committed to the local database.');
+        committed = updated;
+        restoreRoomClocks(created.gameKey, backup.clocks);
+        const displayMapping = parseDisplaySideMapping(backup.displaySideMapping);
+        if (displayMapping) saveDisplaySideMapping(created.gameKey, displayMapping);
+        if (backup.playerSeating) saveSeating(created.gameKey, backup.playerSeating);
+        await refresh(store);
+        const restored = await store.get(created.id);
+        const restoredAs = restoringAlongsideActive
+          ? 'A local copy of this game was already in progress. This QBSheet backup was restored as a separate copy; confirm which copy is current before scoring.'
+          : skippedOccupiedSlot
+            ? 'QBSheet backup restored as a separate copy, preserving another local record this version could not read.'
+            : 'QBSheet backup restored on this device.';
+        setNotice('');
+        setBackupRestoreNotice(
+          journalSaved
+            ? restoredAs
+            : `${restoredAs} Its action history could not be saved in the fast recovery journal.`,
+        );
+        await openRecord(restored ?? { ...created, setup: backup.setup, events: backup.events });
+      } catch {
+        const recoverable = committed ?? (journalSaved ? created : null);
+        if (recoverable) {
+          // The second copy is allowed to refuse a write, but it must never make us erase the first
+          // one in response. `store.remove()` also clears this game's journal, so it is only safe
+          // for a record that has neither a committed event history nor a successful journal.
+          try {
+            await refresh(store);
+          } catch {
+            // The fast journal below is still enough to put the game back on screen. Refresh is
+            // presentation bookkeeping, not an authority to discard recoverable scoring.
+          }
+          // A database that has just refused a transaction may also refuse the list read above.
+          // Keep the known record in this live tab so `openRecord` can mount the journal recovery
+          // instead of falling back to Home merely because its asynchronous mirror is unhealthy.
+          setRecords((records) => [recoverable, ...records.filter((record) => record.id !== recoverable.id)]);
+          const restoredAs = restoringAlongsideActive
+            ? 'A local copy of this game was already in progress. This QBSheet backup is open as a separate copy; confirm which copy is current before scoring.'
+            : skippedOccupiedSlot
+              ? 'QBSheet backup is open as a separate copy, preserving another local record this version could not read.'
+              : 'QBSheet backup is open on this device.';
+          setNotice('');
+          setBackupRestoreNotice(
+            committed
+              ? `${restoredAs} The final local setup step could not be completed, but the scoring history is safe.`
+              : `${restoredAs} The durable database could not save its second copy. Export another QBSheet backup before leaving this device.`,
+          );
+          await openRecord(recoverable);
+          return;
+        }
+        // If creation succeeded but neither recovery copy did, remove the incomplete record so Home
+        // cannot offer a misleading empty game on the next reload.
+        try {
+          if (created) await store.remove(created.id);
+        } catch {
+          // The database may be the very thing that failed. There is no successful journal in this
+          // branch, so cleanup remains best effort and cannot discard recoverable scoring.
+        }
+        try {
+          await refresh(store);
+        } catch {
+          // Showing the clear failure below is more useful than replacing it with a second storage
+          // exception from the list view.
+        }
+        setBackupRestoreNotice('');
+        setNotice('This QBSheet backup could not be restored on this device. Nothing was overwritten.');
+      }
+    },
+    [openRecord, refresh, store],
   );
 
   /**
@@ -610,6 +746,7 @@ export default function App() {
       });
       if (!created) return;
       setNotice('');
+      setBackupRestoreNotice('');
       await openRecord(created);
     },
     [ensureRecord, openRecord],
@@ -809,6 +946,7 @@ export default function App() {
       await refresh(store);
       claim.current?.release();
       claim.current = null;
+      setBackupRestoreNotice('');
       setScreen({ kind: 'completed', recordId, acceptedJustNow });
     },
     [store, refresh],
@@ -818,6 +956,7 @@ export default function App() {
     claim.current?.release();
     claim.current = null;
     if (store) await refresh(store);
+    setBackupRestoreNotice('');
     setScreen({ kind: 'home' });
   }, [store, refresh]);
 
@@ -958,7 +1097,7 @@ export default function App() {
   if (screen.kind === 'scoring' && current) {
     return (
       <>
-        <GameOriginNotice packageValue={current.package} />
+        <GameOriginNotice packageValue={current.package} notice={backupRestoreNotice} />
         <ScoringScreen
           record={current}
           store={store}
@@ -1043,6 +1182,7 @@ export default function App() {
       onOpenPackage={async (packageValue, attempt) => {
         await startFromPackage(packageValue, { connected: false, attempt });
       }}
+      onOpenBackup={restoreQbsheetBackup}
       onOpenRecord={async (record) => {
         await openRecord(record);
       }}

@@ -455,6 +455,21 @@ export class QbtcpAdapter extends BaseAdapter {
         },
       };
     }
+    if (opened.kind === 'backup') {
+      return {
+        ok: true,
+        value: {
+          ...base,
+          state: 'assigned',
+          definition: null,
+          session: operational?.session ?? null,
+          ...(operational?.nextAssignmentLabel
+            ? { nextAssignmentLabel: operational.nextAssignmentLabel }
+            : {}),
+          errors: ['Tournament control sent a QBSheet recovery backup where an assignment was expected.'],
+        },
+      };
+    }
 
     const definition = opened.definition;
     return {

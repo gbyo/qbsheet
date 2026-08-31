@@ -30,6 +30,7 @@ export * from '../qbtcp/QbtcpRoutes';
 export * from '../scoring/RoomProcedure';
 export * from '../scoring/ScoreEvents';
 export * from '../scoring/ScorekeeperFormat';
+export * from '../scoring/gameFormatSummary';
 export * from '../scoring/ProtestNotes';
 export * from '../scoring/types';
 export * from '../scoring/canApplyScoreEvent';

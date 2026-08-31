@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   ControlRequestState,
   HelpClearResult,
@@ -18,6 +18,7 @@ import ScorerDialog from './ScorerDialog';
 import PlayingBenchEditor from './PlayingBenchEditor';
 import { orderedActivePlayers, playersAddedAfter } from './LineupEditing';
 import { readScorerRecovery } from './ScorerRecovery';
+import { DisplaySideMapping, identityDisplaySideMapping } from './DisplaySideMapping';
 
 /**
  * Everything a room needs somebody for, except a protest.
@@ -304,11 +305,13 @@ export function FlagDialog(props: {
  */
 export function ExportDialog(props: {
   onDownloadQbjBackup: () => void;
+  onDownloadQbsheetBackup?: () => void;
   onDownloadPartialQbj?: () => void;
   onDownloadLegacyQbj?: () => void;
   onClose: () => void;
 }) {
-  const { onDownloadQbjBackup, onDownloadPartialQbj, onDownloadLegacyQbj, onClose } = props;
+  const { onDownloadQbjBackup, onDownloadQbsheetBackup, onDownloadPartialQbj, onDownloadLegacyQbj, onClose } =
+    props;
   const choose = (action: () => void) => {
     action();
     onClose();
@@ -320,6 +323,11 @@ export function ExportDialog(props: {
         Save a portable copy of this game. Keep the QBJ backup until the result has been received and checked.
       </p>
       <div className="scorer-export-options">
+        {onDownloadQbsheetBackup && (
+          <button type="button" className="scorer-choice" onClick={() => choose(onDownloadQbsheetBackup)}>
+            Download QBSheet backup
+          </button>
+        )}
         <button type="button" className="scorer-choice" onClick={() => choose(onDownloadQbjBackup)}>
           Download QBJ backup
         </button>
@@ -342,7 +350,12 @@ function signed(value: number): string {
   return value > 0 ? `+${value}` : String(value);
 }
 
-export function eventDescription(event: ScoreEvent, format: IScorekeeperFormat, game: IDerivedGame): string {
+export function eventDescription(
+  event: ScoreEvent,
+  format: IScorekeeperFormat,
+  game: IDerivedGame,
+  displaySides: DisplaySideMapping = identityDisplaySideMapping,
+): string {
   if (event.type === 'tossup-buzz') {
     const value = format.answerTypes[event.answerTypeIndex]?.value;
     return `${event.playerName} ${value === undefined ? 'unknown ruling' : signed(value)}`;
@@ -361,7 +374,14 @@ export function eventDescription(event: ScoreEvent, format: IScorekeeperFormat, 
   if (event.type === 'lightning') return `Lightning ${signed(event.points)}`;
   if (event.type === 'adjustment')
     return `Adjustment ${signed(event.points)}${event.reason ? ` — ${event.reason}` : ''}`;
-  if (event.type === 'forfeit') return `Forfeit: ${event.teams.join(' and ')}`;
+  if (event.type === 'forfeit') {
+    const teams = event.teams
+      .slice()
+      .sort(
+        (first, second) => (displaySides.left === first ? 0 : 1) - (displaySides.left === second ? 0 : 1),
+      );
+    return `Forfeit: ${teams.map((team) => game[team].name).join(' and ')}`;
+  }
   if (event.type === 'end-regulation')
     return `End regulation${
       event.lastRegulationQuestion !== undefined ? ` after Tossup ${event.lastRegulationQuestion}` : ''
@@ -374,7 +394,7 @@ export function eventDescription(event: ScoreEvent, format: IScorekeeperFormat, 
   if (event.type === 'timeout-start') return `Timeout started: ${game[event.team].name}`;
   if (event.type === 'timeout-resume') return 'Timeout ended · play resumed';
   if (event.type === 'protest')
-    return `Protest (${event.team}, ${event.status}): ${event.description}${
+    return `Protest (${game[event.team].name}, ${event.status}): ${event.description}${
       event.resolution ? ` — ${event.resolution}` : ''
     }`;
   if (event.type === 'question-void')
@@ -812,6 +832,8 @@ export function ScoresheetReviewDialog(props: {
    * submitted.
    */
   onRemoveOvertime?: () => void;
+  /** Side labels and score order for this presentation; event data stays canonical. */
+  displaySides?: DisplaySideMapping;
   onClose: () => void;
 }) {
   const {
@@ -825,10 +847,15 @@ export function ScoresheetReviewDialog(props: {
     editQuestion,
     onOpenReplacement,
     onRemoveOvertime,
+    displaySides = identityDisplaySideMapping,
     onClose,
   } = props;
   const [editing, setEditing] = useState<string | null>(null);
   const [editingQuestion, setEditingQuestion] = useState<number | null>(editQuestion ?? null);
+  const displayedTeams = useMemo(
+    () => ({ left: game[displaySides.left], right: game[displaySides.right] }),
+    [displaySides, game],
+  );
   /**
    * Whether leaving the editor should land on the review list or back on the scoresheet.
    *
@@ -855,6 +882,7 @@ export function ScoresheetReviewDialog(props: {
           game={game}
           format={format}
           initial={editableQuestionFromEvents(events, editingQuestion)}
+          displaySides={displaySides}
           onSave={(question) => onReplaceQuestion(editingQuestion, question)}
           onCancel={leaveEditor}
           onOpenReplacement={onOpenReplacement ? () => onOpenReplacement(editingQuestion) : undefined}
@@ -862,8 +890,8 @@ export function ScoresheetReviewDialog(props: {
       ) : (
         <>
           <p className="scorer-dialog-note">
-            {game.left.name} {game.left.points} · {game.right.name} {game.right.points}. Corrections
-            recalculate every total and player stat.
+            {displayedTeams.left.name} {displayedTeams.left.points} · {displayedTeams.right.name}{' '}
+            {displayedTeams.right.points}. Corrections recalculate every total and player stat.
           </p>
           {game.personnelProblems.map((problem) => (
             <p key={problem.eventId} className="scorer-problem">
@@ -938,7 +966,7 @@ export function ScoresheetReviewDialog(props: {
                               <span className="scorer-review-question-gutter" aria-hidden="true" />
                             )}
                             <span className="scorer-review-event-description">
-                              {eventDescription(event, format, game)}
+                              {eventDescription(event, format, game, displaySides)}
                             </span>
                             <span className="scorer-review-actions">
                               {eventIndex === 0 && (

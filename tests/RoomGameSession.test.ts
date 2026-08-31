@@ -6,6 +6,8 @@ import {
   clearGame,
   gameSessionMaxAgeMs,
   gameSessionVersion,
+  legacyGameSessionVersion,
+  exportJournals,
   loadGame,
   saveGame,
 } from '../src/scorer/GameSession';
@@ -24,6 +26,10 @@ function memoryStorage(initial: Record<string, string> = {}) {
     removeItem: (key: string) => {
       delete store[key];
     },
+    get length() {
+      return Object.keys(store).length;
+    },
+    key: (index: number) => Object.keys(store)[index] ?? null,
     raw: store,
   };
 }
@@ -89,6 +95,45 @@ describe('saving and resuming', () => {
 
     expect(loadGame('session-a', now, storage)?.events).toHaveLength(3);
     expect(Object.keys(storage.raw)).toHaveLength(1);
+  });
+
+  test('chooses the newest valid journal when transitional versioned keys coexist', () => {
+    const storage = memoryStorage();
+    saveGame('session-a', setup, events.concat(events[0]), now, storage);
+    storage.raw['yellowfruit.room.game.v2.session-a'] = JSON.stringify({
+      version: gameSessionVersion,
+      gameKey: 'session-a',
+      setup,
+      events,
+      updatedAt: new Date(now.getTime() - 1_000).toISOString(),
+    });
+
+    expect(loadGame('session-a', now, storage)?.events).toHaveLength(3);
+  });
+
+  test('crash export keeps the newest transitional journal rather than a stale duplicate', () => {
+    const storage = memoryStorage();
+    saveGame('session-a', setup, events, now, storage);
+    storage.raw['yellowfruit.room.game.v2.session-a'] = JSON.stringify({
+      version: gameSessionVersion,
+      gameKey: 'session-a',
+      setup,
+      events: events.concat(events[0]),
+      updatedAt: new Date(now.getTime() + 1_000).toISOString(),
+    });
+
+    expect(JSON.parse(exportJournals(storage)['session-a']).events).toHaveLength(3);
+  });
+
+  test('action-level history survives a reload alongside the event list', () => {
+    const storage = memoryStorage();
+    const history = {
+      undo: [2],
+      redo: [[{ id: 'redo-1', type: 'tossup-dead' as const, questionNumber: 2 }]],
+    };
+    saveGame('session-history', setup, events, now, storage, history);
+
+    expect(loadGame('session-history', now, storage)?.history).toEqual(history);
   });
 
   test('a different game is a different key, so the next round starts empty', () => {
@@ -187,6 +232,43 @@ describe('what is refused', () => {
     });
 
     expect(loadGame('session-a', now, storage)).toBeNull();
+  });
+
+  test('malformed action metadata is discarded while usable events still recover', () => {
+    const storage = memoryStorage({
+      'yellowfruit.room.game.v1.session-a': JSON.stringify({
+        version: gameSessionVersion,
+        gameKey: 'session-a',
+        setup,
+        events,
+        history: {
+          undo: [1],
+          redo: [[{ id: 'bad-redo', type: 'not-a-score-event', questionNumber: 1 }]],
+        },
+        updatedAt: now.toISOString(),
+      }),
+    });
+
+    const loaded = loadGame('session-a', now, storage);
+    expect(loaded?.events).toEqual(events);
+    expect(loaded?.history).toEqual({ undo: [1], redo: [] });
+  });
+
+  test('legacy v1 journals still load without inventing action history', () => {
+    const storage = memoryStorage({
+      'yellowfruit.room.game.v1.legacy': JSON.stringify({
+        version: legacyGameSessionVersion,
+        gameKey: 'legacy',
+        setup,
+        events,
+        updatedAt: now.toISOString(),
+      }),
+    });
+
+    const loaded = loadGame('legacy', now, storage);
+    expect(loaded?.version).toBe(gameSessionVersion);
+    expect(loaded?.events).toEqual(events);
+    expect(loaded?.history).toBeUndefined();
   });
 
   test('an empty key saves nothing, rather than sharing one bucket between games', () => {

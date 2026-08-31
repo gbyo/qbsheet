@@ -103,7 +103,14 @@ import useRoomClock from './useRoomClock';
 import usePlayerSeating from './usePlayerSeating';
 import { orderBySeating } from './PlayerSeating';
 import useScreenWakeLock from './useScreenWakeLock';
-import { formatClock, RoomClockStatus, roomClockSegment } from './RoomClock';
+import {
+  exportRoomClocks,
+  formatClock,
+  RoomClockStatus,
+  roomClockSegment,
+  snapshotRoomClock,
+} from './RoomClock';
+import { createQbsheetBackup, IQbsheetBackup } from './QBSheetBackup';
 import useScorerKeyboard from './useScorerKeyboard';
 import KeyboardMap, { KeyboardMapContext } from './KeyboardMap';
 import KeyboardStatus, { type KeyboardStatus as IKeyboardStatus } from './KeyboardStatus';
@@ -129,12 +136,16 @@ import MotionNumber, {
 import { bouncebackNeedsTypedEntry, bouncebackOptions, regularBonusTotals } from './bonusOptions';
 import { extraTimeoutsGranted, substitutionAllowed } from '../scoring/ProcedureExceptions';
 import removeOvertime, { overtimeQuestionNumbers, overtimeRemovalNote } from '../scoring/overtimeCorrection';
+import { canonicalSideForDisplay, displaySideForCanonical, mapSides } from './DisplaySideMapping';
+import useDisplaySideMapping from './useDisplaySideMapping';
 
 export type { IScorerAlert, IScorerRecoveryStatus } from './ConnectionStatus';
 
 export interface IScorerSubmitResult {
   ok: boolean;
   message: string;
+  /** False only when the host knows the finished result did not reach durable local storage. */
+  durablySaved?: boolean;
 }
 
 export interface IScorerProps {
@@ -185,6 +196,8 @@ export interface IScorerProps {
   onSubmit: (qbj: object) => Promise<IScorerSubmitResult>;
   /** Writes the current game out as a file, at any point. */
   onDownload: (qbj: object) => void;
+  /** Writes QBSheet's exact, credential-free recovery envelope, when the host supports it. */
+  onDownloadQbsheetBackup?: (backup: IQbsheetBackup) => void;
   /**
    * Save the game as portable QBJ in a named form.
    *
@@ -558,6 +571,7 @@ export default function Scorer(props: IScorerProps) {
     saved,
     onSubmit,
     onDownload,
+    onDownloadQbsheetBackup,
     onDownloadForm,
     onCorrectGame,
     onProgress,
@@ -767,8 +781,48 @@ export default function Scorer(props: IScorerProps) {
    * `PlayerSeating`.
    */
   const seating = usePlayerSeating(gameKey);
+  /**
+   * Which canonical team is shown on each side of this screen.
+   *
+   * This is deliberately separate from the event journal and from player seating. The mapping is a
+   * presentation transform only: every callback below maps the side a scorekeeper touched back to
+   * the canonical side before recording anything.
+   */
+  const displaySideState = useDisplaySideMapping(gameKey);
 
   const game = useMemo(() => deriveGame(format, setup, events.events), [format, setup, events.events]);
+  const displaySideMapping = displaySideState.mapping;
+  const displayedTeams = useMemo(
+    () => ({
+      left: game[displaySideMapping.left],
+      right: game[displaySideMapping.right],
+    }),
+    [displaySideMapping, game],
+  );
+  /** A view-shaped game for dialogs that only read team-facing fields. Never pass this to scoring. */
+  const displayedGame = useMemo(
+    () => ({
+      ...game,
+      left: displayedTeams.left,
+      right: displayedTeams.right,
+      timeouts: mapSides(game.timeouts, displaySideMapping),
+      activeTimeout: game.activeTimeout
+        ? {
+            ...game.activeTimeout,
+            team: displaySideForCanonical(displaySideMapping, game.activeTimeout.team),
+          }
+        : undefined,
+    }),
+    [displaySideMapping, displayedTeams.left, displayedTeams.right, game],
+  );
+  const canonicalForDisplay = useCallback(
+    (side: LeftOrRight) => canonicalSideForDisplay(displaySideMapping, side),
+    [displaySideMapping],
+  );
+  const displayForCanonical = useCallback(
+    (side: LeftOrRight) => displaySideForCanonical(displaySideMapping, side),
+    [displaySideMapping],
+  );
   const clockSegment = roomClockSegment(
     roomTakesBreaks(procedure),
     game.halfBreaks.length,
@@ -914,6 +968,19 @@ export default function Scorer(props: IScorerProps) {
     }
     return status;
   }, [authoritativeRosters, connection, localRosterAdds, onSyncRosterPlayer, rejectedRosterSyncs]);
+  const displayedRosterSyncStatus = useMemo(() => {
+    const status: Record<string, 'synced' | 'waiting' | 'local' | 'rejected'> = {};
+    for (const displaySide of ['left', 'right'] as LeftOrRight[]) {
+      const canonicalSide = displaySideMapping[displaySide];
+      for (const player of game[canonicalSide].players) {
+        const key = rosterSyncKey(canonicalSide, player.name);
+        const displayedKey = rosterSyncKey(displaySide, player.name);
+        const value = rosterSyncStatus[key];
+        if (value !== undefined) status[displayedKey] = value;
+      }
+    }
+    return status;
+  }, [displaySideMapping, game, rosterSyncStatus]);
 
   useEffect(() => {
     if (connection !== RoomConnectionState.Connected || !onSyncRosterPlayer || !authoritativeRosters)
@@ -1119,6 +1186,18 @@ export default function Scorer(props: IScorerProps) {
       });
     },
     [record, phase],
+  );
+
+  /** The panel/keyboard speak in displayed sides; the journal always receives canonical sides. */
+  const recordDisplayedBuzz = useCallback(
+    (displaySide: LeftOrRight, playerName: string, answerType: IScorekeeperAnswerType) =>
+      recordBuzz(canonicalForDisplay(displaySide), playerName, answerType),
+    [canonicalForDisplay, recordBuzz],
+  );
+  const recordDisplayedWrongNoPenalty = useCallback(
+    (displaySide: LeftOrRight, playerName: string) =>
+      recordWrongNoPenalty(canonicalForDisplay(displaySide), playerName),
+    [canonicalForDisplay, recordWrongNoPenalty],
   );
 
   const recordNoBuzz = useCallback(() => {
@@ -1339,6 +1418,8 @@ export default function Scorer(props: IScorerProps) {
     currentQuestionState?.readout !== true &&
     (answeredTeams.size === 0 || currentQuestionState?.readingResumed === true);
   const anyNegAvailable = negsAvailable('left') || negsAvailable('right');
+  const displayedEligible = (side: LeftOrRight) => eligible(canonicalForDisplay(side));
+  const displayedNegsAvailable = (side: LeftOrRight) => negsAvailable(canonicalForDisplay(side));
   const canResumeReading =
     phase.kind === 'tossup' &&
     answeredTeams.size > 0 &&
@@ -1365,17 +1446,21 @@ export default function Scorer(props: IScorerProps) {
   const seatedPlayers = useMemo(
     () => ({
       left: orderBySeating(
-        game.left.players.filter((player) => game.left.activePlayers.includes(player.name)),
-        seating.seating.left,
+        displayedTeams.left.players.filter((player) =>
+          displayedTeams.left.activePlayers.includes(player.name),
+        ),
+        seating.seating[displaySideMapping.left],
         (player) => player.name,
       ).map((player) => player.name),
       right: orderBySeating(
-        game.right.players.filter((player) => game.right.activePlayers.includes(player.name)),
-        seating.seating.right,
+        displayedTeams.right.players.filter((player) =>
+          displayedTeams.right.activePlayers.includes(player.name),
+        ),
+        seating.seating[displaySideMapping.right],
         (player) => player.name,
       ).map((player) => player.name),
     }),
-    [game.left, game.right, seating.seating],
+    [displaySideMapping, displayedTeams, seating.seating],
   );
 
   /** The seat a keystroke just scored into, flashed briefly and then forgotten. */
@@ -1408,19 +1493,24 @@ export default function Scorer(props: IScorerProps) {
     keyboardEnabled,
     format,
     scoringEnabled,
-    negsAvailable,
-    eligible,
+    negsAvailable: displayedNegsAvailable,
+    eligible: displayedEligible,
     seatedPlayers,
     dialogOpen: dialog !== null,
     noBuzzAllowed: phase.kind === 'tossup' && !playBlockedByProtest,
+    seatLayoutKey: displaySideMapping.left,
     // The same callbacks the buttons are given. A keystroke cannot reach a code path a tap cannot.
-    onBuzz: recordBuzz,
-    onWrongNoPenalty: (side, playerName) => recordWrongNoPenalty(side, playerName),
+    onBuzz: recordDisplayedBuzz,
+    onWrongNoPenalty: recordDisplayedWrongNoPenalty,
     onNoBuzz: recordNoBuzz,
     onUndo: undoWithFeedback,
     onRedo: redoWithFeedback,
     onSeatArmed: (seat) =>
-      setKeyStatus({ kind: 'armed', seat, actions: availableActionKeys(format, negsAvailable(seat.side)) }),
+      setKeyStatus({
+        kind: 'armed',
+        seat,
+        actions: availableActionKeys(format, displayedNegsAvailable(seat.side)),
+      }),
     onSequenceCleared: () => setKeyStatus(null),
     onEcho: ({ side, seat, number, playerName, action, answerType }) => {
       setKeyEcho({ side, seat });
@@ -1561,8 +1651,7 @@ export default function Scorer(props: IScorerProps) {
     if (phase.kind === 'checkpoint') {
       return phase.checkpoint === 'overtime' ? 'Regulation complete' : 'Initial overtime complete';
     }
-    if (phase.kind === 'timeout')
-      return `Timeout · ${phase.team === 'left' ? game.left.name : game.right.name}`;
+    if (phase.kind === 'timeout') return `Timeout · ${displayedTeams[displayForCanonical(phase.team)].name}`;
     if (phase.period === 'overtime') {
       const overtimeNumber = game.overtimeTossupsRead + (phase.kind === 'tossup' ? 1 : 0);
       return `Overtime tossup ${Math.max(1, overtimeNumber)}${game.suddenDeathStarted ? ' · sudden death' : ''}`;
@@ -1598,6 +1687,38 @@ export default function Scorer(props: IScorerProps) {
    * scoring surface should have. What it has is a payload and a request.
    */
   const downloadQbj = useCallback(() => onDownload(qbj), [onDownload, qbj]);
+
+  /**
+   * Save the complete QBSheet recovery envelope. The current segment is read from the hook as well
+   * as the other persisted segments because a clock tick is intentionally not a React render; the
+   * export must snapshot the value visible at the instant the scorekeeper presses the button.
+   */
+  const downloadQbsheetBackup = useCallback(() => {
+    if (!onDownloadQbsheetBackup || !gamePackage) return;
+    const now = Date.now();
+    const clocks = exportRoomClocks(gameKey, now);
+    clocks[clockSegment] = snapshotRoomClock(roomClock.state, now);
+    onDownloadQbsheetBackup(
+      createQbsheetBackup({
+        gamePackage,
+        setup,
+        events: events.events,
+        history: events.recoveryHistory(),
+        clocks,
+        display: { mapping: displaySideMapping, seating: seating.seating },
+      }),
+    );
+  }, [
+    clockSegment,
+    displaySideMapping,
+    events,
+    gameKey,
+    gamePackage,
+    onDownloadQbsheetBackup,
+    roomClock.state,
+    seating.seating,
+    setup,
+  ]);
 
   /**
    * Apply a correction to the game's definition, and leave a record of it in the game itself.
@@ -2174,29 +2295,43 @@ export default function Scorer(props: IScorerProps) {
 
       {phase.kind === 'lineup' && (
         <StartingLineupPrompt
-          left={game.left}
-          right={game.right}
+          left={displayedTeams.left}
+          right={displayedTeams.right}
           maximumActive={format.players.maximumActive}
-          needed={phase.teams}
+          needed={phase.teams.map(displayForCanonical)}
           procedure={procedure}
-          requiredStarterCount={requiredStarterCount}
-          onAddPlayer={(team, playerName) => addRosterPlayer(team, playerName)}
+          requiredStarterCount={
+            Object.fromEntries(
+              (['left', 'right'] as LeftOrRight[]).flatMap((displaySide) => {
+                const count = requiredStarterCount?.[canonicalForDisplay(displaySide)];
+                return count === undefined ? [] : [[displaySide, count]];
+              }),
+            ) as Partial<Record<LeftOrRight, number>>
+          }
+          onAddPlayer={(displaySide, playerName) =>
+            addRosterPlayer(canonicalForDisplay(displaySide), playerName)
+          }
           onConfirm={(lineups) => {
-            const problem = validateStartingLineups?.(lineups);
+            const canonicalLineups: Partial<Record<LeftOrRight, string[]>> = {};
+            for (const displaySide of ['left', 'right'] as LeftOrRight[]) {
+              const lineup = lineups[displaySide];
+              if (lineup !== undefined) canonicalLineups[canonicalForDisplay(displaySide)] = lineup;
+            }
+            const problem = validateStartingLineups?.(canonicalLineups);
             if (problem) return problem;
             seating.arrange(
               {
                 left: game.left.players.map((player) => player.name),
                 right: game.right.players.map((player) => player.name),
               },
-              lineups,
+              canonicalLineups,
             );
-            const chosen = (Object.keys(lineups) as LeftOrRight[]).map((side) => ({
+            const chosen = (Object.keys(canonicalLineups) as LeftOrRight[]).map((side) => ({
               id: newEventId(),
               type: 'substitution' as const,
               questionNumber: 1,
               team: side,
-              activePlayers: lineups[side] as string[],
+              activePlayers: canonicalLineups[side] as string[],
             }));
             record(...chosen);
             return undefined;
@@ -2213,6 +2348,7 @@ export default function Scorer(props: IScorerProps) {
             <PreSubmitReview
               format={format}
               game={game}
+              displaySides={displaySideMapping}
               unsyncedRosterAdditions={unsyncedRosterAdditions}
               warnings={warnings}
               blockers={blockers}
@@ -2232,9 +2368,11 @@ export default function Scorer(props: IScorerProps) {
                   whether the game reaches the standings. Both are said, and which one is
                   said depends on whether there is a delivery path at all.
                 */}
-                {!submitResult.ok && connection === RoomConnectionState.Offline && (
-                  <strong>Result saved on this Chromebook</strong>
-                )}
+                {!submitResult.ok &&
+                  submitResult.durablySaved !== false &&
+                  connection === RoomConnectionState.Offline && (
+                    <strong>Result saved on this Chromebook</strong>
+                  )}
                 <p>{submitResult.message}</p>
                 {!submitResult.ok && (
                   <button type="button" className="scorer-action" onClick={downloadQbj}>
@@ -2252,42 +2390,52 @@ export default function Scorer(props: IScorerProps) {
           <main className="scorer-main">
             <div className="scorer-teams">
               <TeamPanel
+                key={displaySideMapping.left}
                 format={format}
-                team={game.left}
-                seatOrder={seating.seating.left}
+                team={displayedTeams.left}
+                seatOrder={seating.seating[displaySideMapping.left]}
                 flashSeat={keyEcho?.side === 'left' ? keyEcho.seat : undefined}
                 scoringEnabled={scoringEnabled}
-                eligible={eligible('left')}
-                negsAvailable={negsAvailable('left')}
-                timeoutsUsed={(procedure?.timeoutsPerTeam ?? 0) > 0 ? game.timeouts.left : undefined}
+                eligible={displayedEligible('left')}
+                negsAvailable={displayedNegsAvailable('left')}
+                timeoutsUsed={
+                  (procedure?.timeoutsPerTeam ?? 0) > 0 ? game.timeouts[displaySideMapping.left] : undefined
+                }
                 timeoutsPerTeam={
                   (procedure?.timeoutsPerTeam ?? 0) > 0 ? procedure?.timeoutsPerTeam : undefined
                 }
-                onBuzz={(playerName, answerType) => recordBuzz('left', playerName, answerType)}
-                onWrongNoPenalty={(playerName) => recordWrongNoPenalty('left', playerName)}
-                onSubstitute={(outgoing, incoming) => substituteFromRow('left', outgoing, incoming)}
-                benchPlayers={benchFor('left')}
-                substitutionAllowed={lineupChangeAllowed || lineupChangeAuthorized.left}
+                onBuzz={(playerName, answerType) => recordDisplayedBuzz('left', playerName, answerType)}
+                onWrongNoPenalty={(playerName) => recordDisplayedWrongNoPenalty('left', playerName)}
+                onSubstitute={(outgoing, incoming) =>
+                  substituteFromRow(displaySideMapping.left, outgoing, incoming)
+                }
+                benchPlayers={benchFor(displaySideMapping.left)}
+                substitutionAllowed={lineupChangeAllowed || lineupChangeAuthorized[displaySideMapping.left]}
                 substitutionBlockedReason={lineupChangeReason}
                 substitutionQuestionNumber={lineupQuestion}
               />
               <TeamPanel
+                key={displaySideMapping.right}
                 format={format}
-                team={game.right}
-                seatOrder={seating.seating.right}
+                team={displayedTeams.right}
+                seatOrder={seating.seating[displaySideMapping.right]}
                 flashSeat={keyEcho?.side === 'right' ? keyEcho.seat : undefined}
                 scoringEnabled={scoringEnabled}
-                eligible={eligible('right')}
-                negsAvailable={negsAvailable('right')}
-                timeoutsUsed={(procedure?.timeoutsPerTeam ?? 0) > 0 ? game.timeouts.right : undefined}
+                eligible={displayedEligible('right')}
+                negsAvailable={displayedNegsAvailable('right')}
+                timeoutsUsed={
+                  (procedure?.timeoutsPerTeam ?? 0) > 0 ? game.timeouts[displaySideMapping.right] : undefined
+                }
                 timeoutsPerTeam={
                   (procedure?.timeoutsPerTeam ?? 0) > 0 ? procedure?.timeoutsPerTeam : undefined
                 }
-                onBuzz={(playerName, answerType) => recordBuzz('right', playerName, answerType)}
-                onWrongNoPenalty={(playerName) => recordWrongNoPenalty('right', playerName)}
-                onSubstitute={(outgoing, incoming) => substituteFromRow('right', outgoing, incoming)}
-                benchPlayers={benchFor('right')}
-                substitutionAllowed={lineupChangeAllowed || lineupChangeAuthorized.right}
+                onBuzz={(playerName, answerType) => recordDisplayedBuzz('right', playerName, answerType)}
+                onWrongNoPenalty={(playerName) => recordDisplayedWrongNoPenalty('right', playerName)}
+                onSubstitute={(outgoing, incoming) =>
+                  substituteFromRow(displaySideMapping.right, outgoing, incoming)
+                }
+                benchPlayers={benchFor(displaySideMapping.right)}
+                substitutionAllowed={lineupChangeAllowed || lineupChangeAuthorized[displaySideMapping.right]}
                 substitutionBlockedReason={lineupChangeReason}
                 substitutionQuestionNumber={lineupQuestion}
               />
@@ -2312,6 +2460,7 @@ export default function Scorer(props: IScorerProps) {
                 <HalftimeCheck
                   game={game}
                   afterQuestion={phase.afterQuestion}
+                  displaySides={displaySideMapping}
                   breakName={currentBreakName}
                   substitutionMessage={substitutionMessage}
                   onPlayers={() => setDialog('players')}
@@ -2362,7 +2511,7 @@ export default function Scorer(props: IScorerProps) {
                   )}
                   {phase.eligibleTeams.length === 1 && (
                     <p className="scorer-hint">
-                      {phase.eligibleTeams[0] === 'left' ? game.left.name : game.right.name} may still answer.
+                      {displayedTeams[displayForCanonical(phase.eligibleTeams[0])].name} may still answer.
                     </p>
                   )}
                 </div>
@@ -2375,10 +2524,10 @@ export default function Scorer(props: IScorerProps) {
                   </p>
                   <p className="scorer-complete-score">
                     <span>
-                      {game.left.name} <strong>{game.left.points}</strong>
+                      {displayedTeams.left.name} <strong>{displayedTeams.left.points}</strong>
                     </span>
                     <span>
-                      {game.right.name} <strong>{game.right.points}</strong>
+                      {displayedTeams.right.name} <strong>{displayedTeams.right.points}</strong>
                     </span>
                   </p>
                   <p className="scorer-dialog-note">
@@ -2425,7 +2574,7 @@ export default function Scorer(props: IScorerProps) {
               {phase.kind === 'timeout' && (
                 <div className="scorer-timeout" aria-label="Timeout active">
                   <p className="scorer-checkpoint-title">
-                    Timeout · {phase.team === 'left' ? game.left.name : game.right.name}
+                    Timeout · {displayedTeams[displayForCanonical(phase.team)].name}
                   </p>
                   {timeoutRemainingMs !== undefined && (
                     <p className="scorer-timeout-clock" aria-label="Timeout remaining">
@@ -2455,7 +2604,7 @@ export default function Scorer(props: IScorerProps) {
                   key={phase.questionNumber}
                   format={format}
                   controllingTeamName={phase.team === 'left' ? game.left.name : game.right.name}
-                  controllingSide={phase.team}
+                  controllingSide={displayForCanonical(phase.team)}
                   opponentName={phase.team === 'left' ? game.right.name : game.left.name}
                   questionNumber={phase.questionNumber}
                   onRecord={recordBonus}
@@ -2469,6 +2618,7 @@ export default function Scorer(props: IScorerProps) {
 
           <RecentRail
             game={game}
+            displaySides={displaySideMapping}
             emphasizeQuestion={emphasizedQuestion}
             motion={recentMotion}
             onInspect={(questionNumber) => openReviewAt(questionNumber, true)}
@@ -2522,60 +2672,60 @@ export default function Scorer(props: IScorerProps) {
 
       {dialog === 'players' && (
         <PlayersDialog
-          left={game.left}
-          right={game.right}
+          left={displayedTeams.left}
+          right={displayedTeams.right}
           maximumActive={format.players.maximumActive}
           questionNumber={lineupQuestion}
-          rosterSyncStatus={rosterSyncStatus}
-          timeouts={game.timeouts}
+          rosterSyncStatus={displayedRosterSyncStatus}
+          timeouts={mapSides(game.timeouts, displaySideMapping)}
           timeoutsPerTeam={procedure?.timeoutsPerTeam ?? 0}
           lineupChangeAllowed={lineupChangeAllowed}
-          lineupChangeAuthorized={lineupChangeAuthorized}
+          lineupChangeAuthorized={mapSides(lineupChangeAuthorized, displaySideMapping)}
           rosterAdditionAllowed={rosterAdditionAllowed}
           lineupChangeReason={lineupChangeReason}
           // Only rendered when a lineup change is currently refused, which is a phase an ordinary
           // game passes through without ever opening this dialog.
           onProcedureQuery={() => openProcedureDialog('substitution-opportunity')}
-          seating={seating.seating}
-          onMovePlayer={(team, visibleNames, playerName, direction) => {
+          seating={mapSides(seating.seating, displaySideMapping)}
+          onMovePlayer={(displaySide, visibleNames, playerName, direction) => {
             if (submitting) return;
             seating.move(
-              team,
-              (team === 'left' ? game.left : game.right).players.map((player) => player.name),
+              canonicalForDisplay(displaySide),
+              game[canonicalForDisplay(displaySide)].players.map((player) => player.name),
               visibleNames,
               playerName,
               direction,
             );
           }}
-          onSeatSubstitute={(team, outgoing, incoming) => {
+          onSeatSubstitute={(displaySide, outgoing, incoming) => {
             if (submitting) return;
             seating.substitute(
-              team,
-              (team === 'left' ? game.left : game.right).players.map((player) => player.name),
+              canonicalForDisplay(displaySide),
+              game[canonicalForDisplay(displaySide)].players.map((player) => player.name),
               outgoing,
               incoming,
             );
           }}
-          onSubstitute={(team, activePlayers) => {
+          onSubstitute={(displaySide, activePlayers) => {
             if (submitting) return;
             record({
               id: newEventId(),
               type: 'substitution',
               questionNumber: lineupQuestion,
-              team,
+              team: canonicalForDisplay(displaySide),
               activePlayers,
             });
             setDialog(null);
           }}
-          onAddPlayer={(team, playerName, activePlayers) => {
+          onAddPlayer={(displaySide, playerName, activePlayers) => {
             if (submitting) return;
-            addRosterPlayer(team, playerName, activePlayers);
+            addRosterPlayer(canonicalForDisplay(displaySide), playerName, activePlayers);
             setDialog(null);
           }}
           onRequestControl={
             onRequestControl
-              ? (team, playerName) => {
-                  const teamName = team === 'left' ? game.left.name : game.right.name;
+              ? (displaySide, playerName) => {
+                  const teamName = game[canonicalForDisplay(displaySide)].name;
                   const facts = {
                     prefix: `Roster change for ${playerName}:`,
                     localOnly: `${playerName} is on this scoresheet.`,
@@ -2598,9 +2748,15 @@ export default function Scorer(props: IScorerProps) {
       {dialog === 'lightning' && (
         <LightningDialog
           format={format}
-          game={game}
-          onRecord={(team, points) =>
-            record({ id: newEventId(), type: 'lightning', questionNumber: currentQuestion, team, points })
+          game={displayedGame}
+          onRecord={(displaySide, points) =>
+            record({
+              id: newEventId(),
+              type: 'lightning',
+              questionNumber: currentQuestion,
+              team: canonicalForDisplay(displaySide),
+              points,
+            })
           }
           onClose={() => setDialog(null)}
         />
@@ -2618,13 +2774,13 @@ export default function Scorer(props: IScorerProps) {
       )}
       {dialog === 'adjust' && (
         <AdjustDialog
-          game={game}
-          onAdjust={(team, points, reason) => {
+          game={displayedGame}
+          onAdjust={(displaySide, points, reason) => {
             record({
               id: newEventId(),
               type: 'adjustment',
               questionNumber: currentQuestion,
-              team,
+              team: canonicalForDisplay(displaySide),
               points,
               reason,
             });
@@ -2635,9 +2791,14 @@ export default function Scorer(props: IScorerProps) {
       )}
       {dialog === 'forfeit' && (
         <ForfeitDialog
-          game={game}
-          onForfeit={(teams) => {
-            record({ id: newEventId(), type: 'forfeit', questionNumber: currentQuestion, teams });
+          game={displayedGame}
+          onForfeit={(displaySides) => {
+            record({
+              id: newEventId(),
+              type: 'forfeit',
+              questionNumber: currentQuestion,
+              teams: displaySides.map(canonicalForDisplay),
+            });
             setDialog(null);
           }}
           onClose={() => setDialog(null)}
@@ -2690,6 +2851,7 @@ export default function Scorer(props: IScorerProps) {
           game={game}
           events={events.events}
           format={format}
+          displaySides={displaySideMapping}
           focusQuestion={reviewFocus}
           editQuestion={reviewEditQuestion}
           /*
@@ -2741,13 +2903,14 @@ export default function Scorer(props: IScorerProps) {
       )}
       {dialog === 'protests' && (
         <ProtestDialog
-          game={game}
+          game={displayedGame}
           questionNumber={currentQuestion}
           controlRequest={controlRequest}
           onRetryControl={onRetryControlRequest}
           onCancelControl={onCancelControlRequest}
-          onRecord={async (team, subject, description, requestControl) => {
+          onRecord={async (displaySide, subject, description, requestControl) => {
             if (submitting) return undefined;
+            const team = canonicalForDisplay(displaySide);
             const teamName = team === 'left' ? game.left.name : game.right.name;
             const recorded = record({
               id: newEventId(),
@@ -2798,21 +2961,28 @@ export default function Scorer(props: IScorerProps) {
       )}
       {dialog === 'timeout' && (
         <TimeoutDialog
-          game={game}
+          game={displayedGame}
           timeoutsPerTeam={procedure?.timeoutsPerTeam ?? 0}
           extraTimeouts={{
-            left: extraTimeoutsGranted(events.events, 'left'),
-            right: extraTimeoutsGranted(events.events, 'right'),
+            ...mapSides(
+              {
+                left: extraTimeoutsGranted(events.events, 'left'),
+                right: extraTimeoutsGranted(events.events, 'right'),
+              },
+              displaySideMapping,
+            ),
           }}
           // Offered only from the team that has actually run out; see `TimeoutDialog`. There is no
           // such control on a team with a timeout left, which is every team in an ordinary game.
-          onProcedureQuery={(team) => openProcedureDialog('timeout-allowance', team)}
-          onRecord={(team) =>
+          onProcedureQuery={(displaySide) =>
+            openProcedureDialog('timeout-allowance', canonicalForDisplay(displaySide))
+          }
+          onRecord={(displaySide) =>
             record({
               id: newEventId(),
               type: 'timeout-start',
               questionNumber: currentQuestion,
-              team,
+              team: canonicalForDisplay(displaySide),
               startedAt: Date.now(),
             })
           }
@@ -2880,7 +3050,7 @@ export default function Scorer(props: IScorerProps) {
         )}
       {dialog === 'end-early' && (
         <EndGameEarlyDialog
-          game={game}
+          game={displayedGame}
           regulationTossupCount={format.regulation.tossupCount}
           onEnd={(reason, tossupsRead) => {
             record({
@@ -2911,12 +3081,15 @@ export default function Scorer(props: IScorerProps) {
           playerNameProblem={playerNameProblem}
           onCorrectScoringRules={onCorrectGame && !submitting ? () => setDialog('scoring-rules') : undefined}
           onCorrectProcedure={onCorrectGame && !submitting ? () => openProcedureDialog() : undefined}
+          displaySides={displaySideMapping}
+          onSwapSides={displaySideState.swap}
           onClose={() => setDialog(null)}
         />
       )}
       {dialog === 'export' && (
         <ExportDialog
           onDownloadQbjBackup={downloadQbj}
+          onDownloadQbsheetBackup={onDownloadQbsheetBackup ? downloadQbsheetBackup : undefined}
           onDownloadPartialQbj={onDownloadForm ? () => onDownloadForm(game, 'partial') : undefined}
           onDownloadLegacyQbj={onDownloadForm ? () => onDownloadForm(game, 'legacy-match') : undefined}
           onClose={() => setDialog(null)}
@@ -2933,6 +3106,7 @@ export default function Scorer(props: IScorerProps) {
           refusalFor={exceptionRefusal}
           onRecordException={recordProcedureException}
           onCorrect={applyProcedureCorrection}
+          displaySides={displaySideMapping}
           onClose={() => {
             setProcedureTopic(undefined);
             setProcedureTeam(undefined);
@@ -2962,6 +3136,7 @@ export default function Scorer(props: IScorerProps) {
         <PrintableScoresheet
           game={game}
           format={format}
+          displaySides={displaySideMapping}
           tournamentName={tournamentName}
           roundName={roundName}
           roomName={roomName}

@@ -18,6 +18,7 @@ import { describe, expect, test } from 'vitest';
 import PrintableScoresheet, { continuationRows } from '../src/scorer/PrintableScoresheet';
 import deriveGame, { IGameSetup } from '../src/scoring/deriveGame';
 import { ScoreEvent } from '../src/scoring/ScoreEvents';
+import { identityDisplaySideMapping, swapDisplaySideMapping } from '../src/scorer/DisplaySideMapping';
 import scoringRulesToScorekeeperFormat, { CommonRuleSets, ScoringRules, typeIndex } from './rules';
 import { event } from './events';
 
@@ -57,7 +58,7 @@ const events: ScoreEvent[] = [
   event({ type: 'bonus', questionNumber: 2, team: 'left', controlledPoints: 10 }),
 ];
 
-function printed(scoreEvents: ScoreEvent[] = events) {
+function printed(scoreEvents: ScoreEvent[] = events, displaySides = identityDisplaySideMapping) {
   const game = deriveGame(format, setup, scoreEvents);
   render(
     <PrintableScoresheet
@@ -68,6 +69,7 @@ function printed(scoreEvents: ScoreEvent[] = events) {
       roomName="Room 204"
       packetName="12"
       operatorName="C. Bell"
+      displaySides={displaySides}
       now={new Date('2026-08-20T14:32:00Z')}
     />,
   );
@@ -127,6 +129,20 @@ describe('what the printed sheet says', () => {
         within(left).getByRole('columnheader', { name: answerType.shortLabel, hidden: true }),
       ).toBeInTheDocument();
     });
+  });
+
+  test('may follow the displayed orientation while keeping canonical question ownership', () => {
+    printed(events, swapDisplaySideMapping(identityDisplaySideMapping));
+
+    expect(screen.getByText('Greenwood vs Ninety Six')).toBeInTheDocument();
+    const grid = screen.getByRole('table', { name: /question by question/i, hidden: true });
+    const header = within(grid).getAllByRole('columnheader', { hidden: true });
+    expect(header[1]).toHaveTextContent('Greenwood');
+    expect(header[3]).toHaveTextContent('Ninety Six');
+    const rows = within(grid).getAllByRole('row', { hidden: true });
+    expect(within(rows[1]).getByText('0 / 35')).toBeInTheDocument();
+    expect(within(rows[1]).getByText('Sarah Mitchell +15')).toBeInTheDocument();
+    expect(screen.getByRole('table', { name: 'Greenwood', hidden: true })).toBeInTheDocument();
   });
 
   test('says what the answer types are worth, for whoever picks the sheet up', () => {

@@ -1,93 +1,140 @@
 # Recovery and backups
 
-QBSheet has three ways to bring a game back. They are not equal. This page tells you which one to use
-and why.
+QBSheet has four recovery layers. They serve different jobs: the local journal is the fastest
+same-device recovery, the durable game record is a second local copy, a QBSheet backup moves an
+unfinished game between devices, and QBJ remains the interoperable result/lifeboat format.
 
-## The three sources
+## The four sources
 
-| Source | Where it lives | How exact |
+| Source | Where it lives | What it restores |
 | --- | --- | --- |
-| The local journal | `localStorage` and IndexedDB on the device | Exact. This is the recovery mechanism. |
-| A partial QBJ file | A file that you hold | Partial. It holds what standard QBJ can say. |
-| The tournament control server | The server that you paired with | A fallback for a device that lost its own copy. |
+| The local game journal | `localStorage` on this device | Events, the frozen setup, and action-level undo/redo |
+| The durable game record | IndexedDB on this device | Package, setup, events, and finished-result/delivery state |
+| A QBSheet backup | A `.qbsheet` file you hold | Exact scoring state, including portable recovery metadata |
+| A partial QBJ file or server snapshot | A file or paired tournament-control server | The state that QBJ or the server snapshot can describe |
 
-## The local journal is the real recovery
+## The local journal is the first recovery path
 
-QBSheet writes each scoring event to `localStorage` at once. QBSheet also mirrors the game package,
-the record state, and the finished QBJ document in IndexedDB.
+Every accepted scoring action writes the event list and the v2 recovery shape to `localStorage` in the
+same turn as the click. The journal contains:
 
-The journal holds things that no file format can hold:
+- the complete `ScoreEvent[]` history and the setup used to derive it;
+- action-level undo frames and redo frames, so a reload keeps the same action boundaries; and
+- the journal timestamp and game key used to find this game again.
 
-- The full history of every scoring event
-- The undo and redo history
-- The internal state of the clock
-- The connection state and the queue of unsent messages
+The event list remains the source of truth. If the auxiliary undo/redo metadata is malformed, QBSheet
+keeps the events and discards only that metadata. Older v1 journals containing only setup and events
+continue to load; they simply have no recoverable undo/redo frames until a new action is made.
 
-**To recover from the journal, open QBSheet again on the same device.** The start screen shows the
-section **Unfinished game**. Select **Resume**.
+Room clocks are a separate local layer. Each half, break segment, or overtime segment has its own
+clock entry. Same-device recovery keeps the timestamp semantics of a running clock. The display-side
+mapping is also device-local presentation state and does not change canonical events or QBJ.
 
-## A partial QBJ file is a lifeboat
+The IndexedDB record mirrors the package, setup, events, and result state. It does not replace the
+synchronous journal for the immediate saved/not-saved promise, and it does not contain the journal's
+undo/redo frames or the separate room-clock entries.
 
-Use a partial QBJ file when the device itself is gone.
+**To recover on the same device, open QBSheet again and select _Resume_ under _Unfinished game_.**
+
+## A QBSheet backup moves an unfinished game
+
+Use this when the Chromebook is being replaced, the room changes machines, or you want an exact
+portable copy before continuing elsewhere.
 
 To write one during a game:
 
-1. Open the Game / More menu.
+1. Open the **Game / More** menu.
+2. Select **Export / backup…**.
+3. Select **Download QBSheet backup**.
+4. Keep the file whose name ends in `.qbsheet`.
+
+The QBSheet-specific, versioned envelope uses an explicit allowlist. It preserves the sanitized game
+package (rules, procedure, teams, rosters, and assignment metadata), current setup and starting
+lineups, the complete event history, action-level undo/redo, every persisted clock segment, the
+display-side mapping, and the player seating/keyboard order. Correction events, exceptions, and
+unresolved protests are ordinary events and therefore remain in the history.
+
+If a clock is running, export snapshots its elapsed time at the instant of export. The file never
+carries `runningSince`; an imported clock is paused, so moving the file does not charge the room for
+the time spent copying it.
+
+To restore one on another device, use the existing **Open game file** button and choose the
+`.qbsheet` file. No separate import screen is needed. QBSheet creates a fresh local, offline record,
+writes the event history and recovery metadata, restores the clocks paused, and restores the display
+orientation. A backup from a connected game does **not** retain authentication or pretend to be live:
+pair the destination device again if tournament control needs the game or its result.
+
+If this device already has an unfinished copy of the same assignment, QBSheet leaves that record
+untouched and restores the backup as a separate local attempt. The scoresheet says so beside the
+restored game; confirm which copy is current before recording another action. An unreadable local
+record is also never overwritten: QBSheet chooses another local attempt or refuses the import.
+
+An optional malformed recovery block is ignored where it is safe to do so, but a malformed event or
+an impossible event sequence makes the backup fail closed. A backup with a newer unsupported version
+is refused with an update message; QBSheet never partially interprets a future recovery shape.
+
+## A partial QBJ file is an interoperable lifeboat
+
+Use QBJ when another tool or tournament staff needs the standard result shape, or when only a QBJ
+reader is available.
+
+To write the current QBJ:
+
+1. Open the **Game / More** menu.
 2. Select **Export / backup…**.
 3. Select **Download current QBJ**.
-4. Keep the file. The name ends in `.partial.qbj`.
 
-The file holds the team and player statistics, the lineups, the per-question record, the notes, the
-room, and the identifiers. QBSheet can open the file again.
+QBJ carries the standard team/player statistics, per-question record, lineups, notes, room metadata,
+and identifiers that the QBJ schema supports. QBSheet continues to strip its internal recovery block
+from downloaded QBJ files. A current/partial QBJ therefore does not carry undo/redo, clock internals,
+display orientation, connection state, or unsent queues. It is a portable result/lifeboat, not an
+exact QBSheet continuation file.
 
-The file does not hold the undo history, the clock internals, the connection state, or the queue. So
-the file is a lifeboat for a dead Chromebook. It is not a substitute for the journal.
+QBJ opening is unchanged: give QBSheet the file through **Open game file**, and it follows the normal
+QBJ or legacy-file path. The QBSheet backup path is selected from the file's own discriminator, not
+by asking the scorekeeper to choose an import mode first.
 
-To read one back into a game in progress:
+## The server is a connected fallback
 
-1. Open the Game / More menu.
-2. Select **Recover from QBJ**.
-3. Choose the file.
+A paired scoresheet may ask tournament control for its private session snapshot only when the device
+has no local event history. This path requires the still-held session credential and is never part of
+a portable file. A server snapshot without QBSheet's recovery event layer is not turned into invented
+undo history; use QBJ recovery or the paper scoresheet instead.
 
-## The server is the last fallback
+## Comparison
 
-A paired scoresheet can ask the server for the private state that the scoresheet sent earlier. The
-same session credential authorises this read. No credential reads a whole room and no credential
-reads the whole tournament.
-
-Use this path only when the local copy of the device is gone or unreadable.
-
-## A comparison
-
-| | A partial QBJ file | The local journal |
-| --- | --- | --- |
-| Lives in | A file that you hold | IndexedDB and `localStorage` |
-| Holds | Standard QBJ statistics | The full event history and the frozen setup |
-| Restores | The game as QBJ can describe it | The game exactly as it was |
-| Undo and redo history | No | Yes |
-| Exact clock internals | No | Yes |
-| Connection state and queue | No | Yes |
-| Leaves the device | Yes | Never |
+| | Local journal | QBSheet backup | Partial/current QBJ |
+| --- | --- | --- | --- |
+| Lives in | This device's `localStorage` | A `.qbsheet` file | A `.qbj` file |
+| Events and setup | Yes | Yes | Standard QBJ projection |
+| Undo and redo frames | Yes, v2; absent in legacy v1 | Yes, when present | No |
+| All room-clock segments | Separate local entries | Yes, snapshotted and paused on import | No |
+| Display-side mapping | Device-local | Yes | No; QBJ stays canonical |
+| Player seating/keyboard order | Device-local | Yes | No |
+| Connection credentials/queue | Device-local only | No | No |
+| Leaves this device | No | Yes | Yes |
 
 ## What a portable file never holds
 
-QBSheet cleans every file that leaves the device. The same rule applies to a download, to a snapshot
-over the network, and to a result over the network.
+QBSheet's allowlisted serializer keeps these out of both QBSheet backups and ordinary QBJ downloads:
 
-A portable file never holds:
+- room, session, or access tokens;
+- pairing codes and authorization header data;
+- device or browser identifiers;
+- server credentials or server addresses;
+- private diagnostic logs, unrelated `localStorage`, and unsent connection queues; and
+- a capability that could impersonate the original room.
 
-- A room token or a session token
-- A pairing code or authorisation header data
-- A device identifier or a browser identifier
-- A server address
-- The private recovery journal
+The package may retain the assignment's game identity and human-readable room/team metadata needed
+to recognize the game. Those are not authentication capabilities. A connected restore is still an
+offline local game until the scorekeeper explicitly repairs or re-pairs it.
 
 ## Habits that save a game
 
-1. Download a partial QBJ file at halftime. One file per half costs nothing.
-2. Download the result at the end, even in a connected room.
-3. Keep the game in one tab on one device.
-4. Do not clear the site data of the browser during a tournament.
+1. Download a QBSheet backup before moving a room to another device.
+2. Download a current QBJ at halftime or whenever tournament staff needs the standard format.
+3. Download the final QBJ at the end, even when tournament control accepted the result.
+4. Keep one active scoresheet tab on one device and do not clear site data during a tournament.
 5. Do not use a private window for scoring.
 
 ## When something already went wrong

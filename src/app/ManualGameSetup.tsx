@@ -61,6 +61,7 @@ import {
   maximumTimeoutsPerTeam,
   substitutionOpportunityPhrase,
 } from '../scoring/RoomProcedure';
+import { gameFormatSummary } from '../scoring/gameFormatSummary';
 import { numberValue } from './BasicScoringRulesEditor';
 import ControlIcon, { type ControlIconName } from '../scorer/ControlIcon';
 import ScoringRulesEditor from './ScoringRulesEditor';
@@ -343,6 +344,11 @@ export default function ManualGameSetup(props: {
     );
 
   const result = useMemo(() => defineManualGame(input), [input]);
+  const parsedSummary = useMemo(
+    () =>
+      result.ok ? gameFormatSummary(result.definition.scorekeeperFormat, result.definition.procedure) : null,
+    [result],
+  );
   const problems = useMemo(() => (result.ok ? [] : result.problems), [result]);
   const rulePresets = useMemo(
     () => [
@@ -502,7 +508,7 @@ export default function ManualGameSetup(props: {
           Players
         </label>
         <p className="shell-hint manual-roster-hint" id={`manual-players-${side}-hint`}>
-          One player per line.
+          One player per line. Spreadsheet rows with tabs use the first column.
         </p>
         <textarea
           id={`manual-players-${side}`}
@@ -808,6 +814,23 @@ export default function ManualGameSetup(props: {
             </div>
           </details>
         </section>
+
+        {parsedSummary && (
+          <section
+            className="shell-section manual-format-summary"
+            aria-labelledby="manual-format-summary-heading"
+          >
+            <h2 id="manual-format-summary-heading" className="shell-heading">
+              Game format
+            </h2>
+            <p className="manual-format-summary-line">
+              <strong>Scoring:</strong> {parsedSummary.format}
+            </p>
+            <p className="manual-format-summary-line">
+              <strong>Room:</strong> {parsedSummary.procedure}
+            </p>
+          </section>
+        )}
 
         {startError !== '' && (
           <p className="shell-warning" role="alert">
