@@ -90,6 +90,26 @@ describe('timestamp-based room clock', () => {
     expect(loadRoomClock('new-game', 60_000, durable, 'half-2')).toEqual(exported['half-2']);
   });
 
+  test('does not export a dotted game key as a segment of its prefix', () => {
+    const durable = storage();
+    const first = pauseRoomClock(startRoomClock(idleRoomClock(60_000), 1_000), 'manual', 6_000);
+    const second = pauseRoomClock(startRoomClock(idleRoomClock(60_000), 1_000), 'manual', 11_000);
+
+    saveRoomClock('g1', first, durable, 'half-1');
+    saveRoomClock('g1.retry', second, durable, 'half-1');
+
+    expect(exportRoomClocks('g1', 12_000, durable)).toEqual({ 'half-1': first });
+    expect(exportRoomClocks('g1.retry', 12_000, durable)).toEqual({ 'half-1': second });
+
+    // The old v2 key grammar could not tell this key from a `retry.half-1` segment of g1. It stays
+    // readable by its exact game-and-segment key, but the new v3 export namespace never enumerates
+    // it under the wrong game.
+    const legacyOnly = storage();
+    legacyOnly.setItem('yellowfruit.room.clock.v2.g1.retry.half-1', JSON.stringify(second));
+    expect(loadRoomClock('g1.retry', 60_000, legacyOnly, 'half-1')).toEqual(second);
+    expect(exportRoomClocks('g1', 12_000, legacyOnly)).toEqual({});
+  });
+
   test('malformed running state recovers to a safe idle clock', () => {
     expect(
       normalizeRoomClock({ version: 2, durationMs: 60_000, status: 'running', accumulatedMs: 0 }, 60_000),

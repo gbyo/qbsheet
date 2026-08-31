@@ -56,7 +56,7 @@ interface IPendingPlayedGame {
 export default function GameFileOpen(props: {
   label?: string;
   onOpen: (definition: IGameDefinition) => void | Promise<void>;
-  onOpenBackup?: (backup: IQbsheetBackup) => void | Promise<void>;
+  onOpenBackup: (backup: IQbsheetBackup) => void | Promise<void>;
 }) {
   const { label = 'Open game file', onOpen, onOpenBackup } = props;
   const input = useRef<HTMLInputElement | null>(null);
@@ -108,10 +108,6 @@ export default function GameFileOpen(props: {
         return;
       }
       if (result.kind === 'backup') {
-        if (!onOpenBackup) {
-          setErrors(['This QBSheet backup needs the main Open game file screen to restore it.']);
-          return;
-        }
         await onOpenBackup(result.backup);
         return;
       }

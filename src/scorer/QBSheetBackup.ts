@@ -196,7 +196,7 @@ function serializePackage(value: IGamePackage): IGamePackage {
   return {
     format: gamePackageFormat,
     version: value.version,
-    ...(value.producer ? { producer: 'QBSheet' as const } : {}),
+    ...(value.producer ? { producer: value.producer } : {}),
     tournament: {
       ...(value.tournament.key ? { key: value.tournament.key } : {}),
       name: value.tournament.name,
@@ -527,6 +527,10 @@ function readClocks(value: unknown): Record<string, IRoomClockState> | undefined
     const durationMs = raw.durationMs;
     if (typeof durationMs !== 'number' || !Number.isFinite(durationMs) || durationMs < 0) continue;
     const normalized = normalizeRoomClock(raw, durationMs);
+    // A malformed active clock normalizes to idle. Omitting it preserves the documented contract
+    // that unusable auxiliary clocks disappear, rather than making a corrupted segment look as
+    // though the room deliberately reset it. A valid idle snapshot remains meaningful and stays.
+    if (raw.status !== 'idle' && normalized.status === 'idle') continue;
     clocks[segment] = cloneClock(normalized);
   }
   return Object.keys(clocks).length > 0 ? clocks : undefined;

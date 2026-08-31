@@ -70,5 +70,9 @@ describe('finishing while only the non-durable fallback is available', () => {
     expect(onComplete).not.toHaveBeenCalled();
     expect(screen.getAllByRole('button', { name: 'Download QBJ backup' }).length).toBeGreaterThan(0);
     expect(screen.queryByText('Result saved on this Chromebook')).toBeNull();
+    const afterRefusal = await store.get(record.id);
+    expect(afterRefusal).not.toHaveProperty('completedAt');
+    expect(afterRefusal).not.toHaveProperty('finalQbj');
+    expect(afterRefusal).not.toHaveProperty('finalScore');
   });
 });

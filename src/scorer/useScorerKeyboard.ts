@@ -112,7 +112,7 @@ export default function useScorerKeyboard(input: IScorerKeyboardInput): void {
     if (input.dialogOpen || !input.scoringEnabled || !input.keyboardEnabled) clearPending();
   }, [input.dialogOpen, input.scoringEnabled, input.keyboardEnabled, clearPending]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     clearPending();
   }, [input.seatLayoutKey, clearPending]);
 

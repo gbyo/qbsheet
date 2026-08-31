@@ -133,6 +133,39 @@ describe('QBSheet backup format', () => {
     expect(parsed.value.clocks).toBeUndefined();
   });
 
+  test('drops malformed active clocks without discarding a valid idle clock', () => {
+    const backup = createQbsheetBackup({ gamePackage, setup, events: [buzz] });
+    const parsed = readQbsheetBackup({
+      ...backup,
+      clocks: {
+        'half-1': {
+          version: roomClockVersion - 1,
+          durationMs: 60_000,
+          status: 'running',
+          accumulatedMs: 5_000,
+          runningSince: 1,
+        },
+        'half-2': {
+          version: roomClockVersion,
+          durationMs: 60_000,
+          status: 'idle',
+          accumulatedMs: 0,
+        },
+      },
+    });
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.clocks).toEqual({
+      'half-2': {
+        version: roomClockVersion,
+        durationMs: 60_000,
+        status: 'idle',
+        accumulatedMs: 0,
+      },
+    });
+  });
+
   test('preserves seating for a player added locally during the game', () => {
     const events = [
       { id: 'dead-1', type: 'tossup-dead' as const, questionNumber: 1 },

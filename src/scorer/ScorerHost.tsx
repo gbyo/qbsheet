@@ -245,9 +245,10 @@ export default function ScorerHost(props: IScorerHostProps) {
   // taken it. Deliberately keyed on the event list identity rather than its length, so a correction
   // that replaces a question without changing the count is mirrored too.
   const eventList = events.events;
+  const { recoveryHistory } = events;
   useEffect(() => {
-    if (onEventsChanged) onEventsChanged(eventList, activeSetup, events.recoveryHistory());
-  }, [onEventsChanged, eventList, activeSetup, events]);
+    if (onEventsChanged) onEventsChanged(eventList, activeSetup, recoveryHistory());
+  }, [onEventsChanged, eventList, activeSetup, recoveryHistory]);
   const lastServerRecoveryAttempt = useRef(-1);
   // Mirrored from a committed effect rather than during render: the only reader is the retry button,
   // which runs long after the commit, and a render that React throws away must not leave a count

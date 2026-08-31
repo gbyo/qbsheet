@@ -1,5 +1,9 @@
 /** A timestamp-based room clock. The displayed seconds are never the source of truth. */
 export const roomClockVersion = 2;
+// The state version stays at 2; storage gets its own namespace so old ambiguous keys are never
+// enumerated as though they belonged to a newly encoded game identity.
+const roomClockStorageVersion = 3;
+const legacyRoomClockStorageVersion = 2;
 
 export type RoomClockSegment = string;
 
@@ -54,12 +58,22 @@ function browserStorage(): IClockStorage | null {
   }
 }
 
-function storageKey(gameKey: string, segment: RoomClockSegment): string {
-  return `yellowfruit.room.clock.v${roomClockVersion}.${encodeURIComponent(gameKey)}.${encodeURIComponent(segment)}`;
+/** Keep the separator out of a game identity, so a dotted key cannot prefix another game's clock. */
+function encodedGameKey(gameKey: string): string {
+  return encodeURIComponent(gameKey).replace(/\./g, '%2E');
 }
 
 function storagePrefix(gameKey: string): string {
-  return `yellowfruit.room.clock.v${roomClockVersion}.${encodeURIComponent(gameKey)}.`;
+  return `yellowfruit.room.clock.v${roomClockStorageVersion}.${encodedGameKey(gameKey)}.`;
+}
+
+function storageKey(gameKey: string, segment: RoomClockSegment): string {
+  return `${storagePrefix(gameKey)}${encodeURIComponent(segment)}`;
+}
+
+/** Read and clear clocks written before dots in game keys were encoded as a separator-safe value. */
+function legacyStorageKey(gameKey: string, segment: RoomClockSegment): string {
+  return `yellowfruit.room.clock.v${legacyRoomClockStorageVersion}.${encodeURIComponent(gameKey)}.${encodeURIComponent(segment)}`;
 }
 
 export function idleRoomClock(durationMs: number): IRoomClockState {
@@ -187,8 +201,10 @@ export function loadRoomClock(
 ): IRoomClockState {
   if (!storage || gameKey === '') return idleRoomClock(durationMs);
   try {
+    const key = storageKey(gameKey, segment);
+    const legacyKey = legacyStorageKey(gameKey, segment);
     return normalizeRoomClock(
-      JSON.parse(storage.getItem(storageKey(gameKey, segment)) ?? 'null'),
+      JSON.parse(storage.getItem(key) ?? (legacyKey === key ? null : storage.getItem(legacyKey)) ?? 'null'),
       durationMs,
     );
   } catch {
@@ -217,7 +233,10 @@ export function clearRoomClock(
   segment: RoomClockSegment = 'regulation',
 ): void {
   try {
-    storage?.removeItem(storageKey(gameKey, segment));
+    const key = storageKey(gameKey, segment);
+    storage?.removeItem(key);
+    const legacyKey = legacyStorageKey(gameKey, segment);
+    if (legacyKey !== key) storage?.removeItem(legacyKey);
   } catch {
     // Clock persistence is a recovery convenience, never a reason to stop scoring.
   }

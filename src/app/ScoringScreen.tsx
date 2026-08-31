@@ -311,6 +311,19 @@ export default function ScoringScreen(props: {
 
   const submit = useCallback(
     async (qbj: object): Promise<IScorerSubmitResult> => {
+      // `GameStore` deliberately lets a memory fallback keep a live room usable, which means an
+      // update can return a value without promising it survives a reload. Refuse *before* setting
+      // the completion fields, so a room is never told a result was unsafe while the stored record
+      // already looks finished to a later reload.
+      if (!store.durable || store.storageDegraded) {
+        if (onScreen.current) setRecordDurablyStored(false);
+        return {
+          ok: false,
+          message:
+            'This device could not durably save the finished result. Do not close this tab. Download the QBJ backup now.',
+          durablySaved: false,
+        };
+      }
       const portable = portableQbj(qbj, record.package);
       const completedAt = new Date().toISOString();
       const saved = await store.update(record.id, {
@@ -318,10 +331,9 @@ export default function ScoringScreen(props: {
         finalQbj: portable,
         finalScore: scoreFromQbj(portable),
       });
-      // `GameStore` deliberately lets a memory fallback keep a live room usable, which means an
-      // update can return a value without promising it survives a reload. Completion is different:
-      // moving to the handoff screen would let the room leave behind a final score that existed only
-      // in this tab. Keep the scorer open and make the portable backup action available instead.
+      // Completion is different from ordinary progress: moving to the handoff screen would let the
+      // room leave behind a final score that existed only in this tab. Keep the scorer open and make
+      // the portable backup action available instead.
       if (!saved || !store.durable || store.storageDegraded) {
         if (onScreen.current) setRecordDurablyStored(false);
         return {

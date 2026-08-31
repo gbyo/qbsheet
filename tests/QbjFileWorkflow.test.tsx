@@ -10,10 +10,11 @@ import { afterEach, describe, expect, test } from 'vitest';
 import { act, cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
 import { openApp, pressControl, score, startLineups } from './appHarness';
 import { claimResponseTimeoutMs } from '../src/persistence/TabClaim';
-import { assignmentDocument, tournamentDocument } from './qbjDocuments';
+import { assignmentDocument, greenwood, matchObject, ninetySix, tournamentDocument } from './qbjDocuments';
 import { packageText } from './packages';
 import { createQbsheetBackup, serializeQbsheetBackup } from '../src/scorer/QBSheetBackup';
 import { validPackage } from './packages';
+import { roomProcedureVersion } from '../src/scoring/RoomProcedure';
 
 afterEach(cleanup);
 
@@ -280,9 +281,9 @@ describe('downloading QBJ during a game', () => {
     return { files };
   }
 
-  async function openAssignmentAndStart(): Promise<void> {
+  async function openAssignmentAndStart(assignment = assignmentDocument()): Promise<void> {
     await openApp();
-    await choose(fileOf(assignmentDocument(), 'R04.assignment.qbj'));
+    await choose(fileOf(assignment, 'R04.assignment.qbj'));
     await startLineups();
   }
 
@@ -314,7 +315,32 @@ describe('downloading QBJ during a game', () => {
 
   test('the QBSheet backup action writes the exact transfer envelope', async () => {
     const downloads = captureDownloads();
-    await openAssignmentAndStart();
+    await openAssignmentAndStart(
+      assignmentDocument({
+        matches: [
+          matchObject({
+            id: 'Match_clock-export',
+            left: ninetySix,
+            right: greenwood,
+            location: 'Room 204',
+            qbtcp: {
+              round_revision: 3,
+              room_id: 'room-204',
+              procedure: {
+                version: roomProcedureVersion,
+                halves: true,
+                halfLengthMinutes: 10,
+                timeoutsPerTeam: 0,
+              },
+              scorekeeper: { timed: false },
+            },
+          }),
+        ],
+      }),
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    });
 
     await pressControl('Export / backup…');
     await pressControl('Download QBSheet backup');
@@ -326,6 +352,7 @@ describe('downloading QBJ during a game', () => {
     expect(written.version).toBe(1);
     expect(written.package.left.name).toBe('Ninety Six');
     expect(Array.isArray(written.events)).toBe(true);
+    expect(written.clocks['half-1']).toMatchObject({ status: 'paused' });
     expect(downloads.files[0].contents).not.toContain('runningSince');
   });
 
