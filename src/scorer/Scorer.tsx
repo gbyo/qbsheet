@@ -65,6 +65,7 @@ import BonusPrompt from './BonusPrompt';
 import RecentRail, { IRecentMotion } from './RecentRail';
 import GameMenu from './GameMenu';
 import scorerMenuItems from './scorerMenu';
+import ArcadeLauncher from '../arcade/ArcadeLauncher';
 import ControlIcon from './ControlIcon';
 import PlayersDialog, { rosterSyncKey } from './PlayersDialog';
 import StartingLineupPrompt from './StartingLineupPrompt';
@@ -321,6 +322,7 @@ type OpenDialog =
   | 'export'
   | 'scoring-layout'
   | 'procedure'
+  | 'arcade'
   | null;
 
 /**
@@ -3619,6 +3621,19 @@ export default function Scorer(props: IScorerProps) {
           onClose={() => setDialog(null)}
         />
       )}
+      {/*
+        The arcade, which is a dialog and nothing else.
+
+        It reaches the scoresheet through the same `dialog` state every other infrequent action does,
+        which is what makes it safe: `anyDialogOpen` is already what turns off keyboard scoring and
+        already what `useScorerKeyboard` checks, so a game gets Space and the arrows for exactly as
+        long as this is open and the scoresheet gets them back the instant it is not. Nothing
+        arcade-shaped appears anywhere else in this file, and nothing in it can record an event.
+
+        `ArcadeLauncher` rather than the dialog itself: the games are in a chunk of their own that a
+        reloading Chromebook never fetches. See `ArcadeLauncher`.
+      */}
+      <ArcadeLauncher open={dialog === 'arcade'} onClose={() => setDialog(null)} />
     </div>
   );
 }

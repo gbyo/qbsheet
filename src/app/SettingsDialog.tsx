@@ -109,6 +109,15 @@ export default function SettingsDialog(props: {
   onResetDevicePreferences: () => void;
   onReadiness: () => void;
   /**
+   * Open the arcade.
+   *
+   * A callback and not a dialog rendered here, for the same reason `onReadiness` is one: Settings is
+   * a native modal, the arcade is a native modal, and a screen that hosts one can host the other.
+   * The host closes this and opens that, so there is one arcade in the application and Settings holds
+   * none of its state. Optional, so a caller compiled against an older build still type-checks.
+   */
+  onArcade?: () => void;
+  /**
    * Retained as an optional compatibility prop for callers compiled against older builds. General
    * scoring navigation now lives on Welcome/ConnectedRoom, not in Settings.
    */
@@ -134,6 +143,7 @@ export default function SettingsDialog(props: {
     onResetDevicePreferences,
     onReadiness,
     recovery,
+    onArcade,
     onChangeTournament,
     onClose,
     initialView = 'settings',
@@ -458,6 +468,32 @@ export default function SettingsDialog(props: {
                 <span aria-hidden="true">›</span>
               </button>
             </section>
+
+            {onArcade && (
+              <section className="settings-section" aria-labelledby="settings-arcade-heading">
+                <h3 id="settings-arcade-heading" className="settings-section-title">
+                  Arcade
+                </h3>
+                <div className="settings-row">
+                  <div>
+                    <span className="settings-row-label">Take a break</span>
+                    <span className="settings-row-detail">QBBird and Snake</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="settings-action"
+                    onClick={() => {
+                      // Closed first: two native modals open at once is a stack nobody asked for, and
+                      // the way back is the arcade's own close. This is what "Check this device" does.
+                      onClose();
+                      onArcade();
+                    }}
+                  >
+                    Play
+                  </button>
+                </div>
+              </section>
+            )}
 
             <section className="settings-section" aria-labelledby="settings-advanced-heading">
               <h3 id="settings-advanced-heading" className="settings-section-title">
