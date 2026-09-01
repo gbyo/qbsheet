@@ -50,7 +50,8 @@ export type MenuDialog =
   | 'end-early'
   | 'forfeit'
   | 'export'
-  | 'scoring-layout';
+  | 'scoring-layout'
+  | 'arcade';
 
 export interface IScorerMenuInput {
   game: IDerivedGame;
@@ -269,6 +270,18 @@ export default function scorerMenuItems(input: IScorerMenuInput): IGameMenuItem[
    */
   file.push({ label: 'Print scoresheet', icon: 'review', onSelect: print });
 
+  /**
+   * The one entry that is not about this game at all.
+   *
+   * Its own group, because it belongs to none of the others and filing it under GAME would be
+   * claiming it is a property of the scoresheet. Offered in every phase and never disabled — not
+   * during a submission either, alongside the backup and the paper copy, because like them it cannot
+   * change anything. A room waiting on tournament control is exactly the room this is for.
+   */
+  const between: IGameMenuItem[] = [
+    { label: 'Take a break…', icon: 'arcade', onSelect: () => openDialog('arcade') },
+  ];
+
   /** The two that end a game. Last, and behind their own rule. */
   const ending: IGameMenuItem[] = [];
   if (phase.kind !== 'complete' && game.tossupsRead > 0) {
@@ -291,7 +304,7 @@ export default function scorerMenuItems(input: IScorerMenuInput): IGameMenuItem[
   }
 
   return joinMenuGroups(
-    [general, round, review, file, ending],
-    ['GAME', 'ROUND', 'REVIEW', 'FILES', 'END GAME'],
+    [general, round, review, file, between, ending],
+    ['GAME', 'ROUND', 'REVIEW', 'FILES', 'BREAK', 'END GAME'],
   );
 }
