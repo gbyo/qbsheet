@@ -1,5 +1,5 @@
-name: Question
-description: Ask how QBSheet, QBTCP, or the QBJ profile works. ❓
+name: ❓ Question
+description: Get help using or developing QBSheet.
 labels: ['question']
 body:
   - type: markdown
