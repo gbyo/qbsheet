@@ -83,6 +83,13 @@ export interface ICanonicalRosterIdentity {
   teamName?: string;
 }
 
+/** A canonical amendment as it appears in a recovery response. */
+export interface ICanonicalRosterAmendment extends ICanonicalRosterIdentity {
+  /** The original display vocabulary, when the caller still has it. */
+  requestedTeamName?: string;
+  requestedPlayerName?: string;
+}
+
 /**
  * Keys stripped from anything leaving the device, matched after removing separators and case.
  *
@@ -197,9 +204,8 @@ export function applyCanonicalRosterIdentity(
   const side = idSide ?? (distinctNamedSides.length === 1 ? distinctNamedSides[0] : undefined);
   if (!side) return packageValue;
 
-  const playerNames = [
-    ...new Set([requestedPlayer, identityText(canonical.playerName)].filter(Boolean)),
-  ] as string[];
+  const canonicalPlayer = identityText(canonical.playerName) ?? requestedPlayer;
+  const playerNames = [...new Set([requestedPlayer, canonicalPlayer].filter(Boolean))] as string[];
   const playerIds = { ...(identity.playerIds ?? {}) };
   let changed = false;
   for (const playerName of playerNames) {
@@ -208,14 +214,43 @@ export function applyCanonicalRosterIdentity(
     playerIds[key] = playerId;
     changed = true;
   }
-  if (!changed) return packageValue;
+  const roster = packageValue[side].players;
+  const hasRequested = roster.some(
+    (player) => player.name.toLocaleLowerCase() === requestedPlayer.toLocaleLowerCase(),
+  );
+  const hasCanonical = roster.some(
+    (player) => player.name.toLocaleLowerCase() === canonicalPlayer.toLocaleLowerCase(),
+  );
+  const nextRoster = !hasRequested && !hasCanonical ? [...roster, { name: canonicalPlayer }] : roster;
+  if (!changed && nextRoster === roster) return packageValue;
   return {
     ...packageValue,
+    [side]: {
+      ...packageValue[side],
+      ...(nextRoster !== roster ? { players: nextRoster } : {}),
+    },
     qbjIdentity: {
       ...identity,
       playerIds,
     },
   } as IGamePackage;
+}
+
+/** Apply all recovery amendments in one pure package transition. */
+export function applyCanonicalRosterAmendments(
+  packageValue: IGamePackage,
+  amendments: readonly ICanonicalRosterAmendment[],
+): IGamePackage {
+  return amendments.reduce(
+    (current, amendment) =>
+      applyCanonicalRosterIdentity(
+        current,
+        amendment.requestedTeamName ?? amendment.teamName ?? amendment.teamId ?? '',
+        amendment.requestedPlayerName ?? amendment.playerName ?? '',
+        amendment,
+      ),
+    packageValue,
+  );
 }
 
 /**

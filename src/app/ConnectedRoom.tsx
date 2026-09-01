@@ -51,19 +51,40 @@ export function assignmentStateKey(assignment: INormalizedAssignment | null): st
     assignment.state === 'assigned' &&
     (!assignment.definition || assignment.scheduledMatchId === undefined)
   ) {
-    return `assigned-incomplete:${procedureAssignmentKey(assignment)}`;
+    return `assigned-incomplete:${procedureAssignmentKey(assignment) ?? 'unavailable'}`;
   }
   if (assignment.state === 'none') return 'none';
   return `assigned:${assignment.scheduledMatchId ?? 'unknown'}`;
 }
 
 /** The identity an explicit procedure override is allowed to approve. */
-export function procedureAssignmentKey(assignment: INormalizedAssignment): string {
-  return [
-    assignment.scheduledMatchId ?? 'unknown',
-    assignment.roundRevision ?? 'unknown',
-    assignment.assignmentRevision ?? 'unknown',
-  ].join(':');
+export function procedureAssignmentKey(assignment: INormalizedAssignment): string | null {
+  // Approval may be reused only when both server revisions are present. JSON encoding keeps an id
+  // containing punctuation unambiguous, and the procedure version is part of the evidence: a server
+  // can re-issue the same pairing with a different unsupported procedure version.
+  if (
+    typeof assignment.scheduledMatchId !== 'string' ||
+    assignment.scheduledMatchId === '' ||
+    typeof assignment.roundRevision !== 'number' ||
+    typeof assignment.assignmentRevision !== 'number'
+  ) {
+    return null;
+  }
+  return JSON.stringify([
+    assignment.scheduledMatchId,
+    assignment.roundRevision,
+    assignment.assignmentRevision,
+    assignment.unsupportedProcedureVersion ?? null,
+  ]);
+}
+
+function hasApprovedProcedure(approvedKey: string | null, assignment: INormalizedAssignment): boolean {
+  const currentKey = procedureAssignmentKey(assignment);
+  return currentKey !== null && approvedKey === currentKey;
+}
+
+function unsupportedProcedureLabel(version?: number): string {
+  return version !== undefined && version > 0 ? `version ${version}` : 'an unknown version';
 }
 
 export function lastCheckLabel(ageMs: number): string {
@@ -104,11 +125,9 @@ function stateLine(assignment: INormalizedAssignment | null, busy: boolean): str
     !assignment.definition &&
     assignment.unsupportedProcedureVersion !== undefined
   ) {
-    const version =
-      assignment.unsupportedProcedureVersion > 0
-        ? `version ${assignment.unsupportedProcedureVersion}`
-        : 'an unknown version';
-    return `Automatic room procedure enforcement is unavailable for ${version}. Choose how to continue.`;
+    return `Automatic room procedure enforcement is unavailable for ${unsupportedProcedureLabel(
+      assignment.unsupportedProcedureVersion,
+    )}. Choose how to continue.`;
   }
   if (assignment.state === 'assigned' && !assignment.definition) {
     return 'Tournament control assigned a game, but its details are not ready. QBSheet will keep checking.';
@@ -304,12 +323,13 @@ export default function ConnectedRoom(props: {
       const assignmentValue =
         !result.value.definition &&
         result.value.emergencyDefinition &&
-        approvedProcedureAssignmentKey.current === procedureAssignmentKey(result.value)
+        hasApprovedProcedure(approvedProcedureAssignmentKey.current, result.value)
           ? { ...result.value, definition: result.value.emergencyDefinition }
           : result.value;
+      const resultProcedureKey = procedureAssignmentKey(result.value);
       if (
         approvedProcedureAssignmentKey.current !== null &&
-        approvedProcedureAssignmentKey.current !== procedureAssignmentKey(result.value)
+        approvedProcedureAssignmentKey.current !== resultProcedureKey
       ) {
         approvedProcedureAssignmentKey.current = null;
       }
@@ -414,7 +434,7 @@ export default function ConnectedRoom(props: {
       const currentValue =
         !current.value.definition &&
         current.value.emergencyDefinition &&
-        approvedProcedureAssignmentKey.current === procedureAssignmentKey(current.value)
+        hasApprovedProcedure(approvedProcedureAssignmentKey.current, current.value)
           ? { ...current.value, definition: current.value.emergencyDefinition }
           : current.value;
       setAssignment(currentValue);
@@ -572,10 +592,7 @@ export default function ConnectedRoom(props: {
             <section className="shell-section room-procedure-override" aria-label="Procedure override">
               <p className="shell-warning" role="alert">
                 Automatic room procedure enforcement is unavailable for{' '}
-                {assignment.unsupportedProcedureVersion && assignment.unsupportedProcedureVersion > 0
-                  ? `version ${assignment.unsupportedProcedureVersion}`
-                  : 'this procedure'}
-                .
+                {unsupportedProcedureLabel(assignment.unsupportedProcedureVersion)}.
               </p>
               <p className="shell-hint">
                 The moderator must give the room its instructions. This decision will be recorded in the

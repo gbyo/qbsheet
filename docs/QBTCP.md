@@ -53,19 +53,19 @@ misread this specification.
 
 ## Terminology
 
-| Term | Meaning |
-| --- | --- |
-| **Tournament control** | The software that owns the schedule and collects the results. Fruity is one. |
-| **Scoresheet** | The client that scores one game at a time. QBSheet is one. |
-| **Room** | A scoring position in the tournament. The room is the unit that pairs and authenticates. |
-| **Session** | The work of one scoresheet on one assigned game. The session is the unit that writes snapshots and a result. |
-| **Assignment** | The game that a room must score now, expressed as a QBJ document. |
-| **Round revision** | An integer that increases monotonically for a round's pairing publication. It identifies which issue of a round's pairings an assignment came from. |
-| **Assignment revision** | An integer scoped to one room. It increases whenever that room is issued or reissued an assignment, including the same pairing after a room-local retry. |
-| **Result receipt** | The durable acknowledgement of an authenticated final. A receipt says what control retained; it does not by itself say that the result was imported into standings. |
-| **Review-required** | A retained result state that needs an explicit director decision before it becomes the tournament's canonical match. |
-| **Abandoned session** | A session explicitly closed by tournament control without deleting its progress or results. A later final is retained for review and never reopens the session. |
-| **Active writer** | The one device that holds authorisation to write to a session. |
+| Term                    | Meaning                                                                                                                                                             |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Tournament control**  | The software that owns the schedule and collects the results. Fruity is one.                                                                                        |
+| **Scoresheet**          | The client that scores one game at a time. QBSheet is one.                                                                                                          |
+| **Room**                | A scoring position in the tournament. The room is the unit that pairs and authenticates.                                                                            |
+| **Session**             | The work of one scoresheet on one assigned game. The session is the unit that writes snapshots and a result.                                                        |
+| **Assignment**          | The game that a room must score now, expressed as a QBJ document.                                                                                                   |
+| **Round revision**      | An integer that increases monotonically for a round's pairing publication. It identifies which issue of a round's pairings an assignment came from.                 |
+| **Assignment revision** | An integer scoped to one room. It increases whenever that room is issued or reissued an assignment, including the same pairing after a room-local retry.            |
+| **Result receipt**      | The durable acknowledgement of an authenticated final. A receipt says what control retained; it does not by itself say that the result was imported into standings. |
+| **Review-required**     | A retained result state that needs an explicit director decision before it becomes the tournament's canonical match.                                                |
+| **Abandoned session**   | A session explicitly closed by tournament control without deleting its progress or results. A later final is retained for review and never reopens the session.     |
+| **Active writer**       | The one device that holds authorisation to write to a session.                                                                                                      |
 
 ## Versioning
 
@@ -113,9 +113,9 @@ pairing code.
 QBTCP uses **capability tokens**. A token is an opaque bearer string. Each token grants exactly one
 scope, and there are two scopes.
 
-| Token | Scope | Header |
-| --- | --- | --- |
-| Room token | One room: read its assignment, post presence and help, open sessions | `x-yf-room-token` |
+| Token         | Scope                                                                         | Header               |
+| ------------- | ----------------------------------------------------------------------------- | -------------------- |
+| Room token    | One room: read its assignment, post presence and help, open sessions          | `x-yf-room-token`    |
 | Session token | One session: read it, write snapshots, submit the final result, read recovery | `x-yf-session-token` |
 
 There is no user account, no password, and no server-wide read. A session token reaches exactly one
@@ -123,9 +123,9 @@ session. A change to the identifier in the path does not reach the game of anoth
 
 Two further headers carry information only. They never authorise an operation.
 
-| Header | Meaning |
-| --- | --- |
-| `x-yf-device-id` | An opaque per-browser identity, used for active-writer arbitration |
+| Header               | Meaning                                                            |
+| -------------------- | ------------------------------------------------------------------ |
+| `x-yf-device-id`     | An opaque per-browser identity, used for active-writer arbitration |
 | `x-yf-operator-name` | The name of the scorekeeper, for the presence view of the director |
 
 The `x-yf-` prefix comes from the implementation that this protocol replaces. The prefix is
@@ -183,14 +183,14 @@ A launch link is a URL whose **fragment** carries the launch parameters:
 path, is a matter of configuration and deployment, not of this protocol. A tournament-control
 implementation SHOULD make it configurable, because a venue may run a self-hosted copy.
 
-| Parameter | Required | Meaning |
-| --- | --- | --- |
-| `v` | Yes | Launch format version. This document defines `1`. |
-| `server` | Yes | The base URL of tournament control, percent-encoded. `http` or `https` only. |
-| `code` | Yes | The short pairing code, exactly as `POST /qbtcp/v1/pair` expects it. |
-| `room` | No | A room identifier, used as the `roomId` of the pair request. |
+| Parameter | Required | Meaning                                                                      |
+| --------- | -------- | ---------------------------------------------------------------------------- |
+| `v`       | Yes      | Launch format version. This document defines `1`.                            |
+| `server`  | Yes      | The base URL of tournament control, percent-encoded. `http` or `https` only. |
+| `code`    | Yes      | The short pairing code, exactly as `POST /qbtcp/v1/pair` expects it.         |
+| `room`    | No       | A room identifier, used as the `roomId` of the pair request.                 |
 
-`v` is the version of *this launch convention*. It is not the protocol version in the path, and a
+`v` is the version of _this launch convention_. It is not the protocol version in the path, and a
 change to it is not a change to QBTCP. A receiving scoresheet MUST accept only a version it
 implements, and MUST fail safely on any other — the launch format is small enough that a future
 version may reasonably carry a parameter whose meaning cannot be guessed, so partial understanding is
@@ -276,9 +276,6 @@ receives over the network is semantically the same document that tournament cont
 disk as `*.assignment.qbj`. One parser on the client reads both. There is no `NetworkAssignmentModel`
 and no `FileAssignmentModel`. See [`QBJ_ASSIGNMENT_PROFILE.md`](QBJ_ASSIGNMENT_PROFILE.md) for the
 contents of the document.
-
-Operational state is not part of the game, so it is not in the QBJ body. It travels in response
-headers or in a sibling endpoint, because a QBJ body would need invented QBJ fields for it.
 
     GET /qbtcp/v1/assignment/status     (room token)
 
@@ -417,13 +414,15 @@ The body is the completed game as a QBJ document, with content type
       "warnings": []
     }
 
-`received: true` means the authenticated final was durably retained. `accepted` is retained for
-backwards compatibility and means that control can proceed without a director decision; a client
-MUST accept either field when reading an older receipt. `review_required: true` means the bytes are
-safe on disk but a person must decide what they mean. `duplicate: true` means the same result was
-already retained or imported and is the correct idempotent answer to a retry. A receipt SHOULD include
-`match_id`, `fingerprint`, and a bounded array of stable warning codes and human-readable warning
-details when available.
+`received: true` means the authenticated final was durably retained. `review_required: true` means
+those bytes are safe on disk but are not yet the canonical standings result; it is independent of
+transport receipt. `accepted` is a deprecated compatibility field. It MAY be true on a modern receipt
+even when `review_required: true`, and MUST NOT be treated as standings acceptance when review is
+required. `duplicate: true` means the same result was already retained or imported and is the correct
+idempotent answer to a retry. New clients SHOULD prefer `received`, `review_required`, and `duplicate`;
+older clients MUST continue to understand `accepted`. A receipt SHOULD include `match_id`,
+`fingerprint`, and a bounded array of stable warning codes and human-readable warning details when
+available.
 
 An authenticated, parseable final MUST be retained before the HTTP response is written, even when
 its team mapping, round revision, assignment revision, or other content disagrees with the current
@@ -509,7 +508,12 @@ The server returns the same envelope for all three endpoints:
     "updatedAt": "2026-08-11T14:42:00.000Z",
     "deviceId": "…",
     "operatorName": "…",
-    "currentMatchup": { "roundNumber": 4, "roundName": "Round 4", "leftTeam": "Ninety Six", "rightTeam": "Greenwood" }
+    "currentMatchup": {
+      "roundNumber": 4,
+      "roundName": "Round 4",
+      "leftTeam": "Ninety Six",
+      "rightTeam": "Greenwood"
+    }
   }
 }
 ```
@@ -541,18 +545,18 @@ display that string without a change.
 { "error": "This browser origin is not approved.", "code": "origin_not_allowed" }
 ```
 
-| Status | Meaning | Client obligation |
-| --- | --- | --- |
-| `400` | Malformed request | Do not retry unchanged |
-| `401` | Missing or invalid credential | For a room-token failure, pair again. For a session-token failure, reopen or resume the existing session. In both cases, keep the in-progress game and continue local scoring. |
-| `403` | Valid credential without permission, including a disallowed origin | Surface it. Do not retry in a loop. |
-| `404` | No such endpoint, session, or room | Do not retry |
-| `405` | Method not allowed | A programming error |
-| `409` | Writer conflict, or a malformed/authentication-level refusal that was not retained | Surface it; do not retry unchanged |
-| `410` | A newer revision superseded the assignment | Fetch the new assignment. Do not discard scored work. |
-| `413` | Body too large | Do not retry unchanged |
-| `429` | Rate limited at pairing | Back off |
-| `5xx` | Server fault | Retry with a backoff |
+| Status | Meaning                                                                            | Client obligation                                                                                                                                                              |
+| ------ | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `400`  | Malformed request                                                                  | Do not retry unchanged                                                                                                                                                         |
+| `401`  | Missing or invalid credential                                                      | For a room-token failure, pair again. For a session-token failure, reopen or resume the existing session. In both cases, keep the in-progress game and continue local scoring. |
+| `403`  | Valid credential without permission, including a disallowed origin                 | Surface it. Do not retry in a loop.                                                                                                                                            |
+| `404`  | No such endpoint, session, or room                                                 | Do not retry                                                                                                                                                                   |
+| `405`  | Method not allowed                                                                 | A programming error                                                                                                                                                            |
+| `409`  | Writer conflict, or a malformed/authentication-level refusal that was not retained | Surface it; do not retry unchanged                                                                                                                                             |
+| `410`  | A newer revision superseded the assignment                                         | Fetch the new assignment. Do not discard scored work.                                                                                                                          |
+| `413`  | Body too large                                                                     | Do not retry unchanged                                                                                                                                                         |
+| `429`  | Rate limited at pairing                                                            | Back off                                                                                                                                                                       |
+| `5xx`  | Server fault                                                                       | Retry with a backoff                                                                                                                                                           |
 
 `401` and `410` need the most care. Each one describes a server that changed its mind about a room in
 the middle of a game. Neither status permits the destruction of that game. A scoresheet MUST continue
@@ -633,6 +637,7 @@ because the client then holds a wrong answer and treats it as correct.
    A fragment is used because a fragment is not sent to the HTTP server as part of the request. That
    property, plus immediate removal, is the whole of what makes the exception acceptable; a query
    string would put the code in somebody else's access log before the scoresheet ran.
+
 6. **Uniform pairing failure.** See "Pairing".
 7. **An origin allowlist, never a wildcard.** See "CORS and local network access".
 8. **Bounded input.** Servers MUST bound the request body size and the URL length. Servers MUST
@@ -641,13 +646,13 @@ because the client then holds a wrong answer and treats it as correct.
 
 ## Ownership of each concern
 
-| Concern | Owner |
-| --- | --- |
-| What a match, team, player, round, or scoring rule is | QBJ |
-| What the result of a game was | QBJ |
-| Which game a room must score now | QBTCP, which delivers a QBJ document |
-| Whether the room can score it, and which device writes | QBTCP |
-| How a result returns, and whether it is a duplicate | QBTCP |
+| Concern                                                | Owner                                |
+| ------------------------------------------------------ | ------------------------------------ |
+| What a match, team, player, round, or scoring rule is  | QBJ                                  |
+| What the result of a game was                          | QBJ                                  |
+| Which game a room must score now                       | QBTCP, which delivers a QBJ document |
+| Whether the room can score it, and which device writes | QBTCP                                |
+| How a result returns, and whether it is a duplicate    | QBTCP                                |
 
 A change to this specification that needs a field describing the game belongs in QBJ, or in the
 documented `_qbtcp` extension. It does not belong in the protocol.

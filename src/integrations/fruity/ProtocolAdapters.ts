@@ -166,7 +166,8 @@ export function readResultReceipt(value: unknown): IResultReceipt {
   return {
     // A successful response from the pre-receipt protocol was acceptance. Silence remains that
     // compatibility answer; a newer server can additionally say `received` and `review_required`.
-    accepted: raw.accepted !== false,
+    // An explicit transport refusal must win over an older compatibility field.
+    accepted: raw.accepted !== false && raw.received !== false,
     ...(typeof raw.received === 'boolean' ? { received: raw.received } : {}),
     ...(typeof rawReviewRequired === 'boolean' ? { reviewRequired: rawReviewRequired } : {}),
     duplicate: raw.duplicate === true,
@@ -216,7 +217,8 @@ export function readSessionRecovery(value: unknown, fallbackSessionId?: string):
     ...(status !== undefined ? { status } : {}),
     ...(roundRevision !== undefined ? { roundRevision } : {}),
     ...(assignmentRevision !== undefined ? { assignmentRevision } : {}),
-    finalReceived: firstOf(value, ['final_received', 'finalReceived']) === true,
+    finalReceived:
+      firstOf(value, ['final_received', 'finalReceived']) === true || status === 'final-received',
     latestQbj: isRecord(rawLatest) ? rawLatest : null,
     ...(Array.isArray(rawAmendments) ? { rosterAmendments: readRosterAmendments(rawAmendments) } : {}),
   };

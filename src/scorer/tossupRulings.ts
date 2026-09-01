@@ -26,8 +26,8 @@ import { IScorekeeperAnswerType, IScorekeeperFormat } from '../scoring/Scorekeep
 /**
  * The rulings a team may be given on this tossup, in the order the format lists them.
  *
- * Negs disappear once anybody has answered: a team answering second has heard the whole question and
- * cannot be penalized for missing it. This is the rule `TeamPanel` used to hold on its own.
+ * Negs are available only before either team has used its tossup opportunity. After one answer, the
+ * remaining team can still be correct or wrong without penalty, but cannot receive a neg.
  */
 export function availableAnswerTypes(
   format: IScorekeeperFormat,

@@ -72,11 +72,10 @@ export interface ITossupBuzzEvent extends IScoreEventBase {
  * # Why this isn't an answer type
  *
  * NAQT's tossups have three configured values — 15, 10 and −5 — and a fourth outcome that has no
- * value at all: an incorrect answer given after the tossup has been read in full is worth zero, and
- * so is the second team's incorrect answer, because a team that has heard the whole question cannot
- * be penalized for missing it. That outcome is not `No buzz` — the team is out of the question
- * either way, but somebody did answer, and on a tied tossup that difference decides who may still
- * speak.
+ * value at all: an incorrect answer for which the rules assess no penalty is worth zero. That
+ * outcome is not `No buzz` — the team is out of the question either way, but somebody did answer,
+ * and on a tied tossup that difference decides who may still speak. The scorekeeper records this
+ * outcome directly; no separate marker is needed to describe where the reader was.
  *
  * Modelling it as a 0-point `AnswerType` would be worse than modelling it not at all: YellowFruit
  * counts a player's tossups per answer type, and a fabricated zero type would show up in every
@@ -95,17 +94,17 @@ export interface ITossupNoPenaltyEvent extends IScoreEventBase {
   playerName?: string;
 }
 
-/** The moderator resumed reading after a tossup was interrupted by an answer. */
+/** Historical marker from older scorers; live legality is derived from tossup opportunities. */
 export interface ITossupReadingResumedEvent extends IScoreEventBase {
   type: 'tossup-reading-resumed';
 }
 
-/** The moderator reached the end of a tossup without a conversion. */
+/** Historical marker from older scorers; `tossup-dead` records the no-conversion outcome. */
 export interface ITossupReadoutEvent extends IScoreEventBase {
   type: 'tossup-readout';
 }
 
-/** The tossup went dead: read, nobody converted it. */
+/** The tossup went dead: nobody converted it. */
 export interface ITossupDeadEvent extends IScoreEventBase {
   type: 'tossup-dead';
 }

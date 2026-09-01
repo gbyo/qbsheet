@@ -197,7 +197,7 @@ Not interpreting it means **refusing the game**, not scoring it without procedur
 different outcomes and only one of them is safe. No `procedure` at all is a tournament that stated no
 procedural rules, and the room scores with none enforced. A `procedure` whose `version` is from the
 future is a tournament that stated rules the room could not read, and falling back to no procedure
-would silently restore `substitutionPolicy: "any-boundary"` — more permissive than what was sent. So a
+would silently restore `substitutionPolicy: "any-boundary"` — more permissive than what was sent.
 A room given a procedure it cannot interpret says so, names the version, and does not start until
 QBSheet is updated or control sends an assignment this build can enforce. QBSheet MAY offer an
 explicit moderator override, labelled as continuing under the moderator's instructions, but it MUST

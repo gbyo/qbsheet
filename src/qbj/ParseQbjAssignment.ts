@@ -554,7 +554,7 @@ export function defineGame(
     stringField((resolveRef(context?.round?.packet ?? null, byId) ?? {}).name);
 
   // --- procedure ------------------------------------------------------------------------------
-  if (!extension?.procedure) {
+  if (!extension?.procedure && extension?.unsupportedProcedureVersion === undefined) {
     assumptions.push(
       'This QBJ does not include tournament procedure. Scoring works normally; the scoresheet will not enforce substitution, timeout or clock rules it has not been given.',
     );

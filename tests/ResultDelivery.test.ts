@@ -12,6 +12,7 @@ import {
 } from '../src/app/ResultDeliveryCapability';
 import FruityServerClient from '../src/integrations/fruity/FruityServerClient';
 import { classifyFinalDelivery } from '../src/integrations/fruity/FruityResultDestination';
+import { readResultReceipt } from '../src/integrations/fruity/ProtocolAdapters';
 import { validPackage } from './packages';
 import { buildDiagnostics, findLeaks } from '../src/app/Diagnostics';
 
@@ -96,6 +97,39 @@ describe('normalizing completed-result delivery', () => {
       matchId: 'sm-4471',
       fingerprint: 'fp-1',
       attempted: true,
+    });
+  });
+
+  test('durable review receipts are successful delivery even when legacy accepted is ambiguous', () => {
+    const receipt = readResultReceipt({
+      accepted: true,
+      received: true,
+      review_required: true,
+      duplicate: false,
+      match_id: 'sm-review-1',
+    });
+
+    expect(receipt).toMatchObject({ accepted: true, received: true, reviewRequired: true });
+    expect(classifyFinalDelivery({ ok: true, value: receipt })).toMatchObject({
+      delivery: 'sent',
+      reviewRequired: true,
+      attempted: true,
+      retryable: false,
+      matchId: 'sm-review-1',
+    });
+  });
+
+  test('modern durable receipt remains successful when accepted is false', () => {
+    const receipt = readResultReceipt({
+      accepted: false,
+      received: true,
+      review_required: false,
+      duplicate: false,
+    });
+    expect(classifyFinalDelivery({ ok: true, value: receipt })).toMatchObject({
+      delivery: 'sent',
+      attempted: true,
+      retryable: false,
     });
   });
 
@@ -200,6 +234,33 @@ describe('bounded result-delivery ledger and private retry capability', () => {
     expect(acceptedRecord?.events).toEqual(record.events);
     expect(capabilities.has(record.id)).toBe(false);
     expect(postFinal).toHaveBeenCalledTimes(2);
+  });
+
+  test('durable review receipt is terminal and is never retried', async () => {
+    const { store, record } = await completedStore();
+    const capabilities = new ResultDeliveryCapabilityStore(new MemoryStorage(), capabilityClock);
+    capabilities.remember(record.id, capability, record.completedAt!);
+    const postFinal = vi.fn(async () =>
+      accepted({
+        received: true,
+        reviewRequired: true,
+        matchId: 'sm-review-2',
+        warningCodes: ['team-name-mismatch'],
+      }),
+    );
+    const service = new ResultDeliveryService(store, capabilities, () => fakeClient(postFinal));
+
+    const result = await service.retry(record.id, new Date('2026-08-11T14:01:00.000Z'));
+    expect(result).toMatchObject({ delivery: 'sent', reviewRequired: true, retryable: false });
+    expect((await store.get(record.id))?.serverDeliveryLedger).toMatchObject({
+      reviewRequired: true,
+      warningCodes: ['team-name-mismatch'],
+      retryable: false,
+      outcome: 'accepted',
+    });
+    expect(capabilities.has(record.id)).toBe(false);
+    expect(await service.retry(record.id)).toBeNull();
+    expect(postFinal).toHaveBeenCalledOnce();
   });
 
   test('only retryable pending records qualify for unattended delivery', async () => {

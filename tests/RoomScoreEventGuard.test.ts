@@ -76,14 +76,14 @@ describe('one answer per team per tossup', () => {
   });
 });
 
-describe('a team that heard the whole question cannot be penalized', () => {
+describe('negative ruling availability follows tossup attempts', () => {
   test('the second team is refused a neg', () => {
     const events = [buzz(1, 'left', 'Sarah', typeIndex(format, -5))];
 
     const verdict = canApplyScoreEvent(context, events, buzz(1, 'right', 'Emma', typeIndex(format, -5)));
 
     expect(verdict.ok).toBe(false);
-    expect(verdict.ok === false && verdict.reason).toContain('whole question');
+    expect(verdict.ok === false && verdict.reason).toContain('after another team');
   });
 
   test('the second team gets the zero-point outcome instead', () => {
@@ -97,19 +97,23 @@ describe('a team that heard the whole question cannot be penalized', () => {
     expect(canApplyScoreEvent(context, [], buzz(1, 'left', 'Sarah', typeIndex(format, -5))).ok).toBe(true);
   });
 
-  test('an explicit reading-resumed event permits the other team to neg', () => {
+  test('a legacy reading-resumed event does not permit the other team to neg', () => {
     const first = buzz(1, 'left', 'Sarah', typeIndex(format, -5));
     const resumed = event({ type: 'tossup-reading-resumed', questionNumber: 1 });
     const afterResume = applyScoreEvents(context, [first], [resumed]);
 
     expect(afterResume.ok).toBe(true);
     if (!afterResume.ok) return;
-    expect(
-      canApplyScoreEvent(context, afterResume.events, buzz(1, 'right', 'Emma', typeIndex(format, -5))).ok,
-    ).toBe(true);
+    const verdict = canApplyScoreEvent(
+      context,
+      afterResume.events,
+      buzz(1, 'right', 'Emma', typeIndex(format, -5)),
+    );
+    expect(verdict.ok).toBe(false);
+    expect(verdict.ok === false && verdict.reason).toContain('after another team');
   });
 
-  test('a readout marker blocks a neg even when no team has answered yet', () => {
+  test('a legacy readout marker does not block the first neg', () => {
     const readout = event({ type: 'tossup-readout', questionNumber: 1 });
     const afterReadout = applyScoreEvents(context, [], [readout]);
 
@@ -120,11 +124,22 @@ describe('a team that heard the whole question cannot be penalized', () => {
       afterReadout.events,
       buzz(1, 'left', 'Sarah', typeIndex(format, -5)),
     );
+    expect(verdict.ok).toBe(true);
+  });
+
+  test('a zero-point answer also removes the neg for the other team', () => {
+    const wrong = event({ type: 'tossup-no-penalty', questionNumber: 1, team: 'left', playerName: 'Sarah' });
+    const afterWrong = applyScoreEvents(context, [], [wrong]);
+
+    expect(afterWrong.ok).toBe(true);
+    if (!afterWrong.ok) return;
+    const verdict = canApplyScoreEvent(
+      context,
+      afterWrong.events,
+      buzz(1, 'right', 'Emma', typeIndex(format, -5)),
+    );
     expect(verdict.ok).toBe(false);
-    expect(verdict.ok === false && verdict.reason).toContain('whole question');
-    expect(
-      canApplyScoreEvent(context, afterReadout.events, buzz(1, 'left', 'Sarah', typeIndex(format, 10))).ok,
-    ).toBe(true);
+    expect(verdict.ok === false && verdict.reason).toContain('after another team');
   });
 });
 

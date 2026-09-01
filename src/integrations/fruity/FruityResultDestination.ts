@@ -68,9 +68,8 @@ function failureDetail(result: { error: string; detail?: string }): string {
  * Translate the normalized API result into the operational meaning a record can keep.
  *
  * The order is intentional: `received` is the durable receipt boundary. A result can be retained
- * for review while `accepted` remains false for old clients that interpreted that field as
- * "canonical". It is still a successful delivery from the room's point of view, and must not be
- * retried or presented as lost.
+ * for review while a modern server still reports `accepted: true` for legacy clients. It is still a
+ * successful delivery from the room's point of view, and must not be retried or presented as lost.
  */
 export function classifyFinalDelivery(result: ApiResult<IResultReceipt>): IFinalDelivery {
   if (result.ok) {
@@ -80,10 +79,10 @@ export function classifyFinalDelivery(result: ApiResult<IResultReceipt>): IFinal
       const reviewRequired = receipt.reviewRequired === true;
       return {
         delivery: 'sent',
-        detail: receipt.duplicate
-          ? 'Tournament control already had this result on record.'
-          : reviewRequired
-            ? 'Tournament control received the result; a director must review it.'
+        detail: reviewRequired
+          ? 'Tournament control received the result; a director must review it.'
+          : receipt.duplicate
+            ? 'Tournament control already had this result on record.'
             : acceptedFallback,
         duplicate: receipt.duplicate,
         ...(reviewRequired ? { reviewRequired } : {}),

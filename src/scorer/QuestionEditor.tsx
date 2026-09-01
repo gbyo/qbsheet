@@ -1083,33 +1083,6 @@ export default function QuestionEditor(props: {
             {displayedTeams.right.name}:{' '}
             {active[displaySides.right].length > 0 ? active[displaySides.right].join(', ') : 'none'}.
           </p>
-          <div className="scorer-question-reading-state">
-            <label className="scorer-checkbox">
-              <input
-                type="checkbox"
-                checked={model.readingResumed === true}
-                disabled={model.attempts.length === 0}
-                onChange={(event) =>
-                  setModel((current) => ({ ...current, readingResumed: event.target.checked }))
-                }
-              />
-              Reading resumed after the first answer
-            </label>
-            <label className="scorer-checkbox">
-              <input
-                type="checkbox"
-                checked={model.readout === true}
-                onChange={(event) =>
-                  setModel((current) => ({
-                    ...current,
-                    readout: event.target.checked,
-                    ...(event.target.checked ? {} : { readoutBeforeAttempt: undefined }),
-                  }))
-                }
-              />
-              Question was read out before the final ruling
-            </label>
-          </div>
           {questionProtests.map((protest) => (
             <p key={protest.eventId} className="scorer-dialog-note">
               Protest ({protest.status}) — {protest.description}

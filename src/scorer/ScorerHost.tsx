@@ -49,7 +49,11 @@ import useGameEvents from './useGameEvents';
 import { IGameSessionHistory, loadGame } from './GameSession';
 import { readScorerRecovery } from './ScorerRecovery';
 import { IQbsheetBackup } from './QBSheetBackup';
-import type { IRosterAddResult, ISessionRecovery } from '../integrations/fruity/FruityServerClient';
+import type {
+  IRosterAddResult,
+  IRosterAmendment,
+  ISessionRecovery,
+} from '../integrations/fruity/FruityServerClient';
 
 export interface IScorerHostProps {
   /** The session or emergency game id. Also what the saved game is filed under. */
@@ -132,6 +136,8 @@ export interface IScorerHostProps {
     requestedPlayerName: string,
     canonical: IRosterAddResult,
   ) => void | Promise<void>;
+  /** Persist a complete recovery amendment set before the recovered events are applied. */
+  onRosterAmendments?: (amendments: IRosterAmendment[]) => void | Promise<void>;
   /**
    * Fetch this session's own latest server snapshot.
    *
@@ -197,6 +203,7 @@ export default function ScorerHost(props: IScorerHostProps) {
     teamIds,
     onSyncRosterPlayer,
     onRosterIdentity,
+    onRosterAmendments,
     onRecoverFromServer,
     alerts,
     openingNotice,
@@ -288,16 +295,13 @@ export default function ScorerHost(props: IScorerHostProps) {
     // empty initial value — so this had nothing left to clear.
     let cancelled = false;
     onRecoverFromServer()
-      .then((sessionRecovery) => {
+      .then(async (sessionRecovery) => {
         if (cancelled || sessionRecovery === null) return undefined;
-        for (const amendment of sessionRecovery.rosterAmendments ?? []) {
-          if (amendment.playerName) {
-            void onRosterIdentity?.(
-              amendment.teamName ?? amendment.teamId ?? '',
-              amendment.playerName,
-              amendment,
-            );
-          }
+        const amendments = sessionRecovery.rosterAmendments ?? [];
+        if (amendments.length > 0) {
+          // The package write is one awaited transition. Parsing or restoring between two
+          // individual writes can leave a replacement device with only half the canonical roster.
+          await onRosterAmendments?.(amendments);
         }
         const qbj = sessionRecovery.latestQbj;
         if (qbj === null) return undefined;
@@ -333,7 +337,7 @@ export default function ScorerHost(props: IScorerHostProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     onRecoverFromServer,
-    onRosterIdentity,
+    onRosterAmendments,
     recovered,
     eventCount,
     restore,

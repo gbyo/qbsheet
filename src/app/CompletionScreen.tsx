@@ -265,10 +265,10 @@ export default function CompletionScreen(props: {
               <svg className="final-accepted-mark" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
                 <path d="m4 10 4 4 8-9" />
               </svg>
-              {record.serverDeliveryLedger?.acceptedAsDuplicate
-                ? 'Result already on record'
-                : record.serverDeliveryLedger?.reviewRequired
-                  ? 'Result received for director review'
+              {record.serverDeliveryLedger?.reviewRequired
+                ? 'Result received for director review'
+                : record.serverDeliveryLedger?.acceptedAsDuplicate
+                  ? 'Result already on record'
                   : 'Result sent'}
               <span className="visually-hidden"> ✓</span>
             </p>

@@ -53,7 +53,7 @@ export const keyboardActionNames: Record<KeyboardAction, string> = {
   correct: 'Correct',
   power: 'Power',
   neg: 'Neg',
-  wrong: 'Wrong',
+  wrong: 'Wrong, no penalty',
 };
 
 export interface ISeatKey {
@@ -166,7 +166,7 @@ export function sequenceLegend(format: IScorekeeperFormat, negsAvailable: boolea
     },
     {
       keys: `seat → ${keyboardActionLabels.wrong}`,
-      meaning: 'wrong · 0',
+      meaning: 'wrong, no penalty · 0',
       available: true,
     },
   ];

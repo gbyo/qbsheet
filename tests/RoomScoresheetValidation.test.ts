@@ -65,7 +65,7 @@ describe('whole-scoresheet validation', () => {
     expect(validation.blockers).toEqual([]);
   });
 
-  test('validation preserves explicit read/resume timing and rejects markers after resolution', () => {
+  test('legacy read/resume markers are accepted, but cannot make a second neg valid', () => {
     const legal = validateCorrectedHistory(formatFor(), setup, [
       event({
         type: 'tossup-buzz',
@@ -80,17 +80,30 @@ describe('whole-scoresheet validation', () => {
         questionNumber: 1,
         team: 'right',
         playerName: 'Emma',
-        answerTypeIndex: 2,
+        answerTypeIndex: 1,
       }),
     ]);
     expect(legal.blockers).toEqual([]);
 
-    const invalid = validateCorrectedHistory(formatFor(), setup, [
+    const invalidNeg = validateCorrectedHistory(formatFor(), setup, [
+      event({ type: 'tossup-no-penalty', questionNumber: 1, team: 'left', playerName: 'Sarah' }),
+      event({ type: 'tossup-reading-resumed', questionNumber: 1 }),
+      event({
+        type: 'tossup-buzz',
+        questionNumber: 1,
+        team: 'right',
+        playerName: 'Emma',
+        answerTypeIndex: 2,
+      }),
+    ]);
+    expect(invalidNeg.blockers.map((problem) => problem.code)).toContain('second-team-neg');
+
+    const invalidMarker = validateCorrectedHistory(formatFor(), setup, [
       event({ type: 'tossup-no-penalty', questionNumber: 1, team: 'left', playerName: 'Sarah' }),
       event({ type: 'tossup-no-penalty', questionNumber: 1, team: 'right', playerName: 'Emma' }),
       event({ type: 'tossup-reading-resumed', questionNumber: 1 }),
     ]);
-    expect(invalid.blockers.map((problem) => problem.code)).toContain('invalid-reading-state');
+    expect(invalidMarker.blockers.map((problem) => problem.code)).toContain('invalid-reading-state');
   });
 
   test('a missing bonus blocks submission but is allowed while correcting the current question', () => {

@@ -135,20 +135,25 @@ describe('multi-attempt tossups', () => {
     expect(game.questions[0].resolved).toBe(true);
   });
 
-  test('both teams negging ends the tossup, because nobody is left to ask', () => {
+  test('a legacy second-team neg is not scored or allowed to end the tossup', () => {
     const format = formatFor();
     const game = deriveGame(format, setup, [
       buzz(1, 'left', 'Sarah', typeIndex(format, -5)),
       buzz(1, 'right', 'Emma', typeIndex(format, -5)),
     ]);
 
-    expect(game.questions[0].resolved).toBe(true);
+    expect(game.left.points).toBe(-5);
+    expect(game.right.points).toBe(0);
+    expect(game.questions[0].buzzes).toHaveLength(1);
+    expect(game.questions[0].resolved).toBe(false);
     expect(game.phase.kind).toBe('tossup');
-    expect(game.phase).toMatchObject({ questionNumber: 2 });
-    expect(game.tossupsRead).toBe(1);
+    expect(game.phase).toMatchObject({ questionNumber: 1, eligibleTeams: ['right'] });
+    expect(game.integrityProblems.map((problem) => problem.message).join('\n')).toContain(
+      'has a neg after another team',
+    );
   });
 
-  test('a format with two negs treats both as negs', () => {
+  test('a format with two negs still allows only the first negative ruling', () => {
     const format = formatFor((rules) => {
       rules.answerTypes = [new AnswerType(10), new AnswerType(-5), new AnswerType(-10)];
     });
@@ -158,8 +163,10 @@ describe('multi-attempt tossups', () => {
     ]);
 
     expect(game.left.points).toBe(-10);
-    expect(game.right.points).toBe(-5);
-    expect(game.questions[0].resolved).toBe(true);
+    expect(game.right.points).toBe(0);
+    expect(game.questions[0].buzzes).toHaveLength(1);
+    expect(game.questions[0].resolved).toBe(false);
+    expect(game.integrityProblems).toHaveLength(1);
   });
 });
 
@@ -181,10 +188,7 @@ describe('bonus phase', () => {
 
   test('a neg never earns a bonus', () => {
     const format = formatFor();
-    const game = deriveGame(format, setup, [
-      buzz(1, 'left', 'Sarah', typeIndex(format, -5)),
-      buzz(1, 'right', 'Emma', typeIndex(format, -5)),
-    ]);
+    const game = deriveGame(format, setup, [buzz(1, 'left', 'Sarah', typeIndex(format, -5))]);
 
     expect(game.phase).toMatchObject({ kind: 'tossup' });
     expect(game.left.bonusesHeard).toBe(0);

@@ -35,7 +35,12 @@ import { IScorerSubmitResult } from '../scorer/Scorer';
 import { IStoredGameRecord, GameStore } from '../game/GameStore';
 import { ScoreEvent } from '../scoring/ScoreEvents';
 import { IGameSetup } from '../scoring/deriveGame';
-import { applyCanonicalRosterIdentity, portableQbj, qbjWithSourceMetadata } from '../game/PortableQbj';
+import {
+  applyCanonicalRosterAmendments,
+  applyCanonicalRosterIdentity,
+  portableQbj,
+  qbjWithSourceMetadata,
+} from '../game/PortableQbj';
 import {
   downloadQbj,
   downloadLegacyMatchOnly,
@@ -49,7 +54,7 @@ import { IDerivedGame } from '../scoring/deriveGame';
 import { RoomConnectionState } from './ConnectionState';
 import { IConnectedSession } from './ConnectedSession';
 import FruityServerClient from '../integrations/fruity/FruityServerClient';
-import type { IRosterAddResult } from '../integrations/fruity/FruityServerClient';
+import type { IRosterAddResult, IRosterAmendment } from '../integrations/fruity/FruityServerClient';
 import useConnectedRuntime, { ICredentialRepair } from './useConnectedRuntime';
 import { connectionTimeline } from './ConnectionTimeline';
 import { useAppUpdate } from '../pwa/useAppUpdate';
@@ -147,6 +152,11 @@ export default function ScoringScreen(props: {
   const [recordDurablyStored, setRecordDurablyStored] = useState(durable && !storageDegraded);
   const [repairing, setRepairing] = useState(false);
   const update = useAppUpdate();
+  const rosterPackageRef = useRef(record.package);
+  const rosterIdentityWrite = useRef(Promise.resolve());
+  useEffect(() => {
+    rosterPackageRef.current = record.package;
+  }, [record.package]);
 
   // A store that has stopped being durable cannot still be holding this game durably. Applied when
   // the answer changes rather than on every render, so a write that reports success against the
@@ -488,17 +498,41 @@ export default function ScoringScreen(props: {
    */
   const onRosterIdentity = useCallback(
     async (requestedTeamName: string, requestedPlayerName: string, canonical: IRosterAddResult) => {
-      const nextPackage = applyCanonicalRosterIdentity(
-        record.package,
-        requestedTeamName,
-        requestedPlayerName,
-        canonical,
-      );
-      if (nextPackage === record.package) return;
-      const updated = await store.update(record.id, { package: nextPackage });
-      if (updated !== null) await onRecordChanged();
+      const write = rosterIdentityWrite.current.then(async () => {
+        const currentPackage = rosterPackageRef.current;
+        const nextPackage = applyCanonicalRosterIdentity(
+          currentPackage,
+          requestedTeamName,
+          requestedPlayerName,
+          canonical,
+        );
+        if (nextPackage === currentPackage) return;
+        const updated = await store.update(record.id, { package: nextPackage });
+        if (updated === null) return;
+        rosterPackageRef.current = nextPackage;
+        await onRecordChanged();
+      });
+      rosterIdentityWrite.current = write.catch(() => undefined);
+      await write;
     },
-    [onRecordChanged, record.id, record.package, store],
+    [onRecordChanged, record.id, store],
+  );
+
+  /** Apply all recovery amendments in one durable write before the scorer consumes the snapshot. */
+  const onRosterAmendments = useCallback(
+    async (amendments: IRosterAmendment[]) => {
+      const write = rosterIdentityWrite.current.then(async () => {
+        const nextPackage = applyCanonicalRosterAmendments(rosterPackageRef.current, amendments);
+        if (nextPackage === rosterPackageRef.current) return;
+        const updated = await store.update(record.id, { package: nextPackage });
+        if (updated === null) return;
+        rosterPackageRef.current = nextPackage;
+        await onRecordChanged();
+      });
+      rosterIdentityWrite.current = write.catch(() => undefined);
+      await write;
+    },
+    [onRecordChanged, record.id, store],
   );
 
   /**
@@ -592,8 +626,11 @@ export default function ScoringScreen(props: {
         controlRequest={live ? runtime.controlRequest : undefined}
         onRetryControlRequest={live ? runtime.retryControlRequest : undefined}
         onCancelControlRequest={live ? runtime.cancelControlRequest : undefined}
+        authoritativeLeftTeam={live ? record.package.left : undefined}
+        authoritativeRightTeam={live ? record.package.right : undefined}
         onSyncRosterPlayer={live ? runtime.syncRosterPlayer : undefined}
         onRosterIdentity={live ? onRosterIdentity : undefined}
+        onRosterAmendments={live ? onRosterAmendments : undefined}
         onRecoverFromServer={live ? runtime.recoverFromServer : undefined}
         alerts={alerts}
         recovery={{
