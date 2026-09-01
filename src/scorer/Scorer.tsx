@@ -138,6 +138,7 @@ import { extraTimeoutsGranted, substitutionAllowed } from '../scoring/ProcedureE
 import removeOvertime, { overtimeQuestionNumbers, overtimeRemovalNote } from '../scoring/overtimeCorrection';
 import { canonicalSideForDisplay, displaySideForCanonical, mapSides } from './DisplaySideMapping';
 import useDisplaySideMapping from './useDisplaySideMapping';
+import type { IRosterAddResult } from '../integrations/fruity/FruityServerClient';
 
 export type { IScorerAlert, IScorerRecoveryStatus } from './ConnectionStatus';
 
@@ -258,11 +259,21 @@ export interface IScorerProps {
   recovery?: IScorerRecoveryStatus;
   /** Latest server rosters confirm durable tournament synchronization; they never replace setup. */
   authoritativeRosters?: Record<LeftOrRight, string[]>;
+  /** Stable team ids let the server resolve an amendment without fuzzy team-name matching. */
+  teamIds?: Partial<Record<LeftOrRight, string>>;
   /** Narrow authoritative roster-add request for an assigned room. */
   onSyncRosterPlayer?: (
     teamName: string,
     playerName: string,
-  ) => Promise<{ ok: boolean; error?: string; rejected?: boolean }>;
+    teamId?: string,
+    questionNumber?: number,
+  ) => Promise<{ ok: boolean; error?: string; rejected?: boolean; canonical?: IRosterAddResult }>;
+  /** Persist a canonical roster identity returned by tournament control. */
+  onRosterIdentity?: (
+    requestedTeamName: string,
+    requestedPlayerName: string,
+    canonical: IRosterAddResult,
+  ) => void | Promise<void>;
 }
 
 type OpenDialog =
@@ -587,7 +598,9 @@ export default function Scorer(props: IScorerProps) {
     alerts,
     recovery,
     authoritativeRosters,
+    teamIds,
     onSyncRosterPlayer,
+    onRosterIdentity,
   } = props;
 
   const controlRequest: ControlRequestState = useMemo(
@@ -1017,8 +1030,16 @@ export default function Scorer(props: IScorerProps) {
         const nextBackoff = Math.min(30_000, 5_000 * 2 ** Math.min(attempts, 3));
         scheduleRetry(now + nextBackoff);
         const teamName = addition.team === 'left' ? game.left.name : game.right.name;
-        onSyncRosterPlayer(teamName, addition.playerName)
+        const teamId = teamIds?.[addition.team];
+        const sync =
+          teamId === undefined
+            ? onSyncRosterPlayer(teamName, addition.playerName)
+            : onSyncRosterPlayer(teamName, addition.playerName, teamId, addition.questionNumber);
+        sync
           .then((result) => {
+            if (result.ok && result.canonical) {
+              void onRosterIdentity?.(teamName, addition.playerName, result.canonical);
+            }
             if (!result.ok && result.rejected) {
               setRejectedRosterSyncs((current) => ({ ...current, [key]: true }));
             }
@@ -1043,8 +1064,10 @@ export default function Scorer(props: IScorerProps) {
     game.left.name,
     game.right.name,
     localRosterAdds,
+    onRosterIdentity,
     onSyncRosterPlayer,
     rejectedRosterSyncs,
+    teamIds,
   ]);
 
   /**

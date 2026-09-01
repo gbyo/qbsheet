@@ -32,6 +32,7 @@
  * device or a person, and a tool that has never heard of it reads the statistical result exactly as
  * it would have anyway.
  */
+import { IGameDefinition, playerIdentityKey } from './GameDefinition';
 import { IGamePackage, gamePackageProducer, gamePackageVersion } from './GamePackage';
 import { scorerRecoveryKey } from '../scorer/ScorerRecovery';
 import { qbtcpExtensionKey, readQbtcpExtension } from '../qbj/QbtcpExtension';
@@ -67,9 +68,19 @@ export interface IQbjSourceMetadata {
    * to be able to tell the difference without asking the room.
    */
   roundRevision: number;
+  /** Which issue of this room's assignment was delivered, when the package carried one. */
+  assignmentRevision?: number;
   roomName?: string;
   /** Stable fingerprint of the portable statistical payload, used for backup reconciliation. */
   resultFingerprint?: string;
+}
+
+/** The non-secret identity fields a roster-add or recovery amendment may return. */
+export interface ICanonicalRosterIdentity {
+  playerId?: string;
+  playerName?: string;
+  teamId?: string;
+  teamName?: string;
 }
 
 /**
@@ -99,6 +110,10 @@ function isForbiddenKey(key: string): boolean {
   return forbiddenKeys.has(normalized) || key === scorerRecoveryKey;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 /**
  * A deep copy with the recovery layer and anything credential-shaped removed.
  *
@@ -125,8 +140,122 @@ export function sourceMetadata(packageValue: IGamePackage): IQbjSourceMetadata {
     ...(packageValue.scheduledMatchId ? { scheduledMatchId: packageValue.scheduledMatchId } : {}),
     roundNumber: packageValue.round.number,
     roundRevision: packageValue.round.revision,
+    ...(packageValue.round.assignmentRevision !== undefined
+      ? { assignmentRevision: packageValue.round.assignmentRevision }
+      : {}),
     ...(packageValue.room?.name ? { roomName: packageValue.room.name } : {}),
   };
+}
+
+function identityText(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() !== '' && value.length <= 500 ? value : undefined;
+}
+
+function sideForName(packageValue: IGamePackage, name: string): 'left' | 'right' | undefined {
+  const exact = (['left', 'right'] as const).filter((side) => packageValue[side].name === name);
+  if (exact.length === 1) return exact[0];
+  const folded = name.toLocaleLowerCase();
+  const insensitive = (['left', 'right'] as const).filter(
+    (side) => packageValue[side].name.toLocaleLowerCase() === folded,
+  );
+  return insensitive.length === 1 ? insensitive[0] : undefined;
+}
+
+/**
+ * Add a canonical player id to the durable package identity map.
+ *
+ * The package's display names remain the scorer's local vocabulary. Matching an amendment therefore
+ * uses a known team id first and a uniquely resolved team name second; an ambiguous amendment is left
+ * untouched rather than assigning an id to the wrong side. Both the requested and canonical player
+ * names are keyed when they differ, because the next QBJ may contain either spelling.
+ */
+export function applyCanonicalRosterIdentity(
+  packageValue: IGamePackage,
+  requestedTeamName: string,
+  requestedPlayerName: string,
+  canonical: ICanonicalRosterIdentity,
+): IGamePackage {
+  const definition = packageValue as IGameDefinition;
+  const identity = definition.qbjIdentity;
+  const playerId = identityText(canonical.playerId);
+  const requestedTeam = identityText(requestedTeamName);
+  const requestedPlayer = identityText(requestedPlayerName);
+  if (!identity || !playerId || !requestedTeam || !requestedPlayer) return packageValue;
+
+  const sides = ['left', 'right'] as const;
+  const idMatches = canonical.teamId
+    ? sides.filter((side) => identity.teamIds?.[side] === canonical.teamId)
+    : [];
+  if (idMatches.length > 1) return packageValue;
+  const idSide = idMatches[0];
+  const namedSides = [requestedTeam, identityText(canonical.teamName)]
+    .filter((name): name is string => name !== undefined)
+    .map((name) => sideForName(packageValue, name))
+    .filter((side): side is (typeof sides)[number] => side !== undefined);
+  const distinctNamedSides = [...new Set(namedSides)];
+  if (idSide && distinctNamedSides.some((side) => side !== idSide)) return packageValue;
+  const side = idSide ?? (distinctNamedSides.length === 1 ? distinctNamedSides[0] : undefined);
+  if (!side) return packageValue;
+
+  const playerNames = [
+    ...new Set([requestedPlayer, identityText(canonical.playerName)].filter(Boolean)),
+  ] as string[];
+  const playerIds = { ...(identity.playerIds ?? {}) };
+  let changed = false;
+  for (const playerName of playerNames) {
+    const key = playerIdentityKey(packageValue[side].name, playerName);
+    if (playerIds[key] === playerId) continue;
+    playerIds[key] = playerId;
+    changed = true;
+  }
+  if (!changed) return packageValue;
+  return {
+    ...packageValue,
+    qbjIdentity: {
+      ...identity,
+      playerIds,
+    },
+  } as IGamePackage;
+}
+
+/**
+ * Preserve canonical QBJ ids in the snapshots built by the scorer.
+ *
+ * The scoring engine intentionally works in display names. A roster add can nevertheless return a
+ * durable tournament player id, so the client grafts that id onto the existing name-shaped match at
+ * the transport/file boundary. Unknown ids and unknown match fields remain untouched.
+ */
+export function withQbjIdentity(qbj: object, packageValue: IGamePackage): object {
+  const identity = (packageValue as IGameDefinition).qbjIdentity;
+  if (!identity) return qbj;
+  const teams = (qbj as Record<string, unknown>).match_teams;
+  if (!Array.isArray(teams)) return qbj;
+
+  const sides = ['left', 'right'] as const;
+  const matchTeams = teams.map((value, position) => {
+    if (!isRecord(value)) return value;
+    const side = sides[position];
+    if (!side) return value;
+    const team = packageValue[side];
+    const teamId = identity.teamIds?.[side];
+    const teamValue = isRecord(value.team) ? (teamId ? { $ref: teamId } : value.team) : value.team;
+    const players = Array.isArray(value.match_players)
+      ? value.match_players.map((matchPlayer) => {
+          if (!isRecord(matchPlayer) || !isRecord(matchPlayer.player)) return matchPlayer;
+          const name = matchPlayer.player.name;
+          if (typeof name !== 'string') return matchPlayer;
+          const playerId = identity.playerIds?.[playerIdentityKey(team.name, name)];
+          return playerId ? { ...matchPlayer, player: { $ref: playerId } } : matchPlayer;
+        })
+      : value.match_players;
+    return {
+      ...value,
+      ...(teamValue !== undefined ? { team: teamValue } : {}),
+      ...(Array.isArray(value.match_players) ? { match_players: players } : {}),
+    };
+  });
+
+  return { ...qbj, match_teams: matchTeams };
 }
 
 /**
@@ -174,11 +303,12 @@ export function portableResultFingerprint(qbj: object): string {
 
 /** Attach source identity to the internal payload sent to control without removing recovery data. */
 export function qbjWithSourceMetadata(qbj: object, packageValue: IGamePackage): object {
+  const identified = withQbjIdentity(qbj, packageValue);
   return {
-    ...qbj,
+    ...identified,
     [sourceExtensionKey]: {
       ...sourceMetadata(packageValue),
-      resultFingerprint: portableResultFingerprint(qbj),
+      resultFingerprint: portableResultFingerprint(identified),
     },
   };
 }
@@ -191,12 +321,15 @@ export function qbjWithSourceMetadata(qbj: object, packageValue: IGamePackage): 
  * "could this file contain something it shouldn't" has to be answered.
  */
 export function portableQbj(qbj: object, packageValue: IGamePackage): object {
-  const stripped = stripInternalState(qbj) as Record<string, unknown>;
+  const stripped = withQbjIdentity(stripInternalState(qbj) as object, packageValue) as Record<
+    string,
+    unknown
+  >;
   return {
     ...stripped,
     [sourceExtensionKey]: {
       ...sourceMetadata(packageValue),
-      resultFingerprint: portableResultFingerprint(qbj),
+      resultFingerprint: portableResultFingerprint(stripped),
     },
   };
 }
@@ -223,17 +356,25 @@ export function portableQbjDocument(document: object): object {
  * it so a result downloaded before this migration still reconciles. Nothing writes the older blocks
  * except the legacy Match-only export.
  */
-export function readResultOrigin(qbj: unknown): { roundRevision?: number; roomId?: string } | null {
+export function readResultOrigin(
+  qbj: unknown,
+): { roundRevision?: number; assignmentRevision?: number; roomId?: string } | null {
   const extension = readQbtcpExtension(qbj);
   if (extension) {
     return {
       ...(extension.roundRevision !== undefined ? { roundRevision: extension.roundRevision } : {}),
+      ...(extension.assignmentRevision !== undefined
+        ? { assignmentRevision: extension.assignmentRevision }
+        : {}),
       ...(extension.roomId !== undefined ? { roomId: extension.roomId } : {}),
     };
   }
   const legacy = readSourceMetadata(qbj);
   if (!legacy) return null;
-  return { roundRevision: legacy.roundRevision };
+  return {
+    roundRevision: legacy.roundRevision,
+    ...(legacy.assignmentRevision !== undefined ? { assignmentRevision: legacy.assignmentRevision } : {}),
+  };
 }
 
 /** Read the source block back, for a tool that wants to know where a result came from. */
@@ -257,6 +398,13 @@ export function readSourceMetadata(qbj: unknown): IQbjSourceMetadata | null {
     typeof candidate.roundRevision !== 'number' ||
     !Number.isInteger(candidate.roundRevision) ||
     candidate.roundRevision < 1
+  )
+    return null;
+  if (
+    candidate.assignmentRevision !== undefined &&
+    (typeof candidate.assignmentRevision !== 'number' ||
+      !Number.isInteger(candidate.assignmentRevision) ||
+      candidate.assignmentRevision < 1)
   )
     return null;
   if (candidate.tournamentId !== undefined && typeof candidate.tournamentId !== 'string') return null;

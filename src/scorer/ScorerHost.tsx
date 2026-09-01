@@ -49,6 +49,7 @@ import useGameEvents from './useGameEvents';
 import { IGameSessionHistory, loadGame } from './GameSession';
 import { readScorerRecovery } from './ScorerRecovery';
 import { IQbsheetBackup } from './QBSheetBackup';
+import type { IRosterAddResult, ISessionRecovery } from '../integrations/fruity/FruityServerClient';
 
 export interface IScorerHostProps {
   /** The session or emergency game id. Also what the saved game is filed under. */
@@ -117,10 +118,20 @@ export interface IScorerHostProps {
   /** Latest assignment rosters, used only to confirm roster synchronization. */
   authoritativeLeftTeam?: ITeamRoster;
   authoritativeRightTeam?: ITeamRoster;
+  /** Stable team ids let a canonical roster response update the right side without fuzzy matching. */
+  teamIds?: Partial<Record<LeftOrRight, string>>;
   onSyncRosterPlayer?: (
     teamName: string,
     playerName: string,
-  ) => Promise<{ ok: boolean; error?: string; rejected?: boolean }>;
+    teamId?: string,
+    questionNumber?: number,
+  ) => Promise<{ ok: boolean; error?: string; rejected?: boolean; canonical?: IRosterAddResult }>;
+  /** Persist the server's canonical identity in the package used by future QBJ snapshots. */
+  onRosterIdentity?: (
+    requestedTeamName: string,
+    requestedPlayerName: string,
+    canonical: IRosterAddResult,
+  ) => void | Promise<void>;
   /**
    * Fetch this session's own latest server snapshot.
    *
@@ -128,7 +139,7 @@ export interface IScorerHostProps {
    * server is unreachable, because it has nothing, or because the room is not assigned — simply
    * means there is nothing to recover from, which is not an error.
    */
-  onRecoverFromServer?: () => Promise<object | null>;
+  onRecoverFromServer?: () => Promise<ISessionRecovery | null>;
   /** Passed through to replace the opening banner. See `Scorer`. */
   openingNotice?: string;
   /** Room-level warnings about the connection, credentials or assignment. */
@@ -183,7 +194,9 @@ export default function ScorerHost(props: IScorerHostProps) {
     onCancelControlRequest,
     authoritativeLeftTeam,
     authoritativeRightTeam,
+    teamIds,
     onSyncRosterPlayer,
+    onRosterIdentity,
     onRecoverFromServer,
     alerts,
     openingNotice,
@@ -275,8 +288,19 @@ export default function ScorerHost(props: IScorerHostProps) {
     // empty initial value — so this had nothing left to clear.
     let cancelled = false;
     onRecoverFromServer()
-      .then((qbj) => {
-        if (cancelled || qbj === null) return undefined;
+      .then((sessionRecovery) => {
+        if (cancelled || sessionRecovery === null) return undefined;
+        for (const amendment of sessionRecovery.rosterAmendments ?? []) {
+          if (amendment.playerName) {
+            void onRosterIdentity?.(
+              amendment.teamName ?? amendment.teamId ?? '',
+              amendment.playerName,
+              amendment,
+            );
+          }
+        }
+        const qbj = sessionRecovery.latestQbj;
+        if (qbj === null) return undefined;
         // Anything scored while the request was in flight is newer than what came back.
         if (events.events.length > 0) return undefined;
         const payload = readScorerRecovery(qbj, activeSetup);
@@ -307,7 +331,15 @@ export default function ScorerHost(props: IScorerHostProps) {
     // because a local event list was replaced. The event-count guard above still cancels recovery as
     // soon as somebody scores locally.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onRecoverFromServer, recovered, eventCount, restore, activeSetup, serverRecoveryAttempt]);
+  }, [
+    onRecoverFromServer,
+    onRosterIdentity,
+    recovered,
+    eventCount,
+    restore,
+    activeSetup,
+    serverRecoveryAttempt,
+  ]);
 
   // A failed first check is exactly the case where a browser coming back online should get another
   // chance. The event-count ref prevents that retry from overwriting a game that started locally in
@@ -375,7 +407,9 @@ export default function ScorerHost(props: IScorerHostProps) {
             }
           : undefined
       }
+      teamIds={teamIds}
       onSyncRosterPlayer={onSyncRosterPlayer}
+      onRosterIdentity={onRosterIdentity}
       recovered={(recovered !== null && recovered.events.length > 0) || recoveringFromDurableRecord}
       openingNotice={openingNotice}
       recoveryNotice={serverRecoveryNotice}

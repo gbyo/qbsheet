@@ -35,7 +35,7 @@ import { IScorerSubmitResult } from '../scorer/Scorer';
 import { IStoredGameRecord, GameStore } from '../game/GameStore';
 import { ScoreEvent } from '../scoring/ScoreEvents';
 import { IGameSetup } from '../scoring/deriveGame';
-import { portableQbj, qbjWithSourceMetadata } from '../game/PortableQbj';
+import { applyCanonicalRosterIdentity, portableQbj, qbjWithSourceMetadata } from '../game/PortableQbj';
 import {
   downloadQbj,
   downloadLegacyMatchOnly,
@@ -49,6 +49,7 @@ import { IDerivedGame } from '../scoring/deriveGame';
 import { RoomConnectionState } from './ConnectionState';
 import { IConnectedSession } from './ConnectedSession';
 import FruityServerClient from '../integrations/fruity/FruityServerClient';
+import type { IRosterAddResult } from '../integrations/fruity/FruityServerClient';
 import useConnectedRuntime, { ICredentialRepair } from './useConnectedRuntime';
 import { connectionTimeline } from './ConnectionTimeline';
 import { useAppUpdate } from '../pwa/useAppUpdate';
@@ -56,6 +57,7 @@ import { updateDeferredAlert } from '../pwa/UpdateNotice';
 import { ResultDeliveryService } from './ResultDelivery';
 import { correctionSentence, GameCorrectionRefusal, IGameCorrection } from '../scoring/gameCorrection';
 import { IGameSessionHistory } from '../scorer/GameSession';
+import { procedureOverrideMessage } from '../qbj/QbtcpExtension';
 
 /** The two totals, read back out of the payload rather than derived a second time. */
 export function scoreFromQbj(qbj: object): { left: number; right: number } | undefined {
@@ -479,6 +481,27 @@ export default function ScoringScreen(props: {
   );
 
   /**
+   * Apply the server's canonical roster identity to the durable package as soon as it arrives.
+   * Display names remain the scorer's vocabulary, but future results can now carry the stable QBJ
+   * player reference. An amendment that cannot be resolved unambiguously is intentionally a no-op;
+   * the room keeps its score and the director still has the append-only amendment to reconcile.
+   */
+  const onRosterIdentity = useCallback(
+    async (requestedTeamName: string, requestedPlayerName: string, canonical: IRosterAddResult) => {
+      const nextPackage = applyCanonicalRosterIdentity(
+        record.package,
+        requestedTeamName,
+        requestedPlayerName,
+        canonical,
+      );
+      if (nextPackage === record.package) return;
+      const updated = await store.update(record.id, { package: nextPackage });
+      if (updated !== null) await onRecordChanged();
+    },
+    [onRecordChanged, record.id, record.package, store],
+  );
+
+  /**
    * The banner strip's contents.
    *
    * The update line goes last because it is the only thing here that is not about this game: every
@@ -555,13 +578,22 @@ export default function ScoringScreen(props: {
         qbjMeta={{
           round: record.package.round.number,
           location: record.package.room?.name,
+          ...((record.package as IGameDefinition).procedureOverride
+            ? {
+                notes: procedureOverrideMessage(
+                  (record.package as IGameDefinition).procedureOverride?.unsupportedVersion ?? 0,
+                ),
+              }
+            : {}),
         }}
         qbjPlayerIds={(record.package as IGameDefinition).qbjIdentity?.playerIds}
+        teamIds={(record.package as IGameDefinition).qbjIdentity?.teamIds}
         onRequestControl={live ? runtime.requestControl : undefined}
         controlRequest={live ? runtime.controlRequest : undefined}
         onRetryControlRequest={live ? runtime.retryControlRequest : undefined}
         onCancelControlRequest={live ? runtime.cancelControlRequest : undefined}
         onSyncRosterPlayer={live ? runtime.syncRosterPlayer : undefined}
+        onRosterIdentity={live ? onRosterIdentity : undefined}
         onRecoverFromServer={live ? runtime.recoverFromServer : undefined}
         alerts={alerts}
         recovery={{

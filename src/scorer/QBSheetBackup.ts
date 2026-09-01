@@ -224,6 +224,14 @@ function serializePackage(value: IGamePackage): IGamePackage {
     ...(definition.origin !== undefined ? { origin: definition.origin } : {}),
     ...(definition.assumptions ? { assumptions: definition.assumptions.slice() } : {}),
     ...(definition.qbjIdentity ? { qbjIdentity: cloneIdentity(definition.qbjIdentity) } : {}),
+    ...(definition.procedureOverride
+      ? {
+          procedureOverride: {
+            kind: 'moderator-instructions' as const,
+            unsupportedVersion: definition.procedureOverride.unsupportedVersion,
+          },
+        }
+      : {}),
   } as IGameDefinition;
 }
 
@@ -560,11 +568,24 @@ function restoreDefinitionMetadata(packageValue: PackageShape, raw: unknown): IG
     ? definition.assumptions.filter((item): item is string => typeof item === 'string' && item !== '')
     : undefined;
   const qbjIdentity = cloneIdentity(definition.qbjIdentity);
+  const procedureOverride =
+    isPlainObject(definition.procedureOverride) &&
+    definition.procedureOverride.kind === 'moderator-instructions' &&
+    typeof definition.procedureOverride.unsupportedVersion === 'number' &&
+    Number.isInteger(definition.procedureOverride.unsupportedVersion) &&
+    definition.procedureOverride.unsupportedVersion >= 0 &&
+    definition.procedureOverride.unsupportedVersion <= 100
+      ? {
+          kind: 'moderator-instructions' as const,
+          unsupportedVersion: definition.procedureOverride.unsupportedVersion,
+        }
+      : undefined;
   return {
     ...packageValue,
     ...(origin ? { origin } : {}),
     ...(assumptions && assumptions.length > 0 ? { assumptions } : {}),
     ...(qbjIdentity ? { qbjIdentity } : {}),
+    ...(procedureOverride ? { procedureOverride } : {}),
   } as IGameDefinition;
 }
 

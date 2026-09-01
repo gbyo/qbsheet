@@ -65,7 +65,8 @@ describe('discovery', () => {
 
     // Announced, understood to exist, and deliberately not spoken.
     expect(future?.version).toBe(2);
-    expect(routesFor(future)).toBe(legacyRoutes);
+    expect(routesFor(future).protocol).toBe('qbtcp/unsupported');
+    expect(routesFor(future)).not.toBe(legacyRoutes);
   });
 
   test('a version 1 server gets the canonical surface', () => {

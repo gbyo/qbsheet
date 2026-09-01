@@ -72,7 +72,11 @@ function serverStatus(record: IStoredGameRecord): { title: string; detail?: stri
   const ledger = record.serverDeliveryLedger;
   if (record.serverDelivery === 'none') return { title: 'Not connected' };
   if (record.serverDelivery === 'sent') {
-    const title = ledger?.acceptedAsDuplicate ? 'Already received' : 'Accepted';
+    const title = ledger?.acceptedAsDuplicate
+      ? 'Already received'
+      : ledger?.reviewRequired
+        ? 'Received · Review needed'
+        : 'Accepted';
     const acceptedAt = timeOfDay(ledger?.acceptedAt);
     const secondary = ledger
       ? [attemptText(ledger.attemptCount), ledger.matchId ? `Match ${ledger.matchId}` : undefined]

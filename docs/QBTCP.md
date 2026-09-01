@@ -38,7 +38,7 @@ QBTCP owns the operational behaviour that exists only while a tournament runs:
 - Final result delivery
 - Reconnection and server-assisted recovery
 - Help requests
-- The assignment lifecycle and the revision of a round
+- The assignment lifecycle and its revisions
 
 QBTCP does not define, redefine, or restate any of these:
 
@@ -60,7 +60,11 @@ misread this specification.
 | **Room** | A scoring position in the tournament. The room is the unit that pairs and authenticates. |
 | **Session** | The work of one scoresheet on one assigned game. The session is the unit that writes snapshots and a result. |
 | **Assignment** | The game that a room must score now, expressed as a QBJ document. |
-| **Round revision** | An integer that increases monotonically. It identifies which issue of a round's pairings an assignment came from. |
+| **Round revision** | An integer that increases monotonically for a round's pairing publication. It identifies which issue of a round's pairings an assignment came from. |
+| **Assignment revision** | An integer scoped to one room. It increases whenever that room is issued or reissued an assignment, including the same pairing after a room-local retry. |
+| **Result receipt** | The durable acknowledgement of an authenticated final. A receipt says what control retained; it does not by itself say that the result was imported into standings. |
+| **Review-required** | A retained result state that needs an explicit director decision before it becomes the tournament's canonical match. |
+| **Abandoned session** | A session explicitly closed by tournament control without deleting its progress or results. A later final is retained for review and never reopens the session. |
 | **Active writer** | The one device that holds authorisation to write to a session. |
 
 ## Versioning
@@ -73,6 +77,11 @@ ignore a response field that it does not recognise, rather than fail on it.
 
 Version negotiation is discovery, not a handshake. A client fetches the discovery document, reads
 `version` and `capabilities`, and then decides what it can do. There is no in-band upgrade.
+
+A client that recognizes `protocol: "QBTCP"` but a version greater than the newest version it
+implements MUST stop using the QBTCP routes and MUST tell the operator that this is an unsupported
+future QBTCP server. It MUST NOT guess that the server is a legacy `/api/v1` server. An absent,
+unreadable, or `404` discovery response is the separate legacy-compatibility case.
 
 ## Discovery
 
@@ -278,16 +287,26 @@ headers or in a sibling endpoint, because a QBJ body would need invented QBJ fie
   "state": "assigned",
   "blocked_reason": null,
   "blocked_message": null,
-  "session": { "session_id": "...", "resumable": true },
+  "session": { "session_id": "...", "status": "open", "resumable": true },
   "previous": { "label": "Round 3 · Ninety Six vs Emerald" },
   "next": { "label": "Round 5 · Clinton vs Greenwood" },
+  "round_revision": 3,
+  "assignment_revision": 7,
   "released_round": 4,
   "hold_new_starts": false
 }
 ```
 
 `state` is one of `assigned`, `none`, `blocked`, or `held`. When `state` is not `assigned`, the
-assignment endpoint returns `204 No Content`. It does not return an empty QBJ document.
+assignment endpoint returns `204 No Content`. It does not return an empty QBJ document. A pending
+result review is not a room-level hold: the assignment for another game MAY be issued while the
+earlier result remains in the review queue, but the specific pairing represented by that result
+remains locked until its decision is recorded.
+
+Operational state is not part of the game, so it is not in the QBJ body. It travels in response
+headers or in this sibling endpoint. The assignment document MAY repeat `round_revision` and
+`assignment_revision` in `_qbtcp` so a result can carry the issue that was actually scored; the
+status endpoint remains authoritative for the current room state.
 
 A scoresheet MUST persist the normalized assignment locally **before** any scoring depends on a
 further network call. After that point the network is optional. See "Durability requirements for a
@@ -317,6 +336,19 @@ take over. Writer ownership resolves that case. A refusal does not.
 
 `POST` records that this device and this operator are alive. `GET` returns what tournament control
 believes about the room.
+
+The client MAY include bounded diagnostic metadata in the presence body or headers:
+
+```json
+{
+  "client": { "name": "QBSheet", "version": "4.2.0", "build": "20260831" },
+  "procedure_versions": [1, 2, 3],
+  "qbj_version": "2.1.1"
+}
+```
+
+This metadata is advisory and MUST NOT be used for authentication. Servers MUST bound and sanitize
+it before persisting or displaying it.
 
 Presence is advisory. A lost heartbeat MUST NOT end a session, invalidate a token, or affect the
 scoring.
@@ -367,7 +399,7 @@ server that receives a sequence lower than the one it holds MUST discard that sn
 Progress delivery is best-effort. A failed snapshot MUST NOT block the scoring, surface as a scoring
 error, or discard local state.
 
-## Result
+## Result and receipt semantics
 
     POST /qbtcp/v1/sessions/{id}/result   (session token, writer)
 
@@ -375,15 +407,53 @@ The body is the completed game as a QBJ document, with content type
 `application/vnd.quizbowl.qbj+json`. It is the same document that the scoresheet would download as
 `*.result.qbj`, with nothing added and nothing removed.
 
-    { "accepted": true, "match_id": "sm-4471", "fingerprint": "…", "duplicate": false }
+    {
+      "accepted": true,
+      "received": true,
+      "review_required": false,
+      "duplicate": false,
+      "match_id": "sm-4471",
+      "fingerprint": "…",
+      "warnings": []
+    }
 
-`duplicate: true` means that this exact statistical result is already on record. It is the correct
-response to a retry, and it is not an error.
+`received: true` means the authenticated final was durably retained. `accepted` is retained for
+backwards compatibility and means that control can proceed without a director decision; a client
+MUST accept either field when reading an older receipt. `review_required: true` means the bytes are
+safe on disk but a person must decide what they mean. `duplicate: true` means the same result was
+already retained or imported and is the correct idempotent answer to a retry. A receipt SHOULD include
+`match_id`, `fingerprint`, and a bounded array of stable warning codes and human-readable warning
+details when available.
 
-Result submission MUST use the pair of `Tournament.id` and `Match.id` as the game identity, together
-with the statistical fingerprint. The tournament identifier scopes the match identifier, so identical
-`Match.id` values in different tournaments MUST NOT collide. The fingerprint distinguishes an
-identical retry from a conflicting result for the same game. A client that retries after a timeout
+An authenticated, parseable final MUST be retained before the HTTP response is written, even when
+its team mapping, round revision, assignment revision, or other content disagrees with the current
+assignment. Such a disagreement is a review warning, not a transport failure. The server MUST return
+a successful receipt for a retained nonfatal final; it MUST NOT make a room retry a result that is
+already durably stored. If the body is malformed or unreadable, the server MAY retain a sanitized
+quarantine record for audit and support, but MUST NOT claim that it was a usable result; the response
+must identify the parse failure without echoing secrets or the original body.
+
+Identity and deduplication are ordered as follows:
+
+1. The tournament identifier scopes the comparison.
+2. When a match identity is present, compare that identity first. The same match identity and the
+   same fingerprint is a duplicate; the same match identity and a different fingerprint is a
+   correction candidate and MUST be retained for review.
+3. Two different match identities are not duplicates merely because their statistics are identical.
+4. When identity is absent, the server MAY use a conservative fingerprint fallback, but it MUST NOT
+   merge an ambiguous result automatically. A retry key supplied by a client MAY make a transport
+   retry idempotent, but it is not a replacement for the result identity.
+
+Every retained result is an audit record. A correction workflow MUST offer explicit `Replace`, `Keep`
+(the existing canonical result), and `Dismiss` decisions, with an optional separate manual-import
+decision. Replacing or keeping one result MUST preserve both records and their relationship (for
+example `supersedes_result_id`, `superseded_by_result_id`, or an equivalent stable link). A server
+MUST NOT silently overwrite, skip, or delete either copy.
+
+Result submission MUST use the pair of `Tournament.id` and `Match.id` as the preferred game identity,
+together with the statistical fingerprint. The tournament identifier scopes the match identifier,
+so identical `Match.id` values in different tournaments MUST NOT collide. The fingerprint distinguishes
+an identical retry from a conflicting result for the same game. A client that retries after a timeout
 must not create a second match. See "Result identity and deduplication" in the profile document.
 
 A scoresheet MUST NOT treat acceptance over QBTCP as a reason to delete its local copy, or as a reason
@@ -396,6 +466,16 @@ to stop offering the result for manual download.
 This is the second recovery source. It serves a device whose own local copy is absent or unreadable.
 It returns the private state that the server received. The same session capability authorises it as
 every other operation on that session. There is no room-wide read and no server-wide read.
+
+Recovery MUST include the session lifecycle (`open`, `final-received`, or `abandoned`) and MUST
+include any canonical live-roster amendments applied while the session was open. A replacement
+device applies those amendments by canonical player identity, not by display-name guessing. A result
+received after `abandoned` remains an audit/review record marked as `late-after-abandon`; it MUST NOT
+auto-import or reopen the session.
+
+Tournament control SHOULD expose an explicit abandon action. Abandoning revokes the session's writer
+authority, preserves progress and receipts, releases the room for a new assignment, and records who
+or what performed the action. It is not equivalent to deleting a session.
 
 Server-assisted recovery is a fallback. The local journal of a scoresheet is the authoritative exact
 recovery path. The profile document describes both paths together.
@@ -468,7 +548,7 @@ display that string without a change.
 | `403` | Valid credential without permission, including a disallowed origin | Surface it. Do not retry in a loop. |
 | `404` | No such endpoint, session, or room | Do not retry |
 | `405` | Method not allowed | A programming error |
-| `409` | Writer conflict, or a conflict with a recorded result | A person must resolve it |
+| `409` | Writer conflict, or a malformed/authentication-level refusal that was not retained | Surface it; do not retry unchanged |
 | `410` | A newer revision superseded the assignment | Fetch the new assignment. Do not discard scored work. |
 | `413` | Body too large | Do not retry unchanged |
 | `429` | Rate limited at pairing | Back off |
@@ -476,7 +556,9 @@ display that string without a change.
 
 `401` and `410` need the most care. Each one describes a server that changed its mind about a room in
 the middle of a game. Neither status permits the destruction of that game. A scoresheet MUST continue
-to score locally, and MUST keep the result available for download.
+to score locally, and MUST keep the result available for download. A result-content mismatch is not
+automatically a `409`: if the authenticated final was retained, the receipt is the successful answer
+and the warning/review state is what tells control to act.
 
 ## Durability requirements for a scoresheet
 
@@ -491,6 +573,8 @@ game. An implementation that claims QBTCP conformance MUST hold to all of the fo
 - A reload restores from local state, not from the network.
 - Snapshots retry and coalesce. The current state always takes precedence over a stale queued one.
 - A connected final still offers a manual QBJ download.
+- The operator has an explicit offline/emergency path: export the assignment, continue scoring locally,
+  and import or hand off the final later without depending on a live server.
 
 For help requests, a client classifies a `401` as a room-credential problem for the existing room
 repair flow, a `403` as an explicit refusal without starting a pairing loop, a network failure as
@@ -590,3 +674,21 @@ that never receives QBTCP discovery may continue using them; a QBTCP client uses
 If an older pre-QBTCP server exposes only `POST /help`, the client keeps that request action
 available but reports lifecycle reads and withdrawal as unavailable; it does not hide a request that
 may still be open on that server.
+
+## Cross-repository contract harness
+
+QBSheet includes a browser contract test against YellowFruit's real QBTCP server. It is enabled when
+the YellowFruit checkout is available at the sibling path used by the development workspace, or when
+`YELLOWFRUIT_REPO` points to another checkout. `YELLOWFRUIT_REF` is optional and only verifies the
+checkout's current `HEAD`; the harness never changes a branch or working tree.
+
+```sh
+YELLOWFRUIT_REPO=/path/to/yellowfruit-link \
+YELLOWFRUIT_REF=main \
+npm run test:browser:yellowfruit
+```
+
+The test starts YellowFruit on a temporary loopback port with temporary QBTCP state, drives the real
+QBSheet page through pairing, scoring, progress, and final submission, then resolves the durable
+result review explicitly. If no YellowFruit checkout is present, this optional test is skipped and the
+QBSheet-only QBTCP browser contract suite remains available through `npm run test:browser`.

@@ -51,10 +51,19 @@ export function assignmentStateKey(assignment: INormalizedAssignment | null): st
     assignment.state === 'assigned' &&
     (!assignment.definition || assignment.scheduledMatchId === undefined)
   ) {
-    return `assigned-incomplete:${assignment.scheduledMatchId ?? 'unknown'}`;
+    return `assigned-incomplete:${procedureAssignmentKey(assignment)}`;
   }
   if (assignment.state === 'none') return 'none';
   return `assigned:${assignment.scheduledMatchId ?? 'unknown'}`;
+}
+
+/** The identity an explicit procedure override is allowed to approve. */
+export function procedureAssignmentKey(assignment: INormalizedAssignment): string {
+  return [
+    assignment.scheduledMatchId ?? 'unknown',
+    assignment.roundRevision ?? 'unknown',
+    assignment.assignmentRevision ?? 'unknown',
+  ].join(':');
 }
 
 export function lastCheckLabel(ageMs: number): string {
@@ -89,6 +98,17 @@ function stateLine(assignment: INormalizedAssignment | null, busy: boolean): str
   }
   if (assignment.state === 'blocked') {
     return assignment.blockedMessage ?? 'Tournament control is holding this room.';
+  }
+  if (
+    assignment.state === 'assigned' &&
+    !assignment.definition &&
+    assignment.unsupportedProcedureVersion !== undefined
+  ) {
+    const version =
+      assignment.unsupportedProcedureVersion > 0
+        ? `version ${assignment.unsupportedProcedureVersion}`
+        : 'an unknown version';
+    return `Automatic room procedure enforcement is unavailable for ${version}. Choose how to continue.`;
   }
   if (assignment.state === 'assigned' && !assignment.definition) {
     return 'Tournament control assigned a game, but its details are not ready. QBSheet will keep checking.';
@@ -203,6 +223,7 @@ export default function ConnectedRoom(props: {
   const roomCredentialProblemRef = useRef(roomCredentialProblem);
   const startingRef = useRef(false);
   const startGeneration = useRef(0);
+  const approvedProcedureAssignmentKey = useRef<string | null>(null);
 
   const client = useMemo(() => new FruityServerClient(pairedRoom.baseUrl), [pairedRoom.baseUrl]);
   const identity = useMemo(() => identityFor(pairedRoom, operatorName), [pairedRoom, operatorName]);
@@ -280,11 +301,23 @@ export default function ConnectedRoom(props: {
       setPollFailed(false);
       setPollError('');
       setLastSuccessfulCheckAt(Date.now());
-      setAssignment(result.value);
+      const assignmentValue =
+        !result.value.definition &&
+        result.value.emergencyDefinition &&
+        approvedProcedureAssignmentKey.current === procedureAssignmentKey(result.value)
+          ? { ...result.value, definition: result.value.emergencyDefinition }
+          : result.value;
+      if (
+        approvedProcedureAssignmentKey.current !== null &&
+        approvedProcedureAssignmentKey.current !== procedureAssignmentKey(result.value)
+      ) {
+        approvedProcedureAssignmentKey.current = null;
+      }
+      setAssignment(assignmentValue);
       setProblemReceipt((receipt) =>
-        receipt && receipt.scheduledMatchId !== result.value.scheduledMatchId ? null : receipt,
+        receipt && receipt.scheduledMatchId !== assignmentValue.scheduledMatchId ? null : receipt,
       );
-      if (result.value.errors?.length) setActionError(result.value.errors.join(' '));
+      if (assignmentValue.errors?.length) setActionError(assignmentValue.errors.join(' '));
       else setActionError('');
     } catch {
       if (roomKeyRef.current === key && assignmentRequest.current?.sequence === sequence) {
@@ -316,6 +349,13 @@ export default function ConnectedRoom(props: {
   const retryAssignment = () => {
     setActionError('');
     void loadAssignment();
+  };
+
+  const approveProcedureOverride = () => {
+    if (!assignment?.emergencyDefinition) return;
+    approvedProcedureAssignmentKey.current = procedureAssignmentKey(assignment);
+    setActionError('');
+    setAssignment({ ...assignment, definition: assignment.emergencyDefinition });
   };
 
   const handleProblemReport = useCallback(
@@ -371,12 +411,18 @@ export default function ConnectedRoom(props: {
         noteFailure(current, safeStartFailure(current), 'start');
         return;
       }
-      setAssignment(current.value);
-      if (!current.value.definition) {
+      const currentValue =
+        !current.value.definition &&
+        current.value.emergencyDefinition &&
+        approvedProcedureAssignmentKey.current === procedureAssignmentKey(current.value)
+          ? { ...current.value, definition: current.value.emergencyDefinition }
+          : current.value;
+      setAssignment(currentValue);
+      if (!currentValue.definition) {
         setActionError('Tournament control started the game but did not say what to play. Check again.');
         return;
       }
-      if (current.value.scheduledMatchId !== expectedMatchId) {
+      if (currentValue.scheduledMatchId !== expectedMatchId) {
         setActionError(
           'Tournament control changed this room’s game while it was starting. Check the game shown and start again.',
         );
@@ -386,8 +432,8 @@ export default function ConnectedRoom(props: {
         room: pairedRoom,
         identity,
         credentials: { sessionId: session.value.sessionId, token: session.value.token },
-        ...(current.value.tournamentKey ? { tournamentKey: current.value.tournamentKey } : {}),
-        definition: current.value.definition,
+        ...(currentValue.tournamentKey ? { tournamentKey: currentValue.tournamentKey } : {}),
+        definition: currentValue.definition,
         isCurrent,
       });
       if (!isCurrent()) return;
@@ -520,6 +566,30 @@ export default function ConnectedRoom(props: {
               <span className="assignment-next-label">Up next</span>
               <span>{assignment.nextAssignmentLabel}</span>
             </aside>
+          )}
+
+          {assignment?.state === 'assigned' && !assignmentDefinition && assignment.emergencyDefinition && (
+            <section className="shell-section room-procedure-override" aria-label="Procedure override">
+              <p className="shell-warning" role="alert">
+                Automatic room procedure enforcement is unavailable for{' '}
+                {assignment.unsupportedProcedureVersion && assignment.unsupportedProcedureVersion > 0
+                  ? `version ${assignment.unsupportedProcedureVersion}`
+                  : 'this procedure'}
+                .
+              </p>
+              <p className="shell-hint">
+                The moderator must give the room its instructions. This decision will be recorded in the
+                result and local audit.
+              </p>
+              <button
+                type="button"
+                className="shell-button is-primary"
+                disabled={starting}
+                onClick={approveProcedureOverride}
+              >
+                Continue using the moderator&apos;s instructions
+              </button>
+            </section>
           )}
 
           {assignmentDefinition?.assumptions && assignmentDefinition.assumptions.length > 0 && (

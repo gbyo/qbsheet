@@ -32,6 +32,7 @@ import {
 import { validateGamePackage } from '../../game/GamePackageValidation';
 import { GameSourceResult } from '../../game/GameSource';
 import { OpenGameResult, openGameValue } from '../../game/OpenGameDefinition';
+import { IGameDefinitionOverrides } from '../../qbj/ParseQbjAssignment';
 import { IAssignmentResponse, IAssignedMatchup } from './ServerTypes';
 
 /**
@@ -79,6 +80,7 @@ export function assignmentToGamePackage({ assignment, matchup }: IAssignmentConv
       number: matchup.roundNumber,
       name: matchup.roundName,
       revision: matchup.roundRevision ?? assumedRoundRevision,
+      ...(matchup.assignmentRevision !== undefined ? { assignmentRevision: matchup.assignmentRevision } : {}),
       ...(matchup.packetName ? { packetName: matchup.packetName } : {}),
     },
     room: { id: assignment.roomId, name: assignment.roomName },
@@ -112,6 +114,9 @@ export function assignmentToGamePackage({ assignment, matchup }: IAssignmentConv
  * Credentials are not here because they are not in the body. They stay in the connected session's
  * own state; see `ConnectedSession`.
  */
-export function qbtcpAssignmentToDefinition(body: unknown): OpenGameResult {
-  return openGameValue(body);
+export function qbtcpAssignmentToDefinition(
+  body: unknown,
+  overrides: IGameDefinitionOverrides = {},
+): OpenGameResult {
+  return openGameValue(body, overrides);
 }

@@ -36,6 +36,7 @@
     "test:stress": "QBSHEET_DEEP_STRESS=1 vitest --run tests/RoomGameStateSpace.test.ts",
     "test:property": "vitest --run tests/RoomGameProperty.test.ts",
     "test:browser": "playwright test",
+    "test:browser:yellowfruit": "playwright test e2e/YellowFruitInterop.spec.ts",
     "test:mutation": "stryker run",
     "test:mutation:dry": "stryker run --dryRunOnly",
     "prepare": "npm run build:core"
