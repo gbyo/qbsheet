@@ -157,7 +157,7 @@ export default function KeyboardDrill(props: { onBack: () => void; onHome: () =>
             on the buttons by design: a chord for each of them would be a layout nobody could hold in their
             head, and these are the things nobody does mid-buzz. A bonus scored part by part — which is what a
             format with bouncebacks opens on — puts its own three digits in this map while it is on screen,
-            naming the teams they belong to.
+            naming the teams they belong to, and Enter records it once every part has an answer.
           </p>
         </section>
 

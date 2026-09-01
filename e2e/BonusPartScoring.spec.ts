@@ -10,6 +10,7 @@
  */
 import { expect, test, type Page } from '@playwright/test';
 import { validPackage } from '../tests/packages';
+import { chooseScoringLayout } from './support/scoringLayout';
 
 const opponent = 'Greenwood Consolidated Regional';
 
@@ -27,6 +28,7 @@ async function openBounceGame(page: Page): Promise<void> {
     buffer: Buffer.from(JSON.stringify(packageValue)),
   });
 
+  await chooseScoringLayout(page);
   await expect(page.getByRole('heading', { name: 'Who is starting?' })).toBeVisible();
   const prompt = page.getByLabel('Starting lineups');
   for (const player of ['Sarah Mitchell', 'James Okafor']) {
@@ -64,17 +66,16 @@ async function partLayout(page: Page) {
         buttonRight: Math.max(...buttons.map((button) => button.right)),
         buttonWidth: Math.min(...buttons.map((button) => button.width)),
         buttonHeight: Math.min(...buttons.map((button) => button.height)),
-        // Stacked once the rows fold: every button starts on the same left edge.
-        stacked: buttons.every((button) => Math.abs(button.left - buttons[0].left) < 1),
+        // Where each button sits, so a wide row and a folded one can be told apart.
+        tops: buttons.map((button) => Math.round(button.top)),
+        widths: buttons.map((button) => Math.round(button.width)),
       };
     });
-    const head = element.querySelector('.scorer-part-head');
     return {
       left: bounds.left,
       right: bounds.right,
       clientWidth: element.clientWidth,
       scrollWidth: element.scrollWidth,
-      headingVisible: head !== null ? getComputedStyle(head).display !== 'none' : false,
       rows,
     };
   });
@@ -86,9 +87,9 @@ test('the live part grid is columns on a scorer screen and blocks on a narrow on
 
   const wide = await partLayout(page);
   expect(wide.rows).toHaveLength(3);
-  expect(wide.headingVisible).toBe(true);
   for (const row of wide.rows) {
-    expect(row.stacked).toBe(false);
+    // One line: the three answers side by side under the part number.
+    expect(new Set(row.tops).size).toBe(1);
     expect(row.buttonRight).toBeLessThanOrEqual(row.right + 1);
     // Wide enough to be pressed rather than aimed at.
     expect(row.buttonWidth).toBeGreaterThan(44);
@@ -97,13 +98,21 @@ test('the live part grid is columns on a scorer screen and blocks on a narrow on
   expect(wide.left).toBeGreaterThanOrEqual(0);
   expect(wide.right).toBeLessThanOrEqual(1366);
 
-  // The same prompt in a phone-width window: each part becomes a block, and its buttons name their
-  // own team now that the column heading has gone.
+  /*
+   * The same prompt in a phone-width window.
+   *
+   * The two teams pair up on one line and the answer that is neither takes the line below. One
+   * button per line was the obvious fold and the wrong one: nine stacked buttons made the panel
+   * taller than the phone and pushed its own Record off the bottom of the screen.
+   */
   await page.setViewportSize({ width: 360, height: 740 });
   const narrow = await partLayout(page);
-  expect(narrow.headingVisible).toBe(false);
   for (const row of narrow.rows) {
-    expect(row.stacked).toBe(true);
+    const [controlling, opponent, noPoints] = row.tops;
+    expect(opponent).toBe(controlling);
+    expect(noPoints).toBeGreaterThan(controlling);
+    // And it spans both of them rather than sitting under one.
+    expect(row.widths[2]).toBeGreaterThan(row.widths[0] + row.widths[1]);
     expect(row.buttonRight).toBeLessThanOrEqual(row.right + 1);
     // Still a touch target, not a sliver.
     expect(row.buttonHeight).toBeGreaterThanOrEqual(40);
@@ -112,9 +121,41 @@ test('the live part grid is columns on a scorer screen and blocks on a narrow on
   expect(narrow.left).toBeGreaterThanOrEqual(0);
   expect(narrow.right).toBeLessThanOrEqual(360);
 
-  await expect(page.getByRole('button', { name: `Part 2 to ${opponent}, 10 points` })).toContainText(
-    opponent,
-  );
+  /*
+   * The panel stays inside the contextual row that holds it.
+   *
+   * That row is a flex item of the column the sheet is laid out in, and its own content is centred
+   * — so when it was allowed to shrink below what it was showing, a bonus taller than the squashed
+   * box escaped in both directions and painted over the roster with nothing behind it. A tall
+   * prompt has to make the sheet scroll instead, which is what the body is a scroller for.
+   */
+  const containment = await page.evaluate(() => {
+    const stage = document.querySelector('.scorer-stage') as HTMLElement;
+    const prompt = document.querySelector('.scorer-bonus-prompt') as HTMLElement;
+    const stageBox = stage.getBoundingClientRect();
+    const promptBox = prompt.getBoundingClientRect();
+    return {
+      overflowAbove: Math.round(stageBox.top - promptBox.top),
+      overflowBelow: Math.round(promptBox.bottom - stageBox.bottom),
+    };
+  });
+  expect(containment.overflowAbove).toBeLessThanOrEqual(0);
+  expect(containment.overflowBelow).toBeLessThanOrEqual(0);
+
+  /*
+   * There is nothing here that a width can take away. The team is written on the button itself at
+   * both sizes, so which of the two is the bounce never depends on a heading — the panel used to
+   * carry one, and it was the only part of it that a narrow screen folded out of sight.
+   */
+  for (const width of [1366, 360]) {
+    await page.setViewportSize({ width, height: 740 });
+    await expect(page.getByRole('button', { name: `Part 2 to ${opponent}, 10 points` })).toContainText(
+      opponent,
+    );
+    await expect(page.getByRole('button', { name: 'Part 2 to Ninety Six A, 10 points' })).toContainText(
+      'Ninety Six A',
+    );
+  }
 });
 
 test('answering the parts records one bonus without the rows moving under the pointer', async ({ page }) => {
@@ -133,7 +174,17 @@ test('answering the parts records one bonus without the rows moving under the po
   await page.getByRole('button', { name: `Part 2 to ${opponent}, 10 points` }).click();
   await page.getByRole('button', { name: 'No points on part 3' }).click();
 
-  // Recorded on the last press, with no Record button in between, and the room already moved on.
+  /*
+   * Answering every part does not write the bonus. The panel is still up, showing what is about to
+   * be recorded, and Record has taken the focus — so the key that finishes a bonus is Enter,
+   * without a shortcut having had to be invented for it.
+   */
+  const record = page.getByRole('button', { name: 'Record bonus' });
+  await expect(record).toBeFocused();
+  await expect(page.getByLabel('Ninety Six A score')).toHaveText('10');
+
+  await page.keyboard.press('Enter');
+
   await expect(page.getByLabel('Bonus')).toBeHidden();
   await expect(page.getByLabel('Ninety Six A score')).toHaveText('20');
   await expect(page.getByLabel(`${opponent} score`)).toHaveText('10');
