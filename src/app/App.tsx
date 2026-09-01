@@ -79,10 +79,12 @@ import ConnectedSetup from './ConnectedSetup';
 import ConnectedRoom, { ConnectedStartResult, IConnectedStart } from './ConnectedRoom';
 import ManualGameSetup from './ManualGameSetup';
 import ScoringScreen from './ScoringScreen';
+import RecoveryMode from './RecoveryMode';
 import GameOriginNotice from './GameOriginNotice';
 import CompletionScreen from './CompletionScreen';
 import DuplicateTabNotice from './DuplicateTabNotice';
 import DeviceReadiness from './DeviceReadiness';
+import type { IRecoveryUi } from './DeviceReadiness';
 import { useReplaceable } from '../pwa/useAppUpdate';
 import { ResultDeliveryCapabilityStore } from './ResultDeliveryCapability';
 import { ResultDeliveryService } from './ResultDelivery';
@@ -92,6 +94,8 @@ import { clearKeyboardPreference } from '../scorer/keyboardPreference';
 import { clearScoringView } from '../scorer/scoringViewPreference';
 import { clearDisplayPreferences } from './displayPreference';
 import { safeAddress } from './Diagnostics';
+import { RecoveryController } from '../recovery/RecoveryController';
+import type { IRecoveryControllerStatus, IRecoverySnapshotRequest } from '../recovery/RecoveryController';
 
 /**
  * Whether the application may be replaced by a newer build while this screen is up.
@@ -197,6 +201,7 @@ export type Screen =
     }
   | { kind: 'room' }
   | { kind: 'readiness' }
+  | { kind: 'recovery'; returnTo: 'home' | 'room' }
   | { kind: 'practice' }
   /**
    * Describing a game by hand, for a practice or anything else nobody scheduled.
@@ -303,6 +308,65 @@ export function setupFromPackage(packageValue: IGamePackage): IGameSetup {
   return { left: side(packageValue.left), right: side(packageValue.right) };
 }
 
+function recoveryUiExternalStatus(
+  status: IRecoveryControllerStatus['externalBackup'] | undefined,
+): IRecoveryUi['externalBackup'] {
+  if (!status) return undefined;
+  return {
+    state: status.state === 'backup-failed' ? 'failed' : status.state,
+    ...(status.directoryName ? { folderName: status.directoryName } : {}),
+    ...(status.lastSuccessfulWriteAt ? { lastSavedAt: status.lastSuccessfulWriteAt } : {}),
+    ...(status.lastFailure ? { message: status.lastFailure } : {}),
+  };
+}
+
+function recoveryCheckpointFor(
+  record: IStoredGameRecord,
+  backup: IQbsheetBackup,
+  revision: number,
+  capturedAt = new Date(),
+): IRecoverySnapshotRequest['checkpoint'] {
+  const latestQuestion = backup.events.reduce((highest, event) => Math.max(highest, event.questionNumber), 0);
+  const lastEvent = backup.events[backup.events.length - 1];
+  let kind: 'rolling' | 'anchor' = 'rolling';
+  let anchorKey: string | undefined;
+  let reason: string | undefined;
+
+  if (backup.events.length === 0) {
+    kind = 'anchor';
+    anchorKey = 'game-start';
+    reason = 'Game start';
+  } else if (lastEvent?.type === 'half-break') {
+    kind = 'anchor';
+    const halfNumber = backup.events.filter((event) => event.type === 'half-break').length;
+    anchorKey = `halftime:${halfNumber}`;
+    reason = 'Halftime score check';
+  } else if (lastEvent?.type === 'end-regulation') {
+    kind = 'anchor';
+    anchorKey = 'regulation-end';
+    reason = 'End of regulation';
+  } else if (lastEvent?.type === 'begin-overtime') {
+    kind = 'anchor';
+    anchorKey = 'overtime-start';
+    reason = 'Overtime start';
+  } else if (lastEvent?.type === 'begin-sudden-death') {
+    kind = 'anchor';
+    anchorKey = 'sudden-death-start';
+    reason = 'Sudden-death start';
+  }
+
+  return {
+    id: `${record.gameKey}:${revision}:${capturedAt.getTime()}`,
+    capturedAt: capturedAt.toISOString(),
+    kind,
+    ...(anchorKey ? { anchorKey } : {}),
+    ...(reason ? { reason } : {}),
+    progressLabel: latestQuestion > 0 ? `Tossup ${latestQuestion}` : 'Game start',
+    ...(latestQuestion > 0 ? { questionNumber: latestQuestion } : {}),
+    completed: record.completedAt !== undefined,
+  };
+}
+
 export default function App() {
   const [store, setStore] = useState<GameStore | null>(null);
   const [records, setRecords] = useState<IStoredGameRecord[]>([]);
@@ -314,6 +378,9 @@ export default function App() {
   const [notice, setNotice] = useState('');
   /** Shown beside a restored backup rather than disappearing with the file picker it came through. */
   const [backupRestoreNotice, setBackupRestoreNotice] = useState('');
+  const [recoveryNotice, setRecoveryNotice] = useState('');
+  const [recoveryController, setRecoveryController] = useState<RecoveryController | null>(null);
+  const [recoveryStatus, setRecoveryStatus] = useState<IRecoveryControllerStatus | null>(null);
   /**
    * The pairing link this page was opened with, read exactly once.
    *
@@ -331,6 +398,198 @@ export default function App() {
     () => (store ? new ResultDeliveryService(store, resultDeliveryCapabilities) : null),
     [store, resultDeliveryCapabilities],
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    void RecoveryController.open()
+      .then(async (controller) => {
+        if (cancelled) return;
+        setRecoveryController(controller);
+        try {
+          const status = await controller.status();
+          if (!cancelled) setRecoveryStatus(status);
+        } catch {
+          if (!cancelled) setRecoveryStatus(null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setRecoveryStatus(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const refreshRecoveryStatus = useCallback(async () => {
+    const controller = recoveryController;
+    if (!controller) return;
+    try {
+      setRecoveryStatus(await controller.status());
+    } catch {
+      // Recovery status is advisory. The synchronous journal and ordinary game store remain intact.
+    }
+  }, [recoveryController]);
+
+  const recoveryRevision = useRef(new Map<string, number>());
+  const queueRecoverySnapshot = useCallback(
+    (record: IStoredGameRecord, backup: IQbsheetBackup) => {
+      const controller = recoveryController;
+      if (!controller) return;
+      const revision = (recoveryRevision.current.get(record.gameKey) ?? 0) + 1;
+      recoveryRevision.current.set(record.gameKey, revision);
+      const checkpoint = recoveryCheckpointFor(record, backup, revision);
+      const scheduled = controller.scheduleSnapshot({
+        gameKey: record.gameKey,
+        gamePackage: record.package,
+        backup,
+        checkpoint,
+        revision,
+      });
+      // Neither IndexedDB nor the optional folder is on the scoring critical path. Explicitly
+      // consume both promises so a browser-level failure cannot become an unhandled rejection.
+      void scheduled.checkpoint.catch(() => undefined);
+      void scheduled.externalBackup
+        .then(async (result) => {
+          if (!result.ok) {
+            if (result.status !== 'unsupported' && result.status !== 'not-configured') {
+              setRecoveryNotice(
+                'External backup stopped. Your game is still saved on this device. Repair it in Settings.',
+              );
+              await refreshRecoveryStatus();
+            }
+            return;
+          }
+          if (!result.completion) return;
+          const outcome = await result.completion;
+          setRecoveryStatus((currentStatus) => {
+            if (!currentStatus) return currentStatus;
+            return {
+              ...currentStatus,
+              externalBackup: {
+                ...currentStatus.externalBackup,
+                ...(outcome.state === 'saved'
+                  ? {
+                      state: 'ready' as const,
+                      lastFailure: undefined,
+                      lastFailureAt: undefined,
+                      lastSuccessfulWriteAt: outcome.completedAt,
+                    }
+                  : {
+                      state: 'backup-failed' as const,
+                      lastFailure: 'The external backup could not be written.',
+                      lastFailureAt: outcome.completedAt,
+                    }),
+              },
+            };
+          });
+          setRecoveryNotice(
+            outcome.state === 'failed'
+              ? 'External backup stopped. Your game is still saved on this device. Repair it in Settings.'
+              : '',
+          );
+        })
+        .catch(() => {
+          setRecoveryNotice(
+            'External backup stopped. Your game is still saved on this device. Repair it in Settings.',
+          );
+        });
+    },
+    [recoveryController, refreshRecoveryStatus],
+  );
+
+  const recoveryUi = useMemo<IRecoveryUi>(() => {
+    const externalBackup = recoveryUiExternalStatus(recoveryStatus?.externalBackup);
+    const checkpoints = recoveryStatus?.checkpoints;
+    return {
+      ...(externalBackup ? { externalBackup } : {}),
+      localCheckpoints: checkpoints
+        ? {
+            state: checkpoints.storageDegraded
+              ? 'degraded'
+              : checkpoints.durable
+                ? 'protected'
+                : 'unavailable',
+            message: checkpoints.storageDegraded
+              ? 'Rolling checkpoints are temporarily unavailable; the instant journal remains authoritative.'
+              : checkpoints.durable
+                ? 'Rolling checkpoints are protected in the separate recovery store.'
+                : 'This browser is using a tab-only recovery store; keep the raw journal elsewhere.',
+          }
+        : {
+            state: 'unknown',
+            message: 'QBSheet is checking the separate recovery store.',
+          },
+      onSetupExternalBackup: async () => {
+        if (!recoveryController) return { ok: false, message: 'Recovery settings are still loading.' };
+        const result = await recoveryController.setupExternalBackup();
+        if (result.ok) {
+          setRecoveryStatus({
+            externalBackup: result.status,
+            checkpoints: {
+              durable: recoveryController.store.durable,
+              storageDegraded: recoveryController.store.storageDegraded,
+            },
+          });
+          return { ok: true, message: 'External backup folder connected.' };
+        }
+        return {
+          ok: false,
+          message: result.cancelled
+            ? 'Folder selection was cancelled. Local protection is still active.'
+            : 'QBSheet could not connect that backup folder. Local protection is still active.',
+        };
+      },
+      onManageExternalBackup: async () => {
+        if (!recoveryController) return { ok: false, message: 'Recovery settings are still loading.' };
+        const result = await recoveryController.setupExternalBackup();
+        if (result.ok) {
+          setRecoveryStatus({
+            externalBackup: result.status,
+            checkpoints: {
+              durable: recoveryController.store.durable,
+              storageDegraded: recoveryController.store.storageDegraded,
+            },
+          });
+          return { ok: true, message: 'External backup folder updated.' };
+        }
+        return {
+          ok: false,
+          message: result.cancelled
+            ? 'Folder selection was cancelled. The existing backup setting is unchanged.'
+            : 'QBSheet could not update that backup folder. The existing setting is unchanged.',
+        };
+      },
+      onReconnectExternalBackup: async () => {
+        if (!recoveryController) return { ok: false, message: 'Recovery settings are still loading.' };
+        const result = await recoveryController.reconnectExternalBackup();
+        if (result.ok) {
+          setRecoveryStatus({
+            externalBackup: result.status,
+            checkpoints: {
+              durable: recoveryController.store.durable,
+              storageDegraded: recoveryController.store.storageDegraded,
+            },
+          });
+          return { ok: true, message: 'External backup folder reconnected.' };
+        }
+        return {
+          ok: false,
+          message: 'QBSheet could not reconnect that folder. Local protection is still active.',
+        };
+      },
+      onRemoveExternalBackup: async () => {
+        if (!recoveryController) return { ok: false, message: 'Recovery settings are still loading.' };
+        const removed = await recoveryController.removeExternalBackup();
+        if (!removed && recoveryController.store.durable) {
+          return { ok: false, message: 'QBSheet could not stop external backup. No files were deleted.' };
+        }
+        await refreshRecoveryStatus();
+        return { ok: true, message: 'External backup stopped. Existing .qbsheet files were not deleted.' };
+      },
+      onRefreshRecoveryStatus: refreshRecoveryStatus,
+      onViewRecoveryStatus: () => setScreen({ kind: 'recovery', returnTo: connection ? 'room' : 'home' }),
+    };
+  }, [connection, recoveryController, recoveryStatus, refreshRecoveryStatus]);
 
   const refresh = useCallback(
     async (openStore: GameStore) => {
@@ -949,6 +1208,7 @@ export default function App() {
       claim.current?.release();
       claim.current = null;
       setBackupRestoreNotice('');
+      setRecoveryNotice('');
       setScreen({ kind: 'completed', recordId, acceptedJustNow });
     },
     [store, refresh],
@@ -959,6 +1219,7 @@ export default function App() {
     claim.current = null;
     if (store) await refresh(store);
     setBackupRestoreNotice('');
+    setRecoveryNotice('');
     setScreen({ kind: 'home' });
   }, [store, refresh]);
 
@@ -1043,6 +1304,8 @@ export default function App() {
         onResetDevicePreferences={resetDevicePreferences}
         practiceInProgress={(loadGame(practiceGameKey)?.events.length ?? 0) > 0}
         onReadiness={() => setScreen({ kind: 'readiness' })}
+        recovery={recoveryUi}
+        onRecovery={() => setScreen({ kind: 'recovery', returnTo: 'room' })}
         onPractice={() => setScreen({ kind: 'practice' })}
         onOtherScoring={() => setScreen({ kind: 'home' })}
         onChangeTournament={() => {
@@ -1079,7 +1342,23 @@ export default function App() {
           connection?.roomId,
           connection?.deviceId,
         ].filter((value): value is string => typeof value === 'string' && value !== '')}
+        recovery={recoveryUi}
         onBack={() => setScreen(pairedRoom ? { kind: 'room' } : { kind: 'home' })}
+      />
+    );
+  }
+
+  if (screen.kind === 'recovery') {
+    return (
+      <RecoveryMode
+        onLeave={() =>
+          setScreen(screen.returnTo === 'room' && pairedRoom ? { kind: 'room' } : { kind: 'home' })
+        }
+        onResume={async (record) => {
+          await refresh(store);
+          const latest = await store.get(record.id);
+          if (latest) await openRecord(latest);
+        }}
       />
     );
   }
@@ -1099,7 +1378,10 @@ export default function App() {
   if (screen.kind === 'scoring' && current) {
     return (
       <>
-        <GameOriginNotice packageValue={current.package} notice={backupRestoreNotice} />
+        <GameOriginNotice
+          packageValue={current.package}
+          notice={[backupRestoreNotice, recoveryNotice].filter(Boolean).join(' ') || undefined}
+        />
         <ScoringScreen
           record={current}
           store={store}
@@ -1114,6 +1396,9 @@ export default function App() {
           onConnectionLost={() => {
             clearConnection();
             setConnection(null);
+          }}
+          onRecoverySnapshot={(backup) => {
+            if (current) queueRecoverySnapshot(current, backup);
           }}
         />
       </>
@@ -1163,6 +1448,8 @@ export default function App() {
       onResetDevicePreferences={resetDevicePreferences}
       practiceInProgress={(loadGame(practiceGameKey)?.events.length ?? 0) > 0}
       onReadiness={() => setScreen({ kind: 'readiness' })}
+      recovery={recoveryUi}
+      onRecovery={() => setScreen({ kind: 'recovery', returnTo: 'home' })}
       onPractice={() => {
         setScreen({ kind: 'practice' });
       }}

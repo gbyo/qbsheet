@@ -166,6 +166,23 @@ describe('ending a game', () => {
   });
 });
 
+describe('the break', () => {
+  test('every game is offered one, in a group of its own', () => {
+    expect(menu()).toContain('Take a break…');
+  });
+
+  test('it is there in every phase, because it is not about the phase', () => {
+    const played = [event({ type: 'tossup-dead', questionNumber: 1 })];
+    expect(menu({}, played)).toContain('Take a break…');
+    expect(menu({ phase: { kind: 'complete', reason: 'regulation' } }, played)).toContain('Take a break…');
+  });
+
+  test('it is not one of the ones that end a game', () => {
+    const entry = items().find((item) => item.label === 'Take a break…');
+    expect(entry?.destructive).toBeUndefined();
+  });
+});
+
 describe('while a result is being submitted', () => {
   test('everything that would change the game is unavailable, and the backup is not', () => {
     const built = items({ submitting: true, canCorrectGame: true });
@@ -177,5 +194,7 @@ describe('while a result is being submitted', () => {
     // Getting a copy off the device is never the dangerous operation.
     expect(by('Download QBJ backup')?.disabled).toBeUndefined();
     expect(by('Print scoresheet')?.disabled).toBeUndefined();
+    // Nor is going away for ten minutes. A room waiting on control is who this is for.
+    expect(by('Take a break…')?.disabled).toBeUndefined();
   });
 });

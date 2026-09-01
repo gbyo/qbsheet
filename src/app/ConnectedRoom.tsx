@@ -26,6 +26,8 @@ import { connectionTimeline } from './ConnectionTimeline';
 import { HelpRequestCategory, HelpRequestResult } from './HelpRequests';
 import AssignmentProblemDialog, { assignmentLine } from './AssignmentProblemDialog';
 import SettingsDialog, { ISettingsConnection } from './SettingsDialog';
+import type { IRecoveryUi } from './DeviceReadiness';
+import ArcadeLauncher from '../arcade/ArcadeLauncher';
 import NativeDialog from './NativeDialog';
 import { exchangePairingCode } from './ControlPairing';
 import UpdateNotice from '../pwa/UpdateNotice';
@@ -188,6 +190,8 @@ export default function ConnectedRoom(props: {
   onResetDevicePreferences: () => void;
   practiceInProgress: boolean;
   onReadiness: () => void;
+  recovery?: IRecoveryUi;
+  onRecovery?: () => void;
   onPractice: () => void;
   onOtherScoring: () => void;
   onChangeTournament: () => void;
@@ -209,6 +213,8 @@ export default function ConnectedRoom(props: {
     onForgetPairing,
     onResetDevicePreferences,
     onReadiness,
+    recovery,
+    onRecovery = () => undefined,
     onOtherScoring,
     onChangeTournament,
     onResume,
@@ -226,6 +232,8 @@ export default function ConnectedRoom(props: {
   const [lastSuccessfulCheckAt, setLastSuccessfulCheckAt] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Settings closes as this opens; the arcade is the only modal on screen while it is up.
+  const [arcadeOpen, setArcadeOpen] = useState(false);
   const [problemAssignment, setProblemAssignment] = useState<{
     packageValue: IGameDefinition;
     scheduledMatchId: string;
@@ -658,6 +666,14 @@ export default function ConnectedRoom(props: {
         >
           Other scoring options
         </button>
+        <button
+          type="button"
+          className="shell-button shell-button-quiet"
+          onClick={onRecovery}
+          disabled={starting}
+        >
+          Recovery tools
+        </button>
       </div>
 
       {forbidden !== '' && (
@@ -718,10 +734,14 @@ export default function ConnectedRoom(props: {
           onForgetPairing={onForgetPairing}
           onResetDevicePreferences={onResetDevicePreferences}
           onReadiness={onReadiness}
+          recovery={recovery}
           onChangeTournament={onChangeTournament}
+          onArcade={() => setArcadeOpen(true)}
           onClose={() => setSettingsOpen(false)}
         />
       )}
+
+      <ArcadeLauncher open={arcadeOpen} onClose={() => setArcadeOpen(false)} />
 
       {problemAssignment && (
         <AssignmentProblemDialog

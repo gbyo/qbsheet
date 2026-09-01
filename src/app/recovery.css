@@ -1,0 +1,605 @@
+@import '@fontsource/ibm-plex-sans/latin-400.css';
+@import '@fontsource/ibm-plex-sans/latin-500.css';
+@import '@fontsource/ibm-plex-sans/latin-600.css';
+@import '@fontsource/ibm-plex-sans/latin-700.css';
+
+/*
+ * Recovery Mode is loaded before the normal application shell so it can survive a scorer crash.
+ * It still belongs to the same application: these are the shell's palette, type, spacing, rules,
+ * and controls in a self-contained bootstrap stylesheet. The page is quiet and deliberately flat,
+ * like the welcome screen, while the normal scorer remains completely unmounted.
+ */
+:root {
+  color-scheme: light;
+  --room-text-scale: 1;
+  --room-text: #1c1d20;
+  --room-muted: #5c6066;
+  --room-faint: #8a8f96;
+  --room-border: #d8dade;
+  --room-border-strong: #c2c5ca;
+  --room-surface: #ffffff;
+  --room-surface-sunken: #f6f7f8;
+  --room-accent: #1565c0;
+  --room-accent-hover: #10529c;
+  --room-on-accent: #ffffff;
+  --room-success: #1e6b32;
+  --room-success-bg: #e8f3ea;
+  --room-warning: #8a5300;
+  --room-warning-bg: #fdf3e3;
+  --room-warning-border: #e0a33c;
+  --room-error: #a8231b;
+  --room-error-bg: #fceceb;
+  --room-error-border: #d9534f;
+  --room-info-bg: #eaf3fb;
+  --room-info-border: #6aa9dd;
+  --room-shadow-strong: 0 5px 18px rgb(20 24 28 / 18%);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --room-text: #e7e9ec;
+    --room-muted: #a6acb5;
+    --room-faint: #7b818a;
+    --room-border: #33363b;
+    --room-border-strong: #4a4f57;
+    --room-surface: #16171a;
+    --room-surface-sunken: #1f2125;
+    --room-accent: #7ab3ee;
+    --room-accent-hover: #9ac9f8;
+    --room-on-accent: #10151c;
+    --room-success: #7fd39b;
+    --room-success-bg: #15281c;
+    --room-warning: #e5b264;
+    --room-warning-bg: #2a2013;
+    --room-warning-border: #7c5b21;
+    --room-error: #f3948d;
+    --room-error-bg: #2c1917;
+    --room-error-border: #8e3b35;
+    --room-info-bg: #13202d;
+    --room-info-border: #35638f;
+    --room-shadow-strong: 0 5px 18px rgb(0 0 0 / 55%);
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --room-text: #e7e9ec;
+  --room-muted: #a6acb5;
+  --room-faint: #7b818a;
+  --room-border: #33363b;
+  --room-border-strong: #4a4f57;
+  --room-surface: #16171a;
+  --room-surface-sunken: #1f2125;
+  --room-accent: #7ab3ee;
+  --room-accent-hover: #9ac9f8;
+  --room-on-accent: #10151c;
+  --room-success: #7fd39b;
+  --room-success-bg: #15281c;
+  --room-warning: #e5b264;
+  --room-warning-bg: #2a2013;
+  --room-warning-border: #7c5b21;
+  --room-error: #f3948d;
+  --room-error-bg: #2c1917;
+  --room-error-border: #8e3b35;
+  --room-info-bg: #13202d;
+  --room-info-border: #35638f;
+  --room-shadow-strong: 0 5px 18px rgb(0 0 0 / 55%);
+}
+
+html {
+  font-size: calc(100% * var(--room-text-scale, 1));
+  background: var(--room-surface);
+}
+
+body {
+  min-width: 320px;
+  margin: 0;
+  color: var(--room-text);
+  background: var(--room-surface);
+  font-family: 'IBM Plex Sans', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-size: 0.875rem;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+button {
+  font: inherit;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* The crash boundary uses the same shell surface and controls while the normal app is unavailable. */
+.crash-screen {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  box-sizing: border-box;
+  min-height: 100vh;
+  padding: 32px 16px 48px;
+  color: var(--room-text);
+  background: var(--room-surface);
+  font-family: 'IBM Plex Sans', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
+
+.crash-panel {
+  width: min(640px, 100%);
+}
+
+.crash-title {
+  margin: 0 0 12px;
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.crash-lead {
+  margin: 0 0 8px;
+  font-size: 1rem;
+}
+
+.crash-body {
+  margin: 0 0 24px;
+  color: var(--room-muted);
+}
+
+.crash-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.crash-button,
+.shell-button {
+  padding: 8px 14px;
+  color: var(--room-text);
+  background: var(--room-surface);
+  border: 1px solid var(--room-border-strong);
+  border-radius: 3px;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.crash-button:hover:not(:disabled),
+.shell-button:hover:not(:disabled) {
+  background: var(--room-surface-sunken);
+}
+
+.crash-button.is-primary,
+.shell-button.is-primary {
+  color: var(--room-on-accent);
+  background: var(--room-accent);
+  border-color: var(--room-accent);
+}
+
+.crash-button.is-primary:hover:not(:disabled),
+.shell-button.is-primary:hover:not(:disabled) {
+  background: var(--room-accent-hover);
+  border-color: var(--room-accent-hover);
+}
+
+.crash-button:disabled,
+.shell-button:disabled {
+  color: var(--room-faint);
+  cursor: default;
+}
+
+.crash-button:focus-visible,
+.shell-button:focus-visible,
+.recovery-source-action:focus-visible {
+  outline: 2px solid var(--room-accent);
+  outline-offset: 2px;
+}
+
+.crash-note {
+  margin: 16px 0 0;
+  color: var(--room-muted);
+  font-size: 0.8125rem;
+}
+
+.crash-details {
+  margin-top: 24px;
+  padding-top: 16px;
+  color: var(--room-muted);
+  border-top: 1px solid var(--room-border);
+  font-size: 0.8125rem;
+}
+
+.crash-details summary {
+  cursor: pointer;
+}
+
+.crash-thrown {
+  margin: 8px 0 0;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+}
+
+/* #region Recovery shell */
+
+.recovery-screen {
+  width: min(760px, 100%);
+  min-height: 100vh;
+  padding: 32px 16px 48px;
+  margin: 0 auto;
+}
+
+.recovery-header {
+  padding-bottom: 12px;
+  margin-bottom: 0;
+  border-bottom: 1px solid var(--room-border);
+}
+
+.recovery-brand {
+  line-height: 0;
+}
+
+.shell-brand-logo {
+  display: block;
+  width: 174px;
+  height: auto;
+  color: var(--room-text);
+}
+
+.shell-title {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.recovery-title {
+  margin-top: 18px;
+}
+
+.shell-subtitle {
+  margin: 4px 0 0;
+  color: var(--room-muted);
+  font-size: 0.8125rem;
+}
+
+.recovery-intro {
+  max-width: 62ch;
+}
+
+.recovery-panel {
+  width: 100%;
+  padding: 8px 12px;
+  margin: 16px 0 0;
+  color: var(--room-text);
+  background: var(--room-info-bg);
+  border-left: 3px solid var(--room-info-border);
+  font-size: 0.8125rem;
+}
+
+.recovery-panel.is-warning {
+  color: var(--room-warning);
+  background: var(--room-warning-bg);
+  border-left-color: var(--room-warning-border);
+}
+
+.recovery-section {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--room-border);
+}
+
+.recovery-section:last-of-type {
+  border-bottom: 0;
+}
+
+.recovery-section-heading,
+.recovery-game-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.shell-heading {
+  margin: 0 0 8px;
+  color: var(--room-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  line-height: 1.3;
+  text-transform: uppercase;
+}
+
+.recovery-section-heading p,
+.recovery-section > p,
+.recovery-game-heading p,
+.recovery-hint,
+.recovery-backup-preview p,
+.recovery-footer p {
+  color: var(--room-muted);
+  line-height: 1.45;
+}
+
+.recovery-section-heading p,
+.recovery-section > p {
+  margin: 0;
+}
+
+.recovery-inline-warning {
+  padding: 8px 12px;
+  margin: 16px 0 0;
+  color: var(--room-warning);
+  background: var(--room-warning-bg);
+  border-left: 3px solid var(--room-warning-border);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+.recovery-external-status {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 0;
+  margin-top: 16px;
+  border-top: 1px solid var(--room-border);
+  border-bottom: 1px solid var(--room-border);
+}
+
+.recovery-external-status p {
+  min-width: 0;
+  margin: 0;
+  color: var(--room-muted);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+.recovery-external-status strong {
+  color: var(--room-text);
+  font-weight: 600;
+}
+
+.recovery-external-status .recovery-note {
+  margin-top: 8px;
+}
+
+.recovery-game-list {
+  margin-top: 16px;
+}
+
+.recovery-game {
+  padding: 16px 0;
+  border-top: 1px solid var(--room-border);
+}
+
+.recovery-game:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.recovery-game-heading h3 {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.recovery-game-heading p {
+  margin: 4px 0 0;
+  font-size: 0.8125rem;
+}
+
+.recovery-sources {
+  margin: 12px 0 0;
+}
+
+.recovery-sources > div {
+  display: grid;
+  grid-template-columns: minmax(170px, 0.8fr) minmax(0, 1.2fr);
+  gap: 16px;
+  padding: 7px 0;
+  border-top: 1px solid var(--room-surface-sunken);
+}
+
+.recovery-sources > div:first-child {
+  border-top: 0;
+}
+
+.recovery-sources dt {
+  color: var(--room-muted);
+  font-size: 0.8125rem;
+}
+
+.recovery-sources dd {
+  min-width: 0;
+  margin: 0;
+}
+
+.recovery-status {
+  display: block;
+  color: var(--room-muted);
+  font-size: 0.8125rem;
+}
+
+.recovery-status.is-valid {
+  color: var(--room-success);
+}
+
+.recovery-status.is-stale,
+.recovery-status.is-unsupported,
+.recovery-status.is-malformed,
+.recovery-status.is-missing {
+  color: var(--room-warning);
+}
+
+.recovery-sources small {
+  display: block;
+  margin-top: 3px;
+  color: var(--room-muted);
+  font-size: 0.75rem;
+}
+
+.recovery-source-action {
+  display: block;
+  padding: 4px 0;
+  margin-top: 4px;
+  color: var(--room-accent);
+  background: none;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.8125rem;
+  text-align: left;
+  text-decoration: none;
+}
+
+.recovery-source-action:hover {
+  text-decoration: underline;
+}
+
+.recovery-empty,
+.recovery-hint {
+  margin: 16px 0 0;
+}
+
+.recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.recovery-note {
+  margin: 12px 0 0;
+  color: var(--room-success);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+.recovery-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.recovery-backup-preview {
+  padding: 8px 12px;
+  margin-top: 16px;
+  background: var(--room-info-bg);
+  border-left: 3px solid var(--room-info-border);
+}
+
+.recovery-backup-preview h3 {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+.recovery-backup-preview p {
+  margin: 4px 0 12px;
+}
+
+.recovery-footer {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 20px;
+}
+
+.recovery-footer p {
+  max-width: 42ch;
+  margin: 0;
+  font-size: 0.75rem;
+  text-align: right;
+}
+
+/* #endregion */
+
+@media (max-width: 700px) {
+  .recovery-screen {
+    padding: 24px 16px 36px;
+  }
+
+  .recovery-section-heading,
+  .recovery-game-heading,
+  .recovery-footer {
+    display: block;
+  }
+
+  .recovery-section-heading .shell-button,
+  .recovery-game-heading .shell-button {
+    margin-top: 12px;
+  }
+
+  .recovery-external-status {
+    display: block;
+  }
+
+  .recovery-external-status .shell-button {
+    margin-top: 8px;
+  }
+
+  .recovery-sources > div {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+
+  .recovery-sources dd {
+    margin-top: 2px;
+  }
+
+  .recovery-footer p {
+    margin-top: 10px;
+    text-align: left;
+  }
+}
+
+@media (max-width: 440px) {
+  .recovery-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .recovery-actions .shell-button {
+    width: 100%;
+  }
+}
+
+@media (forced-colors: active) {
+  .crash-screen,
+  .recovery-screen {
+    color: CanvasText;
+    background: Canvas;
+  }
+
+  .crash-panel,
+  .recovery-panel,
+  .shell-button {
+    border-color: CanvasText;
+  }
+
+  .crash-button.is-primary,
+  .shell-button.is-primary {
+    color: ButtonText;
+    background: ButtonFace;
+  }
+
+  :focus-visible {
+    outline-color: Highlight;
+  }
+}

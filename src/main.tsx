@@ -7,34 +7,39 @@
  * difference in the one part of this application where being wrong costs a room its game.
  */
 import { createRoot } from 'react-dom/client';
-import App from './app/App';
+import { lazy, Suspense } from 'react';
 import RenderErrorBoundary from './app/RenderErrorBoundary';
 import { registerServiceWorker } from './pwa/registerServiceWorker';
 import { watchForErrors } from './app/ErrorLog';
 import { startDisplayPreferences } from './app/displayPreference';
 import { capturePairingLaunch } from './app/PairingLaunch';
-import '@fontsource/ibm-plex-sans/latin-400.css';
-import '@fontsource/ibm-plex-sans/latin-500.css';
-import '@fontsource/ibm-plex-sans/latin-600.css';
-import '@fontsource/ibm-plex-sans/latin-700.css';
-import './app/app-shell.css';
-import './app/readiness.css';
-/*
- * The scorer's stylesheets, in cascade order.
- *
- * They were one 3,200-line file. The order below is the order they appeared in it and has to stay
- * that way; a new one belongs at the end of this list rather than in the middle. See `scorer.css`.
- */
-import './scorer/scorer.css';
-import './scorer/scorer-dialogs.css';
-import './scorer/scorer-procedure.css';
-import './scorer/scorer-review.css';
-import './scorer/print.css';
-import './scorer/scorer-table.css';
-import './practice/practice.css';
-import './app/motion.css';
-// Last, because both of the modes it handles are corrections to what everything above decided.
-import './app/contrast.css';
+// This is the only stylesheet loaded before the bootstrap chooses a mode. It contains the standalone
+// Recovery Mode and crash fallback rules; the normal shell/scorer styles are loaded only below.
+import './app/recovery.css';
+import { isRecoveryModeRequested } from './app/recoveryModeRequest';
+
+async function loadNormalApplication() {
+  // Keep the ordinary cascade in its existing order. Sequential CSS imports matter here: parallel
+  // stylesheet requests would let network timing change which normal rule wins. None of these
+  // imports is evaluated when the recovery query selects the safe-mode branch.
+  await import('@fontsource/ibm-plex-sans/latin-400.css');
+  await import('@fontsource/ibm-plex-sans/latin-500.css');
+  await import('@fontsource/ibm-plex-sans/latin-600.css');
+  await import('@fontsource/ibm-plex-sans/latin-700.css');
+  await import('./app/app-shell.css');
+  await import('./app/readiness.css');
+  await import('./scorer/scorer.css');
+  await import('./scorer/scorer-dialogs.css');
+  await import('./scorer/scorer-procedure.css');
+  await import('./scorer/scorer-review.css');
+  await import('./scorer/print.css');
+  await import('./scorer/scorer-table.css');
+  await import('./practice/practice.css');
+  await import('./app/motion.css');
+  await import('./app/contrast.css');
+  await import('./scorer/scorer-interactions.css');
+  return import('./app/App');
+}
 
 // First, before anything at all.
 //
@@ -58,13 +63,34 @@ startDisplayPreferences();
 // Outside the application, so that whatever throws inside it has somewhere to land. A boundary
 // rendered by `App` could not catch a throw from `App` itself, which is the case that produces the
 // blank screen this exists to replace. See `RenderErrorBoundary`.
+//
+// `App` is intentionally not imported above. Recovery Mode is a safe-mode bundle selected before
+// the normal application is loaded; a scorer/render crash must not immediately recreate the tree
+// that just failed.
 const container = document.getElementById('root');
 if (container) {
-  createRoot(container).render(
-    <RenderErrorBoundary>
-      <App />
-    </RenderErrorBoundary>,
-  );
+  const root = createRoot(container);
+  if (isRecoveryModeRequested()) {
+    void import('./app/RecoveryMode').then(({ default: RecoveryMode }) => {
+      root.render(
+        <RenderErrorBoundary>
+          <RecoveryMode />
+        </RenderErrorBoundary>,
+      );
+    });
+  } else {
+    // Keep the ordinary root handoff synchronous for startup ordering and let React load the normal
+    // app only in the non-recovery branch. The recovery branch above never evaluates this lazy
+    // importer, so it cannot request or mount the scorer tree.
+    const App = lazy(loadNormalApplication);
+    root.render(
+      <RenderErrorBoundary>
+        <Suspense fallback={null}>
+          <App />
+        </Suspense>
+      </RenderErrorBoundary>,
+    );
+  }
 }
 
 registerServiceWorker();

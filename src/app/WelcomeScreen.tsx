@@ -77,6 +77,8 @@ import QrScannerDialog from './QrScannerDialog';
 import { IPairingLaunchIntent, readScannedPairingCode } from './PairingLaunch';
 import { readOperatorNameAsked, writeOperatorNameAsked } from './OperatorIdentity';
 import SettingsDialog, { ISettingsConnection } from './SettingsDialog';
+import type { IRecoveryUi } from './DeviceReadiness';
+import ArcadeLauncher from '../arcade/ArcadeLauncher';
 import { downloadStoredGameQbj } from './FinishedGameDownload';
 
 /** How far a saved game got, for the resume card. */
@@ -145,6 +147,8 @@ export default function WelcomeScreen(props: {
   onResetDevicePreferences: () => void;
   practiceInProgress: boolean;
   onReadiness: () => void;
+  recovery?: IRecoveryUi;
+  onRecovery: () => void;
   onPractice: () => void;
   /** Into the hand-entered setup form. Creates nothing until that form is submitted. */
   onCreateGame: () => void;
@@ -181,6 +185,8 @@ export default function WelcomeScreen(props: {
     onResetDevicePreferences,
     practiceInProgress,
     onReadiness,
+    recovery,
+    onRecovery,
     onPractice,
     onCreateGame,
     onOpenRoom,
@@ -203,6 +209,8 @@ export default function WelcomeScreen(props: {
   } | null>(null);
   const [settingsView, setSettingsView] = useState<'settings' | 'scorekeeper' | null>(null);
   const [scanning, setScanning] = useState(false);
+  // Settings closes as this opens; the arcade is the only modal on screen while it is up.
+  const [arcadeOpen, setArcadeOpen] = useState(false);
   /**
    * The first-load ask, decided once at mount.
    *
@@ -497,6 +505,9 @@ export default function WelcomeScreen(props: {
 
       <footer className="welcome-footer">
         <a href="about/">About QBSheet</a>
+        <button type="button" className="welcome-recovery-link" onClick={onRecovery}>
+          Recovery tools
+        </button>
       </footer>
 
       {onOperatorNameChange && (settingsView !== null || firstRun) && (
@@ -510,9 +521,13 @@ export default function WelcomeScreen(props: {
           onForgetPairing={onForgetPairing}
           onResetDevicePreferences={onResetDevicePreferences}
           onReadiness={onReadiness}
+          recovery={recovery}
+          onArcade={() => setArcadeOpen(true)}
           onClose={closeSettings}
         />
       )}
+
+      <ArcadeLauncher open={arcadeOpen} onClose={() => setArcadeOpen(false)} />
 
       {scanning && (
         <QrScannerDialog

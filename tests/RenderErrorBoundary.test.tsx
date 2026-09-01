@@ -22,10 +22,28 @@ import RenderErrorBoundary, {
   recordCrash,
 } from '../src/app/RenderErrorBoundary';
 import { ErrorLog } from '../src/app/ErrorLog';
-import { exportJournals } from '../src/scorer/GameSession';
+import { exportJournals, gameSessionVersion } from '../src/scorer/GameSession';
 
 function Boom(): never {
   throw new Error('the scoresheet exploded');
+}
+
+const safeSetup = {
+  left: { name: 'Ninety Six', players: ['Sarah'] },
+  right: { name: 'Greenwood', players: ['Emma'] },
+};
+
+function saveInspectableJournal(questionNumber = 12): void {
+  window.localStorage.setItem(
+    'yellowfruit.room.game.v1.game-7',
+    JSON.stringify({
+      version: gameSessionVersion,
+      gameKey: 'game-7',
+      setup: safeSetup,
+      events: [{ id: 'dead-1', type: 'tossup-dead', questionNumber }],
+      updatedAt: '2026-08-20T14:00:00.000Z',
+    }),
+  );
 }
 
 /** A `sessionStorage` a test can see into, and one that refuses everything. */
@@ -52,14 +70,15 @@ afterEach(() => {
 
 describe('a render-phase throw', () => {
   test('replaces the blank page with the fact that the scoring is safe', () => {
+    saveInspectableJournal();
     render(
-      <RenderErrorBoundary storage={fakeStorage()}>
+      <RenderErrorBoundary storage={fakeStorage()} now={() => new Date('2026-08-20T14:00:00.000Z')}>
         <Boom />
       </RenderErrorBoundary>,
     );
 
     expect(screen.getByRole('alert')).toBeInTheDocument();
-    expect(screen.getByText(/scoring is saved on this device/i)).toBeInTheDocument();
+    expect(screen.getByText(/scoring through TU 12 is saved on this device/i)).toBeInTheDocument();
     // Reloading is the answer to a first crash, so it is the primary action.
     expect(screen.getByRole('button', { name: /reload the scoresheet/i })).toHaveClass('is-primary');
   });
@@ -110,17 +129,44 @@ describe('a render-phase throw', () => {
 describe('a crash that comes back after the reload', () => {
   test('stops recommending the reload and makes the recovery file the action', () => {
     // The count a previous crash in this session left behind.
+    saveInspectableJournal();
     render(
-      <RenderErrorBoundary storage={fakeStorage({ [crashCountStorageKey]: '1' })}>
+      <RenderErrorBoundary
+        storage={fakeStorage({ [crashCountStorageKey]: '1' })}
+        now={() => new Date('2026-08-20T14:00:00.000Z')}
+      >
         <Boom />
       </RenderErrorBoundary>,
     );
 
-    expect(screen.getByText(/happened more than once/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /save recovery file/i })).toHaveClass('is-primary');
+    expect(screen.getByText(/keeps crashing while opening this game/i)).toBeInTheDocument();
+    expect(screen.getByText(/scoring through TU 12 is saved on this device/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /open recovery mode/i })).toHaveClass('is-primary');
     expect(screen.getByRole('button', { name: /reload the scoresheet/i })).not.toHaveClass('is-primary');
-    // Still true, and still the first thing said.
-    expect(screen.getByText(/scoring is still saved on this device/i)).toBeInTheDocument();
+  });
+
+  test('offers Recovery Mode as a deliberate safe-mode navigation action', () => {
+    const onRecoveryMode = vi.fn();
+    render(
+      <RenderErrorBoundary storage={fakeStorage()} onRecoveryMode={onRecoveryMode}>
+        <Boom />
+      </RenderErrorBoundary>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /open recovery mode/i }));
+    expect(onRecoveryMode).toHaveBeenCalledOnce();
+  });
+
+  test('does not claim a malformed journal is saved, while keeping raw export available', () => {
+    window.localStorage.setItem('yellowfruit.room.game.v1.game-7', '{not json');
+    render(
+      <RenderErrorBoundary storage={fakeStorage()} now={() => new Date('2026-08-20T14:00:00.000Z')}>
+        <Boom />
+      </RenderErrorBoundary>,
+    );
+
+    expect(screen.getByText(/could not verify the newest journal/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /save recovery file/i })).toBeInTheDocument();
   });
 
   test('offers the journal even though nothing in the application can be reached', () => {

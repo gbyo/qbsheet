@@ -14,6 +14,53 @@ type ServiceWorkerState = 'unsupported' | 'missing' | 'registered' | 'controlled
 type LocalNetworkPermissionState = PermissionState | 'unsupported';
 type DownloadState = 'untested' | 'waiting' | 'passed' | 'failed';
 
+/** The optional external layer is deliberately separate from the local protections below it. */
+export type ExternalBackupState =
+  'unsupported' | 'not-configured' | 'ready' | 'needs-permission' | 'folder-unavailable' | 'failed';
+
+export type LocalCheckpointState = 'protected' | 'degraded' | 'unavailable' | 'unknown';
+export type RecoveryTimestamp = string | number;
+
+export interface IExternalBackupStatus {
+  state: ExternalBackupState;
+  /** A display name only, never an absolute path. */
+  folderName?: string;
+  lastSavedAt?: RecoveryTimestamp;
+  /** A safe, human-facing explanation supplied by the isolated recovery core. */
+  message?: string;
+}
+
+export interface ILocalCheckpointStatus {
+  state: LocalCheckpointState;
+  /** Optional detail from the checkpoint store; no game contents or credentials belong here. */
+  message?: string;
+  lastSavedAt?: RecoveryTimestamp;
+}
+
+export type RecoveryActionResult = void | { ok?: true; message?: string } | { ok: false; message: string };
+
+/**
+ * Actions are injected by the recovery core so the UI does not own persistence or browser handles.
+ * A setup/reconnect implementation must call showDirectoryPicker/requestPermission synchronously
+ * from the action's user gesture; this component never calls either API while inspecting readiness.
+ */
+export type RecoveryAction = () => RecoveryActionResult | Promise<RecoveryActionResult>;
+
+export interface IRecoveryUi {
+  /** Status must be safe to read without querying or requesting browser permission. */
+  externalBackup?: IExternalBackupStatus;
+  localCheckpoints?: ILocalCheckpointStatus;
+  onSetupExternalBackup?: RecoveryAction;
+  onManageExternalBackup?: RecoveryAction;
+  onReconnectExternalBackup?: RecoveryAction;
+  /** Removes QBSheet's remembered configuration only; it must never delete user files. */
+  onRemoveExternalBackup?: RecoveryAction;
+  /** Optional status refresh, used only after an explicit recovery action. */
+  onRefreshRecoveryStatus?: () => void | Promise<void>;
+  /** Lets the host enter a fuller, safe Recovery Mode without mounting the scorer. */
+  onViewRecoveryStatus?: () => void;
+}
+
 type ServerTestState =
   | { kind: 'untested' }
   | { kind: 'testing' }
@@ -33,8 +80,121 @@ export function protocolLabel(client: { isQbtcp: boolean }): string {
   return client.isQbtcp ? 'QBTCP v1' : 'Legacy API fallback';
 }
 
+interface IExternalBackupBrowser {
+  showDirectoryPicker?: unknown;
+}
+
+/** Feature detection only. In particular, this never calls a picker or touches permission state. */
+export function supportsExternalBackup(
+  browser: IExternalBackupBrowser | undefined = typeof window === 'undefined'
+    ? undefined
+    : (window as unknown as IExternalBackupBrowser),
+): boolean {
+  try {
+    return typeof browser?.showDirectoryPicker === 'function';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Resolve a status for the current browser without turning an absent integration into a false claim.
+ * An injected status comes from the recovery core and is preserved; otherwise feature detection is
+ * enough to distinguish an optional unsupported layer from one that simply has not been configured.
+ */
+export function effectiveExternalBackupStatus(
+  supported: boolean,
+  status?: IExternalBackupStatus,
+): IExternalBackupStatus {
+  return status ?? (supported ? { state: 'not-configured' } : { state: 'unsupported' });
+}
+
+export function safeRecoveryFolderName(folderName?: string): string {
+  if (!folderName) return 'External backup folder';
+  const leaf = folderName
+    .replaceAll('\\', '/')
+    .split('/')
+    .pop()
+    ?.split('')
+    .filter((character) => {
+      const code = character.charCodeAt(0);
+      return code > 31 && code !== 127;
+    })
+    .join('')
+    .trim();
+  if (!leaf || leaf === '.' || leaf === '..') return 'External backup folder';
+  return leaf.slice(0, 96);
+}
+
+export function recoverySavedAtLabel(timestamp?: RecoveryTimestamp, now = Date.now()): string {
+  if (timestamp === undefined) return 'Not saved yet';
+  const parsed = typeof timestamp === 'number' ? timestamp : Date.parse(timestamp);
+  if (!Number.isFinite(parsed)) return 'Saved recently';
+  const age = Math.max(0, now - parsed);
+  if (age < 60_000) return 'Saved just now';
+  if (age < 3_600_000) {
+    const minutes = Math.floor(age / 60_000);
+    return `Saved ${minutes} ${minutes === 1 ? 'minute' : 'minutes'} ago`;
+  }
+  if (age < 86_400_000) {
+    const hours = Math.floor(age / 3_600_000);
+    return `Saved ${hours} ${hours === 1 ? 'hour' : 'hours'} ago`;
+  }
+  return `Saved ${new Date(parsed).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
+}
+
+export function externalBackupStateLabel(state: ExternalBackupState): string {
+  switch (state) {
+    case 'unsupported':
+      return 'Unsupported by this browser';
+    case 'not-configured':
+      return 'Not configured';
+    case 'ready':
+      return 'Ready';
+    case 'needs-permission':
+      return 'Needs permission';
+    case 'folder-unavailable':
+      return 'Folder unavailable';
+    case 'failed':
+      return 'Backup failed';
+  }
+}
+
+export function externalBackupActionLabel(state: ExternalBackupState): string | null {
+  switch (state) {
+    case 'not-configured':
+      return 'Set up external backup…';
+    case 'ready':
+      return 'Manage external backup…';
+    case 'needs-permission':
+      return 'Reconnect external backup';
+    case 'folder-unavailable':
+      return 'Reconnect folder';
+    case 'failed':
+      return 'Repair external backup';
+    case 'unsupported':
+      return null;
+  }
+}
+
+export function localCheckpointStateLabel(state: LocalCheckpointState): string {
+  switch (state) {
+    case 'protected':
+      return 'Protected';
+    case 'degraded':
+      return 'Degraded';
+    case 'unavailable':
+      return 'Unavailable';
+    case 'unknown':
+      return 'Status unavailable';
+  }
+}
+
 interface IReadinessSnapshot {
   localStorage: boolean;
+  localCheckpoints: ILocalCheckpointStatus;
+  externalBackup: IExternalBackupStatus;
+  externalBackupSupported: boolean;
   serviceWorker: ServiceWorkerState;
   installed: boolean;
   secureContext: boolean;
@@ -145,12 +305,19 @@ export default function DeviceReadiness(props: {
    * that they did not. Nothing here is rendered, logged or written; see `findLeaks`.
    */
   liveSecrets?: readonly string[];
+  /** Read-only recovery status plus explicit-user-action callbacks from the recovery core. */
+  recovery?: IRecoveryUi;
   onBack: () => void;
 }) {
-  const { durable, rememberedServer = '', roomName, games, liveSecrets = [], onBack } = props;
+  const { durable, rememberedServer = '', roomName, games, liveSecrets = [], recovery, onBack } = props;
   const [snapshot, setSnapshot] = useState<IReadinessSnapshot | null>(null);
   const [checking, setChecking] = useState(false);
   const [requestingPersistence, setRequestingPersistence] = useState(false);
+  const [recoveryAction, setRecoveryAction] = useState<string | null>(null);
+  const [recoveryActionMessage, setRecoveryActionMessage] = useState<{
+    kind: 'pass' | 'fail';
+    text: string;
+  } | null>(null);
   const [serverAddress, setServerAddress] = useState(rememberedServer);
   const [serverTest, setServerTest] = useState<ServerTestState>({ kind: 'untested' });
   const serverTestSequence = useRef(0);
@@ -158,6 +325,20 @@ export default function DeviceReadiness(props: {
   const [workerBuild, setWorkerBuild] = useState<IWorkerBuild | null>(null);
   const [diagnostics, setDiagnostics] = useState<DiagnosticsOutcome | null>(null);
   const update = useAppUpdate();
+  const externalBackupSupported = supportsExternalBackup();
+  const externalBackupStatus = useMemo(
+    () => effectiveExternalBackupStatus(externalBackupSupported, recovery?.externalBackup),
+    [externalBackupSupported, recovery?.externalBackup],
+  );
+  const localCheckpointStatus = useMemo(
+    () =>
+      recovery?.localCheckpoints ?? {
+        state: 'unknown' as const,
+        message:
+          'Rolling checkpoint status is not currently reported. The instant journal and durable game storage checks above remain authoritative.',
+      },
+    [recovery?.localCheckpoints],
+  );
 
   // `navigator.onLine` is only a snapshot. Keep the readiness result honest while the page remains
   // open, because an offline transition is exactly when somebody is deciding whether file scoring
@@ -216,6 +397,9 @@ export default function DeviceReadiness(props: {
       setWorkerBuild(reportedBuild);
       setSnapshot({
         localStorage: localStorageWorks(),
+        localCheckpoints: localCheckpointStatus,
+        externalBackup: externalBackupStatus,
+        externalBackupSupported,
         serviceWorker: worker,
         installed: installedAsApp(),
         secureContext: window.isSecureContext,
@@ -235,7 +419,7 @@ export default function DeviceReadiness(props: {
       // least helpful thing it could possibly do.
       setChecking(false);
     }
-  }, []);
+  }, [externalBackupStatus, externalBackupSupported, localCheckpointStatus]);
 
   // Started by the effect, not performed in it. The probes are asynchronous and report as they
   // finish; the spinner they raise belongs to that work rather than to this commit.
@@ -254,6 +438,38 @@ export default function DeviceReadiness(props: {
     } finally {
       setRequestingPersistence(false);
       await runChecks();
+    }
+  };
+
+  const runRecoveryAction = async (
+    name: string,
+    action: RecoveryAction | undefined,
+    successMessage: string,
+  ) => {
+    if (!action) return;
+    setRecoveryAction(name);
+    setRecoveryActionMessage(null);
+    try {
+      // Calling the injected action before the first await preserves the browser's user-activation
+      // window for a picker or permission request. No recovery action is called by runChecks/effects.
+      const resolved = await action();
+      if (resolved && 'ok' in resolved && resolved.ok === false) {
+        setRecoveryActionMessage({ kind: 'fail', text: resolved.message });
+        return;
+      }
+      if (recovery?.onRefreshRecoveryStatus) await recovery.onRefreshRecoveryStatus();
+      setRecoveryActionMessage({
+        kind: 'pass',
+        text: resolved?.message ?? successMessage,
+      });
+      await runChecks();
+    } catch {
+      setRecoveryActionMessage({
+        kind: 'fail',
+        text: 'QBSheet could not update external backup settings. Local protection is still active.',
+      });
+    } finally {
+      setRecoveryAction(null);
     }
   };
 
@@ -456,12 +672,33 @@ export default function DeviceReadiness(props: {
       },
       {
         id: 'journal',
-        title: 'Emergency journal',
+        title: 'Instant game journal',
         detail: snapshot.localStorage
           ? 'localStorage can write and read the in-progress event journal.'
           : 'localStorage is blocked or unavailable. The synchronous recovery journal cannot be trusted.',
         state: snapshot.localStorage ? 'pass' : 'fail',
         kind: 'required',
+      },
+      {
+        id: 'local-checkpoints',
+        title: 'Automatic local checkpoints',
+        detail:
+          snapshot.localCheckpoints.message ??
+          (snapshot.localCheckpoints.state === 'protected'
+            ? 'Rolling exact recovery checkpoints are being kept on this device.'
+            : snapshot.localCheckpoints.state === 'degraded'
+              ? 'QBSheet is still scoring, but checkpoint protection needs attention.'
+              : snapshot.localCheckpoints.state === 'unavailable'
+                ? 'Rolling checkpoints are unavailable. The instant journal and durable game storage remain separate recovery layers.'
+                : 'The recovery core did not report checkpoint status. The instant journal and durable game storage checks remain authoritative.'),
+        state:
+          snapshot.localCheckpoints.state === 'protected'
+            ? 'pass'
+            : snapshot.localCheckpoints.state === 'degraded' ||
+                snapshot.localCheckpoints.state === 'unavailable'
+              ? 'warn'
+              : 'info',
+        kind: 'recommended',
       },
       downloadCheck,
       {
@@ -476,7 +713,7 @@ export default function DeviceReadiness(props: {
       workerCheck,
       {
         id: 'persistent-storage',
-        title: 'Protected storage',
+        title: 'Persistent browser storage',
         detail:
           snapshot.persistentStorage === true
             ? `The browser marked QBSheet storage persistent. ${storageDetail}`
@@ -505,6 +742,40 @@ export default function DeviceReadiness(props: {
         kind: 'connected',
       },
       permissionCheck,
+      {
+        id: 'external-backup-support',
+        title: 'External backup support',
+        detail: snapshot.externalBackupSupported
+          ? 'This browser supports the optional external .qbsheet backup folder.'
+          : 'This browser does not support optional external backup folders. QBSheet’s local protection continues to work.',
+        state: snapshot.externalBackupSupported ? 'pass' : 'info',
+        kind: 'recommended',
+      },
+      {
+        id: 'external-backup-status',
+        title: 'External backup status',
+        detail:
+          snapshot.externalBackup.state === 'ready'
+            ? `${safeRecoveryFolderName(snapshot.externalBackup.folderName)} · ${recoverySavedAtLabel(snapshot.externalBackup.lastSavedAt)}${snapshot.externalBackup.message ? ` · ${snapshot.externalBackup.message}` : ''}`
+            : (snapshot.externalBackup.message ??
+              (snapshot.externalBackup.state === 'unsupported'
+                ? `${externalBackupStateLabel(snapshot.externalBackup.state)}. This is an optional layer, not a failure of local QBSheet recovery.`
+                : snapshot.externalBackup.state === 'not-configured'
+                  ? `${externalBackupStateLabel(snapshot.externalBackup.state)}. This optional layer can be set up from Settings.`
+                  : snapshot.externalBackup.state === 'needs-permission'
+                    ? `${externalBackupStateLabel(snapshot.externalBackup.state)}. The remembered folder needs permission again; QBSheet has not requested access automatically.`
+                    : snapshot.externalBackup.state === 'folder-unavailable'
+                      ? `${externalBackupStateLabel(snapshot.externalBackup.state)}. Reconnect it from Settings; existing files are not deleted.`
+                      : `${externalBackupStateLabel(snapshot.externalBackup.state)}. The last external write failed; scoring and local protection continue.`)),
+        state:
+          snapshot.externalBackup.state === 'ready'
+            ? 'pass'
+            : snapshot.externalBackup.state === 'unsupported' ||
+                snapshot.externalBackup.state === 'not-configured'
+              ? 'info'
+              : 'warn',
+        kind: 'recommended',
+      },
       {
         id: 'network',
         title: 'Current network',
@@ -683,12 +954,58 @@ export default function DeviceReadiness(props: {
                           </button>
                         </div>
                       )}
+                      {check.id === 'external-backup-status' &&
+                        externalBackupActionLabel(snapshot.externalBackup.state) &&
+                        ((snapshot.externalBackup.state === 'not-configured' &&
+                          recovery?.onSetupExternalBackup) ||
+                          (snapshot.externalBackup.state === 'ready' && recovery?.onManageExternalBackup) ||
+                          ((snapshot.externalBackup.state === 'needs-permission' ||
+                            snapshot.externalBackup.state === 'folder-unavailable') &&
+                            recovery?.onReconnectExternalBackup) ||
+                          (snapshot.externalBackup.state === 'failed' &&
+                            (recovery?.onReconnectExternalBackup || recovery?.onSetupExternalBackup))) && (
+                          <button
+                            type="button"
+                            className="shell-button readiness-inline-action"
+                            disabled={recoveryAction !== null}
+                            onClick={() => {
+                              const state = snapshot.externalBackup.state;
+                              const action =
+                                state === 'not-configured'
+                                  ? recovery?.onSetupExternalBackup
+                                  : state === 'ready'
+                                    ? recovery?.onManageExternalBackup
+                                    : (recovery?.onReconnectExternalBackup ??
+                                      recovery?.onSetupExternalBackup);
+                              void runRecoveryAction(
+                                'external-backup',
+                                action,
+                                state === 'ready'
+                                  ? 'External backup settings opened.'
+                                  : 'External backup action completed.',
+                              );
+                            }}
+                          >
+                            {recoveryAction === 'external-backup'
+                              ? 'Working…'
+                              : externalBackupActionLabel(snapshot.externalBackup.state)}
+                          </button>
+                        )}
                     </div>
                   </li>
                 ))}
             </ul>
           </section>
         ))
+      )}
+
+      {recoveryActionMessage && (
+        <p
+          className={`readiness-test-result is-${recoveryActionMessage.kind}`}
+          role={recoveryActionMessage.kind === 'fail' ? 'alert' : 'status'}
+        >
+          {recoveryActionMessage.kind === 'fail' ? '×' : '✓'} {recoveryActionMessage.text}
+        </p>
       )}
 
       <section className="shell-section">

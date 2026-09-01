@@ -40,12 +40,25 @@
  * fallback that can throw while reporting a throw. Everything below is plain elements and the
  * shell's own tokens.
  */
-import { Component, ErrorInfo, ReactNode } from 'react';
+import { Component } from 'react';
+import type { ErrorInfo, ReactNode } from 'react';
 import { downloadFile } from '../integrations/file/QbjDownload';
 import { describeThrown, errorLog, ErrorLog, messageLimit } from './ErrorLog';
 import { redact } from './ConnectionTimeline';
 import { downloadDiagnostics } from './Diagnostics';
 import { exportJournals } from '../scorer/GameSession';
+import {
+  inspectBrowserJournals,
+  journalFileContents,
+  journalFileName,
+  summarizeJournalRecovery,
+} from './RecoveryJournal';
+import type { IJournalInspection } from './RecoveryJournal';
+import { recoveryModeHref } from './recoveryModeRequest';
+
+// Kept as named exports here for existing callers and tests. The implementation lives beside the
+// read-only journal inspector so Recovery Mode and the crash boundary use the same raw format.
+export { journalFileContents, journalFileName } from './RecoveryJournal';
 
 /**
  * Where the repeat count lives.
@@ -96,25 +109,6 @@ export function recordCrash(storage: IStorageLike | null = sessionStore()): numb
   return next;
 }
 
-/** The journal, as a file, with the shape a reader needs to know what they are looking at. */
-export function journalFileContents(journals: Record<string, string>, now: Date): string {
-  return `${JSON.stringify(
-    {
-      qbsheetRecoveryExport: 1,
-      exportedAt: now.toISOString(),
-      note: 'Raw scoring journals, exactly as stored. Not a QBJ. Hand this to a tournament director.',
-      games: journals,
-    },
-    null,
-    2,
-  )}\n`;
-}
-
-/** `qbsheet-recovery-2026-08-20T14-32-05.json`. Sortable, and obviously not a result file. */
-export function journalFileName(now: Date): string {
-  return `qbsheet-recovery-${now.toISOString().replace(/[:.]/g, '-').replace(/Z$/, '')}.json`;
-}
-
 type SaveState = 'idle' | 'saved' | 'empty' | 'failed';
 
 interface IProps {
@@ -123,6 +117,7 @@ interface IProps {
   log?: ErrorLog;
   storage?: IStorageLike | null;
   onReload?: () => void;
+  onRecoveryMode?: () => void;
   now?: () => Date;
   /**
    * How a file reaches the scorekeeper's downloads folder.
@@ -140,6 +135,7 @@ interface IState {
   crashCount: number;
   diagnostics: SaveState;
   journal: SaveState;
+  journalInspection: IJournalInspection[];
 }
 
 const initialState: IState = {
@@ -148,6 +144,7 @@ const initialState: IState = {
   crashCount: 0,
   diagnostics: 'idle',
   journal: 'idle',
+  journalInspection: [],
 };
 
 export default class RenderErrorBoundary extends Component<IProps, IState> {
@@ -167,7 +164,14 @@ export default class RenderErrorBoundary extends Component<IProps, IState> {
     // `undefined` means "nobody said", which is the real browser. An explicit `null` is a test
     // saying "this device has no session storage", and `??` would quietly overrule it.
     const storage = this.props.storage !== undefined ? this.props.storage : sessionStore();
-    this.setState({ crashCount: recordCrash(storage) });
+    let journalInspection: IJournalInspection[] = [];
+    try {
+      journalInspection = inspectBrowserJournals(this.now()).entries;
+    } catch {
+      // The boundary must remain renderable even when a storage implementation misbehaves while it
+      // is being inspected. The raw export action still has its own defensive path.
+    }
+    this.setState({ crashCount: recordCrash(storage), journalInspection });
   }
 
   private now(): Date {
@@ -180,6 +184,14 @@ export default class RenderErrorBoundary extends Component<IProps, IState> {
       return;
     }
     if (typeof window !== 'undefined') window.location.reload();
+  };
+
+  private openRecoveryMode = (): void => {
+    if (this.props.onRecoveryMode) {
+      this.props.onRecoveryMode();
+      return;
+    }
+    if (typeof window !== 'undefined') window.location.assign(recoveryModeHref(window.location));
   };
 
   private saveDiagnostics = (): void => {
@@ -207,6 +219,15 @@ export default class RenderErrorBoundary extends Component<IProps, IState> {
     if (!this.state.crashed) return this.props.children;
 
     const repeating = this.state.crashCount >= repeatCrashThreshold;
+    const journalFact = summarizeJournalRecovery(this.state.journalInspection);
+    const savedProgress =
+      journalFact.kind === 'valid'
+        ? journalFact.questionNumber === undefined
+          ? 'Your scoring journal is saved on this device.'
+          : `Your scoring through TU ${journalFact.questionNumber} is saved on this device.`
+        : journalFact.kind === 'unverified'
+          ? 'QBSheet found recovery data on this device, but could not verify the newest journal.'
+          : 'QBSheet could not verify a saved scoring journal on this device.';
 
     return (
       <div className="crash-screen" role="alert">
@@ -215,21 +236,21 @@ export default class RenderErrorBoundary extends Component<IProps, IState> {
 
           {repeating ? (
             <>
-              <p className="crash-lead">
-                This has now happened more than once, so reloading is unlikely to clear it. Your scoring is
-                still saved on this device.
-              </p>
+              <p className="crash-lead">QBSheet keeps crashing while opening this game.</p>
+              <p className="crash-lead">{savedProgress}</p>
               <p className="crash-body">
-                Save the recovery file below and give it to your tournament director. It contains every game
-                this device has scored today. Then score the rest of this game on paper.
+                Use Recovery Mode to inspect the copies QBSheet can read. Save the raw journal before asking
+                anyone to clear browser data; it preserves exactly what was stored, even when this build
+                cannot verify it.
               </p>
             </>
           ) : (
             <>
-              <p className="crash-lead">Your scoring is saved on this device. Nothing has been lost.</p>
+              <p className="crash-lead">{savedProgress}</p>
               <p className="crash-body">
-                Reload to return to the question you were on. Every operation you accepted was written to this
-                device before the screen went wrong.
+                {journalFact.kind === 'valid'
+                  ? 'Reload to return to the question you were on. Every accepted operation in this journal was written before the screen went wrong.'
+                  : 'Reload may help with a temporary drawing problem. If it happens again, use Recovery Mode or save the raw journal; do not clear this device’s recovery data.'}
               </p>
             </>
           )}
@@ -245,8 +266,11 @@ export default class RenderErrorBoundary extends Component<IProps, IState> {
             <button
               type="button"
               className={`crash-button${repeating ? ' is-primary' : ''}`}
-              onClick={this.saveJournal}
+              onClick={this.openRecoveryMode}
             >
+              Open Recovery Mode
+            </button>
+            <button type="button" className="crash-button" onClick={this.saveJournal}>
               Save recovery file
             </button>
             <button type="button" className="crash-button" onClick={this.saveDiagnostics}>

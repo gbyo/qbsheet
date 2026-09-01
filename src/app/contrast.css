@@ -120,7 +120,13 @@
   .shell-errors,
   .shell-notice,
   .shell-modal-body,
-  .crash-panel {
+  .crash-panel,
+  /* The arcade's own surfaces. Its stylesheet ships in a lazily loaded chunk; the correction stays
+     here, where the question "what does QBSheet do in High Contrast?" is answered for everything. */
+  .arcade-card,
+  .arcade-primary,
+  .arcade-pad-key,
+  .arcade-board {
     border: 1px solid CanvasText;
   }
 

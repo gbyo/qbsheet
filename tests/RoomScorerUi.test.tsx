@@ -1561,9 +1561,9 @@ describe('the game menu', () => {
     addMissingPlayer('Ninety Six lineup', 'Taylor Brooks');
 
     expect(sync).toHaveBeenCalledTimes(1);
-    await vi.advanceTimersByTimeAsync(9_999);
+    await act(() => vi.advanceTimersByTimeAsync(9_999));
     expect(sync).toHaveBeenCalledTimes(1);
-    await vi.advanceTimersByTimeAsync(1);
+    await act(() => vi.advanceTimersByTimeAsync(1));
     expect(sync).toHaveBeenCalledTimes(2);
     expect(sync).toHaveBeenLastCalledWith('Ninety Six', 'Taylor Brooks');
   });

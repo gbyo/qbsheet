@@ -213,6 +213,128 @@ export function loadGame(
   }
 }
 
+/**
+ * The richer result used by Recovery Mode, not by the normal scorer.
+ *
+ * `loadGame` deliberately collapses every unreadable shape into `null`: a scorer must never mount
+ * against data it cannot prove is safe. Recovery needs to make a more useful statement, though. A
+ * missing journal, an old journal, and a journal written by a newer build are three different
+ * situations with three different next actions. Keeping this inspection beside the strict reader
+ * makes it difficult for the two paths to drift in what they consider structurally valid.
+ */
+export type GameJournalInspectionStatus = 'missing' | 'valid' | 'stale' | 'unsupported' | 'malformed';
+
+export interface IGameJournalCopyInspection {
+  key: 'current' | 'alternate';
+  status: Exclude<GameJournalInspectionStatus, 'missing'>;
+  raw?: string;
+  value?: IStoredGame;
+  updatedAt?: string;
+}
+
+export interface IGameJournalInspection {
+  gameKey: string;
+  status: GameJournalInspectionStatus;
+  /** The selected usable copy, when one exists. The normal loader applies the same freshness rule. */
+  value?: IStoredGame;
+  /** All physical journal copies, retained for Recovery Mode diagnostics and emergency actions. */
+  copies: IGameJournalCopyInspection[];
+}
+
+function inspectJournalCopy(
+  raw: string,
+  key: 'current' | 'alternate',
+  gameKey: string,
+  now: Date,
+): IGameJournalCopyInspection {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { key, status: 'malformed', raw };
+  }
+
+  if (typeof parsed !== 'object' || parsed === null) return { key, status: 'malformed', raw };
+  const version = (parsed as { version?: unknown }).version;
+  if (version !== gameSessionVersion && version !== legacyGameSessionVersion) {
+    return { key, status: 'unsupported', raw };
+  }
+
+  const candidate = parseStored(raw, gameKey);
+  if (!candidate) return { key, status: 'malformed', raw };
+  const updated = new Date(candidate.updatedAt).getTime();
+  if (!Number.isFinite(updated)) return { key, status: 'malformed', raw, updatedAt: candidate.updatedAt };
+  const age = now.getTime() - updated;
+  if (age < 0 || age > gameSessionMaxAgeMs) {
+    return { key, status: 'stale', raw, updatedAt: candidate.updatedAt, value: candidate };
+  }
+  return { key, status: 'valid', raw, updatedAt: candidate.updatedAt, value: candidate };
+}
+
+/** Inspect one game's journal without changing the strict normal-load contract. */
+export function inspectGameJournal(
+  gameKey: string,
+  now: Date = new Date(),
+  storage: IStorageLike | null = browserStorage(),
+): IGameJournalInspection {
+  const copies: IGameJournalCopyInspection[] = [];
+  if (storage && gameKey !== '') {
+    try {
+      const alternate = storage.getItem(alternateStorageKey(gameKey));
+      if (alternate !== null) copies.push(inspectJournalCopy(alternate, 'alternate', gameKey, now));
+      const current = storage.getItem(storageKey(gameKey));
+      if (current !== null) copies.push(inspectJournalCopy(current, 'current', gameKey, now));
+    } catch {
+      // A storage refusal is indistinguishable from a missing copy to this read-only inspector.
+      // The caller still has the raw export path, which enumerates whatever the browser permits.
+    }
+  }
+
+  const usable = copies
+    .filter(
+      (copy): copy is IGameJournalCopyInspection & { status: 'valid'; value: IStoredGame } =>
+        copy.status === 'valid' && copy.value !== undefined,
+    )
+    .sort((first, second) => {
+      const left = new Date(first.value.updatedAt).getTime();
+      const right = new Date(second.value.updatedAt).getTime();
+      return right - left || (first.key === 'current' ? -1 : 1);
+    });
+  if (usable[0]) return { gameKey, status: 'valid', value: usable[0].value, copies };
+  if (copies.some((copy) => copy.status === 'stale')) return { gameKey, status: 'stale', copies };
+  if (copies.some((copy) => copy.status === 'unsupported')) {
+    return { gameKey, status: 'unsupported', copies };
+  }
+  if (copies.some((copy) => copy.status === 'malformed')) return { gameKey, status: 'malformed', copies };
+  return { gameKey, status: 'missing', copies };
+}
+
+/** Inspect every journal key the browser permits enumerating. */
+export function inspectGameJournals(
+  now: Date = new Date(),
+  storage: IStorageLike | null = browserStorage(),
+): IGameJournalInspection[] {
+  if (!storage) return [];
+  const gameKeys = new Set<string>();
+  try {
+    const enumerable = storage as IStorageLike & {
+      length?: number;
+      key?: (index: number) => string | null;
+    };
+    if (typeof enumerable.length !== 'number' || typeof enumerable.key !== 'function') return [];
+    for (let index = 0; index < enumerable.length; index += 1) {
+      const key = enumerable.key(index);
+      if (key?.startsWith(storagePrefix)) gameKeys.add(key.slice(storagePrefix.length));
+      if (key?.startsWith(alternateStoragePrefix)) gameKeys.add(key.slice(alternateStoragePrefix.length));
+    }
+  } catch {
+    return [];
+  }
+  return [...gameKeys]
+    .filter((gameKey) => gameKey !== '')
+    .map((gameKey) => inspectGameJournal(gameKey, now, storage));
+}
+
 /** Forget a game, once its result is safely in the outbox. */
 export function clearGame(gameKey: string, storage: IStorageLike | null = browserStorage()): void {
   try {

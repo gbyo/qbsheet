@@ -1041,6 +1041,25 @@ body:has(.welcome-shell .update-notice-hero) {
   font-size: 0.75rem;
 }
 
+.settings-row-status {
+  flex: 0 0 auto;
+  color: var(--room-muted);
+  font-size: 0.8125rem;
+  text-align: right;
+}
+
+.settings-row-status.is-pass {
+  color: var(--room-success);
+}
+
+.settings-row-status.is-warn {
+  color: var(--room-warning);
+}
+
+.settings-row-status.is-info {
+  color: var(--room-muted);
+}
+
 .settings-action,
 .settings-inline-action {
   padding: 4px 0;
@@ -1186,6 +1205,15 @@ body:has(.welcome-shell .update-notice-hero) {
 .settings-detail-note {
   color: var(--room-muted);
   font-size: 0.8125rem;
+}
+
+.settings-recovery-confirmation {
+  width: 100%;
+  padding-top: 4px;
+}
+
+.settings-recovery-confirmation .shell-warning {
+  margin: 0 0 8px;
 }
 
 @media (max-width: 440px) {
