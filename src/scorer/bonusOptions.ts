@@ -9,9 +9,17 @@
  * the same, and there need not be a fixed number of them, so the only honest interface is a number
  * the scorekeeper types. `bonusTotalProblem` is what checks it.
  *
- * The part-level vocabulary lives here too — `BonusPartOutcome` and the two functions that turn one
+ * The part-level vocabulary lives here too — `BonusPartOutcome` and the functions that turn one
  * into stored points and back — because both the live bonus prompt and the correction editor ask
  * the same question about a part (who got it?) and must not drift on what the answer means.
+ *
+ * # Which entry a live bonus opens in
+ *
+ * Total entry is fastest when only one team can score: 0 / 10 / 20 / 30 is one press and the
+ * scorekeeper has already heard the number. Part entry is clearest when a missed part can become
+ * the opponent's points, because then the scorekeeper has heard a sequence of part outcomes — this
+ * team got it, the other team got it on the bounce, nobody got it — and asking for a total makes
+ * them add those up before they can record anything. `partEntryIsDefault` is that rule.
  */
 import { IBonusPartResult } from '../scoring/ScoreEvents';
 import { IScorekeeperBonus } from '../scoring/ScorekeeperFormat';
@@ -167,6 +175,66 @@ export function regularBonusPartCount(bonus: IScorekeeperBonus): number | null {
   if (count < 1) return null;
   // Trust the rules' own bounds over the division when they disagree.
   return Math.min(Math.max(count, minimumParts), Math.max(maximumParts, minimumParts));
+}
+
+/**
+ * The most parts the live prompt will lay out as a grid.
+ *
+ * A real bonus has three or four parts. The format schema allows thousands, and a live scoresheet
+ * that answers one of those with a thousand rows above the control bar is worse than the totals it
+ * replaced — so past this, the bonus keeps totals and part entry is not offered live. The
+ * correction editor, which is a scrollable dialog rather than a bar the scorekeeper works from, is
+ * left to its own judgement.
+ */
+export const maximumLivePartRows = 12;
+
+/**
+ * How many parts the live prompt can ask about one at a time, or null if it should not try.
+ *
+ * `regularBonusPartCount` says what the rules define; this says what fits on the scoresheet.
+ */
+export function livePartCount(bonus: IScorekeeperBonus): number | null {
+  const count = regularBonusPartCount(bonus);
+  if (count === null || count > maximumLivePartRows) return null;
+  return count;
+}
+
+/**
+ * Whether a live bonus should open on its parts rather than on its totals.
+ *
+ * Only where a missed part is somebody else's points. Without bouncebacks the totals are one press
+ * for the same information, and making every bonus three presses to improve the ones that bounce
+ * would be paying for bouncebacks in every other format.
+ */
+export function partEntryIsDefault(bonus: IScorekeeperBonus): boolean {
+  return bonus.bounceBack && livePartCount(bonus) !== null;
+}
+
+/** What a set of recorded parts comes to for each team. */
+export function bonusPartResultTotals(parts: readonly IBonusPartResult[]): {
+  controlled: number;
+  bounceback: number;
+} {
+  let controlled = 0;
+  let bounceback = 0;
+  for (const part of parts) {
+    controlled += part.controlledPoints;
+    bounceback += part.bouncebackPoints ?? 0;
+  }
+  return { controlled, bounceback };
+}
+
+/**
+ * What a part breakdown in progress is worth so far, treating an unanswered part as nothing yet.
+ *
+ * The running summary needs a number for a bonus that is half answered, and "nothing yet" is the
+ * honest one: an unanswered part has not been given to anybody.
+ */
+export function bonusOutcomeTotals(
+  bonus: IScorekeeperBonus,
+  outcomes: readonly (BonusPartOutcome | null)[],
+): { controlled: number; bounceback: number } {
+  return bonusPartResultTotals(outcomes.map((outcome) => bonusPartForOutcome(bonus, outcome ?? 'missed')));
 }
 
 /**

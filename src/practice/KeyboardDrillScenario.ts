@@ -215,7 +215,7 @@ function bonusTask(): IDrillTask | null {
     call: `${practiceLeftTeam.name} converts the tossup and gets two of the three bonus parts, for ${row.meaning}.`,
     ask: `Press ${row.keys}.`,
     keys: [row.keys],
-    why: `A converted tossup opens the bonus on its own, and while it is open the digits address what is on screen rather than seats: ${mapping}. The digit is the number of parts, which is what you have just heard — and it is why ${legend[0].keys}, not ${legend[1].keys}, is the bonus that scored nothing. The row is the totals this format can produce, so a bonus scored in fives renumbers its own digits. There is deliberately no cancel key on this first prompt: a bonus that belongs to the wrong team is fixed by undoing the tossup.`,
+    why: `A converted tossup opens the bonus on its own, and while it is open the digits address what is on screen rather than seats: ${mapping}. The digit is the number of parts, which is what you have just heard — and it is why ${legend[0].keys}, not ${legend[1].keys}, is the bonus that scored nothing. The row is the totals this format can produce, so a bonus scored in fives renumbers its own digits. There is deliberately no cancel key on this first prompt: a bonus that belongs to the wrong team is fixed by undoing the tossup. A format whose bonuses bounce back asks part by part instead, and its digits say who scored the part rather than how many were got — the map on the scoresheet always names them.`,
     correction: `During a bonus the digits are the totals on screen: ${mapping}.`,
     success: `${row.meaning} to ${practiceLeftTeam.name}, and the scoresheet moves on to the next tossup.`,
   };

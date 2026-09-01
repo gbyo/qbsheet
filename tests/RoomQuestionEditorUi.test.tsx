@@ -95,30 +95,42 @@ function bounceFormat(): IScorekeeperFormat {
   });
 }
 
-/** Q1 to Ninety Six, its bonus recorded as totals — the shape that has no part history. */
+/**
+ * Q1 to Ninety Six, its bonus recorded as totals — the shape that has no part history.
+ *
+ * A bounceback format's live prompt opens on its parts now, so getting a total-only bonus out of it
+ * means taking the way out it offers. Everything after that is one stationary panel with both teams
+ * on it: no second screen, and no back button to get at the first number again.
+ */
 function recordBonusTotals(controlled: number, bounceback?: number) {
   fireEvent.click(buttonsFor('Sarah Mitchell')[1]); // +10
-  fireEvent.click(within(screen.getByLabelText('Bonus')).getByText(String(controlled)));
+  const prompt = () => screen.getByLabelText('Bonus');
+  const toTotals = within(prompt()).queryByRole('button', { name: 'Enter totals instead' });
+  if (toTotals) fireEvent.click(toTotals);
+  // Only a panel with two rows of identical numbers names the team on each button.
+  const controllingName = bounceback === undefined ? String(controlled) : `Ninety Six, ${controlled} points`;
+  fireEvent.click(within(prompt()).getByRole('button', { name: controllingName }));
   if (bounceback !== undefined) {
-    fireEvent.click(within(screen.getByLabelText('Bounceback')).getByText(String(bounceback)));
+    fireEvent.click(within(prompt()).getByRole('button', { name: `Greenwood, ${bounceback} points` }));
   }
 }
 
+type LiveOutcome = 'controlled' | 'bounceback' | 'missed';
+
+/** The live prompt's name for one part outcome: who scored it, said in full. */
+function liveOutcomeName(partNumber: number, outcome: LiveOutcome): string {
+  if (outcome === 'controlled') return `Part ${partNumber} to Ninety Six, 10 points`;
+  if (outcome === 'bounceback') return `Part ${partNumber} to Greenwood, 10 points`;
+  return `No points on part ${partNumber}`;
+}
+
 /** Q1 to Ninety Six, its bonus recorded part by part on the live prompt. */
-function recordBonusParts(outcomes: string[]) {
+function recordBonusParts(outcomes: LiveOutcome[]) {
   fireEvent.click(buttonsFor('Sarah Mitchell')[1]); // +10
-  fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('Parts…'));
   outcomes.forEach((outcome, index) => {
     const row = screen.getByText(`Part ${index + 1}`).closest('.scorer-part-row') as HTMLElement;
-    const name =
-      outcome === '+10'
-        ? new RegExp(`^Part ${index + 1}, .*\\+10$`)
-        : outcome === 'Bounce'
-          ? new RegExp(`^Part ${index + 1}, .*bounceback$`)
-          : new RegExp(`^Part ${index + 1}, .*missed by both teams$`);
-    fireEvent.click(within(row).getByRole('button', { name }));
+    fireEvent.click(within(row).getByRole('button', { name: liveOutcomeName(index + 1, outcome) }));
   });
-  fireEvent.click(screen.getByRole('button', { name: 'Record parts' }));
 }
 
 function partOutcomes(partNumber: number): HTMLElement {
@@ -641,20 +653,20 @@ describe('the bonus', () => {
       }),
     );
     fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
-    fireEvent.change(screen.getByLabelText(/Bonus points/), { target: { value: '25' } });
-    fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('Record'));
+    fireEvent.change(screen.getByLabelText('Ninety Six bonus points'), { target: { value: '25' } });
+    fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('Record bonus'));
     openEditor();
 
     expect(screen.queryByRole('group', { name: 'Bonus points' })).toBeNull();
     expect(within(editor()).getByLabelText('Bonus points')).toBeTruthy();
     // Nothing here knows what one part of an irregular bonus is worth, so no part outcomes are offered.
-    expect(screen.queryByText('Edit individual parts\u2026')).toBeNull();
+    expect(screen.queryByText('Edit by part')).toBeNull();
   });
 
   /**
    * Parts, asked the way the live prompt asks them.
    *
-   * `Edit individual parts…` used to turn each part into one number box for the controlling team and, under
+   * Part entry used to turn each part into one number box for the controlling team and, under
    * bouncebacks, a second one for the opponent — so the screen read `Part 1 [0] [10]` with the teams
    * named only in the accessible labels. A regular part has three outcomes and no other value it may
    * take, so the three buttons are both clearer and narrower than the pair of boxes they replace.
@@ -665,12 +677,10 @@ describe('the bonus', () => {
         rules.bonusesBounceBack = true;
       }),
     );
-    fireEvent.click(buttonsFor('Sarah Mitchell')[1]); // +10 for Ninety Six
-    fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('20'));
-    fireEvent.click(within(screen.getByLabelText('Bounceback')).getByText('10'));
+    recordBonusTotals(20, 10);
     openEditor();
 
-    fireEvent.click(screen.getByText('Edit individual parts…'));
+    fireEvent.click(screen.getByText('Edit by part'));
 
     const parts = screen.getByText('Part 1').closest('.scorer-question-parts') as HTMLElement;
     const head = parts.querySelector('.scorer-question-part-head') as HTMLElement;
@@ -680,7 +690,7 @@ describe('the bonus', () => {
 
     fireEvent.click(screen.getByLabelText('Bonus part 1 to Ninety Six'));
     fireEvent.click(screen.getByLabelText('Bonus part 2 bounced back to Greenwood'));
-    fireEvent.click(screen.getByLabelText('Bonus part 3 missed'));
+    fireEvent.click(screen.getByLabelText('No points on bonus part 3'));
     fireEvent.click(screen.getByText('Save changes'));
 
     expect(scoreOf('Ninety Six')).toBe('20');
@@ -703,13 +713,11 @@ describe('the bonus', () => {
         rules.bonusesBounceBack = true;
       }),
     );
-    fireEvent.click(buttonsFor('Sarah Mitchell')[1]); // +10
-    fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('20'));
-    fireEvent.click(within(screen.getByLabelText('Bounceback')).getByText('10'));
+    recordBonusTotals(20, 10);
     openEditor();
     const score = screen.getByRole('table', { name: 'Question 1 score impact' });
 
-    fireEvent.click(screen.getByText('Edit individual parts…'));
+    fireEvent.click(screen.getByText('Edit by part'));
 
     // Nothing pressed: which parts made the 20 is exactly what the total does not record.
     expect(chosenOutcomes(3)).toEqual(['none', 'none', 'none']);
@@ -734,11 +742,11 @@ describe('the bonus', () => {
     fireEvent.click(screen.getByText('20'));
     openEditor();
 
-    fireEvent.click(screen.getByText('Edit individual parts…'));
+    fireEvent.click(screen.getByText('Edit by part'));
 
     expect(screen.getByLabelText('Bonus part 1 to Ninety Six')).toBeTruthy();
     expect(screen.queryByLabelText('Bonus part 1 bounced back to Greenwood')).toBeNull();
-    expect(screen.getByLabelText('Bonus part 1 missed')).toBeTruthy();
+    expect(screen.getByLabelText('No points on bonus part 1')).toBeTruthy();
   });
 
   test('a correction that creates a conversion can add the bonus it earns', () => {
@@ -768,7 +776,7 @@ describe('the bonus', () => {
 describe('who got each bonus part', () => {
   test('a bounceback bonus opens as outcomes, not as pairs of numbers', () => {
     renderScorer(bounceFormat());
-    recordBonusParts(['+10', 'Bounce', 'Miss']);
+    recordBonusParts(['controlled', 'bounceback', 'missed']);
     openEditorFromRecent(1);
 
     // Both teams are identified: the one that converted, and the one that can take the rest.
@@ -788,7 +796,7 @@ describe('who got each bonus part', () => {
     ).toEqual([
       'Bonus part 2 to Ninety Six',
       'Bonus part 2 bounced back to Greenwood',
-      'Bonus part 2 missed',
+      'No points on bonus part 2',
     ]);
 
     // Nothing left of the storage: no unexplained number pairs, and no dead "Points" box.
@@ -799,20 +807,20 @@ describe('who got each bonus part', () => {
 
   test('the recorded outcomes are the ones showing, in the parts they were recorded on', () => {
     renderScorer(bounceFormat());
-    recordBonusParts(['+10', 'Bounce', 'Miss']);
+    recordBonusParts(['controlled', 'bounceback', 'missed']);
     openEditorFromRecent(1);
 
     expect(chosenOutcomes(3)).toEqual([
       'Bonus part 1 to Ninety Six',
       'Bonus part 2 bounced back to Greenwood',
-      'Bonus part 3 missed',
+      'No points on bonus part 3',
     ]);
     expect(within(editor()).getByText('Ninety Six +10 · Greenwood +10 bounceback')).toBeTruthy();
   });
 
   test('changing a part moves the whole part, so no part can pay both teams', () => {
     renderScorer(bounceFormat());
-    recordBonusParts(['+10', 'Bounce', 'Miss']);
+    recordBonusParts(['controlled', 'bounceback', 'missed']);
     openEditorFromRecent(1);
 
     fireEvent.click(outcomeButton(1, 'Bonus part 1 bounced back to Greenwood'));
@@ -821,32 +829,32 @@ describe('who got each bonus part', () => {
       'aria-pressed',
       'true',
     );
-    expect(outcomeButton(1, 'Bonus part 1 missed')).toHaveAttribute('aria-pressed', 'false');
+    expect(outcomeButton(1, 'No points on bonus part 1')).toHaveAttribute('aria-pressed', 'false');
     expect(within(editor()).getByText('Ninety Six 0 · Greenwood +20 bounceback')).toBeTruthy();
 
-    fireEvent.click(outcomeButton(2, 'Bonus part 2 missed'));
+    fireEvent.click(outcomeButton(2, 'No points on bonus part 2'));
     expect(chosenOutcomes(3)).toEqual([
       'Bonus part 1 bounced back to Greenwood',
-      'Bonus part 2 missed',
-      'Bonus part 3 missed',
+      'No points on bonus part 2',
+      'No points on bonus part 3',
     ]);
     expect(within(editor()).getByText('Ninety Six 0 · Greenwood +10 bounceback')).toBeTruthy();
   });
 
   test('a bonus nobody scored says so rather than showing a row of zeroes', () => {
     renderScorer(bounceFormat());
-    recordBonusParts(['+10', 'Bounce', 'Miss']);
+    recordBonusParts(['controlled', 'bounceback', 'missed']);
     openEditorFromRecent(1);
 
-    fireEvent.click(outcomeButton(1, 'Bonus part 1 missed'));
-    fireEvent.click(outcomeButton(2, 'Bonus part 2 missed'));
+    fireEvent.click(outcomeButton(1, 'No points on bonus part 1'));
+    fireEvent.click(outcomeButton(2, 'No points on bonus part 2'));
 
     expect(within(editor()).getByText('Nobody scored this bonus.')).toBeTruthy();
   });
 
   test('the totals, the score preview and the saved game all follow the parts', () => {
     renderScorer(bounceFormat());
-    recordBonusParts(['+10', 'Bounce', 'Miss']);
+    recordBonusParts(['controlled', 'bounceback', 'missed']);
     expect(scoreOf('Ninety Six')).toBe('20');
     expect(scoreOf('Greenwood')).toBe('10');
     openEditorFromRecent(1);
@@ -868,18 +876,18 @@ describe('who got each bonus part', () => {
     renderScorer(formatFor());
     recordBonusTotals(20);
     openEditorFromRecent(1);
-    fireEvent.click(screen.getByText('Edit individual parts…'));
+    fireEvent.click(screen.getByText('Edit by part'));
 
     expect(
       within(partOutcomes(1))
         .getAllByRole('button')
         .map((button) => button.getAttribute('aria-label')),
-    ).toEqual(['Bonus part 1 to Ninety Six', 'Bonus part 1 missed']);
+    ).toEqual(['Bonus part 1 to Ninety Six', 'No points on bonus part 1']);
     expect(editor().querySelector('.scorer-question-part-head')?.textContent).toBe('Ninety Six');
 
     fireEvent.click(outcomeButton(1, 'Bonus part 1 to Ninety Six'));
     fireEvent.click(outcomeButton(2, 'Bonus part 2 to Ninety Six'));
-    fireEvent.click(outcomeButton(3, 'Bonus part 3 missed'));
+    fireEvent.click(outcomeButton(3, 'No points on bonus part 3'));
 
     expect(within(editor()).getByText('Ninety Six +20')).toBeTruthy();
     fireEvent.click(screen.getByText('Save changes'));
@@ -899,7 +907,7 @@ describe('who got each bonus part', () => {
     );
     recordBonusTotals(10, 5);
     openEditorFromRecent(1);
-    fireEvent.click(screen.getByText('Edit individual parts…'));
+    fireEvent.click(screen.getByText('Edit by part'));
 
     expect(within(editor()).getAllByRole('group', { name: /^Bonus part \d+ outcome$/ })).toHaveLength(4);
     expect(outcomeButton(4, 'Bonus part 4 to Ninety Six')).toBeTruthy();
@@ -916,7 +924,7 @@ describe('who got each bonus part', () => {
     fireEvent.click(outcomeButton(1, 'Bonus part 1 to Ninety Six'));
     fireEvent.click(outcomeButton(2, 'Bonus part 2 to Ninety Six'));
     fireEvent.click(outcomeButton(3, 'Bonus part 3 bounced back to Greenwood'));
-    fireEvent.click(outcomeButton(4, 'Bonus part 4 missed'));
+    fireEvent.click(outcomeButton(4, 'No points on bonus part 4'));
 
     expect(within(editor()).getByText('Ninety Six +10 · Greenwood +5 bounceback')).toBeTruthy();
   });
@@ -938,7 +946,7 @@ describe('turning a recorded total into parts', () => {
     expect(scoreOf('Greenwood')).toBe('10');
     openEditorFromRecent(1);
 
-    fireEvent.click(screen.getByText('Edit individual parts…'));
+    fireEvent.click(screen.getByText('Edit by part'));
 
     // Nothing invented: no part claims to know what happened to it.
     expect(chosenOutcomes(3)).toEqual(['none', 'none', 'none']);
@@ -953,7 +961,7 @@ describe('turning a recorded total into parts', () => {
     renderScorer(bounceFormat());
     recordBonusTotals(20, 10);
     openEditorFromRecent(1);
-    fireEvent.click(screen.getByText('Edit individual parts…'));
+    fireEvent.click(screen.getByText('Edit by part'));
 
     fireEvent.click(outcomeButton(1, 'Bonus part 1 to Ninety Six'));
     fireEvent.click(screen.getByText('Save changes'));
@@ -969,11 +977,11 @@ describe('turning a recorded total into parts', () => {
     renderScorer(bounceFormat());
     recordBonusTotals(20, 10);
     openEditorFromRecent(1);
-    fireEvent.click(screen.getByText('Edit individual parts…'));
+    fireEvent.click(screen.getByText('Edit by part'));
 
     fireEvent.click(outcomeButton(1, 'Bonus part 1 to Ninety Six'));
     fireEvent.click(outcomeButton(2, 'Bonus part 2 bounced back to Greenwood'));
-    fireEvent.click(outcomeButton(3, 'Bonus part 3 missed'));
+    fireEvent.click(outcomeButton(3, 'No points on bonus part 3'));
 
     expect(within(editor()).queryByText(/Still to answer/)).toBeNull();
     expect(within(editor()).getByText('Ninety Six +10 · Greenwood +10 bounceback')).toBeTruthy();
@@ -986,7 +994,7 @@ describe('turning a recorded total into parts', () => {
 
   test('going back to totals keeps what the bonus is worth and drops only the detail', () => {
     renderScorer(bounceFormat());
-    recordBonusParts(['+10', 'Bounce', '+10']);
+    recordBonusParts(['controlled', 'bounceback', 'controlled']);
     openEditorFromRecent(1);
 
     fireEvent.click(screen.getByText('Enter totals instead'));

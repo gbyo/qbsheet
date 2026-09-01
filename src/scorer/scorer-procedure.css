@@ -712,51 +712,249 @@
   }
 }
 
-/* Bonus parts. One row per part, the choices in a line, and the running total under them. */
+/*
+ * The live bonus, part by part.
+ *
+ * One stable grid: a column per team plus one for a part nobody got, and a row per part that never
+ * moves. The headings are what make two identical `+10` buttons mean different things, so the rows
+ * and the heading share one grid rather than a flex row with a guessed label width — a long team
+ * name is the ordinary case, not the exception.
+ */
 .scorer-bonus-parts {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
+.scorer-part-head,
+.scorer-part-row {
+  display: grid;
+  grid-template-columns: 64px repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  align-items: center;
+}
+
+/* Without bouncebacks a part is taken or missed, and the opponent column has nothing to hold. */
+.scorer-part-head.is-two-way,
+.scorer-part-row.is-two-way {
+  grid-template-columns: 64px repeat(2, minmax(0, 1fr));
+}
+
+.scorer-part-head {
+  padding-bottom: 2px;
+  font-size: 0.75rem;
+  color: var(--room-muted);
+}
+
+/*
+ * A long team name is truncated rather than allowed to widen its column, and stays available in
+ * full to anything that reads the buttons — every one of which names its own team and part.
+ */
+.scorer-part-column {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Says what the second column is for, so "bounceback" explains the format without being the answer. */
+.scorer-part-column-note {
+  font-size: 0.6875rem;
+  color: var(--room-faint);
+}
+
 .scorer-part-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
+/*
+ * The part being asked about, and the ones already answered.
+ *
+ * A left rule and full-strength text on the active row; answered rows go quiet but stay entirely
+ * legible and entirely pressable, because correcting part 1 after answering part 2 is an ordinary
+ * thing to need and not a mode to enter.
+ */
 .scorer-part-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+  padding-left: 8px;
+  border-left: 2px solid transparent;
+}
+
+.scorer-part-row.is-active {
+  border-left-color: var(--room-accent);
+}
+
+.scorer-part-row.is-active .scorer-part-label {
+  font-weight: 600;
+  color: var(--room-text);
 }
 
 .scorer-part-label {
-  width: 60px;
-  flex-shrink: 0;
+  min-width: 0;
   font-size: 0.8125rem;
   color: var(--room-muted);
 }
 
-/*
- * Under the bounceback choices, not beside them.
- *
- * It is the way out of a stage whose buttons are the primary action, so it must not sit in the row
- * a scorekeeper is aiming at — a mispress there records a bounceback instead of going back, which is
- * the mistake this control exists to fix.
- */
-.scorer-prompt-back {
-  display: block;
-  margin-top: 12px;
+.scorer-part-row .scorer-choice {
+  min-width: 0;
+  padding: 10px 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
+/*
+ * Selected is a fill, a heavier weight and a tick — three cues, so which team got a part does not
+ * rest on the accent colour being distinguishable.
+ */
+.scorer-part-row .scorer-choice.is-selected {
+  font-weight: 600;
+}
+
+/*
+ * A non-breaking space: a trailing one in `content` collapses and the tick lands on the number.
+ *
+ * Excluding the presentation labels, because in the inert exit copy the same pseudo-element is what
+ * paints the button's text. That copy gets the tick as part of its label instead, one rule down, so
+ * the snapshot still shows which outcome was pressed.
+ */
+.scorer-part-row .scorer-choice.is-selected:not([data-presentation-label])::before {
+  content: '✓\00a0';
+}
+
+.scorer-bonus-exit .scorer-part-row .scorer-choice.is-selected[data-presentation-label]::before {
+  content: '✓\00a0' attr(data-presentation-label);
+}
+
+/*
+ * Parts still to come: on screen, in place, and pressable, but not competing for attention with the
+ * one the moderator is reading. Reaching ahead is allowed — a quiet control is not a disabled one —
+ * so hover and focus bring a later row back to full strength.
+ */
+.scorer-part-row:not(.is-active):not(.is-answered) .scorer-choice {
+  opacity: 0.72;
+}
+
+.scorer-part-row:not(.is-active):not(.is-answered) .scorer-choice:hover:not(:disabled),
+.scorer-part-row:not(.is-active):not(.is-answered) .scorer-choice:focus-visible {
+  opacity: 1;
+}
+
+/* The column heading names the team on wide screens; this repeats it once the heading folds away. */
+.scorer-part-choice-team {
+  display: none;
+}
+
+/*
+ * Who has what, in the only terms that matter at the table. Not "20 controlled · 10 bounceback".
+ */
 .scorer-part-total {
   margin: 0;
   font-size: 1.125rem;
   font-variant-numeric: tabular-nums;
+}
+
+.scorer-part-total-team {
+  white-space: nowrap;
+}
+
+.scorer-part-progress {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--room-muted);
+}
+
+/*
+ * Narrow enough that four columns would be four slivers: the heading row goes, each part becomes a
+ * block, and the buttons name their own team instead of relying on a heading that is no longer
+ * there. Part N still leads the block, so which outcomes belong to which part stays obvious, and the
+ * targets get taller rather than narrower.
+ */
+@media (max-width: 560px) {
+  .scorer-part-head {
+    display: none;
+  }
+
+  .scorer-part-row,
+  .scorer-part-row.is-two-way {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+    padding-bottom: 6px;
+  }
+
+  .scorer-part-row .scorer-choice {
+    justify-self: stretch;
+    padding: 12px 10px;
+    text-align: left;
+  }
+
+  .scorer-part-choice-team {
+    display: inline;
+  }
+}
+
+/*
+ * Bonus totals, with both teams on one panel.
+ *
+ * Stacked rather than side by side: the opponent's choices depend on the controlling team's, and a
+ * column layout would put the second row where the first one's answer is not yet visible.
+ */
+.scorer-bonus-totals {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.scorer-bonus-total-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* Says whose points these are, in the same 12px muted label the typed fields carry. */
+.scorer-bonus-total-label {
+  overflow: hidden;
+  font-size: 0.75rem;
+  color: var(--room-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Both teams asked for at once, because a room reading out two numbers should give them once. */
+.scorer-bonus-typed {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.scorer-bonus-typed-team {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.scorer-bonus-typed label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.8125rem;
+  color: var(--room-muted);
+}
+
+.scorer-bonus-typed input {
+  width: 120px;
+  padding: 8px;
+  font: inherit;
+  color: var(--room-text);
+  background: var(--room-surface);
+  border: 1px solid var(--room-border-strong);
+  border-radius: 4px;
 }
 
 /* #endregion */

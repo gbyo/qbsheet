@@ -23,6 +23,8 @@ export function numberMotion(from: number, to: number, token = 1): INumberMotion
 
 export const numberMotionMs = 180;
 export const noBuzzAcknowledgementMotionMs = 170;
+/** How long a chosen bonus part keeps its press acknowledgement and its row keeps the wash. */
+export const partAcknowledgementMotionMs = 200;
 export const bonusExitMotionMs = 180;
 export const recentMotionMs = 200;
 export const connectionRecoveryMotionMs = 320;

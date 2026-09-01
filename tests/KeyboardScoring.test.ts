@@ -8,6 +8,9 @@ import {
   availableActionKeys,
   bonusKeyLegend,
   bonusOptionForCode,
+  bonusPartChoices,
+  bonusPartKeyLegend,
+  bonusPartOutcomeForCode,
   keyboardActionLabels,
   keyboardSeatCount,
   keyboardSeatNumbers,
@@ -243,5 +246,52 @@ describe('bonus digits', () => {
 
     expect(bonusKeyLegend(many)).toHaveLength(10);
     expect(bonusOptionForCode('Digit9', many)).toBe(9);
+  });
+});
+
+/**
+ * The other question a bonus can ask.
+ *
+ * A part is not a number of points, so its digits are not positions in a row of totals. They answer
+ * "who scored this?" — and the legend that goes with them has to say so in the names of the teams in
+ * the room, because "controlled" and "bounce" are the storage and not the answer.
+ */
+describe('bonus part digits', () => {
+  const teams = { controllingTeamName: 'Ninety Six', opponentName: 'Greenwood' };
+
+  test('the choices name the part and both teams, in screen order', () => {
+    expect(bonusPartChoices({ partNumber: 2, ...teams, bounceBack: true })).toEqual([
+      { outcome: 'controlled', key: '1', meaning: 'part 2 to Ninety Six' },
+      { outcome: 'bounceback', key: '2', meaning: 'part 2 to Greenwood' },
+      { outcome: 'missed', key: '0', meaning: 'no points on part 2' },
+    ]);
+  });
+
+  test('a format without bouncebacks has no second team to offer, so 2 addresses nothing', () => {
+    const choices = bonusPartChoices({ partNumber: 1, ...teams, bounceBack: false });
+
+    expect(choices.map((choice) => choice.outcome)).toEqual(['controlled', 'missed']);
+    expect(bonusPartOutcomeForCode('Digit2', choices)).toBeNull();
+  });
+
+  test('a number-row or numpad digit selects the outcome it is printed against', () => {
+    const choices = bonusPartChoices({ partNumber: 1, ...teams, bounceBack: true });
+
+    expect(bonusPartOutcomeForCode('Digit1', choices)).toBe('controlled');
+    expect(bonusPartOutcomeForCode('Numpad2', choices)).toBe('bounceback');
+    expect(bonusPartOutcomeForCode('Digit0', choices)).toBe('missed');
+    expect(bonusPartOutcomeForCode('Digit3', choices)).toBeNull();
+    expect(bonusPartOutcomeForCode('KeyA', choices)).toBeNull();
+  });
+
+  test('the legend prints one row per choice, saying exactly what that key does now', () => {
+    const legend = bonusPartKeyLegend(bonusPartChoices({ partNumber: 3, ...teams, bounceBack: true }));
+
+    expect(legend.map((row) => `${row.keys}=${row.meaning}`)).toEqual([
+      '1=part 3 to Ninety Six',
+      '2=part 3 to Greenwood',
+      '0=no points on part 3',
+    ]);
+    expect(legend.every((row) => row.available)).toBe(true);
   });
 });
