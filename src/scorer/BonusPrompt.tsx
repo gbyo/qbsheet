@@ -366,13 +366,6 @@ export default function BonusPrompt(props: IBonusPromptProps) {
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [keyboardEnabled, byParts, controlled]);
 
-  const title = (
-    <p className="scorer-prompt-title">
-      <span className="scorer-prompt-team">{controllingTeamName}</span> bonus
-      <span className="scorer-prompt-context">Q{questionNumber}</span>
-    </p>
-  );
-
   if (byParts && partCount !== null) {
     const complete = activeIndex === -1;
     /** Three cues on a chosen outcome — fill, weight and a tick — so it does not rest on colour. */
@@ -427,6 +420,22 @@ export default function BonusPrompt(props: IBonusPromptProps) {
             <span className="scorer-prompt-context">
               Q{questionNumber} · {partCount} {partCount === 1 ? 'part' : 'parts'}, {perPart} each
             </span>
+            {/*
+              Up here with what this panel is, not down among the answers.
+              
+              It is a way of saying "ask me differently", which is a different kind of thing from
+              the buttons that answer the question — and putting it under them left it floating
+              below the panel looking like a stray link, in reach of a hand aiming at Record. Being
+              in the heading also puts it as far as it can be from the controls a mispress would
+              cost something.
+            */}
+            <button
+              type="button"
+              className="scorer-text-action scorer-prompt-switch"
+              onClick={() => setByParts(false)}
+            >
+              Enter totals instead
+            </button>
           </p>
           {/*
             The format, explained once, in a sentence, where a subtitle goes — rather than as a note
@@ -508,7 +517,7 @@ export default function BonusPrompt(props: IBonusPromptProps) {
               <button
                 ref={recordRef}
                 type="button"
-                className="scorer-choice scorer-part-record"
+                className="scorer-submit scorer-part-record"
                 disabled={!complete}
                 onClick={recordParts}
               >
@@ -520,29 +529,29 @@ export default function BonusPrompt(props: IBonusPromptProps) {
                 </p>
               )}
             </div>
-            {/*
-              For the bonus somebody was given as totals afterwards, or a cycle being reconstructed.
-              Quiet, and never sticky: the next bonus opens on its parts again.
-            */}
-            <button type="button" className="scorer-text-action" onClick={() => setByParts(false)}>
-              Enter totals instead
-            </button>
           </div>
         </div>
       </section>
     );
   }
 
-  const scoreByPart = partCount !== null && (
-    <button type="button" className="scorer-text-action" onClick={() => setByParts(true)}>
-      Score by part
-    </button>
-  );
-
   return (
     <section className="scorer-prompt scorer-bonus-prompt" aria-label="Bonus">
       <div className="scorer-prompt-content">
-        {title}
+        <p className="scorer-prompt-title">
+          <span className="scorer-prompt-team">{controllingTeamName}</span> bonus
+          <span className="scorer-prompt-context">Q{questionNumber}</span>
+          {/* The same switch in the same place, so the two ways in are each other's opposite. */}
+          {partCount !== null && (
+            <button
+              type="button"
+              className="scorer-text-action scorer-prompt-switch"
+              onClick={() => setByParts(true)}
+            >
+              Score by part
+            </button>
+          )}
+        </p>
         {totals !== null ? (
           /*
             One stationary panel with both teams on it, rather than the controlling team's screen
@@ -608,7 +617,6 @@ export default function BonusPrompt(props: IBonusPromptProps) {
                 )}
               </div>
             )}
-            {scoreByPart}
           </div>
         ) : (
           /*

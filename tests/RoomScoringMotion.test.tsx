@@ -52,7 +52,6 @@ describe('shared scoring motion primitives', () => {
     expect(reduced).toContain('.scorer-bonus-exit');
     expect(reduced).toContain('.scorer-conn.is-recovered .scorer-dot::after');
     expect(reduced).toContain('.scorer-rail-item.is-motion-ghost');
-    expect(reduced).toContain('.scorer-part-row');
     expect(reduced).toContain('transform: none !important');
   });
 
@@ -71,13 +70,22 @@ describe('shared scoring motion primitives', () => {
       css.indexOf('.scorer-clock-digits {'),
     );
 
-    // Every animation on the part rows is inside the no-preference block.
+    // Every animation and transition on the part rows is inside the no-preference block.
     const noPreference = preferred.slice(preferred.indexOf('@media (prefers-reduced-motion: no-preference)'));
     expect(noPreference).toContain('.scorer-part-row.is-part-set');
-    expect(noPreference).toContain('.scorer-part-row.is-active');
+    expect(noPreference).toContain('transition:');
     expect(preferred.indexOf('.scorer-part-row.is-part-set')).toBeGreaterThan(
       preferred.indexOf('@media (prefers-reduced-motion: no-preference)'),
     );
+
+    /*
+     * Nothing about the bonus panel travels.
+     *
+     * Emphasis moving down the parts is a change of weight and rule, never a change of position:
+     * the row a finger is already on its way to must not shift under it, and a few pixels of rise
+     * three times a bonus is a tic somebody at this table all day would come to feel.
+     */
+    expect(preferred).not.toContain('translate');
 
     // The state itself is plain layout, in the procedure sheet, under no motion query at all.
     const procedure = readFileSync(
@@ -92,7 +100,7 @@ describe('shared scoring motion primitives', () => {
     for (const rule of [
       '.scorer-part-row.is-active {',
       '.scorer-part-row .scorer-choice.is-selected',
-      '.scorer-part-row:not(.is-active):not(.is-answered) .scorer-choice {',
+      '.scorer-part-row:not(.is-active):not(.is-answered) .scorer-choice:not(.is-selected) {',
     ]) {
       expect(bonusRegion).toContain(rule);
     }

@@ -441,40 +441,42 @@
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  /* The acknowledgement that this part landed, on the row rather than under the finger that made it. */
-  .scorer-part-row.is-part-set {
-    animation: qbsheet-part-row-wash 200ms var(--room-ease-out) both;
+  /*
+   * Which part is being asked about, moved as a transition rather than played as an animation.
+   *
+   * A keyframe here would be an event, and this is a state: it would restart whenever the row
+   * re-rendered, and a scorekeeper correcting an earlier part would watch the emphasis replay at
+   * them. A transition just goes where it is told, is interruptible, and costs nothing when it is
+   * already there. Nothing moves — the rule and the label change weight, and the row a finger is
+   * travelling to stays exactly where it was.
+   */
+  .scorer-part-row {
+    transition:
+      border-color var(--room-motion-fast) var(--room-ease-standard),
+      background-color var(--room-motion-fast) var(--room-ease-standard);
   }
 
   /*
-   * The part now being asked about. A few pixels and an opacity change, because the emphasis moving
-   * down the list is the whole progress indicator and it must not read as the list itself shifting.
+   * The acknowledgement that this part landed, on the row rather than under the finger that made it.
+   *
+   * Neutral rather than tinted, and barely there. This plays three times a bonus and twenty bonuses
+   * a game for somebody who is at this table all day; the press already answers itself where it was
+   * made — the button fills, ticks and settles — so the row only has to confirm which line it
+   * belonged to.
    */
-  .scorer-part-row.is-active {
-    animation: qbsheet-part-active 140ms var(--room-ease-out) both;
+  .scorer-part-row.is-part-set {
+    animation: qbsheet-part-row-wash 200ms var(--room-ease-out) both;
   }
 }
 
 @keyframes qbsheet-part-row-wash {
   0%,
   45% {
-    background-color: var(--room-info-bg);
+    background-color: var(--room-surface);
   }
 
   100% {
     background-color: transparent;
-  }
-}
-
-@keyframes qbsheet-part-active {
-  from {
-    opacity: 0.75;
-    transform: translateY(3px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
   }
 }
 
@@ -772,7 +774,6 @@
     .scorer-answer.is-recorded,
     .scorer-player.is-ruling-recorded,
     .scorer-choice.is-part-recorded,
-    .scorer-part-row,
     .scorer-clock-digits,
     .scorer-clock-icon,
     .scorer-rail-item,

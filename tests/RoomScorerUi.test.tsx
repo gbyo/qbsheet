@@ -470,9 +470,13 @@ describe('scoring a tossup', () => {
 
     /*
      * Totals, because nothing bounces here: one press is the whole bonus and enumerating three parts
-     * would be three presses for a number the room already said. Part entry stays one press away.
+     * would be three presses for a number the room already said. Part entry stays one press away —
+     * up in the heading rather than among the totals, out of reach of a hand aiming at one.
      */
-    expect(choices.map((button) => button.textContent)).toEqual(['0', '10', '20', '30', 'Score by part']);
+    expect(choices.map((button) => button.textContent)).toEqual(['Score by part', '0', '10', '20', '30']);
+    expect(within(screen.getByLabelText('Bonus')).getByRole('button', { name: 'Score by part' })).toHaveClass(
+      'scorer-prompt-switch',
+    );
   });
 
   test('a four-part bonus offers a fifth button', () => {
@@ -489,12 +493,12 @@ describe('scoring a tossup', () => {
     const choices = within(screen.getByLabelText('Bonus')).getAllByRole('button');
 
     expect(choices.map((button) => button.textContent)).toEqual([
+      'Score by part',
       '0',
       '10',
       '20',
       '30',
       '40',
-      'Score by part',
     ]);
   });
 

@@ -728,6 +728,18 @@
   gap: 8px;
 }
 
+/*
+ * The way of asking for this bonus differently, at the far end of the line that says what it is.
+ *
+ * Pushed there so it is the furthest control on the panel from the ones being pressed: it abandons
+ * a part breakdown, and it must not be sitting where a hand travelling to Record could catch it.
+ * Under the grid it read as a stray link below the panel rather than as part of it.
+ */
+.scorer-prompt-switch {
+  margin-inline-start: auto;
+  font-size: 0.75rem;
+}
+
 /* The format in a sentence, under the title, where a subtitle goes. */
 .scorer-prompt-note {
   margin: -6px 0 10px;
@@ -811,16 +823,23 @@
 
 /*
  * Parts still to come: on screen, in place, and pressable, but not competing for attention with the
- * one the moderator is reading. Reaching ahead is allowed — a quiet control is not a disabled one —
- * so hover and focus bring a later row back to full strength.
+ * one the moderator is reading.
+ *
+ * The muted text and lighter border are the pair this sheet already uses everywhere for a control
+ * that is available but not the one being asked for. Dimming the whole button with opacity was the
+ * shorter way to write it and the wrong one: it takes the contrast of the team name down with it,
+ * and a name a scorekeeper has to squint at is the opposite of the point. Reaching ahead is
+ * ordinary — a quiet control is not a disabled one — so hover and focus bring it back to strength.
  */
-.scorer-part-row:not(.is-active):not(.is-answered) .scorer-choice {
-  opacity: 0.72;
+.scorer-part-row:not(.is-active):not(.is-answered) .scorer-choice:not(.is-selected) {
+  color: var(--room-muted);
+  border-color: var(--room-border);
 }
 
 .scorer-part-row:not(.is-active):not(.is-answered) .scorer-choice:hover:not(:disabled),
 .scorer-part-row:not(.is-active):not(.is-answered) .scorer-choice:focus-visible {
-  opacity: 1;
+  color: var(--room-text);
+  border-color: var(--room-border-strong);
 }
 
 /* What the parts come to, and the press that writes them, on one line under the grid. */
@@ -846,7 +865,13 @@
   white-space: nowrap;
 }
 
-/* The one press on this panel that changes the game, so it does not sit in the row being aimed at. */
+/*
+ * The one press on this panel that changes the game.
+ *
+ * `scorer-submit` rather than `scorer-choice`: it is the same act as every other commit in the app
+ * and wears the same button, which also keeps it from reading as a fourth outcome sitting beside
+ * the three that answer a part. Pushed to the end of the line, away from what is being aimed at.
+ */
 .scorer-part-record {
   margin-inline-start: auto;
 }
@@ -920,7 +945,7 @@
    * an ordinary bonus from nine stacked buttons down to three compact blocks.
    */
   .scorer-part-record {
-    padding-block: 12px;
+    padding: 12px 16px;
   }
 }
 
@@ -965,24 +990,6 @@
   flex-direction: column;
   gap: 4px;
   min-width: 0;
-}
-
-.scorer-bonus-typed label {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 0.8125rem;
-  color: var(--room-muted);
-}
-
-.scorer-bonus-typed input {
-  width: 120px;
-  padding: 8px;
-  font: inherit;
-  color: var(--room-text);
-  background: var(--room-surface);
-  border: 1px solid var(--room-border-strong);
-  border-radius: 4px;
 }
 
 /* #endregion */

@@ -908,7 +908,8 @@ div.scorer-banner .scorer-banner-message {
   flex-wrap: wrap;
 }
 
-.scorer-inline-form label {
+.scorer-inline-form label,
+.scorer-bonus-typed label {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -916,7 +917,8 @@ div.scorer-banner .scorer-banner-message {
   color: var(--room-muted);
 }
 
-.scorer-inline-form input {
+.scorer-inline-form input,
+.scorer-bonus-typed input {
   width: 120px;
   padding: 8px;
   font: inherit;
