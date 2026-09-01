@@ -1,0 +1,13 @@
+/*
+ * Compound scorer interaction states that need to win after the component styles are combined.
+ *
+ * A selected choice already uses the accent surface. The generic choice hover rule is intentionally
+ * pale for an unselected option, but it is more specific than `.scorer-choice.is-selected`, so it
+ * used to replace the selected background while leaving the selected foreground in place. That
+ * produced white-on-nearly-white text in the light theme.
+ */
+.scorer-choice.is-selected:hover:not(:disabled) {
+  color: var(--room-on-accent);
+  background: var(--room-accent-hover);
+  border-color: var(--room-accent-hover);
+}
