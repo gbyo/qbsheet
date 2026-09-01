@@ -53,6 +53,14 @@ interface IPendingPlayedGame {
   state: Exclude<MatchPlayState, 'unplayed'>;
 }
 
+interface IPendingProcedureOverride {
+  source: IQbjSource;
+  index: number;
+  overrides: IGameDefinitionOverrides;
+  state: MatchPlayState;
+  unsupportedVersion: number;
+}
+
 export default function GameFileOpen(props: {
   label?: string;
   onOpen: (definition: IGameDefinition) => void | Promise<void>;
@@ -68,6 +76,7 @@ export default function GameFileOpen(props: {
   const [needsRules, setNeedsRules] = useState<IPendingSetup | null>(null);
   const [needsRoster, setNeedsRoster] = useState<IPendingSetup | null>(null);
   const [playedGame, setPlayedGame] = useState<IPendingPlayedGame | null>(null);
+  const [procedureOverride, setProcedureOverride] = useState<IPendingProcedureOverride | null>(null);
   const readInFlight = useRef(false);
 
   /*
@@ -91,9 +100,22 @@ export default function GameFileOpen(props: {
     setNeedsRules(null);
     setNeedsRoster(null);
     setPlayedGame(null);
+    setProcedureOverride(null);
     try {
       const result = await new FileGameSource(file).open();
       if (!result.ok) {
+        if (result.source && result.index !== undefined && result.unsupportedProcedureVersion !== undefined) {
+          setProcedureOverride({
+            source: result.source,
+            index: result.index,
+            overrides: {},
+            state:
+              result.source.candidates.find((candidate) => candidate.index === result.index)?.state ??
+              'unplayed',
+            unsupportedVersion: result.unsupportedProcedureVersion,
+          });
+          return;
+        }
         // A gap the room can answer gets a form; anything else is something upstream has to fix, and
         // saying so plainly is the most useful thing this can do.
         if (result.source && (result.needsScoringRules || result.needsRoster)) {
@@ -147,8 +169,23 @@ export default function GameFileOpen(props: {
       setChoice(null);
       setNeedsRules(null);
       setNeedsRoster(null);
+      setProcedureOverride(null);
       if (state === 'unplayed') await accept(defined.definition);
       else setPlayedGame({ definition: defined.definition, state });
+      return;
+    }
+    if (defined.unsupportedProcedureVersion !== undefined) {
+      setChoice(null);
+      setNeedsRules(null);
+      setNeedsRoster(null);
+      setErrors([]);
+      setProcedureOverride({
+        source,
+        index,
+        overrides,
+        state,
+        unsupportedVersion: defined.unsupportedProcedureVersion,
+      });
       return;
     }
     const pending: IPendingSetup = { source, index, reason: defined.errors, overrides, teams: [], state };
@@ -199,9 +236,25 @@ export default function GameFileOpen(props: {
     );
   };
 
+  const applyProcedureOverride = async () => {
+    if (!procedureOverride) return;
+    await resolve(
+      procedureOverride.source,
+      procedureOverride.index,
+      { ...procedureOverride.overrides, continueWithModeratorInstructions: true },
+      procedureOverride.state,
+    );
+  };
+
   const restorePicker = (pending: IPendingSetup) => {
     setNeedsRules(null);
     setNeedsRoster(null);
+    setErrors([]);
+    setChoice({ source: pending.source, candidates: orderCandidates(pending.source.candidates) });
+  };
+
+  const restoreProcedurePicker = (pending: IPendingProcedureOverride) => {
+    setProcedureOverride(null);
     setErrors([]);
     setChoice({ source: pending.source, candidates: orderCandidates(pending.source.candidates) });
   };
@@ -261,6 +314,13 @@ export default function GameFileOpen(props: {
             void accept(definition);
           }}
           onCancel={() => setPlayedGame(null)}
+        />
+      )}
+      {procedureOverride && (
+        <ProcedureOverridePrompt
+          unsupportedVersion={procedureOverride.unsupportedVersion}
+          onContinue={() => void applyProcedureOverride()}
+          onCancel={() => restoreProcedurePicker(procedureOverride)}
         />
       )}
       {errors.length > 0 && (
@@ -354,6 +414,36 @@ function PlayedGamePrompt(props: {
       <div className="shell-actions">
         <button type="button" className="shell-button is-primary" onClick={onStart}>
           Start a new scoresheet
+        </button>
+        <button type="button" className="shell-button" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function ProcedureOverridePrompt(props: {
+  unsupportedVersion: number;
+  onContinue: () => void;
+  onCancel: () => void;
+}) {
+  const { unsupportedVersion, onContinue, onCancel } = props;
+  const version = unsupportedVersion > 0 ? `version ${unsupportedVersion}` : 'an unknown version';
+  return (
+    <section
+      className="file-played-warning file-procedure-warning"
+      aria-labelledby="procedure-override-title"
+    >
+      <h2 id="procedure-override-title">This room procedure cannot be enforced</h2>
+      <p>
+        The assignment uses {version}, which this QBSheet build does not understand. Automatic enforcement is
+        unavailable, but normal scoring can continue if the moderator gives the room instructions. The
+        decision will be recorded in the result and local audit.
+      </p>
+      <div className="shell-actions">
+        <button type="button" className="shell-button is-primary" onClick={onContinue}>
+          Continue using the moderator&apos;s instructions
         </button>
         <button type="button" className="shell-button" onClick={onCancel}>
           Cancel

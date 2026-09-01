@@ -238,6 +238,12 @@ export function validateGamePackage(value: unknown): GamePackageValidation {
         'The round has no usable revision. A game file must say which issue of the pairings it came from.',
       );
     }
+    if (
+      round.assignmentRevision !== undefined &&
+      (!Number.isInteger(round.assignmentRevision) || Number(round.assignmentRevision) < 1)
+    ) {
+      errors.push('The round assignment revision is not usable.');
+    }
     if (round.packetName !== undefined && !nonBlankString(round.packetName)) {
       errors.push('The packet name is not usable.');
     }
@@ -320,6 +326,7 @@ export function validateGamePackage(value: unknown): GamePackageValidation {
         number: round.number,
         name: round.name,
         revision: round.revision,
+        ...(round.assignmentRevision !== undefined ? { assignmentRevision: round.assignmentRevision } : {}),
         ...(round.packetName ? { packetName: round.packetName } : {}),
       },
       ...(room && (room.id || room.name)

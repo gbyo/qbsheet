@@ -25,11 +25,14 @@ export interface IEditableBonus {
 export interface IEditableQuestion {
   questionNumber: number;
   attempts: IEditableAttempt[];
-  /** Preserve the explicit interruption/resume state when a question is corrected. */
+  /**
+   * Historical marker retained so old event histories can be edited and round-tripped safely.
+   * It is not a live scoring input and never makes a later neg legal.
+   */
   readingResumed?: boolean;
-  /** Preserve the moderator's readout marker when a question is corrected. */
+  /** Historical marker retained for old event histories; not a live scoring input. */
   readout?: boolean;
-  /** A readout recorded before either team answered, rather than after the first attempt. */
+  /** Historical detail: a readout recorded before either team answered. */
   readoutBeforeAttempt?: boolean;
   dead: boolean;
   bonus?: IEditableBonus;
@@ -227,12 +230,7 @@ export function validateEditableQuestion(
       const answerType =
         attempt.answerTypeIndex === undefined ? undefined : format.answerTypes[attempt.answerTypeIndex];
       if (!answerType) errors.push(`Choose a valid ruling for Question ${model.questionNumber}.`);
-      else if (
-        answerType.isNeg &&
-        (model.readoutBeforeAttempt === true ||
-          (model.readout === true && previousAttempt) ||
-          (previousAttempt && model.readingResumed !== true))
-      )
+      else if (answerType.isNeg && previousAttempt)
         errors.push(`Question ${model.questionNumber} cannot have a second-team neg.`);
     } else if (
       attempt.playerName !== undefined &&
@@ -321,6 +319,8 @@ export function eventsFromEditableQuestion(
     };
   });
   const result: ScoreEvent[] = [];
+  // These markers are emitted only when a corrected question still carries legacy history. The
+  // ordinary live scorer never creates them; actual attempts and rulings are the correction source.
   if (model.readoutBeforeAttempt === true) {
     result.push({ id: idFactory(), type: 'tossup-readout', questionNumber: model.questionNumber });
   }

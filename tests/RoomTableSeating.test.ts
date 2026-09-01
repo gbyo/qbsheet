@@ -215,7 +215,7 @@ describe('who steps aside for them', () => {
 
 describe('the numbers during a drag', () => {
   test('they say where each player would be, not where they are', () => {
-    const drag = { from: 3, to: 1, deltaX: -220, pitch: 110 };
+    const drag = { from: 3, to: 1, delta: -220, pitch: 110 };
     expect([0, 1, 2, 3].map((seat) => previewSeatNumber(seat, drag))).toEqual([1, 3, 4, 2]);
   });
 

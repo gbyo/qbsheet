@@ -169,7 +169,7 @@ describe('the sequence legend', () => {
   test('says the format values and includes the wrong action', () => {
     const rows = sequenceLegend(oddFormat, true);
 
-    expect(rows.map((row) => row.meaning)).toEqual(['+20', 'S', '−10', 'wrong · 0']);
+    expect(rows.map((row) => row.meaning)).toEqual(['+20', 'S', '−10', 'wrong, no penalty · 0']);
     expect(rows.map((row) => row.keys)).toEqual(['seat → C', 'seat → P', 'seat → N', 'seat → 0']);
   });
 

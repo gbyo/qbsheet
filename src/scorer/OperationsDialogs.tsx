@@ -361,8 +361,8 @@ export function eventDescription(
     return `${event.playerName} ${value === undefined ? 'unknown ruling' : signed(value)}`;
   }
   if (event.type === 'tossup-no-penalty') return `${event.playerName ?? 'Answer'} wrong · 0 (no penalty)`;
-  if (event.type === 'tossup-reading-resumed') return 'Tossup reading resumed';
-  if (event.type === 'tossup-readout') return 'Tossup read out';
+  if (event.type === 'tossup-reading-resumed') return 'Historical marker · tossup reading resumed';
+  if (event.type === 'tossup-readout') return 'Historical marker · tossup read out';
   if (event.type === 'tossup-dead') return 'No buzz';
   if (event.type === 'bonus')
     return `Bonus ${event.controlledPoints ?? 0}${

@@ -202,7 +202,7 @@ describe('the drill itself', () => {
     const map = screen.getByLabelText('Keyboard scoring');
     expect(within(map).getByText('seat → P')).toBeTruthy();
     expect(within(map).getByText('+10')).toBeTruthy();
-    expect(within(map).getByText('wrong · 0')).toBeTruthy();
+    expect(within(map).getByText('wrong, no penalty · 0')).toBeTruthy();
     expect(within(map).getByText('no buzz')).toBeTruthy();
     expect(within(map).getByText('undo')).toBeTruthy();
 

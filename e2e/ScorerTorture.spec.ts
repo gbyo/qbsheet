@@ -148,7 +148,7 @@ test('production keyboard scoring records seat rulings, bonuses, and safe focus 
   await page.keyboard.press('1');
   await page.keyboard.press('c');
   await expect(page.getByLabel('Ninety Six A score')).toHaveText('10');
-  await expect(page.getByLabel('Bonus')).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Bonus' })).toBeVisible();
   // The bonus digit is the number of parts, so two parts — 20 points here — is 2.
   await page.keyboard.press('2');
   await expect(page.getByText('Tossup 2 of 20', { exact: true })).toBeVisible();
@@ -198,7 +198,7 @@ test('a real scorer session survives fast input, reload, correction, completion,
   // A hurried double-click must still record one tossup, not two events or two questions.
   await page.getByRole('button', { name: 'Sarah Mitchell 15', exact: true }).dblclick();
   await expect(page.getByLabel('Ninety Six A score')).toHaveText('15');
-  await expect(page.getByLabel('Bonus')).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Bonus' })).toBeVisible();
   await chooseBonus(page, 20);
   await expect(page.getByText('Tossup 2 of 20', { exact: true })).toBeVisible();
 

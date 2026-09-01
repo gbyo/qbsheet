@@ -56,6 +56,11 @@
   margin-left: auto;
 }
 
+/* Slightly tighter than the layout switch beside it: a facet of the table, not a peer of it. */
+.scorer-layout-orientation .scorer-layout-option {
+  padding: 4px 10px;
+}
+
 /*
  * Two options, one of them current.
  *
@@ -284,6 +289,59 @@
   min-width: 0;
 }
 
+/*
+ * The same table, seen from the end of the room.
+ *
+ * A scorekeeper beside the moderator is looking *down* the tables rather than across them, and the
+ * seats run away from them. So the strip becomes a column and nothing else changes: same tiles, same
+ * order, same numbers, same picker, same drag with its axis turned. Drawing it as a row and asking
+ * somebody to rotate the room in their head is the cost this removes.
+ *
+ * The two teams stay side by side, because they are still on opposite sides of the room.
+ */
+[data-orientation='down'] .scorer-table-seats {
+  grid-auto-flow: row;
+  grid-auto-columns: auto;
+  grid-auto-rows: minmax(52px, auto);
+  overflow-x: visible;
+  overflow-y: auto;
+}
+
+/*
+ * A chair, lying down.
+ *
+ * Shorter and wider: a column of four full-height tiles would be taller than the space between the
+ * notices and the control bar, and the number no longer needs its own line when there is a whole
+ * row's width to put it on.
+ */
+[data-orientation='down'] .scorer-table-player {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 8px 12px;
+}
+
+[data-orientation='down'] .scorer-table-player-seat {
+  flex: none;
+  width: 1.25em;
+}
+
+[data-orientation='down'] .scorer-table-player-name {
+  flex: 1 1 auto;
+}
+
+/* Down the tile's own edges rather than across them, because that is where the neighbours are. */
+[data-orientation='down'] .scorer-table-nudge {
+  flex-direction: column;
+  padding: 2px 0;
+}
+
+[data-orientation='down'] .scorer-table-nudge-action {
+  width: 32px;
+  min-height: 20px;
+}
+
 /* The FLIP transform for a seat travelling to a new position. See `LineupMotion`. */
 @media (prefers-reduced-motion: no-preference) {
   .scorer-table-seat.is-moving {
@@ -404,6 +462,11 @@
   border-style: dashed;
   touch-action: pan-y;
   user-select: none;
+}
+
+/* Down the table instead: the gesture claims the axis the seats are on, and leaves the other. */
+[data-orientation='down'] .scorer-table-player.is-arranging {
+  touch-action: pan-x;
 }
 
 .scorer-table-player.is-arranging:hover {
@@ -784,30 +847,49 @@
  * each team — the physical order is the point of this view and does not bend to a viewport.
  */
 @media (max-width: 820px) {
-  .scorer-table-teams {
+  .scorer-table-view[data-orientation='across'] .scorer-table-teams {
     grid-template-columns: 1fr;
   }
 
-  .scorer-table-teams::before {
+  .scorer-table-view[data-orientation='across'] .scorer-table-teams::before {
     grid-column: 1;
     grid-row: 2;
     height: 1px;
   }
 
-  .scorer-table-team:first-of-type {
+  .scorer-table-view[data-orientation='across'] .scorer-table-team:first-of-type {
     grid-column: 1;
     grid-row: 1;
   }
 
-  .scorer-table-team:last-of-type {
+  .scorer-table-view[data-orientation='across'] .scorer-table-team:last-of-type {
     grid-column: 1;
     grid-row: 3;
+  }
+
+  /*
+   * A table running downwards does not stack.
+   *
+   * Two narrow columns are exactly what a phone has room for, and stacking them would turn one
+   * screenful into two — which is the thing stacking exists to avoid. So the width that squeezes a
+   * pair of horizontal tables is a width the vertical ones are already the right shape for.
+   */
+  [data-orientation='down'] .scorer-table-team {
+    padding: 12px 10px;
+  }
+
+  [data-orientation='down'] .scorer-table-surface {
+    padding: 8px;
   }
 }
 
 @media (max-width: 560px) {
   .scorer-table-seats {
     grid-auto-columns: minmax(104px, 1fr);
+  }
+
+  [data-orientation='down'] .scorer-table-seats {
+    grid-auto-columns: auto;
   }
 
   /*

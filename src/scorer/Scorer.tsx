@@ -127,9 +127,18 @@ import { rulingLabel, unreachableAnswerTypes } from './tossupRulings';
 import { setKeyboardEnabled } from './keyboardPreference';
 import useKeyboardEnabled from './useKeyboardEnabled';
 import TableView from './TableView';
-import { ScoringView, setScoringView } from './scoringViewPreference';
-import useScoringView from './useScoringView';
+import {
+  ScoringView,
+  setScoringView,
+  setTableOrientation,
+  tableOrientationDescriptions,
+  tableOrientationLabels,
+  tableOrientations,
+  TableOrientation,
+} from './scoringViewPreference';
+import useScoringView, { useTableOrientation } from './useScoringView';
 import ScoringLayoutSwitcher from './ScoringLayoutSwitcher';
+import SegmentedChoice, { ISegmentedOption } from './SegmentedChoice';
 import ScoringLayoutDialog from './ScoringLayoutDialog';
 import { rememberScoringLayoutChoice, scoringLayoutChosen } from './scoringLayoutPrompt';
 import {
@@ -152,6 +161,7 @@ import { extraTimeoutsGranted, substitutionAllowed } from '../scoring/ProcedureE
 import removeOvertime, { overtimeQuestionNumbers, overtimeRemovalNote } from '../scoring/overtimeCorrection';
 import { canonicalSideForDisplay, displaySideForCanonical, mapSides } from './DisplaySideMapping';
 import useDisplaySideMapping from './useDisplaySideMapping';
+import type { IRosterAddResult } from '../integrations/fruity/FruityServerClient';
 
 export type { IScorerAlert, IScorerRecoveryStatus } from './ConnectionStatus';
 
@@ -272,11 +282,21 @@ export interface IScorerProps {
   recovery?: IScorerRecoveryStatus;
   /** Latest server rosters confirm durable tournament synchronization; they never replace setup. */
   authoritativeRosters?: Record<LeftOrRight, string[]>;
+  /** Stable team ids let the server resolve an amendment without fuzzy team-name matching. */
+  teamIds?: Partial<Record<LeftOrRight, string>>;
   /** Narrow authoritative roster-add request for an assigned room. */
   onSyncRosterPlayer?: (
     teamName: string,
     playerName: string,
-  ) => Promise<{ ok: boolean; error?: string; rejected?: boolean }>;
+    teamId?: string,
+    questionNumber?: number,
+  ) => Promise<{ ok: boolean; error?: string; rejected?: boolean; canonical?: IRosterAddResult }>;
+  /** Persist a canonical roster identity returned by tournament control. */
+  onRosterIdentity?: (
+    requestedTeamName: string,
+    requestedPlayerName: string,
+    canonical: IRosterAddResult,
+  ) => void | Promise<void>;
 }
 
 type OpenDialog =
@@ -300,6 +320,20 @@ type OpenDialog =
   | 'scoring-layout'
   | 'procedure'
   | null;
+
+/**
+ * The two ways the table can be drawn, as the strip offers them.
+ *
+ * Built once at module scope: the options never depend on the game, and rebuilding the array on
+ * every render would hand the control a new identity for no reason.
+ */
+const orientationOptions: ReadonlyArray<ISegmentedOption<TableOrientation>> = tableOrientations.map(
+  (orientation) => ({
+    value: orientation,
+    label: tableOrientationLabels[orientation],
+    description: tableOrientationDescriptions[orientation],
+  }),
+);
 
 /** How often, at most, to tell tournament control how the game is going. Matches MODAQ's old timer. */
 const progressIntervalMs = 5000;
@@ -652,7 +686,9 @@ export default function Scorer(props: IScorerProps) {
     alerts,
     recovery,
     authoritativeRosters,
+    teamIds,
     onSyncRosterPlayer,
+    onRosterIdentity,
   } = props;
 
   const controlRequest: ControlRequestState = useMemo(
@@ -695,6 +731,14 @@ export default function Scorer(props: IScorerProps) {
    * callbacks `TeamPanel` gets, so nothing about what is recorded depends on this value.
    */
   const scoringLayout = useScoringView();
+  /**
+   * Which way the table runs, for a scorekeeper who is not sitting alongside it.
+   *
+   * A facet of the table rather than a third layout — see `TableOrientation` — so it lives beside
+   * the layout preference, is offered only while the table is on screen, and changes nothing about
+   * the seats or the events.
+   */
+  const tableOrientationChoice = useTableOrientation();
   /**
    * Whether this game still has to be asked which layout to score it in.
    *
@@ -1102,8 +1146,23 @@ export default function Scorer(props: IScorerProps) {
         const nextBackoff = Math.min(30_000, 5_000 * 2 ** Math.min(attempts, 3));
         scheduleRetry(now + nextBackoff);
         const teamName = addition.team === 'left' ? game.left.name : game.right.name;
-        onSyncRosterPlayer(teamName, addition.playerName)
-          .then((result) => {
+        const teamId = teamIds?.[addition.team];
+        const sync =
+          teamId === undefined
+            ? onSyncRosterPlayer(teamName, addition.playerName)
+            : onSyncRosterPlayer(teamName, addition.playerName, teamId, addition.questionNumber);
+        sync
+          .then(async (result) => {
+            if (result.ok && result.canonical) {
+              // The durable package update is part of roster synchronization. Awaiting it keeps
+              // concurrent additions ordered and makes a rejected persistence write observable to
+              // this retry path instead of creating an unhandled promise.
+              try {
+                await onRosterIdentity?.(teamName, addition.playerName, result.canonical);
+              } catch {
+                setRejectedRosterSyncs((current) => ({ ...current, [key]: true }));
+              }
+            }
             if (!result.ok && result.rejected) {
               setRejectedRosterSyncs((current) => ({ ...current, [key]: true }));
             }
@@ -1128,8 +1187,10 @@ export default function Scorer(props: IScorerProps) {
     game.left.name,
     game.right.name,
     localRosterAdds,
+    onRosterIdentity,
     onSyncRosterPlayer,
     rejectedRosterSyncs,
+    teamIds,
   ]);
 
   /**
@@ -1291,16 +1352,6 @@ export default function Scorer(props: IScorerProps) {
     if (accepted) setNoBuzzAcknowledgement({ token: nextTransientToken() });
     return accepted;
   }, [nextTransientToken, record, phase]);
-
-  const recordReadingResumed = useCallback(() => {
-    if (phase.kind !== 'tossup') return;
-    record({ id: newEventId(), type: 'tossup-reading-resumed', questionNumber: phase.questionNumber });
-  }, [record, phase]);
-
-  const recordReadout = useCallback(() => {
-    if (phase.kind !== 'tossup') return;
-    record({ id: newEventId(), type: 'tossup-readout', questionNumber: phase.questionNumber });
-  }, [record, phase]);
 
   const recordBonusWithExit = useCallback(
     (payload: Pick<IBonusEvent, 'controlledPoints' | 'bouncebackPoints' | 'parts'>) => {
@@ -1504,10 +1555,10 @@ export default function Scorer(props: IScorerProps) {
   const eligible = (side: LeftOrRight) =>
     scoringEnabled && phase.kind === 'tossup' && phase.eligibleTeams.includes(side);
   /**
-   * Nobody has answered this tossup yet, so a neg is still a possible ruling.
+   * A neg is available only before either team has used its tossup opportunity.
    *
-   * Both teams still being eligible is exactly that condition: an answer of any kind — a buzz or a
-   * zero — removes the team that gave it from the eligible list. See `TeamPanel`.
+   * Both a scored buzz and a zero-point/no-penalty answer spend that opportunity. The historical
+   * reading markers below the scorer's event model are deliberately not part of live legality.
    */
   const currentQuestionState =
     phase.kind === 'tossup'
@@ -1517,22 +1568,10 @@ export default function Scorer(props: IScorerProps) {
     ...(currentQuestionState?.buzzes.map((buzz) => buzz.team) ?? []),
     ...(currentQuestionState?.noPenalty.map((missed) => missed.team) ?? []),
   ]);
-  const negsAvailable = (side: LeftOrRight) =>
-    scoringEnabled &&
-    phase.kind === 'tossup' &&
-    phase.eligibleTeams.includes(side) &&
-    currentQuestionState?.readout !== true &&
-    (answeredTeams.size === 0 || currentQuestionState?.readingResumed === true);
+  const negsAvailable = (side: LeftOrRight) => eligible(side) && answeredTeams.size === 0;
   const anyNegAvailable = negsAvailable('left') || negsAvailable('right');
   const displayedEligible = (side: LeftOrRight) => eligible(canonicalForDisplay(side));
   const displayedNegsAvailable = (side: LeftOrRight) => negsAvailable(canonicalForDisplay(side));
-  const canResumeReading =
-    phase.kind === 'tossup' &&
-    answeredTeams.size > 0 &&
-    answeredTeams.size < 2 &&
-    currentQuestionState?.readingResumed !== true &&
-    currentQuestionState?.readout !== true;
-  const canReadout = phase.kind === 'tossup' && currentQuestionState?.readout !== true;
   /**
    * The button says the same thing all game.
    *
@@ -2636,6 +2675,28 @@ export default function Scorer(props: IScorerProps) {
                 Scoring layout
               </span>
               <ScoringLayoutSwitcher value={scoringLayout} onChange={(layout) => setScoringView(layout)} />
+              {/*
+                Which chair the scorekeeper is in, offered only where it means anything.
+
+                Beside the layout rather than inside the chooser: a new game's question is which of
+                two layouts to score in, and adding "and which way round" to it would be asking two
+                things at a moment that should cost one press.
+              */}
+              {scoringLayout === 'table' && (
+                <>
+                  {/* Its own caption, or four buttons in two pills read as one control with one label. */}
+                  <span className="scorer-layout-bar-label" aria-hidden="true">
+                    Seats
+                  </span>
+                  <SegmentedChoice
+                    className="scorer-layout-orientation"
+                    options={orientationOptions}
+                    value={tableOrientationChoice}
+                    label="Which way the seats run"
+                    onChange={(next) => setTableOrientation(next)}
+                  />
+                </>
+              )}
               {scoringLayout === 'table' && !submitting && (
                 <button
                   type="button"
@@ -2682,6 +2743,7 @@ export default function Scorer(props: IScorerProps) {
                 timeoutsPerTeam={
                   (procedure?.timeoutsPerTeam ?? 0) > 0 ? procedure?.timeoutsPerTeam : undefined
                 }
+                orientation={tableOrientationChoice}
                 arranging={arrangingTable}
                 onArrangingChange={setArrangingTable}
                 arrangementUnconfirmed={arrangementUnconfirmed && !tableHintDismissed}
@@ -2828,26 +2890,6 @@ export default function Scorer(props: IScorerProps) {
                   >
                     {noBuzzLabel}
                   </button>
-                  {canResumeReading && (
-                    <button
-                      type="button"
-                      className="scorer-action"
-                      onClick={recordReadingResumed}
-                      disabled={playBlockedByProtest}
-                    >
-                      Resume reading
-                    </button>
-                  )}
-                  {canReadout && (
-                    <button
-                      type="button"
-                      className="scorer-action"
-                      onClick={recordReadout}
-                      disabled={playBlockedByProtest}
-                    >
-                      Question read out
-                    </button>
-                  )}
                   {phase.eligibleTeams.length === 1 && (
                     <p className="scorer-hint">
                       {displayedTeams[displayForCanonical(phase.eligibleTeams[0])].name} may still answer.
