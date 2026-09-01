@@ -1,0 +1,15 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "identifier": "director-main",
+  "description": "The single QBSheet Director window with only the native operations it needs.",
+  "windows": ["main"],
+  "permissions": [
+    "director-operations",
+    "sql:allow-close",
+    "sql:allow-execute",
+    "sql:allow-load",
+    "sql:allow-select",
+    "window-state:allow-restore-state",
+    "window-state:allow-save-window-state"
+  ]
+}

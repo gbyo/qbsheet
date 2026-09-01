@@ -1,0 +1,62 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "QBSheet Director",
+  "version": "0.1.0",
+  "identifier": "com.qbsheet.director",
+  "mainBinaryName": "qbsheet-director",
+  "build": {
+    "beforeDevCommand": "npm run dev -- --host 127.0.0.1 --port 1420",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://127.0.0.1:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "security": {
+      "capabilities": ["director-main"],
+      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:1420 ws://127.0.0.1:1420; font-src 'self' data:; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+    },
+    "windows": [
+      {
+        "label": "main",
+        "title": "QBSheet Director",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1024,
+        "minHeight": 680,
+        "resizable": true,
+        "fullscreen": false,
+        "center": true,
+        "visible": false,
+        "focus": true
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg", "msi", "nsis", "deb", "rpm", "appimage"],
+    "category": "Education",
+    "shortDescription": "Local tournament operations for quiz bowl.",
+    "longDescription": "QBSheet Director is an offline-first desktop workspace for setting up, running, reviewing, and publishing quiz-bowl tournaments.",
+    "homepage": "https://github.com/gbyo/qbsheet",
+    "license": "AGPL-3.0-or-later",
+    "licenseFile": "../../LICENSE",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "createUpdaterArtifacts": false
+  },
+  "plugins": {
+    "sql": {
+      "preload": ["sqlite:director.sqlite"]
+    },
+    "updater": {
+      "pubkey": "REPLACE_WITH_QBSHEET_DIRECTOR_RELEASE_PUBLIC_KEY",
+      "endpoints": []
+    }
+  }
+}

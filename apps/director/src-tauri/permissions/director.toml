@@ -1,0 +1,11 @@
+[[permission]]
+identifier = "director-operations"
+description = "Allow the Director window to use its own path, file, diagnostics, and updater commands."
+commands.allow = [
+  "get_app_data_paths",
+  "open_tournament_file",
+  "save_tournament_snapshot",
+  "write_diagnostics",
+  "export_diagnostics",
+  "check_for_updates",
+]

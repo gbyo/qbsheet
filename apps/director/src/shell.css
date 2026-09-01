@@ -1,0 +1,139 @@
+.director-native-frame {
+  min-height: 100vh;
+  background: var(--director-page);
+}
+
+.director-native-frame > .director-app {
+  min-height: calc(100vh - 42px);
+}
+
+.director-native-frame > .director-app .director-sidebar {
+  height: calc(100vh - 42px);
+}
+
+.director-native-toolbar {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+  min-height: 42px;
+  padding: 5px 18px;
+  color: var(--director-muted);
+  background: var(--director-surface);
+  border-bottom: 1px solid var(--director-border);
+}
+
+.director-native-session,
+.director-native-actions {
+  display: flex;
+  align-items: center;
+}
+
+.director-native-session {
+  gap: 7px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.director-native-session strong {
+  color: var(--director-ink);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.director-native-session-mark {
+  width: 7px;
+  height: 7px;
+  background: var(--director-green);
+  border-radius: 50%;
+}
+
+.director-native-session-divider {
+  width: 1px;
+  height: 14px;
+  margin: 0 2px;
+  background: var(--director-border);
+}
+
+.director-native-store,
+.director-native-status {
+  overflow: hidden;
+  color: var(--director-faint);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.director-native-actions {
+  justify-content: center;
+  gap: 4px;
+}
+
+.director-native-actions button {
+  min-height: 28px;
+  padding: 4px 8px;
+  color: var(--director-muted);
+  font-size: 11px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.director-native-actions button:hover:not(:disabled) {
+  color: var(--director-accent);
+  background: var(--director-accent-soft);
+  border-color: #d7e7f1;
+}
+
+.director-native-actions button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.director-native-actions kbd {
+  margin-left: 3px;
+  padding: 1px 3px;
+  color: var(--director-faint);
+  font-family: inherit;
+  font-size: 9px;
+  border: 1px solid var(--director-border);
+  border-radius: 3px;
+}
+
+.director-native-status {
+  max-width: 190px;
+  text-align: right;
+}
+
+@media (max-width: 1120px) {
+  .director-native-toolbar {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .director-native-status {
+    display: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .director-native-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px 10px;
+    padding: 7px 12px;
+  }
+
+  .director-native-actions {
+    order: 3;
+    width: 100%;
+    justify-content: flex-start;
+    overflow-x: auto;
+  }
+
+  .director-native-actions kbd {
+    display: none;
+  }
+}
