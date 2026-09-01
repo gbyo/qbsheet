@@ -127,9 +127,18 @@ import { rulingLabel, unreachableAnswerTypes } from './tossupRulings';
 import { setKeyboardEnabled } from './keyboardPreference';
 import useKeyboardEnabled from './useKeyboardEnabled';
 import TableView from './TableView';
-import { ScoringView, setScoringView } from './scoringViewPreference';
-import useScoringView from './useScoringView';
+import {
+  ScoringView,
+  setScoringView,
+  setTableOrientation,
+  tableOrientationDescriptions,
+  tableOrientationLabels,
+  tableOrientations,
+  TableOrientation,
+} from './scoringViewPreference';
+import useScoringView, { useTableOrientation } from './useScoringView';
 import ScoringLayoutSwitcher from './ScoringLayoutSwitcher';
+import SegmentedChoice, { ISegmentedOption } from './SegmentedChoice';
 import ScoringLayoutDialog from './ScoringLayoutDialog';
 import { rememberScoringLayoutChoice, scoringLayoutChosen } from './scoringLayoutPrompt';
 import {
@@ -311,6 +320,20 @@ type OpenDialog =
   | 'scoring-layout'
   | 'procedure'
   | null;
+
+/**
+ * The two ways the table can be drawn, as the strip offers them.
+ *
+ * Built once at module scope: the options never depend on the game, and rebuilding the array on
+ * every render would hand the control a new identity for no reason.
+ */
+const orientationOptions: ReadonlyArray<ISegmentedOption<TableOrientation>> = tableOrientations.map(
+  (orientation) => ({
+    value: orientation,
+    label: tableOrientationLabels[orientation],
+    description: tableOrientationDescriptions[orientation],
+  }),
+);
 
 /** How often, at most, to tell tournament control how the game is going. Matches MODAQ's old timer. */
 const progressIntervalMs = 5000;
@@ -708,6 +731,14 @@ export default function Scorer(props: IScorerProps) {
    * callbacks `TeamPanel` gets, so nothing about what is recorded depends on this value.
    */
   const scoringLayout = useScoringView();
+  /**
+   * Which way the table runs, for a scorekeeper who is not sitting alongside it.
+   *
+   * A facet of the table rather than a third layout — see `TableOrientation` — so it lives beside
+   * the layout preference, is offered only while the table is on screen, and changes nothing about
+   * the seats or the events.
+   */
+  const tableOrientationChoice = useTableOrientation();
   /**
    * Whether this game still has to be asked which layout to score it in.
    *
@@ -2644,6 +2675,28 @@ export default function Scorer(props: IScorerProps) {
                 Scoring layout
               </span>
               <ScoringLayoutSwitcher value={scoringLayout} onChange={(layout) => setScoringView(layout)} />
+              {/*
+                Which chair the scorekeeper is in, offered only where it means anything.
+
+                Beside the layout rather than inside the chooser: a new game's question is which of
+                two layouts to score in, and adding "and which way round" to it would be asking two
+                things at a moment that should cost one press.
+              */}
+              {scoringLayout === 'table' && (
+                <>
+                  {/* Its own caption, or four buttons in two pills read as one control with one label. */}
+                  <span className="scorer-layout-bar-label" aria-hidden="true">
+                    Seats
+                  </span>
+                  <SegmentedChoice
+                    className="scorer-layout-orientation"
+                    options={orientationOptions}
+                    value={tableOrientationChoice}
+                    label="Which way the seats run"
+                    onChange={(next) => setTableOrientation(next)}
+                  />
+                </>
+              )}
               {scoringLayout === 'table' && !submitting && (
                 <button
                   type="button"
@@ -2690,6 +2743,7 @@ export default function Scorer(props: IScorerProps) {
                 timeoutsPerTeam={
                   (procedure?.timeoutsPerTeam ?? 0) > 0 ? procedure?.timeoutsPerTeam : undefined
                 }
+                orientation={tableOrientationChoice}
                 arranging={arrangingTable}
                 onArrangingChange={setArrangingTable}
                 arrangementUnconfirmed={arrangementUnconfirmed && !tableHintDismissed}

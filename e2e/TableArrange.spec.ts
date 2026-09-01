@@ -48,7 +48,9 @@ async function seatNumbers(page: Page, teamName: string): Promise<string[]> {
  * Carry one player onto another's chair with a real pointer.
  *
  * Moved in steps rather than in one jump, because that is what a hand does and because a single
- * enormous move would not exercise the threshold the gesture starts at.
+ * enormous move would not exercise the threshold the gesture starts at. The path follows whichever
+ * way the table is actually drawn, which is the whole reason this file is in a browser: a jsdom
+ * rectangle has no idea which axis it is on.
  */
 async function dragOnto(page: Page, teamName: string, playerName: string, target: string): Promise<void> {
   const team = page.getByRole('region', { name: teamName });
@@ -61,11 +63,12 @@ async function dragOnto(page: Page, teamName: string, playerName: string, target
   const startX = (start?.x ?? 0) + (start?.width ?? 0) / 2;
   const startY = (start?.y ?? 0) + (start?.height ?? 0) / 2;
   const finishX = (finish?.x ?? 0) + (finish?.width ?? 0) / 2;
+  const finishY = (finish?.y ?? 0) + (finish?.height ?? 0) / 2;
 
   await page.mouse.move(startX, startY);
   await page.mouse.down();
   for (let step = 1; step <= 8; step += 1) {
-    await page.mouse.move(startX + ((finishX - startX) * step) / 8, startY);
+    await page.mouse.move(startX + ((finishX - startX) * step) / 8, startY + ((finishY - startY) * step) / 8);
   }
   await page.mouse.up();
 }
@@ -150,4 +153,63 @@ test('arranging the table changes nothing about the game', async ({ page }) => {
   await expect(page.getByLabel('Ninety Six A score')).toHaveText('30');
   await expect(page.getByText('Tossup 2 of 20', { exact: true })).toBeVisible();
   expect(await chairs(page, 'Ninety Six A')).toEqual(['Phillip', 'Gibson', 'Maycie', 'Jeremy']);
+});
+
+/**
+ * The same table, from the end of the room.
+ *
+ * A browser is the only place this can be checked at all: the claim is that the seats are laid out
+ * one above another and that a gesture down that column moves somebody, and both halves are geometry.
+ */
+test.describe('a table that runs downwards', () => {
+  async function faceDownTheTables(page: Page): Promise<void> {
+    await page.getByRole('radio', { name: 'Down', exact: true }).click();
+    await expect(page.locator('.scorer-table-view')).toHaveAttribute('data-orientation', 'down');
+  }
+
+  test('the seats are stacked rather than strung out', async ({ page }) => {
+    await openTableGame(page);
+    await faceDownTheTables(page);
+
+    const seats = page.getByRole('region', { name: 'Ninety Six A' }).locator('.scorer-table-seat');
+    const boxes = await seats.evaluateAll((nodes) =>
+      nodes.map((node) => {
+        const box = node.getBoundingClientRect();
+        return { top: box.top, left: box.left };
+      }),
+    );
+    expect(boxes).toHaveLength(4);
+    for (let seat = 1; seat < boxes.length; seat += 1) {
+      // Each one below the last, and all of them in the same column.
+      expect(boxes[seat].top).toBeGreaterThan(boxes[seat - 1].top);
+      expect(Math.abs(boxes[seat].left - boxes[0].left)).toBeLessThanOrEqual(1);
+    }
+    // And the two teams are still beside each other, because they still are in the room.
+    const left = await page.getByRole('region', { name: 'Ninety Six A' }).boundingBox();
+    const right = await page.getByRole('region', { name: 'Greenwood' }).boundingBox();
+    expect(right?.x ?? 0).toBeGreaterThan(left?.x ?? 0);
+  });
+
+  test('a player is dragged down the column into a different chair', async ({ page }) => {
+    await openTableGame(page);
+    await faceDownTheTables(page);
+    await page.getByRole('button', { name: 'Arrange table' }).click();
+
+    await dragOnto(page, 'Ninety Six A', 'Phillip', 'Gibson');
+
+    expect(await chairs(page, 'Ninety Six A')).toEqual(['Phillip', 'Gibson', 'Maycie', 'Jeremy']);
+    expect(await seatNumbers(page, 'Ninety Six A')).toEqual(['1', '2', '3', '4']);
+  });
+
+  test('scoring from it is the scoring it always was', async ({ page }) => {
+    await openTableGame(page);
+    await faceDownTheTables(page);
+
+    await page.getByRole('button', { name: 'Maycie', exact: true }).click();
+    await page.getByRole('button', { name: 'Maycie 15', exact: true }).click();
+    await page.getByLabel('Bonus').getByRole('button', { name: '20', exact: true }).click();
+
+    await expect(page.getByLabel('Ninety Six A score')).toHaveText('35');
+    await expect(page.getByText('Tossup 2 of 20', { exact: true })).toBeVisible();
+  });
 });

@@ -13,6 +13,13 @@
  * them; what a drag changes is a player's place in that order, and nothing else in this view can be
  * moved at all.
  *
+ * # One gesture, either way the table runs
+ *
+ * A scorekeeper alongside the tables sees the seats left to right; one at the end of the room, which
+ * is where most of them sit, is looking down them. Both are the same table and the same gesture, so
+ * the axis is a parameter rather than a second implementation: one coordinate, one pitch, one
+ * arithmetic. See `TableOrientation`.
+ *
  * # Pointer events, not the HTML5 drag API
  *
  * `draggable` gives a desktop mouse a reasonable time and everybody else a bad one: no touch support
@@ -43,13 +50,16 @@ import { PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useS
  */
 export const seatDragThresholdPx = 6;
 
+/** Which way this table runs, and therefore which coordinate the gesture reads. */
+export type SeatAxis = 'x' | 'y';
+
 export interface ISeatDragState {
   /** Where the dragged player started. */
   from: number;
   /** Where they would land if the pointer were lifted now. */
   to: number;
-  /** How far the dragged tile has been carried, for the transform that follows the pointer. */
-  deltaX: number;
+  /** How far along the table's own axis the tile has been carried, for the transform. */
+  delta: number;
   /** One seat's worth of travel, so everybody stepping aside steps aside by exactly one. */
   pitch: number;
 }
@@ -61,9 +71,9 @@ export interface ISeatDragState {
  * the number of seats crossed, and half a seat of travel is the point at which the eye already reads
  * the tile as belonging to the next one.
  */
-export function seatDropIndex(from: number, deltaX: number, pitch: number, count: number): number {
+export function seatDropIndex(from: number, delta: number, pitch: number, count: number): number {
   if (count <= 1 || pitch <= 0) return from;
-  const moved = Math.round(deltaX / pitch);
+  const moved = Math.round(delta / pitch);
   return Math.min(count - 1, Math.max(0, from + moved));
 }
 
@@ -99,6 +109,8 @@ export interface ISeatDragApi {
   seatRef: (index: number) => (element: HTMLElement | null) => void;
   /** Attach to the seat's drag handle. */
   onPointerDown: (index: number) => (event: ReactPointerEvent<HTMLElement>) => void;
+  /** The transform a seat is carrying right now, or undefined when it is where it belongs. */
+  seatTransform: (index: number) => string | undefined;
 }
 
 /**
@@ -108,11 +120,15 @@ export interface ISeatDragApi {
  * abandoned drag, Escape, a cancelled pointer, a gesture that never passed the threshold — resolves
  * to nothing at all, which is what makes a cancelled drag leave the stored order untouched.
  */
-export function useSeatDrag(count: number, onDrop: (from: number, to: number) => void): ISeatDragApi {
+export function useSeatDrag(
+  count: number,
+  onDrop: (from: number, to: number) => void,
+  axis: SeatAxis = 'x',
+): ISeatDragApi {
   const seats = useRef<Array<HTMLElement | null>>([]);
   const refs = useRef(new Map<number, (element: HTMLElement | null) => void>());
   /** The press that may become a drag: recorded on pointerdown, promoted once it travels far enough. */
-  const pending = useRef<{ pointerId: number; startX: number; from: number } | null>(null);
+  const pending = useRef<{ pointerId: number; start: number; from: number } | null>(null);
   const [drag, setDrag] = useState<ISeatDragState | null>(null);
   /**
    * The same drag, for the window listeners.
@@ -133,36 +149,45 @@ export function useSeatDrag(count: number, onDrop: (from: number, to: number) =>
     setDrag(null);
   }, []);
 
-  /** One seat's width including the gap, measured from the seats themselves rather than assumed. */
+  /** One seat's size along the table, including the gap, measured rather than assumed. */
   const measurePitch = useCallback((): number => {
     const boxes = seats.current.filter((seat): seat is HTMLElement => seat !== null);
-    if (boxes.length < 2) return boxes[0]?.getBoundingClientRect().width ?? 0;
+    const extent = (box: DOMRect) => (axis === 'x' ? box.width : box.height);
+    const start = (box: DOMRect) => (axis === 'x' ? box.left : box.top);
+    if (boxes.length < 2) {
+      const only = boxes[0]?.getBoundingClientRect();
+      return only ? extent(only) : 0;
+    }
     const first = boxes[0].getBoundingClientRect();
     const second = boxes[1].getBoundingClientRect();
-    return Math.abs(second.left - first.left) || first.width;
-  }, []);
+    return Math.abs(start(second) - start(first)) || extent(first);
+  }, [axis]);
 
   const onPointerDown = useCallback(
     (index: number) => (event: ReactPointerEvent<HTMLElement>) => {
       // A secondary button is a context menu, and one seat has nowhere to be dragged to.
       if (event.button !== 0 || count < 2) return;
-      pending.current = { pointerId: event.pointerId, startX: event.clientX, from: index };
+      pending.current = {
+        pointerId: event.pointerId,
+        start: axis === 'x' ? event.clientX : event.clientY,
+        from: index,
+      };
       // Keeps the gesture alive when the pointer leaves the tile, which it does immediately.
       event.currentTarget.setPointerCapture?.(event.pointerId);
     },
-    [count],
+    [axis, count],
   );
 
   useEffect(() => {
     const onPointerMove = (event: PointerEvent) => {
       const waiting = pending.current;
       if (!waiting || event.pointerId !== waiting.pointerId) return;
-      const deltaX = event.clientX - waiting.startX;
+      const delta = (axis === 'x' ? event.clientX : event.clientY) - waiting.start;
       const started = live.current;
       if (!started) {
-        // Below the threshold this is still a press, and a horizontal flick still belongs to the
-        // strip's own scrolling.
-        if (Math.abs(deltaX) < seatDragThresholdPx) return;
+        // Below the threshold this is still a press, and a flick along the table still belongs to
+        // the strip's own scrolling.
+        if (Math.abs(delta) < seatDragThresholdPx) return;
         const pitch = measurePitch();
         if (pitch <= 0) return;
         // The seat this has already reached, not the seat it left: a pointer can cross the threshold
@@ -170,8 +195,8 @@ export function useSeatDrag(count: number, onDrop: (from: number, to: number) =>
         // the gesture a seat behind the finger making it.
         const next = {
           from: waiting.from,
-          to: seatDropIndex(waiting.from, deltaX, pitch, count),
-          deltaX,
+          to: seatDropIndex(waiting.from, delta, pitch, count),
+          delta,
           pitch,
         };
         live.current = next;
@@ -180,8 +205,8 @@ export function useSeatDrag(count: number, onDrop: (from: number, to: number) =>
       }
       const next = {
         ...started,
-        deltaX,
-        to: seatDropIndex(started.from, deltaX, started.pitch, count),
+        delta,
+        to: seatDropIndex(started.from, delta, started.pitch, count),
       };
       live.current = next;
       setDrag(next);
@@ -217,7 +242,7 @@ export function useSeatDrag(count: number, onDrop: (from: number, to: number) =>
       window.removeEventListener('pointercancel', onPointerCancel);
       window.removeEventListener('keydown', onKeyDown, true);
     };
-  }, [clear, count, measurePitch]);
+  }, [axis, clear, count, measurePitch]);
 
   const seatRef = useCallback((index: number) => {
     const existing = refs.current.get(index);
@@ -229,5 +254,22 @@ export function useSeatDrag(count: number, onDrop: (from: number, to: number) =>
     return ref;
   }, []);
 
-  return { drag, seatRef, onPointerDown };
+  /**
+   * Where a seat is being drawn while a gesture is in flight.
+   *
+   * The carried tile follows the pointer exactly; everybody between it and where it would land steps
+   * aside by one whole seat. Composed here rather than in the strip so that the two orientations
+   * cannot disagree about which way "aside" is.
+   */
+  const seatTransform = useCallback(
+    (index: number): string | undefined => {
+      if (!drag) return undefined;
+      const offset = index === drag.from ? drag.delta : seatShift(index, drag.from, drag.to) * drag.pitch;
+      if (offset === 0) return undefined;
+      return axis === 'x' ? `translateX(${offset}px)` : `translateY(${offset}px)`;
+    },
+    [axis, drag],
+  );
+
+  return { drag, seatRef, onPointerDown, seatTransform };
 }

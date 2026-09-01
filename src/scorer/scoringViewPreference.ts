@@ -34,6 +34,8 @@ export const scoringViewVersion = 1;
 
 export const scoringViewStorageKey = `qbsheet.scorer.view.v${scoringViewVersion}`;
 
+export const tableOrientationStorageKey = `qbsheet.scorer.table-orientation.v${scoringViewVersion}`;
+
 /** `scoresheet` is the ruled rows; `table` is the room's own seating. */
 export type ScoringView = 'scoresheet' | 'table';
 
@@ -58,6 +60,49 @@ export const scoringLayoutTaglines: Record<ScoringView, string> = {
 export const scoringLayoutDescriptions: Record<ScoringView, string> = {
   scoresheet: 'Players are listed in rows with scoring controls beside each name.',
   table: 'Players appear in seating order. Tap a player, then choose the ruling.',
+};
+
+/**
+ * Which way the tables run on screen.
+ *
+ * # Not a third layout
+ *
+ * This is the table seen from a different chair, and nothing else: the same tiles, the same picker,
+ * the same seat order, the same everything. A scorekeeper sitting alongside the tables sees each
+ * team's seats running left to right, which is what they see in the room. A scorekeeper at the end of
+ * the room — beside the moderator, which is where most of them actually sit — is looking *down* the
+ * tables, and the seats run away from them. Drawing that as a row is asking somebody to rotate the
+ * room in their head on every buzz.
+ *
+ * So it belongs with the layout preference rather than beside it. There are two layouts and the
+ * table has two orientations; there are not four layouts.
+ *
+ * # Across unless somebody said otherwise
+ *
+ * `across` is what the table has always drawn, so a device that has been using it keeps what it has.
+ */
+export type TableOrientation = 'across' | 'down';
+
+export const defaultTableOrientation: TableOrientation = 'across';
+
+/** The order the two are offered in. */
+export const tableOrientations: readonly TableOrientation[] = ['across', 'down'];
+
+/** What each one is called. Short, because the control sits in a strip beside two others. */
+export const tableOrientationLabels: Record<TableOrientation, string> = {
+  across: 'Across',
+  down: 'Down',
+};
+
+/**
+ * Which chair each one is for.
+ *
+ * Named for where the scorekeeper is rather than for the axis, because "vertical" is a fact about
+ * pixels and "you are sitting at the end of the room" is the fact they are answering.
+ */
+export const tableOrientationDescriptions: Record<TableOrientation, string> = {
+  across: 'Seats run left to right, for a scorekeeper sitting alongside the tables.',
+  down: 'Seats run top to bottom, for a scorekeeper at the end of the room looking down them.',
 };
 
 interface IPreferenceStorage {
@@ -130,6 +175,55 @@ export function subscribeScoringView(listener: (value: ScoringView) => void): ()
   };
 }
 
+function isTableOrientation(value: string | null): value is TableOrientation {
+  return value === 'across' || value === 'down';
+}
+
+export function loadTableOrientation(
+  storage: IPreferenceStorage | null = browserStorage(),
+): TableOrientation {
+  try {
+    const stored = storage?.getItem(tableOrientationStorageKey) ?? null;
+    return isTableOrientation(stored) ? stored : defaultTableOrientation;
+  } catch {
+    return defaultTableOrientation;
+  }
+}
+
+export function saveTableOrientation(
+  orientation: TableOrientation,
+  storage: IPreferenceStorage | null = browserStorage(),
+): boolean {
+  try {
+    storage?.setItem(tableOrientationStorageKey, orientation);
+    return storage !== null;
+  } catch {
+    return false;
+  }
+}
+
+/** The orientation as a live value, held the same way and for the same reasons as the layout. */
+let orientation = loadTableOrientation();
+const orientationListeners = new Set<(value: TableOrientation) => void>();
+
+export function tableOrientation(): TableOrientation {
+  return orientation;
+}
+
+export function setTableOrientation(value: TableOrientation): void {
+  if (value === orientation) return;
+  orientation = value;
+  saveTableOrientation(value);
+  orientationListeners.forEach((listener) => listener(value));
+}
+
+export function subscribeTableOrientation(listener: (value: TableOrientation) => void): () => void {
+  orientationListeners.add(listener);
+  return () => {
+    orientationListeners.delete(listener);
+  };
+}
+
 /**
  * Forget the choice and return this device to the scoresheet in the same turn.
  *
@@ -141,12 +235,17 @@ export function clearScoringView(storage: IPreferenceStorage | null = browserSto
   let cleared = storage !== null;
   try {
     storage?.removeItem(scoringViewStorageKey);
+    storage?.removeItem(tableOrientationStorageKey);
   } catch {
     cleared = false;
   }
   if (current !== defaultScoringView) {
     current = defaultScoringView;
     listeners.forEach((listener) => listener(current));
+  }
+  if (orientation !== defaultTableOrientation) {
+    orientation = defaultTableOrientation;
+    orientationListeners.forEach((listener) => listener(orientation));
   }
   return cleared;
 }
@@ -155,4 +254,6 @@ export function clearScoringView(storage: IPreferenceStorage | null = browserSto
 export function resetScoringView(): void {
   current = loadScoringView();
   listeners.forEach((listener) => listener(current));
+  orientation = loadTableOrientation();
+  orientationListeners.forEach((listener) => listener(orientation));
 }
