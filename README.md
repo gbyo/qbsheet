@@ -127,6 +127,7 @@ The service worker provides the application shell for offline use.
 | -------------------------------------------------------- | ----------------------------------------------------------- |
 | [QBTCP](docs/QBTCP.md)                                   | Protocol for communication with tournament-control software |
 | [QBJ assignment profile](docs/QBJ_ASSIGNMENT_PROFILE.md) | How QBSheet reads and writes QBJ                            |
+| [Transfers](docs/TRANSFERS.md)                           | Moving assignments and results by USB, folders, and downloads |
 | [QBG migration](docs/QBG_MIGRATION.md)                   | Compatibility information for the older QBG and API formats |
 | [Spreadsheet clipboard](docs/SPREADSHEET_CLIPBOARD.md)   | Copy one complete game into a shared tournament spreadsheet |
 | [Test file generation](docs/TEST_FILE_GENERATION.md)     | Information about test files and development fixtures       |

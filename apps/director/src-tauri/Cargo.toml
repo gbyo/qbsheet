@@ -21,6 +21,7 @@ qbtcp-server = { path = "../../../crates/qbtcp-server" }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.145"
+sysinfo = { version = "0.38", default-features = false, features = ["disk"] }
 tauri = { version = "2.11.5", features = [] }
 tauri-plugin-dialog = "2.7.3"
 tauri-plugin-single-instance = "2.4.4"
