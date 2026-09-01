@@ -65,7 +65,7 @@ jobs:
 
       - name: Install YellowFruit dependencies
         working-directory: yellowfruit-link
-        run: npm ci --ignore-scripts
+        run: npm install --ignore-scripts --no-audit --no-fund
 
       - name: Verify runner Chrome
         run: google-chrome --version
