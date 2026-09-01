@@ -1,5 +1,5 @@
-name: Bug report
-description: The scoresheet is broken or scores something incorrectly. 🐞
+name: 🐞 Bug report
+description: Something isn't working correctly.
 labels: ['bug']
 body:
   - type: markdown
