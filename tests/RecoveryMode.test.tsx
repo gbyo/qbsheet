@@ -67,6 +67,10 @@ describe('standalone Recovery Mode', () => {
     render(<RecoveryMode loadSources={() => Promise.resolve(loaded)} onResume={onResume} now={() => now} />);
 
     expect(await screen.findByRole('heading', { name: 'Recovery Mode' })).toBeInTheDocument();
+    const recoveryMain = screen.getByRole('main', { name: 'Recovery Mode' });
+    expect(recoveryMain).toHaveClass('shell', 'recovery-screen');
+    expect(recoveryMain.querySelector('.shell-brand-logo')).not.toBeNull();
+    expect(screen.getByRole('heading', { name: 'Recovery Mode' })).toHaveClass('shell-title');
     expect(screen.getByText('Instant scoring journal')).toBeInTheDocument();
     expect(screen.getAllByText(/Valid · saved just now · 1 event · through TU 14/)).toHaveLength(2);
     expect(screen.getByText(/does not open the scorer/i)).toBeInTheDocument();
