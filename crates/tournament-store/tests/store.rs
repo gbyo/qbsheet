@@ -257,6 +257,10 @@ fn schedule_repository_rejects_team_and_room_conflicts() {
         .teams()
         .create(NewTeam::new(&tournament.id, "C"))
         .unwrap();
+    let team_d = store
+        .teams()
+        .create(NewTeam::new(&tournament.id, "D"))
+        .unwrap();
     let phase = store
         .phases()
         .create(NewPhase {
@@ -327,8 +331,8 @@ fn schedule_repository_rejects_team_and_room_conflicts() {
         round_id: round.id.clone(),
         room_id: Some(room.id),
         packet_id: None,
-        team_a_id: Some(team_a.id.clone()),
-        team_b_id: Some(team_c.id.clone()),
+        team_a_id: Some(team_c.id.clone()),
+        team_b_id: Some(team_d.id),
         game_number: 2,
         status: "scheduled".to_owned(),
         scheduled_at: None,

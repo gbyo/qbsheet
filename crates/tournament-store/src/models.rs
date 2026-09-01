@@ -50,12 +50,37 @@ impl NewTournament {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct TournamentUpdate {
     pub name: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_with::rust::double_option"
+    )]
     pub short_name: Option<Option<String>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_with::rust::double_option"
+    )]
     pub location: Option<Option<String>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_with::rust::double_option"
+    )]
     pub start_date: Option<Option<String>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_with::rust::double_option"
+    )]
     pub end_date: Option<Option<String>>,
     pub status: Option<String>,
     pub rules: Option<Value>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_with::rust::double_option"
+    )]
     pub archived_at: Option<Option<UnixTimestamp>>,
 }
 
@@ -122,13 +147,38 @@ impl NewTeam {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct TeamUpdate {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_with::rust::double_option"
+    )]
     pub organization_id: Option<Option<Id>>,
     pub name: Option<String>,
     pub display_name: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_with::rust::double_option"
+    )]
     pub team_letter: Option<Option<String>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_with::rust::double_option"
+    )]
     pub seed: Option<Option<i64>>,
     pub status: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_with::rust::double_option"
+    )]
     pub notes: Option<Option<String>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_with::rust::double_option"
+    )]
     pub archived_at: Option<Option<UnixTimestamp>>,
 }
 
@@ -567,4 +617,95 @@ pub struct NewQbtcpSession {
     pub status: String,
     pub paired_at: UnixTimestamp,
     pub expires_at: Option<UnixTimestamp>,
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{TeamUpdate, TournamentUpdate};
+
+    #[test]
+    fn tournament_update_distinguishes_omitted_null_and_present_nullable_fields() {
+        let omitted: TournamentUpdate = serde_json::from_value(json!({})).unwrap();
+        assert_eq!(omitted.short_name, None);
+        assert_eq!(omitted.location, None);
+        assert_eq!(omitted.start_date, None);
+        assert_eq!(omitted.end_date, None);
+        assert_eq!(omitted.archived_at, None);
+        let serialized = serde_json::to_value(omitted).unwrap();
+        for key in ["short_name", "location", "start_date", "end_date", "archived_at"] {
+            assert!(serialized.get(key).is_none());
+        }
+
+        let cleared: TournamentUpdate = serde_json::from_value(json!({
+            "short_name": null,
+            "location": null,
+            "start_date": null,
+            "end_date": null,
+            "archived_at": null
+        }))
+        .unwrap();
+        assert_eq!(cleared.short_name, Some(None));
+        assert_eq!(cleared.location, Some(None));
+        assert_eq!(cleared.start_date, Some(None));
+        assert_eq!(cleared.end_date, Some(None));
+        assert_eq!(cleared.archived_at, Some(None));
+
+        let present: TournamentUpdate = serde_json::from_value(json!({
+            "short_name": "Invitational",
+            "location": "Main campus",
+            "start_date": "2026-09-12",
+            "end_date": "2026-09-13",
+            "archived_at": 123
+        }))
+        .unwrap();
+        assert_eq!(present.short_name, Some(Some("Invitational".to_owned())));
+        assert_eq!(present.location, Some(Some("Main campus".to_owned())));
+        assert_eq!(present.start_date, Some(Some("2026-09-12".to_owned())));
+        assert_eq!(present.end_date, Some(Some("2026-09-13".to_owned())));
+        assert_eq!(present.archived_at, Some(Some(123)));
+    }
+
+    #[test]
+    fn team_update_distinguishes_omitted_null_and_present_nullable_fields() {
+        let omitted: TeamUpdate = serde_json::from_value(json!({})).unwrap();
+        assert_eq!(omitted.organization_id, None);
+        assert_eq!(omitted.team_letter, None);
+        assert_eq!(omitted.seed, None);
+        assert_eq!(omitted.notes, None);
+        assert_eq!(omitted.archived_at, None);
+        let serialized = serde_json::to_value(omitted).unwrap();
+        for key in ["organization_id", "team_letter", "seed", "notes", "archived_at"] {
+            assert!(serialized.get(key).is_none());
+        }
+
+        let cleared: TeamUpdate = serde_json::from_value(json!({
+            "organization_id": null,
+            "team_letter": null,
+            "seed": null,
+            "notes": null,
+            "archived_at": null
+        }))
+        .unwrap();
+        assert_eq!(cleared.organization_id, Some(None));
+        assert_eq!(cleared.team_letter, Some(None));
+        assert_eq!(cleared.seed, Some(None));
+        assert_eq!(cleared.notes, Some(None));
+        assert_eq!(cleared.archived_at, Some(None));
+
+        let present: TeamUpdate = serde_json::from_value(json!({
+            "organization_id": "org-1",
+            "team_letter": "A",
+            "seed": 4,
+            "notes": "late arrival",
+            "archived_at": 456
+        }))
+        .unwrap();
+        assert_eq!(present.organization_id, Some(Some("org-1".to_owned())));
+        assert_eq!(present.team_letter, Some(Some("A".to_owned())));
+        assert_eq!(present.seed, Some(Some(4)));
+        assert_eq!(present.notes, Some(Some("late arrival".to_owned())));
+        assert_eq!(present.archived_at, Some(Some(456)));
+    }
 }
