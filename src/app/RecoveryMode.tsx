@@ -7,6 +7,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
+import BrandLogo from '../BrandLogo';
 import { isActive } from '../game/GameStore';
 import type { IStoredGameRecord } from '../game/GameStore';
 import { downloadFile } from '../integrations/file/QbjDownload';
@@ -108,7 +109,7 @@ function GameSources(props: {
           <p>{game.label}</p>
         </div>
         {resumable && (
-          <button type="button" className="recovery-button is-primary" onClick={() => onResume(game.record!)}>
+          <button type="button" className="shell-button is-primary" onClick={() => onResume(game.record!)}>
             Resume safest copy
           </button>
         )}
@@ -291,11 +292,15 @@ export default function RecoveryMode(props: IRecoveryModeProps = {}) {
   };
 
   return (
-    <main className="recovery-screen" aria-labelledby="recovery-title">
-      <header className="recovery-header">
-        <p className="recovery-eyebrow">QBSheet</p>
-        <h1 id="recovery-title">Recovery Mode</h1>
-        <p>
+    <main className="shell recovery-screen" aria-labelledby="recovery-title">
+      <header className="shell-header recovery-header">
+        <div className="recovery-brand">
+          <BrandLogo className="shell-brand-logo" />
+        </div>
+        <h1 id="recovery-title" className="shell-title recovery-title">
+          Recovery Mode
+        </h1>
+        <p className="shell-subtitle recovery-intro">
           This is a quiet view of the copies QBSheet can find. Inspection does not open the scorer, contact
           tournament control, request folder access on startup, or clear anything.
         </p>
@@ -314,18 +319,15 @@ export default function RecoveryMode(props: IRecoveryModeProps = {}) {
 
       {snapshot && (
         <>
-          <section className="recovery-panel" aria-labelledby="recovery-status-title">
+          <section className="shell-section recovery-section" aria-labelledby="recovery-status-title">
             <div className="recovery-section-heading">
               <div>
-                <h2 id="recovery-status-title">Local recovery status</h2>
+                <h2 id="recovery-status-title" className="shell-heading">
+                  Local recovery status
+                </h2>
                 <p>Nothing in this inspection changes a journal or a durable game record.</p>
               </div>
-              <button
-                type="button"
-                className="recovery-button"
-                onClick={() => void load()}
-                disabled={loading}
-              >
+              <button type="button" className="shell-button" onClick={() => void load()} disabled={loading}>
                 {loading ? 'Refreshing…' : 'Refresh'}
               </button>
             </div>
@@ -375,7 +377,7 @@ export default function RecoveryMode(props: IRecoveryModeProps = {}) {
                   snapshot.externalBackup.state === 'backup-failed') && (
                   <button
                     type="button"
-                    className="recovery-button"
+                    className="shell-button"
                     onClick={() => void manageExternalBackup()}
                     disabled={externalBusy}
                   >
@@ -415,14 +417,16 @@ export default function RecoveryMode(props: IRecoveryModeProps = {}) {
             )}
           </section>
 
-          <section className="recovery-panel" aria-labelledby="recovery-actions-title">
-            <h2 id="recovery-actions-title">Recovery actions</h2>
+          <section className="shell-section recovery-section" aria-labelledby="recovery-actions-title">
+            <h2 id="recovery-actions-title" className="shell-heading">
+              Recovery actions
+            </h2>
             <p>Choose an action deliberately. Existing local copies are preserved.</p>
             <div className="recovery-actions">
-              <button type="button" className="recovery-button" onClick={saveRawJournal}>
+              <button type="button" className="shell-button" onClick={saveRawJournal}>
                 Save raw recovery file
               </button>
-              <button type="button" className="recovery-button" onClick={() => fileInput.current?.click()}>
+              <button type="button" className="shell-button" onClick={() => fileInput.current?.click()}>
                 Open QBSheet backup…
               </button>
               <input
@@ -458,7 +462,7 @@ export default function RecoveryMode(props: IRecoveryModeProps = {}) {
                 </p>
                 <button
                   type="button"
-                  className="recovery-button is-primary"
+                  className="shell-button is-primary"
                   onClick={() => void restoreBackup()}
                   disabled={restoreBusy}
                 >
@@ -476,7 +480,7 @@ export default function RecoveryMode(props: IRecoveryModeProps = {}) {
       )}
 
       <footer className="recovery-footer">
-        <button type="button" className="recovery-button" onClick={leave}>
+        <button type="button" className="shell-button" onClick={leave}>
           Return to QBSheet
         </button>
         <p>When you are ready, returning to QBSheet removes Recovery Mode from the startup path.</p>
