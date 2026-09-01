@@ -37,11 +37,18 @@ vi.mock('../src/pwa/registerServiceWorker', () => ({
   },
 }));
 
-vi.mock('../src/app/App', () => ({
-  default: () => {
-    timeline.push({ step: 'render', href: window.location.href });
-    return null;
-  },
+vi.mock('../src/app/App', () => {
+  timeline.push({ step: 'App.module', href: window.location.href });
+  return {
+    default: () => {
+      timeline.push({ step: 'render', href: window.location.href });
+      return null;
+    },
+  };
+});
+
+vi.mock('../src/app/RecoveryMode', () => ({
+  default: () => null,
 }));
 
 vi.mock('react-dom/client', () => ({
@@ -92,5 +99,23 @@ test('a URL with no pairing fragment starts up exactly as it always did', async 
     'createRoot.render',
     'registerServiceWorker',
   ]);
+  expect(window.location.hash).toBe('#anchor');
+});
+
+test('the recovery query loads the safe screen without evaluating the normal app module', async () => {
+  window.history.replaceState(null, '', '/scoresheet/?recovery=1#anchor');
+
+  await import('../src/main');
+  await vi.waitFor(() => {
+    expect(timeline.some((entry) => entry.step === 'createRoot.render')).toBe(true);
+  });
+
+  expect(timeline.map((entry) => entry.step)).toEqual([
+    'watchForErrors',
+    'registerServiceWorker',
+    'createRoot.render',
+  ]);
+  expect(timeline.some((entry) => entry.step === 'App.module')).toBe(false);
+  expect(window.location.search).toBe('?recovery=1');
   expect(window.location.hash).toBe('#anchor');
 });

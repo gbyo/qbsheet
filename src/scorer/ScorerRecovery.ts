@@ -1,14 +1,20 @@
 import { IGameSetup } from '../scoring/deriveGame';
 import { ProcedureAllowance, ScoreEvent } from '../scoring/ScoreEvents';
 import { procedureAllowances } from '../scoring/ProcedureExceptions';
+import type { IGameSessionHistory } from './GameSession';
 
 export const scorerRecoveryKey = '_yf_scorekeeper_recovery';
-export const scorerRecoveryVersion = 1;
+/** The current private scorer recovery envelope. */
+export const scorerRecoveryVersion = 2;
+/** The setup/events-only envelope written before action-level recovery was available. */
+export const legacyScorerRecoveryVersion = 1;
 
 export interface IScorerRecoveryPayload {
   version: number;
   setup: IGameSetup;
   events: ScoreEvent[];
+  /** Optional auxiliary action history. The event list remains authoritative. */
+  history?: IGameSessionHistory;
 }
 
 // Keep historical tossup reading markers parseable; they are not live scoring controls anymore.
@@ -190,14 +196,55 @@ export function validEvent(value: unknown): value is ScoreEvent {
   return true;
 }
 
+/**
+ * Read action-level metadata without turning it into a second event journal.
+ *
+ * This deliberately follows the best-effort shape checks used by GameSession and QBSheetBackup:
+ * an invalid stack is dropped, while a usable sibling stack can still be retained. Format-aware
+ * redo validation belongs to useGameEvents, which has the scoring format needed to reject a frame
+ * that is structurally valid but impossible to replay. Nothing here derives or repairs frames.
+ */
+function readRecoveryHistory(value: unknown, events: ScoreEvent[]): IGameSessionHistory | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const history = value as Partial<IGameSessionHistory>;
+  const undo =
+    Array.isArray(history.undo) &&
+    history.undo.every((frame) => typeof frame === 'number' && Number.isInteger(frame) && frame > 0) &&
+    history.undo.reduce((sum, frame) => sum + frame, 0) <= events.length
+      ? history.undo.slice()
+      : [];
+  const redo =
+    Array.isArray(history.redo) &&
+    history.redo.every(
+      (frame) => Array.isArray(frame) && frame.length > 0 && frame.every((event) => validEvent(event)),
+    )
+      ? history.redo.map((frame) => frame.map((event) => ({ ...event })))
+      : [];
+  return undo.length > 0 || redo.length > 0 ? { undo, redo } : undefined;
+}
+
+function cloneRecoveryHistory(
+  history: IGameSessionHistory | undefined,
+  events: ScoreEvent[],
+): IGameSessionHistory | undefined {
+  return readRecoveryHistory(history, events);
+}
+
 /** Add an exact, credential-free recovery layer to an otherwise ordinary QBJ match. */
-export function attachScorerRecovery(qbj: object, setup: IGameSetup, events: ScoreEvent[]): object {
+export function attachScorerRecovery(
+  qbj: object,
+  setup: IGameSetup,
+  events: ScoreEvent[],
+  history?: IGameSessionHistory,
+): object {
+  const recoveryHistory = cloneRecoveryHistory(history, events);
   return {
     ...qbj,
     [scorerRecoveryKey]: {
       version: scorerRecoveryVersion,
       setup,
       events,
+      ...(recoveryHistory ? { history: recoveryHistory } : {}),
     },
   };
 }
@@ -210,14 +257,23 @@ export function readScorerRecovery(
   if (typeof value !== 'object' || value === null) return null;
   const payload = (value as Record<string, unknown>)[scorerRecoveryKey] as
     Partial<IScorerRecoveryPayload> | undefined;
-  if (payload?.version !== scorerRecoveryVersion || !Array.isArray(payload.events)) return null;
+  if (!payload) return null;
+  const version = payload.version;
+  if (
+    (version !== scorerRecoveryVersion && version !== legacyScorerRecoveryVersion) ||
+    !Array.isArray(payload.events)
+  )
+    return null;
   if (!payload.events.every(validEvent)) return null;
   if (!validSetup(payload.setup)) return null;
   if (payload.setup.left.name !== expected.left.name || payload.setup.right.name !== expected.right.name)
     return null;
+  const history =
+    version === scorerRecoveryVersion ? readRecoveryHistory(payload.history, payload.events) : undefined;
   return {
-    version: scorerRecoveryVersion,
+    version,
     setup: payload.setup,
     events: payload.events,
+    ...(history ? { history } : {}),
   };
 }

@@ -77,6 +77,7 @@ import QrScannerDialog from './QrScannerDialog';
 import { IPairingLaunchIntent, readScannedPairingCode } from './PairingLaunch';
 import { readOperatorNameAsked, writeOperatorNameAsked } from './OperatorIdentity';
 import SettingsDialog, { ISettingsConnection } from './SettingsDialog';
+import type { IRecoveryUi } from './DeviceReadiness';
 import { downloadStoredGameQbj } from './FinishedGameDownload';
 
 /** How far a saved game got, for the resume card. */
@@ -145,6 +146,8 @@ export default function WelcomeScreen(props: {
   onResetDevicePreferences: () => void;
   practiceInProgress: boolean;
   onReadiness: () => void;
+  recovery?: IRecoveryUi;
+  onRecovery: () => void;
   onPractice: () => void;
   /** Into the hand-entered setup form. Creates nothing until that form is submitted. */
   onCreateGame: () => void;
@@ -181,6 +184,8 @@ export default function WelcomeScreen(props: {
     onResetDevicePreferences,
     practiceInProgress,
     onReadiness,
+    recovery,
+    onRecovery,
     onPractice,
     onCreateGame,
     onOpenRoom,
@@ -497,6 +502,9 @@ export default function WelcomeScreen(props: {
 
       <footer className="welcome-footer">
         <a href="about/">About QBSheet</a>
+        <button type="button" className="welcome-recovery-link" onClick={onRecovery}>
+          Recovery tools
+        </button>
       </footer>
 
       {onOperatorNameChange && (settingsView !== null || firstRun) && (
@@ -510,6 +518,7 @@ export default function WelcomeScreen(props: {
           onForgetPairing={onForgetPairing}
           onResetDevicePreferences={onResetDevicePreferences}
           onReadiness={onReadiness}
+          recovery={recovery}
           onClose={closeSettings}
         />
       )}

@@ -69,8 +69,8 @@ export interface IGameEventsApi {
   remove: (id: string) => void;
   /** Replace one question atomically after validating its complete proposed cycle. */
   replaceQuestion: (questionNumber: number, question: IEditableQuestion) => boolean;
-  /** Replace the game from a verified recovery file. */
-  restore: (restored: ScoreEvent[]) => void;
+  /** Replace the game from a verified recovery file or a validated server snapshot. */
+  restore: (restored: ScoreEvent[], restoredHistory?: IGameSessionHistory) => void;
   /**
    * Replace the whole history with a corrected one, if it is coherent.
    *
@@ -369,13 +369,14 @@ export default function useGameEvents(
   );
 
   const restore = useCallback(
-    (restored: ScoreEvent[]) => {
-      undoStack.current = [];
-      redoStack.current = [];
+    (restored: ScoreEvent[], restoredHistory?: IGameSessionHistory) => {
+      const usable = usableInitialHistory(restoredHistory, format, setup, procedure, restored);
+      undoStack.current = usable?.undo.slice() ?? [];
+      redoStack.current = usable?.redo.map((frame) => frame.map((event) => ({ ...event }))) ?? [];
       clearRejectionState();
       commit(restored.map((event) => ({ ...event })));
     },
-    [clearRejectionState, commit],
+    [clearRejectionState, commit, format, procedure, setup],
   );
 
   const clearRejection = clearRejectionState;
