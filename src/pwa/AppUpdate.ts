@@ -41,7 +41,7 @@
 /** How often an open tab asks whether a newer build has been deployed. */
 export const updateCheckIntervalMs = 15 * 60 * 1000;
 
-/** How long an attempted worker takeover may wait for `controllerchange` before it can be retried. */
+/** How long an attempted worker takeover may wait for activation before it can be retried. */
 export const updateApplyTimeoutMs = 10 * 1000;
 
 /** What the build serving this page says about itself, when it can be asked. */
@@ -121,6 +121,10 @@ export class AppUpdateWatcher {
 
   private applyResetTimer: ReturnType<typeof setTimeout> | null = null;
 
+  private applyingWorker: IWorkerLike | null = null;
+
+  private applyingWorkerStateHandler: (() => void) | null = null;
+
   private updateFoundHandler: (() => void) | null = null;
 
   private controllerChangeHandler: (() => void) | null = null;
@@ -153,10 +157,44 @@ export class AppUpdateWatcher {
     this.listeners.forEach((listener) => listener(next));
   }
 
+  private clearApplyingWorkerListener(): void {
+    if (this.applyingWorker && this.applyingWorkerStateHandler) {
+      this.applyingWorker.removeEventListener('statechange', this.applyingWorkerStateHandler);
+    }
+    this.applyingWorker = null;
+    this.applyingWorkerStateHandler = null;
+  }
+
+  /**
+   * Finish a swap this watcher initiated.
+   *
+   * `controllerchange` is the ideal signal, but browsers also expose the waiting worker's own state.
+   * The generated worker does its cache cleanup and `clients.claim()` inside the activate event's
+   * `waitUntil`, so reaching `activated` is also a safe point to reload. Listening to both avoids an
+   * update button that appears to do nothing when a browser delays or misses `controllerchange`.
+   */
+  private completeApply(): void {
+    if (!this.state.applying) return;
+    if (this.applyResetTimer !== null) clearTimeout(this.applyResetTimer);
+    this.applyResetTimer = null;
+    this.clearApplyingWorkerListener();
+    this.publish({ available: false, applying: false });
+    this.reload();
+  }
+
+  private abandonApply(): void {
+    if (this.applyResetTimer !== null) clearTimeout(this.applyResetTimer);
+    this.applyResetTimer = null;
+    this.clearApplyingWorkerListener();
+    this.publish({ applying: false });
+    this.evaluate();
+  }
+
   /** Clear transient apply state, primarily for a fresh observation or a test boundary. */
   reset(): void {
     if (this.applyResetTimer !== null) clearTimeout(this.applyResetTimer);
     this.applyResetTimer = null;
+    this.clearApplyingWorkerListener();
     this.publish({ applying: false });
   }
 
@@ -202,10 +240,7 @@ export class AppUpdateWatcher {
     this.controllerChangeHandler = () => {
       // Only a swap this module asked for. A first install also lands here, and reloading for that
       // would restart the application the instant somebody opened it for the first time.
-      if (!this.state.applying) return;
-      if (this.applyResetTimer !== null) clearTimeout(this.applyResetTimer);
-      this.applyResetTimer = null;
-      this.reload();
+      this.completeApply();
     };
     container.addEventListener('controllerchange', this.controllerChangeHandler);
 
@@ -225,6 +260,7 @@ export class AppUpdateWatcher {
     this.timer = null;
     if (this.applyResetTimer !== null) clearTimeout(this.applyResetTimer);
     this.applyResetTimer = null;
+    this.clearApplyingWorkerListener();
   }
 
   private evaluate(): void {
@@ -257,17 +293,36 @@ export class AppUpdateWatcher {
    * Replace the running application with the waiting build, if that is currently allowed.
    *
    * Returns whether the swap was started, so a caller that reached this while a game was live finds
-   * out rather than assuming. The reload itself happens on `controllerchange`, once the new worker
-   * has actually taken control — reloading before that lands the page back on the old worker and
-   * looks like an update that does nothing.
+   * out rather than assuming. The reload happens once either the container reports `controllerchange`
+   * or the worker reaches `activated`; both are after the generated worker's activate work, including
+   * `clients.claim()`, has completed. Reloading before then can land back on the old worker and looks
+   * exactly like an update button that did nothing.
    */
   apply(): boolean {
     const waiting = this.registration?.waiting;
     if (!waiting || !this.replaceable || this.state.applying) return false;
+
     this.publish({ applying: true });
-    waiting.postMessage('qbsheet:skip-waiting');
+    this.applyingWorker = waiting;
+    this.applyingWorkerStateHandler = () => {
+      if (waiting.state === 'activated') {
+        this.completeApply();
+        return;
+      }
+      if (waiting.state === 'redundant') this.abandonApply();
+    };
+    waiting.addEventListener('statechange', this.applyingWorkerStateHandler);
+
+    try {
+      waiting.postMessage('qbsheet:skip-waiting');
+    } catch {
+      this.abandonApply();
+      return false;
+    }
+
     this.applyResetTimer = setTimeout(() => {
       this.applyResetTimer = null;
+      this.clearApplyingWorkerListener();
       this.publish({ applying: false });
       this.evaluate();
     }, updateApplyTimeoutMs);
