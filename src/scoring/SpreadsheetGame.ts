@@ -107,6 +107,7 @@ export interface ISpreadsheetSerialization {
 const eventPropertyKeys = {
   'tossup-buzz': ['team', 'playerName', 'answerTypeIndex'],
   'tossup-no-penalty': ['team', 'playerName'],
+  // Preserve legacy markers when importing/exporting spreadsheets; they do not drive live legality.
   'tossup-reading-resumed': [],
   'tossup-readout': [],
   'tossup-dead': [],

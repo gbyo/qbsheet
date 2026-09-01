@@ -56,6 +56,8 @@ import FruityServerClient, {
   HelpReadResult,
   HelpRequestResult,
   IRoomIdentity,
+  IRosterAddResult,
+  ISessionRecovery,
   ISessionCredentials,
   IWriterConflict,
   readWriterConflict,
@@ -69,6 +71,8 @@ import {
   helpRequestCategoryLabels,
 } from './HelpRequests';
 import { ConnectionTimeline, connectionTimeline } from './ConnectionTimeline';
+import { buildVersion } from '../pwa/BuildVersion';
+import { qbjSerializationVersion } from '../qbj/QbjSerialization';
 
 /** How often a room asks control what it should be playing. */
 export const assignmentPollIntervalMs = 10_000;
@@ -125,11 +129,13 @@ export interface IConnectedRuntime {
   /** Offer the latest scoresheet for the next trailing snapshot. Safe to call every render. */
   reportProgress: (qbj: object) => void;
   submitFinal: (qbj: object) => Promise<IFinalDelivery>;
-  recoverFromServer: () => Promise<object | null>;
+  recoverFromServer: () => Promise<ISessionRecovery | null>;
   syncRosterPlayer: (
     teamName: string,
     playerName: string,
-  ) => Promise<{ ok: boolean; error?: string; rejected?: boolean }>;
+    teamId?: string,
+    questionNumber?: number,
+  ) => Promise<{ ok: boolean; error?: string; rejected?: boolean; canonical?: IRosterAddResult }>;
   requestControl: (category: HelpRequestCategory, message: string) => Promise<HelpRequestResult>;
   retryControlRequest: () => Promise<HelpRequestResult | null>;
   cancelControlRequest: () => Promise<HelpClearResult | null>;
@@ -384,6 +390,38 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     onProgressSequence,
     timeline = connectionTimeline,
   } = input;
+
+  /**
+   * Presence is deliberately advisory. It carries only bounded build/procedure information and
+   * uses the already-paired room endpoint; a failed heartbeat must never affect scoring or result
+   * delivery. The interval is long enough not to become a second progress channel, while still
+   * letting control distinguish an old browser from a live one during a room check.
+   */
+  useEffect(() => {
+    if (!enabled) return undefined;
+    let cancelled = false;
+    const publish = () => {
+      if (cancelled) return;
+      if (typeof client.updatePresence !== 'function') return;
+      void client.updatePresence(identity, {
+        ready: true,
+        client: {
+          name: 'QBSheet',
+          version: buildVersion.version,
+          build: buildVersion.commit,
+          commit: buildVersion.commit,
+        },
+        procedureVersions: [3],
+        qbjVersion: qbjSerializationVersion,
+      });
+    };
+    publish();
+    const timer = setInterval(publish, 15_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [client, enabled, identity]);
 
   const [connection, setConnection] = useState(RoomConnectionState.Connected);
   const [degradedMessage, setDegradedMessage] = useState<string | undefined>(undefined);
@@ -1053,15 +1091,22 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     if (!result.ok) {
       throw new Error(result.detail ?? result.error);
     }
-    return result.value.latestQbj;
+    return result.value;
   }, [client, credentials]);
 
   const syncRosterPlayer = useCallback(
-    async (teamName: string, playerName: string) => {
-      const result = await client.addRosterPlayer(identity, credentials, teamName, playerName);
+    async (teamName: string, playerName: string, teamId?: string, questionNumber?: number) => {
+      const result = await client.addRosterPlayer(
+        identity,
+        credentials,
+        teamName,
+        playerName,
+        teamId,
+        questionNumber,
+      );
       if (result.ok) {
         timeline.record('roster-synced');
-        return { ok: true };
+        return { ok: true, canonical: result.value };
       }
       // A refusal that reached control is a decision about the roster; a failure that did not is a
       // network problem the room can try again. The scorer says different things about each.

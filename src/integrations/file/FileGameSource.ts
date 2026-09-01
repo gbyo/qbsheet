@@ -11,6 +11,7 @@
  */
 import { IGameSource, GameSourceResult } from '../../game/GameSource';
 import { OpenGameResult, openGameText } from '../../game/OpenGameDefinition';
+import { IGameDefinitionOverrides } from '../../qbj/ParseQbjAssignment';
 import { maxQbjBytes } from '../../qbj/QbjSerialization';
 
 /**
@@ -32,7 +33,7 @@ export class FileGameSource implements IGameSource {
    * The full-fidelity entry point: a document holding several games returns the choice rather than
    * collapsing it, and one missing its scoring rules says so in a way the caller can answer.
    */
-  async open(): Promise<OpenGameResult> {
+  async open(overrides: IGameDefinitionOverrides = {}): Promise<OpenGameResult> {
     if (this.file.size > maxQbjBytes) {
       return { ok: false, errors: ['That file is too large to be a game file.'] };
     }
@@ -42,7 +43,7 @@ export class FileGameSource implements IGameSource {
     } catch {
       return { ok: false, errors: ['That file could not be read.'] };
     }
-    return openGameText(text);
+    return openGameText(text, overrides);
   }
 
   /**

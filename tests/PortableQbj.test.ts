@@ -9,6 +9,8 @@
  */
 import { describe, expect, test } from 'vitest';
 import {
+  applyCanonicalRosterAmendments,
+  applyCanonicalRosterIdentity,
   portableQbj,
   readSourceMetadata,
   sourceExtensionKey,
@@ -22,6 +24,8 @@ import { qbjFileContents, qbjFileName } from '../src/integrations/file/QbjDownlo
 import { validPackage } from './packages';
 import scoringRulesToScorekeeperFormat, { CommonRuleSets, ScoringRules, typeIndex } from './rules';
 import { event } from './events';
+import { buildResultDocument } from '../src/qbj/QbjResult';
+import type { IGameDefinition } from '../src/game/GameDefinition';
 
 const format = scoringRulesToScorekeeperFormat(new ScoringRules(CommonRuleSets.AcfPowers));
 const setup: IGameSetup = {
@@ -138,6 +142,108 @@ describe('the source block', () => {
     expect(readSourceMetadata({ [sourceExtensionKey]: { ...valid, gamePackageVersion: '1' } })).toBeNull();
     expect(readSourceMetadata({ [sourceExtensionKey]: { ...valid, roundRevision: 0 } })).toBeNull();
     expect(readSourceMetadata({ [sourceExtensionKey]: { ...valid, producer: 'Other Scorer' } })).toBeNull();
+  });
+});
+
+describe('canonical roster recovery', () => {
+  test('applies a batch atomically, adds both new players, and preserves their ids in a document export', () => {
+    const packageValue = validPackage({
+      qbjIdentity: {
+        tournamentId: 'tourn-2026-spring',
+        matchId: 'sched-101',
+        teamIds: { left: 'team-left', right: 'team-right' },
+        playerIds: {},
+      },
+    }) as IGameDefinition;
+    const updated = applyCanonicalRosterAmendments(packageValue, [
+      { teamId: 'team-left', teamName: 'Ninety Six A', playerName: 'Taylor Reed', playerId: 'player-taylor' },
+      { teamId: 'team-right', teamName: 'Greenwood', playerName: 'Casey Jones', playerId: 'player-casey' },
+    ]) as IGameDefinition;
+
+    expect(updated.left.players.map((player) => player.name)).toContain('Taylor Reed');
+    expect(updated.right.players.map((player) => player.name)).toContain('Casey Jones');
+    expect(updated.qbjIdentity?.playerIds).toMatchObject({
+      ['Ninety Six A\u001fTaylor Reed']: 'player-taylor',
+      ['Greenwood\u001fCasey Jones']: 'player-casey',
+    });
+
+    const document = buildResultDocument({
+      definition: updated,
+      format,
+      game: deriveGame(format, setup, []),
+    });
+    const teams = document.objects.filter((entry) => entry.type === 'Team');
+    expect(teams.flatMap((team) => (Array.isArray(team.players) ? team.players : []))).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'player-taylor', name: 'Taylor Reed' }),
+        expect.objectContaining({ id: 'player-casey', name: 'Casey Jones' }),
+      ]),
+    );
+  });
+
+  test('applies two additions for one canonical team without losing either identity', () => {
+    const packageValue = validPackage({
+      qbjIdentity: {
+        tournamentId: 'tourn-2026-spring',
+        matchId: 'sched-101',
+        teamIds: { left: 'team-left', right: 'team-right' },
+        playerIds: {},
+      },
+    }) as IGameDefinition;
+    const updated = applyCanonicalRosterAmendments(packageValue, [
+      { teamId: 'team-left', teamName: 'Ninety Six A', playerName: 'Taylor Reed', playerId: 'player-taylor' },
+      { teamId: 'team-left', teamName: 'Ninety Six A', playerName: 'Morgan Lee', playerId: 'player-morgan' },
+    ]) as IGameDefinition;
+
+    expect(updated.left.players.map((player) => player.name)).toEqual(
+      expect.arrayContaining(['Taylor Reed', 'Morgan Lee']),
+    );
+    expect(updated.qbjIdentity?.playerIds).toMatchObject({
+      ['Ninety Six A\u001fTaylor Reed']: 'player-taylor',
+      ['Ninety Six A\u001fMorgan Lee']: 'player-morgan',
+    });
+
+    const document = buildResultDocument({
+      definition: updated,
+      format,
+      game: deriveGame(format, setup, []),
+    });
+    const leftTeam = document.objects.find((entry) => entry.type === 'Team' && entry.name === 'Ninety Six A');
+    expect(leftTeam?.players).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'player-taylor', name: 'Taylor Reed' }),
+        expect.objectContaining({ id: 'player-morgan', name: 'Morgan Lee' }),
+      ]),
+    );
+  });
+
+  test('is idempotent and refuses an ambiguous team amendment', () => {
+    const packageValue = validPackage({
+      right: { name: 'Ninety Six A', players: [{ name: 'Jordan Blake' }] },
+      qbjIdentity: { teamIds: { left: 'team-1', right: 'team-2' }, playerIds: {} },
+    }) as IGameDefinition;
+    const amendment = {
+      teamId: 'team-1',
+      teamName: 'Ninety Six A',
+      playerName: 'Taylor Reed',
+      playerId: 'p-1',
+    };
+    const once = applyCanonicalRosterIdentity(
+      packageValue,
+      amendment.teamName,
+      amendment.playerName,
+      amendment,
+    );
+    expect(applyCanonicalRosterIdentity(once, amendment.teamName, amendment.playerName, amendment)).toBe(
+      once,
+    );
+    expect(
+      applyCanonicalRosterIdentity(packageValue, 'Ninety Six A', 'Taylor Reed', {
+        teamName: 'Ninety Six A',
+        playerName: 'Taylor Reed',
+        playerId: 'p-2',
+      }),
+    ).toBe(packageValue);
   });
 });
 

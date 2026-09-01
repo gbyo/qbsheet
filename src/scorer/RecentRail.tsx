@@ -83,7 +83,10 @@ function questionLines(question: IDerivedQuestion, teamNames: { left: string; ri
     points: signed(buzz.answerType.value),
   }));
   for (const missed of question.noPenalty) {
-    lines.push({ what: missed.playerName ?? `${teamNames[missed.team]} wrong`, points: '0' });
+    lines.push({
+      what: `${missed.playerName ?? teamNames[missed.team]} wrong, no penalty`,
+      points: '0',
+    });
   }
   if (question.bonus) {
     lines.push({

@@ -909,6 +909,18 @@ describe('a bonus without bouncebacks', () => {
 });
 
 describe('a tossup that is not over yet', () => {
+  test('does not ask the scorekeeper to track the moderator reading position', () => {
+    renderScorer(formatFor());
+
+    expect(screen.queryByRole('button', { name: 'Resume reading' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Question read out' })).toBeNull();
+
+    fireEvent.click(buttonsFor('Sarah Mitchell')[2]); // -5
+
+    expect(screen.queryByRole('button', { name: 'Resume reading' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Question read out' })).toBeNull();
+  });
+
   test('a neg leaves the other team able to answer', () => {
     renderScorer(formatFor());
 
@@ -2152,13 +2164,13 @@ describe('recovering a game', () => {
 describe('a wrong answer that costs nothing', () => {
   /*
    * NAQT's answer types are 15, 10 and -5, and it has a fourth tossup outcome none of them can
-   * express: an answer given after the question has been read in full is worth zero. `No buzz` is
-   * not the same thing, because the other team is still owed its chance.
+   * express: an incorrect answer with no penalty is worth zero. `No buzz` is not the same thing,
+   * because the other team is still owed its chance.
    */
   test("the zero ends this team's chance and leaves the other team eligible", () => {
     renderScorer(formatFor());
 
-    fireEvent.click(screen.getByLabelText('Sarah Mitchell 0 after readout wrong, no penalty'));
+    fireEvent.click(screen.getByLabelText('Sarah Mitchell 0, Wrong, no penalty'));
 
     expect(scoreOf('Ninety Six')).toBe('0');
     expect(screen.getByText(/Greenwood may still answer/)).toBeTruthy();

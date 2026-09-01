@@ -40,11 +40,10 @@ export interface ITeamPanelProps {
   /** False when this team has already answered on the current tossup. */
   eligible: boolean;
   /**
-   * False once anybody has answered this tossup.
+   * False once either team has used its tossup opportunity.
    *
-   * A team answering second has heard the whole question, and a team that has heard the whole
-   * question cannot be penalized for missing it. Leaving −5 on screen for them is an invitation to
-   * record a neg that the rules do not have.
+   * The second team may still record the applicable positive rulings or a wrong/no-penalty answer,
+   * but it cannot receive a negative ruling.
    */
   negsAvailable: boolean;
   /** Whether a timeout has been used, when the tournament tracks them. */
@@ -202,9 +201,9 @@ export default function TeamPanel(props: ITeamPanelProps) {
     (player) => player.name,
   );
   /*
-   * The rulings actually available to this team on this tossup. Negs disappear once anybody has
-   * answered, because from that point the question has been read out and nobody can be penalized on
-   * it — which is exactly why the zero-point button beside them exists.
+   * The rulings actually available to this team on this tossup. Once either team has used its
+   * opportunity, negatives disappear for both teams; the zero-point button remains because it is a
+   * distinct answer outcome that also spends a team's chance.
    *
    * Derived in `tossupRulings` rather than here, because the keyboard layer binds to the same rule and
    * two copies of "is a neg legal right now" would disagree the first time either was corrected.
@@ -363,8 +362,8 @@ export default function TeamPanel(props: ITeamPanelProps) {
                 onClick={() => {
                   if (onWrongNoPenalty(player.name)) acknowledgeRuling(player.name, 'zero', false);
                 }}
-                aria-label={`${player.name} ${negsAvailable ? '0 after readout' : '0'} wrong, no penalty`}
-                title={negsAvailable ? 'Wrong answer after readout, no penalty' : 'Wrong answer, no penalty'}
+                aria-label={`${player.name} 0, Wrong, no penalty`}
+                title="Wrong, no penalty"
               >
                 0
               </button>

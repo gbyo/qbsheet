@@ -65,6 +65,7 @@ export type OpenGameResult =
       index?: number;
       needsScoringRules?: boolean;
       needsRoster?: boolean;
+      unsupportedProcedureVersion?: number;
     };
 
 /**
@@ -72,10 +73,10 @@ export type OpenGameResult =
  *
  * @param text the raw file or response body — untrusted, and treated as such by both readers
  */
-export function openGameText(text: string): OpenGameResult {
+export function openGameText(text: string, overrides: IGameDefinitionOverrides = {}): OpenGameResult {
   const parsed = parseQbjText(text);
   if (!parsed.ok) return { ok: false, errors: parsed.errors };
-  return openGameValue(parsed.value);
+  return openGameValue(parsed.value, overrides);
 }
 
 /**
@@ -89,7 +90,7 @@ export function openGameText(text: string): OpenGameResult {
  *
  * @param value untrusted parsed JSON — from a file, from a drop, or from a QBTCP response body
  */
-export function openGameValue(value: unknown): OpenGameResult {
+export function openGameValue(value: unknown, overrides: IGameDefinitionOverrides = {}): OpenGameResult {
   // A backup is deliberately checked before the ordinary package/QBJ readers. It has its own
   // version gate and a stricter event-history validator; treating it as a generic JSON file would
   // either discard the recovery layer or accidentally turn a portable restore into a new game.
@@ -117,7 +118,7 @@ export function openGameValue(value: unknown): OpenGameResult {
   if (source.ok) {
     const single = scoreableWithoutChoice(source.value);
     if (!single) return { ok: true, kind: 'choice', source: source.value };
-    const defined = defineGame(source.value, single.index);
+    const defined = defineGame(source.value, single.index, overrides);
     if (defined.ok) {
       return { ok: true, kind: 'game', definition: defined.definition, legacy: false, state: single.state };
     }
