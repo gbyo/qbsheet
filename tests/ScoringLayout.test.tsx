@@ -29,7 +29,9 @@ import {
   ScoringView,
   resetScoringView,
   saveScoringView,
+  saveTableOrientation,
   scoringViewStorageKey,
+  tableOrientationStorageKey,
 } from '../src/scorer/scoringViewPreference';
 import {
   forgetScoringLayoutChoice,
@@ -74,6 +76,7 @@ beforeEach(() => {
   installLocalStorage();
   installDialogMethods();
   saveScoringView('scoresheet');
+  saveTableOrientation('across');
   resetScoringView();
   resetScoringLayoutPrompts();
 });
@@ -81,6 +84,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   saveScoringView('scoresheet');
+  saveTableOrientation('across');
   resetScoringView();
   resetScoringLayoutPrompts();
 });
@@ -392,5 +396,87 @@ describe('the Game menu route', () => {
 
     expect(chooser()).toBeNull();
     expect(document.querySelector('.scorer-table-view')).toBeTruthy();
+  });
+});
+
+/**
+ * Which way the tables run, which is a different question from which layout.
+ *
+ * A scorekeeper sitting at the end of the room is looking down the tables rather than across them.
+ * That is one table drawn two ways, so it is offered where the table is and nowhere else — not as a
+ * third layout, and not folded into the one question a new game already asks.
+ */
+describe('the orientation of the table', () => {
+  function scoring(layout: 'Scoresheet' | 'Table'): string {
+    const gameKey = newGame();
+    choose(layout);
+    return gameKey;
+  }
+
+  function orientationGroup(): HTMLElement | null {
+    return document.querySelector('.scorer-layout-orientation');
+  }
+
+  test('a new game is asked one question, not two', () => {
+    newGame();
+
+    const dialog = chooser() as HTMLElement;
+    expect(within(dialog).queryByRole('radio', { name: 'Across' })).toBeNull();
+    expect(within(dialog).queryByRole('radio', { name: 'Down' })).toBeNull();
+  });
+
+  test('it is offered beside the layout, and only where it means anything', () => {
+    scoring('Scoresheet');
+    expect(orientationGroup()).toBeNull();
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Table' }));
+
+    const group = orientationGroup() as HTMLElement;
+    expect(group).toBeTruthy();
+    // In the same strip as the layout switch, rather than in a toolbar of its own.
+    expect(group.closest('.scorer-layout-bar')).toBe(layoutBar());
+    expect(within(group).getByRole('radio', { name: 'Across' }).getAttribute('aria-checked')).toBe('true');
+  });
+
+  test('choosing Down turns the table without touching anything else', () => {
+    const gameKey = scoring('Table');
+    fireEvent.click(within(screen.getByLabelText('Ninety Six')).getByRole('button', { name: 'Gibson' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Gibson 10' }));
+    const before = savedEvents(gameKey);
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Down' }));
+
+    expect(document.querySelector('.scorer-table-view')?.getAttribute('data-orientation')).toBe('down');
+    expect(savedEvents(gameKey)).toEqual(before);
+    expect(screen.getByLabelText('Ninety Six score').textContent).toBe('10');
+  });
+
+  test('the chair the scorekeeper is sitting in is remembered for the next game', () => {
+    scoring('Table');
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Down' }));
+
+    expect(window.localStorage.getItem(tableOrientationStorageKey)).toBe('down');
+  });
+
+  test('a device that has never said stays across, which is what the table has always drawn', () => {
+    // Nothing stored at all: the scorekeeper who has been using the table gets the table they know.
+    window.localStorage.removeItem(tableOrientationStorageKey);
+
+    scoring('Table');
+
+    expect(document.querySelector('.scorer-table-view')?.getAttribute('data-orientation')).toBe('across');
+  });
+
+  test('going back to the scoresheet takes the question with it', () => {
+    scoring('Table');
+    fireEvent.click(screen.getByRole('radio', { name: 'Down' }));
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Scoresheet' }));
+
+    expect(orientationGroup()).toBeNull();
+    // And it is still there when the table comes back.
+    fireEvent.click(screen.getByRole('radio', { name: 'Table' }));
+    expect(document.querySelector('.scorer-table-view')?.getAttribute('data-orientation')).toBe('down');
   });
 });

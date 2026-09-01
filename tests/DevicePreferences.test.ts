@@ -15,10 +15,16 @@ import {
   clearScoringView,
   loadScoringView,
   saveScoringView,
+  loadTableOrientation,
+  saveTableOrientation,
   scoringView,
   scoringViewStorageKey,
   setScoringView,
+  setTableOrientation,
   subscribeScoringView,
+  subscribeTableOrientation,
+  tableOrientation,
+  tableOrientationStorageKey,
 } from '../src/scorer/scoringViewPreference';
 import {
   forgetScoringLayoutChoice,
@@ -214,5 +220,61 @@ describe('the per-game layout question', () => {
 
     expect(scoringLayoutChosen('round-4', now, storage)).toBe(false);
     expect(storage.getItem(scoringLayoutPromptStorageKey('round-4'))).toBeNull();
+  });
+});
+
+/**
+ * Which way the tables run, for a scorekeeper who is not sitting alongside them.
+ *
+ * The same device fact as the layout beside it, with the same two obligations: an unrecognized value
+ * is the one the table has always drawn, and a browser that refuses storage still answers.
+ */
+describe('the table orientation preference', () => {
+  test('an absent or unrecognized value is across', () => {
+    const storage = new TestStorage();
+    expect(loadTableOrientation(storage)).toBe('across');
+    storage.setItem(tableOrientationStorageKey, 'diagonal');
+    expect(loadTableOrientation(storage)).toBe('across');
+  });
+
+  test('a stored choice comes back', () => {
+    const storage = new TestStorage();
+    expect(saveTableOrientation('down', storage)).toBe(true);
+    expect(loadTableOrientation(storage)).toBe('down');
+  });
+
+  test('storage that refuses is not a reason to refuse an orientation', () => {
+    const broken = {
+      getItem: () => {
+        throw new Error('denied');
+      },
+      setItem: () => {
+        throw new Error('denied');
+      },
+      removeItem: () => {
+        throw new Error('denied');
+      },
+    };
+    expect(loadTableOrientation(broken)).toBe('across');
+    expect(saveTableOrientation('down', broken)).toBe(false);
+    expect(loadTableOrientation(null)).toBe('across');
+  });
+
+  test('the reset returns both halves of the choice, and tells their subscribers', () => {
+    const storage = new TestStorage();
+    storage.setItem(scoringViewStorageKey, 'table');
+    storage.setItem(tableOrientationStorageKey, 'down');
+    setScoringView('table');
+    setTableOrientation('down');
+    const listener = vi.fn();
+    const unsubscribe = subscribeTableOrientation(listener);
+
+    expect(clearScoringView(storage)).toBe(true);
+
+    expect(storage.getItem(tableOrientationStorageKey)).toBeNull();
+    expect(tableOrientation()).toBe('across');
+    expect(scoringView()).toBe('scoresheet');
+    expect(listener).toHaveBeenCalledWith('across');
+    unsubscribe();
   });
 });
