@@ -1,0 +1,17 @@
+[package]
+name = "qbsheet-tournament-store"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.79"
+description = "SQLite-backed persistence for QBSheet Director tournaments"
+license = "MIT"
+
+[dependencies]
+rusqlite = { version = "0.37", features = ["backup", "bundled"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+uuid = { version = "1.18", features = ["serde", "v4"] }
+
+[dev-dependencies]
+tempfile = "3.22"
