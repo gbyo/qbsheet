@@ -1,5 +1,5 @@
-name: Compatibility problem
-description: QBSheet and another QBJ or QBTCP application disagree. 🔌
+name: 🔌 Compatibility problem
+description: QBSheet and another QBJ/QBTCP application disagree.
 labels: ['bug']
 body:
   - type: markdown
