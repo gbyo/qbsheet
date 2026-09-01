@@ -1,5 +1,5 @@
-name: Tournament QBSheet can't handle
-description: Your tournament's format or procedure does not fit QBSheet. 🏆
+name: 🏆 Tournament QBSheet can't handle
+description: Your format or procedure doesn't fit QBSheet.
 labels: ['enhancement']
 body:
   - type: markdown
