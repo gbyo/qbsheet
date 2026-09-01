@@ -48,6 +48,22 @@ export async function openGameFile(file: File = gameFile()): Promise<void> {
       setTimeout(resolve, claimResponseTimeoutMs + 50);
     });
   });
+  await chooseScoringLayout();
+}
+
+/**
+ * Answer the scoring-layout question a new game opens with.
+ *
+ * Every genuinely new game asks it once — see `scoringLayoutPrompt` — and almost nothing in these
+ * suites is about which layout is on screen, so `openGameFile` answers it with the scoresheet and
+ * gets out of the way. A test that wants the table calls this itself with `'Table'`.
+ */
+export async function chooseScoringLayout(layout: 'Scoresheet' | 'Table' = 'Scoresheet'): Promise<void> {
+  const chooser = screen.queryByRole('dialog', { name: 'Choose a scoring layout' });
+  if (!chooser) return;
+  await act(async () => {
+    fireEvent.click(within(chooser).getByRole('radio', { name: layout }));
+  });
 }
 
 /**

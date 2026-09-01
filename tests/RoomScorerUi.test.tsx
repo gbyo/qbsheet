@@ -17,6 +17,7 @@ import scoringRulesToScorekeeperFormat from './rules';
 import { CommonRuleSets, ScoringRules } from './rules';
 import AnswerType from './AnswerType';
 import ScorerHost from '../src/scorer/ScorerHost';
+import { rememberScoringLayoutChoice } from '../src/scorer/scoringLayoutPrompt';
 import { operationNoticeMs, recoveryNoticeMs } from '../src/scorer/Scorer';
 import type { IScorerSubmitResult } from '../src/scorer/Scorer';
 import { saveGame } from '../src/scorer/GameSession';
@@ -89,6 +90,7 @@ function renderScorer(
     vi.fn<(qbj: object) => Promise<IScorerSubmitResult>>().mockResolvedValue({ ok: true, message: 'Sent' });
   gameCounter += 1;
   const gameKey = gameKeyOverride ?? `test-game-${gameCounter}`;
+  rememberScoringLayoutChoice(gameKey);
   if (recovered) {
     saveGame(
       gameKey,

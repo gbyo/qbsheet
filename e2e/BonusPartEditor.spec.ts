@@ -9,6 +9,7 @@
  */
 import { expect, test, type Page } from '@playwright/test';
 import { validPackage } from '../tests/packages';
+import { chooseScoringLayout } from './support/scoringLayout';
 
 async function openGameWithBouncebacks(page: Page): Promise<void> {
   const packageValue = validPackage();
@@ -24,6 +25,7 @@ async function openGameWithBouncebacks(page: Page): Promise<void> {
     buffer: Buffer.from(JSON.stringify(packageValue)),
   });
 
+  await chooseScoringLayout(page);
   await expect(page.getByRole('heading', { name: 'Who is starting?' })).toBeVisible();
   const prompt = page.getByLabel('Starting lineups');
   for (const player of ['Sarah Mitchell', 'James Okafor']) {

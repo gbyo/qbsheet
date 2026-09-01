@@ -1,13 +1,13 @@
 /**
  * The two teams as the room is actually sitting.
  *
- * # It is a view, not a second scorer
+ * # It is a layout, not a second scorer
  *
  * Everything here is handed down already display-mapped: the teams, who is in which seat, whether a
  * side may still answer, whether a neg is still legal. Nothing is recomputed, and the two callbacks
  * are the same wrappers `TeamPanel` is given — so a ruling recorded from a rectangle on the table is
  * the same event, in the same journal, with the same undo frame, as one recorded from a button on a
- * row. There is no "visual scoring" anywhere in the history.
+ * row. Choosing this layout writes nothing at all.
  *
  * # Why a rectangle rather than a row of buttons
  *
@@ -18,18 +18,28 @@
  * the person, and the ruling opens against them; see `RulingPicker` for why it opens beside the tile
  * and never in the middle of the screen.
  *
- * # The seat is the object
+ * # Two representations of the same table
  *
- * A tile is a chair, not a person. The `<li>` is keyed by seat, so a substitution changes who is
+ * While scoring, a tile is a *chair*. The `<li>` is keyed by seat, so a substitution changes who is
  * sitting in it and moves nothing: the rectangle, its number and its place on the table are all
- * exactly where they were. What travels is a reordering — the room telling the software it had the
- * table wrong — and that is the one thing that should look like movement.
+ * exactly where they were. That is the whole sentence a substitution has to say — same seat,
+ * different person — and a chair that flew across the table would say the opposite.
+ *
+ * While arranging, a tile is a *player*. The room is telling the software it had the order wrong,
+ * and the thing being moved is a person between positions, so the `<li>` is keyed by name and the
+ * drag carries it. The two representations are separate lists rather than one list with a flag,
+ * which is what keeps each of them honest about what its keys mean.
+ *
+ * This is still not a floor plan. Two fixed tables, one linear order along each, no arbitrary
+ * placement, nothing draggable except a player's position among their own team-mates.
  */
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { LeftOrRight } from '../scoring/types';
 import { IScorekeeperAnswerType, IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
 import { IDerivedTeam } from '../scoring/deriveGame';
 import { useLineupMotion } from './LineupMotion';
+import { reorderSeats } from './PlayerSeating';
+import { previewSeatNumber, seatShift, useSeatDrag } from './SeatDrag';
 import { seatChangeEmphasisMs } from './TeamPanel';
 import RulingPicker from './RulingPicker';
 import tossupChoices, { TossupChoice } from './tossupChoices';
@@ -61,18 +71,27 @@ export interface ITableViewProps {
   timeouts?: Record<LeftOrRight, number>;
   timeoutsPerTeam?: number;
   /**
-   * Move one player one seat along the table.
+   * Whether the room is currently putting the tables in the order it is sitting in.
    *
-   * The same `seating.move` the Players dialog calls: there is one physical seat order, and this is a
-   * second way into it rather than a second copy of it. Absent means the table cannot be rearranged
+   * Controlled from above because the control that turns it on lives in the toolbar beside the
+   * layout switcher, which is deliberately outside this component so that it does not move when the
+   * layout does.
+   */
+  arranging?: boolean;
+  onArrangingChange?: (arranging: boolean) => void;
+  /**
+   * Commit one team's table order.
+   *
+   * The whole visible order rather than a direction, because a drag is not a nudge: a player carried
+   * from the fourth chair to the first is one decision, and expressing it as three moves would be
+   * three writes describing a journey nobody took. The keyboard and the fallback arrows use the same
+   * callback with a distance of one.
+   *
+   * This is `seating.arrange` under a different name — one physical seat order, shared with the
+   * scoresheet rows and the keyboard's seat mapping. Absent means the table cannot be rearranged
    * from here and no arrangement controls are drawn.
    */
-  onMoveSeat?: (
-    side: LeftOrRight,
-    visibleNames: readonly string[],
-    playerName: string,
-    direction: -1 | 1,
-  ) => void;
+  onArrangeSeats?: (side: LeftOrRight, visibleNames: readonly string[]) => void;
   /**
    * Nobody has told this device what order the room is sitting in.
    *
@@ -124,7 +143,9 @@ export default function TableView(props: ITableViewProps) {
     dialogOpen = false,
     timeouts,
     timeoutsPerTeam,
-    onMoveSeat,
+    arranging = false,
+    onArrangingChange,
+    onArrangeSeats,
     arrangementUnconfirmed = false,
     onConfirmArrangement,
     onDismissArrangementHint,
@@ -133,14 +154,13 @@ export default function TableView(props: ITableViewProps) {
   } = props;
 
   const [selected, setSelected] = useState<ISelection | null>(null);
-  const [arranging, setArranging] = useState(false);
   const [hintDismissed, setHintDismissed] = useState(false);
+  const pickerId = useId();
   /** Answered here and reported upward, so it stays answered across a look at the scoresheet. */
   const dismissHint = () => {
     setHintDismissed(true);
     onDismissArrangementHint?.();
   };
-  const pickerId = useId();
 
   const close = useCallback(
     (returnFocus: boolean) => {
@@ -225,31 +245,15 @@ export default function TableView(props: ITableViewProps) {
     }
   };
 
-  const showHint = arrangementUnconfirmed && !hintDismissed && !arranging && onMoveSeat !== undefined;
+  const showHint = arrangementUnconfirmed && !hintDismissed && !arranging && onArrangeSeats !== undefined;
 
   return (
     <div className="scorer-table-view">
-      <div className="scorer-table-tools">
-        {onMoveSeat && (
-          <button
-            type="button"
-            className="scorer-text-action"
-            onClick={() => {
-              setArranging((current) => !current);
-              dismissHint();
-              onDismissOrderCheck?.();
-            }}
-          >
-            {arranging ? 'Done arranging' : 'Arrange table'}
-          </button>
-        )}
-      </div>
-
       {showHint && (
         <div className="scorer-table-hint" role="note">
           <p className="scorer-table-hint-title">Match the table</p>
           <p className="scorer-table-hint-body">
-            Players are currently shown in roster order. Arrange them if they&rsquo;re sitting differently.
+            Players are currently shown in roster order. Drag them into the order they&rsquo;re sitting.
           </p>
           <div className="scorer-table-hint-actions">
             <button
@@ -257,7 +261,7 @@ export default function TableView(props: ITableViewProps) {
               className="scorer-choice"
               onClick={() => {
                 dismissHint();
-                setArranging(true);
+                onArrangingChange?.(true);
               }}
             >
               Arrange
@@ -279,12 +283,12 @@ export default function TableView(props: ITableViewProps) {
       {lineupOrderCheck && !arranging && (
         <div className="scorer-table-notice" role="status">
           <span>Lineup changed · Check table order</span>
-          {onMoveSeat && (
+          {onArrangeSeats && (
             <button
               type="button"
               className="scorer-text-action"
               onClick={() => {
-                setArranging(true);
+                onArrangingChange?.(true);
                 onDismissOrderCheck?.();
               }}
             >
@@ -306,14 +310,14 @@ export default function TableView(props: ITableViewProps) {
             seats={seatedPlayers[side]}
             scoringEnabled={scoringEnabled}
             eligible={eligible(side)}
-            arranging={arranging}
+            arranging={arranging && onArrangeSeats !== undefined}
             flashSeat={flashSeat?.side === side ? flashSeat.seat : undefined}
             recorded={recorded?.side === side ? recorded : null}
             selectedPlayer={selected?.side === side ? selected.playerName : null}
             pickerId={pickerId}
             timeoutsUsed={timeouts?.[side]}
             timeoutsPerTeam={timeoutsPerTeam}
-            onMoveSeat={onMoveSeat}
+            onArrangeSeats={onArrangeSeats}
             onSelect={(playerName, tile) =>
               setSelected((current) =>
                 current && current.side === side && current.playerName === playerName
@@ -353,12 +357,7 @@ interface ITableTeamProps {
   pickerId: string;
   timeoutsUsed?: number;
   timeoutsPerTeam?: number;
-  onMoveSeat?: (
-    side: LeftOrRight,
-    visibleNames: readonly string[],
-    playerName: string,
-    direction: -1 | 1,
-  ) => void;
+  onArrangeSeats?: (side: LeftOrRight, visibleNames: readonly string[]) => void;
   onSelect: (playerName: string, tile: HTMLButtonElement) => void;
 }
 
@@ -383,12 +382,9 @@ function TableTeam(props: ITableTeamProps) {
     pickerId,
     timeoutsUsed,
     timeoutsPerTeam,
-    onMoveSeat,
+    onArrangeSeats,
     onSelect,
   } = props;
-
-  // The same FLIP the lineup editor uses, along the table's own axis. See `LineupMotion`.
-  const motion = useLineupMotion({ axis: 'x' });
 
   /**
    * The seats a lineup change put somebody new into.
@@ -422,7 +418,7 @@ function TableTeam(props: ITableTeamProps) {
   /*
    * Which way the score last moved, recorded when it moves. The same derivation `TeamPanel` uses,
    * and deliberately the same motion: one scoreboard should not roll two different ways depending on
-   * which view is drawing it.
+   * which layout is drawing it.
    */
   const [scoreMotion, setScoreMotion] = useState({
     points: team.points,
@@ -436,10 +432,6 @@ function TableTeam(props: ITableTeamProps) {
       started: true,
     });
   }
-
-  const disabledReason = !scoringEnabled
-    ? 'No tossup is live.'
-    : `${team.name} has already answered this tossup.`;
 
   return (
     <section className="scorer-table-team" aria-label={team.name}>
@@ -465,99 +457,22 @@ function TableTeam(props: ITableTeamProps) {
 
       {/* The table itself: a quiet rectangle whose only job is to say these chairs are one table. */}
       <div className="scorer-table-surface">
-        <ul className="scorer-table-seats" aria-label={`${team.name} table`}>
-          {seats.map((playerName, seat) => (
-            <li
-              key={seat}
-              ref={motion.rowRef(playerName)}
-              className={motion.rowClassName(playerName, 'scorer-table-seat')}
-              data-seat-token={landed?.seats.includes(seat) ? landed.token : undefined}
-            >
-              {arranging ? (
-                <div
-                  className={[
-                    'scorer-table-player',
-                    'is-arranging',
-                    landed?.seats.includes(seat) ? 'is-substituted' : '',
-                  ]
-                    .filter(Boolean)
-                    .join(' ')}
-                >
-                  <span className="scorer-table-player-seat" aria-hidden="true">
-                    {seat + 1}
-                  </span>
-                  <span className="scorer-table-player-name" title={playerName}>
-                    {playerName}
-                  </span>
-                  <span className="scorer-table-arrange-actions">
-                    <button
-                      type="button"
-                      className="scorer-text-action"
-                      aria-label={`Move ${playerName} left`}
-                      disabled={seat === 0}
-                      onClick={() => {
-                        // Measured immediately before the seating state changes; the change itself is
-                        // not delayed. See `LineupMotion`.
-                        motion.beginMove(playerName);
-                        onMoveSeat?.(side, seats, playerName, -1);
-                      }}
-                    >
-                      ←
-                    </button>
-                    <button
-                      type="button"
-                      className="scorer-text-action"
-                      aria-label={`Move ${playerName} right`}
-                      disabled={seat === seats.length - 1}
-                      onClick={() => {
-                        motion.beginMove(playerName);
-                        onMoveSeat?.(side, seats, playerName, 1);
-                      }}
-                    >
-                      →
-                    </button>
-                  </span>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  className={[
-                    'scorer-table-player',
-                    selectedPlayer === playerName ? 'is-selected' : '',
-                    !scoringEnabled || !eligible ? 'is-disabled' : '',
-                    recorded?.playerName === playerName ? 'is-recorded' : '',
-                    recorded?.playerName === playerName && recorded.isNeg ? 'is-neg-recorded' : '',
-                    landed?.seats.includes(seat) ? 'is-substituted' : '',
-                    seat === flashSeat ? 'is-keyed' : '',
-                  ]
-                    .filter(Boolean)
-                    .join(' ')}
-                  data-ruling-token={recorded?.playerName === playerName ? recorded.token : undefined}
-                  disabled={!scoringEnabled || !eligible}
-                  title={!scoringEnabled || !eligible ? disabledReason : undefined}
-                  aria-haspopup="dialog"
-                  aria-expanded={selectedPlayer === playerName}
-                  aria-controls={selectedPlayer === playerName ? pickerId : undefined}
-                  onClick={(event) => onSelect(playerName, event.currentTarget)}
-                >
-                  {/* The seat, not an identity. Hidden from assistive technology, which reads the name. */}
-                  <span className="scorer-table-player-seat" aria-hidden="true">
-                    {seat + 1}
-                  </span>
-                  {/* Keyed by the name, so a substitution replaces the element rather than editing its
-                      text — which is what lets the arriving name have an entrance while the chair
-                      around it has none. */}
-                  <span key={playerName} className="scorer-table-player-name" title={playerName}>
-                    {playerName}
-                  </span>
-                </button>
-              )}
-            </li>
-          ))}
-          {seats.length === 0 && (
-            <li className="scorer-table-empty">Nobody is on the floor for this team.</li>
-          )}
-        </ul>
+        {arranging && onArrangeSeats ? (
+          <ArrangeSeats side={side} teamName={team.name} seats={seats} onArrangeSeats={onArrangeSeats} />
+        ) : (
+          <ScoringSeats
+            teamName={team.name}
+            seats={seats}
+            scoringEnabled={scoringEnabled}
+            eligible={eligible}
+            flashSeat={flashSeat}
+            landed={landed}
+            recorded={recorded}
+            selectedPlayer={selectedPlayer}
+            pickerId={pickerId}
+            onSelect={onSelect}
+          />
+        )}
       </div>
       {recorded && (
         <span className="visually-hidden" role="status">
@@ -565,5 +480,225 @@ function TableTeam(props: ITableTeamProps) {
         </span>
       )}
     </section>
+  );
+}
+
+/**
+ * The table while a tossup is live: one chair per player, and the chair is the object.
+ *
+ * Keyed by seat. A substitution swaps the name inside a rectangle that does not move, which is the
+ * only thing that actually happened.
+ */
+function ScoringSeats(props: {
+  teamName: string;
+  seats: readonly string[];
+  scoringEnabled: boolean;
+  eligible: boolean;
+  flashSeat?: number;
+  landed: { seats: number[]; token: number } | null;
+  recorded: { playerName: string; isNeg: boolean; token: number } | null;
+  selectedPlayer: string | null;
+  pickerId: string;
+  onSelect: (playerName: string, tile: HTMLButtonElement) => void;
+}) {
+  const {
+    teamName,
+    seats,
+    scoringEnabled,
+    eligible,
+    flashSeat,
+    landed,
+    recorded,
+    selectedPlayer,
+    pickerId,
+    onSelect,
+  } = props;
+
+  const disabledReason = !scoringEnabled
+    ? 'No tossup is live.'
+    : `${teamName} has already answered this tossup.`;
+
+  return (
+    <ul className="scorer-table-seats" aria-label={`${teamName} table`}>
+      {seats.map((playerName, seat) => (
+        <li
+          key={seat}
+          className="scorer-table-seat"
+          data-seat-token={landed?.seats.includes(seat) ? landed.token : undefined}
+        >
+          <button
+            type="button"
+            className={[
+              'scorer-table-player',
+              selectedPlayer === playerName ? 'is-selected' : '',
+              !scoringEnabled || !eligible ? 'is-disabled' : '',
+              recorded?.playerName === playerName ? 'is-recorded' : '',
+              recorded?.playerName === playerName && recorded.isNeg ? 'is-neg-recorded' : '',
+              landed?.seats.includes(seat) ? 'is-substituted' : '',
+              seat === flashSeat ? 'is-keyed' : '',
+            ]
+              .filter(Boolean)
+              .join(' ')}
+            data-ruling-token={recorded?.playerName === playerName ? recorded.token : undefined}
+            disabled={!scoringEnabled || !eligible}
+            title={!scoringEnabled || !eligible ? disabledReason : undefined}
+            aria-haspopup="dialog"
+            aria-expanded={selectedPlayer === playerName}
+            aria-controls={selectedPlayer === playerName ? pickerId : undefined}
+            onClick={(event) => onSelect(playerName, event.currentTarget)}
+          >
+            {/* The seat, not an identity. Hidden from assistive technology, which reads the name. */}
+            <span className="scorer-table-player-seat" aria-hidden="true">
+              {seat + 1}
+            </span>
+            {/* Keyed by the name, so a substitution replaces the element rather than editing its
+                text — which is what lets the arriving name have an entrance while the chair
+                around it has none. */}
+            <span key={playerName} className="scorer-table-player-name" title={playerName}>
+              {playerName}
+            </span>
+          </button>
+        </li>
+      ))}
+      {seats.length === 0 && <li className="scorer-table-empty">Nobody is on the floor for this team.</li>}
+    </ul>
+  );
+}
+
+/**
+ * The table while the room is telling it what order everybody is in.
+ *
+ * Keyed by player, because the player is what moves. Drag is the ordinary way — see `SeatDrag` — and
+ * the arrows beside each tile are there for a pointer that cannot drag; the arrow keys do the same
+ * job for a keyboard, on the tile that has focus, and say out loud where the player ended up.
+ *
+ * Nothing here can move somebody to the other team: each table owns its own list, and a drop is
+ * expressed as an index within it.
+ */
+function ArrangeSeats(props: {
+  side: LeftOrRight;
+  teamName: string;
+  seats: readonly string[];
+  onArrangeSeats: (side: LeftOrRight, visibleNames: readonly string[]) => void;
+}) {
+  const { side, teamName, seats, onArrangeSeats } = props;
+  const instructionsId = useId();
+  const [announcement, setAnnouncement] = useState('');
+  /*
+   * The FLIP the lineup editor uses, for the discrete moves only.
+   *
+   * A drag already shows where everybody is going, frame by frame, and running an interpolation over
+   * the top of it would animate the same movement twice. An arrow press has no such preview, so it
+   * keeps the travel that makes "which one did I just move?" answerable without reading.
+   */
+  const motion = useLineupMotion({ axis: 'x' });
+
+  const move = useCallback(
+    (from: number, to: number, animate: boolean) => {
+      const target = Math.min(seats.length - 1, Math.max(0, to));
+      if (target === from || from < 0 || from >= seats.length) return;
+      const playerName = seats[from];
+      if (animate) motion.beginMove(playerName);
+      onArrangeSeats(side, reorderSeats(seats, from, target));
+      setAnnouncement(`${playerName} is now seat ${target + 1} of ${seats.length}, ${teamName}.`);
+    },
+    [motion, onArrangeSeats, seats, side, teamName],
+  );
+
+  // The drop owns the movement it has already been showing, so no interpolation is asked for.
+  const drag = useSeatDrag(seats.length, (from, to) => move(from, to, false));
+
+  if (seats.length === 0) {
+    return (
+      <ul className="scorer-table-seats" aria-label={`${teamName} table`}>
+        <li className="scorer-table-empty">Nobody is on the floor for this team.</li>
+      </ul>
+    );
+  }
+
+  return (
+    <>
+      <p id={instructionsId} className="visually-hidden">
+        Drag a player along the table, or use the left and right arrow keys to move them.
+      </p>
+      <ul
+        className={`scorer-table-seats is-arranging${drag.drag ? ' is-dragging' : ''}`}
+        aria-label={`${teamName} table`}
+      >
+        {seats.map((playerName, index) => {
+          const dragging = drag.drag?.from === index;
+          const shift = drag.drag ? seatShift(index, drag.drag.from, drag.drag.to) : 0;
+          const offset = dragging ? drag.drag!.deltaX : shift * (drag.drag?.pitch ?? 0);
+          return (
+            <li
+              key={playerName}
+              ref={(element) => {
+                // Two owners of one element and neither writes what the other reads: the FLIP moves
+                // the list item between renders, the drag only measures it.
+                motion.rowRef(playerName)(element);
+                drag.seatRef(index)(element);
+              }}
+              className={motion.rowClassName(playerName, 'scorer-table-seat')}
+            >
+              <button
+                type="button"
+                className={`scorer-table-player is-arranging${dragging ? ' is-dragging' : ''}`}
+                style={offset === 0 ? undefined : { transform: `translateX(${offset}px)` }}
+                aria-roledescription="Sortable seat"
+                aria-label={`${playerName}, seat ${previewSeatNumber(index, drag.drag)} of ${seats.length}`}
+                aria-describedby={instructionsId}
+                onPointerDown={drag.onPointerDown(index)}
+                onKeyDown={(event) => {
+                  if (event.key === 'ArrowLeft') move(index, index - 1, true);
+                  else if (event.key === 'ArrowRight') move(index, index + 1, true);
+                  else if (event.key === 'Home') move(index, 0, true);
+                  else if (event.key === 'End') move(index, seats.length - 1, true);
+                  else return;
+                  event.preventDefault();
+                }}
+              >
+                <span className="scorer-table-player-seat" aria-hidden="true">
+                  {previewSeatNumber(index, drag.drag)}
+                </span>
+                <span className="scorer-table-player-name" title={playerName}>
+                  {playerName}
+                </span>
+                <span className="scorer-table-grip" aria-hidden="true" />
+              </button>
+              {/*
+                The way round for a pointer that cannot drag.
+
+                Quiet, and revealed by hover or focus rather than drawn on every seat all the time:
+                the table has to say "drag these" first, and two arrows per player shouted that
+                loudly enough to drown it out.
+              */}
+              <span className={`scorer-table-nudge${drag.drag ? ' is-hidden' : ''}`}>
+                <button
+                  type="button"
+                  className="scorer-table-nudge-action"
+                  aria-label={`Move ${playerName} left`}
+                  disabled={index === 0}
+                  onClick={() => move(index, index - 1, true)}
+                >
+                  ‹
+                </button>
+                <button
+                  type="button"
+                  className="scorer-table-nudge-action"
+                  aria-label={`Move ${playerName} right`}
+                  disabled={index === seats.length - 1}
+                  onClick={() => move(index, index + 1, true)}
+                >
+                  ›
+                </button>
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+      <span className="visually-hidden" role="status">
+        {announcement}
+      </span>
+    </>
   );
 }

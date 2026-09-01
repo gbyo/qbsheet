@@ -19,6 +19,7 @@ import scoringRulesToScorekeeperFormat from './rules';
 import { CommonRuleSets, ScoringRules } from './rules';
 import AnswerType from './AnswerType';
 import ScorerHost from '../src/scorer/ScorerHost';
+import { rememberScoringLayoutChoice } from '../src/scorer/scoringLayoutPrompt';
 import { RoomConnectionState } from '../src/app/ConnectionState';
 
 const leftTeam = { name: 'Ninety Six', players: [{ name: 'Sarah Mitchell' }, { name: 'James Robinson' }] };
@@ -35,9 +36,11 @@ let gameCounter = 0;
 
 function renderScorer(format: IScorekeeperFormat) {
   gameCounter += 1;
+  const gameKey = `question-editor-${gameCounter}`;
+  rememberScoringLayoutChoice(gameKey);
   render(
     <ScorerHost
-      gameKey={`question-editor-${gameCounter}`}
+      gameKey={gameKey}
       format={format}
       leftTeam={leftTeam}
       rightTeam={rightTeam}
