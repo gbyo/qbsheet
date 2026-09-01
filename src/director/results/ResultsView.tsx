@@ -63,11 +63,15 @@ export function ResultsView({
               </FilterButton>
               <FilterButton active={filter === 'accepted'} onClick={() => setFilter('accepted')}>
                 Accepted{' '}
-                <span>{state.submissions.filter((submission) => submission.status === 'accepted').length}</span>
+                <span>
+                  {state.submissions.filter((submission) => submission.status === 'accepted').length}
+                </span>
               </FilterButton>
               <FilterButton active={filter === 'rejected'} onClick={() => setFilter('rejected')}>
                 Rejected{' '}
-                <span>{state.submissions.filter((submission) => submission.status === 'rejected').length}</span>
+                <span>
+                  {state.submissions.filter((submission) => submission.status === 'rejected').length}
+                </span>
               </FilterButton>
             </div>
           </div>
