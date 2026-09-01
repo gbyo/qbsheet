@@ -1,5 +1,5 @@
-name: Lost work or recovery problem
-description: Scoring disappeared, recovery failed, or a game did not survive a reload. 🚨
+name: 🚨 Lost work / recovery problem
+description: Scoring disappeared, recovery failed, or a game did not survive a reload.
 labels: ['bug']
 body:
   - type: markdown
