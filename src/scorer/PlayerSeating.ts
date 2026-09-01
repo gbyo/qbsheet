@@ -198,3 +198,73 @@ export function takeSeat(
   base.splice(seat, 0, incoming);
   return base;
 }
+
+/**
+ * Correct a name without moving the person it belongs to.
+ *
+ * The preference is keyed by name, which is what makes a name correction dangerous to it: rewriting
+ * the roster and leaving this alone would make the corrected player somebody the preference has never
+ * heard of, and `orderBySeating` puts those at the end. A scorekeeper who fixed a spelling would
+ * watch the third seat move to the fourth.
+ *
+ * A merge is the case where the corrected name is already seated — two rows the room created by hand
+ * being reconciled into one person. The earlier of the two seats survives, because that is the seat
+ * that has been in that position for longer, and because a preference must never list one name twice.
+ */
+export function renameSeatPlayer(preferred: readonly string[], from: string, to: string): string[] {
+  const seat = preferred.indexOf(from);
+  // Nobody has arranged this side, or this player was never mentioned. Nothing to preserve.
+  if (seat < 0) return preferred.slice();
+  const renamed = preferred.slice();
+  renamed[seat] = to;
+  // The Set keeps the first mention, which is the earlier seat of the two in a merge.
+  return Array.from(new Set(renamed));
+}
+
+/** What a lineup change did to the seats, and the seat order it leaves behind. */
+export interface IReseatResult {
+  /** The players on the floor afterwards, in the order the room should now see them. */
+  seats: string[];
+  /** How many seats were emptied by the change. Two or more is a bulk change, not a substitution. */
+  vacated: number;
+}
+
+/**
+ * Keep as much of the table as the lineup change left standing.
+ *
+ * A one-for-one substitution already has an answer — `takeSeat`, called at the moment the room says
+ * who came on for whom. A bulk change does not: the event stores the complete lineup and deliberately
+ * says nothing about which incoming player sat down in which chair, because a physical seat is not
+ * scoring history and putting one in a substitution event would be inventing a fact.
+ *
+ * So the seats are worked out from what is left. Everybody still playing keeps the seat they were in;
+ * the seats their departing team-mates left are filled, in order, by the arrivals in the order the
+ * lineup event lists them. That is deterministic, it preserves the arrangement the room built, and it
+ * is a guess about two names rather than about four — which is why the caller says so out loud rather
+ * than presenting it as fact.
+ */
+export function reseatLineup(
+  preferred: readonly string[],
+  previousActive: readonly string[],
+  nextActive: readonly string[],
+): IReseatResult {
+  const before = orderBySeating(previousActive, preferred, (name) => name);
+  const staying = new Set(nextActive);
+  const arriving = nextActive.filter((name) => !previousActive.includes(name));
+  const seats: string[] = [];
+  let vacated = 0;
+  let next = 0;
+  for (const occupant of before) {
+    if (staying.has(occupant)) {
+      seats.push(occupant);
+      continue;
+    }
+    vacated += 1;
+    // An emptied seat takes the next arrival, or closes up when there is nobody left to take it.
+    if (next < arriving.length) seats.push(arriving[next++]);
+  }
+  // More arrivals than departures: a team that grew rather than swapped. They go on the end, which is
+  // where a player who has never been seated goes anyway.
+  seats.push(...arriving.slice(next));
+  return { seats, vacated };
+}

@@ -101,7 +101,8 @@ import canApplyScoreEvent from '../scoring/canApplyScoreEvent';
 import { attachScorerRecovery } from './ScorerRecovery';
 import useRoomClock from './useRoomClock';
 import usePlayerSeating from './usePlayerSeating';
-import { orderBySeating } from './PlayerSeating';
+import { orderBySeating, PlayerSeating, reseatLineup } from './PlayerSeating';
+import { sameMembership } from './LineupEditing';
 import useScreenWakeLock from './useScreenWakeLock';
 import {
   exportRoomClocks,
@@ -118,6 +119,9 @@ import { availableActionKeys, keyboardActionNames, sequenceLegend, bonusKeyLegen
 import { rulingLabel, unreachableAnswerTypes } from './tossupRulings';
 import { setKeyboardEnabled } from './keyboardPreference';
 import useKeyboardEnabled from './useKeyboardEnabled';
+import TableView from './TableView';
+import { setScoringView } from './scoringViewPreference';
+import useScoringView from './useScoringView';
 import {
   ConnectionDetailDialog,
   IScorerAlert,
@@ -622,6 +626,14 @@ export default function Scorer(props: IScorerProps) {
    * on for somebody who did not ask would make an ordinary browser shortcut record a tossup.
    */
   const keyboardEnabled = useKeyboardEnabled();
+  /**
+   * Which surface this scorekeeper scores from.
+   *
+   * Presentation only, and beside the keyboard preference deliberately: both belong to the device,
+   * neither reaches the game. Table View is handed the display-mapped state below and the same
+   * callbacks `TeamPanel` gets, so nothing about what is recorded depends on this value.
+   */
+  const scoringViewChoice = useScoringView();
   /**
    * Which set of choices the bonus is currently asking for, reported up by `BonusPrompt`.
    *
@@ -1463,6 +1475,71 @@ export default function Scorer(props: IScorerProps) {
     [displaySideMapping, displayedTeams, seating.seating],
   );
 
+  /**
+   * Keeping the table standing across a lineup change nobody described seat by seat.
+   *
+   * A one-for-one substitution already says who sat down where — `seating.substitute` is called at the
+   * moment the room says "eleven for four", and by the time this runs there is nothing left to work
+   * out. A bulk change is the other case: the event stores the complete lineup and deliberately says
+   * nothing about physical seats, because a seat is not scoring history and putting one in a
+   * substitution event would be recording a fact nobody stated.
+   *
+   * So the seats are reconciled here instead — survivors keep their chairs, the emptied ones are
+   * filled in order — and when two or more chairs changed hands the scorekeeper is told to check it
+   * rather than left to discover it. See `reseatLineup`.
+   *
+   * Canonical sides throughout: this is the seat order itself, not a view of it.
+   */
+  const [tableOrderCheck, setTableOrderCheck] = useState<{ token: number } | null>(null);
+  const previousActivePlayers = useRef<Record<LeftOrRight, readonly string[]> | null>(null);
+  useEffect(() => {
+    const next: Record<LeftOrRight, readonly string[]> = {
+      left: game.left.activePlayers,
+      right: game.right.activePlayers,
+    };
+    const previous = previousActivePlayers.current;
+    previousActivePlayers.current = next;
+    // Nothing to preserve on the first render, and nothing to preserve before anybody is on the floor.
+    if (previous === null) return;
+
+    const rosterNames: PlayerSeating = {
+      left: game.left.players.map((player) => player.name),
+      right: game.right.players.map((player) => player.name),
+    };
+    const visibleOrders: Partial<PlayerSeating> = {};
+    let bulk = false;
+    for (const side of ['left', 'right'] as LeftOrRight[]) {
+      if (sameMembership(previous[side], next[side])) continue;
+      const seated = orderBySeating(next[side], seating.seating[side], (name) => name);
+      const result = reseatLineup(seating.seating[side], previous[side], next[side]);
+      if (result.vacated >= 2) bulk = true;
+      // A change the seating store has already absorbed leaves the order it would produce, so
+      // writing it again would be a storage write per substitution for no change at all.
+      if (result.seats.length !== seated.length || result.seats.some((name, seat) => name !== seated[seat])) {
+        visibleOrders[side] = result.seats;
+      }
+    }
+    if (Object.keys(visibleOrders).length > 0) seating.arrange(rosterNames, visibleOrders);
+    if (bulk) setTableOrderCheck({ token: nextTransientToken() });
+  }, [game.left, game.right, nextTransientToken, seating]);
+
+  /**
+   * Nobody on this device has said what order the room is sitting in.
+   *
+   * The starting-lineup prompt writes a seating preference when it confirms, so this is only ever
+   * true for the game it never appears for: a roster of exactly the maximum, everybody starting
+   * automatically, and a table whose order is therefore whatever the roster happened to be in.
+   */
+  const arrangementUnconfirmed = seating.seating.left.length === 0 && seating.seating.right.length === 0;
+  /*
+   * Whether the room has already answered that question.
+   *
+   * Held here rather than in `TableView`, which is unmounted every time the scorekeeper looks at the
+   * scoresheet: a hint that came back after being dismissed would be a hint nobody had really been
+   * asked. Presentation only, and deliberately not persisted — it is true for this sitting.
+   */
+  const [tableHintDismissed, setTableHintDismissed] = useState(false);
+
   /** The seat a keystroke just scored into, flashed briefly and then forgotten. */
   const [keyEcho, setKeyEcho] = useState<{ side: LeftOrRight; seat: number } | null>(null);
   useEffect(() => {
@@ -1827,6 +1904,18 @@ export default function Scorer(props: IScorerProps) {
       changes: attempt.changes,
       summary: attempt.summary,
     });
+    /*
+     * The seat follows the corrected name.
+     *
+     * The seating preference is keyed by name, so leaving it alone would point it at a spelling
+     * nobody has any more — and `orderBySeating` puts a name it does not recognize at the end. A
+     * scorekeeper who fixed a typo would watch that player cross the room. Not an event, because
+     * nobody moved; the correction that renamed them is already in the history.
+     *
+     * After the write and not before it: a host that refuses the correction must not be left with a
+     * table arranged around a name the roster never took.
+     */
+    seating.rename(side, from, to);
   };
 
   /**
@@ -1919,6 +2008,7 @@ export default function Scorer(props: IScorerProps) {
     currentQuestion,
     lastPlayed: lastPlayedQuestion(game),
     keyboardEnabled,
+    scoringView: scoringViewChoice,
     submitting,
     canRedo: events.canRedo,
     onRedo: redoWithFeedback,
@@ -1928,6 +2018,7 @@ export default function Scorer(props: IScorerProps) {
       setDialog(next);
     },
     setKeyboardEnabled,
+    setScoringView,
     record,
     newEventId,
     openReview: () => openReviewAt(undefined),
@@ -2388,58 +2479,129 @@ export default function Scorer(props: IScorerProps) {
       {phase.kind !== 'lineup' && phase.kind !== 'complete' && (
         <div className="scorer-body">
           <main className="scorer-main">
-            <div className="scorer-teams">
-              <TeamPanel
-                key={displaySideMapping.left}
+            {/*
+              One surface or the other, never both.
+
+              The table view is not a second scorer: it is handed the same display-mapped teams, the
+              same seat order, the same eligibility questions and the same two record callbacks the
+              panels below are given. Switching between them changes what is drawn and nothing else,
+              which is why the choice is a device preference rather than anything the game knows
+              about. Keyed, so the outgoing tree is unmounted rather than left running behind the one
+              on screen.
+            */}
+            {scoringViewChoice === 'table' ? (
+              <TableView
+                key="table"
                 format={format}
-                team={displayedTeams.left}
-                seatOrder={seating.seating[displaySideMapping.left]}
-                flashSeat={keyEcho?.side === 'left' ? keyEcho.seat : undefined}
+                teams={displayedTeams}
+                seatedPlayers={seatedPlayers}
                 scoringEnabled={scoringEnabled}
-                eligible={displayedEligible('left')}
-                negsAvailable={displayedNegsAvailable('left')}
-                timeoutsUsed={
-                  (procedure?.timeoutsPerTeam ?? 0) > 0 ? game.timeouts[displaySideMapping.left] : undefined
+                eligible={displayedEligible}
+                negsAvailable={displayedNegsAvailable}
+                flashSeat={keyEcho}
+                onBuzz={recordDisplayedBuzz}
+                onWrongNoPenalty={recordDisplayedWrongNoPenalty}
+                sideLayoutKey={displaySideMapping.left}
+                dialogOpen={dialog !== null}
+                timeouts={
+                  (procedure?.timeoutsPerTeam ?? 0) > 0
+                    ? mapSides(game.timeouts, displaySideMapping)
+                    : undefined
                 }
                 timeoutsPerTeam={
                   (procedure?.timeoutsPerTeam ?? 0) > 0 ? procedure?.timeoutsPerTeam : undefined
                 }
-                onBuzz={(playerName, answerType) => recordDisplayedBuzz('left', playerName, answerType)}
-                onWrongNoPenalty={(playerName) => recordDisplayedWrongNoPenalty('left', playerName)}
-                onSubstitute={(outgoing, incoming) =>
-                  substituteFromRow(displaySideMapping.left, outgoing, incoming)
+                arrangementUnconfirmed={arrangementUnconfirmed && !tableHintDismissed}
+                onDismissArrangementHint={() => setTableHintDismissed(true)}
+                lineupOrderCheck={tableOrderCheck}
+                onDismissOrderCheck={() => setTableOrderCheck(null)}
+                onMoveSeat={
+                  submitting
+                    ? undefined
+                    : (displaySide, visibleNames, playerName, direction) => {
+                        const side = canonicalForDisplay(displaySide);
+                        seating.move(
+                          side,
+                          game[side].players.map((player) => player.name),
+                          visibleNames,
+                          playerName,
+                          direction,
+                        );
+                      }
                 }
-                benchPlayers={benchFor(displaySideMapping.left)}
-                substitutionAllowed={lineupChangeAllowed || lineupChangeAuthorized[displaySideMapping.left]}
-                substitutionBlockedReason={lineupChangeReason}
-                substitutionQuestionNumber={lineupQuestion}
+                onConfirmArrangement={() => {
+                  // The room saying the roster order is the table order. A seating preference and
+                  // nothing else: no event, no lineup, nothing that reaches the scoresheet.
+                  const canonicalSeats: Partial<PlayerSeating> = {};
+                  canonicalSeats[canonicalForDisplay('left')] = [...seatedPlayers.left];
+                  canonicalSeats[canonicalForDisplay('right')] = [...seatedPlayers.right];
+                  seating.arrange(
+                    {
+                      left: game.left.players.map((player) => player.name),
+                      right: game.right.players.map((player) => player.name),
+                    },
+                    canonicalSeats,
+                  );
+                }}
               />
-              <TeamPanel
-                key={displaySideMapping.right}
-                format={format}
-                team={displayedTeams.right}
-                seatOrder={seating.seating[displaySideMapping.right]}
-                flashSeat={keyEcho?.side === 'right' ? keyEcho.seat : undefined}
-                scoringEnabled={scoringEnabled}
-                eligible={displayedEligible('right')}
-                negsAvailable={displayedNegsAvailable('right')}
-                timeoutsUsed={
-                  (procedure?.timeoutsPerTeam ?? 0) > 0 ? game.timeouts[displaySideMapping.right] : undefined
-                }
-                timeoutsPerTeam={
-                  (procedure?.timeoutsPerTeam ?? 0) > 0 ? procedure?.timeoutsPerTeam : undefined
-                }
-                onBuzz={(playerName, answerType) => recordDisplayedBuzz('right', playerName, answerType)}
-                onWrongNoPenalty={(playerName) => recordDisplayedWrongNoPenalty('right', playerName)}
-                onSubstitute={(outgoing, incoming) =>
-                  substituteFromRow(displaySideMapping.right, outgoing, incoming)
-                }
-                benchPlayers={benchFor(displaySideMapping.right)}
-                substitutionAllowed={lineupChangeAllowed || lineupChangeAuthorized[displaySideMapping.right]}
-                substitutionBlockedReason={lineupChangeReason}
-                substitutionQuestionNumber={lineupQuestion}
-              />
-            </div>
+            ) : (
+              <div key="scoresheet" className="scorer-teams">
+                <TeamPanel
+                  key={displaySideMapping.left}
+                  format={format}
+                  team={displayedTeams.left}
+                  seatOrder={seating.seating[displaySideMapping.left]}
+                  flashSeat={keyEcho?.side === 'left' ? keyEcho.seat : undefined}
+                  scoringEnabled={scoringEnabled}
+                  eligible={displayedEligible('left')}
+                  negsAvailable={displayedNegsAvailable('left')}
+                  timeoutsUsed={
+                    (procedure?.timeoutsPerTeam ?? 0) > 0 ? game.timeouts[displaySideMapping.left] : undefined
+                  }
+                  timeoutsPerTeam={
+                    (procedure?.timeoutsPerTeam ?? 0) > 0 ? procedure?.timeoutsPerTeam : undefined
+                  }
+                  onBuzz={(playerName, answerType) => recordDisplayedBuzz('left', playerName, answerType)}
+                  onWrongNoPenalty={(playerName) => recordDisplayedWrongNoPenalty('left', playerName)}
+                  onSubstitute={(outgoing, incoming) =>
+                    substituteFromRow(displaySideMapping.left, outgoing, incoming)
+                  }
+                  benchPlayers={benchFor(displaySideMapping.left)}
+                  substitutionAllowed={lineupChangeAllowed || lineupChangeAuthorized[displaySideMapping.left]}
+                  substitutionBlockedReason={lineupChangeReason}
+                  substitutionQuestionNumber={lineupQuestion}
+                />
+                <TeamPanel
+                  key={displaySideMapping.right}
+                  format={format}
+                  team={displayedTeams.right}
+                  seatOrder={seating.seating[displaySideMapping.right]}
+                  flashSeat={keyEcho?.side === 'right' ? keyEcho.seat : undefined}
+                  scoringEnabled={scoringEnabled}
+                  eligible={displayedEligible('right')}
+                  negsAvailable={displayedNegsAvailable('right')}
+                  timeoutsUsed={
+                    (procedure?.timeoutsPerTeam ?? 0) > 0
+                      ? game.timeouts[displaySideMapping.right]
+                      : undefined
+                  }
+                  timeoutsPerTeam={
+                    (procedure?.timeoutsPerTeam ?? 0) > 0 ? procedure?.timeoutsPerTeam : undefined
+                  }
+                  onBuzz={(playerName, answerType) => recordDisplayedBuzz('right', playerName, answerType)}
+                  onWrongNoPenalty={(playerName) => recordDisplayedWrongNoPenalty('right', playerName)}
+                  onSubstitute={(outgoing, incoming) =>
+                    substituteFromRow(displaySideMapping.right, outgoing, incoming)
+                  }
+                  benchPlayers={benchFor(displaySideMapping.right)}
+                  substitutionAllowed={
+                    lineupChangeAllowed || lineupChangeAuthorized[displaySideMapping.right]
+                  }
+                  substitutionBlockedReason={lineupChangeReason}
+                  substitutionQuestionNumber={lineupQuestion}
+                />
+              </div>
+            )}
 
             {/* After the teams and before the control bar, so it sits beside the rulings it describes
                 without joining the two-column grid they are laid out in. */}

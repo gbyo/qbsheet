@@ -11,6 +11,15 @@ import {
   setKeyboardEnabled,
   subscribeKeyboardEnabled,
 } from '../src/scorer/keyboardPreference';
+import {
+  clearScoringView,
+  loadScoringView,
+  saveScoringView,
+  scoringView,
+  scoringViewStorageKey,
+  setScoringView,
+  subscribeScoringView,
+} from '../src/scorer/scoringViewPreference';
 
 class TestStorage {
   values = new Map<string, string>();
@@ -55,5 +64,66 @@ describe('narrow device preference reset APIs', () => {
     expect(keyboardEnabled()).toBe(false);
     expect(listener).toHaveBeenCalledWith(false);
     unsubscribe();
+  });
+  test('scoring view reset removes only its key, returns to the scoresheet, and notifies subscribers', () => {
+    const storage = new TestStorage();
+    storage.setItem(scoringViewStorageKey, 'table');
+    storage.setItem('qbsheet.player-seating.do-not-touch', 'saved seating');
+    setScoringView('table');
+    const listener = vi.fn();
+    const unsubscribe = subscribeScoringView(listener);
+
+    expect(clearScoringView(storage)).toBe(true);
+    expect(storage.getItem(scoringViewStorageKey)).toBeNull();
+    expect(storage.getItem('qbsheet.player-seating.do-not-touch')).toBe('saved seating');
+    expect(scoringView()).toBe('scoresheet');
+    expect(listener).toHaveBeenCalledWith('scoresheet');
+    unsubscribe();
+  });
+});
+
+/**
+ * The stored value, and what happens when the device will not keep it.
+ *
+ * A Chromebook with storage locked down still has to be able to score. Every path here therefore
+ * answers with the scoresheet rather than throwing, and a refused write leaves the choice applying
+ * for as long as the tab is open.
+ */
+describe('the scoring view preference on its own', () => {
+  test('an absent or unrecognized value is the scoresheet', () => {
+    const storage = new TestStorage();
+    expect(loadScoringView(storage)).toBe('scoresheet');
+    storage.setItem(scoringViewStorageKey, 'floor-plan');
+    expect(loadScoringView(storage)).toBe('scoresheet');
+  });
+
+  test('a stored choice comes back', () => {
+    const storage = new TestStorage();
+    expect(saveScoringView('table', storage)).toBe(true);
+    expect(storage.getItem(scoringViewStorageKey)).toBe('table');
+    expect(loadScoringView(storage)).toBe('table');
+  });
+
+  test('storage that refuses to read or write is not a reason to refuse a view', () => {
+    const broken = {
+      getItem: () => {
+        throw new Error('denied');
+      },
+      setItem: () => {
+        throw new Error('denied');
+      },
+      removeItem: () => {
+        throw new Error('denied');
+      },
+    };
+    expect(loadScoringView(broken)).toBe('scoresheet');
+    expect(saveScoringView('table', broken)).toBe(false);
+    // Nothing here throws, so the toggle still works for this tab.
+    expect(clearScoringView(broken)).toBe(false);
+  });
+
+  test('a device with no storage at all still answers', () => {
+    expect(loadScoringView(null)).toBe('scoresheet');
+    expect(saveScoringView('table', null)).toBe(false);
   });
 });
