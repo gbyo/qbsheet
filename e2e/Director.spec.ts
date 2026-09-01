@@ -23,6 +23,76 @@ test('Director starts with an empty, persisted tournament workspace', async ({ p
   await expect(page.getByText('No rooms have been added yet.')).toBeVisible();
 });
 
+test('Director layout keeps panel, table, status, and narrow-window contracts', async ({ page }) => {
+  await createTournament(page);
+
+  const navigation = page.locator('nav[aria-label="Tournament sections"]');
+  await navigation.getByRole('button', { name: 'Teams', exact: true }).click();
+  await page.getByRole('button', { name: 'Add team' }).click();
+
+  const teamForm = page.locator('.director-form-panel').first();
+  await expect(teamForm.locator('.director-panel-body')).toBeVisible();
+  await expect(teamForm.locator('.director-panel-footer')).toBeVisible();
+  const teamFormInsets = await teamForm.evaluate((panel) => {
+    const panelBox = panel.getBoundingClientRect();
+    const grid = panel.querySelector('.director-form-grid')?.getBoundingClientRect();
+    const action = panel.querySelector('.director-panel-footer .director-button')?.getBoundingClientRect();
+    if (!grid || !action) throw new Error('Expected a form grid and footer action.');
+    return {
+      gridLeft: grid.left - panelBox.left,
+      gridRight: panelBox.right - grid.right,
+      actionLeft: action.left - panelBox.left,
+      actionRight: panelBox.right - action.right,
+    };
+  });
+  expect(teamFormInsets.gridLeft).toBeGreaterThanOrEqual(12);
+  expect(teamFormInsets.gridRight).toBeGreaterThanOrEqual(12);
+  expect(teamFormInsets.actionLeft).toBeGreaterThanOrEqual(12);
+  expect(teamFormInsets.actionRight).toBeGreaterThanOrEqual(12);
+
+  await page.getByLabel('Display name').fill('Northview A');
+  await page.getByLabel('School / organization').fill('Northview');
+  await page.getByRole('button', { name: 'Save team' }).click();
+
+  const tableContract = await page
+    .locator('.director-table')
+    .first()
+    .evaluate((table) => {
+      const wrap = table.parentElement;
+      const firstCell = table.querySelector('th, td');
+      const lastCell = table.querySelector('tr > :last-child');
+      if (!wrap || !firstCell || !lastCell) throw new Error('Expected a Director table.');
+      const firstCellStyle = getComputedStyle(firstCell);
+      const lastCellStyle = getComputedStyle(lastCell);
+      return {
+        borderCollapse: getComputedStyle(table).borderCollapse,
+        overflowX: getComputedStyle(wrap).overflowX,
+        firstCellPadding: Number.parseFloat(firstCellStyle.paddingLeft),
+        lastCellPadding: Number.parseFloat(lastCellStyle.paddingRight),
+      };
+    });
+  expect(tableContract.borderCollapse).toBe('collapse');
+  expect(tableContract.overflowX).toBe('auto');
+  expect(tableContract.firstCellPadding).toBeGreaterThanOrEqual(16);
+  expect(tableContract.lastCellPadding).toBeGreaterThanOrEqual(16);
+
+  await navigation.getByRole('button', { name: 'Rooms & staff', exact: true }).click();
+  await page.getByRole('button', { name: 'Add room' }).click();
+  const roomForm = page.locator('.director-form-panel').first();
+  await expect(roomForm.locator('.director-panel-body')).toBeVisible();
+  await expect(roomForm.locator('.director-panel-footer')).toBeVisible();
+  await page.getByLabel('Room name').fill('Room 101');
+  await page.getByRole('button', { name: 'Save room' }).click();
+  await expect(page.locator('.director-filter-tabs')).toBeVisible();
+  await expect(page.locator('.director-server-status')).toHaveAttribute('data-status', 'unavailable');
+
+  await page.setViewportSize({ width: 520, height: 720 });
+  await navigation.getByRole('button', { name: 'Settings', exact: true }).click();
+  await expect(page.getByRole('heading', { level: 1, name: 'Settings' })).toBeVisible();
+  const documentWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+  expect(documentWidth).toBeLessThanOrEqual(521);
+});
+
 test('Director runs a local tournament slice and reopens its result', async ({ page }) => {
   await createTournament(page);
 

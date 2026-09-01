@@ -76,7 +76,7 @@ export function ResultsView({
             </div>
           </div>
           {submissions.length === 0 ? (
-            <div className="director-panel-body director-empty-state--contained" role="status">
+            <div className="director-panel-body director-panel-empty-body" role="status">
               <p className="director-empty-copy">
                 No submissions in this view. Electronic QBTCP submissions and paper/manual results will appear
                 here.
@@ -245,7 +245,7 @@ function ManualResult({
         </div>
       </div>
       {choices.length === 0 ? (
-        <div className="director-panel-body director-empty-state--contained" role="status">
+        <div className="director-panel-body director-panel-empty-body" role="status">
           <p className="director-empty-copy">
             There are no unresolved scheduled games available for manual entry.
           </p>

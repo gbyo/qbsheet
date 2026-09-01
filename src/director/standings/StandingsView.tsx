@@ -100,7 +100,7 @@ export function StandingsView({
                 <span className="director-muted">Accepted games only</span>
               </div>
               {playerStandings.length === 0 ? (
-                <div className="director-panel-body director-empty-state--contained" role="status">
+                <div className="director-panel-body director-panel-empty-body" role="status">
                   <p className="director-empty-copy">
                     Player statistics will appear when accepted results include rosters.
                   </p>

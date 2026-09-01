@@ -116,138 +116,139 @@ export function TeamsView({
           </>
         }
       />
+      <div className="director-page-stack">
+        {showForm && (
+          <section className="director-panel director-form-panel">
+            <div className="director-panel-heading">
+              <div>
+                <p className="director-eyebrow">New team</p>
+                <h2>Registration</h2>
+              </div>
+              <Button variant="quiet" icon="x" onClick={() => setShowForm(false)}>
+                Close
+              </Button>
+            </div>
+            <PanelBody>
+              <div className="director-form-grid director-form-grid-three">
+                <FormField label="Display name">
+                  <input
+                    value={displayName}
+                    onChange={(event) => setDisplayName(event.target.value)}
+                    placeholder="Northview A"
+                  />
+                </FormField>
+                <FormField label="School / organization">
+                  <input
+                    value={organizationName}
+                    onChange={(event) => setOrganizationName(event.target.value)}
+                    placeholder="Northview High"
+                  />
+                </FormField>
+                <FormField label="Team letter">
+                  <input
+                    value={teamLetter}
+                    onChange={(event) => setTeamLetter(event.target.value)}
+                    placeholder="A"
+                    maxLength={4}
+                  />
+                </FormField>
+              </div>
+            </PanelBody>
+            <PanelFooter className="director-form-actions">
+              <Button variant="primary" onClick={submitTeam}>
+                Save team
+              </Button>
+            </PanelFooter>
+          </section>
+        )}
 
-      {showForm && (
-        <section className="director-panel director-form-panel">
-          <div className="director-panel-heading">
-            <div>
-              <p className="director-eyebrow">New team</p>
-              <h2>Registration</h2>
+        {showPaste && (
+          <section className="director-panel director-form-panel">
+            <div className="director-panel-heading">
+              <div>
+                <p className="director-eyebrow">Bulk entry</p>
+                <h2>Paste teams</h2>
+              </div>
+              <Button variant="quiet" icon="x" onClick={() => setShowPaste(false)}>
+                Close
+              </Button>
             </div>
-            <Button variant="quiet" icon="x" onClick={() => setShowForm(false)}>
-              Close
-            </Button>
-          </div>
-          <PanelBody>
-            <div className="director-form-grid director-form-grid-three">
-              <FormField label="Display name">
-                <input
-                  value={displayName}
-                  onChange={(event) => setDisplayName(event.target.value)}
-                  placeholder="Northview A"
-                />
-              </FormField>
-              <FormField label="School / organization">
-                <input
-                  value={organizationName}
-                  onChange={(event) => setOrganizationName(event.target.value)}
-                  placeholder="Northview High"
-                />
-              </FormField>
-              <FormField label="Team letter">
-                <input
-                  value={teamLetter}
-                  onChange={(event) => setTeamLetter(event.target.value)}
-                  placeholder="A"
-                  maxLength={4}
-                />
-              </FormField>
-            </div>
-          </PanelBody>
-          <PanelFooter className="director-form-actions">
-            <Button variant="primary" onClick={submitTeam}>
-              Save team
-            </Button>
-          </PanelFooter>
-        </section>
-      )}
+            <PanelBody>
+              <p className="director-panel-description">
+                One team per line. Use columns for team name, school, and team letter.
+              </p>
+              <textarea
+                className="director-textarea"
+                value={paste}
+                onChange={(event) => setPaste(event.target.value)}
+                placeholder={'Northview A\tNorthview High\tA\nRiverside A\tRiverside School\tA'}
+                rows={5}
+              />
+            </PanelBody>
+            <PanelFooter className="director-form-actions">
+              <Button variant="primary" onClick={importPaste}>
+                Add pasted teams
+              </Button>
+            </PanelFooter>
+          </section>
+        )}
 
-      {showPaste && (
-        <section className="director-panel director-form-panel">
-          <div className="director-panel-heading">
-            <div>
-              <p className="director-eyebrow">Bulk entry</p>
-              <h2>Paste teams</h2>
-            </div>
-            <Button variant="quiet" icon="x" onClick={() => setShowPaste(false)}>
-              Close
+        {state.teams.length === 0 ? (
+          <EmptyState
+            title="No teams yet"
+            description="Add registrations one at a time, paste a roster, or import a CSV. Teams stay editable after the schedule is generated."
+          >
+            <Button variant="primary" icon="plus" onClick={() => setShowForm(true)}>
+              Add first team
             </Button>
-          </div>
-          <PanelBody>
-            <p className="director-panel-description">
-              One team per line. Use columns for team name, school, and team letter.
-            </p>
-            <textarea
-              className="director-textarea"
-              value={paste}
-              onChange={(event) => setPaste(event.target.value)}
-              placeholder={'Northview A\tNorthview High\tA\nRiverside A\tRiverside School\tA'}
-              rows={5}
-            />
-          </PanelBody>
-          <PanelFooter className="director-form-actions">
-            <Button variant="primary" onClick={importPaste}>
-              Add pasted teams
-            </Button>
-          </PanelFooter>
-        </section>
-      )}
-
-      {state.teams.length === 0 ? (
-        <EmptyState
-          title="No teams yet"
-          description="Add registrations one at a time, paste a roster, or import a CSV. Teams stay editable after the schedule is generated."
-        >
-          <Button variant="primary" icon="plus" onClick={() => setShowForm(true)}>
-            Add first team
-          </Button>
-        </EmptyState>
-      ) : (
-        <section className="director-panel">
-          <div className="director-panel-heading">
-            <div>
-              <p className="director-eyebrow">Registrations</p>
-              <h2>{visibleTeams.length} shown</h2>
+          </EmptyState>
+        ) : (
+          <section className="director-panel">
+            <div className="director-panel-heading">
+              <div>
+                <p className="director-eyebrow">Registrations</p>
+                <h2>{visibleTeams.length} shown</h2>
+              </div>
+              <span className="director-muted">
+                {state.teams.filter((team) => team.status === 'confirmed').length} confirmed
+              </span>
             </div>
-            <span className="director-muted">
-              {state.teams.filter((team) => team.status === 'confirmed').length} confirmed
-            </span>
-          </div>
-          <div className="director-table-wrap">
-            <table className="director-table director-team-table">
-              <thead>
-                <tr>
-                  <th>Seed</th>
-                  <th>Team</th>
-                  <th>School</th>
-                  <th>Roster</th>
-                  <th>Status</th>
-                  <th aria-label="Actions" />
-                </tr>
-              </thead>
-              <tbody>
-                {visibleTeams.length > 0 ? (
-                  visibleTeams.map((team) => (
-                    <TeamRow
-                      key={team.id}
-                      state={state}
-                      teamId={team.id}
-                      controller={controller}
-                      onAnnounce={onAnnounce}
-                    />
-                  ))
-                ) : (
-                  <tr className="director-table-empty-row">
-                    <td colSpan={6}>
-                      <p className="director-empty-copy">No teams match the current search.</p>
-                    </td>
+            <div className="director-table-wrap">
+              <table className="director-table director-team-table">
+                <thead>
+                  <tr>
+                    <th>Seed</th>
+                    <th>Team</th>
+                    <th>School</th>
+                    <th>Roster</th>
+                    <th>Status</th>
+                    <th aria-label="Actions" />
                   </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      )}
+                </thead>
+                <tbody>
+                  {visibleTeams.length > 0 ? (
+                    visibleTeams.map((team) => (
+                      <TeamRow
+                        key={team.id}
+                        state={state}
+                        teamId={team.id}
+                        controller={controller}
+                        onAnnounce={onAnnounce}
+                      />
+                    ))
+                  ) : (
+                    <tr className="director-table-empty-row">
+                      <td colSpan={6}>
+                        <p className="director-empty-copy">No teams match the current search.</p>
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
+      </div>
     </>
   );
 }

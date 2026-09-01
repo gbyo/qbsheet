@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { DirectorState } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
-import { Button, EmptyState, FormField, StateLabel } from '../components/Controls';
+import { Button, EmptyState, FormField, PanelBody, PanelFooter, StateLabel } from '../components/Controls';
 import { Icon } from '../components/Icon';
 import { PageHeader } from '../components/PageHeader';
 import { importQbjText } from '../format/interchange';
@@ -83,104 +83,109 @@ export function PacketsView({
           </>
         }
       />
-      {showForm && (
-        <section className="director-panel director-form-panel">
-          <div className="director-panel-heading">
-            <div>
-              <p className="director-eyebrow">New packet</p>
-              <h2>Inventory item</h2>
+      <div className="director-page-stack">
+        {showForm && (
+          <section className="director-panel director-form-panel">
+            <div className="director-panel-heading">
+              <div>
+                <p className="director-eyebrow">New packet</p>
+                <h2>Inventory item</h2>
+              </div>
+              <Button variant="quiet" icon="x" onClick={() => setShowForm(false)}>
+                Close
+              </Button>
             </div>
-            <Button variant="quiet" icon="x" onClick={() => setShowForm(false)}>
-              Close
+            <PanelBody>
+              <div className="director-form-grid director-form-grid-single">
+                <FormField label="Packet name">
+                  <input
+                    value={name}
+                    onChange={(event) => setName(event.target.value)}
+                    placeholder="Round 1 · Set A"
+                  />
+                </FormField>
+              </div>
+            </PanelBody>
+            <PanelFooter className="director-form-actions">
+              <Button variant="primary" onClick={save}>
+                Save packet
+              </Button>
+            </PanelFooter>
+          </section>
+        )}
+        {state.packets.length === 0 ? (
+          <EmptyState
+            title="No packets in inventory"
+            description="Add packet names now or import QBJ assignment data. Director warns when a packet is reused."
+          >
+            <Button variant="primary" icon="plus" onClick={() => setShowForm(true)}>
+              Add first packet
             </Button>
-          </div>
-          <div className="director-form-grid">
-            <FormField label="Packet name">
-              <input
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                placeholder="Round 1 · Set A"
-              />
-            </FormField>
-          </div>
-          <div className="director-form-actions">
-            <Button variant="primary" onClick={save}>
-              Save packet
-            </Button>
-          </div>
-        </section>
-      )}
-      {state.packets.length === 0 ? (
-        <EmptyState
-          title="No packets in inventory"
-          description="Add packet names now or import QBJ assignment data. Director warns when a packet is reused."
-        >
-          <Button variant="primary" icon="plus" onClick={() => setShowForm(true)}>
-            Add first packet
-          </Button>
-        </EmptyState>
-      ) : (
-        <section className="director-panel">
-          <div className="director-panel-heading">
-            <div>
-              <p className="director-eyebrow">Inventory</p>
-              <h2>
-                {state.packets.length} packet{state.packets.length === 1 ? '' : 's'}
-              </h2>
+          </EmptyState>
+        ) : (
+          <section className="director-panel">
+            <div className="director-panel-heading">
+              <div>
+                <p className="director-eyebrow">Inventory</p>
+                <h2>
+                  {state.packets.length} packet{state.packets.length === 1 ? '' : 's'}
+                </h2>
+              </div>
+              <span className="director-muted">
+                {state.packets.filter((packet) => packet.usedGameIds.length === 0).length} unused
+              </span>
             </div>
-            <span className="director-muted">
-              {state.packets.filter((packet) => packet.usedGameIds.length === 0).length} unused
-            </span>
-          </div>
-          <div className="director-table-wrap">
-            <table className="director-table">
-              <thead>
-                <tr>
-                  <th>Packet</th>
-                  <th>Source</th>
-                  <th>Round assignments</th>
-                  <th>Games used</th>
-                  <th>Status</th>
-                  <th aria-label="Actions" />
-                </tr>
-              </thead>
-              <tbody>
-                {state.packets.map((packet) => (
-                  <tr key={packet.id}>
-                    <td>
-                      <strong>{packet.name}</strong>
-                      {packet.tiebreaker && <small className="director-table-subtext">Tiebreaker</small>}
-                    </td>
-                    <td>{packet.source}</td>
-                    <td>{packet.assignedRoundIds.length || '—'}</td>
-                    <td>{packet.usedGameIds.length || '—'}</td>
-                    <td>
-                      <StateLabel
-                        state={packet.usedGameIds.length > 0 ? 'finished' : 'available'}
-                        label={packet.usedGameIds.length > 0 ? 'Used' : 'Available'}
-                      />
-                    </td>
-                    <td>
-                      <button
-                        type="button"
-                        className="director-icon-button"
-                        aria-label={`Packet actions for ${packet.name}`}
-                        onClick={() =>
-                          onAnnounce(
-                            `${packet.name}: ${packet.assignedGameIds.length} game assignment${packet.assignedGameIds.length === 1 ? '' : 's'}.`,
-                          )
-                        }
-                      >
-                        <Icon name="more" size={16} />
-                      </button>
-                    </td>
+            <div className="director-table-wrap">
+              <table className="director-table">
+                <thead>
+                  <tr>
+                    <th>Packet</th>
+                    <th>Source</th>
+                    <th>Round assignments</th>
+                    <th>Games used</th>
+                    <th>Status</th>
+                    <th aria-label="Actions" />
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      )}
+                </thead>
+                <tbody>
+                  {state.packets.map((packet) => (
+                    <tr key={packet.id}>
+                      <td>
+                        <strong>{packet.name}</strong>
+                        {packet.tiebreaker && <small className="director-table-subtext">Tiebreaker</small>}
+                      </td>
+                      <td>{packet.source}</td>
+                      <td>{packet.assignedRoundIds.length || '—'}</td>
+                      <td>{packet.usedGameIds.length || '—'}</td>
+                      <td>
+                        <StateLabel
+                          state={packet.usedGameIds.length > 0 ? 'finished' : 'available'}
+                          label={packet.usedGameIds.length > 0 ? 'Used' : 'Available'}
+                        />
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="director-button director-button-quiet director-table-action"
+                          aria-label={`View details for ${packet.name}`}
+                          onClick={() =>
+                            onAnnounce(
+                              `${packet.name}: ${packet.assignedGameIds.length} game assignment${packet.assignedGameIds.length === 1 ? '' : 's'}.`,
+                            )
+                          }
+                        >
+                          <Icon name="file" size={14} />
+                          <span>Details</span>
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
+      </div>
     </>
   );
 }

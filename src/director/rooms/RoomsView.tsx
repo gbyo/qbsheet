@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { DirectorState } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
-import { Button, EmptyState, FormField, StateLabel } from '../components/Controls';
+import { Button, EmptyState, FormField, PanelBody, PanelFooter, StateLabel } from '../components/Controls';
 import { Icon } from '../components/Icon';
 import { PageHeader } from '../components/PageHeader';
 
@@ -76,231 +76,259 @@ export function RoomsView({
           </div>
         }
       />
-      {showForm === 'room' && (
-        <section className="director-panel director-form-panel">
-          <div className="director-panel-heading">
-            <div>
-              <p className="director-eyebrow">New room</p>
-              <h2>Room details</h2>
+      <div className="director-page-stack">
+        {showForm === 'room' && (
+          <section className="director-panel director-form-panel">
+            <div className="director-panel-heading">
+              <div>
+                <p className="director-eyebrow">New room</p>
+                <h2>Room details</h2>
+              </div>
+              <Button variant="quiet" icon="x" onClick={() => setShowForm(null)}>
+                Close
+              </Button>
             </div>
-            <Button variant="quiet" icon="x" onClick={() => setShowForm(null)}>
-              Close
-            </Button>
-          </div>
-          <div className="director-form-grid">
-            <FormField label="Room name">
-              <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Room 101" />
-            </FormField>
-            <FormField label="Building">
-              <input
-                value={building}
-                onChange={(event) => setBuilding(event.target.value)}
-                placeholder="Main building"
-              />
-            </FormField>
-            <FormField label="Floor">
-              <input value={floor} onChange={(event) => setFloor(event.target.value)} placeholder="First" />
-            </FormField>
-          </div>
-          <div className="director-form-actions">
-            <Button variant="primary" onClick={save}>
-              Save room
-            </Button>
-          </div>
-        </section>
-      )}
-      {showForm === 'staff' && (
-        <section className="director-panel director-form-panel">
-          <div className="director-panel-heading">
-            <div>
-              <p className="director-eyebrow">New staff member</p>
-              <h2>Staff details</h2>
+            <PanelBody>
+              <div className="director-form-grid director-form-grid-three">
+                <FormField label="Room name">
+                  <input
+                    value={name}
+                    onChange={(event) => setName(event.target.value)}
+                    placeholder="Room 101"
+                  />
+                </FormField>
+                <FormField label="Building">
+                  <input
+                    value={building}
+                    onChange={(event) => setBuilding(event.target.value)}
+                    placeholder="Main building"
+                  />
+                </FormField>
+                <FormField label="Floor">
+                  <input
+                    value={floor}
+                    onChange={(event) => setFloor(event.target.value)}
+                    placeholder="First"
+                  />
+                </FormField>
+              </div>
+            </PanelBody>
+            <PanelFooter className="director-form-actions">
+              <Button variant="primary" onClick={save}>
+                Save room
+              </Button>
+            </PanelFooter>
+          </section>
+        )}
+        {showForm === 'staff' && (
+          <section className="director-panel director-form-panel">
+            <div className="director-panel-heading">
+              <div>
+                <p className="director-eyebrow">New staff member</p>
+                <h2>Staff details</h2>
+              </div>
+              <Button variant="quiet" icon="x" onClick={() => setShowForm(null)}>
+                Close
+              </Button>
             </div>
-            <Button variant="quiet" icon="x" onClick={() => setShowForm(null)}>
-              Close
-            </Button>
-          </div>
-          <div className="director-form-grid">
-            <FormField label="Name">
-              <input
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                placeholder="Alex Morgan"
-              />
-            </FormField>
-            <FormField label="Primary role">
-              <select
-                value={staffRole}
-                onChange={(event) => setStaffRole(event.target.value as typeof staffRole)}
-              >
-                <option value="moderator">Moderator</option>
-                <option value="scorekeeper">Scorekeeper</option>
-                <option value="runner">Runner</option>
-                <option value="hq">HQ staff</option>
-              </select>
-            </FormField>
-          </div>
-          <div className="director-form-actions">
-            <Button variant="primary" onClick={saveStaff}>
-              Save staff member
-            </Button>
-          </div>
-        </section>
-      )}
-      {showForm === 'equipment' && (
-        <section className="director-panel director-form-panel">
-          <div className="director-panel-heading">
-            <div>
-              <p className="director-eyebrow">New resource</p>
-              <h2>Equipment details</h2>
+            <PanelBody>
+              <div className="director-form-grid director-form-grid-two">
+                <FormField label="Name">
+                  <input
+                    value={name}
+                    onChange={(event) => setName(event.target.value)}
+                    placeholder="Alex Morgan"
+                  />
+                </FormField>
+                <FormField label="Primary role">
+                  <select
+                    value={staffRole}
+                    onChange={(event) => setStaffRole(event.target.value as typeof staffRole)}
+                  >
+                    <option value="moderator">Moderator</option>
+                    <option value="scorekeeper">Scorekeeper</option>
+                    <option value="runner">Runner</option>
+                    <option value="hq">HQ staff</option>
+                  </select>
+                </FormField>
+              </div>
+            </PanelBody>
+            <PanelFooter className="director-form-actions">
+              <Button variant="primary" onClick={saveStaff}>
+                Save staff member
+              </Button>
+            </PanelFooter>
+          </section>
+        )}
+        {showForm === 'equipment' && (
+          <section className="director-panel director-form-panel">
+            <div className="director-panel-heading">
+              <div>
+                <p className="director-eyebrow">New resource</p>
+                <h2>Equipment details</h2>
+              </div>
+              <Button variant="quiet" icon="x" onClick={() => setShowForm(null)}>
+                Close
+              </Button>
             </div>
-            <Button variant="quiet" icon="x" onClick={() => setShowForm(null)}>
-              Close
+            <PanelBody>
+              <div className="director-form-grid director-form-grid-two">
+                <FormField label="Name">
+                  <input
+                    value={name}
+                    onChange={(event) => setName(event.target.value)}
+                    placeholder="Buzzer set 1"
+                  />
+                </FormField>
+                <FormField label="Type">
+                  <select
+                    value={equipmentKind}
+                    onChange={(event) => setEquipmentKind(event.target.value as typeof equipmentKind)}
+                  >
+                    <option value="buzzer">Buzzer</option>
+                    <option value="device">Laptop / tablet</option>
+                    <option value="other">Other</option>
+                  </select>
+                </FormField>
+              </div>
+            </PanelBody>
+            <PanelFooter className="director-form-actions">
+              <Button variant="primary" onClick={saveEquipment}>
+                Save equipment
+              </Button>
+            </PanelFooter>
+          </section>
+        )}
+        {state.rooms.length === 0 ? (
+          <EmptyState
+            title="No rooms yet"
+            description="Add the rooms that can host games. Room availability and assignments are persisted with the tournament."
+          >
+            <Button variant="primary" icon="plus" onClick={() => setShowForm('room')}>
+              Add first room
             </Button>
-          </div>
-          <div className="director-form-grid">
-            <FormField label="Name">
-              <input
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                placeholder="Buzzer set 1"
-              />
-            </FormField>
-            <FormField label="Type">
-              <select
-                value={equipmentKind}
-                onChange={(event) => setEquipmentKind(event.target.value as typeof equipmentKind)}
-              >
-                <option value="buzzer">Buzzer</option>
-                <option value="device">Laptop / tablet</option>
-                <option value="other">Other</option>
-              </select>
-            </FormField>
-          </div>
-          <div className="director-form-actions">
-            <Button variant="primary" onClick={saveEquipment}>
-              Save equipment
-            </Button>
-          </div>
-        </section>
-      )}
-      {state.rooms.length === 0 ? (
-        <EmptyState
-          title="No rooms yet"
-          description="Add the rooms that can host games. Room availability and assignments are persisted with the tournament."
-        >
-          <Button variant="primary" icon="plus" onClick={() => setShowForm('room')}>
-            Add first room
-          </Button>
-        </EmptyState>
-      ) : (
-        <section className="director-panel">
-          <div className="director-filter-tabs" role="tablist" aria-label="Room status">
-            <FilterButton active={filter === 'all'} onClick={() => setFilter('all')}>
-              All <span>{state.rooms.length}</span>
-            </FilterButton>
-            <FilterButton active={filter === 'available'} onClick={() => setFilter('available')}>
-              Available <span>{state.rooms.filter((room) => room.available).length}</span>
-            </FilterButton>
-            <FilterButton active={filter === 'live'} onClick={() => setFilter('live')}>
-              Live <span>{state.rooms.filter((room) => room.status === 'live').length}</span>
-            </FilterButton>
-            <FilterButton active={filter === 'help'} onClick={() => setFilter('help')}>
-              Help <span>{state.rooms.filter((room) => room.status === 'help').length}</span>
-            </FilterButton>
-            <FilterButton active={filter === 'offline'} onClick={() => setFilter('offline')}>
-              Offline <span>{state.rooms.filter((room) => room.status === 'offline').length}</span>
-            </FilterButton>
-          </div>
-          <div className="director-table-wrap">
-            <table className="director-table">
-              <thead>
-                <tr>
-                  <th>Room</th>
-                  <th>Location</th>
-                  <th>Moderator</th>
-                  <th>Scorekeeper</th>
-                  <th>Equipment</th>
-                  <th>Status</th>
-                  <th aria-label="Actions" />
-                </tr>
-              </thead>
-              <tbody>
-                {rooms.map((room) => (
-                  <tr key={room.id}>
-                    <td>
-                      <strong>{room.name}</strong>
-                      <small className="director-table-subtext">
-                        {room.accessibility || 'No access notes'}
-                      </small>
-                    </td>
-                    <td>{[room.building, room.floor].filter(Boolean).join(' · ') || '—'}</td>
-                    <td>{staffName(state, room.moderatorId) || 'Unassigned'}</td>
-                    <td>{staffName(state, room.scorekeeperId) || 'Unassigned'}</td>
-                    <td>{equipmentName(state, room.equipmentId) || 'Unassigned'}</td>
-                    <td>
-                      <StateLabel state={room.status} label={room.available ? room.status : 'Unavailable'} />
-                    </td>
-                    <td>
-                      <button
-                        type="button"
-                        className="director-icon-button"
-                        aria-label={`Toggle ${room.name} availability`}
-                        onClick={() => {
-                          controller.updateRoom(room.id, { available: !room.available });
-                          onAnnounce(`${room.name} marked ${room.available ? 'unavailable' : 'available'}.`);
-                        }}
-                      >
-                        <Icon name="more" size={16} />
-                      </button>
-                    </td>
+          </EmptyState>
+        ) : (
+          <section className="director-panel">
+            <PanelBody className="director-filter-panel-body">
+              <div className="director-filter-tabs" role="tablist" aria-label="Room status">
+                <FilterButton active={filter === 'all'} onClick={() => setFilter('all')}>
+                  All <span>{state.rooms.length}</span>
+                </FilterButton>
+                <FilterButton active={filter === 'available'} onClick={() => setFilter('available')}>
+                  Available <span>{state.rooms.filter((room) => room.available).length}</span>
+                </FilterButton>
+                <FilterButton active={filter === 'live'} onClick={() => setFilter('live')}>
+                  Live <span>{state.rooms.filter((room) => room.status === 'live').length}</span>
+                </FilterButton>
+                <FilterButton active={filter === 'help'} onClick={() => setFilter('help')}>
+                  Help <span>{state.rooms.filter((room) => room.status === 'help').length}</span>
+                </FilterButton>
+                <FilterButton active={filter === 'offline'} onClick={() => setFilter('offline')}>
+                  Offline <span>{state.rooms.filter((room) => room.status === 'offline').length}</span>
+                </FilterButton>
+              </div>
+            </PanelBody>
+            <div className="director-table-wrap">
+              <table className="director-table">
+                <thead>
+                  <tr>
+                    <th>Room</th>
+                    <th>Location</th>
+                    <th>Moderator</th>
+                    <th>Scorekeeper</th>
+                    <th>Equipment</th>
+                    <th>Status</th>
+                    <th aria-label="Actions" />
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {rooms.map((room) => (
+                    <tr key={room.id}>
+                      <td>
+                        <strong>{room.name}</strong>
+                        <small className="director-table-subtext">
+                          {room.accessibility || 'No access notes'}
+                        </small>
+                      </td>
+                      <td>{[room.building, room.floor].filter(Boolean).join(' · ') || '—'}</td>
+                      <td>{staffName(state, room.moderatorId) || 'Unassigned'}</td>
+                      <td>{staffName(state, room.scorekeeperId) || 'Unassigned'}</td>
+                      <td>{equipmentName(state, room.equipmentId) || 'Unassigned'}</td>
+                      <td>
+                        <StateLabel
+                          state={room.status}
+                          label={room.available ? room.status : 'Unavailable'}
+                        />
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="director-button director-button-quiet director-table-action"
+                          aria-label={`${room.available ? 'Mark' : 'Make'} ${room.name} ${room.available ? 'unavailable' : 'available'}`}
+                          onClick={() => {
+                            controller.updateRoom(room.id, { available: !room.available });
+                            onAnnounce(
+                              `${room.name} marked ${room.available ? 'unavailable' : 'available'}.`,
+                            );
+                          }}
+                        >
+                          <Icon name={room.available ? 'pause' : 'play'} size={14} />
+                          <span>{room.available ? 'Unavailable' : 'Available'}</span>
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
+        {(state.staff.length > 0 || state.equipment.length > 0) && (
+          <div className="director-two-column">
+            <section className="director-panel">
+              <div className="director-panel-heading">
+                <div>
+                  <p className="director-eyebrow">Staff</p>
+                  <h2>
+                    {state.staff.length} available member{state.staff.length === 1 ? '' : 's'}
+                  </h2>
+                </div>
+              </div>
+              <PanelBody>
+                <ul className="director-plain-list">
+                  {state.staff.map((member) => (
+                    <li key={member.id}>
+                      <strong>{member.name}</strong>
+                      <span>{member.roles.join(' · ')}</span>
+                    </li>
+                  ))}
+                </ul>
+              </PanelBody>
+            </section>
+            <section className="director-panel">
+              <div className="director-panel-heading">
+                <div>
+                  <p className="director-eyebrow">Equipment</p>
+                  <h2>
+                    {state.equipment.length} resource{state.equipment.length === 1 ? '' : 's'}
+                  </h2>
+                </div>
+              </div>
+              <PanelBody>
+                <ul className="director-plain-list">
+                  {state.equipment.map((item) => (
+                    <li key={item.id}>
+                      <strong>{item.name}</strong>
+                      <span>{item.kind}</span>
+                    </li>
+                  ))}
+                </ul>
+              </PanelBody>
+            </section>
           </div>
-        </section>
-      )}
-      {(state.staff.length > 0 || state.equipment.length > 0) && (
-        <div className="director-two-column">
-          <section className="director-panel">
-            <div className="director-panel-heading">
-              <div>
-                <p className="director-eyebrow">Staff</p>
-                <h2>
-                  {state.staff.length} available member{state.staff.length === 1 ? '' : 's'}
-                </h2>
-              </div>
-            </div>
-            <ul className="director-plain-list">
-              {state.staff.map((member) => (
-                <li key={member.id}>
-                  <strong>{member.name}</strong>
-                  <span>{member.roles.join(' · ')}</span>
-                </li>
-              ))}
-            </ul>
-          </section>
-          <section className="director-panel">
-            <div className="director-panel-heading">
-              <div>
-                <p className="director-eyebrow">Equipment</p>
-                <h2>
-                  {state.equipment.length} resource{state.equipment.length === 1 ? '' : 's'}
-                </h2>
-              </div>
-            </div>
-            <ul className="director-plain-list">
-              {state.equipment.map((item) => (
-                <li key={item.id}>
-                  <strong>{item.name}</strong>
-                  <span>{item.kind}</span>
-                </li>
-              ))}
-            </ul>
-          </section>
-        </div>
-      )}
+        )}
+      </div>
     </>
   );
 }

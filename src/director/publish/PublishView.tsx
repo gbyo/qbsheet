@@ -1,5 +1,5 @@
 import { deriveTeamStandings, type DirectorState } from '../domain';
-import { Button, EmptyState } from '../components/Controls';
+import { Button, EmptyState, PanelBody } from '../components/Controls';
 import { Icon } from '../components/Icon';
 import { PageHeader } from '../components/PageHeader';
 import { exportArchiveBytes, exportQbj, exportSqbs, exportTeamCsv } from '../format/interchange';
@@ -25,82 +25,95 @@ export function PublishView({
           </Button>
         }
       />
-      {!hasTournament ? (
-        <EmptyState
-          title="Nothing to publish"
-          description="Create or open a tournament before exporting reports."
-        />
-      ) : (
-        <div className="director-publish-grid">
-          <PublishAction
-            title="Team standings"
-            description="A printable HTML table with the configured tiebreak order."
-            action="Download HTML"
-            icon="publish"
-            onClick={() => downloadHtml(state, onAnnounce)}
+      <div className="director-page-stack">
+        {!hasTournament ? (
+          <EmptyState
+            title="Nothing to publish"
+            description="Create or open a tournament before exporting reports."
           />
-          <PublishAction
-            title="Standings CSV"
-            description="Team records and scoring columns for spreadsheets."
-            action="Download CSV"
-            icon="download"
-            onClick={() => downloadCsv(state, onAnnounce)}
-          />
-          <PublishAction
-            title="Portable archive"
-            description="A versioned Director document that can be reopened on another computer."
-            action="Export archive"
-            icon="file"
-            onClick={() => void downloadArchive(state, onAnnounce)}
-          />
-          <PublishAction
-            title="QBJ tournament"
-            description="Interoperable tournament, roster, schedule, and accepted-result data."
-            action="Download QBJ"
-            icon="file"
-            onClick={() => downloadQbj(state, onAnnounce)}
-          />
-          <PublishAction
-            title="SQBS roster"
-            description="A practical positional roster export for SQBS-compatible tools."
-            action="Download SQBS"
-            icon="download"
-            onClick={() => downloadSqbs(state, onAnnounce)}
-          />
-          <PublishAction
-            title="Print current view"
-            description="Use the browser print dialog for room sheets or review tables."
-            action="Print"
-            icon="publish"
-            onClick={() => {
-              window.print();
-              onAnnounce('Print dialog opened.');
-            }}
-          />
-        </div>
-      )}
-      <section className="director-panel">
-        <div className="director-panel-heading">
-          <div>
-            <p className="director-eyebrow">Offline publishing</p>
-            <h2>What is included</h2>
+        ) : (
+          <section className="director-panel director-publish-panel">
+            <div className="director-panel-heading">
+              <div>
+                <p className="director-eyebrow">Offline publishing</p>
+                <h2>Exports</h2>
+              </div>
+              <span className="director-muted">Local files</span>
+            </div>
+            <div className="director-publish-rows">
+              <PublishAction
+                title="Team standings"
+                description="Printable HTML table with the configured tiebreak order."
+                action="Download HTML"
+                icon="publish"
+                onClick={() => downloadHtml(state, onAnnounce)}
+              />
+              <PublishAction
+                title="Standings CSV"
+                description="Team records and scoring columns for spreadsheets."
+                action="Download CSV"
+                icon="download"
+                onClick={() => downloadCsv(state, onAnnounce)}
+              />
+              <PublishAction
+                title="Portable archive"
+                description="Versioned Director document that can be reopened on another computer."
+                action="Export archive"
+                icon="file"
+                onClick={() => void downloadArchive(state, onAnnounce)}
+              />
+              <PublishAction
+                title="QBJ tournament"
+                description="Interoperable tournament, roster, schedule, and accepted-result data."
+                action="Download QBJ"
+                icon="file"
+                onClick={() => downloadQbj(state, onAnnounce)}
+              />
+              <PublishAction
+                title="SQBS roster"
+                description="Positional roster export for SQBS-compatible tools."
+                action="Download SQBS"
+                icon="download"
+                onClick={() => downloadSqbs(state, onAnnounce)}
+              />
+              <PublishAction
+                title="Print current view"
+                description="Use the browser print dialog for room sheets or review tables."
+                action="Print"
+                icon="publish"
+                onClick={() => {
+                  window.print();
+                  onAnnounce('Print dialog opened.');
+                }}
+              />
+            </div>
+          </section>
+        )}
+        <section className="director-panel">
+          <div className="director-panel-heading">
+            <div>
+              <p className="director-eyebrow">Offline publishing</p>
+              <h2>What is included</h2>
+            </div>
           </div>
-        </div>
-        <ul className="director-publish-checklist">
-          <li>
-            <Icon name="check" size={16} />
-            <span>Team standings use accepted results only.</span>
-          </li>
-          <li>
-            <Icon name="check" size={16} />
-            <span>Original QBTCP submissions stay in the archive.</span>
-          </li>
-          <li>
-            <Icon name="check" size={16} />
-            <span>Audit history and schema version travel with the tournament.</span>
-          </li>
-        </ul>
-      </section>
+          <PanelBody>
+            <ul className="director-publish-checklist">
+              <li>
+                <Icon name="check" size={16} />
+                <span>Team standings use accepted results only.</span>
+              </li>
+              <li>
+                <Icon name="check" size={16} />
+                <span>Original QBTCP submissions stay in the archive.</span>
+              </li>
+              <li>
+                <Icon name="check" size={16} />
+                <span>Audit history and schema version travel with the tournament.</span>
+              </li>
+            </ul>
+          </PanelBody>
+        </section>
+      </div>
     </>
   );
 }
@@ -119,7 +132,7 @@ function PublishAction({
   onClick: () => void;
 }) {
   return (
-    <section className="director-panel director-publish-action">
+    <div className="director-publish-row">
       <div className="director-publish-action-icon">
         <Icon name={icon} size={19} />
       </div>
@@ -130,7 +143,7 @@ function PublishAction({
       <Button variant="secondary" onClick={onClick}>
         {action}
       </Button>
-    </section>
+    </div>
   );
 }
 
