@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
+mod server;
 mod store;
 
 use tauri::{Manager, Wry};
@@ -33,11 +34,18 @@ pub fn run() {
                 Box::<dyn std::error::Error>::from(std::io::Error::other(error.to_string()))
             })?;
             app.manage(store);
+            app.manage(server::ServerRuntime::default());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_application_paths,
             commands::get_store_status,
+            commands::director_load_state,
+            commands::director_save_state,
+            commands::director_checkpoint,
+            commands::director_server_status,
+            commands::director_start_qbtcp_server,
+            commands::director_stop_qbtcp_server,
             commands::checkpoint_store,
             commands::open_tournament_file,
             commands::save_tournament_file,

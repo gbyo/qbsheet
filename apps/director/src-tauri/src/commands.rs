@@ -6,9 +6,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::{DialogExt, FilePath};
 
+use crate::server::{ServerError, ServerRuntime, ServerStatus};
 use crate::store::{DirectorStore, StoreError, StoreStatus};
 
 #[derive(Debug, Serialize)]
@@ -52,6 +54,13 @@ impl CommandError {
             message: error.to_string(),
         }
     }
+
+    fn server(error: ServerError) -> Self {
+        Self {
+            code: "server",
+            message: error.to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -92,6 +101,7 @@ pub struct DiagnosticsSnapshot {
     pub arch: String,
     pub paths: ApplicationPaths,
     pub store: StoreStatus,
+    pub server: ServerStatus,
 }
 
 #[derive(Debug, Deserialize)]
@@ -140,6 +150,63 @@ pub fn get_application_paths(app: AppHandle) -> Result<ApplicationPaths, Command
 #[tauri::command]
 pub fn get_store_status(store: State<'_, DirectorStore>) -> Result<StoreStatus, CommandError> {
     store.status().map_err(CommandError::store)
+}
+
+#[tauri::command]
+pub fn director_load_state(store: State<'_, DirectorStore>) -> Result<Option<Value>, CommandError> {
+    store.load_state().map_err(CommandError::store)
+}
+
+#[tauri::command]
+pub fn director_save_state(
+    state: Value,
+    store: State<'_, DirectorStore>,
+    server: State<'_, ServerRuntime>,
+) -> Result<StoreStatus, CommandError> {
+    store.save_state(&state).map_err(CommandError::store)?;
+    server.refresh_state(Some(&state));
+    store.status().map_err(CommandError::store)
+}
+
+#[tauri::command]
+pub fn director_checkpoint(
+    state: Value,
+    reason: String,
+    store: State<'_, DirectorStore>,
+    server: State<'_, ServerRuntime>,
+) -> Result<StoreStatus, CommandError> {
+    let reason = reason.trim();
+    if reason.is_empty() {
+        return Err(CommandError::dialog("A checkpoint reason is required."));
+    }
+    let status = store
+        .checkpoint_state(&state, reason)
+        .map_err(CommandError::store)?;
+    server.refresh_state(Some(&state));
+    Ok(status)
+}
+
+#[tauri::command]
+pub fn director_server_status(
+    server: State<'_, ServerRuntime>,
+) -> Result<ServerStatus, CommandError> {
+    Ok(server.status())
+}
+
+#[tauri::command]
+pub async fn director_start_qbtcp_server(
+    store: State<'_, DirectorStore>,
+    server: State<'_, ServerRuntime>,
+) -> Result<ServerStatus, CommandError> {
+    let state = store.load_state().map_err(CommandError::store)?;
+    server.start(state).await.map_err(CommandError::server)
+}
+
+#[tauri::command]
+pub fn director_stop_qbtcp_server(
+    server: State<'_, ServerRuntime>,
+) -> Result<ServerStatus, CommandError> {
+    Ok(server.stop())
 }
 
 #[tauri::command]
@@ -216,16 +283,18 @@ pub async fn save_tournament_file(
 pub fn get_diagnostics_snapshot(
     app: AppHandle,
     store: State<'_, DirectorStore>,
+    server: State<'_, ServerRuntime>,
 ) -> Result<DiagnosticsSnapshot, CommandError> {
-    diagnostics_snapshot(&app, &store)
+    diagnostics_snapshot(&app, &store, &server)
 }
 
 #[tauri::command]
 pub async fn save_diagnostics_bundle(
     app: AppHandle,
     store: State<'_, DirectorStore>,
+    server: State<'_, ServerRuntime>,
 ) -> Result<Option<SavedFile>, CommandError> {
-    let snapshot = diagnostics_snapshot(&app, &store)?;
+    let snapshot = diagnostics_snapshot(&app, &store, &server)?;
     let bytes = serde_json::to_vec_pretty(&snapshot).map_err(CommandError::serialization)?;
     let mut dialog = app
         .dialog()
@@ -251,6 +320,7 @@ pub async fn save_diagnostics_bundle(
 fn diagnostics_snapshot(
     app: &AppHandle,
     store: &DirectorStore,
+    server: &ServerRuntime,
 ) -> Result<DiagnosticsSnapshot, CommandError> {
     Ok(DiagnosticsSnapshot {
         app_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -261,6 +331,7 @@ fn diagnostics_snapshot(
         arch: std::env::consts::ARCH.to_string(),
         paths: app_paths(app)?,
         store: store.status().map_err(CommandError::store)?,
+        server: server.status(),
     })
 }
 

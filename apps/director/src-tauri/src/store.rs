@@ -3,11 +3,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
+use serde_json::Value;
 use thiserror::Error;
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
+const MAX_STATE_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Debug, Error)]
 pub enum StoreError {
@@ -23,6 +25,14 @@ pub enum StoreError {
     MissingParent,
     #[error("Director database lock is poisoned")]
     Poisoned,
+    #[error("Director state must be a JSON object")]
+    InvalidStateShape,
+    #[error("Director state is too large")]
+    StateTooLarge,
+    #[error("Director state could not be serialized: {0}")]
+    SerializeState(#[source] serde_json::Error),
+    #[error("Director state could not be decoded: {0}")]
+    DecodeState(#[source] serde_json::Error),
 }
 
 impl From<rusqlite::Error> for StoreError {
@@ -82,6 +92,82 @@ impl DirectorStore {
         connection.execute_batch("PRAGMA wal_checkpoint(PASSIVE);")?;
         status_for(&connection, &self.database_path)
     }
+
+    /// Load the document-shaped state used by the Director React application.
+    ///
+    /// The normalized operational tables remain the durable schema boundary. The document is kept
+    /// separately so the React model can evolve without exposing SQLite rows or making the native
+    /// shell duplicate TypeScript domain types.
+    pub fn load_state(&self) -> Result<Option<Value>, StoreError> {
+        let connection = self.connection.lock().map_err(|_| StoreError::Poisoned)?;
+        let state_json = connection
+            .query_row(
+                "SELECT state_json FROM director_state WHERE id = 1",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        state_json
+            .map(|value| serde_json::from_str(&value).map_err(StoreError::DecodeState))
+            .transpose()
+    }
+
+    /// Save a complete Director document in one SQLite transaction.
+    pub fn save_state(&self, state: &Value) -> Result<(), StoreError> {
+        let state_json = encode_state(state)?;
+        let connection = self.connection.lock().map_err(|_| StoreError::Poisoned)?;
+        let transaction = connection.unchecked_transaction()?;
+        upsert_state(&transaction, &state_json)?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Save state and record the operation checkpoint atomically before flushing the WAL.
+    pub fn checkpoint_state(&self, state: &Value, reason: &str) -> Result<StoreStatus, StoreError> {
+        let state_json = encode_state(state)?;
+        let connection = self.connection.lock().map_err(|_| StoreError::Poisoned)?;
+        let transaction = connection.unchecked_transaction()?;
+        upsert_state(&transaction, &state_json)?;
+        let checkpoint_id = format!("checkpoint-{}-{}", unix_timestamp_ms(), std::process::id());
+        transaction.execute(
+            "INSERT INTO audit_events (id, entity_type, entity_id, action, payload_json)
+             VALUES (?1, 'application', 'director', 'checkpoint', ?2)",
+            params![
+                checkpoint_id,
+                serde_json::json!({ "reason": reason }).to_string()
+            ],
+        )?;
+        transaction.commit()?;
+        connection.execute_batch("PRAGMA wal_checkpoint(PASSIVE);")?;
+        status_for(&connection, &self.database_path)
+    }
+}
+
+fn encode_state(state: &Value) -> Result<String, StoreError> {
+    if !state.is_object() {
+        return Err(StoreError::InvalidStateShape);
+    }
+    let serialized = serde_json::to_string(state).map_err(StoreError::SerializeState)?;
+    if serialized.len() > MAX_STATE_BYTES {
+        return Err(StoreError::StateTooLarge);
+    }
+    Ok(serialized)
+}
+
+fn upsert_state(
+    transaction: &rusqlite::Transaction<'_>,
+    state_json: &str,
+) -> Result<(), StoreError> {
+    transaction.execute(
+        "INSERT INTO director_state (id, schema_version, state_json, updated_at)
+         VALUES (1, ?1, ?2, CURRENT_TIMESTAMP)
+         ON CONFLICT(id) DO UPDATE SET
+           schema_version = excluded.schema_version,
+           state_json = excluded.state_json,
+           updated_at = CURRENT_TIMESTAMP",
+        params![SCHEMA_VERSION, state_json],
+    )?;
+    Ok(())
 }
 
 fn configure_connection(connection: &Connection) -> Result<(), StoreError> {
@@ -345,7 +431,24 @@ fn migrate(connection: &mut Connection) -> Result<(), StoreError> {
         )?;
         transaction.execute(
             "INSERT INTO schema_migrations (version) VALUES (?1)",
-            params![SCHEMA_VERSION],
+            params![1_i64],
+        )?;
+    }
+
+    if current < 2 {
+        transaction.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS director_state (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                schema_version INTEGER NOT NULL,
+                state_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            ",
+        )?;
+        transaction.execute(
+            "INSERT INTO schema_migrations (version) VALUES (?1)",
+            params![2_i64],
         )?;
     }
 
@@ -385,6 +488,7 @@ fn unix_timestamp_ms() -> u128 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     fn temporary_database_path(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
@@ -407,12 +511,13 @@ mod tests {
         let status = store.status().expect("status reads");
 
         assert_eq!(status.schema_version, SCHEMA_VERSION);
-        assert_eq!(status.migration_count, 1);
+        assert_eq!(status.migration_count, 2);
         assert_eq!(status.journal_mode.to_lowercase(), "wal");
         assert!(status.foreign_keys);
 
         let connection = store.connection.lock().expect("database lock");
         for table in [
+            "director_state",
             "tournaments",
             "teams",
             "players",
@@ -443,7 +548,7 @@ mod tests {
         let store = DirectorStore::open(path.clone()).expect("database opens");
         let second = DirectorStore::open(path.clone()).expect("database reopens");
 
-        assert_eq!(second.status().expect("status reads").migration_count, 1);
+        assert_eq!(second.status().expect("status reads").migration_count, 2);
         store
             .checkpoint("before phase transition")
             .expect("checkpoint writes");
@@ -458,6 +563,52 @@ mod tests {
         assert_eq!(action, "checkpoint");
         drop(connection);
         drop(second);
+        drop(store);
+        cleanup(&path);
+    }
+
+    #[test]
+    fn state_round_trip_is_transactional_and_reopens() {
+        let path = temporary_database_path("state");
+        let store = DirectorStore::open(path.clone()).expect("database opens");
+        let state = json!({
+            "schemaVersion": 1,
+            "tournament": {"id": "tournament-1", "name": "Test event"},
+            "teams": [{"id": "team-1", "displayName": "North"}]
+        });
+
+        store.save_state(&state).expect("state saves");
+        assert_eq!(
+            store.load_state().expect("state loads"),
+            Some(state.clone())
+        );
+        store
+            .checkpoint_state(&state, "before test transition")
+            .expect("checkpoint saves state");
+
+        let reopened = DirectorStore::open(path.clone()).expect("database reopens");
+        assert_eq!(
+            reopened.load_state().expect("reopened state loads"),
+            Some(state)
+        );
+        drop(reopened);
+        drop(store);
+        cleanup(&path);
+    }
+
+    #[test]
+    fn state_rejects_non_objects_and_oversized_documents() {
+        let path = temporary_database_path("state-validation");
+        let store = DirectorStore::open(path.clone()).expect("database opens");
+        assert!(matches!(
+            store.save_state(&Value::Null),
+            Err(StoreError::InvalidStateShape)
+        ));
+        let too_large = json!({ "payload": "x".repeat(MAX_STATE_BYTES) });
+        assert!(matches!(
+            store.save_state(&too_large),
+            Err(StoreError::StateTooLarge)
+        ));
         drop(store);
         cleanup(&path);
     }

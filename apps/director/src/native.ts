@@ -18,6 +18,17 @@ export interface StoreStatus {
   migrationCount: number;
 }
 
+export interface NativeServerStatus {
+  running: boolean;
+  address?: string;
+  port?: number;
+  protocol?: string;
+  pairedRooms?: number;
+  pairingCode?: string;
+  pairingUrl?: string;
+  message?: string;
+}
+
 export interface DiagnosticsSnapshot {
   appVersion: string;
   protocol: string;
@@ -27,6 +38,7 @@ export interface DiagnosticsSnapshot {
   arch: string;
   paths: ApplicationPaths;
   store: StoreStatus;
+  server: NativeServerStatus;
 }
 
 export interface SelectedFile {
@@ -59,6 +71,39 @@ export async function getApplicationPaths(): Promise<ApplicationPaths> {
 export async function getStoreStatus(): Promise<StoreStatus> {
   requireTauri();
   return invoke<StoreStatus>('get_store_status');
+}
+
+export async function loadDirectorState<T = unknown>(): Promise<T | null> {
+  requireTauri();
+  return invoke<T | null>('director_load_state');
+}
+
+export async function saveDirectorState(state: unknown): Promise<StoreStatus> {
+  requireTauri();
+  return invoke<StoreStatus>('director_save_state', { state });
+}
+
+export async function checkpointDirectorState(
+  state: unknown,
+  reason: string,
+): Promise<StoreStatus> {
+  requireTauri();
+  return invoke<StoreStatus>('director_checkpoint', { state, reason });
+}
+
+export async function getServerStatus(): Promise<NativeServerStatus> {
+  requireTauri();
+  return invoke<NativeServerStatus>('director_server_status');
+}
+
+export async function startQbtcpServer(): Promise<NativeServerStatus> {
+  requireTauri();
+  return invoke<NativeServerStatus>('director_start_qbtcp_server');
+}
+
+export async function stopQbtcpServer(): Promise<NativeServerStatus> {
+  requireTauri();
+  return invoke<NativeServerStatus>('director_stop_qbtcp_server');
 }
 
 export async function openTournamentFile(): Promise<SelectedFile | null> {

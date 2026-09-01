@@ -37,6 +37,17 @@ single-instance behavior, window-state persistence, and signed updates. The Reac
 `src/native.ts` is deliberately small so tournament repositories can be introduced without
 leaking SQLite rows into the UI.
 
+The Director React repository uses these native commands when running in Tauri:
+
+- `director_load_state`, `director_save_state`, and `director_checkpoint` for the persisted
+  document-shaped tournament state.
+- `director_server_status`, `director_start_qbtcp_server`, and `director_stop_qbtcp_server` for
+  the native QBTCP v1 LAN listener.
+
+The server binds port `8787`, advertises the configured scoresheet origins, and projects saved room
+metadata into the shared `qbtcp-server` protocol implementation. Add a room in Director before
+starting it to receive a one-time pairing code and launch link.
+
 The updater endpoint and public signing key are release configuration. The checked-in configuration
 keeps the updater plugin wired while `createUpdaterArtifacts` remains disabled until a release key
 is supplied by the distribution pipeline.
