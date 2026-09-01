@@ -1,0 +1,152 @@
+name: 🚨 Lost work / recovery problem
+description: Scoring disappeared, recovery failed, or a game did not survive a reload.
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Losing scored work is treated separately from an ordinary bug because the details around storage,
+        reloads, and recovery matter.
+
+        **Do not paste room access tokens, session tokens, pairing codes, or private tournament data into this issue.**
+        If you still have a QBJ or recovery record containing private roster data, say so below rather than posting it publicly.
+
+        If this is a security vulnerability, close this form and follow
+        [SECURITY.md](https://github.com/gbyo/qbsheet/blob/main/SECURITY.md) instead.
+
+  - type: checkboxes
+    id: prerequisites
+    attributes:
+      label: Before you file
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: I have removed tokens, pairing codes, and private tournament data from anything I am posting publicly.
+          required: true
+
+  - type: dropdown
+    id: impact
+    attributes:
+      label: What was lost?
+      options:
+        - Visible scoring data disappeared
+        - The game reopened, but some scored events were missing
+        - Recovery was offered but failed to restore the game
+        - Recovery was not offered when I expected it
+        - The game survived, but the recovery/status indicators were wrong
+        - Something else / not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: trigger
+    attributes:
+      label: What happened immediately before the problem?
+      options:
+        - Accidental reload or navigation
+        - Tab or browser was closed
+        - Browser or device crashed
+        - Device lost power or restarted
+        - QBSheet updated or its service worker refreshed
+        - Browser/site storage was cleared
+        - Nothing obvious — it happened while scoring
+        - Something else / not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: mode
+    attributes:
+      label: How was the game being scored?
+      options:
+        - File-only — opened a QBJ, no server
+        - Connected — paired to tournament control
+        - Practice mode
+        - Not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: recovery
+    attributes:
+      label: What happened when QBSheet reopened?
+      options:
+        - The game resumed automatically and was complete
+        - A recovery option appeared and restored everything
+        - A recovery option appeared but restored only part of the game
+        - A recovery option appeared but failed
+        - No recovery option appeared
+        - I did not reopen QBSheet
+        - Not applicable / not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: timeline
+    attributes:
+      label: What happened
+      description: Describe the last actions you remember, what disappeared, and what you saw after reopening or attempting recovery.
+      placeholder: |
+        We had just finished tossup 12 and entered the bonus. The tab reloaded. When QBSheet reopened...
+    validations:
+      required: true
+
+  - type: input
+    id: game-point
+    attributes:
+      label: Approximate point in the game
+      description: The last tossup, bonus, break, timeout, or other event you know was saved correctly.
+      placeholder: After tossup 12 bonus / during halftime score check / not sure
+
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and device
+      placeholder: Chromebook, Chrome 132 / iPad, Safari 18 / Windows 11, Edge 131
+    validations:
+      required: true
+
+  - type: dropdown
+    id: installed
+    attributes:
+      label: How was QBSheet opened?
+      options:
+        - Normal browser tab
+        - Installed PWA / app window
+        - I am not sure
+    validations:
+      required: true
+
+  - type: input
+    id: deployment
+    attributes:
+      label: Where QBSheet was running from
+      description: The deployed URL, "local npm start", or the commit you built from. No credentials.
+      placeholder: https://qbsheet.com/ or local npm start at commit 112db21
+    validations:
+      required: true
+
+  - type: textarea
+    id: surviving-artifacts
+    attributes:
+      label: What evidence still exists?
+      description: >
+        Say whether Download current QBJ still worked, whether you have the original assignment QBJ,
+        a recovered QBJ, screenshots, console output, or another copy. Attach only material that is safe to be public.
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Console output
+      description: Anything in browser developer tools around the failure, if available. Remove credentials or private data first.
+      render: text
+
+  - type: checkboxes
+    id: live
+    attributes:
+      label: Context
+      options:
+        - label: This happened during a live tournament.
+          required: false
+        - label: There is no known usable copy of the missing scored data.
+          required: false

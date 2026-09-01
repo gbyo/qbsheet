@@ -1,0 +1,133 @@
+name: 🔌 Compatibility problem
+description: QBSheet and another QBJ/QBTCP application disagree.
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this when QBSheet works by itself but exchanging data or connecting to another application does not.
+        This form is for interoperability bugs; if you are proposing a normative change to QBTCP or the QBJ profile,
+        use **Protocol or format change** instead.
+
+        **Do not post room tokens, session tokens, pairing codes, credentials, or private tournament data.**
+        Sanitize QBJ documents and protocol messages before attaching them publicly.
+
+  - type: checkboxes
+    id: prerequisites
+    attributes:
+      label: Before you file
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: I removed credentials, pairing information, and private tournament data from anything I am posting publicly.
+          required: true
+
+  - type: dropdown
+    id: other-system
+    attributes:
+      label: What is QBSheet interacting with?
+      options:
+        - Fruity
+        - yellowfruit-link
+        - Another QBTCP implementation
+        - Another QBJ producer
+        - Another QBJ consumer
+        - Static hosting, browser, or PWA integration
+        - Something else / not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: direction
+    attributes:
+      label: Where does the disagreement happen?
+      options:
+        - QBSheet opening data produced elsewhere
+        - Another application opening data produced by QBSheet
+        - Live QBTCP pairing or room connection
+        - Live QBTCP updates after pairing
+        - Round-trip — data changes after passing through both applications
+        - Something else / not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe what each application did and where their behavior stopped matching.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What should have happened instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: independent-check
+    attributes:
+      label: What works independently?
+      description: >
+        If known, say whether the same QBJ opens in QBSheet by itself, whether the other application accepts its own output,
+        or whether either side works with a different implementation. This helps locate the interoperability boundary.
+
+  - type: input
+    id: qbsheet-version
+    attributes:
+      label: QBSheet version or commit
+      placeholder: qbsheet.com build, release, or commit SHA
+    validations:
+      required: true
+
+  - type: input
+    id: other-version
+    attributes:
+      label: Other application and version
+      placeholder: Fruity 0.x / yellowfruit-link commit abc1234 / custom implementation
+    validations:
+      required: true
+
+  - type: textarea
+    id: minimal-data
+    attributes:
+      label: Minimal sanitized data or messages
+      description: >
+        If possible, attach or paste the smallest QBJ fragment, request/response, or message sequence that reproduces the problem.
+        Remove tokens, credentials, device identifiers, server addresses that should remain private, and private roster data.
+      render: text
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: spec-change
+    attributes:
+      label: Do you think the specification itself needs to change?
+      description: It is fine to choose "Not sure". A compatibility bug can exist even when both specs are already sufficient.
+      options:
+        - No — this looks like an implementation mismatch
+        - Yes — the current spec cannot express or resolve this
+        - Not sure
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: live
+    attributes:
+      label: Context
+      options:
+        - label: This blocked or disrupted a live tournament.
+          required: false
+        - label: I can provide a sanitized fixture or test case for regression coverage.
+          required: false
