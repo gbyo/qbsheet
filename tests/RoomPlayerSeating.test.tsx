@@ -17,6 +17,7 @@ import { IScorekeeperFormat } from '../src/scoring/ScorekeeperFormat';
 import scoringRulesToScorekeeperFormat from './rules';
 import { CommonRuleSets, ScoringRules } from './rules';
 import ScorerHost from '../src/scorer/ScorerHost';
+import { rememberScoringLayoutChoice } from '../src/scorer/scoringLayoutPrompt';
 import { RoomConnectionState } from '../src/app/ConnectionState';
 import { loadGame } from '../src/scorer/GameSession';
 import { ScoreEvent } from '../src/scoring/ScoreEvents';
@@ -60,6 +61,7 @@ function renderScorer(
 ) {
   gameCounter += 1;
   gameKey = `seating-game-${gameCounter}`;
+  rememberScoringLayoutChoice(gameKey);
   render(
     <ScorerHost
       gameKey={gameKey}

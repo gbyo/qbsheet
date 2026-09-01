@@ -163,6 +163,25 @@ export function moveWithin(visibleNames: readonly string[], name: string, direct
 }
 
 /**
+ * Carry one player from the seat they are in to the seat they belong in.
+ *
+ * The move a drag expresses, and the move an arrow expresses when the distance happens to be one:
+ * everybody between the two closes up behind them, and nobody else changes place. Expressed against
+ * the visible list, like `moveWithin`, because both ends of the gesture are positions on screen.
+ *
+ * An index that addresses nobody — a lineup that changed under a gesture already in flight — leaves
+ * the order exactly as it found it rather than guessing what was meant.
+ */
+export function reorderSeats(visibleNames: readonly string[], from: number, to: number): string[] {
+  const order = visibleNames.slice();
+  if (from === to) return order;
+  if (from < 0 || from >= order.length || to < 0 || to >= order.length) return order;
+  const [moved] = order.splice(from, 1);
+  order.splice(to, 0, moved);
+  return order;
+}
+
+/**
  * Merge a reordering of some players back into the full preference for that side.
  *
  * Only the names in `reordered` are repositioned; everybody else keeps their place relative to the

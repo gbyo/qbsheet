@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { chooseScoringLayout } from './support/scoringLayout';
 
 test.use({ viewport: { width: 1366, height: 768 } });
 
@@ -6,6 +7,7 @@ async function startPracticeGame(page: import('@playwright/test').Page): Promise
   await page.goto('/');
   await page.getByRole('button', { name: 'Practice scoring' }).click();
 
+  await chooseScoringLayout(page);
   await expect(page.getByRole('heading', { name: 'Who is starting?' })).toBeVisible();
   const prompt = page.getByLabel('Starting lineups');
   const left = prompt.getByLabel('Ninety Six starters');

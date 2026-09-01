@@ -11,6 +11,7 @@
  * every unit test and a broken one in the gym.
  */
 import { expect, test, type Page } from '@playwright/test';
+import { chooseScoringLayout } from './support/scoringLayout';
 
 test.use({ viewport: { width: 1366, height: 768 } });
 
@@ -35,6 +36,7 @@ async function fillSetupForm(page: Page, label: string): Promise<void> {
 }
 
 async function chooseStarters(page: Page): Promise<void> {
+  await chooseScoringLayout(page);
   await expect(page.getByRole('heading', { name: 'Who is starting?' })).toBeVisible();
   const prompt = page.getByLabel('Starting lineups');
   const left = prompt.getByLabel('Ninety Six starters');

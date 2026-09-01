@@ -12,6 +12,7 @@
  * in every unit test and a lost game in the gym.
  */
 import { expect, test, type Page } from '@playwright/test';
+import { chooseScoringLayout } from './support/scoringLayout';
 
 test.use({ viewport: { width: 1366, height: 768 } });
 
@@ -34,6 +35,7 @@ async function createGame(page: Page): Promise<void> {
   await page.getByLabel('Timeouts per team').fill('1');
 
   await page.getByRole('button', { name: 'Start game' }).click();
+  await chooseScoringLayout(page);
 }
 
 /** Open a control wherever it lives — the footer, or the Game menu. */

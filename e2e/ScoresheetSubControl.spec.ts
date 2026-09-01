@@ -11,6 +11,7 @@
  */
 import { expect, test } from '@playwright/test';
 import { validPackage } from '../tests/packages';
+import { chooseScoringLayout } from './support/scoringLayout';
 
 test('the substitution control sits against the name, unbordered, with the rulings still flush right', async ({
   page,
@@ -23,6 +24,7 @@ test('the substitution control sits against the name, unbordered, with the rulin
     mimeType: 'application/json',
     buffer: Buffer.from(JSON.stringify(packageValue)),
   });
+  await chooseScoringLayout(page);
   await expect(page.getByRole('heading', { name: 'Who is starting?' })).toBeVisible();
   const prompt = page.getByLabel('Starting lineups');
   const left = prompt.getByLabel('Ninety Six A starters');

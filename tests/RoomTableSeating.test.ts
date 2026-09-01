@@ -12,7 +12,8 @@
  * scoresheet on screen. `RoomTableView` covers what the view does with them.
  */
 import { describe, expect, test } from 'vitest';
-import { orderBySeating, renameSeatPlayer, reseatLineup } from '../src/scorer/PlayerSeating';
+import { orderBySeating, renameSeatPlayer, reorderSeats, reseatLineup } from '../src/scorer/PlayerSeating';
+import { previewSeatNumber, seatDropIndex, seatShift } from '../src/scorer/SeatDrag';
 
 describe('correcting a name', () => {
   test('the corrected player keeps the exact seat they were in', () => {
@@ -139,5 +140,86 @@ describe('a lineup change nobody described seat by seat', () => {
     expect(orderBySeating(['Olivia', 'Noah', 'Emma', 'Chris'], result.seats, (name) => name)).toEqual(
       result.seats,
     );
+  });
+});
+
+/**
+ * Carrying one player to a different chair.
+ *
+ * The arithmetic behind both ways of doing it — a drag across three seats and an arrow press across
+ * one are the same operation with a different distance — kept here rather than inside the component
+ * because jsdom has no geometry and a browser cannot answer a question about an off-by-one.
+ */
+describe('moving a player along the table', () => {
+  const table = ['Gibson', 'Maycie', 'Jeremy', 'Adam'];
+
+  test('everybody between the two chairs closes up behind them', () => {
+    expect(reorderSeats(table, 2, 0)).toEqual(['Jeremy', 'Gibson', 'Maycie', 'Adam']);
+    expect(reorderSeats(table, 0, 3)).toEqual(['Maycie', 'Jeremy', 'Adam', 'Gibson']);
+  });
+
+  test('a move of one is the same operation as a move of three', () => {
+    expect(reorderSeats(table, 1, 2)).toEqual(['Gibson', 'Jeremy', 'Maycie', 'Adam']);
+  });
+
+  test('dropping somebody where they already are changes nothing', () => {
+    expect(reorderSeats(table, 2, 2)).toEqual(table);
+  });
+
+  test('an index that addresses nobody leaves the table exactly as it was', () => {
+    // A lineup change under a gesture already in flight. Guessing what was meant would move the
+    // wrong person.
+    expect(reorderSeats(table, 9, 0)).toEqual(table);
+    expect(reorderSeats(table, 0, 9)).toEqual(table);
+  });
+
+  test('it returns a new list rather than rewriting the one it was given', () => {
+    const before = table.slice();
+    reorderSeats(table, 0, 3);
+    expect(table).toEqual(before);
+  });
+});
+
+describe('where a carried tile has got to', () => {
+  test('half a seat of travel is the next seat', () => {
+    expect(seatDropIndex(1, 0, 100, 4)).toBe(1);
+    expect(seatDropIndex(1, 49, 100, 4)).toBe(1);
+    expect(seatDropIndex(1, 51, 100, 4)).toBe(2);
+    expect(seatDropIndex(1, -51, 100, 4)).toBe(0);
+  });
+
+  test('it stops at the ends of the table', () => {
+    expect(seatDropIndex(3, 500, 100, 4)).toBe(3);
+    expect(seatDropIndex(0, -500, 100, 4)).toBe(0);
+  });
+
+  test('a table nobody can be moved along answers with where they are', () => {
+    expect(seatDropIndex(0, 400, 100, 1)).toBe(0);
+    expect(seatDropIndex(2, 400, 0, 4)).toBe(2);
+  });
+});
+
+describe('who steps aside for them', () => {
+  test('moving right pulls everybody up to the destination one seat left', () => {
+    expect([0, 1, 2, 3].map((seat) => seatShift(seat, 0, 2))).toEqual([0, -1, -1, 0]);
+  });
+
+  test('moving left pushes everybody from the destination one seat right', () => {
+    expect([0, 1, 2, 3].map((seat) => seatShift(seat, 3, 1))).toEqual([0, 1, 1, 0]);
+  });
+
+  test('a drag that has not left its own seat moves nobody', () => {
+    expect([0, 1, 2, 3].map((seat) => seatShift(seat, 2, 2))).toEqual([0, 0, 0, 0]);
+  });
+});
+
+describe('the numbers during a drag', () => {
+  test('they say where each player would be, not where they are', () => {
+    const drag = { from: 3, to: 1, deltaX: -220, pitch: 110 };
+    expect([0, 1, 2, 3].map((seat) => previewSeatNumber(seat, drag))).toEqual([1, 3, 4, 2]);
+  });
+
+  test('with nothing in flight they are simply the seats', () => {
+    expect([0, 1, 2].map((seat) => previewSeatNumber(seat, null))).toEqual([1, 2, 3]);
   });
 });
