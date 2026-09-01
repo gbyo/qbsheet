@@ -120,8 +120,11 @@ import { rulingLabel, unreachableAnswerTypes } from './tossupRulings';
 import { setKeyboardEnabled } from './keyboardPreference';
 import useKeyboardEnabled from './useKeyboardEnabled';
 import TableView from './TableView';
-import { setScoringView } from './scoringViewPreference';
+import { ScoringView, setScoringView } from './scoringViewPreference';
 import useScoringView from './useScoringView';
+import ScoringLayoutSwitcher from './ScoringLayoutSwitcher';
+import ScoringLayoutDialog from './ScoringLayoutDialog';
+import { rememberScoringLayoutChoice, scoringLayoutChosen } from './scoringLayoutPrompt';
 import {
   ConnectionDetailDialog,
   IScorerAlert,
@@ -287,6 +290,7 @@ type OpenDialog =
   | 'connection'
   | 'scoring-rules'
   | 'export'
+  | 'scoring-layout'
   | 'procedure'
   | null;
 
@@ -627,13 +631,28 @@ export default function Scorer(props: IScorerProps) {
    */
   const keyboardEnabled = useKeyboardEnabled();
   /**
-   * Which surface this scorekeeper scores from.
+   * Which layout this scorekeeper is scoring in.
    *
    * Presentation only, and beside the keyboard preference deliberately: both belong to the device,
-   * neither reaches the game. Table View is handed the display-mapped state below and the same
+   * neither reaches the game. The table is handed the display-mapped state below and the same
    * callbacks `TeamPanel` gets, so nothing about what is recorded depends on this value.
    */
-  const scoringViewChoice = useScoringView();
+  const scoringLayout = useScoringView();
+  /**
+   * Whether this game still has to be asked which layout to score it in.
+   *
+   * Decided once, from the journal as it was when the scoresheet opened. An empty journal is a game
+   * nobody has scored yet, which is the only moment a modal costs nothing; anything recovered,
+   * reloaded or already in progress is left alone. See `scoringLayoutPrompt` for why the answer is
+   * remembered per game rather than only per device.
+   */
+  const [layoutPromptOpen, setLayoutPromptOpen] = useState(
+    () => events.events.length === 0 && !scoringLayoutChosen(gameKey),
+  );
+  /** True while the room is putting the tables in the order it is actually sitting in. */
+  const [arrangingTable, setArrangingTable] = useState(false);
+  // Arranging is something only the table can do, so leaving the table ends it.
+  if (arrangingTable && scoringLayout !== 'table') setArrangingTable(false);
   /**
    * Which set of choices the bonus is currently asking for, reported up by `BonusPrompt`.
    *
@@ -1540,6 +1559,33 @@ export default function Scorer(props: IScorerProps) {
    */
   const [tableHintDismissed, setTableHintDismissed] = useState(false);
 
+  /**
+   * Whether anything modal currently owns the screen.
+   *
+   * The layout question is not one of the scorer's ordinary dialogs — it opens on its own, from the
+   * state of the game rather than from a menu — but it is a dialog, and everything that has to stand
+   * back for one has to stand back for it: the keyboard layer, the ruling picker, the legend.
+   */
+  const layoutChooserOpen = layoutPromptOpen || dialog === 'scoring-layout';
+  const anyDialogOpen = dialog !== null || layoutPromptOpen;
+
+  /**
+   * The layout question, answered.
+   *
+   * One press does all of it: the layout changes, the device remembers it for the next game, and
+   * this game is marked as asked so a reload does not ask again. Dismissing without choosing is the
+   * same answer with the preselected layout, which is why it records the same acknowledgement.
+   */
+  const answerLayoutPrompt = useCallback(
+    (layout?: ScoringView) => {
+      if (layout) setScoringView(layout);
+      rememberScoringLayoutChoice(gameKey);
+      setLayoutPromptOpen(false);
+      setDialog((current) => (current === 'scoring-layout' ? null : current));
+    },
+    [gameKey],
+  );
+
   /** The seat a keystroke just scored into, flashed briefly and then forgotten. */
   const [keyEcho, setKeyEcho] = useState<{ side: LeftOrRight; seat: number } | null>(null);
   useEffect(() => {
@@ -1573,7 +1619,7 @@ export default function Scorer(props: IScorerProps) {
     negsAvailable: displayedNegsAvailable,
     eligible: displayedEligible,
     seatedPlayers,
-    dialogOpen: dialog !== null,
+    dialogOpen: anyDialogOpen,
     noBuzzAllowed: phase.kind === 'tossup' && !playBlockedByProtest,
     seatLayoutKey: displaySideMapping.left,
     // The same callbacks the buttons are given. A keystroke cannot reach a code path a tap cannot.
@@ -1611,7 +1657,7 @@ export default function Scorer(props: IScorerProps) {
    * has the keyboard: a dialog takes everything, then the bonus, then the tossup.
    */
   const keyboardContext = useMemo<KeyboardMapContext>(() => {
-    if (dialog !== null) return { kind: 'inactive', reason: 'Finish what is open first.' };
+    if (anyDialogOpen) return { kind: 'inactive', reason: 'Finish what is open first.' };
     if (bonusStage !== null) {
       return {
         kind: 'choices',
@@ -1631,7 +1677,7 @@ export default function Scorer(props: IScorerProps) {
       actions: sequenceLegend(format, anyNegAvailable),
       unreachable: unreachableAnswerTypes(format).map(rulingLabel),
     };
-  }, [dialog, bonusStage, phase.kind, playBlockedByProtest, format, anyNegAvailable]);
+  }, [anyDialogOpen, bonusStage, phase.kind, playBlockedByProtest, format, anyNegAvailable]);
 
   const lineupChangeAllowed = lineupChangeAllowedAtPhase(substitutionPolicy(procedure), phase.kind);
   /**
@@ -2008,7 +2054,6 @@ export default function Scorer(props: IScorerProps) {
     currentQuestion,
     lastPlayed: lastPlayedQuestion(game),
     keyboardEnabled,
-    scoringView: scoringViewChoice,
     submitting,
     canRedo: events.canRedo,
     onRedo: redoWithFeedback,
@@ -2018,7 +2063,6 @@ export default function Scorer(props: IScorerProps) {
       setDialog(next);
     },
     setKeyboardEnabled,
-    setScoringView,
     record,
     newEventId,
     openReview: () => openReviewAt(undefined),
@@ -2480,16 +2524,44 @@ export default function Scorer(props: IScorerProps) {
         <div className="scorer-body">
           <main className="scorer-main">
             {/*
+              The switch, and — in the table layout — the one editing action the table has.
+
+              Outside the choice below on purpose: a control that moved when it was used would make
+              switching back a hunt. Two visible options rather than a toggle naming the current one,
+              for the reason `ScoringLayoutSwitcher` gives. Not in the footer either: that row is
+              Undo, Redo, Players and Flag, all of which do something to the game, and this does
+              something to the screen.
+            */}
+            <div className="scorer-layout-bar">
+              <span className="scorer-layout-bar-label" aria-hidden="true">
+                Scoring layout
+              </span>
+              <ScoringLayoutSwitcher value={scoringLayout} onChange={(layout) => setScoringView(layout)} />
+              {scoringLayout === 'table' && !submitting && (
+                <button
+                  type="button"
+                  className="scorer-text-action scorer-layout-bar-action"
+                  onClick={() => {
+                    setArrangingTable((current) => !current);
+                    setTableHintDismissed(true);
+                    setTableOrderCheck(null);
+                  }}
+                >
+                  {arrangingTable ? 'Done arranging' : 'Arrange table'}
+                </button>
+              )}
+            </div>
+
+            {/*
               One surface or the other, never both.
 
-              The table view is not a second scorer: it is handed the same display-mapped teams, the
-              same seat order, the same eligibility questions and the same two record callbacks the
-              panels below are given. Switching between them changes what is drawn and nothing else,
-              which is why the choice is a device preference rather than anything the game knows
-              about. Keyed, so the outgoing tree is unmounted rather than left running behind the one
-              on screen.
+              The table is not a second scorer: it is handed the same display-mapped teams, the same
+              seat order, the same eligibility questions and the same two record callbacks the panels
+              below are given. Switching between them changes what is drawn and nothing else, which is
+              why the choice is a device preference rather than anything the game knows about. Keyed,
+              so the outgoing tree is unmounted rather than left running behind the one on screen.
             */}
-            {scoringViewChoice === 'table' ? (
+            {scoringLayout === 'table' ? (
               <TableView
                 key="table"
                 format={format}
@@ -2502,7 +2574,7 @@ export default function Scorer(props: IScorerProps) {
                 onBuzz={recordDisplayedBuzz}
                 onWrongNoPenalty={recordDisplayedWrongNoPenalty}
                 sideLayoutKey={displaySideMapping.left}
-                dialogOpen={dialog !== null}
+                dialogOpen={anyDialogOpen}
                 timeouts={
                   (procedure?.timeoutsPerTeam ?? 0) > 0
                     ? mapSides(game.timeouts, displaySideMapping)
@@ -2511,21 +2583,27 @@ export default function Scorer(props: IScorerProps) {
                 timeoutsPerTeam={
                   (procedure?.timeoutsPerTeam ?? 0) > 0 ? procedure?.timeoutsPerTeam : undefined
                 }
+                arranging={arrangingTable}
+                onArrangingChange={setArrangingTable}
                 arrangementUnconfirmed={arrangementUnconfirmed && !tableHintDismissed}
                 onDismissArrangementHint={() => setTableHintDismissed(true)}
                 lineupOrderCheck={tableOrderCheck}
                 onDismissOrderCheck={() => setTableOrderCheck(null)}
-                onMoveSeat={
+                onArrangeSeats={
                   submitting
                     ? undefined
-                    : (displaySide, visibleNames, playerName, direction) => {
+                    : (displaySide, visibleNames) => {
+                        // The side a scorekeeper touched, mapped back to the team the game stores,
+                        // exactly as every scoring callback here does. `seating.arrange` is the one
+                        // physical seat order — the same one the scoresheet rows and the keyboard's
+                        // seat mapping read — so a drag on the table moves all three or none.
                         const side = canonicalForDisplay(displaySide);
-                        seating.move(
-                          side,
-                          game[side].players.map((player) => player.name),
-                          visibleNames,
-                          playerName,
-                          direction,
+                        seating.arrange(
+                          {
+                            left: game.left.players.map((player) => player.name),
+                            right: game.right.players.map((player) => player.name),
+                          },
+                          { [side]: [...visibleNames] },
                         );
                       }
                 }
@@ -3246,6 +3324,19 @@ export default function Scorer(props: IScorerProps) {
           displaySides={displaySideMapping}
           onSwapSides={displaySideState.swap}
           onClose={() => setDialog(null)}
+        />
+      )}
+      {/*
+        Which layout, asked once a game.
+
+        The same dialog from both routes: automatically for a game nobody has scored yet, and from
+        the Game menu whenever somebody wants to read what the two are. See `scoringLayoutPrompt`.
+      */}
+      {layoutChooserOpen && (
+        <ScoringLayoutDialog
+          value={scoringLayout}
+          onChoose={answerLayoutPrompt}
+          onClose={() => answerLayoutPrompt()}
         />
       )}
       {dialog === 'export' && (

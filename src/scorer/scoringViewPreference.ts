@@ -1,38 +1,63 @@
 /**
- * Which of the two scoring surfaces this device draws: the scoresheet, or the table.
+ * Which of the two scoring layouts this device draws last: the scoresheet, or the table.
+ *
+ * # "Scoring layout" is the name; `view` is the spelling history left behind
+ *
+ * The scorekeeper is offered a *scoring layout*, and every label, description and menu entry says so.
+ * The type, the functions and the storage key still say `view`, and deliberately: renaming the key
+ * would migrate every device that has already chosen for no gain, and renaming the symbols would be
+ * churn across six files to say the same thing. The copy lives in `scoringLayoutLabels` and
+ * `scoringLayoutDescriptions` below, which is what anybody looking for the wording will find.
  *
  * # Presentation, and nothing else
  *
- * Both views record the same events through the same callbacks — see `TableView`, which is handed
+ * Both layouts record the same events through the same callbacks — see `TableView`, which is handed
  * the display-mapped state the scoresheet already derived and calls the wrappers `TeamPanel` calls.
  * Choosing between them changes what a scorekeeper looks at and changes nothing about what is
  * written, which is why this is a preference rather than a setting: it belongs to whoever is at this
  * Chromebook, it is not a property of the tournament, and it must never reach the event history, a
  * QBJ, or tournament control.
  *
- * # Scoresheet unless somebody said otherwise
+ * # This is the *last used* layout, not the layout in force
  *
- * The default is the view every existing scorekeeper already knows. A room that has been scoring
- * from ruled rows all season should not find a floor plan in front of it because a version shipped.
+ * A new game asks which layout to score it in and preselects what is stored here; see
+ * `scoringLayoutPrompt` for why it asks rather than silently inheriting. So this value is a default
+ * offered to the next scorekeeper, and the scoresheet default is what somebody who has never chosen
+ * is offered first — a room that has scored from ruled rows all season should not find a floor plan
+ * in front of it because a version shipped.
  *
  * Kept beside `keyboardPreference`, whose shape this follows deliberately, and not aged out for the
- * same reason: somebody who chose the table view in the morning has not changed their mind by the
- * afternoon.
+ * same reason: somebody who chose the table in the morning has not changed their mind by lunchtime.
  */
 
 export const scoringViewVersion = 1;
 
 export const scoringViewStorageKey = `qbsheet.scorer.view.v${scoringViewVersion}`;
 
-/** `scoresheet` is the ruled rows; `table` is the spatial view of the room. */
+/** `scoresheet` is the ruled rows; `table` is the room's own seating. */
 export type ScoringView = 'scoresheet' | 'table';
 
 export const defaultScoringView: ScoringView = 'scoresheet';
 
-/** What the Game menu calls each of them. Stated once so the menu and any hint agree. */
-export const scoringViewLabels: Record<ScoringView, string> = {
+/** The order the two are offered in, everywhere they are offered. */
+export const scoringLayouts: readonly ScoringView[] = ['scoresheet', 'table'];
+
+/** What each layout is called. Stated once, so the chooser, the switcher and the menu agree. */
+export const scoringLayoutLabels: Record<ScoringView, string> = {
   scoresheet: 'Scoresheet',
   table: 'Table',
+};
+
+/** The half-line under the name, for the surfaces that have room for one. */
+export const scoringLayoutTaglines: Record<ScoringView, string> = {
+  scoresheet: 'Traditional layout',
+  table: 'Matches the room',
+};
+
+/** What choosing it actually gets you. Written for somebody who has never seen either. */
+export const scoringLayoutDescriptions: Record<ScoringView, string> = {
+  scoresheet: 'Players are listed in rows with scoring controls beside each name.',
+  table: 'Players appear in seating order. Tap a player, then choose the ruling.',
 };
 
 interface IPreferenceStorage {

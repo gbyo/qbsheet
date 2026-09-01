@@ -23,6 +23,7 @@ import { IScorekeeperFormat } from '../src/scoring/ScorekeeperFormat';
 import scoringRulesToScorekeeperFormat from './rules';
 import { CommonRuleSets, ScoringRules } from './rules';
 import ScorerHost from '../src/scorer/ScorerHost';
+import { rememberScoringLayoutChoice } from '../src/scorer/scoringLayoutPrompt';
 import { RoomConnectionState } from '../src/app/ConnectionState';
 import { loadGame } from '../src/scorer/GameSession';
 import { ScoreEvent } from '../src/scoring/ScoreEvents';
@@ -45,6 +46,7 @@ function formatFor(maximumActive: number): IScorekeeperFormat {
 function renderScorer(maximumActive = 2) {
   gameCounter += 1;
   gameKey = `historical-lineup-${gameCounter}`;
+  rememberScoringLayoutChoice(gameKey);
   render(
     <ScorerHost
       gameKey={gameKey}

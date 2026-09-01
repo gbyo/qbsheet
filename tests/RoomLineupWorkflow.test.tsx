@@ -20,6 +20,7 @@ import { IScorekeeperFormat } from '../src/scoring/ScorekeeperFormat';
 import scoringRulesToScorekeeperFormat from './rules';
 import { CommonRuleSets, ScoringRules } from './rules';
 import ScorerHost from '../src/scorer/ScorerHost';
+import { rememberScoringLayoutChoice } from '../src/scorer/scoringLayoutPrompt';
 import { RoomConnectionState } from '../src/app/ConnectionState';
 import { IRoomProcedure, roomProcedureVersion } from '../src/scoring/RoomProcedure';
 import { substitutionSentence } from '../src/scorer/StartingLineupPrompt';
@@ -54,6 +55,7 @@ function renderScorer(
 ) {
   gameCounter += 1;
   gameKey = `lineup-game-${gameCounter}`;
+  rememberScoringLayoutChoice(gameKey);
   render(
     <ScorerHost
       gameKey={gameKey}

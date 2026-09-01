@@ -38,11 +38,19 @@ import {
   roomTakesBreaks,
 } from '../scoring/RoomProcedure';
 import { ScoreEvent } from '../scoring/ScoreEvents';
-import { ScoringView, scoringViewLabels } from './scoringViewPreference';
 
 /** Which dialog an entry opens. The scorer's own `OpenDialog`, named here so this file is honest. */
 export type MenuDialog =
-  'notes' | 'details' | 'lightning' | 'timeout' | 'adjust' | 'recovery' | 'end-early' | 'forfeit' | 'export';
+  | 'notes'
+  | 'details'
+  | 'lightning'
+  | 'timeout'
+  | 'adjust'
+  | 'recovery'
+  | 'end-early'
+  | 'forfeit'
+  | 'export'
+  | 'scoring-layout';
 
 export interface IScorerMenuInput {
   game: IDerivedGame;
@@ -60,7 +68,6 @@ export interface IScorerMenuInput {
    * A device preference and a presentation one — both views record through the same callbacks — so it
    * sits beside keyboard scoring rather than anywhere the game is described. See `TableView`.
    */
-  scoringView: ScoringView;
   /** True while a submission is in flight, when nothing about the game may change. */
   submitting: boolean;
   /** Present only when the host can deliver a mid-game or legacy QBJ. */
@@ -78,7 +85,6 @@ export interface IScorerMenuInput {
 
   openDialog: (dialog: MenuDialog) => void;
   setKeyboardEnabled: (enabled: boolean) => void;
-  setScoringView: (view: ScoringView) => void;
   record: (event: ScoreEvent) => boolean;
   newEventId: () => string;
   openReview: () => void;
@@ -102,13 +108,11 @@ export default function scorerMenuItems(input: IScorerMenuInput): IGameMenuItem[
     currentQuestion,
     lastPlayed,
     keyboardEnabled,
-    scoringView,
     submitting,
     canDownloadForms,
     canRedo = false,
     openDialog,
     setKeyboardEnabled,
-    setScoringView,
     record,
     newEventId,
     openReview,
@@ -133,12 +137,17 @@ export default function scorerMenuItems(input: IScorerMenuInput): IGameMenuItem[
       onSelect: () => setKeyboardEnabled(!keyboardEnabled),
     },
     {
-      // Named the same way and for the same reason: an entry reading "Scoring view" would say
-      // nothing about which of the two is on screen. One entry rather than a submenu — there are two
-      // choices, and a second level to hold two choices is a level to remember the filing of.
-      label: `Scoring view: ${scoringViewLabels[scoringView]}`,
+      /*
+       * A second way to the same question, for anybody who does not find the switcher above the
+       * scoring surface.
+       *
+       * It opens the chooser rather than toggling. The entry this replaces read "Scoring view:
+       * Scoresheet" and switched to the table — a label naming the current state on a control that
+       * changes it, which is the one shape of toggle nobody can read at speed.
+       */
+      label: 'Scoring layout…',
       icon: 'game',
-      onSelect: () => setScoringView(scoringView === 'table' ? 'scoresheet' : 'table'),
+      onSelect: () => openDialog('scoring-layout'),
     },
     { label: 'Notes', icon: 'note', onSelect: () => openDialog('notes'), disabled: submitting },
     { label: 'Game details', icon: 'details', onSelect: () => openDialog('details') },

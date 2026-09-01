@@ -5,11 +5,14 @@
 /**
  * Scoring from a picture of the table.
  *
- * The claim this file protects is that Table View is a *view*. A ruling recorded by tapping a
+ * The claim this file protects is that the table is a *layout*. A ruling recorded by tapping a
  * rectangle has to be indistinguishable — in the event journal, in the score, in the phase the game
  * moves to, in what undo takes back — from the same ruling recorded by pressing a button on a row.
  * If any test here had to reach for a different event type, a different callback, or a second copy
  * of a quiz bowl rule, the feature would have been built wrong.
+ *
+ * Which layout is on screen, and how it is chosen, is `ScoringLayout`'s subject rather than this
+ * one's.
  *
  * The two halves are deliberate. The first renders the component on its own, which is the only way
  * to ask what happens when the engine *refuses* a ruling — through the real scoresheet the chairs
@@ -29,11 +32,8 @@ import { RoomConnectionState } from '../src/app/ConnectionState';
 import { loadGame } from '../src/scorer/GameSession';
 import { ScoreEvent } from '../src/scoring/ScoreEvents';
 import { loadSeating } from '../src/scorer/PlayerSeating';
-import {
-  resetScoringView,
-  saveScoringView,
-  scoringViewStorageKey,
-} from '../src/scorer/scoringViewPreference';
+import { resetScoringView, saveScoringView } from '../src/scorer/scoringViewPreference';
+import { rememberScoringLayoutChoice, resetScoringLayoutPrompts } from '../src/scorer/scoringLayoutPrompt';
 import { resetKeyboardPreference, saveKeyboardEnabled } from '../src/scorer/keyboardPreference';
 
 function installLocalStorage(): void {
@@ -76,6 +76,7 @@ beforeEach(() => {
   resetKeyboardPreference();
   saveScoringView('scoresheet');
   resetScoringView();
+  resetScoringLayoutPrompts();
 });
 
 afterEach(() => {
@@ -415,7 +416,7 @@ function scorerFormat(maximumActive = 4): IScorekeeperFormat {
 }
 
 /**
- * The scoresheet, in Table View, with a roster that needs no starting-lineup prompt.
+ * The scoresheet, in the table layout, with a roster that needs no starting-lineup prompt.
  *
  * Four on the floor out of four on the roster is the ordinary case and also the awkward one: nothing
  * ever asks the room what order they are sitting in, which is exactly why the arrangement hint
@@ -435,6 +436,14 @@ function renderScorer(
   gameKey = `table-view-game-${gameCounter}`;
   saveScoringView(options.view ?? 'table');
   resetScoringView();
+  /*
+   * Answered already.
+   *
+   * Every genuinely new game opens with the layout question — `ScoringLayout` is the file about
+   * that — and nothing below is about it. A device that has already been asked is what the rest of
+   * this file needs, and it keeps a modal from standing in front of the table.
+   */
+  rememberScoringLayoutChoice(gameKey);
   if (options.keyboard) {
     saveKeyboardEnabled(true);
     resetKeyboardPreference();
@@ -468,59 +477,68 @@ function openGameMenu(): void {
   fireEvent.click(screen.getByText('Game'));
 }
 
-describe('choosing a view', () => {
-  test('the scoresheet is what a device that has never chosen gets', () => {
-    renderScorer({ view: 'scoresheet' });
-
-    expect(document.querySelector('.scorer-table-view')).toBeNull();
-    expect(document.querySelector('.scorer-teams')).toBeTruthy();
+/** One seat's drag handle, while the table is being arranged. */
+function seatHandle(teamName: string, playerName: string): HTMLElement {
+  return within(screen.getByLabelText(teamName)).getByRole('button', {
+    name: new RegExp(`^${playerName}, seat `),
   });
+}
 
-  test('the menu says which one is on screen, and switching swaps the surface', () => {
-    renderScorer({ view: 'scoresheet' });
+/**
+ * Give the seats the geometry jsdom will not.
+ *
+ * The drag measures one seat's width from the seats themselves, and every rectangle in jsdom is zero
+ * by zero. What this file can prove is the wiring — that a gesture of this many seats commits that
+ * order and writes no event — and `e2e/TableArrange.spec.ts` proves the gesture itself in a browser
+ * that has real pointers and real layout.
+ */
+const seatWidth = 120;
 
-    openGameMenu();
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Scoring view: Scoresheet' }));
-
-    expect(document.querySelector('.scorer-table-view')).toBeTruthy();
-    expect(document.querySelector('.scorer-teams')).toBeNull();
-    openGameMenu();
-    expect(screen.getByRole('menuitem', { name: 'Scoring view: Table' })).toBeTruthy();
+function stubSeatGeometry(teamName: string): void {
+  const seats = Array.from(
+    screen.getByLabelText(teamName).querySelectorAll<HTMLElement>('.scorer-table-seat'),
+  );
+  seats.forEach((seat, index) => {
+    seat.getBoundingClientRect = () =>
+      ({
+        x: index * seatWidth,
+        y: 0,
+        left: index * seatWidth,
+        right: index * seatWidth + seatWidth,
+        top: 0,
+        bottom: 64,
+        width: seatWidth,
+        height: 64,
+        toJSON: () => ({}),
+      }) as DOMRect;
   });
+}
 
-  test('the choice is remembered on this device', () => {
-    renderScorer({ view: 'scoresheet' });
+/**
+ * A pointer event that actually carries a coordinate.
+ *
+ * jsdom has no `PointerEvent`, and Testing Library's fallback constructor drops `clientX` on the
+ * floor — which makes every drag a drag of zero pixels. A `MouseEvent` named for the pointer event
+ * carries the one property this gesture reads.
+ */
+function pointerEvent(type: string, clientX: number): MouseEvent {
+  return new MouseEvent(type, { clientX, bubbles: true, cancelable: true });
+}
 
-    openGameMenu();
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Scoring view: Scoresheet' }));
+/** Carry a player `seats` places along their own table and let go. */
+function dragPlayer(teamName: string, playerName: string, seats: number): void {
+  const handle = seatHandle(teamName, playerName);
+  stubSeatGeometry(teamName);
+  const travel = seats * seatWidth;
+  fireEvent(handle, pointerEvent('pointerdown', 500));
+  fireEvent(window, pointerEvent('pointermove', 500 + travel));
+  fireEvent(window, pointerEvent('pointerup', 500 + travel));
+}
 
-    expect(window.localStorage.getItem(scoringViewStorageKey)).toBe('table');
-  });
-
-  test('switching views changes nothing that was recorded', () => {
-    renderScorer({ view: 'table' });
-    openPicker('Ninety Six', 'Maycie');
-    ruling('Maycie', '10');
-    const afterScoring = savedEvents();
-
-    openGameMenu();
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Scoring view: Table' }));
-    openGameMenu();
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Scoring view: Scoresheet' }));
-
-    expect(savedEvents()).toEqual(afterScoring);
-  });
-
-  test('switching back to the scoresheet takes any open picker with it', () => {
-    renderScorer({ view: 'table' });
-    openPicker('Ninety Six', 'Maycie');
-
-    openGameMenu();
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Scoring view: Table' }));
-
-    expect(screen.queryByRole('dialog')).toBeNull();
-  });
-});
+/** The strip above the scoring surface, which is where the layout is chosen now. */
+function switchLayout(to: 'Scoresheet' | 'Table'): void {
+  fireEvent.click(screen.getByRole('radio', { name: to }));
+}
 
 describe('a ruling recorded from the table', () => {
   test('it is the ordinary tossup event, against the right player and the right team', () => {
@@ -688,8 +706,7 @@ describe('the order the chairs are in', () => {
     // The stored preference is the same one `TeamPanel` and `useScorerKeyboard` read.
     expect(loadSeating(gameKey).left).toEqual(['Gibson', 'Jeremy', 'Maycie', 'Phillip']);
 
-    openGameMenu();
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Scoring view: Table' }));
+    switchLayout('Scoresheet');
     const rows = Array.from(
       screen.getByLabelText('Ninety Six').querySelectorAll('.scorer-player-name'),
       (node) => node.textContent,
@@ -719,6 +736,96 @@ describe('the order the chairs are in', () => {
     for (const seat of Array.from(table.querySelectorAll<HTMLElement>('.scorer-table-seat'))) {
       expect(seat.style.transform).toBe('');
     }
+  });
+
+  test('a player can be carried to a different chair, and the table follows', () => {
+    renderScorer();
+    fireEvent.click(screen.getByRole('button', { name: 'Arrange table' }));
+    const before = savedEvents();
+
+    dragPlayer('Ninety Six', 'Phillip', -3);
+
+    expect(chairs('Ninety Six')).toEqual(['Phillip', 'Gibson', 'Maycie', 'Jeremy']);
+    expect(seatNumbers('Ninety Six')).toEqual(['1', '2', '3', '4']);
+    expect(loadSeating(gameKey).left).toEqual(['Phillip', 'Gibson', 'Maycie', 'Jeremy']);
+    // The whole point: a table is furniture, and moving furniture is not scoring.
+    expect(savedEvents()).toEqual(before);
+  });
+
+  test('a drag that never left its own seat is not a move', () => {
+    renderScorer();
+    fireEvent.click(screen.getByRole('button', { name: 'Arrange table' }));
+
+    dragPlayer('Ninety Six', 'Maycie', 0);
+
+    expect(chairs('Ninety Six')).toEqual(['Gibson', 'Maycie', 'Jeremy', 'Phillip']);
+    expect(loadSeating(gameKey).left).toEqual([]);
+  });
+
+  test('Escape during a drag puts everybody back where they were', () => {
+    renderScorer();
+    fireEvent.click(screen.getByRole('button', { name: 'Arrange table' }));
+    const handle = seatHandle('Ninety Six', 'Phillip');
+    stubSeatGeometry('Ninety Six');
+
+    fireEvent(handle, pointerEvent('pointerdown', 360));
+    fireEvent(window, pointerEvent('pointermove', 0));
+    // Carried to the front, and then abandoned.
+    fireEvent.keyDown(window, { key: 'Escape' });
+    fireEvent(window, pointerEvent('pointerup', 0));
+
+    expect(chairs('Ninety Six')).toEqual(['Gibson', 'Maycie', 'Jeremy', 'Phillip']);
+    // Nothing was written, because nothing is written until a drop resolves.
+    expect(loadSeating(gameKey).left).toEqual([]);
+  });
+
+  test('a drag stays inside its own team, however far it is carried', () => {
+    renderScorer();
+    fireEvent.click(screen.getByRole('button', { name: 'Arrange table' }));
+
+    // Twenty seats to the right is further than the table is long, and there is another table there.
+    dragPlayer('Ninety Six', 'Gibson', 20);
+
+    expect(chairs('Ninety Six')).toEqual(['Maycie', 'Jeremy', 'Phillip', 'Gibson']);
+    expect(chairs('Greenwood')).toEqual(['Emma', 'Taylor']);
+    expect(loadSeating(gameKey).right).toEqual([]);
+  });
+
+  test('the arrow keys move the seat that has focus, and say where it landed', () => {
+    renderScorer();
+    fireEvent.click(screen.getByRole('button', { name: 'Arrange table' }));
+
+    fireEvent.keyDown(seatHandle('Ninety Six', 'Maycie'), { key: 'ArrowRight' });
+
+    expect(chairs('Ninety Six')).toEqual(['Gibson', 'Jeremy', 'Maycie', 'Phillip']);
+    expect(screen.getByText('Maycie is now seat 3 of 4, Ninety Six.')).toBeTruthy();
+  });
+
+  test('End carries a player to the far end of their own table in one press', () => {
+    renderScorer();
+    fireEvent.click(screen.getByRole('button', { name: 'Arrange table' }));
+
+    fireEvent.keyDown(seatHandle('Ninety Six', 'Gibson'), { key: 'End' });
+
+    expect(chairs('Ninety Six')).toEqual(['Maycie', 'Jeremy', 'Phillip', 'Gibson']);
+  });
+
+  test('the arrows on each seat still work for a pointer that cannot drag', () => {
+    renderScorer();
+    fireEvent.click(screen.getByRole('button', { name: 'Arrange table' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move Jeremy left' }));
+
+    expect(chairs('Ninety Six')).toEqual(['Gibson', 'Jeremy', 'Maycie', 'Phillip']);
+  });
+
+  test('every seat says which position it is, so a screen reader can follow the move', () => {
+    renderScorer();
+    fireEvent.click(screen.getByRole('button', { name: 'Arrange table' }));
+
+    expect(seatHandle('Ninety Six', 'Jeremy').getAttribute('aria-label')).toBe('Jeremy, seat 3 of 4');
+    fireEvent.keyDown(seatHandle('Ninety Six', 'Jeremy'), { key: 'ArrowLeft' });
+    expect(seatHandle('Ninety Six', 'Jeremy').getAttribute('aria-label')).toBe('Jeremy, seat 2 of 4');
   });
 
   test('arranging closes an open picker rather than leaving it over a moving chair', () => {
@@ -851,10 +958,8 @@ describe('when the room has never said what order it is sitting in', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Arrange' }));
     fireEvent.click(screen.getByRole('button', { name: 'Done arranging' }));
 
-    openGameMenu();
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Scoring view: Table' }));
-    openGameMenu();
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Scoring view: Scoresheet' }));
+    switchLayout('Scoresheet');
+    switchLayout('Table');
 
     expect(screen.queryByText('Match the table')).toBeNull();
   });
