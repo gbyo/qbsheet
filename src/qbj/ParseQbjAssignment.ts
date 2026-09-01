@@ -51,7 +51,12 @@ import {
   wholeNumber,
 } from './QbjSerialization';
 import { readQbjScoringRules } from './QbjScoringRules';
-import { IQbtcpExtension, readQbtcpExtension, unsupportedProcedureMessage } from './QbtcpExtension';
+import {
+  IQbtcpExtension,
+  procedureOverrideMessage,
+  readQbtcpExtension,
+  unsupportedProcedureMessage,
+} from './QbtcpExtension';
 
 const maxPlayersPerTeam = 200;
 const maxMatches = 4000;
@@ -113,6 +118,8 @@ export type DefineGameResult =
        * the file is how a scorekeeper ends up retyping names that were right.
        */
       missingRosters?: string[];
+      /** The procedure is known to be present, but this build cannot enforce its version. */
+      unsupportedProcedureVersion?: number;
     };
 
 /** What the scorekeeper supplied for the parts a generic QBJ left out. */
@@ -123,6 +130,8 @@ export interface IGameDefinitionOverrides {
   rosters?: Record<string, IRosterPlayer[]>;
   /** Answers the timed question the document could not. */
   timed?: boolean;
+  /** Explicitly continue with the moderator's instructions for an unsupported procedure version. */
+  continueWithModeratorInstructions?: boolean;
 }
 
 function stringField(value: unknown, max = 500): string | undefined {
@@ -452,7 +461,14 @@ export function defineGame(
    * explicitly states procedural rules can be refused for stating them in a shape from the future.
    */
   if (extension?.unsupportedProcedureVersion !== undefined) {
-    return { ok: false, errors: [unsupportedProcedureMessage(extension.unsupportedProcedureVersion)] };
+    if (!overrides.continueWithModeratorInstructions) {
+      return {
+        ok: false,
+        errors: [unsupportedProcedureMessage(extension.unsupportedProcedureVersion)],
+        unsupportedProcedureVersion: extension.unsupportedProcedureVersion,
+      };
+    }
+    assumptions.push(procedureOverrideMessage(extension.unsupportedProcedureVersion));
   }
 
   // --- scoring rules --------------------------------------------------------------------------
@@ -538,7 +554,7 @@ export function defineGame(
     stringField((resolveRef(context?.round?.packet ?? null, byId) ?? {}).name);
 
   // --- procedure ------------------------------------------------------------------------------
-  if (!extension?.procedure) {
+  if (!extension?.procedure && extension?.unsupportedProcedureVersion === undefined) {
     assumptions.push(
       'This QBJ does not include tournament procedure. Scoring works normally; the scoresheet will not enforce substitution, timeout or clock rules it has not been given.',
     );
@@ -578,6 +594,9 @@ export function defineGame(
       // A QBJ document has no revision unless the extension carried one. 1 is the identity value —
       // "the first issue of these pairings" — not a guess about whether a redraw has happened.
       revision: extension?.roundRevision ?? 1,
+      ...(extension?.assignmentRevision !== undefined
+        ? { assignmentRevision: extension.assignmentRevision }
+        : {}),
       ...(packetName ? { packetName } : {}),
     },
     ...(location || extension?.roomId
@@ -595,6 +614,14 @@ export function defineGame(
     ...(extension?.handoffInstruction ? { handoffInstruction: extension.handoffInstruction } : {}),
     qbjIdentity,
     origin: source.document ? 'qbj' : 'qbj-match-only',
+    ...(extension?.unsupportedProcedureVersion !== undefined && overrides.continueWithModeratorInstructions
+      ? {
+          procedureOverride: {
+            kind: 'moderator-instructions' as const,
+            unsupportedVersion: extension.unsupportedProcedureVersion,
+          },
+        }
+      : {}),
     ...(assumptions.length > 0 ? { assumptions } : {}),
   };
 

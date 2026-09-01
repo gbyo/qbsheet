@@ -30,6 +30,14 @@
  * drag carries it. The two representations are separate lists rather than one list with a flag,
  * which is what keeps each of them honest about what its keys mean.
  *
+ * # Which way the tables run
+ *
+ * A scorekeeper sitting alongside the tables sees each team's seats left to right. One sitting at the
+ * end of the room, beside the moderator — which is where most of them actually sit — is looking down
+ * the tables, and the seats run away from them. `down` draws that, and is the same table in every
+ * other respect: same tiles, same picker, same seat order, same drag. It is a chair to look from, not
+ * a third layout. See `TableOrientation`.
+ *
  * This is still not a floor plan. Two fixed tables, one linear order along each, no arbitrary
  * placement, nothing draggable except a player's position among their own team-mates.
  */
@@ -39,10 +47,30 @@ import { IScorekeeperAnswerType, IScorekeeperFormat } from '../scoring/Scorekeep
 import { IDerivedTeam } from '../scoring/deriveGame';
 import { useLineupMotion } from './LineupMotion';
 import { reorderSeats } from './PlayerSeating';
-import { previewSeatNumber, seatShift, useSeatDrag } from './SeatDrag';
+import { previewSeatNumber, useSeatDrag } from './SeatDrag';
 import { seatChangeEmphasisMs } from './TeamPanel';
 import RulingPicker from './RulingPicker';
 import tossupChoices, { TossupChoice } from './tossupChoices';
+import { defaultTableOrientation, TableOrientation } from './scoringViewPreference';
+
+/**
+ * Which way a seat's neighbours are, in the words its controls use.
+ *
+ * The arrow keys accept both pairs whichever way the table runs — a scorekeeper who reaches for the
+ * one that matches the screen is right, and so is one who reaches for the other. What has to follow
+ * the orientation is the *naming*: "Move Jeremy left" on a table that runs downwards is a label
+ * describing a different screen.
+ */
+const nudgeNames: Record<TableOrientation, { earlier: string; later: string }> = {
+  across: { earlier: 'left', later: 'right' },
+  down: { earlier: 'up', later: 'down' },
+};
+
+/** The glyphs beside them, pointing the way the seat would actually go. */
+const nudgeGlyphs: Record<TableOrientation, { earlier: string; later: string }> = {
+  across: { earlier: '‹', later: '›' },
+  down: { earlier: '⌃', later: '⌄' },
+};
 
 /** How long a tile keeps the wash that says a ruling landed on it. The scoresheet's own duration. */
 const rulingEmphasisMs = 220;
@@ -70,6 +98,13 @@ export interface ITableViewProps {
   dialogOpen?: boolean;
   timeouts?: Record<LeftOrRight, number>;
   timeoutsPerTeam?: number;
+  /**
+   * Which way the tables run on screen.
+   *
+   * A device preference about where the scorekeeper is sitting, not a property of the game. Nothing
+   * about the seats, the rulings or the events changes with it.
+   */
+  orientation?: TableOrientation;
   /**
    * Whether the room is currently putting the tables in the order it is sitting in.
    *
@@ -143,6 +178,7 @@ export default function TableView(props: ITableViewProps) {
     dialogOpen = false,
     timeouts,
     timeoutsPerTeam,
+    orientation = defaultTableOrientation,
     arranging = false,
     onArrangingChange,
     onArrangeSeats,
@@ -248,7 +284,7 @@ export default function TableView(props: ITableViewProps) {
   const showHint = arrangementUnconfirmed && !hintDismissed && !arranging && onArrangeSeats !== undefined;
 
   return (
-    <div className="scorer-table-view">
+    <div className="scorer-table-view" data-orientation={orientation}>
       {showHint && (
         <div className="scorer-table-hint" role="note">
           <p className="scorer-table-hint-title">Match the table</p>
@@ -317,6 +353,7 @@ export default function TableView(props: ITableViewProps) {
             pickerId={pickerId}
             timeoutsUsed={timeouts?.[side]}
             timeoutsPerTeam={timeoutsPerTeam}
+            orientation={orientation}
             onArrangeSeats={onArrangeSeats}
             onSelect={(playerName, tile) =>
               setSelected((current) =>
@@ -357,6 +394,7 @@ interface ITableTeamProps {
   pickerId: string;
   timeoutsUsed?: number;
   timeoutsPerTeam?: number;
+  orientation: TableOrientation;
   onArrangeSeats?: (side: LeftOrRight, visibleNames: readonly string[]) => void;
   onSelect: (playerName: string, tile: HTMLButtonElement) => void;
 }
@@ -382,6 +420,7 @@ function TableTeam(props: ITableTeamProps) {
     pickerId,
     timeoutsUsed,
     timeoutsPerTeam,
+    orientation,
     onArrangeSeats,
     onSelect,
   } = props;
@@ -458,7 +497,13 @@ function TableTeam(props: ITableTeamProps) {
       {/* The table itself: a quiet rectangle whose only job is to say these chairs are one table. */}
       <div className="scorer-table-surface">
         {arranging && onArrangeSeats ? (
-          <ArrangeSeats side={side} teamName={team.name} seats={seats} onArrangeSeats={onArrangeSeats} />
+          <ArrangeSeats
+            side={side}
+            teamName={team.name}
+            seats={seats}
+            orientation={orientation}
+            onArrangeSeats={onArrangeSeats}
+          />
         ) : (
           <ScoringSeats
             teamName={team.name}
@@ -579,9 +624,13 @@ function ArrangeSeats(props: {
   side: LeftOrRight;
   teamName: string;
   seats: readonly string[];
+  orientation: TableOrientation;
   onArrangeSeats: (side: LeftOrRight, visibleNames: readonly string[]) => void;
 }) {
-  const { side, teamName, seats, onArrangeSeats } = props;
+  const { side, teamName, seats, orientation, onArrangeSeats } = props;
+  const axis = orientation === 'down' ? 'y' : 'x';
+  const names = nudgeNames[orientation];
+  const glyphs = nudgeGlyphs[orientation];
   const instructionsId = useId();
   const [announcement, setAnnouncement] = useState('');
   /*
@@ -591,7 +640,7 @@ function ArrangeSeats(props: {
    * the top of it would animate the same movement twice. An arrow press has no such preview, so it
    * keeps the travel that makes "which one did I just move?" answerable without reading.
    */
-  const motion = useLineupMotion({ axis: 'x' });
+  const motion = useLineupMotion({ axis });
 
   const move = useCallback(
     (from: number, to: number, animate: boolean) => {
@@ -606,7 +655,7 @@ function ArrangeSeats(props: {
   );
 
   // The drop owns the movement it has already been showing, so no interpolation is asked for.
-  const drag = useSeatDrag(seats.length, (from, to) => move(from, to, false));
+  const drag = useSeatDrag(seats.length, (from, to) => move(from, to, false), axis);
 
   if (seats.length === 0) {
     return (
@@ -619,7 +668,7 @@ function ArrangeSeats(props: {
   return (
     <>
       <p id={instructionsId} className="visually-hidden">
-        Drag a player along the table, or use the left and right arrow keys to move them.
+        Drag a player along the table, or use the arrow keys to move them.
       </p>
       <ul
         className={`scorer-table-seats is-arranging${drag.drag ? ' is-dragging' : ''}`}
@@ -627,8 +676,7 @@ function ArrangeSeats(props: {
       >
         {seats.map((playerName, index) => {
           const dragging = drag.drag?.from === index;
-          const shift = drag.drag ? seatShift(index, drag.drag.from, drag.drag.to) : 0;
-          const offset = dragging ? drag.drag!.deltaX : shift * (drag.drag?.pitch ?? 0);
+          const transform = drag.seatTransform(index);
           return (
             <li
               key={playerName}
@@ -643,14 +691,23 @@ function ArrangeSeats(props: {
               <button
                 type="button"
                 className={`scorer-table-player is-arranging${dragging ? ' is-dragging' : ''}`}
-                style={offset === 0 ? undefined : { transform: `translateX(${offset}px)` }}
+                style={transform ? { transform } : undefined}
                 aria-roledescription="Sortable seat"
                 aria-label={`${playerName}, seat ${previewSeatNumber(index, drag.drag)} of ${seats.length}`}
                 aria-describedby={instructionsId}
                 onPointerDown={drag.onPointerDown(index)}
                 onKeyDown={(event) => {
-                  if (event.key === 'ArrowLeft') move(index, index - 1, true);
-                  else if (event.key === 'ArrowRight') move(index, index + 1, true);
+                  /*
+                   * Both pairs, whichever way this table runs.
+                   *
+                   * A scorekeeper reaching for the arrow that matches the screen is right, and one
+                   * reaching for the pair they used on the last table is right too. There is nothing
+                   * else for up and down to mean in a single row, or for left and right in a single
+                   * column, so accepting both costs no ambiguity and saves a wrong guess.
+                   */
+                  if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') move(index, index - 1, true);
+                  else if (event.key === 'ArrowRight' || event.key === 'ArrowDown')
+                    move(index, index + 1, true);
                   else if (event.key === 'Home') move(index, 0, true);
                   else if (event.key === 'End') move(index, seats.length - 1, true);
                   else return;
@@ -676,20 +733,20 @@ function ArrangeSeats(props: {
                 <button
                   type="button"
                   className="scorer-table-nudge-action"
-                  aria-label={`Move ${playerName} left`}
+                  aria-label={`Move ${playerName} ${names.earlier}`}
                   disabled={index === 0}
                   onClick={() => move(index, index - 1, true)}
                 >
-                  ‹
+                  {glyphs.earlier}
                 </button>
                 <button
                   type="button"
                   className="scorer-table-nudge-action"
-                  aria-label={`Move ${playerName} right`}
+                  aria-label={`Move ${playerName} ${names.later}`}
                   disabled={index === seats.length - 1}
                   onClick={() => move(index, index + 1, true)}
                 >
-                  ›
+                  {glyphs.later}
                 </button>
               </span>
             </li>

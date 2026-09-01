@@ -206,6 +206,7 @@ function completeGeneratedQuestions(format: IScorekeeperFormat, choices: number[
     if (choice % 2 === 0) {
       events = append(context, events, makeEvent({ type: 'tossup-reading-resumed', questionNumber }));
       const otherPlayers = game[otherTeam].activePlayers;
+      const reboundType = format.answerTypes.find((candidate) => candidate.value > 0) ?? answerType;
       events = append(
         context,
         events,
@@ -214,9 +215,25 @@ function completeGeneratedQuestions(format: IScorekeeperFormat, choices: number[
           questionNumber,
           team: otherTeam,
           playerName: otherPlayers[choice % otherPlayers.length],
-          answerTypeIndex: answerType.index,
+          answerTypeIndex: reboundType.index,
         }),
       );
+      if (reboundType.value > 0) {
+        const afterRebound = deriveGame(format, setup, events);
+        if (afterRebound.phase.kind === 'bonus') {
+          events = append(
+            context,
+            events,
+            makeEvent({
+              type: 'bonus',
+              questionNumber,
+              team: otherTeam,
+              controlledPoints: format.bonus.maximumScore,
+              bouncebackPoints: 0,
+            }),
+          );
+        }
+      }
     } else {
       events = append(
         context,

@@ -276,6 +276,30 @@ describe('the established room', () => {
     ).toBeInTheDocument();
   });
 
+  test('offers an explicit moderator escape hatch for an unsupported procedure', async () => {
+    answer = ok(
+      assignmentOf({
+        state: 'assigned',
+        scheduledMatchId: 'match-5',
+        definition: null,
+        emergencyDefinition: definition,
+        unsupportedProcedureVersion: 4,
+      }),
+    );
+    renderRoom();
+    await settle();
+
+    expect(screen.getByRole('alert')).toHaveTextContent('version 4');
+    expect(
+      screen.getByRole('button', { name: "Continue using the moderator's instructions" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Start scoring' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: "Continue using the moderator's instructions" }));
+
+    expect(screen.getByRole('button', { name: 'Start scoring' })).toBeEnabled();
+  });
+
   test('reports a failed Start as an action error rather than a failed poll', async () => {
     answer = ok(assignmentOf({ state: 'assigned', scheduledMatchId: 'match-5', definition }));
     sessionAnswer = async () => ({

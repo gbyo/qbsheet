@@ -87,11 +87,11 @@ export interface IDerivedQuestion {
   buzzes: IDerivedBuzz[];
   /** Teams that used their chance at this tossup for nothing, per `ITossupNoPenaltyEvent`. */
   noPenalty: IDerivedNoPenalty[];
-  /** The moderator resumed reading after an interruption before the remaining team answered. */
+  /** Historical marker: the moderator resumed reading after an interruption. */
   readingResumed: boolean;
-  /** The moderator reached the end of the question; no later negative answer is legal. */
+  /** Historical marker: the moderator reached the end of the question. */
   readout: boolean;
-  /** Recorded as read with nobody converting it. */
+  /** Recorded as a no-conversion tossup. */
   dead: boolean;
   /**
    * Points from the bonus, as [controlling team, opponent on bouncebacks].
@@ -311,7 +311,7 @@ export function bonusFollows(
   return true;
 }
 
-/** Whether the effective replacement history has started this tossup. */
+/** Whether the effective replacement history has started this tossup. Legacy markers still count. */
 function effectiveCycleHasBegun(events: ScoreEvent[], questionNumber: number): boolean {
   let tossupBegun = false;
   let bonusBegun = false;
@@ -647,15 +647,31 @@ export default function deriveGame(
         });
         continue;
       }
-      spent.add(event.team);
+      const priorAttempt = spent.size > 0;
 
       if (event.type === 'tossup-no-penalty') {
+        spent.add(event.team);
         noPenalty.push({ team: event.team, playerName: event.playerName });
         continue;
       }
       const answerType = byIndex(event.answerTypeIndex);
       // An event referencing an answer type the format no longer has is not something to guess at.
       if (!answerType) continue;
+      /*
+       * A legacy reading-resumed event is descriptive only. It cannot reopen the negative ruling
+       * after either team has already spent its tossup opportunity. Keep malformed/recovered event
+       * histories from scoring that impossible second neg, just as the duplicate-team guard above
+       * keeps an unrepresentable second answer from changing the derived game.
+       */
+      if (answerType.isNeg && priorAttempt) {
+        integrityProblems.push({
+          eventId: event.id,
+          questionNumber,
+          message: `${teams[event.team].name} has a neg after another team attempted Tossup ${questionNumber}.`,
+        });
+        continue;
+      }
+      spent.add(event.team);
       if (!activePlayers[event.team].includes(event.playerName)) {
         personnelProblems.push({
           eventId: event.id,

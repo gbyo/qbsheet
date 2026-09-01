@@ -51,7 +51,7 @@ export interface IDiagnosticServer {
   /** Origin and path only. No query string, ever. */
   address?: string;
   /** Whether discovery found QBTCP, or this client fell back to the deprecated routes. */
-  protocol: 'QBTCP' | 'legacy' | 'unknown';
+  protocol: 'QBTCP' | 'legacy' | 'unsupported' | 'unknown';
   version?: number;
   qbjVersion?: string;
   capabilities?: string[];

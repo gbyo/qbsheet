@@ -1,0 +1,112 @@
+name: 🏆 Tournament QBSheet can't handle
+description: Your format or procedure doesn't fit QBSheet.
+labels: ['enhancement']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Tell us what your tournament actually does. You do **not** need to figure out which control,
+        data model, or protocol field QBSheet should change.
+
+        If you already know this requires a normative change to QBTCP, the QBJ assignment profile,
+        or the core export surface, use the **Protocol or format change** form instead.
+
+  - type: checkboxes
+    id: prerequisites
+    attributes:
+      label: Before you file
+      options:
+        - label: I searched existing issues and did not find this tournament behavior already covered.
+          required: true
+
+  - type: dropdown
+    id: blocked-area
+    attributes:
+      label: What part does not fit?
+      options:
+        - Tossup answer types or point values
+        - Bonuses or bonus part values
+        - Timing or clock behavior
+        - Breaks, halves, or score checks
+        - Substitutions or lineup rules
+        - Timeouts
+        - Overtime
+        - Player limits or eligibility
+        - Bouncebacks, lightning, or another scoring phase
+        - Several of these
+        - Something else / not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: tournament-rule
+    attributes:
+      label: What does the tournament do?
+      description: Describe the real rule or procedure in plain language. Include exact values or timing where they matter.
+      placeholder: |
+        The round has 24 tossups. Teams stop after tossups 6, 12, and 18. Substitutions are allowed only at those breaks and during timeouts...
+    validations:
+      required: true
+
+  - type: textarea
+    id: qbsheet-problem
+    attributes:
+      label: What prevents you from scoring it correctly in QBSheet?
+      description: What is impossible, misleading, or requires an unsafe workaround today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: How do you handle it now?
+      description: Optional. Tell us what the room or tournament director does instead.
+
+  - type: textarea
+    id: rules-details
+    attributes:
+      label: Relevant rule details
+      description: >
+        Add whichever details matter: tossup values, bonus structure, timing, breaks, substitutions,
+        timeouts, overtime, player limits, bouncebacks, lightning, or other procedure rules. You can leave unrelated parts out.
+
+  - type: input
+    id: public-rules
+    attributes:
+      label: Public rules link
+      description: Optional. Link the tournament's rules or format document if it is public.
+      placeholder: https://...
+
+  - type: dropdown
+    id: entry-path
+    attributes:
+      label: How are you trying to start the game?
+      options:
+        - Manual game setup
+        - Opening a QBJ assignment
+        - Connected tournament control (QBTCP)
+        - Practice mode
+        - More than one of these
+        - Not sure
+    validations:
+      required: true
+
+  - type: input
+    id: room-context
+    attributes:
+      label: Room context
+      description: Optional. Devices, number of rooms, and whether a moderator or separate scorekeeper operates QBSheet can help explain the constraint.
+      placeholder: 16 rooms on school Chromebooks, one moderator scoring each room
+
+  - type: checkboxes
+    id: portability
+    attributes:
+      label: Offline-first context
+      description: These are informational, not gates.
+      options:
+        - label: The tournament needs this to work with no backend and no network connection.
+          required: false
+        - label: Tournament control already sends enough information; QBSheet just cannot represent or enforce it correctly.
+          required: false
+        - label: I am willing to provide a sanitized QBJ or test file if useful.
+          required: false

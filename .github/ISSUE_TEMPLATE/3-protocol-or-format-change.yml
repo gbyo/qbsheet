@@ -1,5 +1,5 @@
-name: Protocol or format change
-description: Propose a change to QBTCP, the QBJ assignment profile, or the core export surface. 📐
+name: 📐 Protocol or format change
+description: Propose a normative QBTCP/QBJ/export change.
 labels: ['enhancement', 'documentation']
 body:
   - type: markdown

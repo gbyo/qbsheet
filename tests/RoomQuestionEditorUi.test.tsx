@@ -221,6 +221,16 @@ describe('what the editor leads with', () => {
     expect(screen.getByText(/On the floor/)).toBeTruthy();
   });
 
+  test('correction details do not expose legacy moderator reading-state controls', () => {
+    renderScorer(formatFor());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+    openEditor();
+    fireEvent.click(screen.getByText('Correction details'));
+
+    expect(screen.queryByText('Reading resumed after the first answer')).toBeNull();
+    expect(screen.queryByText('Question was read out before the final ruling')).toBeNull();
+  });
+
   test('the score after previews the correction before it is saved', () => {
     renderScorer(formatFor());
     fireEvent.click(buttonsFor('Sarah Mitchell')[1]); // +10
@@ -292,7 +302,7 @@ describe('what the editor leads with', () => {
 
   test('a zero-point answer remains editable when the other team never converts', () => {
     renderScorer(formatFor());
-    fireEvent.click(screen.getByLabelText('Sarah Mitchell 0 after readout wrong, no penalty'));
+    fireEvent.click(screen.getByLabelText('Sarah Mitchell 0, Wrong, no penalty'));
     fireEvent.click(screen.getByText('No buzz'));
     openEditor();
 

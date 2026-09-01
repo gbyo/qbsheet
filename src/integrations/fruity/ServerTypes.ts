@@ -111,6 +111,8 @@ export interface IAssignedMatchup {
    * never rebracketed and is the only assumption available for one that has.
    */
   roundRevision?: number;
+  /** Which issue of this room's assignment the matchup came from, when the server supplies it. */
+  assignmentRevision?: number;
   leftTeam: ITeamRoster;
   rightTeam: ITeamRoster;
   status: string;
@@ -145,9 +147,50 @@ export interface ISessionRecovery {
   roundNumber: number;
   leftTeam: string;
   rightTeam: string;
+  /** Session lifecycle as reported by tournament control, when the server supplies it. */
+  status?: 'open' | 'final-received' | 'abandoned';
+  /** Pairing revision metadata carried by recovery-capable servers, when available. */
+  roundRevision?: number;
+  assignmentRevision?: number;
   finalReceived: boolean;
   /** The most recent payload this session sent, or null if it never sent one. */
   latestQbj: object | null;
+  /** Append-only roster changes made by tournament control after the original assignment. */
+  rosterAmendments?: IRosterAmendment[];
+}
+
+/** Optional, non-authoritative client information included in presence diagnostics. */
+export interface IQbtcpClientDiagnostics {
+  name?: string;
+  version?: string;
+  build?: string;
+  commit?: string;
+}
+
+/** Presence keeps its original `ready` field and adds optional, non-authoritative diagnostics. */
+export interface IPresenceUpdate {
+  ready?: boolean;
+  client?: IQbtcpClientDiagnostics;
+  /** Public camelCase name; the QBTCP wire spelling is `procedure_versions`. */
+  procedureVersions?: number[];
+  /** Accepted as a compatibility alias for callers that use the brief's wording. */
+  supportedProcedureVersions?: number[];
+  qbjVersion?: string;
+}
+
+/** Canonical identity returned after a roster add; every field is optional for old empty-body success. */
+export interface IRosterAddResult {
+  playerId?: string;
+  playerName?: string;
+  teamId?: string;
+  teamName?: string;
+  created?: boolean;
+  warning?: string;
+}
+
+/** A durable roster amendment returned as part of recovery. */
+export interface IRosterAmendment extends IRosterAddResult {
+  questionNumber?: number;
 }
 
 // --- the one normalized vocabulary -------------------------------------------------------------
@@ -194,8 +237,15 @@ export interface INormalizedAssignment {
   tournamentKey?: string;
   /** The game to score. Null whenever `state` is not `assigned`. */
   definition: IGameDefinition | null;
+  /** A deliberately gated fallback for a procedure version this build cannot enforce. */
+  emergencyDefinition?: IGameDefinition;
+  /** Present when `definition` is withheld because the procedure is newer than this build. */
+  unsupportedProcedureVersion?: number;
   /** The handle a session is opened against. `Match.id` on QBTCP; the scheduled match on legacy. */
   scheduledMatchId?: string;
+  /** Pairing and room-assignment revisions, when the active surface reports them separately. */
+  roundRevision?: number;
+  assignmentRevision?: number;
   session: IResumableSession | null;
   blockedReason?: string;
   blockedMessage?: string;
@@ -227,10 +277,16 @@ export interface IOpenedSession {
 /** What became of a final that reached tournament control. */
 export interface IResultReceipt {
   accepted: boolean;
+  /** True when the authenticated result was durably retained, even if it needs review. */
+  received?: boolean;
+  /** True when a director must review the retained result before it becomes canonical. */
+  reviewRequired?: boolean;
   /** True when this exact statistical result was already on record. The correct answer to a retry. */
   duplicate: boolean;
   matchId?: string;
   fingerprint?: string;
+  /** Stable, bounded warning identifiers supplied by tournament control. */
+  warningCodes?: string[];
 }
 
 /** A refused write that a person, not a retry, has to resolve. */

@@ -28,7 +28,7 @@ export const qbtcpPrefix = '/qbtcp/v1';
 /** The pre-QBTCP prefix, retained by servers as deprecated aliases onto the same handlers. */
 export const legacyApiPrefix = '/api/v1';
 
-export type QbtcpProtocol = 'qbtcp/v1' | 'api/v1';
+export type QbtcpProtocol = 'qbtcp/v1' | 'api/v1' | 'qbtcp/unsupported';
 
 /** What the discovery endpoint says about a server, once it has been asked. */
 export interface IQbtcpDiscovery {
@@ -115,6 +115,19 @@ export const legacyRoutes: IQbtcpRoutes = {
 };
 
 /**
+ * A route-shaped marker for an announced QBTCP version this build cannot speak.
+ *
+ * It deliberately retains the canonical paths for diagnostics and type completeness, but the
+ * adapter selected for this table refuses every operation without calling one. In particular, it
+ * is not `legacyRoutes`: an explicit future announcement is not evidence that the deprecated API
+ * has the same semantics.
+ */
+export const unsupportedQbtcpRoutes: IQbtcpRoutes = {
+  ...qbtcpRoutes,
+  protocol: 'qbtcp/unsupported',
+};
+
+/**
  * Read a discovery response.
  *
  * Strict about the two fields a client acts on and forgiving about everything else, because a
@@ -142,13 +155,14 @@ export function readDiscovery(value: unknown): IQbtcpDiscovery | null {
 /**
  * Which routes to use against a server that answered discovery this way.
  *
- * Only version 1 is understood. A server announcing version 2 is not assumed to be
- * backward-compatible on these paths, so the legacy surface is used until this client learns that
- * version — degrading to the older protocol is safe, and guessing at a newer one is not.
+ * Only version 1 is understood. A server announcing a future version is not assumed to be
+ * backward-compatible on either surface, so it gets an explicit unsupported marker. Only an absent
+ * or non-QBTCP response selects the legacy table.
  */
 export function routesFor(discovery: IQbtcpDiscovery | null): IQbtcpRoutes {
-  if (!discovery || discovery.version !== 1) return legacyRoutes;
-  return qbtcpRoutes;
+  if (!discovery) return legacyRoutes;
+  if (discovery.version === 1) return qbtcpRoutes;
+  return unsupportedQbtcpRoutes;
 }
 
 /** Whether a server said it supports a named capability. */

@@ -1,5 +1,5 @@
-name: Feature request
-description: Suggest something the scoresheet should do. 🎉
+name: 🎉 Feature request
+description: Something QBSheet could make easier or support.
 labels: ['enhancement']
 body:
   - type: markdown

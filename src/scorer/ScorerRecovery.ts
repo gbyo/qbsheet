@@ -17,6 +17,7 @@ export interface IScorerRecoveryPayload {
   history?: IGameSessionHistory;
 }
 
+// Keep historical tossup reading markers parseable; they are not live scoring controls anymore.
 const eventTypes = new Set([
   'tossup-buzz',
   'tossup-no-penalty',

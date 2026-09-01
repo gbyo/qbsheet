@@ -32,7 +32,12 @@ import { RoomConnectionState } from '../src/app/ConnectionState';
 import { loadGame } from '../src/scorer/GameSession';
 import { ScoreEvent } from '../src/scoring/ScoreEvents';
 import { loadSeating } from '../src/scorer/PlayerSeating';
-import { resetScoringView, saveScoringView } from '../src/scorer/scoringViewPreference';
+import {
+  resetScoringView,
+  saveScoringView,
+  saveTableOrientation,
+  TableOrientation,
+} from '../src/scorer/scoringViewPreference';
 import { rememberScoringLayoutChoice, resetScoringLayoutPrompts } from '../src/scorer/scoringLayoutPrompt';
 import { resetKeyboardPreference, saveKeyboardEnabled } from '../src/scorer/keyboardPreference';
 
@@ -75,6 +80,7 @@ beforeEach(() => {
   saveKeyboardEnabled(false);
   resetKeyboardPreference();
   saveScoringView('scoresheet');
+  saveTableOrientation('across');
   resetScoringView();
   resetScoringLayoutPrompts();
 });
@@ -82,6 +88,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   saveScoringView('scoresheet');
+  saveTableOrientation('across');
   resetScoringView();
   saveKeyboardEnabled(false);
   resetKeyboardPreference();
@@ -430,11 +437,13 @@ function renderScorer(
     onCorrectGame?: (correction: unknown) => void | Promise<void>;
     keyboard?: boolean;
     onDownload?: (qbj: object) => void;
+    orientation?: TableOrientation;
   } = {},
 ) {
   gameCounter += 1;
   gameKey = `table-view-game-${gameCounter}`;
   saveScoringView(options.view ?? 'table');
+  saveTableOrientation(options.orientation ?? 'across');
   resetScoringView();
   /*
    * Answered already.
@@ -494,23 +503,36 @@ function seatHandle(teamName: string, playerName: string): HTMLElement {
  */
 const seatWidth = 120;
 
-function stubSeatGeometry(teamName: string): void {
+function stubSeatGeometry(teamName: string, orientation: TableOrientation = 'across'): void {
   const seats = Array.from(
     screen.getByLabelText(teamName).querySelectorAll<HTMLElement>('.scorer-table-seat'),
   );
   seats.forEach((seat, index) => {
+    const along = index * seatWidth;
     seat.getBoundingClientRect = () =>
-      ({
-        x: index * seatWidth,
-        y: 0,
-        left: index * seatWidth,
-        right: index * seatWidth + seatWidth,
-        top: 0,
-        bottom: 64,
-        width: seatWidth,
-        height: 64,
-        toJSON: () => ({}),
-      }) as DOMRect;
+      (orientation === 'across'
+        ? {
+            x: along,
+            y: 0,
+            left: along,
+            right: along + seatWidth,
+            top: 0,
+            bottom: seatWidth,
+            width: seatWidth,
+            height: seatWidth,
+            toJSON: () => ({}),
+          }
+        : {
+            x: 0,
+            y: along,
+            left: 0,
+            right: seatWidth,
+            top: along,
+            bottom: along + seatWidth,
+            width: seatWidth,
+            height: seatWidth,
+            toJSON: () => ({}),
+          }) as DOMRect;
   });
 }
 
@@ -521,18 +543,25 @@ function stubSeatGeometry(teamName: string): void {
  * floor — which makes every drag a drag of zero pixels. A `MouseEvent` named for the pointer event
  * carries the one property this gesture reads.
  */
-function pointerEvent(type: string, clientX: number): MouseEvent {
-  return new MouseEvent(type, { clientX, bubbles: true, cancelable: true });
+function pointerEvent(type: string, along: number, orientation: TableOrientation): MouseEvent {
+  const coordinates =
+    orientation === 'across' ? { clientX: along, clientY: 0 } : { clientX: 0, clientY: along };
+  return new MouseEvent(type, { ...coordinates, bubbles: true, cancelable: true });
 }
 
 /** Carry a player `seats` places along their own table and let go. */
-function dragPlayer(teamName: string, playerName: string, seats: number): void {
+function dragPlayer(
+  teamName: string,
+  playerName: string,
+  seats: number,
+  orientation: TableOrientation = 'across',
+): void {
   const handle = seatHandle(teamName, playerName);
-  stubSeatGeometry(teamName);
+  stubSeatGeometry(teamName, orientation);
   const travel = seats * seatWidth;
-  fireEvent(handle, pointerEvent('pointerdown', 500));
-  fireEvent(window, pointerEvent('pointermove', 500 + travel));
-  fireEvent(window, pointerEvent('pointerup', 500 + travel));
+  fireEvent(handle, pointerEvent('pointerdown', 500, orientation));
+  fireEvent(window, pointerEvent('pointermove', 500 + travel, orientation));
+  fireEvent(window, pointerEvent('pointerup', 500 + travel, orientation));
 }
 
 /** The strip above the scoring surface, which is where the layout is chosen now. */
@@ -768,11 +797,11 @@ describe('the order the chairs are in', () => {
     const handle = seatHandle('Ninety Six', 'Phillip');
     stubSeatGeometry('Ninety Six');
 
-    fireEvent(handle, pointerEvent('pointerdown', 360));
-    fireEvent(window, pointerEvent('pointermove', 0));
+    fireEvent(handle, pointerEvent('pointerdown', 360, 'across'));
+    fireEvent(window, pointerEvent('pointermove', 0, 'across'));
     // Carried to the front, and then abandoned.
     fireEvent.keyDown(window, { key: 'Escape' });
-    fireEvent(window, pointerEvent('pointerup', 0));
+    fireEvent(window, pointerEvent('pointerup', 0, 'across'));
 
     expect(chairs('Ninety Six')).toEqual(['Gibson', 'Maycie', 'Jeremy', 'Phillip']);
     // Nothing was written, because nothing is written until a drop resolves.
@@ -1125,5 +1154,93 @@ describe('what the table must never put in a result', () => {
     expect(loadSeating(gameKey).left).toEqual(['Gibson', 'Jeremy', 'Maycie', 'Phillip']);
     expect(JSON.stringify(savedEvents())).not.toContain('Jeremy Cole');
     expect(savedEvents().every((event) => !('seats' in event))).toBe(true);
+  });
+});
+
+/**
+ * The same table, seen from the end of the room.
+ *
+ * A scorekeeper beside the moderator is looking down the tables rather than across them. This is
+ * that, and the claim is that it is only that: the seats, the numbers, the rulings, the drag and the
+ * events are the ones the row already had, turned ninety degrees.
+ */
+describe('a table that runs downwards', () => {
+  test('it is the same seats in the same order, drawn the other way', () => {
+    renderScorer({ orientation: 'down' });
+
+    expect(document.querySelector('.scorer-table-view')?.getAttribute('data-orientation')).toBe('down');
+    expect(chairs('Ninety Six')).toEqual(['Gibson', 'Maycie', 'Jeremy', 'Phillip']);
+    expect(seatNumbers('Ninety Six')).toEqual(['1', '2', '3', '4']);
+    // Both teams are still drawn, because they are still on opposite sides of the room.
+    expect(chairs('Greenwood')).toEqual(['Emma', 'Taylor']);
+  });
+
+  test('a ruling is the ruling it always was', () => {
+    renderScorer({ orientation: 'down' });
+
+    openPicker('Ninety Six', 'Maycie');
+    ruling('Maycie', '10');
+
+    expect(savedEvents().find((event) => event.type === 'tossup-buzz')).toMatchObject({
+      team: 'left',
+      playerName: 'Maycie',
+    });
+    expect(screen.getByLabelText('Ninety Six score').textContent).toBe('10');
+  });
+
+  test('the keyboard still addresses the seat that is drawn', () => {
+    renderScorer({ orientation: 'down', keyboard: true });
+
+    fireEvent.keyDown(document, { code: 'Digit3', key: '3' });
+    fireEvent.keyDown(document, { code: 'KeyC', key: 'c' });
+
+    expect(savedEvents().find((event) => event.type === 'tossup-buzz')).toMatchObject({
+      playerName: 'Jeremy',
+    });
+  });
+
+  test('a player is dragged down the table rather than along it', () => {
+    renderScorer({ orientation: 'down' });
+    fireEvent.click(screen.getByRole('button', { name: 'Arrange table' }));
+    const before = savedEvents();
+
+    dragPlayer('Ninety Six', 'Phillip', -3, 'down');
+
+    expect(chairs('Ninety Six')).toEqual(['Phillip', 'Gibson', 'Maycie', 'Jeremy']);
+    expect(seatNumbers('Ninety Six')).toEqual(['1', '2', '3', '4']);
+    expect(loadSeating(gameKey).left).toEqual(['Phillip', 'Gibson', 'Maycie', 'Jeremy']);
+    expect(savedEvents()).toEqual(before);
+  });
+
+  test('a sideways gesture on a table that runs downwards moves nobody', () => {
+    renderScorer({ orientation: 'down' });
+    fireEvent.click(screen.getByRole('button', { name: 'Arrange table' }));
+
+    // Along the axis the seats are *not* on: this is a scroll, not a rearrangement.
+    dragPlayer('Ninety Six', 'Phillip', -3, 'across');
+
+    expect(chairs('Ninety Six')).toEqual(['Gibson', 'Maycie', 'Jeremy', 'Phillip']);
+  });
+
+  test('the fallback arrows are named for where the seat would actually go', () => {
+    renderScorer({ orientation: 'down' });
+    fireEvent.click(screen.getByRole('button', { name: 'Arrange table' }));
+
+    expect(screen.queryByRole('button', { name: 'Move Jeremy left' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Move Jeremy up' }));
+
+    expect(chairs('Ninety Six')).toEqual(['Gibson', 'Jeremy', 'Maycie', 'Phillip']);
+  });
+
+  test('the arrow keys work whichever pair a scorekeeper reaches for', () => {
+    renderScorer({ orientation: 'down' });
+    fireEvent.click(screen.getByRole('button', { name: 'Arrange table' }));
+
+    fireEvent.keyDown(seatHandle('Ninety Six', 'Maycie'), { key: 'ArrowDown' });
+    expect(chairs('Ninety Six')).toEqual(['Gibson', 'Jeremy', 'Maycie', 'Phillip']);
+
+    // And the pair that matches a table running across, for a hand that learned it there.
+    fireEvent.keyDown(seatHandle('Ninety Six', 'Maycie'), { key: 'ArrowLeft' });
+    expect(chairs('Ninety Six')).toEqual(['Gibson', 'Maycie', 'Jeremy', 'Phillip']);
   });
 });

@@ -29,7 +29,14 @@
  */
 import { IGameDefinition } from '../../game/GameDefinition';
 import { HelpRequestCategory } from '../../app/HelpRequests';
-import { IQbtcpDiscovery, IQbtcpRoutes, legacyRoutes, qbtcpRoutes, supports } from '../../qbtcp/QbtcpRoutes';
+import {
+  IQbtcpDiscovery,
+  IQbtcpRoutes,
+  legacyRoutes,
+  qbtcpRoutes,
+  supports,
+  unsupportedQbtcpRoutes,
+} from '../../qbtcp/QbtcpRoutes';
 import { assignmentToGamePackage, qbtcpAssignmentToDefinition } from './FruityGameSource';
 import {
   ApiResult,
@@ -38,6 +45,7 @@ import {
   IJoinResult,
   INormalizedAssignment,
   IOpenedSession,
+  IPresenceUpdate,
   IResultReceipt,
   IResumableSession,
   IRoomIdentity,
@@ -45,6 +53,8 @@ import {
   IServerIdentity,
   ISessionCredentials,
   ISessionRecovery,
+  IRosterAddResult,
+  IRosterAmendment,
   IWriterConflict,
   deviceIdHeader,
   operatorNameHeader,
@@ -68,6 +78,181 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function stringOf(value: unknown): string | undefined {
   return typeof value === 'string' && value !== '' ? value : undefined;
+}
+
+function boundedString(value: unknown, maximum = 500): string | undefined {
+  return typeof value === 'string' && value.trim() !== '' && value.length <= maximum ? value : undefined;
+}
+
+function firstOf(record: Record<string, unknown> | undefined, keys: readonly string[]): unknown {
+  if (!record) return undefined;
+  for (const key of keys) {
+    if (record[key] !== undefined) return record[key];
+  }
+  return undefined;
+}
+
+/**
+ * Read the canonical roster identity returned by either generation of tournament control.
+ *
+ * An older server may return an empty success body. That is intentionally normalized to `{}` rather
+ * than treated as an error, so the existing name-based scoring path remains available.
+ */
+export function readRosterAddResponse(value: unknown): IRosterAddResult {
+  if (!isRecord(value)) return {};
+  const player = isRecord(value.player) ? value.player : undefined;
+  const team = isRecord(value.team) ? value.team : undefined;
+  const playerId = boundedString(
+    firstOf(player, ['id', 'player_id', 'playerId']) ?? firstOf(value, ['player_id', 'playerId']),
+  );
+  const playerName = boundedString(
+    firstOf(player, ['name', 'player_name', 'playerName']) ??
+      firstOf(value, ['player_name', 'playerName', 'name']),
+  );
+  const teamId = boundedString(
+    firstOf(team, ['id', 'team_id', 'teamId']) ?? firstOf(value, ['team_id', 'teamId']),
+  );
+  const teamName = boundedString(
+    firstOf(team, ['name', 'team_name', 'teamName']) ?? firstOf(value, ['team_name', 'teamName']),
+  );
+  const warning = boundedString(value.warning, 500);
+  return {
+    ...(playerId !== undefined ? { playerId } : {}),
+    ...(playerName !== undefined ? { playerName } : {}),
+    ...(teamId !== undefined ? { teamId } : {}),
+    ...(teamName !== undefined ? { teamName } : {}),
+    ...(typeof value.created === 'boolean' ? { created: value.created } : {}),
+    ...(warning !== undefined ? { warning } : {}),
+  };
+}
+
+function readRosterAmendment(value: unknown): IRosterAmendment | null {
+  const canonical = readRosterAddResponse(value);
+  if (!canonical.playerName || (!canonical.teamName && !canonical.teamId)) return null;
+  if (!isRecord(value)) return null;
+  const rawQuestion = firstOf(value, ['question_number', 'questionNumber']);
+  const questionNumber =
+    typeof rawQuestion === 'number' &&
+    Number.isInteger(rawQuestion) &&
+    rawQuestion >= 1 &&
+    rawQuestion <= 10000
+      ? rawQuestion
+      : undefined;
+  return { ...canonical, ...(questionNumber !== undefined ? { questionNumber } : {}) };
+}
+
+/** Read bounded, canonical roster amendments without exposing arbitrary recovery payload fields. */
+export function readRosterAmendments(value: unknown): IRosterAmendment[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 200).flatMap((entry) => {
+    const amendment = readRosterAmendment(entry);
+    return amendment ? [amendment] : [];
+  });
+}
+
+/** Read the additive receipt fields while retaining the old `accepted` contract. */
+export function readResultReceipt(value: unknown): IResultReceipt {
+  const raw = isRecord(value) ? value : {};
+  const rawReviewRequired = raw.review_required ?? raw.reviewRequired;
+  const rawWarnings = firstOf(raw, ['warning_codes', 'warningCodes', 'warnings']);
+  const warningCodes = Array.isArray(rawWarnings)
+    ? rawWarnings
+        .flatMap((warning) => {
+          const text = boundedString(warning, 120);
+          return text === undefined ? [] : [text];
+        })
+        .slice(0, 32)
+    : [];
+  return {
+    // A successful response from the pre-receipt protocol was acceptance. Silence remains that
+    // compatibility answer; a newer server can additionally say `received` and `review_required`.
+    // An explicit transport refusal must win over an older compatibility field.
+    accepted: raw.accepted !== false && raw.received !== false,
+    ...(typeof raw.received === 'boolean' ? { received: raw.received } : {}),
+    ...(typeof rawReviewRequired === 'boolean' ? { reviewRequired: rawReviewRequired } : {}),
+    duplicate: raw.duplicate === true,
+    ...(boundedString(raw.match_id ?? raw.matchId) !== undefined
+      ? { matchId: boundedString(raw.match_id ?? raw.matchId) }
+      : {}),
+    ...(boundedString(raw.fingerprint) !== undefined ? { fingerprint: boundedString(raw.fingerprint) } : {}),
+    ...(warningCodes.length > 0 ? { warningCodes } : {}),
+  };
+}
+
+/** Read old camelCase and QBTCP snake_case recovery bodies into one safe client shape. */
+export function readSessionRecovery(value: unknown, fallbackSessionId?: string): ISessionRecovery | null {
+  if (!isRecord(value)) return null;
+  const sessionId =
+    boundedString(firstOf(value, ['session_id', 'sessionId'])) ?? boundedString(fallbackSessionId);
+  if (!sessionId) return null;
+  const rawRound = firstOf(value, ['round_number', 'roundNumber']);
+  const roundNumber =
+    typeof rawRound === 'number' && Number.isInteger(rawRound) && rawRound >= 0 ? rawRound : 0;
+  const rawStatus = firstOf(value, ['session_status', 'sessionStatus', 'status']);
+  const status =
+    rawStatus === 'open' || rawStatus === 'final-received' || rawStatus === 'abandoned'
+      ? rawStatus
+      : undefined;
+  const rawRoundRevision = firstOf(value, ['round_revision', 'roundRevision']);
+  const roundRevision =
+    typeof rawRoundRevision === 'number' && Number.isInteger(rawRoundRevision) && rawRoundRevision >= 1
+      ? rawRoundRevision
+      : undefined;
+  const rawAssignmentRevision = firstOf(value, ['assignment_revision', 'assignmentRevision']);
+  const assignmentRevision =
+    typeof rawAssignmentRevision === 'number' &&
+    Number.isInteger(rawAssignmentRevision) &&
+    rawAssignmentRevision >= 1
+      ? rawAssignmentRevision
+      : undefined;
+  const leftTeam = boundedString(firstOf(value, ['left_team', 'leftTeam'])) ?? '';
+  const rightTeam = boundedString(firstOf(value, ['right_team', 'rightTeam'])) ?? '';
+  const rawLatest = firstOf(value, ['latest_qbj', 'latestQbj']);
+  const rawAmendments = firstOf(value, ['roster_amendments', 'rosterAmendments', 'amendments']);
+  return {
+    sessionId,
+    roundNumber,
+    leftTeam,
+    rightTeam,
+    ...(status !== undefined ? { status } : {}),
+    ...(roundRevision !== undefined ? { roundRevision } : {}),
+    ...(assignmentRevision !== undefined ? { assignmentRevision } : {}),
+    finalReceived:
+      firstOf(value, ['final_received', 'finalReceived']) === true || status === 'final-received',
+    latestQbj: isRecord(rawLatest) ? rawLatest : null,
+    ...(Array.isArray(rawAmendments) ? { rosterAmendments: readRosterAmendments(rawAmendments) } : {}),
+  };
+}
+
+/** Encode only the bounded, advisory presence fields QBTCP defines. */
+export function normalizePresenceUpdate(update: IPresenceUpdate): Record<string, unknown> {
+  const raw = isRecord(update) ? update : {};
+  const normalized: Record<string, unknown> = {};
+  if (typeof raw.ready === 'boolean') normalized.ready = raw.ready;
+
+  const rawClient = isRecord(raw.client) ? raw.client : undefined;
+  if (rawClient) {
+    const client: Record<string, string> = {};
+    for (const key of ['name', 'version', 'build', 'commit'] as const) {
+      const value = boundedString(rawClient[key], 100);
+      if (value !== undefined) client[key] = value;
+    }
+    if (Object.keys(client).length > 0) normalized.client = client;
+  }
+
+  const rawVersions = raw.procedureVersions ?? raw.supportedProcedureVersions ?? raw.procedure_versions;
+  if (Array.isArray(rawVersions)) {
+    const versions = rawVersions
+      .filter(
+        (version): version is number =>
+          typeof version === 'number' && Number.isInteger(version) && version >= 1,
+      )
+      .slice(0, 16);
+    if (versions.length > 0) normalized.procedure_versions = versions;
+  }
+  const qbjVersion = boundedString(raw.qbjVersion ?? raw.qbj_version, 50);
+  if (qbjVersion !== undefined) normalized.qbj_version = qbjVersion;
+  return normalized;
 }
 
 /**
@@ -94,6 +279,8 @@ function readAssignmentState(value: unknown): AssignmentState {
 export function readAssignmentStatus(value: unknown): {
   state: AssignmentState;
   session: IResumableSession | null;
+  roundRevision?: number;
+  assignmentRevision?: number;
   blockedReason?: string;
   blockedMessage?: string;
   nextAssignmentLabel?: string;
@@ -107,6 +294,16 @@ export function readAssignmentStatus(value: unknown): {
   return {
     state: readAssignmentState(value.state),
     session: sessionId ? { sessionId, resumable: rawSession?.resumable !== false } : null,
+    ...(typeof value.round_revision === 'number' &&
+    Number.isInteger(value.round_revision) &&
+    value.round_revision >= 1
+      ? { roundRevision: value.round_revision }
+      : {}),
+    ...(typeof value.assignment_revision === 'number' &&
+    Number.isInteger(value.assignment_revision) &&
+    value.assignment_revision >= 1
+      ? { assignmentRevision: value.assignment_revision }
+      : {}),
     ...(stringOf(value.blocked_reason) ? { blockedReason: stringOf(value.blocked_reason) } : {}),
     ...(stringOf(value.blocked_message) ? { blockedMessage: stringOf(value.blocked_message) } : {}),
     ...(nextAssignmentLabel !== undefined ? { nextAssignmentLabel } : {}),
@@ -127,7 +324,7 @@ export interface IServerAdapter {
   openSession(identity: IRoomIdentity, matchId: string): Promise<ApiResult<IOpenedSession>>;
   /** Claim the write lock from another device. A person starts this; it is never automatic. */
   takeWriter(identity: IRoomIdentity, credentials: ISessionCredentials): Promise<ApiResult<IOpenedSession>>;
-  updatePresence(identity: IRoomIdentity, update: { ready?: boolean }): Promise<ApiResult<unknown>>;
+  updatePresence(identity: IRoomIdentity, update: IPresenceUpdate): Promise<ApiResult<unknown>>;
   requestHelp(
     identity: IRoomIdentity,
     category: HelpRequestCategory,
@@ -140,7 +337,9 @@ export interface IServerAdapter {
     credentials: ISessionCredentials,
     teamName: string,
     playerName: string,
-  ): Promise<ApiResult<unknown>>;
+    teamId?: string,
+    questionNumber?: number,
+  ): Promise<ApiResult<IRosterAddResult>>;
   putProgress(credentials: ISessionCredentials, qbj: object, sequence: number): Promise<ApiResult<unknown>>;
   postResult(credentials: ISessionCredentials, qbj: object): Promise<ApiResult<IResultReceipt>>;
   recover(credentials: ISessionCredentials): Promise<ApiResult<ISessionRecovery>>;
@@ -190,11 +389,11 @@ abstract class BaseAdapter implements IServerAdapter {
     credentials: ISessionCredentials,
   ): Promise<ApiResult<IOpenedSession>>;
 
-  updatePresence(identity: IRoomIdentity, update: { ready?: boolean }): Promise<ApiResult<unknown>> {
+  updatePresence(identity: IRoomIdentity, update: IPresenceUpdate): Promise<ApiResult<unknown>> {
     return this.request(this.routes.presence(identity.roomId), {
       method: 'POST',
       headers: this.roomHeaders(identity, 'application/json'),
-      body: JSON.stringify(update),
+      body: JSON.stringify(normalizePresenceUpdate(update)),
     });
   }
 
@@ -228,15 +427,26 @@ abstract class BaseAdapter implements IServerAdapter {
     credentials: ISessionCredentials,
     teamName: string,
     playerName: string,
-  ): Promise<ApiResult<unknown>> {
-    return this.request(this.routes.addPlayer(identity.roomId), {
+    teamId?: string,
+    questionNumber?: number,
+  ): Promise<ApiResult<IRosterAddResult>> {
+    const safeTeamId = boundedString(teamId);
+    return this.request<unknown>(this.routes.addPlayer(identity.roomId), {
       method: 'POST',
       headers: {
         ...this.roomHeaders(identity, 'application/json'),
         [sessionTokenHeader]: credentials.token,
       },
-      body: JSON.stringify({ sessionId: credentials.sessionId, teamName, playerName }),
-    });
+      body: JSON.stringify({
+        sessionId: credentials.sessionId,
+        ...(safeTeamId ? { team_id: safeTeamId } : {}),
+        teamName,
+        playerName,
+        ...(typeof questionNumber === 'number' && Number.isInteger(questionNumber) && questionNumber >= 1
+          ? { question_number: questionNumber }
+          : {}),
+      }),
+    }).then((result) => (result.ok ? { ok: true, value: readRosterAddResponse(result.value) } : result));
   }
 
   abstract putProgress(
@@ -248,8 +458,14 @@ abstract class BaseAdapter implements IServerAdapter {
   abstract postResult(credentials: ISessionCredentials, qbj: object): Promise<ApiResult<IResultReceipt>>;
 
   recover(credentials: ISessionCredentials): Promise<ApiResult<ISessionRecovery>> {
-    return this.request(this.routes.recovery(credentials.sessionId), {
+    return this.request<unknown>(this.routes.recovery(credentials.sessionId), {
       headers: this.sessionHeaders(credentials),
+    }).then((result) => {
+      if (!result.ok) return result;
+      const recovery = readSessionRecovery(result.value, credentials.sessionId);
+      return recovery
+        ? { ok: true, value: recovery }
+        : { ok: false, error: 'Tournament control sent a recovery answer this page could not read.' };
     });
   }
 }
@@ -392,6 +608,10 @@ export class QbtcpAdapter extends BaseAdapter {
           state: operational.state,
           definition: null,
           session: operational.session,
+          ...(operational.roundRevision !== undefined ? { roundRevision: operational.roundRevision } : {}),
+          ...(operational.assignmentRevision !== undefined
+            ? { assignmentRevision: operational.assignmentRevision }
+            : {}),
           ...(operational.blockedReason ? { blockedReason: operational.blockedReason } : {}),
           ...(operational.blockedMessage ? { blockedMessage: operational.blockedMessage } : {}),
           ...(operational.nextAssignmentLabel
@@ -415,6 +635,10 @@ export class QbtcpAdapter extends BaseAdapter {
           state: operational?.state ?? 'none',
           definition: null,
           session: operational?.session ?? null,
+          ...(operational?.roundRevision !== undefined ? { roundRevision: operational.roundRevision } : {}),
+          ...(operational?.assignmentRevision !== undefined
+            ? { assignmentRevision: operational.assignmentRevision }
+            : {}),
           ...(operational?.nextAssignmentLabel
             ? { nextAssignmentLabel: operational.nextAssignmentLabel }
             : {}),
@@ -424,6 +648,12 @@ export class QbtcpAdapter extends BaseAdapter {
 
     const opened = qbtcpAssignmentToDefinition(body.value);
     if (!opened.ok) {
+      const emergency =
+        opened.unsupportedProcedureVersion !== undefined
+          ? qbtcpAssignmentToDefinition(body.value, { continueWithModeratorInstructions: true })
+          : null;
+      const emergencyDefinition =
+        emergency?.ok && emergency.kind === 'game' ? emergency.definition : undefined;
       return {
         ok: true,
         value: {
@@ -431,10 +661,18 @@ export class QbtcpAdapter extends BaseAdapter {
           state: 'assigned',
           definition: null,
           session: operational?.session ?? null,
+          ...(operational?.roundRevision !== undefined ? { roundRevision: operational.roundRevision } : {}),
+          ...(operational?.assignmentRevision !== undefined
+            ? { assignmentRevision: operational.assignmentRevision }
+            : {}),
           ...(operational?.nextAssignmentLabel
             ? { nextAssignmentLabel: operational.nextAssignmentLabel }
             : {}),
           errors: opened.errors,
+          ...(opened.unsupportedProcedureVersion !== undefined
+            ? { unsupportedProcedureVersion: opened.unsupportedProcedureVersion }
+            : {}),
+          ...(emergencyDefinition ? { emergencyDefinition } : {}),
         },
       };
     }
@@ -446,6 +684,10 @@ export class QbtcpAdapter extends BaseAdapter {
           state: 'assigned',
           definition: null,
           session: operational?.session ?? null,
+          ...(operational?.roundRevision !== undefined ? { roundRevision: operational.roundRevision } : {}),
+          ...(operational?.assignmentRevision !== undefined
+            ? { assignmentRevision: operational.assignmentRevision }
+            : {}),
           ...(operational?.nextAssignmentLabel
             ? { nextAssignmentLabel: operational.nextAssignmentLabel }
             : {}),
@@ -481,6 +723,10 @@ export class QbtcpAdapter extends BaseAdapter {
         ...(definition.tournament.key ? { tournamentKey: definition.tournament.key } : {}),
         state: 'assigned',
         definition,
+        roundRevision: definition.round.revision,
+        ...(definition.round.assignmentRevision !== undefined
+          ? { assignmentRevision: definition.round.assignmentRevision }
+          : {}),
         ...(scheduledMatchIdOf(definition) ? { scheduledMatchId: scheduledMatchIdOf(definition) } : {}),
         session: operational?.session ?? null,
         ...(operational?.nextAssignmentLabel ? { nextAssignmentLabel: operational.nextAssignmentLabel } : {}),
@@ -576,17 +822,7 @@ export class QbtcpAdapter extends BaseAdapter {
       body: JSON.stringify(qbj),
     });
     if (!result.ok) return result;
-    const body = isRecord(result.value) ? result.value : {};
-    return {
-      ok: true,
-      value: {
-        // Silence is acceptance: a `200` with a body this cannot read still means the result landed.
-        accepted: body.accepted !== false,
-        duplicate: body.duplicate === true,
-        ...(stringOf(body.match_id) ? { matchId: stringOf(body.match_id) } : {}),
-        ...(stringOf(body.fingerprint) ? { fingerprint: stringOf(body.fingerprint) } : {}),
-      },
-    };
+    return { ok: true, value: readResultReceipt(result.value) };
   }
 
   /**
@@ -634,8 +870,89 @@ export class QbtcpAdapter extends BaseAdapter {
     return this.guard('help', 'help requests', () => super.cancelHelp(identity, helpId));
   }
 
-  override updatePresence(identity: IRoomIdentity, update: { ready?: boolean }): Promise<ApiResult<unknown>> {
+  override updatePresence(identity: IRoomIdentity, update: IPresenceUpdate): Promise<ApiResult<unknown>> {
     return this.guard('presence', 'presence', () => super.updatePresence(identity, update));
+  }
+}
+
+/** Exact refusal for an explicit QBTCP version newer than this client can interpret. */
+export function unsupportedQbtcpMessage(version: number): string {
+  return `Tournament control uses QBTCP v${version}. This version of QBSheet supports v1. Update QBSheet or score from an assignment file.`;
+}
+
+/**
+ * Adapter selected only after a server explicitly announces a future QBTCP version.
+ *
+ * It never probes a legacy endpoint and never sends a request after discovery. A version mismatch is
+ * a protocol decision, not a transient network failure, so the refusal is stable and actionable.
+ */
+export class UnsupportedQbtcpAdapter implements IServerAdapter {
+  readonly routes = unsupportedQbtcpRoutes;
+
+  constructor(private discovery: IQbtcpDiscovery) {}
+
+  private refusal<T>(): ApiResult<T> {
+    return { ok: false, unsupported: true, error: unsupportedQbtcpMessage(this.discovery.version) };
+  }
+
+  verify(): Promise<ApiResult<unknown>> {
+    return Promise.resolve(this.refusal());
+  }
+
+  identify(): Promise<ApiResult<IServerIdentity>> {
+    return Promise.resolve(this.refusal());
+  }
+
+  listRooms(): Promise<ApiResult<IRoomListEntry[]>> {
+    return Promise.resolve(this.refusal());
+  }
+
+  join(): Promise<ApiResult<IJoinResult>> {
+    return Promise.resolve(this.refusal());
+  }
+
+  assignment(): Promise<ApiResult<INormalizedAssignment>> {
+    return Promise.resolve(this.refusal());
+  }
+
+  openSession(): Promise<ApiResult<IOpenedSession>> {
+    return Promise.resolve(this.refusal());
+  }
+
+  takeWriter(): Promise<ApiResult<IOpenedSession>> {
+    return Promise.resolve(this.refusal());
+  }
+
+  updatePresence(): Promise<ApiResult<unknown>> {
+    return Promise.resolve(this.refusal());
+  }
+
+  requestHelp(): Promise<ApiResult<unknown>> {
+    return Promise.resolve(this.refusal());
+  }
+
+  readHelp(): Promise<ApiResult<unknown>> {
+    return Promise.resolve(this.refusal());
+  }
+
+  cancelHelp(): Promise<ApiResult<unknown>> {
+    return Promise.resolve(this.refusal());
+  }
+
+  addRosterPlayer(): Promise<ApiResult<IRosterAddResult>> {
+    return Promise.resolve(this.refusal());
+  }
+
+  putProgress(): Promise<ApiResult<unknown>> {
+    return Promise.resolve(this.refusal());
+  }
+
+  postResult(): Promise<ApiResult<IResultReceipt>> {
+    return Promise.resolve(this.refusal());
+  }
+
+  recover(): Promise<ApiResult<ISessionRecovery>> {
+    return Promise.resolve(this.refusal());
   }
 }
 
@@ -730,6 +1047,10 @@ export class LegacyAdapter extends BaseAdapter {
         state: blocked ? 'blocked' : 'assigned',
         definition: built.value,
         scheduledMatchId: response.current.scheduledMatchId,
+        roundRevision: built.value.round.revision,
+        ...(built.value.round.assignmentRevision !== undefined
+          ? { assignmentRevision: built.value.round.assignmentRevision }
+          : {}),
       },
     };
   }
@@ -778,7 +1099,6 @@ export class LegacyAdapter extends BaseAdapter {
       body: JSON.stringify(qbj),
     });
     if (!result.ok) return result;
-    const body = isRecord(result.value) ? result.value : {};
-    return { ok: true, value: { accepted: body.accepted !== false, duplicate: body.duplicate === true } };
+    return { ok: true, value: readResultReceipt(result.value) };
   }
 }

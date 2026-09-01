@@ -6,9 +6,12 @@
  * changed rather than the whole object.
  */
 import { IGamePackage, gamePackageFormat, gamePackageVersion } from '../src/game/GamePackage';
+import { IQbjIdentity } from '../src/game/GameDefinition';
 import scoringRulesToScorekeeperFormat, { CommonRuleSets, ScoringRules } from './rules';
 
-export function validPackage(overrides: Partial<IGamePackage> = {}): IGamePackage {
+export function validPackage(
+  overrides: Partial<IGamePackage> & { qbjIdentity?: IQbjIdentity } = {},
+): IGamePackage & { qbjIdentity?: IQbjIdentity } {
   return {
     format: gamePackageFormat,
     version: gamePackageVersion,

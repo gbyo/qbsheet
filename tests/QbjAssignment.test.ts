@@ -356,6 +356,28 @@ describe('incomplete QBJ', () => {
       expect(opened.needsRoster).toBeUndefined();
     });
 
+    test('an explicit moderator override opens and records the emergency decision', () => {
+      const opened = openGameText(
+        text(
+          fromTheFuture({
+            version: roomProcedureVersion + 1,
+            halves: true,
+            timeoutsPerTeam: 0,
+          }),
+        ),
+        { continueWithModeratorInstructions: true },
+      );
+
+      expect(opened.ok).toBe(true);
+      if (!opened.ok || opened.kind !== 'game') return;
+      expect(opened.definition.procedure).toBeUndefined();
+      expect(opened.definition.procedureOverride).toEqual({
+        kind: 'moderator-instructions',
+        unsupportedVersion: roomProcedureVersion + 1,
+      });
+      expect(opened.definition.assumptions?.join(' ')).toContain('moderator');
+    });
+
     test('choosing it from the picker refuses too, rather than the picker being the way past it', () => {
       const source = readQbjSource(fromTheFuture({ version: roomProcedureVersion + 1, halves: true }));
       if (!source.ok) throw new Error('Expected a readable document');

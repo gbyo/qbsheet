@@ -76,8 +76,7 @@ describe('guided practice scenario', () => {
     expect(instruction('q1-power')).toBe('Press P on Gibson’s row, on the Ninety Six side.');
     expect(instruction('q2-ten')).toBe('Press +10 on Tucker’s row, on the Greenwood side.');
     expect(instruction('q3-neg')).toBe('Press N on Jeremy’s row.');
-    // The zero button widens its own label while a neg is still possible, and Tossup 4 is such a tossup.
-    expect(instruction('q4-wrong-no-penalty')).toContain('0 after readout');
+    expect(instruction('q4-wrong-no-penalty')).toContain('0 button');
     // The exception, because this shortcut works whether or not keyboard scoring is on.
     expect(instruction('q6-undo')).toContain('Ctrl/⌘ + Z');
 

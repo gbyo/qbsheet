@@ -219,17 +219,14 @@ export default function canApplyScoreEvent(
       const answerType = format.answerTypes[candidate.answerTypeIndex];
       if (!answerType) return refuse('That is not a ruling this tournament uses.');
       /*
-       * A team answering second has heard the whole question, and a team that has heard the whole
-       * question cannot be penalized for missing it — which is why the zero-point outcome exists at
-       * all. This is not a rule about any one format: it is what "the question was read out" means
-       * everywhere a neg is defined, and the second team's alternative is right here.
+       * A negative ruling belongs only to the first tossup opportunity. Both a scored buzz and a
+       * zero-point/no-penalty answer spend that opportunity. Legacy reading markers describe old
+       * history, but they never change this legality rule or reopen a neg for the other team.
        */
-      if (
-        answerType.isNeg &&
-        (recordedQuestion?.readout === true ||
-          (answered.size > 0 && recordedQuestion?.readingResumed !== true))
-      ) {
-        return refuse(`${game[candidate.team].name} heard the whole question, so this cannot be a neg.`);
+      if (answerType.isNeg && answered.size > 0) {
+        return refuse(
+          `${game[candidate.team].name} cannot receive a neg after another team has attempted this tossup.`,
+        );
       }
       return allowed;
     }

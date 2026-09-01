@@ -1,12 +1,26 @@
 /**
- * Which scoring surface this device is using, as something React can render.
+ * Which scoring layout this device is using, and which way its tables run.
  *
- * A subscription rather than a read, so the Game menu's entry and the surface it names change in the
- * same turn. See `scoringViewPreference` for why the value is module state.
+ * Subscriptions rather than reads, so the Game menu's entry, the strip above the surface and the
+ * surface itself change in the same turn. See `scoringViewPreference` for why the values are module
+ * state.
  */
 import { useSyncExternalStore } from 'react';
-import { defaultScoringView, ScoringView, scoringView, subscribeScoringView } from './scoringViewPreference';
+import {
+  defaultScoringView,
+  defaultTableOrientation,
+  ScoringView,
+  scoringView,
+  subscribeScoringView,
+  subscribeTableOrientation,
+  TableOrientation,
+  tableOrientation,
+} from './scoringViewPreference';
 
 export default function useScoringView(): ScoringView {
   return useSyncExternalStore(subscribeScoringView, scoringView, () => defaultScoringView);
+}
+
+export function useTableOrientation(): TableOrientation {
+  return useSyncExternalStore(subscribeTableOrientation, tableOrientation, () => defaultTableOrientation);
 }
