@@ -142,6 +142,15 @@
   outline-offset: 1px;
 }
 
+/*
+ * The selected card is also autofocus when the chooser opens. Keep that focus visible without
+ * drawing a second detached rectangle around the already-accented selection.
+ */
+.scorer-layout-card.is-selected:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--room-accent);
+}
+
 .scorer-layout-card .scorer-layout-option-name {
   font-size: 1rem;
   font-weight: 600;
