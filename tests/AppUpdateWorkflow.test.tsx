@@ -7,7 +7,7 @@
  * A safety property nobody can see looks like a bug, and a notice with a button next to it is an
  * invitation to press it during a bonus.
  */
-import { act, screen } from '@testing-library/react';
+import { act, cleanup, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { appUpdates } from '../src/pwa/AppUpdate';
 import { openApp, openGameFile, startLineups } from './appHarness';
@@ -96,7 +96,10 @@ describe('a build deployed while the device is idle', () => {
     const worker = fakeWorker();
     deployBuild(worker);
 
+    expect(screen.getByRole('status')).toHaveAttribute('data-update-presentation', 'hero');
+    expect(screen.getByRole('status')).toHaveClass('update-notice-hero');
     const update = screen.getByRole('button', { name: 'Update now' });
+    expect(update).toHaveClass('is-primary');
     await act(async () => {
       update.click();
     });
@@ -109,5 +112,24 @@ describe('a build deployed while the device is idle', () => {
 
     expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull();
     expect(screen.queryByText(/Update available/)).toBeNull();
+    expect(document.querySelector('.update-notice-hero')).toBeNull();
+  });
+
+  test('an unfinished game keeps Resume dominant and presents the update compactly', async () => {
+    await openApp();
+    await openGameFile();
+
+    // A reload returns to Home with the active record, which is the recovery state whose priority
+    // this presentation rule protects.
+    cleanup();
+    await openApp();
+
+    deployBuild(fakeWorker());
+
+    expect(await screen.findByText('Unfinished game')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Resume' })).toHaveClass('is-primary');
+    expect(screen.getByRole('status')).toHaveAttribute('data-update-presentation', 'compact');
+    expect(screen.getByRole('status')).not.toHaveClass('update-notice-hero');
+    expect(screen.getByRole('button', { name: 'Update now' })).not.toHaveClass('is-primary');
   });
 });

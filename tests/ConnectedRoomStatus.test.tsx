@@ -10,6 +10,10 @@ import { assignmentPollIntervalMs } from '../src/app/useConnectedRuntime';
 import { IGameDefinition } from '../src/game/GameDefinition';
 import { validPackage } from './packages';
 
+vi.mock('../src/pwa/useAppUpdate', () => ({
+  useAppUpdate: () => ({ available: true, applying: false }),
+}));
+
 let answer: () => Promise<unknown>;
 let sessionAnswer: () => Promise<unknown>;
 let assignmentCalls = 0;
@@ -128,6 +132,16 @@ afterEach(() => {
 });
 
 describe('the established room', () => {
+  test('keeps the update notice in its compact presentation', async () => {
+    renderRoom();
+    await settle();
+
+    const notice = screen.getByText('A new version of QBSheet is ready on this device.').closest('section');
+    expect(notice).toHaveAttribute('data-update-presentation', 'compact');
+    expect(notice).not.toHaveClass('update-notice-hero');
+    expect(screen.getByRole('button', { name: 'Update now' })).not.toHaveClass('is-primary');
+  });
+
   test('checks automatically and does not offer a manual check in the healthy waiting state', async () => {
     renderRoom();
     await settle();
