@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import BrandLogo from '../../BrandLogo';
-import { Button, EmptyState } from '../components/Controls';
+import { Button, EmptyState, PanelBody, PanelFooter } from '../components/Controls';
 import { Icon } from '../components/Icon';
 import { navigation, labelForSection, type SectionId } from './navigation';
 import { useDirectorController } from '../state/useDirectorController';
@@ -15,7 +15,12 @@ import { StandingsView } from '../standings/StandingsView';
 import { PublishView } from '../publish/PublishView';
 import { SettingsView } from '../settings/SettingsView';
 import { importArchiveBytes, importDirectorTournament, importQbjText } from '../format/interchange';
-import { isNativeDirector, openNativeTournamentFile } from '../platform/native';
+import {
+  isNativeDirector,
+  openNativeTournamentFile,
+  readNativeServerStatus,
+  type NativeServerStatus,
+} from '../platform/native';
 import type { DirectorTournamentInput } from '@qbsheet/tournament-formats';
 
 export default function DirectorApp() {
@@ -24,6 +29,9 @@ export default function DirectorApp() {
   const [activeSection, setActiveSection] = useState<SectionId>('overview');
   const [search, setSearch] = useState('');
   const [announcement, setAnnouncement] = useState('');
+  const [qbtcpServerStatus, setQbtcpServerStatus] = useState<NativeServerStatus | null>(() =>
+    isNativeDirector() ? null : { running: false },
+  );
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -38,10 +46,15 @@ export default function DirectorApp() {
   }, []);
 
   useEffect(() => {
-    if (loading || !state.tournament || !isNativeDirector()) return;
+    if (loading || !state.tournament) return;
+    if (!isNativeDirector()) return;
     let active = true;
     const poll = () => {
-      if (active) void syncQbtcp();
+      if (!active) return;
+      void syncQbtcp();
+      void readNativeServerStatus().then((next) => {
+        if (active) setQbtcpServerStatus(next);
+      });
     };
     poll();
     const interval = window.setInterval(poll, 1000);
@@ -65,6 +78,7 @@ export default function DirectorApp() {
   const resultReviewCount = controller.state.submissions.filter(
     (submission) => submission.status === 'review' || submission.status === 'received',
   ).length;
+  const sidebarServer = describeSidebarServer(qbtcpServerStatus, isNativeDirector());
   const renderPage = () => {
     switch (activeSection) {
       case 'overview':
@@ -153,16 +167,15 @@ export default function DirectorApp() {
           ))}
         </nav>
         <div className="director-sidebar-footer">
-          <div className="director-server-status">
-            <span className="director-server-dot" />
+          <div className={`director-server-status is-${sidebarServer.kind}`} data-status={sidebarServer.kind}>
+            <span className="director-server-dot" aria-hidden="true" />
             <div>
-              <strong>
-                {controller.state.qbtcpSessions.length
-                  ? `${controller.state.qbtcpSessions.length} room${controller.state.qbtcpSessions.length === 1 ? '' : 's'} paired`
-                  : 'QBTCP not started'}
-              </strong>
+              <strong>{sidebarServer.label}</strong>
               <small>
-                {controller.repositoryKind === 'tauri-sqlite' ? 'SQLite storage' : 'Browser preview storage'}
+                {sidebarServer.detail ??
+                  (controller.repositoryKind === 'tauri-sqlite'
+                    ? 'SQLite storage'
+                    : 'Browser preview storage')}
               </small>
             </div>
           </div>
@@ -179,7 +192,6 @@ export default function DirectorApp() {
               <strong>Director</strong>
               <small>Local operator</small>
             </div>
-            <Icon name="more" size={16} />
           </div>
         </div>
       </aside>
@@ -351,38 +363,48 @@ function NewTournamentScreen({
         <EmptyState
           title="Create or open a tournament"
           description="Director stores the tournament locally as you work. Start with metadata, then add teams, rooms, packets, and a format."
+          variant="standalone"
+          className="director-start-empty-state"
         >
-          <div className="director-start-form">
-            <label className="director-form-field">
-              <span>Tournament name</span>
-              <input
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                placeholder="Saturday invitational"
-              />
-            </label>
-            <label className="director-form-field">
-              <span>Date</span>
-              <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
-            </label>
-            <label className="director-form-field">
-              <span>Venue</span>
-              <input
-                value={venue}
-                onChange={(event) => setVenue(event.target.value)}
-                placeholder="School or building"
-              />
-            </label>
-            <label className="director-form-field">
-              <span>Organizer</span>
-              <input
-                value={organizer}
-                onChange={(event) => setOrganizer(event.target.value)}
-                placeholder="Your name or organization"
-              />
-            </label>
-            <div className="director-form-actions">
-              <Button variant="primary" icon="plus" onClick={create}>
+          <form
+            className="director-start-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              create();
+            }}
+          >
+            <PanelBody className="director-start-form-body">
+              <label className="director-form-field">
+                <span>Tournament name</span>
+                <input
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  placeholder="Saturday invitational"
+                />
+              </label>
+              <label className="director-form-field">
+                <span>Date</span>
+                <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+              </label>
+              <label className="director-form-field">
+                <span>Venue</span>
+                <input
+                  value={venue}
+                  onChange={(event) => setVenue(event.target.value)}
+                  placeholder="School or building"
+                />
+              </label>
+              <label className="director-form-field">
+                <span>Organizer</span>
+                <input
+                  value={organizer}
+                  onChange={(event) => setOrganizer(event.target.value)}
+                  placeholder="Your name or organization"
+                />
+              </label>
+            </PanelBody>
+            <PanelFooter className="director-form-actions">
+              <Button variant="primary" icon="plus" type="submit">
                 Create tournament
               </Button>
               <label className="director-button director-button-secondary">
@@ -405,8 +427,8 @@ function NewTournamentScreen({
                   Choose file…
                 </Button>
               )}
-            </div>
-          </div>
+            </PanelFooter>
+          </form>
         </EmptyState>
         {announcement && (
           <div className="director-toast director-toast-start" role="status">
@@ -423,6 +445,32 @@ function importWarningMessage(message: string, warnings: string[]): string {
   return warnings.length > 0
     ? `${message} ${warnings.length} compatibility warning${warnings.length === 1 ? '' : 's'} retained.`
     : message;
+}
+
+type SidebarServerKind = 'unknown' | 'unavailable' | 'stopped' | 'running' | 'paired' | 'error';
+
+function describeSidebarServer(
+  status: NativeServerStatus | null,
+  native: boolean,
+): { kind: SidebarServerKind; label: string; detail?: string } {
+  if (!native) return { kind: 'unavailable', label: 'QBTCP not started' };
+  if (!status) return { kind: 'unknown', label: 'Checking QBTCP…' };
+  if (!status.running) {
+    return status.message && !isExpectedStoppedMessage(status.message)
+      ? { kind: 'error', label: 'QBTCP server error', detail: status.message }
+      : { kind: 'stopped', label: 'QBTCP not started' };
+  }
+  const pairedRooms = status.pairedRooms ?? 0;
+  return pairedRooms > 0
+    ? {
+        kind: 'paired',
+        label: `${pairedRooms} room${pairedRooms === 1 ? '' : 's'} paired`,
+      }
+    : { kind: 'running', label: 'QBTCP server running' };
+}
+
+function isExpectedStoppedMessage(message: string): boolean {
+  return /^qbtcp server stopped\.?$/i.test(message.trim());
 }
 
 function statusLabel(status: string): string {

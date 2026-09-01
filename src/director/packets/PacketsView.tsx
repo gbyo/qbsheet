@@ -47,7 +47,9 @@ export function PacketsView({
           notes: packet.notes,
         })),
       );
-      onAnnounce(`${report.state.packets.length} packet${report.state.packets.length === 1 ? '' : 's'} imported.`);
+      onAnnounce(
+        `${report.state.packets.length} packet${report.state.packets.length === 1 ? '' : 's'} imported.`,
+      );
     } catch (reason: unknown) {
       onAnnounce(reason instanceof Error ? reason.message : 'That QBJ file could not be read.');
     }

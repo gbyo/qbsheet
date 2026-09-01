@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { DirectorController } from '../state/useDirectorController';
 import type { DirectorState } from '../domain';
-import { Button, EmptyState, FormField, StateLabel } from '../components/Controls';
+import { Button, EmptyState, FormField, PanelBody, PanelFooter, StateLabel } from '../components/Controls';
 import { Icon } from '../components/Icon';
 import { PageHeader } from '../components/PageHeader';
 
@@ -128,35 +128,37 @@ export function TeamsView({
               Close
             </Button>
           </div>
-          <div className="director-form-grid">
-            <FormField label="Display name">
-              <input
-                value={displayName}
-                onChange={(event) => setDisplayName(event.target.value)}
-                placeholder="Northview A"
-              />
-            </FormField>
-            <FormField label="School / organization">
-              <input
-                value={organizationName}
-                onChange={(event) => setOrganizationName(event.target.value)}
-                placeholder="Northview High"
-              />
-            </FormField>
-            <FormField label="Team letter">
-              <input
-                value={teamLetter}
-                onChange={(event) => setTeamLetter(event.target.value)}
-                placeholder="A"
-                maxLength={4}
-              />
-            </FormField>
-          </div>
-          <div className="director-form-actions">
+          <PanelBody>
+            <div className="director-form-grid director-form-grid-three">
+              <FormField label="Display name">
+                <input
+                  value={displayName}
+                  onChange={(event) => setDisplayName(event.target.value)}
+                  placeholder="Northview A"
+                />
+              </FormField>
+              <FormField label="School / organization">
+                <input
+                  value={organizationName}
+                  onChange={(event) => setOrganizationName(event.target.value)}
+                  placeholder="Northview High"
+                />
+              </FormField>
+              <FormField label="Team letter">
+                <input
+                  value={teamLetter}
+                  onChange={(event) => setTeamLetter(event.target.value)}
+                  placeholder="A"
+                  maxLength={4}
+                />
+              </FormField>
+            </div>
+          </PanelBody>
+          <PanelFooter className="director-form-actions">
             <Button variant="primary" onClick={submitTeam}>
               Save team
             </Button>
-          </div>
+          </PanelFooter>
         </section>
       )}
 
@@ -171,21 +173,23 @@ export function TeamsView({
               Close
             </Button>
           </div>
-          <p className="director-panel-description">
-            One team per line. Use columns for team name, school, and team letter.
-          </p>
-          <textarea
-            className="director-textarea"
-            value={paste}
-            onChange={(event) => setPaste(event.target.value)}
-            placeholder={'Northview A\tNorthview High\tA\nRiverside A\tRiverside School\tA'}
-            rows={5}
-          />
-          <div className="director-form-actions">
+          <PanelBody>
+            <p className="director-panel-description">
+              One team per line. Use columns for team name, school, and team letter.
+            </p>
+            <textarea
+              className="director-textarea"
+              value={paste}
+              onChange={(event) => setPaste(event.target.value)}
+              placeholder={'Northview A\tNorthview High\tA\nRiverside A\tRiverside School\tA'}
+              rows={5}
+            />
+          </PanelBody>
+          <PanelFooter className="director-form-actions">
             <Button variant="primary" onClick={importPaste}>
               Add pasted teams
             </Button>
-          </div>
+          </PanelFooter>
         </section>
       )}
 
@@ -222,15 +226,23 @@ export function TeamsView({
                 </tr>
               </thead>
               <tbody>
-                {visibleTeams.map((team) => (
-                  <TeamRow
-                    key={team.id}
-                    state={state}
-                    teamId={team.id}
-                    controller={controller}
-                    onAnnounce={onAnnounce}
-                  />
-                ))}
+                {visibleTeams.length > 0 ? (
+                  visibleTeams.map((team) => (
+                    <TeamRow
+                      key={team.id}
+                      state={state}
+                      teamId={team.id}
+                      controller={controller}
+                      onAnnounce={onAnnounce}
+                    />
+                  ))
+                ) : (
+                  <tr className="director-table-empty-row">
+                    <td colSpan={6}>
+                      <p className="director-empty-copy">No teams match the current search.</p>
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -264,27 +276,32 @@ function TeamRow({
       </td>
       <td>{organizationNameFor(state, team.organizationId) || '—'}</td>
       <td>
-        <details>
-          <summary>
+        <details className="director-roster-details">
+          <summary className="director-roster-summary">
             {players.length} player{players.length === 1 ? '' : 's'}
           </summary>
-          <div className="director-roster-popover">
-            {players.map((player) => (
-              <div key={player.id} className="director-roster-line">
-                <span>
-                  {player.name}
-                  {player.captain ? ' · captain' : ''}
-                </span>
-                <button
-                  type="button"
-                  className="director-inline-action"
-                  onClick={() => controller.removePlayer(player.id)}
-                >
-                  Remove
-                </button>
-              </div>
-            ))}
-            <div className="director-inline-form">
+          <div className="director-roster-editor">
+            {players.length > 0 && (
+              <ul className="director-list director-roster-list">
+                {players.map((player) => (
+                  <li key={player.id} className="director-list-row director-roster-row">
+                    <span>
+                      {player.name}
+                      {player.captain ? ' · captain' : ''}
+                    </span>
+                    <button
+                      type="button"
+                      className="director-inline-action director-roster-remove-action"
+                      aria-label={`Remove ${player.name} from ${team.displayName}`}
+                      onClick={() => controller.removePlayer(player.id)}
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="director-inline-form director-roster-add-row">
               <input
                 aria-label={`Add player to ${team.displayName}`}
                 value={playerName}
@@ -293,7 +310,7 @@ function TeamRow({
               />
               <button
                 type="button"
-                className="director-inline-action"
+                className="director-inline-action director-roster-add-action"
                 onClick={() => {
                   controller.addPlayer(team.id, playerName);
                   setPlayerName('');
@@ -317,8 +334,8 @@ function TeamRow({
       <td>
         <button
           type="button"
-          className="director-icon-button"
-          aria-label={`More actions for ${team.displayName}`}
+          className="director-button director-button-quiet director-table-action"
+          aria-label={`${team.status === 'dropped' ? 'Restore' : 'Drop'} ${team.displayName}`}
           onClick={() => {
             if (team.status === 'dropped') controller.restoreTeam(team.id);
             else controller.dropTeam(team.id);
@@ -329,7 +346,8 @@ function TeamRow({
             );
           }}
         >
-          <Icon name={team.status === 'dropped' ? 'refresh' : 'more'} size={16} />
+          <Icon name={team.status === 'dropped' ? 'refresh' : 'x'} size={15} />
+          <span>{team.status === 'dropped' ? 'Restore' : 'Drop'}</span>
         </button>
       </td>
     </tr>

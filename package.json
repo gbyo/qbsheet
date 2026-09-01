@@ -50,7 +50,7 @@
     "test:browser:yellowfruit": "playwright test e2e/YellowFruitInterop.spec.ts",
     "test:mutation": "stryker run",
     "test:mutation:dry": "stryker run --dryRunOnly",
-    "prepare": "npm run build:core"
+    "prepare": "npm run build:core && npm run build --workspace=@qbsheet/tournament-formats"
   },
   "dependencies": {
     "@qbsheet/tournament-core": "0.1.0",

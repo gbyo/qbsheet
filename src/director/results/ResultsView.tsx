@@ -1,8 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { DirectorState, TeamGameScore } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
-import { Button, EmptyState, FormField, StateLabel } from '../components/Controls';
-import { Icon } from '../components/Icon';
+import { Button, FormField, StateLabel } from '../components/Controls';
 import { PageHeader } from '../components/PageHeader';
 
 export function ResultsView({
@@ -42,66 +41,72 @@ export function ResultsView({
           </Button>
         }
       />
-      {showManual && (
-        <ManualResult
-          state={state}
-          controller={controller}
-          onAnnounce={(message) => {
-            setShowManual(false);
-            onAnnounce(message);
-          }}
-        />
-      )}
-      <section className="director-panel">
-        <div className="director-filter-tabs" role="tablist" aria-label="Result status">
-          <FilterButton active={filter === 'all'} onClick={() => setFilter('all')}>
-            All <span>{state.submissions.length}</span>
-          </FilterButton>
-          <FilterButton active={filter === 'review'} onClick={() => setFilter('review')}>
-            Review <span>{reviewCount}</span>
-          </FilterButton>
-          <FilterButton active={filter === 'accepted'} onClick={() => setFilter('accepted')}>
-            Accepted{' '}
-            <span>{state.submissions.filter((submission) => submission.status === 'accepted').length}</span>
-          </FilterButton>
-          <FilterButton active={filter === 'rejected'} onClick={() => setFilter('rejected')}>
-            Rejected{' '}
-            <span>{state.submissions.filter((submission) => submission.status === 'rejected').length}</span>
-          </FilterButton>
-        </div>
-        {submissions.length === 0 ? (
-          <EmptyState
-            title="No submissions in this view"
-            description="Electronic QBTCP submissions and paper/manual results will appear here."
+      <div className="director-page-stack">
+        {showManual && (
+          <ManualResult
+            state={state}
+            controller={controller}
+            onAnnounce={(message) => {
+              setShowManual(false);
+              onAnnounce(message);
+            }}
           />
-        ) : (
-          <div className="director-table-wrap">
-            <table className="director-table">
-              <thead>
-                <tr>
-                  <th>Received</th>
-                  <th>Game</th>
-                  <th>Score</th>
-                  <th>Source</th>
-                  <th>Status</th>
-                  <th aria-label="Actions" />
-                </tr>
-              </thead>
-              <tbody>
-                {submissions.map((submission) => (
-                  <ResultRow
-                    key={submission.id}
-                    state={state}
-                    submission={submission}
-                    controller={controller}
-                    onAnnounce={onAnnounce}
-                  />
-                ))}
-              </tbody>
-            </table>
-          </div>
         )}
-      </section>
+        <section className="director-panel">
+          <div className="director-panel-body director-panel-filter">
+            <div className="director-filter-tabs" role="tablist" aria-label="Result status">
+              <FilterButton active={filter === 'all'} onClick={() => setFilter('all')}>
+                All <span>{state.submissions.length}</span>
+              </FilterButton>
+              <FilterButton active={filter === 'review'} onClick={() => setFilter('review')}>
+                Review <span>{reviewCount}</span>
+              </FilterButton>
+              <FilterButton active={filter === 'accepted'} onClick={() => setFilter('accepted')}>
+                Accepted{' '}
+                <span>{state.submissions.filter((submission) => submission.status === 'accepted').length}</span>
+              </FilterButton>
+              <FilterButton active={filter === 'rejected'} onClick={() => setFilter('rejected')}>
+                Rejected{' '}
+                <span>{state.submissions.filter((submission) => submission.status === 'rejected').length}</span>
+              </FilterButton>
+            </div>
+          </div>
+          {submissions.length === 0 ? (
+            <div className="director-panel-body director-empty-state--contained" role="status">
+              <p className="director-empty-copy">
+                No submissions in this view. Electronic QBTCP submissions and paper/manual results will appear
+                here.
+              </p>
+            </div>
+          ) : (
+            <div className="director-table-wrap">
+              <table className="director-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Received</th>
+                    <th scope="col">Game</th>
+                    <th scope="col">Score</th>
+                    <th scope="col">Source</th>
+                    <th scope="col">Status</th>
+                    <th scope="col" aria-label="Actions" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {submissions.map((submission) => (
+                    <ResultRow
+                      key={submission.id}
+                      state={state}
+                      submission={submission}
+                      controller={controller}
+                      onAnnounce={onAnnounce}
+                    />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      </div>
     </>
   );
 }
@@ -145,13 +150,7 @@ function ResultRow({
       <td>{game?.source ?? 'QBTCP'}</td>
       <td>
         <StateLabel
-          state={
-            submission.status === 'accepted'
-              ? 'finished'
-              : submission.status === 'rejected'
-                ? 'offline'
-                : 'help'
-          }
+          state={submissionState(submission.status)}
           label={submission.status === 'received' ? 'Review' : submission.status}
         />
       </td>
@@ -180,16 +179,15 @@ function ResultRow({
             </>
           )}
           {submission.status === 'accepted' && (
-            <button
-              type="button"
-              className="director-icon-button"
-              aria-label={`Open actions for ${left} and ${right}`}
+            <Button
+              variant="quiet"
+              icon="history"
               onClick={() =>
                 onAnnounce('Accepted result is retained in the audit history for correction workflows.')
               }
             >
-              <Icon name="more" size={16} />
-            </button>
+              Audit note
+            </Button>
           )}
         </div>
       </td>
@@ -243,39 +241,43 @@ function ManualResult({
         </div>
       </div>
       {choices.length === 0 ? (
-        <p className="director-empty-copy">
-          There are no unresolved scheduled games available for manual entry.
-        </p>
+        <div className="director-panel-body director-empty-state--contained" role="status">
+          <p className="director-empty-copy">
+            There are no unresolved scheduled games available for manual entry.
+          </p>
+        </div>
       ) : (
         <>
-          <div className="director-form-grid">
-            <FormField label="Scheduled game">
-              <select value={gameId} onChange={(event) => setGameId(event.target.value)}>
-                {choices.map((game) => (
-                  <option key={game.id} value={game.id}>
-                    {teamLabel(state, game.leftTeamId)} · {teamLabel(state, game.rightTeamId)}
-                  </option>
-                ))}
-              </select>
-            </FormField>
-            <FormField label={selected ? teamLabel(state, selected.leftTeamId) : 'Left score'}>
-              <input
-                type="number"
-                min="0"
-                value={leftScore}
-                onChange={(event) => setLeftScore(event.target.value)}
-              />
-            </FormField>
-            <FormField label={selected ? teamLabel(state, selected.rightTeamId) : 'Right score'}>
-              <input
-                type="number"
-                min="0"
-                value={rightScore}
-                onChange={(event) => setRightScore(event.target.value)}
-              />
-            </FormField>
+          <div className="director-panel-body">
+            <div className="director-form-grid">
+              <FormField label="Scheduled game">
+                <select value={gameId} onChange={(event) => setGameId(event.target.value)}>
+                  {choices.map((game) => (
+                    <option key={game.id} value={game.id}>
+                      {teamLabel(state, game.leftTeamId)} · {teamLabel(state, game.rightTeamId)}
+                    </option>
+                  ))}
+                </select>
+              </FormField>
+              <FormField label={selected ? teamLabel(state, selected.leftTeamId) : 'Left score'}>
+                <input
+                  type="number"
+                  min="0"
+                  value={leftScore}
+                  onChange={(event) => setLeftScore(event.target.value)}
+                />
+              </FormField>
+              <FormField label={selected ? teamLabel(state, selected.rightTeamId) : 'Right score'}>
+                <input
+                  type="number"
+                  min="0"
+                  value={rightScore}
+                  onChange={(event) => setRightScore(event.target.value)}
+                />
+              </FormField>
+            </div>
           </div>
-          <div className="director-form-actions">
+          <div className="director-panel-footer">
             <Button variant="primary" onClick={save}>
               Accept manual result
             </Button>
@@ -284,6 +286,16 @@ function ManualResult({
       )}
     </section>
   );
+}
+
+function submissionState(status: DirectorState['submissions'][number]['status']): string {
+  return status === 'accepted'
+    ? 'accepted'
+    : status === 'rejected'
+      ? 'rejected'
+      : status === 'duplicate'
+        ? 'warning'
+        : 'review';
 }
 
 function FilterButton({

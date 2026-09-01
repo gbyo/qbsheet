@@ -27,14 +27,15 @@ export function StandingsView({
           </Button>
         }
       />
-      {state.teams.length === 0 ? (
-        <EmptyState
-          title="No standings yet"
-          description="Add teams and accept results to derive records, scoring, and player statistics."
-        />
-      ) : (
-        <>
-          <section className="director-panel">
+      <div className="director-page-stack">
+        {state.teams.length === 0 ? (
+          <EmptyState
+            title="No standings yet"
+            description="Add teams and accept results to derive records, scoring, and player statistics."
+          />
+        ) : (
+          <>
+            <section className="director-panel">
             <div className="director-panel-heading">
               <div>
                 <p className="director-eyebrow">Team standings</p>
@@ -48,48 +49,48 @@ export function StandingsView({
               <table className="director-table director-standings-table">
                 <thead>
                   <tr>
-                    <th>#</th>
-                    <th>Team</th>
-                    <th>W–L</th>
-                    <th>Win %</th>
-                    <th>PF</th>
-                    <th>PA</th>
-                    <th>Margin</th>
-                    <th>Powers</th>
-                    <th>Gets</th>
-                    <th>Negs</th>
+                    <th scope="col">#</th>
+                    <th scope="col">Team</th>
+                    <th scope="col">W–L</th>
+                    <th scope="col">Win %</th>
+                    <th scope="col">PF</th>
+                    <th scope="col">PA</th>
+                    <th scope="col">Margin</th>
+                    <th scope="col">Powers</th>
+                    <th scope="col">Gets</th>
+                    <th scope="col">Negs</th>
                   </tr>
                 </thead>
                 <tbody>
                   {teamStandings.map((standing, index) => (
                     <tr key={standing.teamId}>
-                      <td>{index + 1}</td>
+                      <td className="director-number-cell">{index + 1}</td>
                       <td>
                         <strong>
                           {state.teams.find((team) => team.id === standing.teamId)?.displayName ?? 'Unknown'}
                         </strong>
                       </td>
-                      <td className="director-record-cell">
+                      <td className="director-record-cell director-number-cell">
                         {standing.wins}–{standing.losses}
                         {standing.ties ? `–${standing.ties}` : ''}
                       </td>
-                      <td>{(standing.winPercentage * 100).toFixed(1)}%</td>
-                      <td>{standing.pointsFor}</td>
-                      <td>{standing.pointsAgainst}</td>
-                      <td>
+                      <td className="director-number-cell">{(standing.winPercentage * 100).toFixed(1)}%</td>
+                      <td className="director-number-cell">{standing.pointsFor}</td>
+                      <td className="director-number-cell">{standing.pointsAgainst}</td>
+                      <td className="director-number-cell">
                         {standing.margin > 0 ? '+' : ''}
                         {standing.margin}
                       </td>
-                      <td>{standing.powers}</td>
-                      <td>{standing.gets}</td>
-                      <td>{standing.negs}</td>
+                      <td className="director-number-cell">{standing.powers}</td>
+                      <td className="director-number-cell">{standing.gets}</td>
+                      <td className="director-number-cell">{standing.negs}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-          </section>
-          <section className="director-panel">
+            </section>
+            <section className="director-panel">
             <div className="director-panel-heading">
               <div>
                 <p className="director-eyebrow">Player statistics</p>
@@ -98,22 +99,24 @@ export function StandingsView({
               <span className="director-muted">Accepted games only</span>
             </div>
             {playerStandings.length === 0 ? (
-              <p className="director-empty-copy">
-                Player statistics will appear when accepted results include rosters.
-              </p>
+              <div className="director-panel-body director-empty-state--contained" role="status">
+                <p className="director-empty-copy">
+                  Player statistics will appear when accepted results include rosters.
+                </p>
+              </div>
             ) : (
               <div className="director-table-wrap">
-                <table className="director-table">
+                <table className="director-table director-player-table">
                   <thead>
                     <tr>
-                      <th>Player</th>
-                      <th>Team</th>
-                      <th>Games</th>
-                      <th>PPG</th>
-                      <th>Powers</th>
-                      <th>Gets</th>
-                      <th>Negs</th>
-                      <th>Bonus pts</th>
+                      <th scope="col">Player</th>
+                      <th scope="col">Team</th>
+                      <th scope="col">Games</th>
+                      <th scope="col">PPG</th>
+                      <th scope="col">Powers</th>
+                      <th scope="col">Gets</th>
+                      <th scope="col">Negs</th>
+                      <th scope="col">Bonus pts</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -128,21 +131,22 @@ export function StandingsView({
                         <td>
                           {state.teams.find((team) => team.id === standing.teamId)?.displayName ?? 'Unknown'}
                         </td>
-                        <td>{standing.gamesPlayed}</td>
-                        <td>{standing.ppg.toFixed(1)}</td>
-                        <td>{standing.powers}</td>
-                        <td>{standing.gets}</td>
-                        <td>{standing.negs}</td>
-                        <td>{standing.bonusPoints}</td>
+                      <td className="director-number-cell">{standing.gamesPlayed}</td>
+                      <td className="director-number-cell">{standing.ppg.toFixed(1)}</td>
+                      <td className="director-number-cell">{standing.powers}</td>
+                      <td className="director-number-cell">{standing.gets}</td>
+                      <td className="director-number-cell">{standing.negs}</td>
+                      <td className="director-number-cell">{standing.bonusPoints}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
             )}
-          </section>
-        </>
-      )}
+            </section>
+          </>
+        )}
+      </div>
     </>
   );
 }

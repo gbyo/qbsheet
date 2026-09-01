@@ -122,10 +122,17 @@ export function RoomsView({
           </div>
           <div className="director-form-grid">
             <FormField label="Name">
-              <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Alex Morgan" />
+              <input
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                placeholder="Alex Morgan"
+              />
             </FormField>
             <FormField label="Primary role">
-              <select value={staffRole} onChange={(event) => setStaffRole(event.target.value as typeof staffRole)}>
+              <select
+                value={staffRole}
+                onChange={(event) => setStaffRole(event.target.value as typeof staffRole)}
+              >
                 <option value="moderator">Moderator</option>
                 <option value="scorekeeper">Scorekeeper</option>
                 <option value="runner">Runner</option>
@@ -153,7 +160,11 @@ export function RoomsView({
           </div>
           <div className="director-form-grid">
             <FormField label="Name">
-              <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Buzzer set 1" />
+              <input
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                placeholder="Buzzer set 1"
+              />
             </FormField>
             <FormField label="Type">
               <select
@@ -256,7 +267,9 @@ export function RoomsView({
             <div className="director-panel-heading">
               <div>
                 <p className="director-eyebrow">Staff</p>
-                <h2>{state.staff.length} available member{state.staff.length === 1 ? '' : 's'}</h2>
+                <h2>
+                  {state.staff.length} available member{state.staff.length === 1 ? '' : 's'}
+                </h2>
               </div>
             </div>
             <ul className="director-plain-list">
@@ -272,7 +285,9 @@ export function RoomsView({
             <div className="director-panel-heading">
               <div>
                 <p className="director-eyebrow">Equipment</p>
-                <h2>{state.equipment.length} resource{state.equipment.length === 1 ? '' : 's'}</h2>
+                <h2>
+                  {state.equipment.length} resource{state.equipment.length === 1 ? '' : 's'}
+                </h2>
               </div>
             </div>
             <ul className="director-plain-list">

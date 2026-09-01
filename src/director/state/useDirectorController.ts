@@ -1057,22 +1057,21 @@ function applyNativePresence(state: DirectorState, snapshot: NativeServerSnapsho
       (session) => session.roomId === presence.roomId && session.deviceId === presence.deviceId,
     );
     const sessionId = existing?.sessionId ?? `qbtcp-${presence.roomId}-${presence.deviceId}`;
-    const session =
-      existing ??
-      {
-        roomId: presence.roomId,
-        sessionId,
-        deviceId: presence.deviceId,
-        state: 'paired' as const,
-        lastSeenAt: presence.observedAt,
-        progress: null,
-        helpRequestId: null,
-      };
+    const session = existing ?? {
+      roomId: presence.roomId,
+      sessionId,
+      deviceId: presence.deviceId,
+      state: 'paired' as const,
+      lastSeenAt: presence.observedAt,
+      progress: null,
+      helpRequestId: null,
+    };
     if (!existing) {
       state.qbtcpSessions.push(session);
       changed = true;
     }
-    const nextState = presence.update.ready === true && session.state === 'paired' ? 'assigned' : session.state;
+    const nextState =
+      presence.update.ready === true && session.state === 'paired' ? 'assigned' : session.state;
     if (
       session.operatorName !== presence.operatorName ||
       session.lastSeenAt !== presence.observedAt ||
@@ -1192,7 +1191,7 @@ function applyNativeResults(state: DirectorState, snapshot: NativeServerSnapshot
       at: now,
       actor: 'QBTCP',
       type: 'result-received',
-      summary: `Received a result for ${scheduled ? gameLabel(state, scheduled.id) : matchId ?? 'an unmatched game'}.`,
+      summary: `Received a result for ${scheduled ? gameLabel(state, scheduled.id) : (matchId ?? 'an unmatched game')}.`,
       entityId: gameId,
       details: {
         transportResultId: result.id,
@@ -1220,9 +1219,8 @@ function matchIdentity(value: unknown): string | undefined {
   const root = value as { id?: unknown; type?: unknown; objects?: unknown };
   if (root.type === 'Match' && typeof root.id === 'string') return root.id;
   if (Array.isArray(root.objects)) {
-    const match = root.objects.find(
-      (entry): entry is { type?: unknown; id?: unknown } =>
-        Boolean(entry && typeof entry === 'object' && (entry as { type?: unknown }).type === 'Match'),
+    const match = root.objects.find((entry): entry is { type?: unknown; id?: unknown } =>
+      Boolean(entry && typeof entry === 'object' && (entry as { type?: unknown }).type === 'Match'),
     );
     return match && typeof match.id === 'string' ? match.id : undefined;
   }
@@ -1266,7 +1264,8 @@ function resultScores(
       const playerRecord = candidate as Record<string, unknown>;
       const playerName = namedValue(playerRecord.player);
       const player = state.players.find(
-        (entry) => entry.teamId === teamId && entry.name.toLocaleLowerCase() === playerName?.toLocaleLowerCase(),
+        (entry) =>
+          entry.teamId === teamId && entry.name.toLocaleLowerCase() === playerName?.toLocaleLowerCase(),
       );
       if (!player) return [];
       const counts = Array.isArray(playerRecord.answer_counts) ? playerRecord.answer_counts : [];
@@ -1276,7 +1275,10 @@ function resultScores(
       for (const count of counts) {
         if (!count || typeof count !== 'object') continue;
         const answer = (count as Record<string, unknown>).answer_type;
-        const value = answer && typeof answer === 'object' ? finiteNumber((answer as Record<string, unknown>).value) : undefined;
+        const value =
+          answer && typeof answer === 'object'
+            ? finiteNumber((answer as Record<string, unknown>).value)
+            : undefined;
         const number = finiteNumber((count as Record<string, unknown>).number)
           ? Number((count as Record<string, unknown>).number)
           : 0;
@@ -1318,7 +1320,10 @@ function teamAggregate(
       for (const count of counts) {
         if (!count || typeof count !== 'object') continue;
         const answer = (count as Record<string, unknown>).answer_type;
-        const value = answer && typeof answer === 'object' ? finiteNumber((answer as Record<string, unknown>).value) : undefined;
+        const value =
+          answer && typeof answer === 'object'
+            ? finiteNumber((answer as Record<string, unknown>).value)
+            : undefined;
         const number = finiteNumber((count as Record<string, unknown>).number)
           ? Number((count as Record<string, unknown>).number)
           : 0;
@@ -1329,9 +1334,7 @@ function teamAggregate(
       }
     }
   }
-  const bouncebacks = finiteNumber(entry.bonus_bounceback_points)
-    ? Number(entry.bonus_bounceback_points)
-    : 0;
+  const bouncebacks = finiteNumber(entry.bonus_bounceback_points) ? Number(entry.bonus_bounceback_points) : 0;
   const lightning = finiteNumber(entry.lightning_points) ? Number(entry.lightning_points) : 0;
   const tossupPoints =
     powers * (state.tournament?.rules.powerValue ?? 15) +
@@ -1353,9 +1356,8 @@ function matchObject(value: unknown): Record<string, unknown> | undefined {
   const root = value as Record<string, unknown>;
   if (root.type === 'Match') return root;
   return Array.isArray(root.objects)
-    ? (root.objects.find(
-        (entry): entry is Record<string, unknown> =>
-          Boolean(entry && typeof entry === 'object' && (entry as Record<string, unknown>).type === 'Match'),
+    ? (root.objects.find((entry): entry is Record<string, unknown> =>
+        Boolean(entry && typeof entry === 'object' && (entry as Record<string, unknown>).type === 'Match'),
       ) ?? undefined)
     : undefined;
 }
@@ -1366,14 +1368,13 @@ function resultTeamId(
   scheduled: DirectorState['scheduledGames'][number] | undefined,
 ): string | undefined {
   const identity = namedIdentity(value);
-  const candidates = [scheduled?.leftTeamId, scheduled?.rightTeamId].filter(
-    (entry): entry is string => Boolean(entry),
+  const candidates = [scheduled?.leftTeamId, scheduled?.rightTeamId].filter((entry): entry is string =>
+    Boolean(entry),
   );
   if (identity && candidates.includes(identity)) return identity;
   const team = state.teams.find(
     (entry) =>
-      entry.id === identity ||
-      entry.displayName.toLocaleLowerCase() === identity?.toLocaleLowerCase(),
+      entry.id === identity || entry.displayName.toLocaleLowerCase() === identity?.toLocaleLowerCase(),
   );
   return team?.id;
 }
@@ -1403,7 +1404,9 @@ function progressSummary(
 ): NonNullable<DirectorState['qbtcpSessions'][number]['progress']> {
   const match = matchObject(value);
   const entries = Array.isArray(match?.match_teams) ? match.match_teams : [];
-  const scheduled = state.scheduledGames.find((game) => game.roomId === roomId && game.status !== 'cancelled');
+  const scheduled = state.scheduledGames.find(
+    (game) => game.roomId === roomId && game.status !== 'cancelled',
+  );
   const points = entries.map((entry) => {
     if (!entry || typeof entry !== 'object') return undefined;
     return finiteNumber((entry as Record<string, unknown>).points);
@@ -1420,7 +1423,7 @@ function gameLabel(state: DirectorState, scheduledId: string): string {
   if (!scheduled) return scheduledId;
   const left = state.teams.find((team) => team.id === scheduled.leftTeamId)?.displayName ?? 'Team';
   const right = scheduled.rightTeamId
-    ? state.teams.find((team) => team.id === scheduled.rightTeamId)?.displayName ?? 'Team'
+    ? (state.teams.find((team) => team.id === scheduled.rightTeamId)?.displayName ?? 'Team')
     : 'Bye';
   return `${left} vs ${right}`;
 }

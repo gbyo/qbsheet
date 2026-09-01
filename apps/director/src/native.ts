@@ -83,10 +83,7 @@ export async function saveDirectorState(state: unknown): Promise<StoreStatus> {
   return invoke<StoreStatus>('director_save_state', { state });
 }
 
-export async function checkpointDirectorState(
-  state: unknown,
-  reason: string,
-): Promise<StoreStatus> {
+export async function checkpointDirectorState(state: unknown, reason: string): Promise<StoreStatus> {
   requireTauri();
   return invoke<StoreStatus>('director_checkpoint', { state, reason });
 }
