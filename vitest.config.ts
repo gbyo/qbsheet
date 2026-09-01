@@ -45,8 +45,12 @@ export default defineConfig({
   test: {
     globals: true,
     css: false,
-    // Worker threads avoid the process-startup cost of Vitest's default fork pool. The DOM tests
-    // remain isolated by Vitest, so browser globals and persistence cannot leak between files.
+    // Worker threads avoid the process-startup cost of Vitest's default fork pool. Vitest gives
+    // each file its own module registry and its own jsdom, so anything jsdom defines is per file.
+    // What threads do share is the process, and therefore any global Node supplies that jsdom does
+    // not: `BroadcastChannel` is the one that matters, because Node's reaches every worker in the
+    // process and the duplicate-tab guard would read the rest of the suite as rival tabs. It is
+    // replaced with a realm-local one in `tests/broadcastChannel.ts`.
     pool: 'threads',
     projects: [
       {
