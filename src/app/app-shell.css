@@ -2,9 +2,11 @@
  *
  * The palette and the rhythm are the scorer's, because they are the same application and a
  * scorekeeper moves between them in the middle of a round. Flat surfaces, 1px rules, small radii on
- * things you press and nothing else. No gradients, no drop shadows standing in for hierarchy, no
- * cards floating in padding, no icon wall, no pills. A room is looking at this for ten seconds at a
- * time and needs to find one button.
+ * things you press and nothing else. Gradients are not used for ordinary hierarchy. The homepage's
+ * temporary update-available wash is the single intentional exception: an environmental state, not
+ * a reusable surface treatment. No drop shadows standing in for hierarchy, no cards floating in
+ * padding, no icon wall, no pills. A room is looking at this for ten seconds at a time and needs to
+ * find one button.
  *
  * Blue is reserved for the primary action on a screen — Connect, Resume, Download QBJ — and is not
  * spent on anything else, so it always means "this is the thing to press".
@@ -73,6 +75,10 @@
   --room-error-border: #d9534f;
   --room-info-bg: #eaf3fb;
   --room-info-border: #6aa9dd;
+  /* The homepage update wash is deliberately separate from ordinary information surfaces. It is
+     allowed to illuminate the page, but is not a palette for cards, controls, or other screens. */
+  --update-wash-strong: #d7ecff;
+  --update-wash-soft: #edf6ff;
 
   /* Elevation and scrims, tokenized for the same reason the colours are: black at 40% over a white
      page is a dimmer, and over a near-black one it is invisible. */
@@ -120,6 +126,8 @@
     --room-error-border: #8e3b35;
     --room-info-bg: #13202d;
     --room-info-border: #35638f;
+    --update-wash-strong: #102c4a;
+    --update-wash-soft: #152231;
 
     /* A scrim has to darken a ground that is already dark, so it is heavier here; a shadow cannot
        darken one at all, so elevation is carried by the sunken/raised surface pair instead and the
@@ -157,6 +165,8 @@
   --room-error-border: #8e3b35;
   --room-info-bg: #13202d;
   --room-info-border: #35638f;
+  --update-wash-strong: #102c4a;
+  --update-wash-soft: #152231;
 
   --room-scrim: rgb(0 0 0 / 62%);
   --room-shadow-raised: 0 1px 3px rgb(0 0 0 / 45%);
@@ -240,6 +250,26 @@ body {
   font-size: 0.875rem;
   line-height: 1.45;
   -webkit-font-smoothing: antialiased;
+}
+
+/*
+ * An update changes the atmosphere of the homepage, not the shape of its notice. The rendered hero
+ * is the source of truth: dismissing it replaces that element with the quiet treatment, so this
+ * wash disappears without mirroring service-worker or localStorage state in the page shell.
+ * Absolute-length stops keep the fade calm and consistent on both a Chromebook and a tall phone;
+ * everything below the top region is the ordinary surface again.
+ */
+body:has(.welcome-shell .update-notice-hero) {
+  min-height: 100vh;
+  background:
+    linear-gradient(
+      180deg,
+      var(--update-wash-strong) 0,
+      var(--update-wash-soft) 13rem,
+      var(--room-surface) 34rem
+    ),
+    var(--room-surface);
+  background-repeat: no-repeat;
 }
 
 /* #region Shell */
@@ -2362,10 +2392,11 @@ body {
 /*
  * The offer to update.
  *
- * Shaped like `.resume-card` — a fact on the left, one button on the right — because it is the same
- * kind of thing and because a scorekeeper should not have to work out what a new kind of box is for.
- * Styled as information rather than as a warning: nothing is wrong, and a room that ignores this for
- * the rest of the day loses nothing.
+ * The default is shaped like `.resume-card` — a fact on the left, one button on the right — because
+ * it is the same kind of thing and because a scorekeeper should not have to work out what a new kind
+ * of box is for. Styled as information rather than as a warning: nothing is wrong, and a room that
+ * ignores this for the rest of the day loses nothing. The homepage hero below is a narrowly scoped
+ * presentation of this same state; connected screens continue to use this compact default.
  */
 .update-notice {
   display: flex;
@@ -2378,6 +2409,10 @@ body {
   background: var(--room-info-bg);
 }
 
+.update-notice > :first-child {
+  min-width: 0;
+}
+
 .update-notice-title {
   margin: 0;
   font-size: 0.875rem;
@@ -2388,6 +2423,39 @@ body {
   margin: 4px 0 0;
   font-size: 0.8125rem;
   color: var(--room-muted);
+}
+
+.update-notice-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+  align-items: center;
+}
+
+/* Embedded in the page wash rather than drawn as another card. */
+.update-notice-hero {
+  display: block;
+  max-width: 38rem;
+  padding: 26px 0 30px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.update-notice-hero .update-notice-title {
+  max-width: 32rem;
+  font-size: 1.125rem;
+  line-height: 1.35;
+}
+
+.update-notice-hero .update-notice-copy {
+  max-width: 36rem;
+  margin-top: 8px;
+  font-size: 0.875rem;
+}
+
+.update-notice-hero .update-notice-actions {
+  margin-top: 18px;
 }
 
 .update-notice-quiet {
@@ -2406,13 +2474,21 @@ body {
 }
 
 @media (max-width: 560px) {
-  .update-notice {
+  .update-notice:not(.update-notice-hero) {
     align-items: flex-start;
     flex-wrap: wrap;
   }
 
-  .update-notice > div {
+  .update-notice:not(.update-notice-hero) > :first-child {
     flex: 1 1 100%;
+  }
+
+  .update-notice:not(.update-notice-hero) .update-notice-actions {
+    flex-wrap: wrap;
+  }
+
+  .update-notice-hero {
+    padding: 22px 0 26px;
   }
 
   .update-notice-quiet-copy {

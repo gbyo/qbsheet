@@ -18,7 +18,11 @@ describe('UpdateNotice', () => {
   test('offers a quiet dismiss action while keeping the update available', () => {
     render(<UpdateNotice />);
 
-    expect(screen.getByRole('status')).toHaveTextContent('A new version of QBSheet is ready');
+    const notice = screen.getByRole('status');
+    expect(notice).toHaveTextContent('A new version of QBSheet is ready');
+    expect(notice).toHaveAttribute('data-update-presentation', 'compact');
+    expect(notice).not.toHaveClass('update-notice-hero');
+    expect(screen.getByRole('button', { name: 'Update now' })).not.toHaveClass('is-primary');
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
 
     expect(screen.getByRole('status')).toHaveTextContent('Update available');
@@ -26,6 +30,29 @@ describe('UpdateNotice', () => {
     expect(screen.getByRole('button', { name: 'Update now' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Show details' })).toBeInTheDocument();
     expect(window.localStorage.getItem(updateNoticeDismissalKey)).toBe('1');
+  });
+
+  test('uses the explicit homepage hero presentation until it is dismissed', () => {
+    render(<UpdateNotice presentation="hero" />);
+
+    let notice = screen.getByRole('status');
+    expect(notice).toHaveAttribute('data-update-presentation', 'hero');
+    expect(notice).toHaveClass('update-notice-hero');
+    expect(screen.getByRole('button', { name: 'Update now' })).toHaveClass('is-primary');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Not now' }));
+
+    notice = screen.getByRole('status');
+    expect(notice).toHaveAttribute('data-update-presentation', 'quiet');
+    expect(notice).not.toHaveClass('update-notice-hero');
+    expect(window.localStorage.getItem(updateNoticeDismissalKey)).toBe('1');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show details' }));
+
+    notice = screen.getByRole('status');
+    expect(notice).toHaveAttribute('data-update-presentation', 'hero');
+    expect(notice).toHaveClass('update-notice-hero');
+    expect(screen.getByRole('button', { name: 'Not now' })).toBeInTheDocument();
   });
 
   test('does not render when there is no waiting update', () => {

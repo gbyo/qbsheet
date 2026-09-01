@@ -331,7 +331,7 @@ export default function WelcomeScreen(props: {
         </p>
       )}
 
-      <UpdateNotice />
+      <UpdateNotice presentation={unfinished.length === 0 ? 'hero' : 'compact'} />
 
       {unfinished.length > 0 && (
         <section className="shell-section">

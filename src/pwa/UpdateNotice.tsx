@@ -26,7 +26,13 @@ function wasUpdateNoticeDismissed(): boolean {
   }
 }
 
-export default function UpdateNotice() {
+export type UpdateNoticePresentation = 'compact' | 'hero';
+
+export default function UpdateNotice({
+  presentation = 'compact',
+}: {
+  presentation?: UpdateNoticePresentation;
+}) {
   const { available, applying } = useAppUpdate();
   const [dismissed, setDismissed] = useState(wasUpdateNoticeDismissed);
 
@@ -58,7 +64,11 @@ export default function UpdateNotice() {
 
   if (dismissed) {
     return (
-      <section className="shell-section update-notice update-notice-quiet" role="status">
+      <section
+        className="shell-section update-notice update-notice-quiet"
+        data-update-presentation="quiet"
+        role="status"
+      >
         <span className="update-notice-quiet-copy">Update available</span>
         <button
           type="button"
@@ -75,27 +85,35 @@ export default function UpdateNotice() {
     );
   }
 
+  const hero = presentation === 'hero';
+
   return (
-    <section className="shell-section update-notice" role="status">
+    <section
+      className={`shell-section update-notice${hero ? ' update-notice-hero' : ''}`}
+      data-update-presentation={presentation}
+      role="status"
+    >
       <div>
         <p className="update-notice-title">A new version of QBSheet is ready on this device.</p>
         <p className="update-notice-copy">
           Updating reloads the app. Saved games, the paired room, and anything in progress are kept.
         </p>
       </div>
-      <button
-        type="button"
-        className="shell-button"
-        disabled={applying}
-        onClick={() => {
-          appUpdates.apply();
-        }}
-      >
-        {applying ? 'Updating…' : 'Update now'}
-      </button>
-      <button type="button" className="shell-button shell-button-quiet" onClick={dismiss}>
-        Dismiss
-      </button>
+      <div className="update-notice-actions">
+        <button
+          type="button"
+          className={`shell-button${hero ? ' is-primary' : ''}`}
+          disabled={applying}
+          onClick={() => {
+            appUpdates.apply();
+          }}
+        >
+          {applying ? 'Updating…' : 'Update now'}
+        </button>
+        <button type="button" className="shell-button shell-button-quiet" onClick={dismiss}>
+          {hero ? 'Not now' : 'Dismiss'}
+        </button>
+      </div>
     </section>
   );
 }

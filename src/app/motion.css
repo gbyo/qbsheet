@@ -136,6 +136,11 @@
   animation: qbsheet-rise-in var(--room-motion-standard) var(--room-ease-out) both;
 }
 
+/* The homepage update is allowed one calm entrance; the wash itself remains completely still. */
+.update-notice-hero {
+  animation: qbsheet-rise-in var(--room-motion-slow) var(--room-ease-out) both;
+}
+
 .readiness-mark,
 .scorer-dot {
   transition:
