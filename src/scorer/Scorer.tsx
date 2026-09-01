@@ -448,17 +448,6 @@ function BonusExitPrompt({ exit }: { exit: IBonusExit }) {
             const totals = bonusPartResultTotals(content.parts);
             return (
               <div className="scorer-bonus-parts">
-                <div className={content.bounceBack ? 'scorer-part-head' : 'scorer-part-head is-two-way'}>
-                  <span />
-                  <span
-                    className="scorer-part-column"
-                    data-presentation-label={content.controllingTeamName}
-                  />
-                  {content.bounceBack && (
-                    <span className="scorer-part-column" data-presentation-label={content.opponentName} />
-                  )}
-                  <span />
-                </div>
                 <div className="scorer-part-list">
                   {content.parts.map((part, index) => {
                     const outcome =
@@ -479,12 +468,12 @@ function BonusExitPrompt({ exit }: { exit: IBonusExit }) {
                         <span className="scorer-part-label" data-presentation-label={`Part ${index + 1}`} />
                         <span
                           className={`scorer-choice${outcome === 'controlled' ? ' is-selected' : ''}`}
-                          data-presentation-label={`+${content.pointsPerPart}`}
+                          data-presentation-label={content.controllingTeamName}
                         />
                         {content.bounceBack && (
                           <span
                             className={`scorer-choice${outcome === 'bounceback' ? ' is-selected' : ''}`}
-                            data-presentation-label={`+${content.pointsPerPart}`}
+                            data-presentation-label={content.opponentName}
                           />
                         )}
                         <span
@@ -495,12 +484,18 @@ function BonusExitPrompt({ exit }: { exit: IBonusExit }) {
                     );
                   })}
                 </div>
-                <p
-                  className="scorer-part-total"
-                  data-presentation-label={`${content.controllingTeamName} ${totals.controlled}${
-                    content.bounceBack ? ` · ${content.opponentName} ${totals.bounceback}` : ''
-                  }`}
-                />
+                <div className="scorer-part-footer">
+                  <p
+                    className="scorer-part-total"
+                    data-presentation-label={`${content.controllingTeamName} ${totals.controlled}${
+                      content.bounceBack ? ` · ${content.opponentName} ${totals.bounceback}` : ''
+                    }`}
+                  />
+                  <span
+                    className="scorer-choice scorer-part-record is-selected"
+                    data-presentation-label="Record bonus"
+                  />
+                </div>
               </div>
             );
           })()}
@@ -1753,19 +1748,30 @@ export default function Scorer(props: IScorerProps) {
        * built where the distinction is still in the type, so the legend names the actual teams
        * rather than listing numbers that would not answer the question being asked.
        */
-      return bonusStage.kind === 'part'
-        ? {
-            kind: 'choices',
-            title: bonusStage.title,
-            choices: bonusPartKeyLegend(bonusStage.choices),
-            cancellable: false,
-          }
-        : {
-            kind: 'choices',
-            title: bonusStage.title,
-            choices: bonusKeyLegend(bonusStage.options),
-            cancellable: bonusStage.cancellable,
-          };
+      if (bonusStage.kind === 'part') {
+        return {
+          kind: 'choices',
+          title: bonusStage.title,
+          choices: bonusPartKeyLegend(bonusStage.choices),
+          cancellable: false,
+        };
+      }
+      if (bonusStage.kind === 'record') {
+        // Not a shortcut of its own: Record has the focus by now, so Enter is that button. Saying so
+        // is the point — and saying what it will write is what makes it safe to press without looking.
+        return {
+          kind: 'choices',
+          title: bonusStage.title,
+          choices: [{ keys: 'Enter', meaning: `record ${bonusStage.summary}`, available: true }],
+          cancellable: false,
+        };
+      }
+      return {
+        kind: 'choices',
+        title: bonusStage.title,
+        choices: bonusKeyLegend(bonusStage.options),
+        cancellable: bonusStage.cancellable,
+      };
     }
     if (phase.kind === 'bonus') {
       // A bonus whose totals are typed rather than chosen. Its digits belong to the number fields.

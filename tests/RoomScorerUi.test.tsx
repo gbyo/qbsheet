@@ -178,6 +178,11 @@ function pressPart(partNumber: number, outcome: LiveOutcome) {
   );
 }
 
+/** The press that writes the bonus, which is a separate act from answering its parts. */
+function recordBonus() {
+  fireEvent.click(within(bonusPrompt()).getByRole('button', { name: 'Record bonus' }));
+}
+
 /**
  * Press a control wherever it currently lives.
  *
@@ -465,9 +470,13 @@ describe('scoring a tossup', () => {
 
     /*
      * Totals, because nothing bounces here: one press is the whole bonus and enumerating three parts
-     * would be three presses for a number the room already said. Part entry stays one press away.
+     * would be three presses for a number the room already said. Part entry stays one press away —
+     * up in the heading rather than among the totals, out of reach of a hand aiming at one.
      */
-    expect(choices.map((button) => button.textContent)).toEqual(['0', '10', '20', '30', 'Score by part']);
+    expect(choices.map((button) => button.textContent)).toEqual(['Score by part', '0', '10', '20', '30']);
+    expect(within(screen.getByLabelText('Bonus')).getByRole('button', { name: 'Score by part' })).toHaveClass(
+      'scorer-prompt-switch',
+    );
   });
 
   test('a four-part bonus offers a fifth button', () => {
@@ -484,12 +493,12 @@ describe('scoring a tossup', () => {
     const choices = within(screen.getByLabelText('Bonus')).getAllByRole('button');
 
     expect(choices.map((button) => button.textContent)).toEqual([
+      'Score by part',
       '0',
       '10',
       '20',
       '30',
       '40',
-      'Score by part',
     ]);
   });
 
@@ -552,14 +561,25 @@ describe('a bounceback bonus', () => {
       ]);
     }
 
-    // The opponent's column explains the format; it is not the thing anybody presses.
-    expect(within(prompt).getByText('Greenwood', { selector: '.scorer-part-column' })).toBeTruthy();
-    expect(within(prompt).getByText('can score missed parts')).toBeTruthy();
+    /*
+     * Every button says whose points it is, on every row — not `+10` twice under a heading three
+     * rows above it. Which of the two is the bounce is answered where the press is made.
+     */
+    expect(
+      within(partRow(3))
+        .getAllByRole('button')
+        .map((button) => button.textContent),
+    ).toEqual(['Ninety Six', 'Greenwood', 'No points']);
     expect(within(prompt).queryByRole('button', { name: 'Bounce' })).toBeNull();
     expect(within(prompt).queryByRole('button', { name: 'Miss' })).toBeNull();
-    // Nothing to confirm: the last part is the confirmation.
-    expect(within(prompt).queryByRole('button', { name: 'Record parts' })).toBeNull();
-    expect(within(prompt).queryByRole('button', { name: /^Parts/ })).toBeNull();
+
+    // The format explained once, as a sentence under the title, naming both teams.
+    expect(within(prompt).getByText('Greenwood can score any part Ninety Six misses.')).toBeTruthy();
+    // What a part is worth, said once rather than on nine buttons.
+    expect(within(prompt).getByText(/3 parts, 10 each/)).toBeTruthy();
+
+    // Nothing is written until this is pressed, and it cannot be pressed on a part-answered bonus.
+    expect(within(prompt).getByRole('button', { name: 'Record bonus' })).toBeDisabled();
   });
 
   test('three part outcomes record one ordinary bonus event with the parts on it', () => {
@@ -579,11 +599,21 @@ describe('a bounceback bonus', () => {
 
     pressPart(1, 'controlled');
     pressPart(2, 'bounceback');
-    // Nothing may be written while the breakdown is incomplete.
-    const beforeLastPart = events[events.length - 1] as { type: string }[];
-    expect(beforeLastPart.filter((event) => event.type === 'bonus')).toHaveLength(0);
-
     pressPart(3, 'controlled');
+
+    // Answering every part is not recording it: the panel is still up and nothing has been written.
+    const beforeRecord = events[events.length - 1] as { type: string }[];
+    expect(beforeRecord.filter((event) => event.type === 'bonus')).toHaveLength(0);
+    expect(screen.getByLabelText('Bonus')).toBeTruthy();
+
+    /*
+     * Record has the focus by the time the last part is answered, which is what makes Enter finish
+     * a bonus without a shortcut having to be invented for it.
+     */
+    const record = within(bonusPrompt()).getByRole('button', { name: 'Record bonus' });
+    expect(record).toBeEnabled();
+    expect(document.activeElement).toBe(record);
+    fireEvent.click(record);
 
     const written = events[events.length - 1] as Record<string, unknown>[];
     const bonuses = written.filter((event) => event.type === 'bonus');
@@ -634,8 +664,37 @@ describe('a bounceback bonus', () => {
     expect(partRow(2)).toHaveClass('is-active');
     pressPart(2, 'controlled');
     pressPart(3, 'missed');
+    recordBonus();
 
     expect(scoreOf('Ninety Six')).toBe('20');
+    expect(scoreOf('Greenwood')).toBe('10');
+  });
+
+  /**
+   * The last part is not the last decision.
+   *
+   * Committing on it read as an ambush: three presses that did nothing and a fourth that ended the
+   * bonus and moved the room on, with no moment in between to look at what had been entered. So
+   * every part can still be changed after the last one is answered, and the totals follow.
+   */
+  test('a fully answered bonus can still be corrected before it is recorded', () => {
+    renderScorer(bounceFormat());
+    fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
+
+    pressPart(1, 'controlled');
+    pressPart(2, 'controlled');
+    pressPart(3, 'controlled');
+    expect(screen.getByLabelText('Ninety Six 30 points')).toBeTruthy();
+
+    pressPart(2, 'bounceback');
+
+    expect(screen.getByLabelText('Ninety Six 20 points')).toBeTruthy();
+    expect(screen.getByLabelText('Greenwood 10 points')).toBeTruthy();
+    expect(scoreOf('Ninety Six')).toBe('10'); // still only the tossup
+
+    recordBonus();
+
+    expect(scoreOf('Ninety Six')).toBe('30');
     expect(scoreOf('Greenwood')).toBe('10');
   });
 
@@ -653,14 +712,16 @@ describe('a bounceback bonus', () => {
     expect(partRow(2)).toHaveClass('is-active');
     expect(screen.getByText('1 of 3 parts scored')).toBeTruthy();
 
-    // Reaching ahead is allowed; nothing is disabled to enforce an order.
+    // Reaching ahead is allowed; no part is disabled to enforce an order.
     pressPart(3, 'missed');
     expect(partRow(2)).toHaveClass('is-active');
     expect(
-      within(bonusPrompt())
-        .getAllByRole('button')
+      [1, 2, 3]
+        .flatMap((partNumber) => within(partRow(partNumber)).getAllByRole('button'))
         .every((button) => !(button as HTMLButtonElement).disabled),
     ).toBe(true);
+    // Record is the one control that is: a bonus with an unanswered part is not one to write.
+    expect(within(bonusPrompt()).getByRole('button', { name: 'Record bonus' })).toBeDisabled();
   });
 
   test('the running summary names the teams rather than the storage', () => {
@@ -741,6 +802,7 @@ describe('a bounceback bonus', () => {
       pressPart(1, 'controlled');
       pressPart(2, 'missed');
       pressPart(3, 'missed');
+      recordBonus();
       expect(scoreOf('Ninety Six')).toBe('20');
     });
 
@@ -834,10 +896,13 @@ describe('a bonus without bouncebacks', () => {
         .getAllByRole('button')
         .map((button) => button.getAttribute('aria-label')),
     ).toEqual(['Part 1 to Ninety Six, 10 points', 'No points on part 1']);
+    // No bounce, so nothing to explain about one.
+    expect(within(bonusPrompt()).queryByText(/can score any part/)).toBeNull();
 
     pressPart(1, 'controlled');
     pressPart(2, 'controlled');
     pressPart(3, 'missed');
+    recordBonus();
 
     expect(scoreOf('Ninety Six')).toBe('30');
   });
@@ -993,6 +1058,7 @@ describe('scoring motion state', () => {
     pressPart(1, 'controlled');
     pressPart(2, 'bounceback');
     pressPart(3, 'controlled');
+    recordBonus();
 
     // The next phase is already live underneath: the snapshot describes what happened, it does not
     // hold the scoresheet open while it plays.
@@ -1008,8 +1074,8 @@ describe('scoring motion state', () => {
     expect(exit.querySelector('.scorer-part-total')?.getAttribute('data-presentation-label')).toBe(
       'Ninety Six 20 · Greenwood 10',
     );
-    // No Record button in the snapshot, because there was none in the prompt it is a copy of.
-    expect(exit.querySelector('[data-presentation-label="Record parts"]')).toBeNull();
+    // Including the press that committed it, which is a copy of the prompt as it actually was.
+    expect(exit.querySelector('[data-presentation-label="Record bonus"]')).toHaveClass('is-selected');
     const secondExitPart = exit.querySelectorAll('.scorer-part-row')[1] as HTMLElement;
     const [toControlling, toOpponent] = Array.from(secondExitPart.querySelectorAll('.scorer-choice'));
     expect(toControlling).not.toHaveClass('is-selected');

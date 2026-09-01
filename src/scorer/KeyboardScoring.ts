@@ -302,7 +302,16 @@ export type BonusKeyboardStage =
       controllingTeamName: string;
       opponentName: string;
       choices: IBonusPartChoice[];
-    };
+    }
+  /**
+   * Every part answered, and the bonus waiting to be recorded.
+   *
+   * A third shape rather than a flag on the second, because the digits genuinely stop meaning
+   * anything here: there is no current part for them to address. What is bound is the key that
+   * finishes the bonus, and `summary` is what finishing it will record — read back before it
+   * happens rather than after.
+   */
+  | { kind: 'record'; title: string; summary: string };
 
 /**
  * Whether this keystroke belongs to whatever it landed on rather than to the scoresheet.
