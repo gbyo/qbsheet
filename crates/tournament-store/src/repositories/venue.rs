@@ -1,5 +1,6 @@
-use rusqlite::{params, OptionalExtension, Row};
+use rusqlite::{params, Row};
 
+use super::ensure_same_tournament;
 use super::tournaments::ensure_tournament_exists;
 use crate::db::Store;
 use crate::error::{StoreError, StoreResult};
@@ -97,31 +98,15 @@ impl<'a> RoomRepository<'a> {
 
     pub fn assign_staff(&self, room_id: &str, staff_id: &str, role: &str) -> StoreResult<()> {
         self.store.write_transaction(|transaction| {
-            let room_tournament: Option<String> = transaction
-                .query_row(
-                    "SELECT tournament_id FROM rooms WHERE id = ?1",
-                    params![room_id],
-                    |row| row.get(0),
-                )
-                .optional()?;
-            let staff_tournament: Option<String> = transaction
-                .query_row(
-                    "SELECT tournament_id FROM staff WHERE id = ?1",
-                    params![staff_id],
-                    |row| row.get(0),
-                )
-                .optional()?;
-            match (room_tournament, staff_tournament) {
-                (Some(room_tournament), Some(staff_tournament))
-                    if room_tournament == staff_tournament => {}
-                (None, _) => return Err(StoreError::not_found("room", room_id)),
-                (_, None) => return Err(StoreError::not_found("staff member", staff_id)),
-                _ => {
-                    return Err(StoreError::Conflict(
-                        "room and staff member belong to different tournaments".to_owned(),
-                    ))
-                }
-            }
+            ensure_same_tournament(
+                transaction,
+                "rooms",
+                "room",
+                room_id,
+                "staff",
+                "staff member",
+                staff_id,
+            )?;
             transaction.execute(
                 "INSERT INTO room_staff_assignments (room_id, staff_id, role)
                  VALUES (?1, ?2, ?3)
@@ -134,31 +119,15 @@ impl<'a> RoomRepository<'a> {
 
     pub fn assign_equipment(&self, room_id: &str, equipment_id: &str) -> StoreResult<()> {
         self.store.write_transaction(|transaction| {
-            let room_tournament: Option<String> = transaction
-                .query_row(
-                    "SELECT tournament_id FROM rooms WHERE id = ?1",
-                    params![room_id],
-                    |row| row.get(0),
-                )
-                .optional()?;
-            let equipment_tournament: Option<String> = transaction
-                .query_row(
-                    "SELECT tournament_id FROM equipment WHERE id = ?1",
-                    params![equipment_id],
-                    |row| row.get(0),
-                )
-                .optional()?;
-            match (room_tournament, equipment_tournament) {
-                (Some(room_tournament), Some(equipment_tournament))
-                    if room_tournament == equipment_tournament => {}
-                (None, _) => return Err(StoreError::not_found("room", room_id)),
-                (_, None) => return Err(StoreError::not_found("equipment", equipment_id)),
-                _ => {
-                    return Err(StoreError::Conflict(
-                        "room and equipment belong to different tournaments".to_owned(),
-                    ))
-                }
-            }
+            ensure_same_tournament(
+                transaction,
+                "rooms",
+                "room",
+                room_id,
+                "equipment",
+                "equipment",
+                equipment_id,
+            )?;
             transaction.execute(
                 "INSERT INTO room_equipment_assignments (room_id, equipment_id)
                  VALUES (?1, ?2)
@@ -241,6 +210,16 @@ impl<'a> EquipmentRepository<'a> {
 
     pub fn create(&self, input: NewEquipmentResource) -> StoreResult<EquipmentResource> {
         ensure_tournament_exists(self.store, &input.tournament_id)?;
+        if input.name.trim().is_empty() {
+            return Err(StoreError::InvalidInput(
+                "equipment name cannot be empty".to_owned(),
+            ));
+        }
+        if input.kind.trim().is_empty() {
+            return Err(StoreError::InvalidInput(
+                "equipment kind cannot be empty".to_owned(),
+            ));
+        }
         let id = new_id();
         let timestamp = now();
         self.store.write_transaction(|transaction| {
