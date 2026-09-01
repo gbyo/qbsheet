@@ -251,7 +251,7 @@ impl QbtcpState for MemoryState {
         let should_replace = inner
             .progresses
             .get(&record.session_id)
-            .is_none_or(|current| record.sequence > current.sequence);
+            .map_or(true, |current| record.sequence > current.sequence);
         if should_replace {
             inner.progresses.insert(record.session_id.clone(), record);
         }

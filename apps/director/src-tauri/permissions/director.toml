@@ -6,6 +6,7 @@ commands.allow = [
   "director_save_state",
   "director_checkpoint",
   "director_server_status",
+  "director_server_snapshot",
   "director_start_qbtcp_server",
   "director_stop_qbtcp_server",
   "get_application_paths",

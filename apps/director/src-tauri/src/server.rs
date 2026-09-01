@@ -3,13 +3,15 @@ use std::net::{IpAddr, Ipv4Addr, UdpSocket};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
 use qbtcp_server::{
     AssignedAssignment, AssignmentMeta, AssignmentState, MemoryState, PresenceRecord,
     ProgressRecord, QbtcpConfig, QbtcpServer, QbtcpState, ResultDisposition, ResultSubmission,
     RoomInfo, RosterAmendment, RosterAmendmentRequest, SessionEvent, StateError, TournamentInfo,
 };
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{json, Map, Value};
 use thiserror::Error;
 use tokio::net::TcpListener;
 
@@ -50,6 +52,51 @@ pub struct ServerStatus {
     pub pairing_code: Option<String>,
     pub pairing_url: Option<String>,
     pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerResultSnapshot {
+    pub id: String,
+    pub session_id: String,
+    pub tournament_id: Option<String>,
+    pub match_id: Option<String>,
+    pub fingerprint: String,
+    pub review_required: bool,
+    pub warnings: Vec<String>,
+    pub conflict_with: Option<String>,
+    pub qbj: Option<Value>,
+    /// The exact request body, retained separately from the parsed QBJ for audit/reconciliation.
+    pub raw_base64: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerProgressSnapshot {
+    pub session_id: String,
+    pub room_id: String,
+    pub sequence: u64,
+    pub match_state: Value,
+    pub received_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerPresenceSnapshot {
+    pub room_id: String,
+    pub room_name: String,
+    pub device_id: String,
+    pub operator_name: Option<String>,
+    pub update: qbtcp_server::PresenceUpdate,
+    pub observed_at: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerSnapshot {
+    pub results: Vec<ServerResultSnapshot>,
+    pub progress: Vec<ServerProgressSnapshot>,
+    pub presence: Vec<ServerPresenceSnapshot>,
 }
 
 #[derive(Default)]
@@ -205,6 +252,17 @@ impl ServerRuntime {
             }
         }
     }
+
+    pub fn snapshot(&self) -> ServerSnapshot {
+        let Ok(inner) = self.inner.lock() else {
+            return ServerSnapshot::default();
+        };
+        inner
+            .state
+            .as_ref()
+            .map(|state| state.snapshot())
+            .unwrap_or_default()
+    }
 }
 
 impl Drop for ServerRuntime {
@@ -231,6 +289,8 @@ pub struct DirectorQbtcpState {
     room_ids: Mutex<HashSet<String>>,
     assignment_room_ids: Mutex<HashSet<String>>,
     paired_rooms: Mutex<HashSet<String>>,
+    progress: Mutex<HashMap<String, ProgressRecord>>,
+    presence: Mutex<HashMap<(String, String), PresenceRecord>>,
 }
 
 impl DirectorQbtcpState {
@@ -253,6 +313,8 @@ impl DirectorQbtcpState {
             room_ids: Mutex::new(room_ids),
             assignment_room_ids: Mutex::new(assignment_room_ids),
             paired_rooms: Mutex::new(HashSet::new()),
+            progress: Mutex::new(HashMap::new()),
+            presence: Mutex::new(HashMap::new()),
         }
     }
 
@@ -314,6 +376,71 @@ impl DirectorQbtcpState {
             .map(|rooms| rooms.len())
             .unwrap_or_default()
     }
+
+    pub fn snapshot(&self) -> ServerSnapshot {
+        let results = self
+            .memory
+            .result_summaries()
+            .into_iter()
+            .map(|summary| {
+                let raw = self.memory.raw_result(&summary.id);
+                ServerResultSnapshot {
+                    id: summary.id,
+                    session_id: summary.session_id,
+                    tournament_id: summary.tournament_id,
+                    match_id: summary.match_id,
+                    fingerprint: summary.fingerprint,
+                    review_required: summary.review_required,
+                    warnings: summary.warnings,
+                    conflict_with: summary.conflict_with,
+                    qbj: raw
+                        .as_deref()
+                        .and_then(|bytes| serde_json::from_slice::<Value>(bytes).ok()),
+                    raw_base64: raw.map(|bytes| BASE64.encode(bytes)),
+                }
+            })
+            .collect();
+        let progress = self
+            .progress
+            .lock()
+            .map(|records| {
+                records
+                    .values()
+                    .cloned()
+                    .map(|record| ServerProgressSnapshot {
+                        session_id: record.session_id,
+                        room_id: record.room_id,
+                        sequence: record.sequence,
+                        match_state: record.match_state,
+                        received_at: record.received_at,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let presence = self
+            .presence
+            .lock()
+            .map(|records| {
+                records
+                    .values()
+                    .cloned()
+                    .map(|record| ServerPresenceSnapshot {
+                        room_id: record.room_id,
+                        room_name: record.room_name,
+                        device_id: record.device_id,
+                        operator_name: record.operator_name,
+                        update: record.update,
+                        observed_at: record.observed_at,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        ServerSnapshot {
+            results,
+            progress,
+            presence,
+        }
+    }
 }
 
 impl QbtcpState for DirectorQbtcpState {
@@ -336,11 +463,24 @@ impl QbtcpState for DirectorQbtcpState {
         if let Ok(mut rooms) = self.paired_rooms.lock() {
             rooms.insert(record.room_id.clone());
         }
-        <MemoryState as QbtcpState>::record_presence(&self.memory, record)
+        <MemoryState as QbtcpState>::record_presence(&self.memory, record.clone())?;
+        self.presence
+            .lock()
+            .map_err(|_| StateError::Unavailable)?
+            .insert((record.room_id.clone(), record.device_id.clone()), record);
+        Ok(())
     }
 
     fn record_progress(&self, record: ProgressRecord) -> Result<(), StateError> {
-        <MemoryState as QbtcpState>::record_progress(&self.memory, record)
+        <MemoryState as QbtcpState>::record_progress(&self.memory, record.clone())?;
+        let mut progress = self.progress.lock().map_err(|_| StateError::Unavailable)?;
+        if progress
+            .get(&record.session_id)
+            .map_or(true, |current| record.sequence > current.sequence)
+        {
+            progress.insert(record.session_id.clone(), record);
+        }
+        Ok(())
     }
 
     fn record_result(&self, submission: ResultSubmission) -> Result<ResultDisposition, StateError> {
@@ -422,14 +562,13 @@ fn rooms_from_document(document: Option<&Value>) -> Vec<RoomInfo> {
         .collect()
 }
 
-/// Project only a real QBJ document attached to a released scheduled game.
+/// Project a released scheduled game into the one-game QBJ assignment profile.
 ///
-/// A schedule contains the operational pairing but not the questions. The native shell must not
-/// manufacture a packet that the scorer could not actually score, so a game is released over
-/// QBTCP only when its saved document carries a QBJ assignment (normally `GameRecord.rawQbj`, or
-/// an explicit `assignmentQbj` on the scheduled game). This keeps room pairing honest while
-/// allowing imported QBJ tournaments and future packet loaders to work without another transport
-/// adapter.
+/// Imported assignments keep their original QBJ when one is present. Director-created schedules do
+/// not have question text yet, but they do have enough durable information to issue a truthful,
+/// playable assignment: scoring rules, rosters, phase/round context, packet identity, and the
+/// unplayed Match. The scorer supplies the questions in the room, just as it does for a manual QBJ
+/// assignment. No scores, question content, or credentials are invented here.
 fn assignments_from_document(document: Option<&Value>) -> Vec<(String, AssignedAssignment)> {
     let Some(root) = document.and_then(Value::as_object) else {
         return Vec::new();
@@ -520,7 +659,8 @@ fn assignments_from_document(document: Option<&Value>) -> Vec<(String, AssignedA
                         .filter_map(|key| scheduled.get(*key))
                         .find(|value| qbtcp_server::is_qbj_like(value))
                         .cloned()
-                })?;
+                })
+                .or_else(|| generated_assignment(root, scheduled, round, &room_id))?;
             let (_, qbj_match_id) = qbtcp_server::qbj_identity(&qbj);
             let mut assignment =
                 AssignedAssignment::new(qbj_match_id.unwrap_or_else(|| scheduled_id.clone()), qbj);
@@ -539,6 +679,256 @@ fn assignments_from_document(document: Option<&Value>) -> Vec<(String, AssignedA
             Some((room_id, assignment))
         })
         .collect()
+}
+
+fn generated_assignment(
+    root: &Map<String, Value>,
+    scheduled: &Map<String, Value>,
+    round: &Map<String, Value>,
+    room_id: &str,
+) -> Option<Value> {
+    let tournament = root.get("tournament")?.as_object()?;
+    let tournament_id = string_field(Some(tournament), "id")?;
+    let tournament_name =
+        string_field(Some(tournament), "name").unwrap_or_else(|| "QBSheet Director".to_owned());
+    let scheduled_id = string_field(Some(scheduled), "id")?;
+    let round_id = string_field(Some(round), "id")?;
+    let round_number = u32_field(Some(round), "number").filter(|number| *number > 0)?;
+    let phase_id = string_field(Some(round), "phaseId").unwrap_or_else(|| "phase-1".to_owned());
+    let phase = root
+        .get("phases")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_object)
+        .find(|phase| string_field(Some(phase), "id").as_deref() == Some(phase_id.as_str()));
+    let phase_name = phase
+        .and_then(|phase| string_field(Some(phase), "name"))
+        .unwrap_or_else(|| "Tournament".to_owned());
+    let round_name = string_field(Some(round), "name").unwrap_or_else(|| round_number.to_string());
+    let left_id = string_field(Some(scheduled), "leftTeamId")?;
+    let right_id = string_field(Some(scheduled), "rightTeamId")?;
+    let left = generated_team(root, &left_id)?;
+    let right = generated_team(root, &right_id)?;
+    let left_name = left.get("name").and_then(Value::as_str)?.to_owned();
+    let right_name = right.get("name").and_then(Value::as_str)?.to_owned();
+    let left_registration_id = format!("registration-{left_id}");
+    let right_registration_id = format!("registration-{right_id}");
+    let rules_id = format!("scoring-rules-{tournament_id}");
+    let room_name = root
+        .get("rooms")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_object)
+        .find(|room| string_field(Some(room), "id").as_deref() == Some(room_id))
+        .and_then(|room| string_field(Some(room), "name"))
+        .unwrap_or_else(|| room_id.to_owned());
+
+    let packet_id =
+        string_field(Some(scheduled), "packetId").or_else(|| string_field(Some(round), "packetId"));
+    let packet = packet_id.as_ref().and_then(|id| {
+        root.get("packets")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_object)
+            .find(|packet| string_field(Some(packet), "id").as_deref() == Some(id.as_str()))
+    });
+    let packet_name = packet
+        .and_then(|packet| string_field(Some(packet), "name"))
+        .or_else(|| packet_id.clone());
+
+    let rules = generated_scoring_rules(tournament.get("rules"), &rules_id);
+    let match_object = json!({
+        "type": "Match",
+        "id": scheduled_id,
+        "location": room_name,
+        "match_teams": [
+            {"team": {"$ref": left_id}},
+            {"team": {"$ref": right_id}}
+        ],
+        "_qbtcp": {
+            "version": 1,
+            "round_revision": u64_field(Some(round), "revision").unwrap_or(1),
+            "assignment_revision": u64_field(Some(scheduled), "assignmentRevision").unwrap_or(1),
+            "room_id": room_id,
+            "scorekeeper": {"timed": false}
+        }
+    });
+    let mut round_object = json!({
+        "type": "Round",
+        "id": round_id,
+        "name": round_name,
+        "number": round_number,
+        "matches": [{"$ref": scheduled_id}]
+    });
+    if let (Some(packet_id), Some(packet_name)) = (packet_id.as_ref(), packet_name.as_ref()) {
+        round_object["packet"] = json!({"type": "Packet", "id": packet_id, "name": packet_name});
+    }
+    let phase_object = json!({
+        "type": "Phase",
+        "id": phase_id,
+        "name": phase_name,
+        "rounds": [{"$ref": round_id}]
+    });
+    let mut objects = vec![
+        json!({
+            "type": "Tournament",
+            "id": tournament_id,
+            "name": tournament_name,
+            "scoring_rules": {"$ref": rules_id},
+            "registrations": [
+                {"$ref": left_registration_id},
+                {"$ref": right_registration_id}
+            ],
+            "phases": [{"$ref": phase_id}]
+        }),
+        rules,
+        json!({
+            "type": "Registration",
+            "id": left_registration_id,
+            "name": left_name,
+            "teams": [{"$ref": left_id}]
+        }),
+        json!({
+            "type": "Registration",
+            "id": right_registration_id,
+            "name": right_name,
+            "teams": [{"$ref": right_id}]
+        }),
+        left,
+        right,
+        phase_object,
+        round_object,
+        match_object,
+    ];
+    if let (Some(packet_id), Some(packet_name)) = (packet_id, packet_name) {
+        objects.push(json!({"type": "Packet", "id": packet_id, "name": packet_name}));
+    }
+    Some(json!({"version": qbtcp_server::QBJ_VERSION, "objects": objects}))
+}
+
+fn generated_team(root: &Map<String, Value>, team_id: &str) -> Option<Value> {
+    let team = root
+        .get("teams")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_object)
+        .find(|team| string_field(Some(team), "id").as_deref() == Some(team_id))?;
+    let name = string_field(Some(team), "displayName")
+        .or_else(|| string_field(Some(team), "name"))
+        .unwrap_or_else(|| team_id.to_owned());
+    let players = root
+        .get("players")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_object)
+        .filter(|player| {
+            string_field(Some(player), "teamId").as_deref() == Some(team_id)
+                && player
+                    .get("active")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(true)
+        })
+        .filter_map(|player| {
+            let id = string_field(Some(player), "id")?;
+            let player_name = string_field(Some(player), "name")?;
+            Some(json!({
+                "type": "Player",
+                "id": id,
+                "name": player_name,
+                "captain": player.get("captain").and_then(Value::as_bool).unwrap_or(false)
+            }))
+        })
+        .collect::<Vec<_>>();
+    Some(json!({
+        "type": "Team",
+        "id": team_id,
+        "name": name,
+        "registration": {"$ref": format!("registration-{team_id}")},
+        "players": players
+    }))
+}
+
+fn generated_scoring_rules(value: Option<&Value>, id: &str) -> Value {
+    let rules = value.and_then(Value::as_object);
+    let tossup = i64_field(rules, "tossupValue").unwrap_or(10);
+    let power = i64_field(rules, "powerValue").unwrap_or(15);
+    let neg = i64_field(rules, "negValue").unwrap_or(-5);
+    let bonus = i64_field(rules, "bonusValue").unwrap_or(10).max(1);
+    let tossup_count = u32_field(rules, "tossupCount")
+        .filter(|value| *value > 0)
+        .unwrap_or(20);
+    let bonus_parts = u32_field(rules, "bonusParts")
+        .filter(|value| *value > 0)
+        .unwrap_or(3);
+    let maximum_players = u32_field(rules, "maximumActivePlayers")
+        .filter(|value| *value > 0)
+        .unwrap_or(4);
+    let bouncebacks = rules
+        .and_then(|rules| rules.get("bouncebacks"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let overtime = rules
+        .and_then(|rules| rules.get("overtime"))
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let lightning = rules
+        .and_then(|rules| rules.get("lightning"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let mut output = json!({
+        "type": "ScoringRules",
+        "id": id,
+        "name": "Director scoring rules",
+        "teams_per_match": 2,
+        "maximum_players_per_team": maximum_players,
+        "regulation_tossup_count": tossup_count,
+        "maximum_regulation_tossup_count": tossup_count,
+        "minimum_overtime_question_count": 1,
+        "overtime_includes_bonuses": overtime,
+        "total_divisor": score_divisor(&[power, tossup, neg, bonus]),
+        "answer_types": [
+            {"type": "AnswerType", "id": "answer-power", "value": power, "label": "Power", "short_label": "P", "awards_bonus": true},
+            {"type": "AnswerType", "id": "answer-correct", "value": tossup, "label": "Correct", "short_label": "C", "awards_bonus": true},
+            {"type": "AnswerType", "id": "answer-neg", "value": neg, "label": "Neg", "short_label": "N", "awards_bonus": false}
+        ],
+        "maximum_bonus_score": bonus * i64::from(bonus_parts),
+        "bonus_divisor": bonus,
+        "minimum_parts_per_bonus": bonus_parts,
+        "maximum_parts_per_bonus": bonus_parts,
+        "points_per_bonus_part": bonus,
+        "bonuses_bounce_back": bouncebacks
+    });
+    if lightning {
+        output["lightning_count_per_team"] = json!(1);
+        output["lightning_divisor"] = json!(10);
+    }
+    output
+}
+
+fn score_divisor(values: &[i64]) -> i64 {
+    values
+        .iter()
+        .map(|value| value.abs())
+        .filter(|value| *value > 0)
+        .fold(0, gcd)
+        .max(1)
+}
+
+fn gcd(left: i64, right: i64) -> i64 {
+    if right == 0 {
+        left
+    } else {
+        gcd(right, left % right)
+    }
+}
+
+fn i64_field(object: Option<&Map<String, Value>>, key: &str) -> Option<i64> {
+    object?.get(key).and_then(Value::as_i64)
 }
 
 fn string_field(object: Option<&serde_json::Map<String, Value>>, key: &str) -> Option<String> {
@@ -689,9 +1079,28 @@ mod tests {
             }
         }
 
-        let empty_room = <DirectorQbtcpState as QbtcpState>::assignment(&state, "room-102")
-            .expect("room without QBJ remains usable");
-        assert!(matches!(empty_room, AssignmentState::None(_)));
+        let generated = <DirectorQbtcpState as QbtcpState>::assignment(&state, "room-102")
+            .expect("Director-created games receive a QBJ assignment");
+        match generated {
+            AssignmentState::Assigned(assignment) => {
+                assert_eq!(assignment.match_id, "scheduled-2");
+                assert_eq!(assignment.left_team.as_deref(), Some("East C"));
+                assert_eq!(assignment.right_team.as_deref(), Some("West D"));
+                assert_eq!(assignment.qbj["version"], json!("2.1.1"));
+                let objects = assignment.qbj["objects"]
+                    .as_array()
+                    .expect("serialized QBJ objects");
+                assert!(objects
+                    .iter()
+                    .any(|object| object["type"] == json!("ScoringRules")));
+                assert!(objects.iter().any(|object| object["type"] == json!("Team")));
+            }
+            AssignmentState::None(_)
+            | AssignmentState::Blocked { .. }
+            | AssignmentState::Held { .. } => {
+                panic!("released Director game should be assigned")
+            }
+        }
 
         let mut updated = document;
         updated["scheduledGames"][0]["status"] = json!("scheduled");
@@ -699,6 +1108,10 @@ mod tests {
         let cleared = <DirectorQbtcpState as QbtcpState>::assignment(&state, "room-101")
             .expect("room remains available after refresh");
         assert!(matches!(cleared, AssignmentState::None(_)));
+        assert!(matches!(
+            <DirectorQbtcpState as QbtcpState>::assignment(&state, "room-102"),
+            Ok(AssignmentState::Assigned(_))
+        ));
     }
 
     #[test]

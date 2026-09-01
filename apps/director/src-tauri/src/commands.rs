@@ -10,7 +10,7 @@ use serde_json::Value;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::{DialogExt, FilePath};
 
-use crate::server::{ServerError, ServerRuntime, ServerStatus};
+use crate::server::{ServerError, ServerRuntime, ServerSnapshot, ServerStatus};
 use crate::store::{DirectorStore, StoreError, StoreStatus};
 
 #[derive(Debug, Serialize)]
@@ -194,6 +194,13 @@ pub fn director_server_status(
 }
 
 #[tauri::command]
+pub fn director_server_snapshot(
+    server: State<'_, ServerRuntime>,
+) -> Result<ServerSnapshot, CommandError> {
+    Ok(server.snapshot())
+}
+
+#[tauri::command]
 pub async fn director_start_qbtcp_server(
     store: State<'_, DirectorStore>,
     server: State<'_, ServerRuntime>,
@@ -227,7 +234,10 @@ pub async fn open_tournament_file(app: AppHandle) -> Result<Option<SelectedFile>
         .dialog()
         .file()
         .set_title("Open QBSheet tournament")
-        .add_filter("QBSheet and QBJ", &["qbj", "qbsheet", "qbs"])
+        .add_filter(
+            "QBSheet, QBJ, and portable archive",
+            &["qbst", "qbj", "qbsheet", "qbs"],
+        )
         .add_filter("JSON and SQBS", &["json", "sqbs"])
         .add_filter("All files", &["*"]);
     if let Some(window) = app.get_webview_window("main") {
@@ -259,7 +269,10 @@ pub async fn save_tournament_file(
         .dialog()
         .file()
         .set_title("Save QBSheet tournament")
-        .add_filter("QBSheet and QBJ", &["qbj", "qbsheet", "qbs"])
+        .add_filter(
+            "QBSheet, QBJ, and portable archive",
+            &["qbst", "qbj", "qbsheet", "qbs"],
+        )
         .add_filter("JSON", &["json"])
         .set_can_create_directories(true);
     if let Some(default_name) = request.default_name.as_deref() {

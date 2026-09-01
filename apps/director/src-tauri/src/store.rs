@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -5,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{json, Map, Value};
 use thiserror::Error;
 
 const SCHEMA_VERSION: i64 = 2;
@@ -118,6 +119,7 @@ impl DirectorStore {
         let connection = self.connection.lock().map_err(|_| StoreError::Poisoned)?;
         let transaction = connection.unchecked_transaction()?;
         upsert_state(&transaction, &state_json)?;
+        sync_normalized_state(&transaction, state)?;
         transaction.commit()?;
         Ok(())
     }
@@ -128,6 +130,7 @@ impl DirectorStore {
         let connection = self.connection.lock().map_err(|_| StoreError::Poisoned)?;
         let transaction = connection.unchecked_transaction()?;
         upsert_state(&transaction, &state_json)?;
+        sync_normalized_state(&transaction, state)?;
         let checkpoint_id = format!("checkpoint-{}-{}", unix_timestamp_ms(), std::process::id());
         transaction.execute(
             "INSERT INTO audit_events (id, entity_type, entity_id, action, payload_json)
@@ -168,6 +171,597 @@ fn upsert_state(
         params![SCHEMA_VERSION, state_json],
     )?;
     Ok(())
+}
+
+/// Project the application document into the normalized operational tables in the same transaction
+/// as the document write. React still consumes one boundary-shaped document, while SQLite keeps
+/// queryable rows for diagnostics, recovery tools, future migrations, and native integrations.
+/// Rebuilding this projection is intentional: the document is the versioned application boundary,
+/// and a failed projection rolls the complete save back without leaving half a tournament graph.
+fn sync_normalized_state(
+    transaction: &rusqlite::Transaction<'_>,
+    state: &Value,
+) -> Result<(), StoreError> {
+    transaction.execute_batch(
+        "DELETE FROM player_statistics;
+         DELETE FROM game_results;
+         DELETE FROM result_submissions;
+         DELETE FROM protests;
+         DELETE FROM qbtcp_sessions;
+         DELETE FROM games;
+         DELETE FROM scheduled_games;
+         DELETE FROM rounds;
+         DELETE FROM pools;
+         DELETE FROM phases;
+         DELETE FROM team_players;
+         DELETE FROM registrations;
+         DELETE FROM players;
+         DELETE FROM teams;
+         DELETE FROM organizations;
+         DELETE FROM rooms;
+         DELETE FROM staff;
+         DELETE FROM equipment;
+         DELETE FROM packets;
+         DELETE FROM tournaments;
+         DELETE FROM audit_events;
+         DELETE FROM application_metadata;",
+    )?;
+
+    let saved_at = state
+        .get("metadata")
+        .and_then(Value::as_object)
+        .and_then(|metadata| text(metadata, "lastSavedAt"))
+        .unwrap_or_else(now_sql);
+    let tournament = state.get("tournament").and_then(Value::as_object);
+    let tournament_id = tournament.and_then(|value| text(value, "id"));
+
+    if let Some(tournament) = tournament {
+        let id = tournament_id.as_deref().unwrap_or("director");
+        let rules = tournament
+            .get("rules")
+            .map(json_text)
+            .unwrap_or_else(|| "{}".to_owned());
+        transaction.execute(
+            "INSERT INTO tournaments
+                (id, name, short_name, status, rules_json, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
+            params![
+                id,
+                text(tournament, "name").unwrap_or_else(|| "QBSheet Director".to_owned()),
+                "",
+                text(tournament, "status").unwrap_or_else(|| "draft".to_owned()),
+                rules,
+                saved_at,
+            ],
+        )?;
+    }
+
+    for organization in objects(state, "organizations") {
+        let Some(id) = text(organization, "id") else {
+            continue;
+        };
+        transaction.execute(
+            "INSERT INTO organizations
+                (id, name, short_name, notes, archived, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
+            params![
+                id,
+                text(organization, "name").unwrap_or_else(|| id.clone()),
+                text(organization, "shortName").unwrap_or_default(),
+                text(organization, "notes").unwrap_or_default(),
+                bool_int(organization.get("archived")),
+                saved_at,
+            ],
+        )?;
+    }
+
+    let mut team_organizations = HashMap::new();
+    for team in objects(state, "teams") {
+        let Some(id) = text(team, "id") else { continue };
+        let organization_id = text(team, "organizationId");
+        team_organizations.insert(id.clone(), organization_id.clone());
+        transaction.execute(
+            "INSERT INTO teams
+                (id, organization_id, display_name, team_letter, seed, status, notes, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
+            params![
+                id,
+                organization_id,
+                text(team, "displayName").unwrap_or_else(|| "Unnamed team".to_owned()),
+                text(team, "teamLetter").unwrap_or_default(),
+                integer(team.get("seed")),
+                text(team, "status").unwrap_or_else(|| "confirmed".to_owned()),
+                text(team, "notes").unwrap_or_default(),
+                text(team, "createdAt").unwrap_or_else(|| saved_at.clone()),
+            ],
+        )?;
+    }
+
+    for player in objects(state, "players") {
+        let Some(id) = text(player, "id") else {
+            continue;
+        };
+        let team_id = text(player, "teamId");
+        transaction.execute(
+            "INSERT INTO players
+                (id, organization_id, display_name, graduation_year, notes, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
+            params![
+                id,
+                team_id
+                    .as_ref()
+                    .and_then(|team_id| team_organizations.get(team_id))
+                    .cloned()
+                    .flatten(),
+                text(player, "name").unwrap_or_else(|| "Unnamed player".to_owned()),
+                integer(player.get("graduationYear")),
+                text(player, "notes").unwrap_or_default(),
+                saved_at,
+            ],
+        )?;
+        if let Some(team_id) = team_id {
+            transaction.execute(
+                "INSERT INTO team_players (team_id, player_id, roster_order, captain)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    team_id,
+                    id,
+                    integer(player.get("rosterOrder")).unwrap_or(0),
+                    bool_int(player.get("captain")),
+                ],
+            )?;
+        }
+    }
+
+    if let Some(tournament_id) = tournament_id.as_deref() {
+        for team in objects(state, "teams") {
+            let Some(team_id) = text(team, "id") else {
+                continue;
+            };
+            transaction.execute(
+                "INSERT INTO registrations
+                    (id, tournament_id, team_id, seed, status, notes)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    format!("registration-{team_id}"),
+                    tournament_id,
+                    team_id,
+                    integer(team.get("seed")),
+                    text(team, "status").unwrap_or_else(|| "active".to_owned()),
+                    text(team, "notes").unwrap_or_default(),
+                ],
+            )?;
+        }
+    }
+
+    for room in objects(state, "rooms") {
+        let Some(id) = text(room, "id") else { continue };
+        transaction.execute(
+            "INSERT INTO rooms
+                (id, name, building, floor, accessibility_notes, directions, status, notes)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                id,
+                text(room, "name").unwrap_or_else(|| id.clone()),
+                text(room, "building").unwrap_or_default(),
+                text(room, "floor").unwrap_or_default(),
+                text(room, "accessibility").unwrap_or_default(),
+                text(room, "directions").unwrap_or_default(),
+                text(room, "status").unwrap_or_else(|| "available".to_owned()),
+                text(room, "notes").unwrap_or_default(),
+            ],
+        )?;
+    }
+
+    for member in objects(state, "staff") {
+        let Some(id) = text(member, "id") else {
+            continue;
+        };
+        let roles = member
+            .get("roles")
+            .map(json_text)
+            .unwrap_or_else(|| "[]".to_owned());
+        transaction.execute(
+            "INSERT INTO staff
+                (id, display_name, role, availability_json, notes, active)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                id,
+                text(member, "name").unwrap_or_else(|| id.clone()),
+                member
+                    .get("roles")
+                    .and_then(Value::as_array)
+                    .and_then(|roles| roles.first())
+                    .and_then(Value::as_str)
+                    .unwrap_or("moderator"),
+                roles,
+                text(member, "notes").unwrap_or_default(),
+                bool_int(member.get("available")),
+            ],
+        )?;
+    }
+
+    for equipment in objects(state, "equipment") {
+        let Some(id) = text(equipment, "id") else {
+            continue;
+        };
+        transaction.execute(
+            "INSERT INTO equipment (id, kind, label, status, notes)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                id,
+                text(equipment, "kind").unwrap_or_else(|| "other".to_owned()),
+                text(equipment, "name").unwrap_or_else(|| id.clone()),
+                if bool_value(equipment.get("available")) {
+                    "available"
+                } else {
+                    "offline"
+                },
+                text(equipment, "notes").unwrap_or_default(),
+            ],
+        )?;
+    }
+
+    for packet in objects(state, "packets") {
+        let Some(id) = text(packet, "id") else {
+            continue;
+        };
+        let used = packet
+            .get("usedGameIds")
+            .and_then(Value::as_array)
+            .is_some_and(|values| !values.is_empty());
+        transaction.execute(
+            "INSERT INTO packets
+                (id, name, packet_type, source, status, security_notes, used_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                id,
+                text(packet, "name").unwrap_or_else(|| id.clone()),
+                if bool_value(packet.get("tiebreaker")) {
+                    "tiebreaker"
+                } else {
+                    "regular"
+                },
+                text(packet, "source").unwrap_or_default(),
+                if used { "used" } else { "available" },
+                text(packet, "notes").unwrap_or_default(),
+                used.then(|| saved_at.clone()),
+            ],
+        )?;
+    }
+
+    let Some(tournament_id) = tournament_id.as_deref() else {
+        insert_metadata(transaction, state, &saved_at)?;
+        return Ok(());
+    };
+
+    for phase in objects(state, "phases") {
+        let Some(id) = text(phase, "id") else {
+            continue;
+        };
+        transaction.execute(
+            "INSERT INTO phases
+                (id, tournament_id, name, phase_type, sequence, rules_json, status)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                id,
+                tournament_id,
+                text(phase, "name").unwrap_or_else(|| id.clone()),
+                text(phase, "kind").unwrap_or_else(|| "custom".to_owned()),
+                integer(phase.get("order")).unwrap_or(0),
+                json_text(phase.get("advancementRule").unwrap_or(&Value::Null)),
+                text(phase, "status").unwrap_or_else(|| "planned".to_owned()),
+            ],
+        )?;
+    }
+    for pool in objects(state, "pools") {
+        let Some(id) = text(pool, "id") else { continue };
+        transaction.execute(
+            "INSERT INTO pools (id, phase_id, name, sequence, rules_json)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                id,
+                text(pool, "phaseId").unwrap_or_default(),
+                text(pool, "name").unwrap_or_else(|| id.clone()),
+                integer(pool.get("order")).unwrap_or(0),
+                "{}",
+            ],
+        )?;
+    }
+    for round in objects(state, "rounds") {
+        let Some(id) = text(round, "id") else {
+            continue;
+        };
+        let packet_policy = round
+            .get("packetId")
+            .map(|packet_id| json_text(&json!({ "packetId": packet_id })))
+            .unwrap_or_else(|| "{}".to_owned());
+        transaction.execute(
+            "INSERT INTO rounds
+                (id, phase_id, name, sequence, revision, status, packet_policy_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                id,
+                text(round, "phaseId").unwrap_or_default(),
+                text(round, "name").unwrap_or_else(|| id.clone()),
+                integer(round.get("number")).unwrap_or(0),
+                integer(round.get("revision")).unwrap_or(0),
+                text(round, "status").unwrap_or_else(|| "planned".to_owned()),
+                packet_policy,
+            ],
+        )?;
+    }
+
+    for (sequence, game) in objects(state, "scheduledGames").into_iter().enumerate() {
+        let Some(id) = text(game, "id") else { continue };
+        transaction.execute(
+            "INSERT INTO scheduled_games
+                (id, round_id, room_id, packet_id, home_team_id, away_team_id, sequence, status, assignment_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                id,
+                text(game, "roundId").unwrap_or_default(),
+                text(game, "roomId"),
+                text(game, "packetId"),
+                text(game, "leftTeamId"),
+                text(game, "rightTeamId"),
+                sequence as i64,
+                text(game, "status").unwrap_or_else(|| "scheduled".to_owned()),
+                "{}",
+            ],
+        )?;
+    }
+
+    let mut first_game_for_schedule = HashMap::new();
+    for game in objects(state, "games") {
+        let Some(id) = text(game, "id") else { continue };
+        let scheduled_id = text(game, "scheduledGameId").and_then(|scheduled_id| {
+            if first_game_for_schedule.contains_key(&scheduled_id) {
+                None
+            } else {
+                first_game_for_schedule.insert(scheduled_id.clone(), id.clone());
+                Some(scheduled_id)
+            }
+        });
+        transaction.execute(
+            "INSERT INTO games
+                (id, scheduled_game_id, session_id, started_at, finished_at, status, notes)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                id,
+                scheduled_id,
+                text(game, "sessionId"),
+                text(game, "startedAt"),
+                text(game, "finishedAt"),
+                text(game, "status").unwrap_or_else(|| "not_started".to_owned()),
+                text(game, "note").unwrap_or_default(),
+            ],
+        )?;
+    }
+
+    for game in objects(state, "games") {
+        let Some(game_id) = text(game, "id") else {
+            continue;
+        };
+        let submission = objects(state, "submissions")
+            .into_iter()
+            .rev()
+            .find(|submission| text(submission, "gameId").as_deref() == Some(game_id.as_str()));
+        let result_id = format!("result-{game_id}");
+        let player_stats = game
+            .get("playerStats")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        transaction.execute(
+            "INSERT INTO game_results
+                (id, game_id, source, raw_submission_json, canonical_result_json, validation_json, review_state, accepted_at, accepted_by, note)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                result_id,
+                game_id,
+                text(game, "source").unwrap_or_else(|| "manual".to_owned()),
+                submission
+                    .map(|value| json_text(&Value::Object(value.clone())))
+                    .unwrap_or_else(|| "{}".to_owned()),
+                json_text(&Value::Object(game.clone())),
+                submission
+                    .and_then(|value| value.get("warnings"))
+                    .map(json_text)
+                    .unwrap_or_else(|| "[]".to_owned()),
+                submission
+                    .and_then(|value| text(value, "status"))
+                    .unwrap_or_else(|| "pending".to_owned()),
+                text(game, "acceptedAt"),
+                submission.and_then(|value| text(value, "acceptedBy")),
+                text(game, "note").unwrap_or_default(),
+            ],
+        )?;
+        for (order, player_stat) in player_stats.iter().enumerate() {
+            let Some(player_stat) = player_stat.as_object() else {
+                continue;
+            };
+            let Some(player_id) = text(player_stat, "playerId") else {
+                continue;
+            };
+            transaction.execute(
+                "INSERT INTO player_statistics
+                    (id, game_result_id, player_id, statistics_json)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    format!("{result_id}-{order}"),
+                    result_id,
+                    player_id,
+                    json_text(&Value::Object(player_stat.clone())),
+                ],
+            )?;
+        }
+    }
+
+    for session in objects(state, "qbtcpSessions") {
+        let Some(id) = text(session, "sessionId") else {
+            continue;
+        };
+        let game_id = text(session, "gameId").or_else(|| {
+            text(session, "roomId").and_then(|room_id| {
+                objects(state, "scheduledGames")
+                    .into_iter()
+                    .find(|game| text(game, "roomId").as_deref() == Some(room_id.as_str()))
+                    .and_then(|game| text(game, "id"))
+                    .and_then(|scheduled_id| first_game_for_schedule.get(&scheduled_id).cloned())
+            })
+        });
+        transaction.execute(
+            "INSERT INTO qbtcp_sessions
+                (id, room_id, game_id, device_id, state, assignment_revision, last_seen_at, metadata_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                id,
+                text(session, "roomId"),
+                game_id,
+                text(session, "deviceId").unwrap_or_default(),
+                text(session, "state").unwrap_or_else(|| "paired".to_owned()),
+                0_i64,
+                text(session, "lastSeenAt"),
+                json_text(session.get("progress").unwrap_or(&Value::Null)),
+            ],
+        )?;
+    }
+
+    for submission in objects(state, "submissions") {
+        let Some(id) = text(submission, "id") else {
+            continue;
+        };
+        transaction.execute(
+            "INSERT INTO result_submissions
+                (id, session_id, game_id, fingerprint, raw_payload_json, received_at, state)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                id,
+                text(submission, "sessionId"),
+                text(submission, "gameId"),
+                text(submission, "fingerprint").unwrap_or_default(),
+                json_text(submission.get("rawSubmission").unwrap_or(&Value::Null)),
+                text(submission, "receivedAt").unwrap_or_else(|| saved_at.clone()),
+                text(submission, "status").unwrap_or_else(|| "received".to_owned()),
+            ],
+        )?;
+    }
+
+    for protest in objects(state, "protests") {
+        let Some(id) = text(protest, "id") else {
+            continue;
+        };
+        transaction.execute(
+            "INSERT INTO protests
+                (id, game_id, question_reference, description, status, ruling, notes, created_at, resolved_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                id,
+                text(protest, "gameId"),
+                text(protest, "category").unwrap_or_default(),
+                text(protest, "description").unwrap_or_default(),
+                text(protest, "status").unwrap_or_else(|| "open".to_owned()),
+                text(protest, "ruling").unwrap_or_default(),
+                "",
+                text(protest, "createdAt").unwrap_or_else(|| saved_at.clone()),
+                text(protest, "updatedAt"),
+            ],
+        )?;
+    }
+
+    for event in objects(state, "audit") {
+        let Some(id) = text(event, "id") else {
+            continue;
+        };
+        transaction.execute(
+            "INSERT INTO audit_events
+                (id, entity_type, entity_id, action, payload_json, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                id,
+                "director",
+                text(event, "entityId").unwrap_or_else(|| "director".to_owned()),
+                text(event, "type").unwrap_or_else(|| "changed".to_owned()),
+                json_text(event.get("details").unwrap_or(&Value::Null)),
+                text(event, "at").unwrap_or_else(|| saved_at.clone()),
+            ],
+        )?;
+    }
+
+    insert_metadata(transaction, state, &saved_at)?;
+    Ok(())
+}
+
+fn insert_metadata(
+    transaction: &rusqlite::Transaction<'_>,
+    state: &Value,
+    saved_at: &str,
+) -> Result<(), StoreError> {
+    let metadata = state.get("metadata").and_then(Value::as_object);
+    for (key, value) in [
+        ("schema_version", Value::from(SCHEMA_VERSION)),
+        ("last_saved_at", metadata_value(metadata, "lastSavedAt")),
+        (
+            "last_checkpoint_at",
+            metadata_value(metadata, "lastCheckpointAt"),
+        ),
+        ("archive_path", metadata_value(metadata, "archivePath")),
+        ("projection_saved_at", Value::from(saved_at)),
+    ] {
+        if !value.is_null() {
+            transaction.execute(
+                "INSERT INTO application_metadata (key, value, updated_at)
+                 VALUES (?1, ?2, CURRENT_TIMESTAMP)",
+                params![key, json_text(&value)],
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn objects<'a>(state: &'a Value, key: &str) -> Vec<&'a Map<String, Value>> {
+    state
+        .get(key)
+        .and_then(Value::as_array)
+        .map(|values| values.iter().filter_map(Value::as_object).collect())
+        .unwrap_or_default()
+}
+
+fn text(object: &Map<String, Value>, key: &str) -> Option<String> {
+    object
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn integer(value: Option<&Value>) -> Option<i64> {
+    value.and_then(Value::as_i64)
+}
+
+fn bool_value(value: Option<&Value>) -> bool {
+    value.and_then(Value::as_bool).unwrap_or(false)
+}
+
+fn bool_int(value: Option<&Value>) -> i64 {
+    i64::from(bool_value(value))
+}
+
+fn json_text(value: &Value) -> String {
+    serde_json::to_string(value).unwrap_or_else(|_| "null".to_owned())
+}
+
+fn metadata_value(metadata: Option<&Map<String, Value>>, key: &str) -> Value {
+    metadata
+        .and_then(|metadata| metadata.get(key))
+        .cloned()
+        .unwrap_or(Value::Null)
+}
+
+fn now_sql() -> String {
+    unix_timestamp_ms().to_string()
 }
 
 fn configure_connection(connection: &Connection) -> Result<(), StoreError> {

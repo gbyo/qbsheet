@@ -739,7 +739,7 @@ impl QbtcpServer {
         let accepted = session
             .latest_progress
             .as_ref()
-            .is_none_or(|latest| sequence > latest.sequence);
+            .map_or(true, |latest| sequence > latest.sequence);
         if accepted {
             let record = ProgressRecord {
                 session_id: session.session_id.clone(),

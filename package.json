@@ -3,6 +3,10 @@
   "private": true,
   "version": "0.1.0",
   "description": "QBSheet, an offline-first electronic quiz bowl scoresheet that runs entirely in the browser",
+  "workspaces": [
+    "apps/director",
+    "packages/*"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/gbyo/qbsheet.git"
@@ -36,12 +40,21 @@
     "test:stress": "QBSHEET_DEEP_STRESS=1 vitest --run tests/RoomGameStateSpace.test.ts",
     "test:property": "vitest --run tests/RoomGameProperty.test.ts",
     "test:browser": "playwright test",
+    "director:dev": "npm run dev --workspace=@qbsheet/director",
+    "director:build": "npm run build --workspace=@qbsheet/director",
+    "director:test": "npm run test --workspace=@qbsheet/director",
+    "director:tauri:dev": "npm run tauri:dev --workspace=@qbsheet/director",
+    "director:tauri:build": "npm run tauri:build --workspace=@qbsheet/director",
+    "director:core:test": "npm run test --workspace=@qbsheet/tournament-core",
+    "director:formats:test": "npm run test --workspace=@qbsheet/tournament-formats",
     "test:browser:yellowfruit": "playwright test e2e/YellowFruitInterop.spec.ts",
     "test:mutation": "stryker run",
     "test:mutation:dry": "stryker run --dryRunOnly",
     "prepare": "npm run build:core"
   },
   "dependencies": {
+    "@qbsheet/tournament-core": "0.1.0",
+    "@qbsheet/tournament-formats": "0.1.0",
     "@fontsource/ibm-plex-sans": "^5.2.5",
     "fflate": "^0.8.3",
     "jsqr": "^1.4.0",

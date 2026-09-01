@@ -44,6 +44,7 @@ pub fn run() {
             commands::director_save_state,
             commands::director_checkpoint,
             commands::director_server_status,
+            commands::director_server_snapshot,
             commands::director_start_qbtcp_server,
             commands::director_stop_qbtcp_server,
             commands::checkpoint_store,
