@@ -19,8 +19,36 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  prepare-cache:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      npm-cache-key: ${{ steps.cache-key.outputs.key }}
+    steps:
+      - name: Check out QBSheet
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+
+      - name: Derive trusted QBSheet npm cache key
+        id: cache-key
+        run: echo "key=qbsheet-npm-${{ runner.os }}-${{ hashFiles('package-lock.json') }}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore or save QBSheet npm cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ steps.cache-key.outputs.key }}
+
+      - name: Populate QBSheet npm cache
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
   shard:
     name: ${{ matrix.name }}
+    needs: prepare-cache
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -69,10 +97,12 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: 20
-          # Scheduled/manual runs may select arbitrary companion refs; keep their dependency
-          # cache isolated by disabling the shared npm cache on those privileged triggers.
-          cache: ${{ github.event_name == 'pull_request' && 'npm' || '' }}
-          cache-dependency-path: package-lock.json
+
+      - name: Restore trusted QBSheet npm cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.npm
+          key: ${{ needs.prepare-cache.outputs.npm-cache-key }}
 
       - name: Install QBSheet dependencies
         run: npm ci
