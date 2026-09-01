@@ -47,6 +47,10 @@
  * team and the opponent gets a row of its own, rather than a "Points" box and a "Bounceback" box
  * that say nothing about who scores what.
  *
+ * The wording is the live prompt's wording: a part goes to a named team or it is `No points`. The
+ * screen is denser than the live one and stays so — a correction is read, not raced — but the
+ * vocabulary and the calculation helpers are shared so the two cannot come to mean different things.
+ *
  * # Turning a total into parts cannot invent history
  *
  * A bonus recorded as 20 says nothing about *which* two parts were got. Opening part entry on one
@@ -1025,7 +1029,7 @@ export default function QuestionEditor(props: {
                             </>,
                             `Bonus part ${index + 1} bounced back to ${opponentName}`,
                           )}
-                        {choice('missed', 'Miss', `Bonus part ${index + 1} missed`)}
+                        {choice('missed', 'No points', `No points on bonus part ${index + 1}`)}
                       </div>
                     );
                   })}
@@ -1050,7 +1054,7 @@ export default function QuestionEditor(props: {
                 className="scorer-text-action"
                 onClick={partDraft ? editTotals : editParts}
               >
-                {partDraft ? 'Enter totals instead' : 'Edit individual parts…'}
+                {partDraft ? 'Enter totals instead' : 'Edit by part'}
               </button>
             )}
           </div>

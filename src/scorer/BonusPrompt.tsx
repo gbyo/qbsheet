@@ -1,237 +1,135 @@
 /**
- * The bonus, asked for the way the format actually defines one.
+ * The bonus, asked for the way the moderator reads one.
  *
- * A regular bonus gets buttons, because a regular bonus has a small known set of totals and pressing
- * one of them is faster than typing. An irregular one gets a number field, because its parts need
- * not be worth the same and there is no set to enumerate — offering buttons there would be inventing
- * a structure the tournament did not define.
+ * # Which question the prompt opens on
  *
- * Bouncebacks appear only when the format bounces bonuses back, and only offer what is left on the
- * bonus after the controlling team has taken its share.
+ * Two different bonuses are being scored under one name, and they want opposite interfaces.
  *
- * # Why parts are an aside and not the default
+ * Where only the controlling team can score, the scorekeeper hears one number and the totals row is
+ * the whole interaction: 0 / 10 / 20 / 30, one press, done. Enumerating parts there would be three
+ * presses for information the room already summed.
  *
- * Because 0 / 10 / 20 / 30 is one click and three parts is three, and the bonus is the half of the
- * cycle where a scorekeeper is already behind. But `ScoreEvents` carries part-level results, QBJ
- * reads them, and there are real occasions when which part was got is the thing in question: a
- * protested bonus, a spoiled part read from the wrong packet, a room being asked afterwards what
- * happened. So parts are one press away and never in the way.
+ * Where bonuses bounce back, the scorekeeper hears no number at all. They hear a sequence — this
+ * team got that part, the other team got the next one on the bounce, nobody got the last — and a
+ * totals row asks them to do the arithmetic and then remember which half of it belongs to whom
+ * while the next tossup is being read. So a bouncing bonus opens on its parts, which is the thing
+ * that was actually said, and QBSheet does the adding. `partEntryIsDefault` is that rule.
+ *
+ * An irregular bonus has neither: its parts need not be worth the same and there is no fixed number
+ * of them, so nothing here can enumerate either totals or parts, and the only honest control is a
+ * number field per team.
+ *
+ * # One panel, never a sequence of screens
+ *
+ * Every part is on screen the whole time, in a fixed position, with the one being asked about
+ * emphasised. Nothing is disabled: reaching ahead and going back over an earlier part are both
+ * ordinary. The bonus commits itself the moment the last part has an answer, because a Record
+ * button after three explicit choices is a fourth press that confirms nothing.
+ *
+ * What is recorded is exactly what the old part route recorded — one `bonus` event carrying
+ * `parts`. There is no such thing as a per-part event, and undo still takes the whole bonus.
  */
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
 import { IBonusPartResult } from '../scoring/ScoreEvents';
 import {
   BonusPartOutcome,
+  bonusOutcomeTotals,
   bonusPartForOutcome,
   bonusScoreProblem,
   bonusTotalProblem,
-  bouncebackNeedsTypedEntry,
   bouncebackOptions,
-  regularBonusPartCount,
+  livePartCount,
+  partEntryIsDefault,
   regularBonusTotals,
 } from './bonusOptions';
-import { bonusOptionForCode, keystrokeBelongsToControl } from './KeyboardScoring';
-import MotionNumber from './ScoringMotion';
-import { LeftOrRight } from '../scoring/types';
+import {
+  BonusKeyboardStage,
+  bonusOptionForCode,
+  bonusPartChoices,
+  bonusPartOutcomeForCode,
+  keystrokeBelongsToControl,
+} from './KeyboardScoring';
+import MotionNumber, { partAcknowledgementMotionMs } from './ScoringMotion';
 
 export interface IBonusPromptProps {
   format: IScorekeeperFormat;
   /** The team that converted the tossup. */
   controllingTeamName: string;
-  /** Explicit screen side: bounceback travel must not be guessed from a team name. */
-  controllingSide: LeftOrRight;
   opponentName: string;
   questionNumber: number;
   onRecord: (controlledPoints: number, bouncebackPoints?: number) => void;
-  /** Record the bonus part by part instead of as a total. */
+  /** Record the bonus part by part instead of as a total. Still one bonus event. */
   onRecordParts: (parts: IBonusPartResult[]) => void;
   /**
    * Whether the digit shortcuts are live, and what the legend should say they do.
    *
    * The shortcut lives here rather than in the scorer's own listener because the choices on screen are
-   * this component's state — which stage of the bonus is being asked for, and what is left to bounce
-   * back. Handling it anywhere else would mean lifting that state so a keyboard layer could read it,
-   * which is a bad trade. `onStageChange` reports upward so the persistent map can change with the
-   * screen; the numbers in it are the ones on the buttons.
+   * this component's state — which part is being asked about, or what is left to bounce back. Handling
+   * it anywhere else would mean lifting that state so a keyboard layer could read it, which is a bad
+   * trade. `onStageChange` reports upward so the persistent map can change with the screen; every
+   * meaning in it is built from the same values the buttons carry.
    */
   keyboardEnabled?: boolean;
-  onStageChange?: (stage: { title: string; options: number[]; cancellable: boolean } | null) => void;
+  onStageChange?: (stage: BonusKeyboardStage | null) => void;
 }
 
 /**
- * Bind the digits to whatever choices are currently on screen.
+ * Bind the digits to whatever the bonus is currently asking.
  *
- * Left to right from zero, so the key is the number of parts and `0` is the bonus that scored none. See
- * `bonusKeyLegend`. Calls the same handler the buttons call, so a keystroke cannot record a total the
- * buttons could not offer.
+ * One listener for both stages, dispatching on the stage's own kind, so a keystroke cannot record
+ * something the buttons on screen could not. Attached once and reading through a ref: the bonus
+ * re-renders on every part, and rebuilding the listener each time would be free to miss a keystroke
+ * between renders.
  */
-function useChoiceKeys(options: readonly number[], pick: (points: number) => void, enabled: boolean): void {
-  const latest = useRef({ options, pick, enabled });
+function useBonusKeys(
+  stage: BonusKeyboardStage | null,
+  handlers: { onTotal: (points: number) => void; onPart: (outcome: BonusPartOutcome) => void },
+  enabled: boolean,
+): void {
+  const latest = useRef({ stage, handlers, enabled });
   useLayoutEffect(() => {
-    latest.current = { options, pick, enabled };
-  }, [options, pick, enabled]);
+    latest.current = { stage, handlers, enabled };
+  }, [stage, handlers, enabled]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const current = latest.current;
-      if (!current.enabled || event.repeat) return;
-      // The irregular-bonus path puts a number field on screen, and its digits are its own. This is the
-      // check that keeps a typed total from also being a shortcut.
+      if (!current.enabled || current.stage === null || event.repeat) return;
+      // The irregular-bonus path puts number fields on screen, and their digits are their own. This is
+      // the check that keeps a typed total from also being a shortcut.
       if (keystrokeBelongsToControl(event)) return;
       if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
-      const points = bonusOptionForCode(event.code, current.options);
-      if (points === null) return;
+
+      if (current.stage.kind === 'totals') {
+        const points = bonusOptionForCode(event.code, current.stage.options);
+        if (points === null) return;
+        event.preventDefault();
+        current.handlers.onTotal(points);
+        return;
+      }
+
+      const outcome = bonusPartOutcomeForCode(event.code, current.stage.choices);
+      if (outcome === null) return;
       event.preventDefault();
-      current.pick(points);
+      current.handlers.onPart(outcome);
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
   }, []);
 }
 
-/** Part-by-part entry: got it / missed it, and who got it when bonuses bounce. */
-function PartEntry(props: {
-  format: IScorekeeperFormat;
-  partCount: number;
-  controllingTeamName: string;
-  opponentName: string;
-  onRecord: (parts: IBonusPartResult[]) => void;
-  onCancel: () => void;
-}) {
-  const { format, partCount, controllingTeamName, opponentName, onRecord, onCancel } = props;
-  const perPart = format.bonus.pointsPerPart ?? 0;
-  const bouncesBack = format.bonus.bounceBack;
-  /** Per part: who took it, if anybody. */
-  const [outcomes, setOutcomes] = useState<Array<BonusPartOutcome | null>>(
-    Array.from({ length: partCount }, () => null),
-  );
-  const [selectionMotion, setSelectionMotion] = useState<{
-    index: number;
-    outcome: BonusPartOutcome;
-    token: number;
-  } | null>(null);
-  const selectionSequence = useRef(0);
-
-  const set = (index: number, value: BonusPartOutcome) => {
-    setOutcomes((current) => current.map((existing, position) => (position === index ? value : existing)));
-    selectionSequence.current += 1;
-    setSelectionMotion({ index, outcome: value, token: selectionSequence.current });
-  };
-  useEffect(() => {
-    if (!selectionMotion) return undefined;
-    const token = selectionMotion.token;
-    const timer = window.setTimeout(
-      () => setSelectionMotion((current) => (current?.token === token ? null : current)),
-      140,
-    );
-    return () => window.clearTimeout(timer);
-  }, [selectionMotion]);
-
-  const choiceClass = (index: number, outcome: BonusPartOutcome, selected: boolean) =>
-    [
-      'scorer-choice',
-      selected ? 'is-selected' : '',
-      selectionMotion?.index === index && selectionMotion.outcome === outcome ? 'is-part-recorded' : '',
-    ]
-      .filter(Boolean)
-      .join(' ');
-  const selectionToken = (index: number, outcome: BonusPartOutcome) =>
-    selectionMotion?.index === index && selectionMotion.outcome === outcome
-      ? selectionMotion.token
-      : undefined;
-
-  const parts: IBonusPartResult[] = outcomes.map((outcome) =>
-    bonusPartForOutcome(format.bonus, outcome ?? 'missed'),
-  );
-  const controlledTotal = parts.reduce((sum, part) => sum + part.controlledPoints, 0);
-  const bouncebackTotal = parts.reduce((sum, part) => sum + (part.bouncebackPoints ?? 0), 0);
-
-  return (
-    <div className="scorer-bonus-parts">
-      <ol className="scorer-part-list">
-        {outcomes.map((outcome, index) => (
-          // Position is the identity of a bonus part; there is nothing else to key on.
-
-          <li key={index} className="scorer-part-row">
-            <span className="scorer-part-label">Part {index + 1}</span>
-            <span className="scorer-choices">
-              <button
-                type="button"
-                aria-pressed={outcome === 'controlled'}
-                aria-label={`Part ${index + 1}, ${controllingTeamName} +${perPart}`}
-                className={choiceClass(index, 'controlled', outcome === 'controlled')}
-                data-selection-token={selectionToken(index, 'controlled')}
-                onClick={() => set(index, 'controlled')}
-              >
-                +{perPart}
-              </button>
-              {bouncesBack && (
-                <button
-                  type="button"
-                  aria-pressed={outcome === 'bounceback'}
-                  aria-label={`Part ${index + 1}, ${opponentName} bounceback`}
-                  className={choiceClass(index, 'bounceback', outcome === 'bounceback')}
-                  data-selection-token={selectionToken(index, 'bounceback')}
-                  onClick={() => set(index, 'bounceback')}
-                >
-                  Bounce
-                </button>
-              )}
-              <button
-                type="button"
-                aria-pressed={outcome === 'missed'}
-                aria-label={`Part ${index + 1}, missed by both teams`}
-                className={choiceClass(index, 'missed', outcome === 'missed')}
-                data-selection-token={selectionToken(index, 'missed')}
-                onClick={() => set(index, 'missed')}
-              >
-                Miss
-              </button>
-            </span>
-          </li>
-        ))}
-      </ol>
-      <p className="scorer-part-total">
-        <MotionNumber
-          value={controlledTotal}
-          minimumDigits={2}
-          aria-label={`${controlledTotal} controlled points`}
-        />
-        {bouncesBack && bouncebackTotal > 0 && (
-          <>
-            {' '}
-            ·{' '}
-            <MotionNumber
-              value={bouncebackTotal}
-              minimumDigits={2}
-              aria-label={`${bouncebackTotal} bounceback points`}
-            />{' '}
-            bounced back
-          </>
-        )}
-      </p>
-      <div className="scorer-choices">
-        <button
-          type="button"
-          className="scorer-choice"
-          disabled={outcomes.some((outcome) => outcome === null)}
-          onClick={() => onRecord(parts)}
-        >
-          Record parts
-        </button>
-        <button type="button" className="scorer-action" onClick={onCancel}>
-          Back to totals
-        </button>
-      </div>
-    </div>
-  );
+/** A press that has just landed, kept only long enough for the acknowledgement to play. */
+interface IPartAcknowledgement {
+  index: number;
+  outcome: BonusPartOutcome;
+  token: number;
 }
 
 export default function BonusPrompt(props: IBonusPromptProps) {
   const {
     format,
     controllingTeamName,
-    controllingSide,
     opponentName,
     questionNumber,
     onRecord,
@@ -239,73 +137,158 @@ export default function BonusPrompt(props: IBonusPromptProps) {
     keyboardEnabled = false,
     onStageChange,
   } = props;
-  const totals = useMemo(() => regularBonusTotals(format.bonus), [format.bonus]);
-  const partCount = regularBonusPartCount(format.bonus);
-  const [controlled, setControlled] = useState<number | null>(null);
-  const [typed, setTyped] = useState('');
-  const [byParts, setByParts] = useState(false);
-  const [handoff, setHandoff] = useState<{ token: number; controlledPoints: number } | null>(null);
-  const handoffSequence = useRef(0);
 
   const bouncesBack = format.bonus.bounceBack;
+  const perPart = format.bonus.pointsPerPart ?? 0;
+  const totals = useMemo(() => regularBonusTotals(format.bonus), [format.bonus]);
+  const partCount = useMemo(() => livePartCount(format.bonus), [format.bonus]);
 
-  /** With no bouncebacks to ask about, choosing the total is the whole interaction. */
-  const finish = (controlledPoints: number) => {
-    if (!bouncesBack) {
-      onRecord(controlledPoints);
-      return;
-    }
-    setTyped('');
-    handoffSequence.current += 1;
-    setHandoff({ token: handoffSequence.current, controlledPoints });
-    setControlled(controlledPoints);
-  };
+  /*
+   * Which entry this bonus opened in, and the scorekeeper's answer if they changed it.
+   *
+   * Not a preference and not a mode: the component is keyed on the question, so every new bonus
+   * starts on whichever entry its format calls for. A room that wants totals for one reconstructed
+   * bonus is not thereby asking for totals for the rest of the round.
+   */
+  const [byParts, setByParts] = useState(() => partEntryIsDefault(format.bonus));
+  const [outcomes, setOutcomes] = useState<Array<BonusPartOutcome | null>>(() =>
+    Array.from({ length: partCount ?? 0 }, () => null),
+  );
+  const [controlled, setControlled] = useState<number | null>(null);
+  const [typedControlled, setTypedControlled] = useState('');
+  const [typedBounceback, setTypedBounceback] = useState('');
+  const [acknowledgement, setAcknowledgement] = useState<IPartAcknowledgement | null>(null);
+  const acknowledgementSequence = useRef(0);
 
   useEffect(() => {
-    if (handoff === null) return undefined;
-    const timer = window.setTimeout(() => setHandoff(null), 200);
+    if (!acknowledgement) return undefined;
+    const token = acknowledgement.token;
+    const timer = window.setTimeout(
+      () => setAcknowledgement((current) => (current?.token === token ? null : current)),
+      partAcknowledgementMotionMs,
+    );
     return () => window.clearTimeout(timer);
-  }, [handoff]);
-
-  const bounceStage = controlled !== null && bouncesBack;
-  const bouncebackTyped = bounceStage && bouncebackNeedsTypedEntry(format.bonus, controlled as number);
-  const typedProblem =
-    typed === ''
-      ? null
-      : bounceStage
-        ? bonusScoreProblem(format.bonus, controlled as number, Number(typed))
-        : bonusTotalProblem(format.bonus, Number(typed));
-  const typedErrorId = bounceStage ? 'scorer-bounceback-points-error' : 'scorer-bonus-points-error';
+  }, [acknowledgement]);
 
   /**
-   * Which stage the keyboard is aimed at.
+   * The part being asked about: the first one nobody has answered.
    *
-   * Only the two stages that are a row of value buttons. Part entry is a grid of got-it/missed-it
-   * toggles per part, and a digit mapping over that would be a redesign of the model to suit the
-   * keyboard rather than a shortcut for the controls already there — so parts stay on the buttons, which
-   * is what the spec for this asks for and what keeps the part model untouched.
-   *
-   * The irregular-bonus path is a typed number field, which owns its own digits. It reports no stage.
+   * Derived rather than stored, which is what makes going back to correct part 1 harmless. Answering
+   * an already-answered part creates no new gap, so the emphasis stays where the bonus actually is
+   * instead of walking backwards to the row that was just touched.
    */
-  const stageTitle = bounceStage ? `${opponentName} bounceback` : `${controllingTeamName} bonus`;
-  const stageOptions = useMemo(
-    () =>
-      bounceStage && !bouncebackTyped
-        ? bouncebackOptions(format.bonus, controlled as number)
-        : bounceStage
-          ? null
-          : (totals ?? null),
-    [bounceStage, bouncebackTyped, format.bonus, controlled, totals],
-  );
-  const stageActive = !byParts && stageOptions !== null;
+  const activeIndex = outcomes.findIndex((outcome) => outcome === null);
+  const answeredCount = outcomes.filter((outcome) => outcome !== null).length;
+  const runningTotals = bonusOutcomeTotals(format.bonus, outcomes);
 
-  const stage = useMemo(
-    () =>
-      stageActive && stageOptions !== null
-        ? { title: stageTitle, options: stageOptions, cancellable: bounceStage }
-        : null,
-    [stageActive, stageOptions, stageTitle, bounceStage],
+  /**
+   * Answer one part, and record the bonus if that was the last of them.
+   *
+   * The event is committed inside the press that completes the breakdown — not after an animation,
+   * and not behind a confirmation. The acknowledgement below describes something that has already
+   * happened.
+   */
+  const choosePart = (index: number, outcome: BonusPartOutcome) => {
+    const next = outcomes.map((existing, position) => (position === index ? outcome : existing));
+    setOutcomes(next);
+    acknowledgementSequence.current += 1;
+    setAcknowledgement({ index, outcome, token: acknowledgementSequence.current });
+    if (next.some((entry) => entry === null)) return;
+    onRecordParts(next.map((entry) => bonusPartForOutcome(format.bonus, entry as BonusPartOutcome)));
+  };
+
+  /** The controlling team's total. Without bouncebacks that is the whole bonus. */
+  const chooseControlledTotal = (points: number) => {
+    if (!bouncesBack) {
+      onRecord(points);
+      return;
+    }
+    /*
+     * A bonus the controlling team swept leaves nothing to bounce, so there is no second answer to
+     * give. Asking for a press on a `0` that is the only button left would be asking the scorekeeper
+     * to confirm arithmetic QBSheet has already done.
+     */
+    if (format.bonus.maximumScore - points <= 0) {
+      onRecord(points, 0);
+      return;
+    }
+    setControlled(points);
+  };
+
+  /*
+   * What the opponent can still take, bounded by what the controlling team left.
+   *
+   * Always enumerable here, and deliberately so: this row is only rendered for a bonus that had a
+   * row of totals to begin with, and a bonus whose totals fit on screen cannot have a bounceback
+   * range that does not. The typed fallback belongs to the irregular path below, which is the only
+   * bonus that genuinely has nothing to enumerate.
+   */
+  const opponentOptions = useMemo(
+    () => (bouncesBack ? bouncebackOptions(format.bonus, controlled ?? 0) : null),
+    [bouncesBack, format.bonus, controlled],
   );
+
+  const controlledNumber = typedControlled === '' ? null : Number(typedControlled);
+  const bouncebackNumber = typedBounceback === '' ? 0 : Number(typedBounceback);
+  /*
+   * Both halves of a typed bonus, checked together by the helpers the correction editor uses, so
+   * the same figures are refused with the same sentence wherever a room enters them.
+   */
+  const typedProblem =
+    controlledNumber === null
+      ? null
+      : bouncesBack
+        ? bonusScoreProblem(format.bonus, controlledNumber, bouncebackNumber)
+        : bonusTotalProblem(format.bonus, controlledNumber);
+
+  /**
+   * What the keyboard is aimed at.
+   *
+   * Part entry gets a stage of its own rather than being squeezed into the totals shape. A part is
+   * not a number of points and the digits over it do not count anything; saying so in the type is
+   * what lets the legend name the actual teams instead of listing values.
+   */
+  const stage = useMemo<BonusKeyboardStage | null>(() => {
+    if (byParts && partCount !== null) {
+      if (activeIndex === -1) return null;
+      return {
+        kind: 'part',
+        title: `Bonus part ${activeIndex + 1} of ${partCount}`,
+        partNumber: activeIndex + 1,
+        partCount,
+        controllingTeamName,
+        opponentName,
+        choices: bonusPartChoices({
+          partNumber: activeIndex + 1,
+          controllingTeamName,
+          opponentName,
+          bounceBack: bouncesBack,
+        }),
+      };
+    }
+    // The irregular path is number fields, which own their own digits and report no stage.
+    if (totals === null) return null;
+    if (controlled !== null && opponentOptions !== null) {
+      return {
+        kind: 'totals',
+        title: `${opponentName}, from missed parts`,
+        options: opponentOptions,
+        cancellable: true,
+      };
+    }
+    return { kind: 'totals', title: `${controllingTeamName} bonus`, options: totals, cancellable: false };
+  }, [
+    byParts,
+    partCount,
+    activeIndex,
+    controllingTeamName,
+    opponentName,
+    bouncesBack,
+    totals,
+    controlled,
+    opponentOptions,
+  ]);
+
   useEffect(() => {
     onStageChange?.(stage);
   }, [stage, onStageChange]);
@@ -313,22 +296,31 @@ export default function BonusPrompt(props: IBonusPromptProps) {
   // Cleared on the way out, so a bonus that finishes does not leave the map advertising its digits.
   useEffect(() => () => onStageChange?.(null), [onStageChange]);
 
-  useChoiceKeys(
-    stage?.options ?? [],
-    (points) => (bounceStage ? onRecord(controlled as number, points) : finish(points)),
-    keyboardEnabled && stageActive,
+  const keyHandlers = useMemo(
+    () => ({
+      onTotal: (points: number) =>
+        controlled !== null ? onRecord(controlled, points) : chooseControlledTotal(points),
+      onPart: (outcome: BonusPartOutcome) => {
+        if (activeIndex !== -1) choosePart(activeIndex, outcome);
+      },
+    }),
+    // The handlers close over the current draft, which is the point: they must do what the buttons
+    // beside them would do at this moment.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [controlled, activeIndex, outcomes, onRecord, format.bonus],
   );
+  useBonusKeys(stage, keyHandlers, keyboardEnabled);
 
   /**
-   * Escape steps back out of the bounceback without recording anything.
+   * Escape releases a chosen controlling total without recording anything.
    *
-   * Safe because the controlling team's total has not been written yet — nothing is recorded until both
-   * halves are known — so going back is genuinely a cancel and not an undo. There is deliberately no
-   * Escape on the first stage: there is nothing to cancel there, and binding it to something would put a
-   * key that means "get me out of this" next to a scoresheet where it had a side effect.
+   * Only in totals entry, and only once a total has been chosen: nothing is written until both halves
+   * are known, so this is a genuine cancel. There is deliberately no Escape over part entry — parts
+   * are answers a scorekeeper has already given, and a key that quietly erased three of them would be
+   * the one destructive shortcut on this screen.
    */
   useEffect(() => {
-    if (!keyboardEnabled || !bounceStage) return undefined;
+    if (!keyboardEnabled || byParts || controlled === null) return undefined;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.repeat) return;
       if (keystrokeBelongsToControl(event)) return;
@@ -337,182 +329,316 @@ export default function BonusPrompt(props: IBonusPromptProps) {
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [keyboardEnabled, bounceStage]);
+  }, [keyboardEnabled, byParts, controlled]);
 
-  if (controlled !== null && bouncesBack) {
-    const availableBounceback = Math.max(0, format.bonus.maximumScore - controlled);
-    const handoffDirection = controllingSide === 'left' ? 'right' : 'left';
-    return (
-      <section
-        className={`scorer-prompt scorer-bounceback-handoff is-to-${handoffDirection}`}
-        aria-label="Bounceback"
-        data-bounceback-direction={handoffDirection}
-        data-motion-token={handoff?.token}
+  const title = (
+    <p className="scorer-prompt-title">
+      <span className="scorer-prompt-team">{controllingTeamName}</span> bonus
+      <span className="scorer-prompt-context">Q{questionNumber}</span>
+    </p>
+  );
+
+  if (byParts && partCount !== null) {
+    /** Three cues on a chosen outcome — fill, weight and a tick — so it does not rest on colour. */
+    const choiceClass = (index: number, outcome: BonusPartOutcome, selected: boolean) =>
+      [
+        'scorer-choice',
+        selected ? 'is-selected' : '',
+        acknowledgement?.index === index && acknowledgement.outcome === outcome ? 'is-part-recorded' : '',
+      ]
+        .filter(Boolean)
+        .join(' ');
+
+    const partChoice = (
+      index: number,
+      outcome: BonusPartOutcome,
+      label: ReactNode,
+      accessibleName: string,
+    ) => (
+      <button
+        type="button"
+        aria-pressed={outcomes[index] === outcome}
+        aria-label={accessibleName}
+        className={choiceClass(index, outcome, outcomes[index] === outcome)}
+        data-selection-token={
+          acknowledgement?.index === index && acknowledgement.outcome === outcome
+            ? acknowledgement.token
+            : undefined
+        }
+        onClick={() => choosePart(index, outcome)}
       >
-        {handoff && (
-          <div className="scorer-prompt-content is-outgoing" aria-hidden="true">
-            <p className="scorer-prompt-title">
-              <span className="scorer-prompt-team">{controllingTeamName}</span> bonus
-              <span className="scorer-prompt-context">Q{questionNumber}</span>
-            </p>
-            <div className="scorer-choices">
-              <span className="scorer-choice is-selected">{handoff.controlledPoints}</span>
-            </div>
-          </div>
-        )}
-        <div className={handoff ? 'scorer-prompt-content is-incoming' : 'scorer-prompt-content'}>
-          <p className="scorer-prompt-title">
-            <span className="scorer-prompt-team">{opponentName}</span> bounceback
-            <span className="scorer-prompt-context">
-              Q{questionNumber} · {controllingTeamName} took {controlled}
-            </span>
-          </p>
-          {stageOptions ? (
-            <div className="scorer-choices">
-              {stageOptions.map((points) => (
-                <button
-                  key={points}
-                  type="button"
-                  className="scorer-choice"
-                  onClick={() => onRecord(controlled, points)}
-                >
-                  {points}
-                </button>
-              ))}
-            </div>
-          ) : (
-            <form
-              className="scorer-inline-form"
-              onSubmit={(submitEvent) => {
-                submitEvent.preventDefault();
-                if (typed === '' || typedProblem) return;
-                onRecord(controlled, Number(typed));
-              }}
-            >
-              <label htmlFor="scorer-bounceback-points">
-                Bounceback points
-                <input
-                  id="scorer-bounceback-points"
-                  type="number"
-                  inputMode="numeric"
-                  step={format.bonus.divisor || 1}
-                  min={0}
-                  max={availableBounceback}
-                  value={typed}
-                  onChange={(changeEvent) => setTyped(changeEvent.target.value)}
-                  aria-invalid={typedProblem !== null}
-                  aria-describedby={typedProblem ? typedErrorId : undefined}
-                  // eslint-disable-next-line jsx-a11y/no-autofocus
-                  autoFocus
-                />
-              </label>
-              <button
-                type="submit"
-                className="scorer-choice"
-                disabled={typed === '' || typedProblem !== null}
-              >
-                Record
-              </button>
-              {typedProblem && (
-                <p id={typedErrorId} className="scorer-problem" role="alert" aria-live="polite">
-                  {typedProblem}
-                </p>
-              )}
-            </form>
-          )}
-          {/*
-            The way back to the controlling team's total.
+        {label}
+      </button>
+    );
 
-            Escape has always done this, and Escape is the wrong and only answer for a scorekeeper
-            working a touchscreen: the total they mistyped is on screen, in the subtitle, and until
-            now there was nothing to press. Nothing is recorded until both halves are known, so this
-            is a genuine cancel rather than an undo — it takes the same path the key does.
-          */}
-          <button
-            type="button"
-            className="scorer-text-action scorer-prompt-back"
-            onClick={() => setControlled(null)}
-          >
-            ← Change {controllingTeamName} bonus ({controlled})
-          </button>
+    return (
+      <section className="scorer-prompt scorer-bonus-prompt" aria-label="Bonus">
+        <div className="scorer-prompt-content">
+          {title}
+          <div className="scorer-bonus-parts">
+            {/*
+              The column headings say who receives the points, which is the question being answered.
+              Hidden from assistive technology because every button already names its own team and
+              part; read out as well, they would be a second, wordier copy of the same grid.
+            */}
+            <div
+              className={bouncesBack ? 'scorer-part-head' : 'scorer-part-head is-two-way'}
+              aria-hidden="true"
+            >
+              <span />
+              <span className="scorer-part-column">{controllingTeamName}</span>
+              {bouncesBack && (
+                <span className="scorer-part-column">
+                  {opponentName}
+                  <small className="scorer-part-column-note">can score missed parts</small>
+                </span>
+              )}
+              <span />
+            </div>
+            {/*
+              Not a list: every row is a `group`, and an `<ol>` whose children all carry another role
+              is announced as a list with nothing in it. The grouping that matters is the one that
+              says which part these three buttons belong to, and that is on the row itself.
+            */}
+            <div className="scorer-part-list">
+              {outcomes.map((outcome, index) => {
+                // Position is the identity of a bonus part; there is nothing else to key on.
+                const rowClass = [
+                  'scorer-part-row',
+                  bouncesBack ? '' : 'is-two-way',
+                  index === activeIndex ? 'is-active' : '',
+                  outcome !== null ? 'is-answered' : '',
+                  acknowledgement?.index === index ? 'is-part-set' : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ');
+                return (
+                  <div
+                    key={index}
+                    className={rowClass}
+                    data-motion-token={acknowledgement?.index === index ? acknowledgement.token : undefined}
+                    role="group"
+                    aria-label={`Part ${index + 1} of ${partCount}`}
+                  >
+                    <span className="scorer-part-label">Part {index + 1}</span>
+                    {partChoice(
+                      index,
+                      'controlled',
+                      /* The team span shows once the headings fold away on a narrow screen. */
+                      <>
+                        <span className="scorer-part-choice-team">{controllingTeamName} </span>+{perPart}
+                      </>,
+                      `Part ${index + 1} to ${controllingTeamName}, ${perPart} points`,
+                    )}
+                    {bouncesBack &&
+                      partChoice(
+                        index,
+                        'bounceback',
+                        <>
+                          <span className="scorer-part-choice-team">{opponentName} </span>+{perPart}
+                        </>,
+                        `Part ${index + 1} to ${opponentName}, ${perPart} points`,
+                      )}
+                    {partChoice(index, 'missed', 'No points', `No points on part ${index + 1}`)}
+                  </div>
+                );
+              })}
+            </div>
+            {/*
+              Whose points these are, not how they were come by. "20 controlled · 10 bounceback" is
+              the storage; the room wants to know that Ninety Six has 20 and Greenwood has 10.
+            */}
+            <p className="scorer-part-total">
+              <span className="scorer-part-total-team">
+                <span aria-hidden="true">{controllingTeamName} </span>
+                <MotionNumber
+                  value={runningTotals.controlled}
+                  minimumDigits={2}
+                  aria-label={`${controllingTeamName} ${runningTotals.controlled} points`}
+                />
+              </span>
+              {bouncesBack && (
+                <>
+                  <span aria-hidden="true"> · </span>
+                  <span className="scorer-part-total-team">
+                    <span aria-hidden="true">{opponentName} </span>
+                    <MotionNumber
+                      value={runningTotals.bounceback}
+                      minimumDigits={2}
+                      aria-label={`${opponentName} ${runningTotals.bounceback} points`}
+                    />
+                  </span>
+                </>
+              )}
+            </p>
+            {activeIndex !== -1 && (
+              <p className="scorer-part-progress">
+                {answeredCount} of {partCount} parts scored
+              </p>
+            )}
+            {/*
+              For the bonus somebody was given as totals afterwards, or a cycle being reconstructed.
+              Quiet, and never sticky: the next bonus opens on its parts again.
+            */}
+            <button type="button" className="scorer-text-action" onClick={() => setByParts(false)}>
+              Enter totals instead
+            </button>
+          </div>
         </div>
       </section>
     );
   }
 
-  return (
-    <section className="scorer-prompt" aria-label="Bonus">
-      <div className="scorer-prompt-content">
-        <p className="scorer-prompt-title">
-          <span className="scorer-prompt-team">{controllingTeamName}</span> bonus
-          <span className="scorer-prompt-context">Q{questionNumber}</span>
-        </p>
+  const scoreByPart = partCount !== null && (
+    <button type="button" className="scorer-text-action" onClick={() => setByParts(true)}>
+      Score by part
+    </button>
+  );
 
-        {byParts && partCount !== null ? (
-          <PartEntry
-            format={format}
-            partCount={partCount}
-            controllingTeamName={controllingTeamName}
-            opponentName={opponentName}
-            onRecord={onRecordParts}
-            onCancel={() => setByParts(false)}
-          />
-        ) : (
-          <>
-            {totals ? (
-              <div className="scorer-choices">
+  return (
+    <section className="scorer-prompt scorer-bonus-prompt" aria-label="Bonus">
+      <div className="scorer-prompt-content">
+        {title}
+        {totals !== null ? (
+          /*
+            One stationary panel with both teams on it, rather than the controlling team's screen
+            handing over to the opponent's. The handoff was a whole screen change for a second
+            number, and it took the first number away exactly when somebody might want to correct it.
+          */
+          <div className="scorer-bonus-totals">
+            <div className="scorer-bonus-total-row">
+              <span className="scorer-bonus-total-label" aria-hidden="true">
+                {controllingTeamName}
+              </span>
+              {/* The group is the buttons, not the row: a row whose only other content is a typed
+                  field would give the field and its container the same name. */}
+              <div className="scorer-choices" role="group" aria-label={`${controllingTeamName} bonus points`}>
                 {totals.map((points) => (
-                  <button key={points} type="button" className="scorer-choice" onClick={() => finish(points)}>
+                  <button
+                    key={points}
+                    type="button"
+                    aria-pressed={bouncesBack ? controlled === points : undefined}
+                    /*
+                     * Named only where a second row of identical numbers is on screen. Without
+                     * bouncebacks the panel has one team on it and the group above already says
+                     * whose it is, so the button is a total and reads as one.
+                     */
+                    aria-label={bouncesBack ? `${controllingTeamName}, ${points} points` : undefined}
+                    className={
+                      bouncesBack && controlled === points ? 'scorer-choice is-selected' : 'scorer-choice'
+                    }
+                    onClick={() => chooseControlledTotal(points)}
+                  >
                     {points}
                   </button>
                 ))}
               </div>
-            ) : (
-              <form
-                className="scorer-inline-form"
-                onSubmit={(submitEvent) => {
-                  submitEvent.preventDefault();
-                  if (typed === '' || typedProblem) return;
-                  finish(Number(typed));
-                }}
-              >
-                <label htmlFor="scorer-bonus-points">
-                  Bonus points
+            </div>
+            {opponentOptions !== null && (
+              <div className="scorer-bonus-total-row">
+                <span className="scorer-bonus-total-label" aria-hidden="true">
+                  {opponentName}
+                </span>
+                <div
+                  className="scorer-choices"
+                  role="group"
+                  aria-label={`${opponentName} points from missed parts`}
+                >
+                  {opponentOptions.map((points) => (
+                    <button
+                      key={points}
+                      type="button"
+                      // Bounded by what the controlling team left; until it has been chosen there is
+                      // no bound to apply, which is what these being unavailable says.
+                      disabled={controlled === null}
+                      aria-label={`${opponentName}, ${points} points`}
+                      className="scorer-choice"
+                      onClick={() => controlled !== null && onRecord(controlled, points)}
+                    >
+                      {points}
+                    </button>
+                  ))}
+                </div>
+                {controlled === null && (
+                  <p className="scorer-hint">Choose {controllingTeamName}&rsquo;s total first.</p>
+                )}
+              </div>
+            )}
+            {scoreByPart}
+          </div>
+        ) : (
+          /*
+            An irregular bonus: no fixed part value and no fixed count, so there is nothing to
+            enumerate for either team. Both fields and one Record, because a room reading out two
+            numbers should not have to record them one at a time.
+          */
+          <form
+            className="scorer-bonus-typed"
+            onSubmit={(submitEvent) => {
+              submitEvent.preventDefault();
+              if (controlledNumber === null || typedProblem) return;
+              onRecord(controlledNumber, bouncesBack ? bouncebackNumber : undefined);
+            }}
+          >
+            <div className="scorer-bonus-typed-team">
+              <span className="scorer-bonus-total-label" aria-hidden="true">
+                {controllingTeamName}
+              </span>
+              <label htmlFor="scorer-bonus-points">
+                Bonus points
+                <input
+                  id="scorer-bonus-points"
+                  type="number"
+                  inputMode="numeric"
+                  step={format.bonus.divisor || 1}
+                  min={0}
+                  max={format.bonus.maximumScore}
+                  value={typedControlled}
+                  aria-label={`${controllingTeamName} bonus points`}
+                  aria-invalid={typedProblem !== null}
+                  aria-describedby={typedProblem ? 'scorer-bonus-points-error' : undefined}
+                  onChange={(changeEvent) => setTypedControlled(changeEvent.target.value)}
+                  // eslint-disable-next-line jsx-a11y/no-autofocus
+                  autoFocus
+                />
+              </label>
+            </div>
+            {bouncesBack && (
+              <div className="scorer-bonus-typed-team">
+                <span className="scorer-bonus-total-label" aria-hidden="true">
+                  {opponentName}
+                </span>
+                <label htmlFor="scorer-bounceback-points">
+                  Points from missed parts
                   <input
-                    id="scorer-bonus-points"
+                    id="scorer-bounceback-points"
                     type="number"
                     inputMode="numeric"
                     step={format.bonus.divisor || 1}
                     min={0}
                     max={format.bonus.maximumScore}
-                    value={typed}
-                    onChange={(changeEvent) => setTyped(changeEvent.target.value)}
+                    value={typedBounceback}
+                    aria-label={`${opponentName} points from missed parts`}
                     aria-invalid={typedProblem !== null}
-                    aria-describedby={typedProblem ? typedErrorId : undefined}
-                    // eslint-disable-next-line jsx-a11y/no-autofocus
-                    autoFocus
+                    aria-describedby={typedProblem ? 'scorer-bonus-points-error' : undefined}
+                    onChange={(changeEvent) => setTypedBounceback(changeEvent.target.value)}
                   />
                 </label>
-                <button
-                  type="submit"
-                  className="scorer-choice"
-                  disabled={typed === '' || typedProblem !== null}
-                >
-                  Record
-                </button>
-                {typedProblem && (
-                  <p id={typedErrorId} className="scorer-problem" role="alert" aria-live="polite">
-                    {typedProblem}
-                  </p>
-                )}
-              </form>
+              </div>
             )}
-            {partCount !== null && (
-              <button type="button" className="scorer-text-action" onClick={() => setByParts(true)}>
-                Parts&hellip;
-              </button>
+            <button
+              type="submit"
+              className="scorer-choice"
+              disabled={controlledNumber === null || typedProblem !== null}
+            >
+              Record bonus
+            </button>
+            {typedProblem && (
+              <p id="scorer-bonus-points-error" className="scorer-problem" role="alert" aria-live="polite">
+                {typedProblem}
+              </p>
             )}
-          </>
+          </form>
         )}
       </div>
     </section>

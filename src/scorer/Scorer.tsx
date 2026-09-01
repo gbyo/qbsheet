@@ -115,7 +115,14 @@ import { createQbsheetBackup, IQbsheetBackup } from './QBSheetBackup';
 import useScorerKeyboard from './useScorerKeyboard';
 import KeyboardMap, { KeyboardMapContext } from './KeyboardMap';
 import KeyboardStatus, { type KeyboardStatus as IKeyboardStatus } from './KeyboardStatus';
-import { availableActionKeys, keyboardActionNames, sequenceLegend, bonusKeyLegend } from './KeyboardScoring';
+import {
+  availableActionKeys,
+  bonusKeyLegend,
+  bonusPartKeyLegend,
+  keyboardActionNames,
+  sequenceLegend,
+  type BonusKeyboardStage,
+} from './KeyboardScoring';
 import { rulingLabel, unreachableAnswerTypes } from './tossupRulings';
 import { setKeyboardEnabled } from './keyboardPreference';
 import useKeyboardEnabled from './useKeyboardEnabled';
@@ -140,7 +147,7 @@ import MotionNumber, {
   noBuzzAcknowledgementMotionMs,
   recentMotionMs,
 } from './ScoringMotion';
-import { bouncebackNeedsTypedEntry, bouncebackOptions, regularBonusTotals } from './bonusOptions';
+import { bonusPartResultTotals, bouncebackOptions, regularBonusTotals } from './bonusOptions';
 import { extraTimeoutsGranted, substitutionAllowed } from '../scoring/ProcedureExceptions';
 import removeOvertime, { overtimeQuestionNumbers, overtimeRemovalNote } from '../scoring/overtimeCorrection';
 import { canonicalSideForDisplay, displaySideForCanonical, mapSides } from './DisplaySideMapping';
@@ -331,10 +338,35 @@ export const operationNoticeMs = 3000;
 /** How long the local recovery explanation stays before getting out of the way of the scoresheet. */
 export const recoveryNoticeMs = 15_000;
 
+/**
+ * One row of the snapshot of a totals panel: a team's choices and the one that was pressed.
+ *
+ * Rows rather than a single option list, because the bounceback panel has two teams on it and the
+ * copy left behind has to show what the scorekeeper was actually looking at when they finished.
+ */
+interface IBonusExitRow {
+  /** The team the row belongs to, omitted where there is only one and the title already names it. */
+  label?: string;
+  options: number[];
+  selected: number | null;
+}
+
+interface IBonusExitField {
+  label: string;
+  value: number;
+}
+
 type BonusExitContent =
-  | { kind: 'choices'; options: number[]; selected: number }
-  | { kind: 'typed'; fieldLabel: string; selected: number }
-  | { kind: 'parts'; parts: IBonusPartResult[]; pointsPerPart: number; bounceBack: boolean };
+  | { kind: 'choices'; rows: IBonusExitRow[] }
+  | { kind: 'typed'; fields: IBonusExitField[] }
+  | {
+      kind: 'parts';
+      parts: IBonusPartResult[];
+      pointsPerPart: number;
+      bounceBack: boolean;
+      controllingTeamName: string;
+      opponentName: string;
+    };
 
 interface IBonusExit {
   token: number;
@@ -343,7 +375,16 @@ interface IBonusExit {
   content: BonusExitContent;
 }
 
-/** An inert snapshot of the prompt that committed the bonus, kept intact for its brief exit. */
+/**
+ * An inert snapshot of the prompt that committed the bonus, kept intact for its brief exit.
+ *
+ * Presentation only: every label is a data attribute painted by CSS, so the copy on its way out
+ * cannot be read as text, found by a query, or pressed. The bonus is already recorded and the next
+ * phase is already underneath — this is the acknowledgement that the whole thing landed, shown where
+ * the scorekeeper's eyes already are rather than in a toast somewhere else on the screen. For a part
+ * breakdown that means the teams named across the top and the outcome chosen for each part, which is
+ * exactly what was just answered.
+ */
 function BonusExitPrompt({ exit }: { exit: IBonusExit }) {
   const content = exit.content;
   return (
@@ -359,35 +400,55 @@ function BonusExitPrompt({ exit }: { exit: IBonusExit }) {
           <span className="scorer-prompt-context">{exit.context}</span>
         </p>
         {content.kind === 'choices' && (
-          <div className="scorer-choices">
-            {content.options.map((points) => (
-              <span
-                key={points}
-                className={`scorer-choice${points === content.selected ? ' is-selected' : ''}`}
-                data-presentation-label={points}
-              />
+          <div className="scorer-bonus-totals">
+            {content.rows.map((row, index) => (
+              <div key={row.label ?? index} className="scorer-bonus-total-row">
+                {row.label !== undefined && (
+                  <span className="scorer-bonus-total-label" data-presentation-label={row.label} />
+                )}
+                <div className="scorer-choices">
+                  {row.options.map((points) => (
+                    <span
+                      key={points}
+                      className={`scorer-choice${points === row.selected ? ' is-selected' : ''}`}
+                      data-presentation-label={points}
+                    />
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
         )}
         {content.kind === 'typed' && (
-          <div className="scorer-inline-form">
-            <label>
-              {content.fieldLabel}
-              <input type="number" value={content.selected} readOnly disabled />
-            </label>
-            <span className="scorer-choice is-selected" data-presentation-label="Record" />
+          <div className="scorer-bonus-typed">
+            {content.fields.map((field) => (
+              <div key={field.label} className="scorer-bonus-typed-team">
+                <label>
+                  {field.label}
+                  <input type="number" value={field.value} readOnly disabled />
+                </label>
+              </div>
+            ))}
+            <span className="scorer-choice is-selected" data-presentation-label="Record bonus" />
           </div>
         )}
         {content.kind === 'parts' &&
           (() => {
-            const controlledTotal = content.parts.reduce((sum, part) => sum + part.controlledPoints, 0);
-            const bouncebackTotal = content.parts.reduce(
-              (sum, part) => sum + (part.bouncebackPoints ?? 0),
-              0,
-            );
+            const totals = bonusPartResultTotals(content.parts);
             return (
               <div className="scorer-bonus-parts">
-                <ol className="scorer-part-list">
+                <div className={content.bounceBack ? 'scorer-part-head' : 'scorer-part-head is-two-way'}>
+                  <span />
+                  <span
+                    className="scorer-part-column"
+                    data-presentation-label={content.controllingTeamName}
+                  />
+                  {content.bounceBack && (
+                    <span className="scorer-part-column" data-presentation-label={content.opponentName} />
+                  )}
+                  <span />
+                </div>
+                <div className="scorer-part-list">
                   {content.parts.map((part, index) => {
                     const outcome =
                       part.controlledPoints > 0
@@ -396,38 +457,39 @@ function BonusExitPrompt({ exit }: { exit: IBonusExit }) {
                           ? 'bounceback'
                           : 'missed';
                     return (
-                      <li key={index} className="scorer-part-row">
+                      <div
+                        key={index}
+                        className={
+                          content.bounceBack
+                            ? 'scorer-part-row is-answered'
+                            : 'scorer-part-row is-two-way is-answered'
+                        }
+                      >
                         <span className="scorer-part-label" data-presentation-label={`Part ${index + 1}`} />
-                        <span className="scorer-choices">
+                        <span
+                          className={`scorer-choice${outcome === 'controlled' ? ' is-selected' : ''}`}
+                          data-presentation-label={`+${content.pointsPerPart}`}
+                        />
+                        {content.bounceBack && (
                           <span
-                            className={`scorer-choice${outcome === 'controlled' ? ' is-selected' : ''}`}
+                            className={`scorer-choice${outcome === 'bounceback' ? ' is-selected' : ''}`}
                             data-presentation-label={`+${content.pointsPerPart}`}
                           />
-                          {content.bounceBack && (
-                            <span
-                              className={`scorer-choice${outcome === 'bounceback' ? ' is-selected' : ''}`}
-                              data-presentation-label="Bounce"
-                            />
-                          )}
-                          <span
-                            className={`scorer-choice${outcome === 'missed' ? ' is-selected' : ''}`}
-                            data-presentation-label="Miss"
-                          />
-                        </span>
-                      </li>
+                        )}
+                        <span
+                          className={`scorer-choice${outcome === 'missed' ? ' is-selected' : ''}`}
+                          data-presentation-label="No points"
+                        />
+                      </div>
                     );
                   })}
-                </ol>
+                </div>
                 <p
                   className="scorer-part-total"
-                  data-presentation-label={`${controlledTotal}${
-                    content.bounceBack && bouncebackTotal > 0 ? ` · ${bouncebackTotal} bounced back` : ''
+                  data-presentation-label={`${content.controllingTeamName} ${totals.controlled}${
+                    content.bounceBack ? ` · ${content.opponentName} ${totals.bounceback}` : ''
                   }`}
                 />
-                <div className="scorer-choices">
-                  <span className="scorer-choice is-selected" data-presentation-label="Record parts" />
-                  <span className="scorer-action" data-presentation-label="Back to totals" />
-                </div>
               </div>
             );
           })()}
@@ -654,18 +716,15 @@ export default function Scorer(props: IScorerProps) {
   // Arranging is something only the table can do, so leaving the table ends it.
   if (arrangingTable && scoringLayout !== 'table') setArrangingTable(false);
   /**
-   * Which set of choices the bonus is currently asking for, reported up by `BonusPrompt`.
+   * What the bonus is currently asking for, reported up by `BonusPrompt`.
    *
-   * The legend has to change when the bonus does — showing seat sequences while a bounceback is on screen
-   * would be showing bindings that do nothing — and the choices live in that component with its own
-   * state. Reporting the stage upward is smaller than lifting the state, and keeps the shortcut in the
-   * same file as the buttons it stands in for.
+   * The legend has to change when the bonus does — showing seat sequences while a bonus part is on
+   * screen would be showing bindings that do nothing — and the choices live in that component with its
+   * own state. Reporting the stage upward is smaller than lifting the state, and keeps the shortcut in
+   * the same file as the buttons it stands in for. It is a union rather than a list of numbers because
+   * a part stage is a genuinely different question from a totals stage, and the legend has to say which.
    */
-  const [bonusStage, setBonusStage] = useState<{
-    title: string;
-    options: number[];
-    cancellable: boolean;
-  } | null>(null);
+  const [bonusStage, setBonusStage] = useState<BonusKeyboardStage | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const submitInFlight = useRef(false);
   const [submitResult, setSubmitResult] = useState<IScorerSubmitResult | null>(null);
@@ -1261,40 +1320,61 @@ export default function Scorer(props: IScorerProps) {
         ...payload,
       });
       if (accepted) {
+        /*
+         * The snapshot is of the panel that was on screen, not of a generic bonus. A part breakdown
+         * leaves the part grid with its teams and its chosen outcomes; a totals panel with
+         * bouncebacks leaves both rows, because both were visible when the last press landed.
+         */
+        const context = `Q${phase.questionNumber}`;
         if (payload.parts) {
           setBonusExit({
             token: nextTransientToken(),
             title: `${controllingTeamName} bonus`,
-            context: `Q${phase.questionNumber}`,
+            context,
             content: {
               kind: 'parts',
               parts: payload.parts,
               pointsPerPart: format.bonus.pointsPerPart ?? 0,
               bounceBack: format.bonus.bounceBack,
+              controllingTeamName,
+              opponentName,
             },
           });
         } else {
           const controlledPoints = payload.controlledPoints ?? 0;
-          const completingBounceback = format.bonus.bounceBack && payload.bouncebackPoints !== undefined;
-          const options = completingBounceback
-            ? bouncebackNeedsTypedEntry(format.bonus, controlledPoints)
-              ? null
-              : bouncebackOptions(format.bonus, controlledPoints)
-            : regularBonusTotals(format.bonus);
-          const selected = completingBounceback ? (payload.bouncebackPoints as number) : controlledPoints;
+          const bouncebackPoints = payload.bouncebackPoints ?? 0;
+          const bouncesBack = format.bonus.bounceBack;
+          const totals = regularBonusTotals(format.bonus);
+          const opponentTotals =
+            bouncesBack && totals !== null ? bouncebackOptions(format.bonus, controlledPoints) : null;
           setBonusExit({
             token: nextTransientToken(),
-            title: completingBounceback ? `${opponentName} bounceback` : `${controllingTeamName} bonus`,
-            context: completingBounceback
-              ? `Q${phase.questionNumber} · ${controllingTeamName} took ${controlledPoints}`
-              : `Q${phase.questionNumber}`,
-            content: options
-              ? { kind: 'choices', options, selected }
-              : {
-                  kind: 'typed',
-                  fieldLabel: completingBounceback ? 'Bounceback points' : 'Bonus points',
-                  selected,
-                },
+            title: `${controllingTeamName} bonus`,
+            context,
+            content:
+              totals !== null
+                ? {
+                    kind: 'choices',
+                    rows: [
+                      {
+                        label: bouncesBack ? controllingTeamName : undefined,
+                        options: totals,
+                        selected: controlledPoints,
+                      },
+                      ...(opponentTotals
+                        ? [{ label: opponentName, options: opponentTotals, selected: bouncebackPoints }]
+                        : []),
+                    ],
+                  }
+                : {
+                    kind: 'typed',
+                    fields: [
+                      { label: 'Bonus points', value: controlledPoints },
+                      ...(bouncesBack
+                        ? [{ label: 'Points from missed parts', value: bouncebackPoints }]
+                        : []),
+                    ],
+                  },
           });
         }
       }
@@ -1659,15 +1739,28 @@ export default function Scorer(props: IScorerProps) {
   const keyboardContext = useMemo<KeyboardMapContext>(() => {
     if (anyDialogOpen) return { kind: 'inactive', reason: 'Finish what is open first.' };
     if (bonusStage !== null) {
-      return {
-        kind: 'choices',
-        title: bonusStage.title,
-        choices: bonusKeyLegend(bonusStage.options),
-        cancellable: bonusStage.cancellable,
-      };
+      /*
+       * Both bonus stages render as the same strip of key/meaning rows, but what a row means is not
+       * the same thing: a totals row is a value and a part row is who scored it. The meanings are
+       * built where the distinction is still in the type, so the legend names the actual teams
+       * rather than listing numbers that would not answer the question being asked.
+       */
+      return bonusStage.kind === 'part'
+        ? {
+            kind: 'choices',
+            title: bonusStage.title,
+            choices: bonusPartKeyLegend(bonusStage.choices),
+            cancellable: false,
+          }
+        : {
+            kind: 'choices',
+            title: bonusStage.title,
+            choices: bonusKeyLegend(bonusStage.options),
+            cancellable: bonusStage.cancellable,
+          };
     }
     if (phase.kind === 'bonus') {
-      // A bonus whose total is typed rather than chosen. Its digits belong to the number field.
+      // A bonus whose totals are typed rather than chosen. Its digits belong to the number fields.
       return { kind: 'inactive', reason: 'Type the bonus total.' };
     }
     if (phase.kind !== 'tossup') return { kind: 'inactive', reason: 'No tossup is live.' };
@@ -2844,7 +2937,6 @@ export default function Scorer(props: IScorerProps) {
                   key={phase.questionNumber}
                   format={format}
                   controllingTeamName={phase.team === 'left' ? game.left.name : game.right.name}
-                  controllingSide={displayForCanonical(phase.team)}
                   opponentName={phase.team === 'left' ? game.right.name : game.left.name}
                   questionNumber={phase.questionNumber}
                   onRecord={recordBonus}

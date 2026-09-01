@@ -245,16 +245,20 @@ describe('an irregular bonus', () => {
 
     await score('Sarah', 'C');
 
-    // No fixed buttons: an irregular bonus has no known set of totals to offer.
+    // No fixed buttons: an irregular bonus has no known set of totals to offer, and no known part
+    // value either, so it is not offered a part breakdown it would have to invent.
     const prompt = screen.getByLabelText('Bonus');
     expect(within(prompt).queryByRole('button', { name: '30' })).toBeNull();
-    expect(within(prompt).getByLabelText('Bonus points')).toBeTruthy();
+    expect(within(prompt).queryByRole('button', { name: 'Score by part' })).toBeNull();
+    expect(within(prompt).getByLabelText('Ninety Six bonus points')).toBeTruthy();
 
     await act(async () => {
-      fireEvent.change(within(prompt).getByLabelText('Bonus points'), { target: { value: '40' } });
+      fireEvent.change(within(prompt).getByLabelText('Ninety Six bonus points'), {
+        target: { value: '40' },
+      });
     });
     await act(async () => {
-      fireEvent.click(within(prompt).getByRole('button', { name: 'Record' }));
+      fireEvent.click(within(prompt).getByRole('button', { name: 'Record bonus' }));
     });
     expect(screen.getByLabelText('Ninety Six score').textContent).toContain('50');
   });
