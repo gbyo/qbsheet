@@ -1,0 +1,12 @@
+[[permission]]
+identifier = "director-operations"
+description = "Allow the Director window to use its explicitly registered native operations."
+commands.allow = [
+  "get_application_paths",
+  "get_store_status",
+  "checkpoint_store",
+  "open_tournament_file",
+  "save_tournament_file",
+  "get_diagnostics_snapshot",
+  "save_diagnostics_bundle",
+]

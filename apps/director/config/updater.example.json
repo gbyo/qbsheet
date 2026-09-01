@@ -1,0 +1,6 @@
+{
+  "notes": "Release configuration is supplied by the distribution pipeline.",
+  "endpoint": "https://github.com/gbyo/qbsheet/releases/latest/download/latest.json",
+  "requiredFields": ["version", "url", "signature"],
+  "signing": "Tauri updater signatures are generated from the release key and are never checked into the repository."
+}
