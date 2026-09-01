@@ -183,11 +183,11 @@ CREATE TABLE IF NOT EXISTS packets (
 );
 
 CREATE TABLE IF NOT EXISTS packet_assignments (
-    packet_id TEXT NOT NULL REFERENCES packets(id) ON DELETE CASCADE,
-    round_id TEXT REFERENCES rounds(id) ON DELETE CASCADE,
-    scheduled_game_id TEXT,
+    packet_id TEXT PRIMARY KEY NOT NULL REFERENCES packets(id) ON DELETE CASCADE,
+    round_id TEXT UNIQUE REFERENCES rounds(id) ON DELETE CASCADE,
+    scheduled_game_id TEXT UNIQUE REFERENCES scheduled_games(id) ON DELETE CASCADE,
     assigned_at INTEGER NOT NULL,
-    PRIMARY KEY (packet_id, round_id, scheduled_game_id)
+    CHECK ((round_id IS NOT NULL) <> (scheduled_game_id IS NOT NULL))
 );
 
 CREATE TABLE IF NOT EXISTS scheduled_games (
