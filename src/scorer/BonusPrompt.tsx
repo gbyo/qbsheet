@@ -565,7 +565,8 @@ export default function BonusPrompt(props: IBonusPromptProps) {
               </span>
               {/* The group is the buttons, not the row: a row whose only other content is a typed
                   field would give the field and its container the same name. */}
-              <div className="scorer-choices" role="group" aria-label={`${controllingTeamName} bonus points`}>
+              <fieldset className="scorer-choices">
+                <legend className="visually-hidden">{controllingTeamName} bonus points</legend>
                 {totals.map((points) => (
                   <button
                     key={points}
@@ -585,18 +586,15 @@ export default function BonusPrompt(props: IBonusPromptProps) {
                     {points}
                   </button>
                 ))}
-              </div>
+              </fieldset>
             </div>
             {opponentOptions !== null && (
               <div className="scorer-bonus-total-row">
                 <span className="scorer-bonus-total-label" aria-hidden="true">
                   {opponentName}
                 </span>
-                <div
-                  className="scorer-choices"
-                  role="group"
-                  aria-label={`${opponentName} points from missed parts`}
-                >
+                <fieldset className="scorer-choices">
+                  <legend className="visually-hidden">{opponentName} points from missed parts</legend>
                   {opponentOptions.map((points) => (
                     <button
                       key={points}
@@ -611,7 +609,7 @@ export default function BonusPrompt(props: IBonusPromptProps) {
                       {points}
                     </button>
                   ))}
-                </div>
+                </fieldset>
                 {controlled === null && (
                   <p className="scorer-hint">Choose {controllingTeamName}&rsquo;s total first.</p>
                 )}

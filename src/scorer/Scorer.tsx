@@ -232,6 +232,8 @@ export interface IScorerProps {
   onCorrectGame?: (correction: IGameCorrection) => void | Promise<void>;
   /** Called as the game changes, so tournament control can watch progress. */
   onProgress?: (qbj: object, questionsPlayed: number) => void;
+  /** Asynchronously mirrors the exact QBSheet state into the recovery service. */
+  onRecoverySnapshot?: (backup: IQbsheetBackup) => void;
   /** Round number and the rest of the non-scoring metadata for the exported match. */
   qbjMeta?: IQbjMatchMeta;
   /**
@@ -640,6 +642,7 @@ export default function Scorer(props: IScorerProps) {
     onDownloadForm,
     onCorrectGame,
     onProgress,
+    onRecoverySnapshot,
     qbjMeta,
     qbjPlayerIds,
     onRequestControl,
@@ -915,6 +918,62 @@ export default function Scorer(props: IScorerProps) {
     game.overtimeStarted,
   );
   const roomClock = useRoomClock(gameKey, procedure?.halfLengthMinutes, clockSegment);
+  const recoveryEventList = events.events;
+  const getRecoveryHistory = events.recoveryHistory;
+
+  /**
+   * Publish the same exact envelope the manual backup action writes.
+   *
+   * The recovery service owns persistence and coalescing. This callback only assembles a
+   * credential-free snapshot from state already owned by the scorer. In particular, it is never
+   * awaited by a scoring action and it includes the current clock segment explicitly because a
+   * running clock's displayed seconds are intentionally not persisted on every tick.
+   */
+  const emitRecoverySnapshot = useCallback(
+    (now = Date.now()) => {
+      if (!onRecoverySnapshot || !gamePackage) return;
+      const clocks = exportRoomClocks(gameKey, now);
+      clocks[clockSegment] = snapshotRoomClock(roomClock.state, now);
+      onRecoverySnapshot(
+        createQbsheetBackup({
+          gamePackage,
+          setup,
+          events: recoveryEventList,
+          history: getRecoveryHistory(),
+          clocks,
+          display: { mapping: displaySideMapping, seating: seating.seating },
+        }),
+      );
+    },
+    [
+      clockSegment,
+      displaySideMapping,
+      getRecoveryHistory,
+      gameKey,
+      gamePackage,
+      onRecoverySnapshot,
+      roomClock.state,
+      seating.seating,
+      recoveryEventList,
+      setup,
+    ],
+  );
+
+  // State changes create an immediate candidate. The recovery service coalesces rapid sequences,
+  // so a buzz/neg/bonus burst becomes one external write rather than one write per click.
+  useEffect(() => {
+    emitRecoverySnapshot();
+  }, [emitRecoverySnapshot]);
+
+  // A running clock gets a bounded heartbeat. `roomClock.state` does not change for each displayed
+  // second, so this does not serialize or write on every clock tick.
+  const recoveryClockHeartbeatMs = 20_000;
+  useEffect(() => {
+    if (!onRecoverySnapshot || roomClock.state.status !== 'running') return undefined;
+    const timer = window.setInterval(() => emitRecoverySnapshot(Date.now()), recoveryClockHeartbeatMs);
+    return () => window.clearInterval(timer);
+  }, [emitRecoverySnapshot, onRecoverySnapshot, roomClock.state.status]);
+
   const scoresheetValidation = useMemo(
     () => validateScoresheet(format, setup, events.events, procedure),
     [format, setup, events.events, procedure],
@@ -984,8 +1043,9 @@ export default function Scorer(props: IScorerProps) {
     };
   }, [qbjMeta, operatorName, moderatorName]);
   const qbj = useMemo(
-    () => attachScorerRecovery(toQbjMatch(format, game, meta), setup, events.events),
-    [format, game, meta, setup, events.events],
+    () =>
+      attachScorerRecovery(toQbjMatch(format, game, meta), setup, recoveryEventList, getRecoveryHistory()),
+    [format, game, getRecoveryHistory, meta, recoveryEventList, setup],
   );
   const spreadsheetTsv = useMemo(() => {
     if (!gamePackage) return undefined;

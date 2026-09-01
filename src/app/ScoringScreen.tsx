@@ -103,6 +103,8 @@ export default function ScoringScreen(props: {
   storageDegraded?: boolean;
   /** `acceptedJustNow` is a transient presentation fact, never persisted as game state. */
   onComplete: (recordId: string, acceptedJustNow?: boolean) => void | Promise<void>;
+  /** Queue exact recovery snapshots without blocking scoring. */
+  onRecoverySnapshot?: (backup: IQbsheetBackup) => void;
   /** Re-read the stored record, after something outside the scorer's own event history changed it. */
   onRecordChanged: () => void | Promise<void>;
   /** A repair produced new credentials for the same game. Persist them; nothing else changes. */
@@ -119,6 +121,7 @@ export default function ScoringScreen(props: {
     operatorName,
     storageDegraded = false,
     onComplete,
+    onRecoverySnapshot,
     onRecordChanged,
     onConnectionRepaired,
     onConnectionLost,
@@ -551,6 +554,7 @@ export default function ScoringScreen(props: {
         onProgress={
           live ? (qbj) => runtime.reportProgress(qbjWithSourceMetadata(qbj, record.package)) : undefined
         }
+        onRecoverySnapshot={onRecoverySnapshot}
         onEventsChanged={mirror}
         qbjMeta={{
           round: record.package.round.number,

@@ -97,6 +97,8 @@ export interface IScorerHostProps {
   /** Passed straight through to Game details. See `Scorer` and `gameCorrection`. */
   onCorrectGame?: (correction: IGameCorrection) => void | Promise<void>;
   onProgress?: (qbj: object, questionsPlayed: number) => void;
+  /** Asynchronously mirrors the exact QBSheet state into the recovery service. */
+  onRecoverySnapshot?: (backup: IQbsheetBackup) => void;
   /** The tournament's player ids, so a name correction re-keys them rather than dropping them. */
   qbjPlayerIds?: Record<string, string>;
   /**
@@ -174,6 +176,7 @@ export default function ScorerHost(props: IScorerHostProps) {
     onDownloadForm,
     onCorrectGame,
     onProgress,
+    onRecoverySnapshot,
     qbjPlayerIds,
     onEventsChanged,
     qbjMeta,
@@ -286,8 +289,10 @@ export default function ScorerHost(props: IScorerHostProps) {
           );
           return undefined;
         }
-        if (payload.events.length === 0) return undefined;
-        restore(payload.events);
+        // An all-undone v2 snapshot legitimately has no current events but still carries a redo
+        // frame. Do not throw that exact recovery state away merely because the event list is empty.
+        if (payload.events.length === 0 && (payload.history?.redo.length ?? 0) === 0) return undefined;
+        restore(payload.events, payload.history);
         setServerRecoveryNotice('Recovered this game from the copy tournament control was holding.');
         return undefined;
       })
@@ -361,6 +366,7 @@ export default function ScorerHost(props: IScorerHostProps) {
       onDownloadForm={onDownloadForm}
       onCorrectGame={onCorrectGame}
       onProgress={onProgress}
+      onRecoverySnapshot={onRecoverySnapshot}
       qbjMeta={qbjMeta}
       qbjPlayerIds={qbjPlayerIds}
       onRequestControl={onRequestControl}

@@ -18,6 +18,16 @@ import {
 import useDisplayPreferences from './useDisplayPreferences';
 import { buildLabel } from '../pwa/BuildVersion';
 import NativeDialog from './NativeDialog';
+import {
+  effectiveExternalBackupStatus,
+  externalBackupActionLabel,
+  externalBackupStateLabel,
+  localCheckpointStateLabel,
+  recoverySavedAtLabel,
+  safeRecoveryFolderName,
+  supportsExternalBackup,
+} from './DeviceReadiness';
+import type { IRecoveryUi, RecoveryAction, RecoveryActionResult } from './DeviceReadiness';
 
 export interface ISettingsConnection {
   /** Human-facing room label only. Never a room id. */
@@ -26,11 +36,12 @@ export interface ISettingsConnection {
   address?: string;
 }
 
-type SettingsView = 'settings' | 'scorekeeper' | 'shortcuts' | 'forget' | 'reset';
+type SettingsView = 'settings' | 'scorekeeper' | 'shortcuts' | 'recovery' | 'forget' | 'reset';
 
 function dialogTitle(view: SettingsView, firstRun: boolean): string {
   if (view === 'scorekeeper') return firstRun ? 'Who is scoring?' : 'Scorekeeper';
   if (view === 'shortcuts') return 'Keyboard shortcuts';
+  if (view === 'recovery') return 'Recovery';
   if (view === 'forget') return 'Forget tournament pairing?';
   if (view === 'reset') return 'Reset device preferences?';
   return 'Settings';
@@ -106,6 +117,8 @@ export default function SettingsDialog(props: {
   onPractice?: () => void;
   /** Whether practice has a saved in-progress game; navigation is no longer rendered here. */
   practiceInProgress?: boolean;
+  /** Read-only recovery status plus explicit user-action callbacks from the recovery core. */
+  recovery?: IRecoveryUi;
   /** Begin a fresh pairing flow without silently clearing the current room. */
   onChangeTournament?: () => void;
   onClose: () => void;
@@ -120,6 +133,7 @@ export default function SettingsDialog(props: {
     onForgetPairing,
     onResetDevicePreferences,
     onReadiness,
+    recovery,
     onChangeTournament,
     onClose,
     initialView = 'settings',
@@ -129,9 +143,20 @@ export default function SettingsDialog(props: {
   const [draft, setDraft] = useState(operatorName);
   const [scorekeeperReturnsToSettings, setScorekeeperReturnsToSettings] = useState(false);
   const [acknowledgement, setAcknowledgement] = useState('');
+  const [recoveryAction, setRecoveryAction] = useState<string | null>(null);
+  const [recoveryMessage, setRecoveryMessage] = useState<{ kind: 'pass' | 'fail'; text: string } | null>(
+    null,
+  );
+  const [confirmingExternalBackupRemoval, setConfirmingExternalBackupRemoval] = useState(false);
   const body = useRef<HTMLDivElement>(null);
   const keyboardEnabled = useKeyboardEnabled();
   const { appearance, textSize } = useDisplayPreferences();
+  const externalBackup = effectiveExternalBackupStatus(supportsExternalBackup(), recovery?.externalBackup);
+  const localCheckpoints = recovery?.localCheckpoints ?? {
+    state: 'protected' as const,
+    message:
+      'QBSheet keeps the instant journal and durable game copy automatically. Rolling checkpoint details appear here when the recovery core reports them.',
+  };
 
   useEffect(() => {
     body.current?.querySelector<HTMLElement>('[data-settings-view-autofocus]')?.focus();
@@ -154,6 +179,44 @@ export default function SettingsDialog(props: {
     leaveScorekeeper();
   };
 
+  const runRecoveryAction = async (
+    name: string,
+    action: RecoveryAction | undefined,
+    successMessage: string,
+    failureMessage: string,
+  ) => {
+    if (!action) return;
+    setRecoveryAction(name);
+    setRecoveryMessage(null);
+    try {
+      // The action is invoked synchronously from the button handler so a recovery core can use the
+      // browser's user activation for showDirectoryPicker/requestPermission. Nothing here runs during
+      // Settings mount or while Device Readiness performs passive feature detection.
+      const result: RecoveryActionResult = await action();
+      if (result && 'ok' in result && result.ok === false) {
+        setRecoveryMessage({ kind: 'fail', text: result.message });
+        return;
+      }
+      if (recovery?.onRefreshRecoveryStatus) await recovery.onRefreshRecoveryStatus();
+      setRecoveryMessage({ kind: 'pass', text: result?.message ?? successMessage });
+    } catch {
+      setRecoveryMessage({ kind: 'fail', text: failureMessage });
+    } finally {
+      setRecoveryAction(null);
+    }
+  };
+
+  const openRecoveryStatus = () => {
+    if (recovery?.onViewRecoveryStatus) {
+      onClose();
+      recovery.onViewRecoveryStatus();
+      return;
+    }
+    setRecoveryMessage(null);
+    setConfirmingExternalBackupRemoval(false);
+    setView('recovery');
+  };
+
   return (
     <NativeDialog title={dialogTitle(view, firstRun)} onClose={onClose} className="settings-dialog">
       <div ref={body}>
@@ -162,6 +225,14 @@ export default function SettingsDialog(props: {
             {acknowledgement !== '' && (
               <p className="settings-acknowledgement" role="status">
                 {acknowledgement}
+              </p>
+            )}
+            {recoveryMessage && (
+              <p
+                className={recoveryMessage.kind === 'fail' ? 'shell-warning' : 'settings-acknowledgement'}
+                role={recoveryMessage.kind === 'fail' ? 'alert' : 'status'}
+              >
+                {recoveryMessage.text}
               </p>
             )}
 
@@ -245,6 +316,86 @@ export default function SettingsDialog(props: {
                   View
                 </button>
               </div>
+            </section>
+
+            <section className="settings-section" aria-labelledby="settings-recovery-heading">
+              <h3 id="settings-recovery-heading" className="settings-section-title">
+                Recovery
+              </h3>
+              <div className="settings-row">
+                <div>
+                  <span className="settings-row-label">Automatic protection</span>
+                  <span className="settings-row-detail">
+                    {localCheckpoints.message ??
+                      'QBSheet keeps the instant journal, durable game copy and rolling checkpoints automatically.'}
+                  </span>
+                </div>
+                <span
+                  className={`settings-row-status is-${localCheckpoints.state === 'protected' ? 'pass' : localCheckpoints.state === 'unknown' ? 'info' : 'warn'}`}
+                >
+                  {localCheckpointStateLabel(localCheckpoints.state)}
+                </span>
+              </div>
+              <div className="settings-row">
+                <div>
+                  <span className="settings-row-label">External backup</span>
+                  <span className="settings-row-detail">
+                    {externalBackup.state === 'ready'
+                      ? `${safeRecoveryFolderName(externalBackup.folderName)} · ${recoverySavedAtLabel(externalBackup.lastSavedAt)}`
+                      : externalBackupStateLabel(externalBackup.state)}
+                  </span>
+                </div>
+                {externalBackupActionLabel(externalBackup.state) &&
+                  (externalBackup.state === 'not-configured'
+                    ? recovery?.onSetupExternalBackup
+                    : externalBackup.state === 'ready'
+                      ? recovery?.onManageExternalBackup || true
+                      : externalBackup.state === 'needs-permission' ||
+                          externalBackup.state === 'folder-unavailable'
+                        ? recovery?.onReconnectExternalBackup
+                        : recovery?.onReconnectExternalBackup || recovery?.onSetupExternalBackup) && (
+                    <button
+                      type="button"
+                      className="settings-action"
+                      disabled={recoveryAction !== null}
+                      onClick={() => {
+                        if (externalBackup.state === 'ready' && recovery?.onManageExternalBackup) {
+                          void runRecoveryAction(
+                            'external-backup',
+                            recovery.onManageExternalBackup,
+                            'External backup settings opened.',
+                            'QBSheet could not open external backup settings.',
+                          );
+                          return;
+                        }
+                        if (externalBackup.state === 'ready') {
+                          openRecoveryStatus();
+                          return;
+                        }
+                        const action =
+                          externalBackup.state === 'not-configured'
+                            ? recovery?.onSetupExternalBackup
+                            : (recovery?.onReconnectExternalBackup ?? recovery?.onSetupExternalBackup);
+                        void runRecoveryAction(
+                          'external-backup',
+                          action,
+                          externalBackup.state === 'not-configured'
+                            ? 'External backup setup completed.'
+                            : 'External backup reconnected.',
+                          'QBSheet could not update external backup. Local protection is still active.',
+                        );
+                      }}
+                    >
+                      {recoveryAction === 'external-backup'
+                        ? 'Working…'
+                        : externalBackupActionLabel(externalBackup.state)}
+                    </button>
+                  )}
+              </div>
+              <button type="button" className="settings-navigation-row" onClick={openRecoveryStatus}>
+                <span>View recovery status</span>
+                <span aria-hidden="true">›</span>
+              </button>
             </section>
 
             {connection && (
@@ -351,6 +502,178 @@ export default function SettingsDialog(props: {
               </button>
             </div>
           </form>
+        )}
+
+        {view === 'recovery' && (
+          <div className="settings-detail-view">
+            <p className="settings-detail-intro">
+              QBSheet keeps local protection on automatically. An external backup is optional and stores a
+              normal, credential-free <code>.qbsheet</code> file outside browser storage.
+            </p>
+
+            <dl className="settings-facts">
+              <div>
+                <dt>Automatic protection</dt>
+                <dd>
+                  {localCheckpointStateLabel(localCheckpoints.state)}
+                  {localCheckpoints.message ? ` · ${localCheckpoints.message}` : ''}
+                </dd>
+              </div>
+              <div>
+                <dt>External backup</dt>
+                <dd>
+                  {externalBackup.state === 'ready'
+                    ? `${safeRecoveryFolderName(externalBackup.folderName)} · ${recoverySavedAtLabel(externalBackup.lastSavedAt)}`
+                    : externalBackupStateLabel(externalBackup.state)}
+                </dd>
+              </div>
+            </dl>
+
+            <p className="settings-detail-note">
+              {externalBackup.message ??
+                (externalBackup.state === 'unsupported'
+                  ? 'This browser does not support external backup folders. Local QBSheet recovery still works.'
+                  : externalBackup.state === 'not-configured'
+                    ? 'Choose a folder once to keep a live backup for each game. This is optional.'
+                    : externalBackup.state === 'ready'
+                      ? 'The live file updates in the background after scoring changes. A write failure never blocks scoring.'
+                      : externalBackup.state === 'needs-permission'
+                        ? 'The folder is remembered, but access needs to be allowed again. QBSheet has not requested permission automatically.'
+                        : externalBackup.state === 'folder-unavailable'
+                          ? 'Reconnect the folder to continue. Removing this configuration never deletes existing .qbsheet files.'
+                          : 'The last external write failed. Local protection remains active while it is repaired.')}
+            </p>
+
+            {recoveryMessage && (
+              <p
+                className={recoveryMessage.kind === 'fail' ? 'shell-warning' : 'settings-acknowledgement'}
+                role={recoveryMessage.kind === 'fail' ? 'alert' : 'status'}
+              >
+                {recoveryMessage.text}
+              </p>
+            )}
+
+            <div className="shell-modal-actions">
+              {externalBackup.state === 'not-configured' && recovery?.onSetupExternalBackup && (
+                <button
+                  type="button"
+                  className="shell-button is-primary"
+                  disabled={recoveryAction !== null}
+                  onClick={() =>
+                    void runRecoveryAction(
+                      'external-backup',
+                      recovery.onSetupExternalBackup,
+                      'External backup setup completed.',
+                      'QBSheet could not set up external backup. Local protection is still active.',
+                    )
+                  }
+                >
+                  {recoveryAction === 'external-backup' ? 'Working…' : 'Set up external backup…'}
+                </button>
+              )}
+              {externalBackup.state === 'ready' && recovery?.onSetupExternalBackup && (
+                <button
+                  type="button"
+                  className="shell-button"
+                  disabled={recoveryAction !== null}
+                  onClick={() =>
+                    void runRecoveryAction(
+                      'external-backup',
+                      recovery.onSetupExternalBackup,
+                      'External backup folder changed.',
+                      'QBSheet could not change the external backup folder.',
+                    )
+                  }
+                >
+                  {recoveryAction === 'external-backup' ? 'Working…' : 'Change folder…'}
+                </button>
+              )}
+              {(externalBackup.state === 'needs-permission' ||
+                externalBackup.state === 'folder-unavailable' ||
+                externalBackup.state === 'failed') &&
+                (recovery?.onReconnectExternalBackup || recovery?.onSetupExternalBackup) && (
+                  <button
+                    type="button"
+                    className="shell-button is-primary"
+                    disabled={recoveryAction !== null}
+                    onClick={() =>
+                      void runRecoveryAction(
+                        'external-backup',
+                        recovery.onReconnectExternalBackup ?? recovery.onSetupExternalBackup,
+                        'External backup reconnected.',
+                        'QBSheet could not reconnect external backup. Local protection is still active.',
+                      )
+                    }
+                  >
+                    {recoveryAction === 'external-backup'
+                      ? 'Working…'
+                      : externalBackup.state === 'needs-permission'
+                        ? 'Allow access'
+                        : 'Reconnect'}
+                  </button>
+                )}
+              {externalBackup.state === 'ready' &&
+                recovery?.onRemoveExternalBackup &&
+                !confirmingExternalBackupRemoval && (
+                  <button
+                    type="button"
+                    className="settings-inline-action"
+                    onClick={() => setConfirmingExternalBackupRemoval(true)}
+                  >
+                    Stop external backup…
+                  </button>
+                )}
+              {confirmingExternalBackupRemoval && (
+                <div className="settings-recovery-confirmation">
+                  <p className="shell-warning" role="alert">
+                    Stop remembering this folder? QBSheet will not delete any existing <code>.qbsheet</code>{' '}
+                    files.
+                  </p>
+                  <button
+                    type="button"
+                    className="shell-button is-destructive"
+                    disabled={recoveryAction !== null}
+                    onClick={() => {
+                      setConfirmingExternalBackupRemoval(false);
+                      void runRecoveryAction(
+                        'external-backup-remove',
+                        recovery?.onRemoveExternalBackup,
+                        'External backup configuration removed. Existing files were not deleted.',
+                        'QBSheet could not remove the external backup configuration.',
+                      );
+                    }}
+                  >
+                    {recoveryAction === 'external-backup-remove' ? 'Working…' : 'Stop external backup'}
+                  </button>
+                  <button
+                    type="button"
+                    className="shell-button"
+                    onClick={() => setConfirmingExternalBackupRemoval(false)}
+                  >
+                    Keep external backup
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {recovery?.onViewRecoveryStatus && (
+              <button type="button" className="settings-inline-action" onClick={openRecoveryStatus}>
+                Open full recovery status
+              </button>
+            )}
+            <button
+              type="button"
+              className="shell-button"
+              data-settings-view-autofocus
+              onClick={() => {
+                setRecoveryMessage(null);
+                setConfirmingExternalBackupRemoval(false);
+                setView('settings');
+              }}
+            >
+              Back to Settings
+            </button>
+          </div>
         )}
 
         {view === 'shortcuts' && (

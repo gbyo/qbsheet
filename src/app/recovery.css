@@ -1,0 +1,591 @@
+/*
+ * Recovery Mode is loaded without the normal application shell. Keep its small visual vocabulary
+ * self-contained so a crash or an early-start query still produces a legible page. This file is also
+ * the one bootstrap stylesheet, so the render boundary can stay visible if the normal shell fails to
+ * load.
+ */
+html {
+  background: #f6f7f8;
+}
+
+body {
+  min-width: 320px;
+  margin: 0;
+}
+
+button {
+  font: inherit;
+}
+
+.crash-screen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-height: 100vh;
+  padding: 24px 16px;
+  color: #1c1d20;
+  background: #ffffff;
+  font-family:
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
+}
+
+.crash-panel {
+  width: 100%;
+  max-width: 560px;
+}
+
+.crash-title {
+  margin: 0 0 12px;
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.crash-lead {
+  margin: 0 0 8px;
+  font-size: 1rem;
+}
+
+.crash-body {
+  margin: 0 0 24px;
+  color: #5c6066;
+}
+
+.crash-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.crash-button {
+  min-height: 44px;
+  padding: 8px 14px;
+  color: #1c1d20;
+  background: #ffffff;
+  border: 1px solid #c2c5ca;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.crash-button:hover {
+  background: #f6f7f8;
+}
+
+.crash-button.is-primary {
+  color: #ffffff;
+  background: #1565c0;
+  border-color: #1565c0;
+}
+
+.crash-button.is-primary:hover {
+  background: #10529c;
+  border-color: #10529c;
+}
+
+.crash-button:focus-visible,
+.recovery-button:focus-visible {
+  outline: 3px solid rgb(21 101 192 / 35%);
+  outline-offset: 2px;
+}
+
+.crash-note {
+  margin: 16px 0 0;
+  color: #5c6066;
+  font-size: 0.8125rem;
+}
+
+.crash-details {
+  margin-top: 24px;
+  padding-top: 16px;
+  color: #5c6066;
+  border-top: 1px solid #d8dade;
+  font-size: 0.8125rem;
+}
+
+.crash-details summary {
+  cursor: pointer;
+}
+
+.crash-thrown {
+  margin: 8px 0 0;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+}
+
+.recovery-screen {
+  box-sizing: border-box;
+  min-height: 100vh;
+  padding: 32px 20px 48px;
+  color: #1c1d20;
+  background: #f6f7f8;
+  font-family:
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
+}
+
+.recovery-screen,
+.recovery-screen * {
+  box-sizing: border-box;
+}
+
+.recovery-header,
+.recovery-panel,
+.recovery-footer {
+  width: min(760px, 100%);
+  margin-right: auto;
+  margin-left: auto;
+}
+
+.recovery-header {
+  margin-bottom: 20px;
+}
+
+.recovery-eyebrow {
+  margin: 0 0 8px;
+  color: #5c6066;
+  font-size: 0.875rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.recovery-header h1,
+.recovery-panel h2,
+.recovery-game h3,
+.recovery-backup-preview h3 {
+  margin: 0;
+  line-height: 1.2;
+}
+
+.recovery-header h1 {
+  font-size: clamp(1.8rem, 5vw, 2.4rem);
+}
+
+.recovery-header p:last-child,
+.recovery-panel > p,
+.recovery-section-heading p,
+.recovery-footer p,
+.recovery-game-heading p,
+.recovery-hint,
+.recovery-backup-preview p {
+  color: #5c6066;
+  line-height: 1.5;
+}
+
+.recovery-header p:last-child {
+  max-width: 62ch;
+  margin: 12px 0 0;
+}
+
+.recovery-panel {
+  margin-bottom: 16px;
+  padding: 20px;
+  border: 1px solid #d8dade;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgb(20 24 28 / 8%);
+}
+
+.recovery-panel.is-warning,
+.recovery-inline-warning {
+  border-color: #e0a33c;
+  background: #fdf3e3;
+}
+
+.recovery-panel.is-warning {
+  color: #6b4300;
+}
+
+.recovery-section-heading,
+.recovery-game-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.recovery-section-heading p,
+.recovery-panel > p {
+  margin: 6px 0 0;
+}
+
+.recovery-inline-warning {
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  border: 1px solid #e0a33c;
+  color: #6b4300;
+  line-height: 1.45;
+}
+
+.recovery-external-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid #d8dade;
+  border-radius: 6px;
+  background: #f6f7f8;
+}
+
+.recovery-external-status p {
+  margin: 0;
+  color: #5c6066;
+  line-height: 1.45;
+}
+
+.recovery-external-status .recovery-note {
+  margin-top: 8px;
+}
+
+.recovery-game-list {
+  margin-top: 18px;
+}
+
+.recovery-game {
+  padding: 16px 0;
+  border-top: 1px solid #d8dade;
+}
+
+.recovery-game:first-child {
+  border-top: 0;
+}
+
+.recovery-game-heading h3 {
+  font-size: 1.05rem;
+}
+
+.recovery-game-heading p {
+  margin: 4px 0 0;
+  font-size: 0.875rem;
+}
+
+.recovery-sources {
+  margin: 14px 0 0;
+}
+
+.recovery-sources > div {
+  display: grid;
+  grid-template-columns: minmax(170px, 0.8fr) minmax(0, 1.2fr);
+  gap: 12px;
+  padding: 9px 0;
+  border-top: 1px solid #eef0f2;
+}
+
+.recovery-sources > div:first-child {
+  border-top: 0;
+}
+
+.recovery-sources dt {
+  font-weight: 600;
+}
+
+.recovery-sources dd {
+  margin: 0;
+}
+
+.recovery-status {
+  display: block;
+  color: #5c6066;
+}
+
+.recovery-status::first-letter {
+  color: #1e6b32;
+}
+
+.recovery-status.is-stale,
+.recovery-status.is-unsupported,
+.recovery-status.is-malformed,
+.recovery-status.is-missing {
+  color: #8a5300;
+}
+
+.recovery-sources small {
+  display: block;
+  margin-top: 3px;
+  color: #5c6066;
+  font-size: 0.8125rem;
+}
+
+.recovery-source-action {
+  display: block;
+  margin-top: 8px;
+  padding: 0;
+  color: #1565c0;
+  background: transparent;
+  border: 0;
+  font: inherit;
+  font-size: 0.8125rem;
+  text-align: left;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.recovery-source-action:hover {
+  color: #10529c;
+}
+
+.recovery-empty,
+.recovery-hint {
+  margin: 18px 0 0;
+}
+
+.recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.recovery-button {
+  min-height: 38px;
+  padding: 8px 13px;
+  border: 1px solid #c2c5ca;
+  border-radius: 6px;
+  color: #1c1d20;
+  background: #ffffff;
+  font: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.recovery-button:hover:not(:disabled) {
+  background: #f6f7f8;
+}
+
+.recovery-button.is-primary {
+  border-color: #1565c0;
+  color: #ffffff;
+  background: #1565c0;
+}
+
+.recovery-button.is-primary:hover:not(:disabled) {
+  background: #10529c;
+}
+
+.recovery-button:focus-visible {
+  outline: 3px solid rgb(21 101 192 / 35%);
+  outline-offset: 2px;
+}
+
+.recovery-button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.recovery-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.recovery-note {
+  margin: 14px 0 0;
+  color: #1e6b32;
+  line-height: 1.45;
+}
+
+.recovery-backup-preview {
+  margin-top: 18px;
+  padding: 14px;
+  border-left: 3px solid #6aa9dd;
+  background: #eaf3fb;
+}
+
+.recovery-backup-preview p {
+  margin: 6px 0 12px;
+}
+
+.recovery-footer {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 18px;
+  padding-top: 4px;
+}
+
+.recovery-footer p {
+  margin: 0;
+  font-size: 0.8125rem;
+  text-align: right;
+}
+
+@media (max-width: 600px) {
+  .recovery-screen {
+    padding: 24px 14px 36px;
+  }
+
+  .recovery-panel {
+    padding: 16px;
+  }
+
+  .recovery-section-heading,
+  .recovery-game-heading,
+  .recovery-footer {
+    display: block;
+  }
+
+  .recovery-section-heading .recovery-button,
+  .recovery-game-heading .recovery-button {
+    margin-top: 12px;
+  }
+
+  .recovery-sources > div {
+    display: block;
+  }
+
+  .recovery-sources dd {
+    margin-top: 4px;
+  }
+
+  .recovery-footer p {
+    margin-top: 10px;
+    text-align: left;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  html {
+    background: #16171a;
+  }
+
+  .crash-screen {
+    color: #e7e9ec;
+    background: #16171a;
+  }
+
+  .crash-body,
+  .crash-note,
+  .crash-details {
+    color: #a6acb5;
+  }
+
+  .crash-button {
+    color: #e7e9ec;
+    background: #16171a;
+    border-color: #4a4f57;
+  }
+
+  .crash-button:hover {
+    background: #2a2d32;
+  }
+
+  .crash-button.is-primary {
+    color: #10151c;
+    background: #7ab3ee;
+    border-color: #7ab3ee;
+  }
+
+  .crash-button.is-primary:hover {
+    background: #9ac9f8;
+    border-color: #9ac9f8;
+  }
+
+  .crash-details {
+    border-color: #33363b;
+  }
+
+  .recovery-screen {
+    color: #e7e9ec;
+    background: #16171a;
+  }
+
+  .recovery-panel {
+    border-color: #33363b;
+    background: #1f2125;
+  }
+
+  .recovery-header p:last-child,
+  .recovery-panel > p,
+  .recovery-section-heading p,
+  .recovery-footer p,
+  .recovery-game-heading p,
+  .recovery-hint,
+  .recovery-backup-preview p,
+  .recovery-status,
+  .recovery-sources small {
+    color: #a6acb5;
+  }
+
+  .recovery-game,
+  .recovery-sources > div {
+    border-color: #33363b;
+  }
+
+  .recovery-panel.is-warning,
+  .recovery-inline-warning {
+    border-color: #7c5b21;
+    background: #2a2013;
+  }
+
+  .recovery-panel.is-warning,
+  .recovery-inline-warning,
+  .recovery-status.is-stale,
+  .recovery-status.is-unsupported,
+  .recovery-status.is-malformed,
+  .recovery-status.is-missing {
+    color: #e5b264;
+  }
+
+  .recovery-button {
+    border-color: #4a4f57;
+    color: #e7e9ec;
+    background: #16171a;
+  }
+
+  .recovery-button:hover:not(:disabled) {
+    background: #2a2d32;
+  }
+
+  .recovery-button.is-primary {
+    border-color: #7ab3ee;
+    color: #10151c;
+    background: #7ab3ee;
+  }
+
+  .recovery-button.is-primary:hover:not(:disabled) {
+    background: #9ac9f8;
+  }
+
+  .recovery-backup-preview {
+    border-left-color: #35638f;
+    background: #13202d;
+  }
+}
+
+@media (forced-colors: active) {
+  .crash-screen {
+    color: CanvasText;
+    background: Canvas;
+  }
+
+  .crash-panel,
+  .recovery-panel,
+  .crash-button,
+  .recovery-button {
+    border-color: CanvasText;
+  }
+
+  .crash-button.is-primary,
+  .recovery-button.is-primary {
+    color: ButtonText;
+    background: ButtonFace;
+  }
+
+  :focus-visible {
+    outline-color: Highlight;
+  }
+}
