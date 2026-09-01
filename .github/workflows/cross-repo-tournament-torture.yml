@@ -21,6 +21,10 @@ concurrency:
 jobs:
   shard:
     name: ${{ matrix.name }}
+    # Scheduled/manual runs can select another repository ref, so keep execution behind the same
+    # environment reviewers used for other untrusted cross-repository code.
+    environment:
+      name: qbtcp-untrusted-interop
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:

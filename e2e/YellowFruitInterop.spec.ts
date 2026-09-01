@@ -6,9 +6,20 @@
  * checkout is available, proving that the two applications can pair, exchange progress, submit a
  * QBJ result, and leave a durable review record together.
  */
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { rounds } from './support/tournamentControl';
 import { startYellowFruitControl, yellowFruitHarnessAvailable } from './support/yellowfruitControl';
+
+async function chooseScoringLayout(page: Page): Promise<void> {
+  const chooser = page.getByRole('dialog', { name: 'Choose a scoring layout' });
+  const asked = await chooser
+    .waitFor({ state: 'visible', timeout: 2_000 })
+    .then(() => true)
+    .catch(() => false);
+  if (!asked) return;
+  await chooser.getByRole('radio', { name: 'Scoresheet', exact: true }).click();
+  await expect(chooser).toBeHidden();
+}
 
 test.describe('QBSheet against the real YellowFruit QBTCP server', () => {
   test.skip(
@@ -82,6 +93,7 @@ test.describe('QBSheet against the real YellowFruit QBTCP server', () => {
       await expect(page.locator('.assignment-context')).toHaveText('4 · Room 204');
 
       await page.getByRole('button', { name: 'Start scoring' }).click();
+      await chooseScoringLayout(page);
       const lineup = page.getByRole('heading', { name: 'Who is starting?' });
       if (await lineup.count()) {
         const prompt = page.getByLabel('Starting lineups');
