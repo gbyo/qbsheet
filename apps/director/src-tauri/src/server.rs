@@ -1,12 +1,12 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, UdpSocket};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 use qbtcp_server::{
-    AssignmentState, MemoryState, PresenceRecord, ProgressRecord, QbtcpConfig, QbtcpServer,
-    QbtcpState, ResultDisposition, ResultSubmission, RoomInfo, RosterAmendment,
-    RosterAmendmentRequest, SessionEvent, StateError, TournamentInfo,
+    AssignedAssignment, AssignmentMeta, AssignmentState, MemoryState, PresenceRecord,
+    ProgressRecord, QbtcpConfig, QbtcpServer, QbtcpState, ResultDisposition, ResultSubmission,
+    RoomInfo, RosterAmendment, RosterAmendmentRequest, SessionEvent, StateError, TournamentInfo,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -229,6 +229,7 @@ pub struct DirectorQbtcpState {
     memory: MemoryState,
     tournament: RwLock<TournamentInfo>,
     room_ids: Mutex<HashSet<String>>,
+    assignment_room_ids: Mutex<HashSet<String>>,
     paired_rooms: Mutex<HashSet<String>>,
 }
 
@@ -236,11 +237,21 @@ impl DirectorQbtcpState {
     pub fn from_document(document: Option<&Value>) -> Self {
         let tournament = tournament_from_document(document);
         let rooms = rooms_from_document(document);
+        let assignments = assignments_from_document(document);
         let room_ids = rooms.iter().map(|room| room.id.clone()).collect();
+        let assignment_room_ids = assignments
+            .iter()
+            .map(|(room_id, _)| room_id.clone())
+            .collect();
+        let memory = MemoryState::new(tournament.clone(), rooms);
+        for (room_id, assignment) in assignments {
+            memory.set_assignment(room_id, AssignmentState::Assigned(assignment));
+        }
         Self {
-            memory: MemoryState::new(tournament.clone(), rooms),
+            memory,
             tournament: RwLock::new(tournament),
             room_ids: Mutex::new(room_ids),
+            assignment_room_ids: Mutex::new(assignment_room_ids),
             paired_rooms: Mutex::new(HashSet::new()),
         }
     }
@@ -259,6 +270,25 @@ impl DirectorQbtcpState {
             }
             for room in &rooms {
                 self.memory.set_room(room.clone());
+            }
+            *known_ids = next_ids;
+        }
+
+        let assignments = assignments_from_document(document);
+        if let Ok(mut known_ids) = self.assignment_room_ids.lock() {
+            let next_ids: HashSet<String> = assignments
+                .iter()
+                .map(|(room_id, _)| room_id.clone())
+                .collect();
+            for room_id in known_ids.iter() {
+                self.memory.set_assignment(
+                    room_id.clone(),
+                    AssignmentState::None(AssignmentMeta::default()),
+                );
+            }
+            for (room_id, assignment) in assignments {
+                self.memory
+                    .set_assignment(room_id, AssignmentState::Assigned(assignment));
             }
             *known_ids = next_ids;
         }
@@ -392,6 +422,125 @@ fn rooms_from_document(document: Option<&Value>) -> Vec<RoomInfo> {
         .collect()
 }
 
+/// Project only a real QBJ document attached to a released scheduled game.
+///
+/// A schedule contains the operational pairing but not the questions. The native shell must not
+/// manufacture a packet that the scorer could not actually score, so a game is released over
+/// QBTCP only when its saved document carries a QBJ assignment (normally `GameRecord.rawQbj`, or
+/// an explicit `assignmentQbj` on the scheduled game). This keeps room pairing honest while
+/// allowing imported QBJ tournaments and future packet loaders to work without another transport
+/// adapter.
+fn assignments_from_document(document: Option<&Value>) -> Vec<(String, AssignedAssignment)> {
+    let Some(root) = document.and_then(Value::as_object) else {
+        return Vec::new();
+    };
+    let Some(scheduled_games) = root.get("scheduledGames").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+
+    let eligible_rooms: HashSet<String> = rooms_from_document(document)
+        .into_iter()
+        .filter(|room| room.enabled)
+        .map(|room| room.id)
+        .collect();
+    let rounds = root
+        .get("rounds")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_object)
+        .filter_map(|round| string_field(Some(round), "id").map(|id| (id, round)))
+        .collect::<HashMap<_, _>>();
+    let teams = root
+        .get("teams")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_object)
+        .filter_map(|team| {
+            let id = string_field(Some(team), "id")?;
+            let name = string_field(Some(team), "displayName")
+                .or_else(|| string_field(Some(team), "name"))
+                .unwrap_or_else(|| id.clone());
+            Some((id, name))
+        })
+        .collect::<HashMap<_, _>>();
+    let games = root
+        .get("games")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_object)
+        .filter_map(|game| string_field(Some(game), "scheduledGameId").map(|id| (id, game)))
+        .collect::<HashMap<_, _>>();
+
+    scheduled_games
+        .iter()
+        .filter_map(Value::as_object)
+        .filter_map(|scheduled| {
+            let status = string_field(Some(scheduled), "status")?;
+            if !matches!(status.as_str(), "released" | "live") {
+                return None;
+            }
+            if scheduled
+                .get("bye")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
+                return None;
+            }
+
+            let scheduled_id = string_field(Some(scheduled), "id")?;
+            let room_id = string_field(Some(scheduled), "roomId")?;
+            if !eligible_rooms.contains(&room_id) {
+                return None;
+            }
+            let round_id = string_field(Some(scheduled), "roundId")?;
+            let round = rounds.get(&round_id)?;
+            let round_number = u32_field(Some(round), "number").filter(|number| *number > 0)?;
+            let left_team_id = string_field(Some(scheduled), "leftTeamId")?;
+            let right_team_id = string_field(Some(scheduled), "rightTeamId")?;
+            let left_team = teams
+                .get(&left_team_id)
+                .cloned()
+                .unwrap_or_else(|| left_team_id.clone());
+            let right_team = teams
+                .get(&right_team_id)
+                .cloned()
+                .unwrap_or_else(|| right_team_id.clone());
+
+            let qbj = games
+                .get(&scheduled_id)
+                .and_then(|game| game.get("rawQbj"))
+                .filter(|value| qbtcp_server::is_qbj_like(value))
+                .cloned()
+                .or_else(|| {
+                    ["assignmentQbj", "qbj", "assignment"]
+                        .iter()
+                        .filter_map(|key| scheduled.get(*key))
+                        .find(|value| qbtcp_server::is_qbj_like(value))
+                        .cloned()
+                })?;
+            let (_, qbj_match_id) = qbtcp_server::qbj_identity(&qbj);
+            let mut assignment =
+                AssignedAssignment::new(qbj_match_id.unwrap_or_else(|| scheduled_id.clone()), qbj);
+            assignment.round_number = round_number;
+            assignment.round_name = string_field(Some(round), "name");
+            assignment.left_team = Some(left_team.clone());
+            assignment.right_team = Some(right_team.clone());
+            assignment.label = Some(format!("{left_team} vs {right_team}"));
+            assignment.meta = AssignmentMeta {
+                round_revision: u64_field(Some(round), "revision").filter(|revision| *revision > 0),
+                assignment_revision: u64_field(Some(scheduled), "assignmentRevision")
+                    .filter(|revision| *revision > 0),
+                released_round: Some(round_number),
+                ..AssignmentMeta::default()
+            };
+            Some((room_id, assignment))
+        })
+        .collect()
+}
+
 fn string_field(object: Option<&serde_json::Map<String, Value>>, key: &str) -> Option<String> {
     object?
         .get(key)
@@ -399,6 +548,14 @@ fn string_field(object: Option<&serde_json::Map<String, Value>>, key: &str) -> O
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
+}
+
+fn u64_field(object: Option<&serde_json::Map<String, Value>>, key: &str) -> Option<u64> {
+    object?.get(key).and_then(Value::as_u64)
+}
+
+fn u32_field(object: Option<&serde_json::Map<String, Value>>, key: &str) -> Option<u32> {
+    u64_field(object, key).and_then(|value| u32::try_from(value).ok())
 }
 
 fn detect_lan_address() -> String {
@@ -459,6 +616,89 @@ mod tests {
             Some("room-101".to_owned())
         );
         assert_eq!(state.paired_room_count(), 0);
+    }
+
+    #[test]
+    fn released_games_with_qbj_are_projected_to_their_rooms() {
+        let document = json!({
+            "tournament": {"id": "t-1", "name": "Local Invitational"},
+            "rooms": [
+                {"id": "room-101", "name": "Room 101", "available": true},
+                {"id": "room-102", "name": "Room 102", "available": true}
+            ],
+            "teams": [
+                {"id": "team-a", "displayName": "North A"},
+                {"id": "team-b", "displayName": "South B"},
+                {"id": "team-c", "displayName": "East C"},
+                {"id": "team-d", "displayName": "West D"}
+            ],
+            "rounds": [{"id": "round-1", "name": "Round 1", "number": 1, "revision": 4}],
+            "scheduledGames": [
+                {
+                    "id": "scheduled-1",
+                    "roundId": "round-1",
+                    "roomId": "room-101",
+                    "leftTeamId": "team-a",
+                    "rightTeamId": "team-b",
+                    "bye": false,
+                    "status": "released",
+                    "assignmentRevision": 3
+                },
+                {
+                    "id": "scheduled-2",
+                    "roundId": "round-1",
+                    "roomId": "room-102",
+                    "leftTeamId": "team-c",
+                    "rightTeamId": "team-d",
+                    "bye": false,
+                    "status": "released",
+                    "assignmentRevision": 1
+                }
+            ],
+            "games": [{
+                "id": "game-1",
+                "scheduledGameId": "scheduled-1",
+                "status": "scheduled",
+                "rawQbj": {
+                    "version": "2.1.1",
+                    "objects": [
+                        {"type": "Tournament", "id": "t-1"},
+                        {"type": "Match", "id": "match-1", "teams": []}
+                    ]
+                }
+            }]
+        });
+        let state = DirectorQbtcpState::from_document(Some(&document));
+
+        let assigned = <DirectorQbtcpState as QbtcpState>::assignment(&state, "room-101")
+            .expect("room assignment is available");
+        match assigned {
+            AssignmentState::Assigned(assignment) => {
+                assert_eq!(assignment.match_id, "match-1");
+                assert_eq!(assignment.round_number, 1);
+                assert_eq!(assignment.round_name.as_deref(), Some("Round 1"));
+                assert_eq!(assignment.left_team.as_deref(), Some("North A"));
+                assert_eq!(assignment.right_team.as_deref(), Some("South B"));
+                assert_eq!(assignment.meta.round_revision, Some(4));
+                assert_eq!(assignment.meta.assignment_revision, Some(3));
+            }
+            AssignmentState::None(_)
+            | AssignmentState::Blocked { .. }
+            | AssignmentState::Held { .. } => {
+                panic!("released QBJ game should be assigned")
+            }
+        }
+
+        let empty_room = <DirectorQbtcpState as QbtcpState>::assignment(&state, "room-102")
+            .expect("room without QBJ remains usable");
+        assert!(matches!(empty_room, AssignmentState::None(_)));
+
+        let mut updated = document;
+        updated["scheduledGames"][0]["status"] = json!("scheduled");
+        state.refresh_from_document(Some(&updated));
+        let cleared = <DirectorQbtcpState as QbtcpState>::assignment(&state, "room-101")
+            .expect("room remains available after refresh");
+        assert!(matches!(cleared, AssignmentState::None(_)));
     }
 
     #[test]
