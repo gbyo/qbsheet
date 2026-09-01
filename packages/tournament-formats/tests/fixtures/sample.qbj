@@ -1,0 +1,65 @@
+{
+  "version": "2.1.1",
+  "objects": [
+    {
+      "type": "Tournament",
+      "id": "Tournament_fixture",
+      "name": "Fixture Invitational",
+      "scoring_rules": {"$ref": "ScoringRules_fixture"},
+      "registrations": [{"$ref": "Registration_alpha"}, {"$ref": "Registration_beta"}],
+      "phases": [{
+        "type": "Phase",
+        "id": "Phase_Prelims",
+        "name": "Prelims",
+        "rounds": [{
+          "type": "Round",
+          "id": "Round_1",
+          "name": "1",
+          "number": 1,
+          "packets": [{"$ref": "Packet_1"}],
+          "matches": [{"$ref": "Match_fixture"}]
+        }]
+      }]
+    },
+    {
+      "type": "ScoringRules",
+      "id": "ScoringRules_fixture",
+      "name": "ACF with powers",
+      "teams_per_match": 2,
+      "maximum_players_per_team": 4,
+      "regulation_tossup_count": 20,
+      "maximum_regulation_tossup_count": 20,
+      "minimum_overtime_question_count": 1,
+      "overtime_includes_bonuses": false,
+      "maximum_bonus_score": 30,
+      "bonus_divisor": 10,
+      "minimum_parts_per_bonus": 3,
+      "maximum_parts_per_bonus": 3,
+      "points_per_bonus_part": 10,
+      "bonuses_bounce_back": false,
+      "answer_types": [
+        {"type": "AnswerType", "id": "AnswerType_15", "value": 15, "label": "Power", "short_label": "P", "awards_bonus": true},
+        {"type": "AnswerType", "id": "AnswerType_10", "value": 10, "label": "Correct", "short_label": "C", "awards_bonus": true},
+        {"type": "AnswerType", "id": "AnswerType_-5", "value": -5, "label": "Neg", "short_label": "N", "awards_bonus": false}
+      ]
+    },
+    {"type": "Registration", "id": "Registration_alpha", "name": "Alpha A", "teams": [{"$ref": "Team_alpha"}]},
+    {"type": "Registration", "id": "Registration_beta", "name": "Beta A", "teams": [{"$ref": "Team_beta"}]},
+    {"type": "Team", "id": "Team_alpha", "name": "Alpha A", "players": [{"type": "Player", "id": "Player_alice", "name": "Alice"}]},
+    {"type": "Team", "id": "Team_beta", "name": "Beta A", "players": [{"type": "Player", "id": "Player_bea", "name": "Bea"}]},
+    {"type": "Packet", "id": "Packet_1", "name": "Packet 1"},
+    {
+      "type": "Match",
+      "id": "Match_fixture",
+      "location": "Room 101",
+      "tossups_read": 20,
+      "match_teams": [
+        {"team": {"$ref": "Team_alpha"}, "points": 315, "match_players": [{"player": {"$ref": "Player_alice"}, "tossups_heard": 20, "answer_counts": [{"number": 2, "answer_type": {"value": 15, "label": "Power", "short_label": "P"}}, {"number": 8, "answer_type": {"value": 10, "label": "Correct", "short_label": "C"}}]}], "YfData": {"overTimeBuzzes": []}},
+        {"team": {"$ref": "Team_beta"}, "points": 240, "match_players": [{"player": {"$ref": "Player_bea"}, "tossups_heard": 20, "answer_counts": [{"number": 7, "answer_type": {"value": 10, "label": "Correct", "short_label": "C"}}, {"number": 2, "answer_type": {"value": -5, "label": "Neg", "short_label": "N"}}]}]}
+      ],
+      "_qbtcp": {"version": 1, "round_revision": 2, "room_id": "room-101", "custom": {"keep": "yes"}},
+      "custom_match_extension": {"source": "fixture"}
+    },
+    {"type": "FutureObject", "id": "future-1", "opaque": {"must": "survive"}}
+  ]
+}

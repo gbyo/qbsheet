@@ -2,6 +2,7 @@
 # to format. Prose is left alone on purpose: the wiki pages are synced from and back to GitHub, and
 # a formatter that rewrapped them would make every sync a diff.
 dist/
+**/target/
 coverage/
 playwright-report/
 test-results/

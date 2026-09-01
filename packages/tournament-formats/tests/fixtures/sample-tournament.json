@@ -1,0 +1,125 @@
+{
+  "tournament": {
+    "id": "t-spring-2026",
+    "name": "Spring, Invitational",
+    "date": "2026-04-11",
+    "location": "Ninety Six High School"
+  },
+  "rules": {
+    "ruleset": "acf-with-powers",
+    "tiebreakers": ["wins", "pointsFor", "margin", "teamName"]
+  },
+  "organizations": [
+    { "id": "org-ninety-six", "name": "Ninety Six High", "state": "SC" },
+    { "id": "org-greenwood", "name": "Greenwood High", "state": "SC" }
+  ],
+  "players": [
+    { "id": "p-sarah", "name": "Sarah O'Brien", "captain": true },
+    { "id": "p-emma", "name": "Emma, Jr.", "grade": "11" }
+  ],
+  "teams": [
+    {
+      "id": "team-ninety-six",
+      "name": "Ninety Six A",
+      "organizationId": "org-ninety-six",
+      "playerIds": ["p-sarah"]
+    },
+    {
+      "id": "team-greenwood",
+      "name": "Greenwood A",
+      "organizationId": "org-greenwood",
+      "playerIds": ["p-emma"]
+    }
+  ],
+  "registrations": [
+    { "id": "reg-ninety-six", "teamId": "team-ninety-six", "seed": 1 },
+    { "id": "reg-greenwood", "teamId": "team-greenwood", "seed": 2 }
+  ],
+  "rooms": [{ "id": "room-101", "name": "Room 101", "accessible": true }],
+  "staff": [{ "id": "staff-mod", "name": "Jamie Moderator", "role": "moderator" }],
+  "equipment": [{ "id": "buzzer-101", "name": "Buzzer 101", "kind": "buzzer" }],
+  "packets": [{ "id": "packet-1", "name": "Packet 1", "roundId": "round-1" }],
+  "phases": [{ "id": "phase-prelims", "name": "Prelims", "roundIds": ["round-1"] }],
+  "pools": [],
+  "rounds": [{ "id": "round-1", "name": "Round 1", "number": 1, "qbjName": "1", "packetIds": ["packet-1"] }],
+  "scheduledGames": [
+    {
+      "id": "game-1",
+      "roundId": "round-1",
+      "roomId": "room-101",
+      "packetId": "packet-1",
+      "teamIds": ["team-ninety-six", "team-greenwood"],
+      "status": "complete"
+    }
+  ],
+  "games": [
+    {
+      "id": "game-1",
+      "roundId": "round-1",
+      "roomId": "room-101",
+      "packetId": "packet-1",
+      "teamIds": ["team-ninety-six", "team-greenwood"],
+      "status": "accepted",
+      "result": {
+        "teams": [
+          {
+            "teamId": "team-ninety-six",
+            "points": 315,
+            "powers": 2,
+            "gets": 8,
+            "negs": 1,
+            "tossupsHeard": 20,
+            "bonusPoints": 135,
+            "bonusesHeard": 10
+          },
+          {
+            "teamId": "team-greenwood",
+            "points": 240,
+            "powers": 1,
+            "gets": 7,
+            "negs": 2,
+            "tossupsHeard": 20,
+            "bonusPoints": 90,
+            "bonusesHeard": 10
+          }
+        ],
+        "players": [
+          {
+            "playerId": "p-sarah",
+            "teamId": "team-ninety-six",
+            "tossupsHeard": 20,
+            "powers": 2,
+            "gets": 8,
+            "negs": 1,
+            "points": 115
+          },
+          {
+            "playerId": "p-emma",
+            "teamId": "team-greenwood",
+            "tossupsHeard": 20,
+            "powers": 1,
+            "gets": 7,
+            "negs": 2,
+            "points": 85
+          }
+        ],
+        "tossupsRead": 20
+      },
+      "extensions": { "directorNote": "Paper result reconciled at HQ." }
+    }
+  ],
+  "playerStatistics": [],
+  "qbtcpSessions": [],
+  "resultSubmissions": [],
+  "protests": [],
+  "auditEvents": [
+    {
+      "id": "audit-1",
+      "at": "2026-04-11T14:00:00Z",
+      "action": "result.accepted",
+      "entityType": "game",
+      "entityId": "game-1"
+    }
+  ],
+  "extensions": { "futureDirectorField": { "kept": true } }
+}
