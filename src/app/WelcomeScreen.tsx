@@ -78,6 +78,7 @@ import { IPairingLaunchIntent, readScannedPairingCode } from './PairingLaunch';
 import { readOperatorNameAsked, writeOperatorNameAsked } from './OperatorIdentity';
 import SettingsDialog, { ISettingsConnection } from './SettingsDialog';
 import type { IRecoveryUi } from './DeviceReadiness';
+import ArcadeLauncher from '../arcade/ArcadeLauncher';
 import { downloadStoredGameQbj } from './FinishedGameDownload';
 
 /** How far a saved game got, for the resume card. */
@@ -208,6 +209,8 @@ export default function WelcomeScreen(props: {
   } | null>(null);
   const [settingsView, setSettingsView] = useState<'settings' | 'scorekeeper' | null>(null);
   const [scanning, setScanning] = useState(false);
+  // Settings closes as this opens; the arcade is the only modal on screen while it is up.
+  const [arcadeOpen, setArcadeOpen] = useState(false);
   /**
    * The first-load ask, decided once at mount.
    *
@@ -519,9 +522,12 @@ export default function WelcomeScreen(props: {
           onResetDevicePreferences={onResetDevicePreferences}
           onReadiness={onReadiness}
           recovery={recovery}
+          onArcade={() => setArcadeOpen(true)}
           onClose={closeSettings}
         />
       )}
+
+      <ArcadeLauncher open={arcadeOpen} onClose={() => setArcadeOpen(false)} />
 
       {scanning && (
         <QrScannerDialog

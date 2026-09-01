@@ -20,7 +20,8 @@ export type ControlIconName =
   | 'forfeit'
   | 'settings'
   | 'qr'
-  | 'swap';
+  | 'swap'
+  | 'arcade';
 
 const paths: Record<ControlIconName, React.ReactNode> = {
   undo: (
@@ -149,6 +150,19 @@ const paths: Record<ControlIconName, React.ReactNode> = {
       <rect x="14" y="3.5" width="6.5" height="6.5" rx="1" />
       <rect x="3.5" y="14" width="6.5" height="6.5" rx="1" />
       <path d="M14 14h3M20.5 14v3M14 17.5v3M17.5 20.5h3" />
+    </>
+  ),
+  /*
+   * A handheld, which is the least ambiguous "this is a game" there is at 16 pixels: a rounded body,
+   * a cross on the left, two buttons on the right. Drawn at the same stroke weight as everything
+   * else here so it reads as one more label icon rather than as an ornament.
+   */
+  arcade: (
+    <>
+      <rect x="2.5" y="7" width="19" height="10" rx="3.5" />
+      <path d="M7 10.5v3M5.5 12h3" />
+      <circle cx="16" cy="11" r="1" />
+      <circle cx="18" cy="13.5" r="1" />
     </>
   ),
 };

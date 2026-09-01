@@ -37,6 +37,7 @@ async function loadNormalApplication() {
   await import('./practice/practice.css');
   await import('./app/motion.css');
   await import('./app/contrast.css');
+  await import('./scorer/scorer-interactions.css');
   return import('./app/App');
 }
 

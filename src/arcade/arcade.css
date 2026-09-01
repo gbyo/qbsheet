@@ -1,0 +1,283 @@
+/*
+ * The arcade, which is allowed to be enjoyable and is not allowed to look like a different product.
+ *
+ * Every value here is one of the scoresheet's own: the tokens from `app-shell.css`, the 4/8/12/16
+ * spacing rhythm, 1px rules, small radii on things you press and nothing else. No gradients, no drop
+ * shadows standing in for hierarchy, no neon. A scorekeeper who opens this between rounds should be
+ * in no doubt that they are still in QBSheet.
+ *
+ * # Why this file is not in `main.tsx`
+ *
+ * The other stylesheets are imported there in a load order that is load-bearing. This one is
+ * imported by `ArcadeDialog`, so it travels in the lazily loaded chunk with the games and costs a
+ * reloading Chromebook nothing. It can afford to: nothing in here restyles anything outside the
+ * arcade, so it has no cascade relationship with the files above it. The Forced Colors corrections
+ * are the exception and live in `contrast.css` with all the others, where that question is answered
+ * once rather than per feature.
+ *
+ * # Why the boards are sized by their width
+ *
+ * A canvas with an `aspect-ratio` and a constrained height is a canvas the browser is free to
+ * distort, and a distorted board is a game whose physics changed because somebody rotated a phone.
+ * Only the width is ever limited — including by a term in viewport height, so a short window shrinks
+ * the board rather than pushing the controls off the bottom — and the height follows from the ratio.
+ */
+
+.arcade-picker {
+  display: grid;
+  gap: 12px;
+}
+
+/*
+ * A whole card is the button.
+ *
+ * The alternative is a card containing a "Play" link, which is a second tab stop inside a thing that
+ * only does one thing, and a hit target the size of a word on the surface where this matters most.
+ */
+.arcade-card {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 12px 14px;
+  font: inherit;
+  text-align: left;
+  color: var(--room-text);
+  background: var(--room-surface);
+  border: 1px solid var(--room-border-strong);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.arcade-card:hover {
+  background: var(--room-info-bg);
+}
+
+.arcade-card-name {
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+.arcade-card-summary {
+  font-size: 0.8125rem;
+  color: var(--room-muted);
+}
+
+.arcade-card-play {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--room-accent);
+}
+
+.arcade-play {
+  display: grid;
+  gap: 12px;
+  justify-items: start;
+}
+
+.arcade-back {
+  padding: 4px 2px;
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--room-accent);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.arcade-game {
+  display: grid;
+  gap: 12px;
+  justify-items: center;
+  width: 100%;
+}
+
+/*
+ * The score, as text.
+ *
+ * It is also drawn on the board, because that is where a player is looking. This is the copy that
+ * assistive technology can reach, that survives a canvas the browser refused to paint, and that a
+ * Forced Colors mode does not flatten. Neither is a live region: a score that announced itself on
+ * every tossup card would make the game unusable with a screen reader running.
+ */
+.arcade-scores {
+  display: flex;
+  gap: 24px;
+  align-items: baseline;
+  justify-content: center;
+}
+
+.arcade-score {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin: 0;
+}
+
+.arcade-score-label {
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--room-muted);
+  text-transform: uppercase;
+}
+
+.arcade-score-value {
+  font-size: 1.125rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.arcade-board {
+  display: block;
+  width: 100%;
+  background: var(--room-surface);
+  border: 1px solid var(--room-border-strong);
+  border-radius: 6px;
+  /* A swipe across the board is a turn, not a scroll of the dialog behind it. */
+  touch-action: none;
+}
+
+.arcade-board:focus-visible {
+  outline: 2px solid var(--room-accent);
+  outline-offset: 2px;
+}
+
+.arcade-board-qbbird {
+  aspect-ratio: 320 / 440;
+  max-width: min(300px, 52vh * 0.727);
+}
+
+.arcade-board-snake {
+  aspect-ratio: 4 / 3;
+  max-width: min(360px, 46vh * 1.333);
+}
+
+.arcade-controls {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.arcade-primary {
+  min-width: 96px;
+  padding: 9px 16px;
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--room-on-accent);
+  background: var(--room-accent);
+  border: 1px solid var(--room-accent);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.arcade-primary:hover:not(:disabled) {
+  background: var(--room-accent-hover);
+  border-color: var(--room-accent-hover);
+}
+
+.arcade-primary:disabled {
+  color: var(--room-faint);
+  background: var(--room-surface-sunken);
+  border-color: var(--room-border);
+  cursor: default;
+}
+
+/* Three columns and two rows, with the four keys in the shape of the thing they are. */
+.arcade-pad {
+  display: grid;
+  grid-template-columns: repeat(3, 34px);
+  grid-template-rows: repeat(2, 34px);
+  gap: 4px;
+}
+
+.arcade-pad-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font: inherit;
+  font-size: 0.9375rem;
+  line-height: 1;
+  color: var(--room-text);
+  background: var(--room-surface);
+  border: 1px solid var(--room-border-strong);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.arcade-pad-key:hover {
+  background: var(--room-info-bg);
+}
+
+.arcade-pad-up {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.arcade-pad-left {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.arcade-pad-down {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+.arcade-pad-right {
+  grid-column: 3;
+  grid-row: 2;
+}
+
+.arcade-card:focus-visible,
+.arcade-back:focus-visible,
+.arcade-primary:focus-visible,
+.arcade-pad-key:focus-visible {
+  outline: 2px solid var(--room-accent);
+  outline-offset: 2px;
+}
+
+.arcade-instructions {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--room-muted);
+  text-align: center;
+}
+
+.arcade-instructions kbd {
+  padding: 1px 5px;
+  font-family: inherit;
+  font-size: 0.6875rem;
+  color: var(--room-text);
+  background: var(--room-surface-sunken);
+  border: 1px solid var(--room-border);
+  border-radius: 3px;
+}
+
+.arcade-note {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--room-faint);
+  text-align: center;
+}
+
+/*
+ * A phone in landscape, where the height is the scarce dimension.
+ *
+ * The width terms above already fold the board down, and this takes the instructions with it so the
+ * controls stay on screen without the dialog needing to scroll to reach them.
+ */
+@media (max-height: 520px) {
+  .arcade-game {
+    gap: 8px;
+  }
+
+  .arcade-instructions {
+    font-size: 0.6875rem;
+  }
+}
