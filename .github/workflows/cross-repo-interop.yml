@@ -55,10 +55,10 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: 20
-          cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            yellowfruit-link/package-lock.json
+          # PR caches are scoped to the pull request; manual dispatches may select arbitrary
+          # companion refs and therefore must not restore or save a shared cache.
+          cache: ${{ github.event_name == 'pull_request' && 'npm' || '' }}
+          cache-dependency-path: package-lock.json
 
       - name: Install QBSheet dependencies
         run: npm ci

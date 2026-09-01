@@ -69,10 +69,10 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: 20
-          cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            yellowfruit-link/package-lock.json
+          # Scheduled/manual runs may select arbitrary companion refs; keep their dependency
+          # cache isolated by disabling the shared npm cache on those privileged triggers.
+          cache: ${{ github.event_name == 'pull_request' && 'npm' || '' }}
+          cache-dependency-path: package-lock.json
 
       - name: Install QBSheet dependencies
         run: npm ci
