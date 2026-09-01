@@ -134,6 +134,8 @@ function recordBonusParts(outcomes: LiveOutcome[]) {
     const row = screen.getByText(`Part ${index + 1}`).closest('.scorer-part-row') as HTMLElement;
     fireEvent.click(within(row).getByRole('button', { name: liveOutcomeName(index + 1, outcome) }));
   });
+  // Answering every part is not recording it; the bonus is written by its own press.
+  fireEvent.click(within(screen.getByLabelText('Bonus')).getByRole('button', { name: 'Record bonus' }));
 }
 
 function partOutcomes(partNumber: number): HTMLElement {
