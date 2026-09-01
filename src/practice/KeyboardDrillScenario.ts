@@ -172,7 +172,7 @@ function wrongAnswerTask(): IDrillTask {
   return {
     id: 'ruling-wrong',
     section: 'Record the ruling',
-    call: `${player} answers after the question has been read out, and is wrong. The rules assess no penalty.`,
+    call: `${player} answers incorrectly. The rules assess no penalty.`,
     ask: `Press ${key}, then ${actionKey}, for ${player}.`,
     keys: [key, actionKey],
     why: `${actionKey} is an answer that was simply wrong. Three keys score nothing and they are three different facts: ${keyboardActionLabels.neg} is a neg and costs points, ${actionKey} is a wrong answer that costs none, and ${keyboardShortcutLabels.noBuzz} is nobody answering at all. Every format can record a used chance, so ${actionKey} is the one ruling key that is never unavailable.`,
@@ -186,7 +186,7 @@ function noBuzzTask(): IDrillTask {
   return {
     id: 'no-buzz',
     section: 'Close the tossup',
-    call: 'The question is read out to the end and neither team buzzes.',
+    call: 'Neither team converts the tossup.',
     ask: `Press ${key}.`,
     keys: [key],
     why: `${key} closes a tossup nobody converted, so there is no bonus. It is the one shortcut that works whether or not keyboard scoring is switched on — and on the scoresheet it is left alone while a button has focus, because there ${key} means "press this button".`,
@@ -295,7 +295,7 @@ export const drillTasks: IDrillTask[] = [
     action: 'neg',
     call: `${seatOf('left', 1).player} interrupts the question and is wrong.`,
     why: (points) =>
-      `${keyboardActionLabels.neg} is the penalty, ${points} here. It only lands while a neg is legal: once a team has heard the whole question, ${keyboardActionLabels.neg} does nothing at all rather than recording a penalty the rules do not allow.`,
+      `${keyboardActionLabels.neg} is the penalty, ${points} here. It only lands before either team has used its tossup opportunity: after one team answers, the other team's negative key does nothing rather than recording a penalty the rules do not allow.`,
   }),
   wrongAnswerTask(),
   noBuzzTask(),

@@ -130,6 +130,7 @@ only the operational information that standard QBJ cannot express, and it attach
   "_qbtcp": {
     "version": 1,
     "round_revision": 3,
+    "assignment_revision": 7,
     "room_id": "room-204",
     "procedure": { "...": "breaks, clock, timeout and substitution policy" },
     "handoff_instruction": "Upload to the Round 4 folder in the shared drive.",
@@ -146,6 +147,7 @@ as it would read a match without the block.
 | Field | Reason |
 | --- | --- |
 | `round_revision` | QBJ has no concept of a redrawn pairing. Without this field, a result scored against a superseded bracket looks the same as a current one. |
+| `assignment_revision` | A room-local issue number. It distinguishes a reissued assignment from an earlier copy even when the round's pairings did not change. |
 | `room_id` | `Match.location` is a display string. A stable room identifier survives a rename from "Room 204" to "Library". Include it only when it differs in kind from `location`. |
 | `procedure` | Breaks, the clock, and the timeout and substitution policies are tournament operations. QBJ models scoring, not the way a room runs a game. See below. |
 | `handoff_instruction` | Free text that tells the room what to do with the finished file. The application does not interpret it. |
@@ -195,9 +197,12 @@ Not interpreting it means **refusing the game**, not scoring it without procedur
 different outcomes and only one of them is safe. No `procedure` at all is a tournament that stated no
 procedural rules, and the room scores with none enforced. A `procedure` whose `version` is from the
 future is a tournament that stated rules the room could not read, and falling back to no procedure
-would silently restore `substitutionPolicy: "any-boundary"` — more permissive than what was sent. So a
-room given a procedure it cannot interpret says so, names the version, and does not start until
-QBSheet is updated or control sends an assignment this build can enforce.
+would silently restore `substitutionPolicy: "any-boundary"` — more permissive than what was sent.
+A room given a procedure it cannot interpret says so, names the version, and does not start until
+QBSheet is updated or control sends an assignment this build can enforce. QBSheet MAY offer an
+explicit moderator override, labelled as continuing under the moderator's instructions, but it MUST
+record that decision in local audit state and MUST never treat the unknown procedure as understood or
+silently fall back to permissive defaults.
 
 The consequence for producers: bumping the procedure version stops older rooms scoring assignments
 that carry one. That is intended, and it is why the version is bumped only for a shape change. A
@@ -233,7 +238,7 @@ Two compatibility facts apply to the reference parser:
    deletes the original.
 
 Therefore a key inside `_qbtcp` MUST NOT collide with a QBJ snake-case key name. The current fields
-are safe, because the conversion table holds none of `round_revision`, `room_id`, `procedure`,
+are safe, because the conversion table holds none of `round_revision`, `assignment_revision`, `room_id`, `procedure`,
 `handoff_instruction`, or `timed`. Check any later field against that table. This constraint comes
 from a deployed parser rather than from a preference.
 

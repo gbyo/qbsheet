@@ -101,6 +101,10 @@ export interface IServerDeliveryLedger {
   matchId?: string;
   /** The result fingerprint returned by control, when it supplied one. */
   fingerprint?: string;
+  /** Control retained the result but queued it for director review. */
+  reviewRequired?: boolean;
+  /** Stable discrepancy identifiers returned with a review receipt. */
+  warningCodes?: string[];
   /** The last safe-to-display explanation for a pending or rejected outcome. */
   lastFailureDetail?: string;
   /** Whether a later explicit attempt is meaningful with the capability still held. */

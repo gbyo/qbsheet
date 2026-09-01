@@ -95,6 +95,12 @@ export type GameDefinitionOrigin =
    */
   | 'manual';
 
+/** A deliberate human decision to continue when automatic procedure enforcement is unavailable. */
+export interface IProcedureEnforcementOverride {
+  kind: 'moderator-instructions';
+  unsupportedVersion: number;
+}
+
 export interface IGameDefinition extends IGamePackage {
   /** Standard QBJ identities, where the source had them. */
   qbjIdentity?: IQbjIdentity;
@@ -106,6 +112,8 @@ export interface IGameDefinition extends IGamePackage {
    * scorekeeper who does not know what was assumed is the failure this prevents.
    */
   assumptions?: string[];
+  /** Present only after an explicit moderator decision; never inferred from an unreadable procedure. */
+  procedureOverride?: IProcedureEnforcementOverride;
 }
 
 /**

@@ -191,15 +191,8 @@ const [powerType, correctType, negType] = answerTypes;
 const powerButton = rulingLabel(powerType);
 const correctButton = rulingLabel(correctType);
 const negButton = rulingLabel(negType);
-/**
- * The zero button, as it reads while the tossup can still be negged.
- *
- * `TeamPanel` widens the label to say when the answer came: until somebody has answered, a wrong answer
- * with no penalty is one given after the question was read out, and the button says so to keep it apart
- * from the neg beside it. Tossup 4 is the only step that uses it, and nobody has answered that tossup
- * when the step arrives.
- */
-const zeroButton = '0 after readout';
+/** The zero button is always available to an eligible team for a wrong answer with no penalty. */
+const zeroButton = '0';
 
 export const practiceSteps: IPracticeStep[] = [
   {
@@ -266,9 +259,9 @@ export const practiceSteps: IPracticeStep[] = [
   {
     id: 'q3-rebound',
     title: 'Tossup 3 continues',
-    call: 'Still on Tossup 3. The question is read out to the end, and Tucker answers it correctly for Greenwood.',
+    call: 'Still on Tossup 3. After Jeremy’s incorrect interrupt, Tucker answers correctly for Greenwood.',
     instruction: `Press ${correctButton} on Tucker’s row. Stay on Tossup 3 — do not use No buzz and do not advance the question.`,
-    hint: `Nothing needs advancing: the header still says Tossup 3 and it stays there until the tossup is settled. Ninety Six’s rulings are greyed out because they have used their answer, and Greenwood no longer shows ${negButton} — a team that has heard the whole question cannot be negged. No buzz would mean Greenwood never answered, which is not what happened.`,
+    hint: `Nothing needs advancing: the header still says Tossup 3 and it stays there until the tossup is settled. Ninety Six’s rulings are greyed out because they have used their answer, and Greenwood no longer shows ${negButton} because the first tossup opportunity has been used. No buzz would mean Greenwood never answered, which is not what happened.`,
     success: 'That is the common neg-and-rebound sequence.',
     section: 'Score the game',
     expectation: { kind: 'event', matches: tossup(3, 'right', 'Tucker', 1) },
@@ -286,7 +279,7 @@ export const practiceSteps: IPracticeStep[] = [
   {
     id: 'q4-wrong-no-penalty',
     title: 'Tossup 4: wrong, no penalty',
-    call: 'Owen answers after the question is finished. The answer is wrong, but there is no penalty.',
+    call: 'Owen answers incorrectly. The answer is wrong, but there is no penalty.',
     instruction: `Press the ${zeroButton} button on Owen’s row — the last one in the row, beside ${negButton}.`,
     hint: `Three different things that all score nothing, and they are not interchangeable: ${negButton} is a neg and costs 5, ${zeroButton} is an answer that was simply wrong, and No buzz means nobody answered at all. Owen answered, so it is ${zeroButton}.`,
     success:

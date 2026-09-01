@@ -206,6 +206,9 @@ function serializePackage(value: IGamePackage): IGamePackage {
       number: value.round.number,
       name: value.round.name,
       revision: value.round.revision,
+      ...(value.round.assignmentRevision !== undefined
+        ? { assignmentRevision: value.round.assignmentRevision }
+        : {}),
       ...(value.round.packetName ? { packetName: value.round.packetName } : {}),
     },
     ...(value.room && (value.room.id || value.room.name)
@@ -224,6 +227,14 @@ function serializePackage(value: IGamePackage): IGamePackage {
     ...(definition.origin !== undefined ? { origin: definition.origin } : {}),
     ...(definition.assumptions ? { assumptions: definition.assumptions.slice() } : {}),
     ...(definition.qbjIdentity ? { qbjIdentity: cloneIdentity(definition.qbjIdentity) } : {}),
+    ...(definition.procedureOverride
+      ? {
+          procedureOverride: {
+            kind: 'moderator-instructions' as const,
+            unsupportedVersion: definition.procedureOverride.unsupportedVersion,
+          },
+        }
+      : {}),
   } as IGameDefinition;
 }
 
@@ -310,6 +321,7 @@ export function serializeScoreEvent(event: ScoreEvent): ScoreEvent {
         team: event.team,
         ...(event.playerName === undefined ? {} : { playerName: event.playerName }),
       };
+    // These historical markers remain part of the backup wire format so old games can be recovered.
     case 'tossup-reading-resumed':
     case 'tossup-readout':
     case 'tossup-dead':
@@ -560,11 +572,23 @@ function restoreDefinitionMetadata(packageValue: PackageShape, raw: unknown): IG
     ? definition.assumptions.filter((item): item is string => typeof item === 'string' && item !== '')
     : undefined;
   const qbjIdentity = cloneIdentity(definition.qbjIdentity);
+  const procedureOverride =
+    isPlainObject(definition.procedureOverride) &&
+    definition.procedureOverride.kind === 'moderator-instructions' &&
+    typeof definition.procedureOverride.unsupportedVersion === 'number' &&
+    Number.isInteger(definition.procedureOverride.unsupportedVersion) &&
+    definition.procedureOverride.unsupportedVersion >= 0
+      ? {
+          kind: 'moderator-instructions' as const,
+          unsupportedVersion: definition.procedureOverride.unsupportedVersion,
+        }
+      : undefined;
   return {
     ...packageValue,
     ...(origin ? { origin } : {}),
     ...(assumptions && assumptions.length > 0 ? { assumptions } : {}),
     ...(qbjIdentity ? { qbjIdentity } : {}),
+    ...(procedureOverride ? { procedureOverride } : {}),
   } as IGameDefinition;
 }
 

@@ -386,6 +386,7 @@ function validateQuestion(
   let attemptsSeen = 0;
   let conversionSeen = false;
   let deadSeen = false;
+  // These two flags validate and preserve old event chronology only. They do not decide neg legality.
   let readingResumed = false;
   let readout = false;
   for (const event of cycleEvents) {
@@ -465,13 +466,13 @@ function validateQuestion(
     }
     if (event.type === 'tossup-buzz') {
       const answerType = format.answerTypes[event.answerTypeIndex];
-      if (answerType?.isNeg && (readout || (priorAttempt && !readingResumed))) {
+      if (answerType?.isNeg && priorAttempt) {
         addUnique(
           blockers,
           problem(
             'blocker',
             'second-team-neg',
-            `Question ${questionNumber} has a neg after the question was read out.`,
+            `Question ${questionNumber} has a neg after another team had already attempted it.`,
             questionNumber,
           ),
         );

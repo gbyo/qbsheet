@@ -1,0 +1,92 @@
+name: Cross-repository interop (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      yellowfruit_ref:
+        description: Optional YellowFruit branch or ref; otherwise use the default branch
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  # This cache lives only inside the disposable runner workspace; it is never an Actions cache.
+  NPM_CONFIG_CACHE: ${{ github.workspace }}/.qbtcp-npm-cache
+
+concurrency:
+  group: cross-repo-interop-manual-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out QBSheet
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Resolve YellowFruit companion ref
+        id: resolve-yellowfruit
+        env:
+          REQUESTED_REF: ${{ inputs.yellowfruit_ref }}
+          CANDIDATE_REF: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          candidate="${REQUESTED_REF:-$CANDIDATE_REF}"
+          if [ -z "$candidate" ]; then candidate=master; fi
+          remote_line="$(git ls-remote https://github.com/gbyo/yellowfruit-link.git "refs/heads/$candidate" || true)"
+          if [ -z "$remote_line" ]; then
+            candidate=master
+            remote_line="$(git ls-remote https://github.com/gbyo/yellowfruit-link.git "refs/heads/$candidate")"
+          fi
+          sha="${remote_line%%$'\t'*}"
+          echo "ref=$candidate" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch YellowFruit companion
+        env:
+          COMPANION_COMMIT: ${{ steps.resolve-yellowfruit.outputs.sha }}
+        run: |
+          set -euo pipefail
+          git init --quiet yellowfruit-link
+          git -C yellowfruit-link fetch --no-tags --depth=1 \
+            https://github.com/gbyo/yellowfruit-link.git "$COMPANION_COMMIT"
+          git -C yellowfruit-link checkout --detach FETCH_HEAD
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+
+      - name: Install QBSheet dependencies
+        run: npm ci
+
+      - name: Install YellowFruit dependencies
+        working-directory: yellowfruit-link
+        run: npm install --ignore-scripts --no-audit --no-fund
+
+      - name: Verify runner Chrome
+        run: google-chrome --version
+
+      - name: Install Playwright video helper
+        run: npx playwright install ffmpeg
+
+      - name: Run real cross-repository browser contract
+        env:
+          YELLOWFRUIT_REPO: ${{ github.workspace }}/yellowfruit-link
+          YELLOWFRUIT_REF: ${{ steps.resolve-yellowfruit.outputs.sha }}
+        run: npm run test:browser:yellowfruit
+
+      - name: Upload browser failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cross-repo-interop-manual-playwright
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore

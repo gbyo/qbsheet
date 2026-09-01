@@ -43,8 +43,14 @@ import {
   IHelpRequestSummary,
   helpRequestCategoryLabels,
 } from '../../app/HelpRequests';
-import { IQbtcpDiscovery, readDiscovery, qbtcpRoutes, supports } from '../../qbtcp/QbtcpRoutes';
-import { IServerAdapter, IRequestOptions, LegacyAdapter, QbtcpAdapter } from './ProtocolAdapters';
+import { IQbtcpDiscovery, readDiscovery, qbtcpRoutes, routesFor, supports } from '../../qbtcp/QbtcpRoutes';
+import {
+  IServerAdapter,
+  IRequestOptions,
+  LegacyAdapter,
+  QbtcpAdapter,
+  UnsupportedQbtcpAdapter,
+} from './ProtocolAdapters';
 import {
   ApiResult,
   INormalizedAssignment,
@@ -53,6 +59,8 @@ import {
   IRoomIdentity,
   IRoomListEntry,
   IJoinResult,
+  IPresenceUpdate,
+  IRosterAddResult,
   IServerIdentity,
   ISessionCredentials,
   ISessionRecovery,
@@ -71,10 +79,14 @@ export type {
   IAssignedMatchup,
   IAssignmentResponse,
   IJoinResult,
+  IQbtcpClientDiagnostics,
   INormalizedAssignment,
   IOpenedSession,
+  IPresenceUpdate,
   IResultReceipt,
   IResumableSession,
+  IRosterAddResult,
+  IRosterAmendment,
   IRoomIdentity,
   IRoomListEntry,
   IServerIdentity,
@@ -91,7 +103,14 @@ export type {
   HelpRequestResult,
   IHelpRequestSummary,
 } from '../../app/HelpRequests';
-export { readWriterConflict } from './ProtocolAdapters';
+export {
+  normalizePresenceUpdate,
+  readRosterAddResponse,
+  readRosterAmendments,
+  readSessionRecovery,
+  readWriterConflict,
+  unsupportedQbtcpMessage,
+} from './ProtocolAdapters';
 
 /** How long to wait on a request before treating tournament control as unreachable. */
 export const requestTimeoutMs = 8000;
@@ -274,9 +293,14 @@ export default class FruityServerClient {
     return this.discovery?.capabilities ?? [];
   }
 
-  /** Whether discovery found a QBTCP server. False means this client is on the deprecated surface. */
+  /** Whether discovery selected the supported QBTCP v1 surface. */
   get isQbtcp(): boolean {
-    return this.discovery !== null && this.adapter.routes.assignmentIsQbj;
+    return this.discovery?.version === 1 && this.adapter.routes.assignmentIsQbj;
+  }
+
+  /** Whether the server explicitly announced a QBTCP version this client cannot speak. */
+  get isUnsupportedQbtcp(): boolean {
+    return this.discovery !== null && this.adapter.routes.protocol === 'qbtcp/unsupported';
   }
 
   supports(capability: string): boolean {
@@ -303,7 +327,7 @@ export default class FruityServerClient {
    * credential — discovery happens before anything is authenticated.
    */
   describeProtocol(): {
-    protocol: 'QBTCP' | 'legacy' | 'unknown';
+    protocol: 'QBTCP' | 'legacy' | 'unsupported' | 'unknown';
     version?: number;
     qbjVersion?: string;
     capabilities?: string[];
@@ -315,7 +339,7 @@ export default class FruityServerClient {
       return this.discoveryAttempted ? { protocol: 'legacy' } : { protocol: 'unknown' };
     }
     return {
-      protocol: this.isQbtcp ? 'QBTCP' : 'legacy',
+      protocol: this.isUnsupportedQbtcp ? 'unsupported' : this.isQbtcp ? 'QBTCP' : 'legacy',
       version: this.discovery.version,
       ...(this.discovery.qbjVersion !== undefined ? { qbjVersion: this.discovery.qbjVersion } : {}),
       capabilities: [...this.discovery.capabilities],
@@ -325,18 +349,19 @@ export default class FruityServerClient {
   /**
    * Ask the server what it speaks, and adopt the matching surface.
    *
-   * Unauthenticated and cheap, and it never fails in a way that stops a room: a server that does not
-   * answer, answers with something else, or announces a version this client does not know simply
-   * leaves the legacy adapter in place. Degrading to the older protocol is safe; guessing at a newer
-   * one is not.
+   * Unauthenticated and cheap. An absent or non-QBTCP answer selects the legacy adapter; an explicit
+   * future QBTCP answer selects a refusal adapter and never falls back to `/api/v1`.
    */
   async discover(): Promise<IQbtcpDiscovery | null> {
     const result = await this.request<unknown>(qbtcpRoutes.discovery);
     this.discovery = result.ok ? readDiscovery(result.value) : null;
+    const routes = routesFor(this.discovery);
     this.adapter =
-      this.discovery && this.discovery.version === 1
-        ? new QbtcpAdapter(this.requestFn, this.discovery)
-        : new LegacyAdapter(this.requestFn);
+      routes === qbtcpRoutes
+        ? new QbtcpAdapter(this.requestFn, this.discovery as IQbtcpDiscovery)
+        : routes.protocol === 'qbtcp/unsupported'
+          ? new UnsupportedQbtcpAdapter(this.discovery as IQbtcpDiscovery)
+          : new LegacyAdapter(this.requestFn);
     // Settled only when something answered. A `404` is an answer — it is how a pre-QBTCP server
     // says so — but nothing answering is not, and latching on it would pin a room to the deprecated
     // surface for the whole game because its Wi-Fi happened to be out at the moment it started.
@@ -472,7 +497,7 @@ export default class FruityServerClient {
     return (await this.ready()).takeWriter(identity, credentials);
   }
 
-  async updatePresence(identity: IRoomIdentity, update: { ready?: boolean }): Promise<ApiResult<unknown>> {
+  async updatePresence(identity: IRoomIdentity, update: IPresenceUpdate): Promise<ApiResult<unknown>> {
     return (await this.ready()).updatePresence(identity, update);
   }
 
@@ -522,6 +547,7 @@ export default class FruityServerClient {
     // reads. A missing legacy GET must not hide the POST action or clear a locally known request;
     // it only means reload reconciliation is unavailable on that server. QBTCP discovery remains
     // authoritative for its own capability.
+    if (this.isUnsupportedQbtcp && !result.ok) return helpFailure(result);
     if (
       !this.isQbtcp &&
       !result.ok &&
@@ -548,6 +574,7 @@ export default class FruityServerClient {
     } catch {
       return { kind: 'unreachable', error: 'Could not reach tournament control.' };
     }
+    if (this.isUnsupportedQbtcp && !result.ok) return helpFailure(result);
     // Control may have resolved it between GET and DELETE; the desired local state is still idle.
     // Once a legacy GET has proved that the lifecycle routes are absent, however, the same 404
     // means this old server cannot withdraw a POST-created request.
@@ -563,8 +590,17 @@ export default class FruityServerClient {
     credentials: ISessionCredentials,
     teamName: string,
     playerName: string,
-  ): Promise<ApiResult<unknown>> {
-    return (await this.ready()).addRosterPlayer(identity, credentials, teamName, playerName);
+    teamId?: string,
+    questionNumber?: number,
+  ): Promise<ApiResult<IRosterAddResult>> {
+    return (await this.ready()).addRosterPlayer(
+      identity,
+      credentials,
+      teamName,
+      playerName,
+      teamId,
+      questionNumber,
+    );
   }
 
   /**

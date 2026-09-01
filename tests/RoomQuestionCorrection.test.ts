@@ -172,7 +172,7 @@ describe('question-level corrections', () => {
     ).toEqual(['tossup-no-penalty', 'tossup-dead']);
   });
 
-  test('correction round-trips an explicit resume and readout state', () => {
+  test('correction round-trips legacy resume and readout state without reopening a neg', () => {
     const format = formatFor();
     const events: ScoreEvent[] = [
       event({

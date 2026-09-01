@@ -17,6 +17,7 @@ const setup = {
   },
 };
 const power = gamePackage.scorekeeperFormat.answerTypes.find((answerType) => answerType.value === 15)!;
+const neg = gamePackage.scorekeeperFormat.answerTypes.find((answerType) => answerType.value === -5)!;
 const buzz = {
   id: 'buzz-1',
   type: 'tossup-buzz' as const,
@@ -107,6 +108,34 @@ describe('QBSheet backup format', () => {
     // A normal QBJ document still takes the established QBJ path; adding the backup discriminator
     // does not make the ordinary assignment parser disappear.
     expect(openGameValue(assignmentDocument())).toMatchObject({ ok: true, kind: 'game' });
+  });
+
+  test('recovers legacy reading markers without dropping the actual rulings', () => {
+    const legacyEvents = [
+      {
+        id: 'legacy-neg',
+        type: 'tossup-buzz' as const,
+        questionNumber: 1,
+        team: 'left' as const,
+        playerName: gamePackage.left.players[0].name,
+        answerTypeIndex: neg.index,
+      },
+      { id: 'legacy-resume', type: 'tossup-reading-resumed' as const, questionNumber: 1 },
+      {
+        id: 'legacy-rebound',
+        type: 'tossup-buzz' as const,
+        questionNumber: 1,
+        team: 'right' as const,
+        playerName: gamePackage.right.players[0].name,
+        answerTypeIndex: power.index,
+      },
+    ];
+    const parsed = readQbsheetBackup(
+      JSON.parse(serializeQbsheetBackup(createQbsheetBackup({ gamePackage, setup, events: legacyEvents }))),
+    );
+
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.value.events).toEqual(legacyEvents);
   });
 
   test('newer versions fail closed and corrupt JSON is rejected', () => {

@@ -22,8 +22,8 @@
  * Unknown keys survive untouched, which is why `_qbtcp` arrives intact. But a key *inside* this
  * extension whose name collides with that table would be silently rewritten and the original
  * deleted. So the field names below are checked against it, and any field added later must be too.
- * `round_revision`, `room_id`, `handoff_instruction`, `procedure` and `timed` are all absent from
- * that table and are therefore safe.
+ * `round_revision`, `assignment_revision`, `room_id`, `handoff_instruction`, `procedure` and `timed`
+ * are all absent from that table and are therefore safe.
  *
  * This is a documented compatibility compromise with a deployed parser, not a preference.
  *
@@ -66,6 +66,8 @@ export interface IQbtcpExtension {
    * to ask the room which it was.
    */
   roundRevision?: number;
+  /** Which issue of this room's assignment was sent, separate from the round's pairing revision. */
+  assignmentRevision?: number;
   /** A stable room identity, which survives "Room 204" being renamed to "Library". */
   roomId?: string;
   /** Halves, clock and timeouts. Operations, not scoring; QBJ models scoring. */
@@ -112,6 +114,9 @@ export function readQbtcpExtension(value: unknown): IQbtcpExtension | null {
 
   if (Number.isInteger(raw.round_revision) && Number(raw.round_revision) >= 1) {
     extension.roundRevision = Number(raw.round_revision);
+  }
+  if (Number.isInteger(raw.assignment_revision) && Number(raw.assignment_revision) >= 1) {
+    extension.assignmentRevision = Number(raw.assignment_revision);
   }
   if (nonBlankString(raw.room_id)) extension.roomId = raw.room_id;
   if (
@@ -165,6 +170,12 @@ export function unsupportedProcedureMessage(version: number): string {
   );
 }
 
+/** The durable, plain-language audit note attached after a moderator explicitly continues. */
+export function procedureOverrideMessage(version: number): string {
+  const which = version > 0 ? `procedure version ${version}` : 'an unknown procedure version';
+  return `Automatic room procedure enforcement was unavailable for ${which}; the room continued using the moderator's instructions.`;
+}
+
 /**
  * Build the extension block, or null when there is nothing operational to say.
  *
@@ -178,6 +189,10 @@ export function buildQbtcpExtension(extension: Omit<IQbtcpExtension, 'version'>)
 
   if (extension.roundRevision !== undefined && Number.isInteger(extension.roundRevision)) {
     block.round_revision = extension.roundRevision;
+    carriesSomething = true;
+  }
+  if (extension.assignmentRevision !== undefined && Number.isInteger(extension.assignmentRevision)) {
+    block.assignment_revision = extension.assignmentRevision;
     carriesSomething = true;
   }
   if (nonBlankString(extension.roomId)) {

@@ -107,6 +107,16 @@ export async function recordFinalDelivery(
       : previous?.fingerprint
         ? { fingerprint: previous.fingerprint }
         : {}),
+    ...(delivery.reviewRequired !== undefined
+      ? { reviewRequired: delivery.reviewRequired }
+      : previous?.reviewRequired !== undefined
+        ? { reviewRequired: previous.reviewRequired }
+        : {}),
+    ...(delivery.warningCodes && delivery.warningCodes.length > 0
+      ? { warningCodes: delivery.warningCodes.slice(0, 32) }
+      : previous?.warningCodes
+        ? { warningCodes: previous.warningCodes }
+        : {}),
     ...(accepted
       ? {}
       : { lastFailureDetail: delivery.detail ?? previous?.lastFailureDetail ?? rejectedDeliveryFallback }),

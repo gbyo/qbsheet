@@ -272,9 +272,9 @@ describe('the action keys', () => {
   test('N does nothing once the other team has already answered', async () => {
     await openScoringWithKeyboard();
 
-    // Greenwood answers wrong with no penalty, so the question has been read out.
+    // Greenwood answers wrong with no penalty, so its tossup opportunity is spent.
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Emma Chen 0 after readout wrong, no penalty' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Emma Chen 0, Wrong, no penalty' }));
     });
     await pressKey('KeyA', { alt: true });
 
@@ -286,9 +286,7 @@ describe('the action keys', () => {
     await openScoringWithKeyboard();
 
     await act(async () => {
-      fireEvent.click(
-        screen.getByRole('button', { name: 'Sarah Mitchell 0 after readout wrong, no penalty' }),
-      );
+      fireEvent.click(screen.getByRole('button', { name: 'Sarah Mitchell 0, Wrong, no penalty' }));
     });
     await pressKey('KeyA');
 
@@ -866,7 +864,7 @@ describe('the readout at the bottom of the screen', () => {
 
     await pressSequence(1, '0');
 
-    expect(region()).toHaveTextContent('Wrong 0');
+    expect(region()).toHaveTextContent('Wrong, no penalty 0');
   });
 
   test('the ruling clears itself', async () => {
