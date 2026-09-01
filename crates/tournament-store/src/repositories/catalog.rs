@@ -1,5 +1,6 @@
 use rusqlite::{params, Row};
 
+use super::ensure_same_tournament;
 use super::tournaments::ensure_tournament_exists;
 use crate::db::Store;
 use crate::error::{StoreError, StoreResult};
@@ -128,7 +129,7 @@ impl<'a> TeamRepository<'a> {
     }
 
     pub fn get(&self, id: &str) -> StoreResult<Option<Team>> {
-        let mut statement = self.store.connection().prepare(team_select(None))?;
+        let mut statement = self.store.connection().prepare(team_select())?;
         let mut rows = statement.query(params![id])?;
         rows.next()?
             .map_or(Ok(None), |row| Ok(Some(team_from_row(row)?)))
@@ -152,29 +153,44 @@ impl<'a> TeamRepository<'a> {
     }
 
     pub fn update(&self, id: &str, update: TeamUpdate) -> StoreResult<Team> {
+        let organization_id_changed = update.organization_id.is_some();
+        let organization_id = update.organization_id.flatten();
+        let team_letter_changed = update.team_letter.is_some();
+        let team_letter = update.team_letter.flatten();
+        let seed_changed = update.seed.is_some();
+        let seed = update.seed.flatten();
+        let notes_changed = update.notes.is_some();
+        let notes = update.notes.flatten();
+        let archived_at_changed = update.archived_at.is_some();
+        let archived_at = update.archived_at.flatten();
         let timestamp = now();
         self.store.write_transaction(|transaction| {
             let changed = transaction.execute(
                 "UPDATE teams SET
-                    organization_id = COALESCE(?1, organization_id),
-                    name = COALESCE(?2, name),
-                    display_name = COALESCE(?3, display_name),
-                    team_letter = COALESCE(?4, team_letter),
-                    seed = COALESCE(?5, seed),
-                    status = COALESCE(?6, status),
-                    notes = COALESCE(?7, notes),
-                    archived_at = COALESCE(?8, archived_at),
-                    updated_at = ?9
-                 WHERE id = ?10",
+                    organization_id = CASE WHEN ?1 <> 0 THEN ?2 ELSE organization_id END,
+                    name = COALESCE(?3, name),
+                    display_name = COALESCE(?4, display_name),
+                    team_letter = CASE WHEN ?5 <> 0 THEN ?6 ELSE team_letter END,
+                    seed = CASE WHEN ?7 <> 0 THEN ?8 ELSE seed END,
+                    status = COALESCE(?9, status),
+                    notes = CASE WHEN ?10 <> 0 THEN ?11 ELSE notes END,
+                    archived_at = CASE WHEN ?12 <> 0 THEN ?13 ELSE archived_at END,
+                    updated_at = ?14
+                 WHERE id = ?15",
                 params![
-                    update.organization_id,
+                    organization_id_changed,
+                    organization_id,
                     update.name,
                     update.display_name,
-                    update.team_letter,
-                    update.seed,
+                    team_letter_changed,
+                    team_letter,
+                    seed_changed,
+                    seed,
                     update.status,
-                    update.notes,
-                    update.archived_at,
+                    notes_changed,
+                    notes,
+                    archived_at_changed,
+                    archived_at,
                     timestamp,
                     id,
                 ],
@@ -182,7 +198,7 @@ impl<'a> TeamRepository<'a> {
             if changed == 0 {
                 return Err(StoreError::not_found("team", id));
             }
-            let mut statement = transaction.prepare(team_select(None))?;
+            let mut statement = transaction.prepare(team_select())?;
             statement
                 .query_row(params![id], team_from_row)
                 .map_err(StoreError::from)
@@ -193,7 +209,7 @@ impl<'a> TeamRepository<'a> {
         self.update(
             id,
             TeamUpdate {
-                archived_at: Some(now()),
+                archived_at: Some(Some(now())),
                 status: Some("dropped".to_owned()),
                 ..TeamUpdate::default()
             },
@@ -208,31 +224,15 @@ impl<'a> TeamRepository<'a> {
         roster_order: i64,
     ) -> StoreResult<()> {
         self.store.write_transaction(|transaction| {
-            let team_tournament: Option<String> = transaction
-                .query_row(
-                    "SELECT tournament_id FROM teams WHERE id = ?1",
-                    params![team_id],
-                    |row| row.get(0),
-                )
-                .optional()?;
-            let player_tournament: Option<String> = transaction
-                .query_row(
-                    "SELECT tournament_id FROM players WHERE id = ?1",
-                    params![player_id],
-                    |row| row.get(0),
-                )
-                .optional()?;
-            match (team_tournament, player_tournament) {
-                (Some(team_tournament), Some(player_tournament))
-                    if team_tournament == player_tournament => {}
-                (None, _) => return Err(StoreError::not_found("team", team_id)),
-                (_, None) => return Err(StoreError::not_found("player", player_id)),
-                _ => {
-                    return Err(StoreError::Conflict(
-                        "team and player belong to different tournaments".to_owned(),
-                    ))
-                }
-            }
+            ensure_same_tournament(
+                transaction,
+                "teams",
+                "team",
+                team_id,
+                "players",
+                "player",
+                player_id,
+            )?;
             transaction.execute(
                 "INSERT INTO team_players (team_id, player_id, captain, roster_order)
                  VALUES (?1, ?2, ?3, ?4)
@@ -360,7 +360,7 @@ fn organization_from_row(row: &Row<'_>) -> rusqlite::Result<Organization> {
     })
 }
 
-fn team_select(_unused: Option<&str>) -> &'static str {
+fn team_select() -> &'static str {
     "SELECT id, tournament_id, organization_id, name, display_name, team_letter, seed,
             status, notes, created_at, updated_at, archived_at
      FROM teams WHERE id = ?1"
@@ -396,5 +396,3 @@ fn player_from_row(row: &Row<'_>) -> rusqlite::Result<Player> {
         archived_at: row.get(8)?,
     })
 }
-
-use rusqlite::OptionalExtension;

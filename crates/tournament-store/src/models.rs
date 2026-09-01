@@ -50,13 +50,13 @@ impl NewTournament {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct TournamentUpdate {
     pub name: Option<String>,
-    pub short_name: Option<String>,
-    pub location: Option<String>,
-    pub start_date: Option<String>,
-    pub end_date: Option<String>,
+    pub short_name: Option<Option<String>>,
+    pub location: Option<Option<String>>,
+    pub start_date: Option<Option<String>>,
+    pub end_date: Option<Option<String>>,
     pub status: Option<String>,
     pub rules: Option<Value>,
-    pub archived_at: Option<UnixTimestamp>,
+    pub archived_at: Option<Option<UnixTimestamp>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -122,14 +122,14 @@ impl NewTeam {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct TeamUpdate {
-    pub organization_id: Option<Id>,
+    pub organization_id: Option<Option<Id>>,
     pub name: Option<String>,
     pub display_name: Option<String>,
-    pub team_letter: Option<String>,
-    pub seed: Option<i64>,
+    pub team_letter: Option<Option<String>>,
+    pub seed: Option<Option<i64>>,
     pub status: Option<String>,
-    pub notes: Option<String>,
-    pub archived_at: Option<UnixTimestamp>,
+    pub notes: Option<Option<String>>,
+    pub archived_at: Option<Option<UnixTimestamp>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

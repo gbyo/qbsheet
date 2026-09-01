@@ -74,39 +74,35 @@ impl<'a> QbtcpRoomRepository<'a> {
 
     pub fn set_status(&self, id: &str, status: &str) -> StoreResult<QbtcpRoom> {
         let timestamp = now();
-        let changed = self.store.connection().execute(
-            "UPDATE qbtcp_rooms SET status = ?1, updated_at = ?2 WHERE id = ?3",
-            params![status, timestamp, id],
-        )?;
-        if changed == 0 {
-            return Err(StoreError::not_found("QBTCP room", id));
-        }
-        let mut statement = self.store.connection().prepare(
-            "SELECT id, tournament_id, room_id, room_code, pairing_code, status,
-                    last_seen_at, created_at, updated_at FROM qbtcp_rooms WHERE id = ?1",
-        )?;
-        statement
-            .query_row(params![id], qbtcp_room_from_row)
-            .map_err(StoreError::from)
+        self.store.write_transaction(|transaction| {
+            let changed = transaction.execute(
+                "UPDATE qbtcp_rooms SET status = ?1, updated_at = ?2 WHERE id = ?3",
+                params![status, timestamp, id],
+            )?;
+            if changed == 0 {
+                return Err(StoreError::not_found("QBTCP room", id));
+            }
+            transaction
+                .query_row(qbtcp_room_select(), params![id], qbtcp_room_from_row)
+                .map_err(StoreError::from)
+        })
     }
 
     pub fn mark_seen(&self, id: &str) -> StoreResult<QbtcpRoom> {
         let timestamp = now();
-        let changed = self.store.connection().execute(
-            "UPDATE qbtcp_rooms SET last_seen_at = ?1, status = 'connected', updated_at = ?1
-             WHERE id = ?2",
-            params![timestamp, id],
-        )?;
-        if changed == 0 {
-            return Err(StoreError::not_found("QBTCP room", id));
-        }
-        let mut statement = self.store.connection().prepare(
-            "SELECT id, tournament_id, room_id, room_code, pairing_code, status,
-                    last_seen_at, created_at, updated_at FROM qbtcp_rooms WHERE id = ?1",
-        )?;
-        statement
-            .query_row(params![id], qbtcp_room_from_row)
-            .map_err(StoreError::from)
+        self.store.write_transaction(|transaction| {
+            let changed = transaction.execute(
+                "UPDATE qbtcp_rooms SET last_seen_at = ?1, status = 'connected', updated_at = ?1
+                 WHERE id = ?2",
+                params![timestamp, id],
+            )?;
+            if changed == 0 {
+                return Err(StoreError::not_found("QBTCP room", id));
+            }
+            transaction
+                .query_row(qbtcp_room_select(), params![id], qbtcp_room_from_row)
+                .map_err(StoreError::from)
+        })
     }
 }
 
@@ -182,39 +178,72 @@ impl<'a> QbtcpSessionRepository<'a> {
 
     pub fn mark_seen(&self, id: &str) -> StoreResult<QbtcpSession> {
         let timestamp = now();
-        let changed = self.store.connection().execute(
-            "UPDATE qbtcp_sessions SET last_seen_at = ?1, status = 'connected' WHERE id = ?2",
-            params![timestamp, id],
-        )?;
-        if changed == 0 {
-            return Err(StoreError::not_found("QBTCP session", id));
-        }
-        self.get(id)?
-            .ok_or_else(|| StoreError::not_found("QBTCP session", id))
+        self.store.write_transaction(|transaction| {
+            let changed = transaction.execute(
+                "UPDATE qbtcp_sessions SET last_seen_at = ?1, status = 'connected'
+                 WHERE id = ?2 AND status <> 'closed'
+                   AND (expires_at IS NULL OR expires_at > ?1)",
+                params![timestamp, id],
+            )?;
+            if changed == 0 {
+                let state: Option<(String, Option<i64>)> = transaction
+                    .query_row(
+                        "SELECT status, expires_at FROM qbtcp_sessions WHERE id = ?1",
+                        params![id],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                    .optional()?;
+                return match state {
+                    None => Err(StoreError::not_found("QBTCP session", id)),
+                    Some((status, _)) if status == "closed" => Err(StoreError::Conflict(format!(
+                        "QBTCP session {id} is closed"
+                    ))),
+                    Some((_, Some(expires_at))) if expires_at <= timestamp => {
+                        Err(StoreError::Conflict(format!("QBTCP session {id} has expired")))
+                    }
+                    Some(_) => Err(StoreError::Conflict(format!(
+                        "QBTCP session {id} cannot be marked seen"
+                    ))),
+                };
+            }
+            transaction
+                .query_row(qbtcp_session_select(), params![id], qbtcp_session_from_row)
+                .map_err(StoreError::from)
+        })
     }
 
     pub fn close(&self, id: &str) -> StoreResult<QbtcpSession> {
-        let changed = self.store.connection().execute(
-            "UPDATE qbtcp_sessions SET status = 'closed' WHERE id = ?1",
-            params![id],
-        )?;
-        if changed == 0 {
-            return Err(StoreError::not_found("QBTCP session", id));
-        }
-        self.get(id)?
-            .ok_or_else(|| StoreError::not_found("QBTCP session", id))
+        self.store.write_transaction(|transaction| {
+            let changed = transaction.execute(
+                "UPDATE qbtcp_sessions SET status = 'closed' WHERE id = ?1",
+                params![id],
+            )?;
+            if changed == 0 {
+                return Err(StoreError::not_found("QBTCP session", id));
+            }
+            transaction
+                .query_row(qbtcp_session_select(), params![id], qbtcp_session_from_row)
+                .map_err(StoreError::from)
+        })
     }
 
     pub fn get(&self, id: &str) -> StoreResult<Option<QbtcpSession>> {
-        let mut statement = self.store.connection().prepare(
-            "SELECT id, tournament_id, qbtcp_room_id, client_id, protocol_version,
-                    capabilities_json, token_digest, status, paired_at, last_seen_at, expires_at
-             FROM qbtcp_sessions WHERE id = ?1",
-        )?;
+        let mut statement = self.store.connection().prepare(qbtcp_session_select())?;
         let mut rows = statement.query(params![id])?;
         rows.next()?
             .map_or(Ok(None), |row| Ok(Some(qbtcp_session_from_row(row)?)))
     }
+}
+
+fn qbtcp_room_select() -> &'static str {
+    "SELECT id, tournament_id, room_id, room_code, pairing_code, status,
+            last_seen_at, created_at, updated_at FROM qbtcp_rooms WHERE id = ?1"
+}
+
+fn qbtcp_session_select() -> &'static str {
+    "SELECT id, tournament_id, qbtcp_room_id, client_id, protocol_version,
+            capabilities_json, token_digest, status, paired_at, last_seen_at, expires_at
+     FROM qbtcp_sessions WHERE id = ?1"
 }
 
 fn qbtcp_room_from_row(row: &Row<'_>) -> rusqlite::Result<QbtcpRoom> {
