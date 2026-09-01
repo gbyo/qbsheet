@@ -6,6 +6,10 @@ You can use QBSheet to score a game from a QBJ file. You can also connect it to 
 
 QBSheet works as a website or an installable PWA. Standalone scoring does not require an account, a database, or an internet connection.
 
+The repository also includes the QBSheet Director operational UI preview. It is a separate entry so the
+existing scorer remains the default application: after starting Vite, open `director.html` to explore
+the tournament overview, rooms, results inbox, standings, publishing, and local-control settings.
+
 ## Features
 
 * **Offline scoring**: Score games without an internet connection.
@@ -74,6 +78,8 @@ npm start
 ```
 
 Vite starts the local development server.
+
+To open the Director preview during development, visit `http://localhost:5173/director.html`.
 
 Run these checks before you submit a change:
 

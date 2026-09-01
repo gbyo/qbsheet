@@ -76,7 +76,13 @@ function buildIdentity(): IBuildIdentity {
 
 /** Marketing-page output is deployed beside the scorer, but is not part of its offline shell. */
 export function isScorerPrecacheAsset(fileName: string): boolean {
-  return !fileName.endsWith('.map') && fileName !== 'about/index.html' && !fileName.startsWith('about/');
+  return (
+    !fileName.endsWith('.map') &&
+    fileName !== 'about/index.html' &&
+    !fileName.startsWith('about/') &&
+    fileName !== 'director.html' &&
+    !fileName.startsWith('director/')
+  );
 }
 
 /** The element in `about/index.html` that the rendered page is placed inside, and the only edit made to it. */
@@ -177,6 +183,11 @@ function isAboutSource(path: string | null | undefined): boolean {
   return typeof path === 'string' && `/${toPosix(path)}`.includes('/src/about/');
 }
 
+/** The Director preview is a separate local-control surface, not part of the scorer's offline shell. */
+function isDirectorSource(path: string | null | undefined): boolean {
+  return typeof path === 'string' && `/${toPosix(path)}`.includes('/src/director/');
+}
+
 /**
  * Whether a chunk is marketing-page output rather than scorer output.
  *
@@ -196,6 +207,13 @@ function isAboutChunk(chunk: Rollup.PreRenderedChunk): boolean {
   const facade = chunk.facadeModuleId;
   if (typeof facade !== 'string') return false;
   return prerenderedPages.some((page) => toPosix(facade).endsWith(`/${page.html}`));
+}
+
+function isDirectorChunk(chunk: Rollup.PreRenderedChunk): boolean {
+  if (chunk.moduleIds.some(isDirectorSource)) return true;
+  const facade = chunk.facadeModuleId;
+  if (typeof facade !== 'string') return false;
+  return toPosix(facade).endsWith('/director.html');
 }
 
 /**
@@ -441,10 +459,16 @@ self.addEventListener('fetch', (event) => {
 
   const scopeUrl = new URL(self.registration.scope);
   const relativePath = url.pathname.slice(scopeUrl.pathname.length);
-  // The product page is a separate Vite entry. It is deliberately network-owned: it must never be
-  // stored as the scorer shell, served the scorer's offline fallback, or put its own assets in the
-  // cache whose activation is coordinated around an active game.
-  if (relativePath === 'about' || relativePath.startsWith('about/')) return;
+  // The product page and Director preview are separate Vite entries. They are deliberately
+  // network-owned: neither should be stored as the scorer shell, served by the scorer's offline
+  // fallback, or put its own assets in the cache whose activation is coordinated around an active game.
+  if (
+    relativePath === 'about' ||
+    relativePath.startsWith('about/') ||
+    relativePath === 'director.html' ||
+    relativePath.startsWith('director/')
+  )
+    return;
 
   if (request.mode === 'navigate') {
     // The application has no path routes. Only the scope root (and an explicit index.html) is a
@@ -499,6 +523,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         scorer: resolve(import.meta.dirname, 'index.html'),
+        director: resolve(import.meta.dirname, 'director.html'),
         about: resolve(import.meta.dirname, 'about/index.html'),
         'about-scoring': resolve(import.meta.dirname, 'about/scoring/index.html'),
         'about-tournaments': resolve(import.meta.dirname, 'about/tournaments/index.html'),
@@ -524,16 +549,29 @@ export default defineConfig({
         // chunk carries, and a rule that catches two of the three still leaves the third inside the
         // scorer's precache list.
         entryFileNames: (chunk) =>
-          isAboutChunk(chunk) ? 'about/assets/[name]-[hash].js' : 'assets/[name]-[hash].js',
+          isAboutChunk(chunk)
+            ? 'about/assets/[name]-[hash].js'
+            : isDirectorChunk(chunk)
+              ? 'director/assets/[name]-[hash].js'
+              : 'assets/[name]-[hash].js',
         chunkFileNames: (chunk) =>
-          isAboutChunk(chunk) ? 'about/assets/[name]-[hash].js' : 'assets/[name]-[hash].js',
+          isAboutChunk(chunk)
+            ? 'about/assets/[name]-[hash].js'
+            : isDirectorChunk(chunk)
+              ? 'director/assets/[name]-[hash].js'
+              : 'assets/[name]-[hash].js',
         assetFileNames: (asset) => {
           const sourceNames = asset.originalFileNames ?? [];
           const belongsToAbout =
             // The extracted stylesheet, which has no sources to be recognised by. See `aboutChunkName`.
             asset.name === `${aboutChunkName}.css` ||
             sourceNames.some((name) => isAboutSource(name) || toPosix(name).endsWith(aboutScreenshot));
-          return belongsToAbout ? 'about/assets/[name]-[hash][extname]' : 'assets/[name]-[hash][extname]';
+          const belongsToDirector = asset.name === 'director.css' || sourceNames.some(isDirectorSource);
+          return belongsToAbout
+            ? 'about/assets/[name]-[hash][extname]'
+            : belongsToDirector
+              ? 'director/assets/[name]-[hash][extname]'
+              : 'assets/[name]-[hash][extname]';
         },
       },
     },
