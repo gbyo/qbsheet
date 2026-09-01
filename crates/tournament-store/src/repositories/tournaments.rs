@@ -91,30 +91,45 @@ impl<'a> TournamentRepository<'a> {
     }
 
     pub fn update(&self, id: &str, update: TournamentUpdate) -> StoreResult<Tournament> {
+        let short_name_changed = update.short_name.is_some();
+        let short_name = update.short_name.flatten();
+        let location_changed = update.location.is_some();
+        let location = update.location.flatten();
+        let start_date_changed = update.start_date.is_some();
+        let start_date = update.start_date.flatten();
+        let end_date_changed = update.end_date.is_some();
+        let end_date = update.end_date.flatten();
+        let archived_at_changed = update.archived_at.is_some();
+        let archived_at = update.archived_at.flatten();
         let rules = update.rules.as_ref().map(json_text).transpose()?;
         let timestamp = now();
         self.store.write_transaction(|transaction| {
             let changed = transaction.execute(
                 "UPDATE tournaments SET
                     name = COALESCE(?1, name),
-                    short_name = COALESCE(?2, short_name),
-                    location = COALESCE(?3, location),
-                    start_date = COALESCE(?4, start_date),
-                    end_date = COALESCE(?5, end_date),
-                    status = COALESCE(?6, status),
-                    rules_json = COALESCE(?7, rules_json),
-                    archived_at = COALESCE(?8, archived_at),
-                    updated_at = ?9
-                 WHERE id = ?10",
+                    short_name = CASE WHEN ?2 <> 0 THEN ?3 ELSE short_name END,
+                    location = CASE WHEN ?4 <> 0 THEN ?5 ELSE location END,
+                    start_date = CASE WHEN ?6 <> 0 THEN ?7 ELSE start_date END,
+                    end_date = CASE WHEN ?8 <> 0 THEN ?9 ELSE end_date END,
+                    status = COALESCE(?10, status),
+                    rules_json = COALESCE(?11, rules_json),
+                    archived_at = CASE WHEN ?12 <> 0 THEN ?13 ELSE archived_at END,
+                    updated_at = ?14
+                 WHERE id = ?15",
                 params![
                     update.name,
-                    update.short_name,
-                    update.location,
-                    update.start_date,
-                    update.end_date,
+                    short_name_changed,
+                    short_name,
+                    location_changed,
+                    location,
+                    start_date_changed,
+                    start_date,
+                    end_date_changed,
+                    end_date,
                     update.status,
                     rules,
-                    update.archived_at,
+                    archived_at_changed,
+                    archived_at,
                     timestamp,
                     id,
                 ],
@@ -137,7 +152,7 @@ impl<'a> TournamentRepository<'a> {
         self.update(
             id,
             TournamentUpdate {
-                archived_at: Some(now()),
+                archived_at: Some(Some(now())),
                 status: Some("archived".to_owned()),
                 ..TournamentUpdate::default()
             },
