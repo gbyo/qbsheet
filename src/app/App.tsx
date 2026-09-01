@@ -89,6 +89,7 @@ import { ResultDeliveryService } from './ResultDelivery';
 import useAutomaticResultDelivery from './useAutomaticResultDelivery';
 import { clearOperatorIdentity, readOperatorName, writeOperatorName } from './OperatorIdentity';
 import { clearKeyboardPreference } from '../scorer/keyboardPreference';
+import { clearScoringView } from '../scorer/scoringViewPreference';
 import { clearDisplayPreferences } from './displayPreference';
 import { safeAddress } from './Diagnostics';
 
@@ -931,6 +932,7 @@ export default function App() {
     if (pairingProtected) return;
     clearOperatorIdentity();
     clearKeyboardPreference();
+    clearScoringView();
     clearDisplayPreferences();
     clearConnection();
     setOperatorName('');

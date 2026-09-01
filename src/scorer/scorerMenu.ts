@@ -38,6 +38,7 @@ import {
   roomTakesBreaks,
 } from '../scoring/RoomProcedure';
 import { ScoreEvent } from '../scoring/ScoreEvents';
+import { ScoringView, scoringViewLabels } from './scoringViewPreference';
 
 /** Which dialog an entry opens. The scorer's own `OpenDialog`, named here so this file is honest. */
 export type MenuDialog =
@@ -53,6 +54,13 @@ export interface IScorerMenuInput {
   /** The last tossup with anything recorded against it. A displayed question is not a read one. */
   lastPlayed: number;
   keyboardEnabled: boolean;
+  /**
+   * Which surface the scorekeeper is scoring from.
+   *
+   * A device preference and a presentation one — both views record through the same callbacks — so it
+   * sits beside keyboard scoring rather than anywhere the game is described. See `TableView`.
+   */
+  scoringView: ScoringView;
   /** True while a submission is in flight, when nothing about the game may change. */
   submitting: boolean;
   /** Present only when the host can deliver a mid-game or legacy QBJ. */
@@ -70,6 +78,7 @@ export interface IScorerMenuInput {
 
   openDialog: (dialog: MenuDialog) => void;
   setKeyboardEnabled: (enabled: boolean) => void;
+  setScoringView: (view: ScoringView) => void;
   record: (event: ScoreEvent) => boolean;
   newEventId: () => string;
   openReview: () => void;
@@ -93,11 +102,13 @@ export default function scorerMenuItems(input: IScorerMenuInput): IGameMenuItem[
     currentQuestion,
     lastPlayed,
     keyboardEnabled,
+    scoringView,
     submitting,
     canDownloadForms,
     canRedo = false,
     openDialog,
     setKeyboardEnabled,
+    setScoringView,
     record,
     newEventId,
     openReview,
@@ -120,6 +131,14 @@ export default function scorerMenuItems(input: IScorerMenuInput): IGameMenuItem[
       label: keyboardEnabled ? 'Keyboard scoring: on' : 'Keyboard scoring: off',
       icon: 'game',
       onSelect: () => setKeyboardEnabled(!keyboardEnabled),
+    },
+    {
+      // Named the same way and for the same reason: an entry reading "Scoring view" would say
+      // nothing about which of the two is on screen. One entry rather than a submenu — there are two
+      // choices, and a second level to hold two choices is a level to remember the filing of.
+      label: `Scoring view: ${scoringViewLabels[scoringView]}`,
+      icon: 'game',
+      onSelect: () => setScoringView(scoringView === 'table' ? 'scoresheet' : 'table'),
     },
     { label: 'Notes', icon: 'note', onSelect: () => openDialog('notes'), disabled: submitting },
     { label: 'Game details', icon: 'details', onSelect: () => openDialog('details') },

@@ -30,6 +30,7 @@ import './scorer/scorer-dialogs.css';
 import './scorer/scorer-procedure.css';
 import './scorer/scorer-review.css';
 import './scorer/print.css';
+import './scorer/scorer-table.css';
 import './practice/practice.css';
 import './app/motion.css';
 // Last, because both of the modes it handles are corrections to what everything above decided.
