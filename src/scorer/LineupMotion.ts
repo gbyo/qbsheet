@@ -56,8 +56,9 @@ const smallestVisibleShift = 1;
 /**
  * How far each row has to be pushed back to appear not to have moved yet.
  *
- * Positive is downwards, matching `translateY`. A name in only one of the two measurements is a row
- * that appeared or disappeared rather than moved, and has no previous position to travel from.
+ * Positive is towards the end of the axis, matching the transform the caller applies. A name in only
+ * one of the two measurements is a row that appeared or disappeared rather than moved, and has no
+ * previous position to travel from.
  */
 export function rowShifts(
   before: ReadonlyMap<string, number>,
@@ -90,6 +91,16 @@ export function prefersReducedMotion(): boolean {
   }
 }
 
+/**
+ * Which way the rows are laid out.
+ *
+ * A lineup is a list and moves vertically; a table is a row of seats and moves horizontally. The
+ * mechanism is identical either way, and it is the same mechanism deliberately — a seat travelling
+ * across the table means what a row travelling down the list means, and two implementations of one
+ * idea would be free to disagree about its timing.
+ */
+export type LineupAxis = 'x' | 'y';
+
 export interface ILineupMotion {
   /** Attach to each animatable row. Same key across a reorder, so the row can be recognised. */
   rowRef: (name: string) => (element: HTMLElement | null) => void;
@@ -99,15 +110,18 @@ export interface ILineupMotion {
   beginMove: (name: string) => void;
 }
 
-function measure(rows: ReadonlyMap<string, HTMLElement>): Map<string, number> {
+function measure(rows: ReadonlyMap<string, HTMLElement>, axis: LineupAxis): Map<string, number> {
   const positions = new Map<string, number>();
   for (const [name, element] of rows) {
-    if (element.isConnected) positions.set(name, element.getBoundingClientRect().top);
+    if (!element.isConnected) continue;
+    const box = element.getBoundingClientRect();
+    positions.set(name, axis === 'x' ? box.left : box.top);
   }
   return positions;
 }
 
-export function useLineupMotion(): ILineupMotion {
+export function useLineupMotion(options: { axis?: LineupAxis } = {}): ILineupMotion {
+  const axis = options.axis ?? 'y';
   const rows = useRef(new Map<string, HTMLElement>());
   const refs = useRef(new Map<string, (element: HTMLElement | null) => void>());
   const before = useRef<Map<string, number> | null>(null);
@@ -131,34 +145,40 @@ export function useLineupMotion(): ILineupMotion {
     travelling.current.clear();
   }, []);
 
-  const travel = useCallback((element: HTMLElement, shift: number) => {
-    // Offset first with transitions off, so the row is painted where it used to be rather than
-    // sliding to where it used to be.
-    element.style.transition = 'none';
-    element.style.transform = `translateY(${shift}px)`;
-    // Reading a layout property is what makes the offset a starting point rather than a no-op the
-    // browser coalesces with the release below.
-    void element.offsetHeight;
-    element.classList.add(lineupMovingClass);
-    element.style.transition = '';
-    element.style.transform = '';
-    travelling.current.set(
-      element,
-      window.setTimeout(() => {
-        travelling.current.delete(element);
-        element.classList.remove(lineupMovingClass);
-      }, lineupMoveMs),
-    );
-  }, []);
+  const travel = useCallback(
+    (element: HTMLElement, shift: number) => {
+      // Offset first with transitions off, so the row is painted where it used to be rather than
+      // sliding to where it used to be.
+      element.style.transition = 'none';
+      element.style.transform = axis === 'x' ? `translateX(${shift}px)` : `translateY(${shift}px)`;
+      // Reading a layout property is what makes the offset a starting point rather than a no-op the
+      // browser coalesces with the release below.
+      void element.offsetHeight;
+      element.classList.add(lineupMovingClass);
+      element.style.transition = '';
+      element.style.transform = '';
+      travelling.current.set(
+        element,
+        window.setTimeout(() => {
+          travelling.current.delete(element);
+          element.classList.remove(lineupMovingClass);
+        }, lineupMoveMs),
+      );
+    },
+    [axis],
+  );
 
-  const beginMove = useCallback((name: string) => {
-    // The painted positions, transforms and all: an interrupted move continues from where the eye
-    // last saw the row rather than from where it was going.
-    before.current = measure(rows.current);
-    setMoved(name);
-    window.clearTimeout(settle.current);
-    settle.current = window.setTimeout(() => setMoved(null), lineupMoveMs + lineupSettleMs);
-  }, []);
+  const beginMove = useCallback(
+    (name: string) => {
+      // The painted positions, transforms and all: an interrupted move continues from where the eye
+      // last saw the row rather than from where it was going.
+      before.current = measure(rows.current, axis);
+      setMoved(name);
+      window.clearTimeout(settle.current);
+      settle.current = window.setTimeout(() => setMoved(null), lineupMoveMs + lineupSettleMs);
+    },
+    [axis],
+  );
 
   useLayoutEffect(() => {
     const previous = before.current;
@@ -169,7 +189,7 @@ export function useLineupMotion(): ILineupMotion {
       return;
     }
     settleTravelling();
-    for (const [name, shift] of rowShifts(previous, measure(rows.current))) {
+    for (const [name, shift] of rowShifts(previous, measure(rows.current, axis))) {
       const element = rows.current.get(name);
       if (element) travel(element, shift);
     }

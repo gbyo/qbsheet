@@ -221,7 +221,7 @@ export const practiceSteps: IPracticeStep[] = [
     title: 'Bonus 1',
     call: 'Ninety Six gets 20 points on the bonus.',
     instruction: 'Press 20 in the bonus prompt that has just appeared.',
-    hint: 'A converted tossup opens the bonus on its own — there is no Tossup/Bonus switch to set. The totals shown are the ones this format can produce; Parts… is there when you would rather record each part.',
+    hint: 'A converted tossup opens the bonus on its own — there is no Tossup/Bonus switch to set. The totals shown are the ones this format can produce. These practice rules have no bouncebacks, so one press is the whole bonus; Score by part is there when you would rather record each part.',
     success: 'Right — the bonus adds 20 to Ninety Six.',
     section: 'Score the game',
     expectation: { kind: 'event', matches: bonus(1, 'left', 20) },

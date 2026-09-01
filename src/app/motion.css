@@ -418,61 +418,14 @@
   }
 }
 
-/* Bonus control moving to the other side: only prompt content travels, never either team panel. */
-.scorer-bounceback-handoff {
-  position: relative;
-}
-
-.scorer-bounceback-handoff .scorer-prompt-content.is-outgoing {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-
-.scorer-bounceback-handoff.is-to-right .is-outgoing {
-  animation: qbsheet-bounce-out-right 190ms var(--room-ease-standard) both;
-}
-
-.scorer-bounceback-handoff.is-to-right .is-incoming {
-  animation: qbsheet-bounce-in-right 190ms var(--room-ease-out) both;
-}
-
-.scorer-bounceback-handoff.is-to-left .is-outgoing {
-  animation: qbsheet-bounce-out-left 190ms var(--room-ease-standard) both;
-}
-
-.scorer-bounceback-handoff.is-to-left .is-incoming {
-  animation: qbsheet-bounce-in-left 190ms var(--room-ease-out) both;
-}
-
-@keyframes qbsheet-bounce-out-right {
-  to {
-    opacity: 0;
-    transform: translateX(8px);
-  }
-}
-
-@keyframes qbsheet-bounce-in-right {
-  from {
-    opacity: 0;
-    transform: translateX(-8px);
-  }
-}
-
-@keyframes qbsheet-bounce-out-left {
-  to {
-    opacity: 0;
-    transform: translateX(-8px);
-  }
-}
-
-@keyframes qbsheet-bounce-in-left {
-  from {
-    opacity: 0;
-    transform: translateX(8px);
-  }
-}
-
+/*
+ * Progress through the parts of a bonus.
+ *
+ * The metaphor is a list being worked down, not a panel travelling from one team to the other. So
+ * nothing here moves a part: the row a scorekeeper is aiming at stays exactly where it was between
+ * one press and the next, and what changes is which row is emphasised and a short wash on the one
+ * that has just been answered. The event is already recorded by the time any of this paints.
+ */
 .scorer-choice.is-part-recorded {
   animation: qbsheet-part-lock 130ms var(--room-ease-out) both;
 }
@@ -484,6 +437,44 @@
 
   to {
     transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* The acknowledgement that this part landed, on the row rather than under the finger that made it. */
+  .scorer-part-row.is-part-set {
+    animation: qbsheet-part-row-wash 200ms var(--room-ease-out) both;
+  }
+
+  /*
+   * The part now being asked about. A few pixels and an opacity change, because the emphasis moving
+   * down the list is the whole progress indicator and it must not read as the list itself shifting.
+   */
+  .scorer-part-row.is-active {
+    animation: qbsheet-part-active 140ms var(--room-ease-out) both;
+  }
+}
+
+@keyframes qbsheet-part-row-wash {
+  0%,
+  45% {
+    background-color: var(--room-info-bg);
+  }
+
+  100% {
+    background-color: transparent;
+  }
+}
+
+@keyframes qbsheet-part-active {
+  from {
+    opacity: 0.75;
+    transform: translateY(3px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
@@ -771,7 +762,6 @@
   .qbsheet-motion-number[data-motion-direction]::before,
   .scorer-no-buzz-sweep,
   .scorer-bonus-exit,
-  .scorer-prompt-content.is-outgoing,
   .scorer-rail-item.is-motion-ghost,
   .scorer-conn.is-recovered .scorer-dot::after {
     display: none;
@@ -781,8 +771,8 @@
     .qbsheet-motion-number-current,
     .scorer-answer.is-recorded,
     .scorer-player.is-ruling-recorded,
-    .scorer-prompt-content.is-incoming,
     .scorer-choice.is-part-recorded,
+    .scorer-part-row,
     .scorer-clock-digits,
     .scorer-clock-icon,
     .scorer-rail-item,

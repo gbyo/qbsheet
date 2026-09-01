@@ -13,6 +13,7 @@
  */
 import { LeftOrRight } from '../scoring/types';
 import { IScorekeeperAnswerType, IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
+import { BonusPartOutcome } from './bonusOptions';
 import { negRuling, normalCorrect, powerCorrect, rulingLabel } from './tossupRulings';
 
 /** How many seats the layout can address per side. Beyond this, the buttons are the only way. */
@@ -198,6 +199,110 @@ export function bonusOptionForCode(code: string, options: readonly number[]): nu
   const index = Number(match[1]);
   return index < options.length ? options[index] : null;
 }
+
+/**
+ * Which digit answers "who scored this part?".
+ *
+ * `1` is the team that took the tossup and `2` is the other one, which is the order they are on
+ * screen and the order the moderator says them in — the bonus belongs to a team and the bounce is
+ * the other thing that can happen to it. `0` stays what it is everywhere else on this keyboard: the
+ * answer worth nothing.
+ *
+ * Deliberately not the digits the totals row uses. During part entry a digit is not a number of
+ * parts, and reusing the counting scheme for a question that is not "how many" is how a scorekeeper
+ * ends up recording a 20 because they were thinking in totals.
+ */
+export const bonusPartKeys: Record<BonusPartOutcome, string> = {
+  controlled: '1',
+  bounceback: '2',
+  missed: '0',
+};
+
+/** One key of the part legend: what it records, and what that means in this room right now. */
+export interface IBonusPartChoice {
+  outcome: BonusPartOutcome;
+  /** The digit printed in the map. */
+  key: string;
+  /** Named teams and a named part, never "controlled" or "bounce". */
+  meaning: string;
+}
+
+/**
+ * The outcomes on offer for one part, in screen order, with the exact meaning of each key.
+ *
+ * The team names are arguments rather than something this file works out, for the same reason no
+ * point value is written down here: the legend has to be true for the game in the room, and the
+ * room is what knows who is playing in it.
+ */
+export function bonusPartChoices(input: {
+  partNumber: number;
+  controllingTeamName: string;
+  opponentName: string;
+  bounceBack: boolean;
+}): IBonusPartChoice[] {
+  const { partNumber, controllingTeamName, opponentName, bounceBack } = input;
+  const choices: IBonusPartChoice[] = [
+    {
+      outcome: 'controlled',
+      key: bonusPartKeys.controlled,
+      meaning: `part ${partNumber} to ${controllingTeamName}`,
+    },
+  ];
+  if (bounceBack) {
+    choices.push({
+      outcome: 'bounceback',
+      key: bonusPartKeys.bounceback,
+      meaning: `part ${partNumber} to ${opponentName}`,
+    });
+  }
+  choices.push({
+    outcome: 'missed',
+    key: bonusPartKeys.missed,
+    meaning: `no points on part ${partNumber}`,
+  });
+  return choices;
+}
+
+/** The part choices as legend rows, so the map renders one kind of thing however the bonus is asked. */
+export function bonusPartKeyLegend(choices: readonly IBonusPartChoice[]): IKeyLegendEntry[] {
+  return choices.map((choice) => ({ keys: choice.key, meaning: choice.meaning, available: true }));
+}
+
+/** Which part outcome a digit key selects, or null when that digit addresses nothing on screen. */
+export function bonusPartOutcomeForCode(
+  code: string,
+  choices: readonly IBonusPartChoice[],
+): BonusPartOutcome | null {
+  const match = /^(?:Digit|Numpad)(\d)$/.exec(code);
+  if (!match) return null;
+  return choices.find((choice) => choice.key === match[1])?.outcome ?? null;
+}
+
+/**
+ * What the bonus currently has the keyboard aimed at.
+ *
+ * Two genuinely different questions, so two shapes rather than one shape that pretends part outcomes
+ * are small numbers. A totals stage is a row of values and the digit is a position in it; a part
+ * stage is one part of several and the digit is who got it. Flattening the second into the first is
+ * what made the old part grid unreachable from the keyboard at all.
+ */
+export type BonusKeyboardStage =
+  | {
+      kind: 'totals';
+      title: string;
+      options: number[];
+      /** Whether Escape steps back out of this stage without recording anything. */
+      cancellable: boolean;
+    }
+  | {
+      kind: 'part';
+      title: string;
+      partNumber: number;
+      partCount: number;
+      controllingTeamName: string;
+      opponentName: string;
+      choices: IBonusPartChoice[];
+    };
 
 /**
  * Whether this keystroke belongs to whatever it landed on rather than to the scoresheet.

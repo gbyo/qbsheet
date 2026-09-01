@@ -153,9 +153,11 @@ export default function KeyboardDrill(props: { onBack: () => void; onHome: () =>
             }}
           />
           <p className="shell-hint">
-            Redo is {keyboardShortcutLabels.redo}. Substitutions, corrections to an earlier question, and
-            bonus parts one at a time stay on the buttons by design: a chord for each of them would be a
-            layout nobody could hold in their head, and these are the things nobody does mid-buzz.
+            Redo is {keyboardShortcutLabels.redo}. Substitutions and corrections to an earlier question stay
+            on the buttons by design: a chord for each of them would be a layout nobody could hold in their
+            head, and these are the things nobody does mid-buzz. A bonus scored part by part — which is what a
+            format with bouncebacks opens on — puts its own three digits in this map while it is on screen,
+            naming the teams they belong to.
           </p>
         </section>
 

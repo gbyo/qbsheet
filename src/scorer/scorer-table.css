@@ -1,0 +1,844 @@
+/* The table layout, and the strip that chooses between it and the scoresheet.
+ *
+ * Same sheet, different question. `scorer.css` draws a scoresheet — ruled rows, fixed answer
+ * columns, numbers aligned down the page — because that is what a scorekeeper reads. This draws
+ * where the people are, because that is what a scorekeeper *watches*, and the two have to look like
+ * the same application seen from two positions rather than like two applications.
+ *
+ * So everything here is borrowed. The palette is `--room-*`. The team head is the scoresheet's own
+ * head, sharing its baseline and its score treatment, so the two totals can still be compared
+ * without reading either label. The table is a 1px rule around a neutral surface — one rule, not a
+ * card with a shadow — and the only things with radius are the things you press.
+ *
+ * What is deliberately absent: avatars, decorative chairs, room graphics, a moderator's desk,
+ * gradients, and any suggestion that this is a floor plan. Two fixed tables and one linear order
+ * along each; the tables do not move and nothing can be placed anywhere.
+ *
+ * The one thing that *is* directly rearrangeable is a player's position along their own table, and
+ * only while Arrange is on. A quiz bowl table is a row of people in an order, the order is the whole
+ * of what this layout has to get right, and dragging somebody into the chair they are sitting in is
+ * the shortest way to say so.
+ */
+
+.scorer-table-view {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/*
+ * The strip above the scoring surface: which layout, and — on the table — the one editing action it
+ * has.
+ *
+ * It sits outside the surface it switches, so it does not move when the surface does; a control that
+ * jumped when you used it would make going back a hunt. Ruled off underneath rather than boxed,
+ * because everything on this screen is ruled rather than boxed.
+ */
+.scorer-layout-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--room-border);
+}
+
+.scorer-layout-bar-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--room-muted);
+}
+
+/* The action belongs to the table, so it sits at the far end rather than beside the switch. */
+.scorer-layout-bar-action {
+  margin-left: auto;
+}
+
+/*
+ * Two options, one of them current.
+ *
+ * A segmented control rather than a toggle: both choices are named and one is marked, which is the
+ * only arrangement that cannot be read backwards. Both halves stay full size on a phone — an
+ * icon-only control here would be a guess about which way it switches.
+ */
+.scorer-layout-segmented {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--room-border-strong);
+  border-radius: 5px;
+  background: var(--room-surface-sunken);
+}
+
+.scorer-layout-option {
+  min-height: 32px;
+  padding: 4px 14px;
+  font: inherit;
+  font-size: 0.8125rem;
+  color: var(--room-muted);
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.scorer-layout-option:hover:not(.is-selected) {
+  color: var(--room-text);
+}
+
+/* Weight and a raised surface, not colour alone: the state has to survive a monochrome screen. */
+.scorer-layout-option.is-selected {
+  color: var(--room-text);
+  font-weight: 600;
+  background: var(--room-surface);
+  box-shadow: var(--room-shadow-raised);
+}
+
+.scorer-layout-option:focus-visible {
+  outline: 2px solid var(--room-accent);
+  outline-offset: 1px;
+}
+
+/*
+ * The same question with room to answer it, which is what a new game opens with.
+ *
+ * Two cards rather than a dropdown: this is asked once a game, to somebody who may never have seen
+ * either layout, and the difference between them is a sentence rather than a word.
+ */
+.scorer-layout-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px;
+}
+
+.scorer-layout-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  padding: 14px;
+  font: inherit;
+  text-align: left;
+  color: var(--room-text);
+  background: var(--room-surface);
+  border: 1px solid var(--room-border-strong);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.scorer-layout-card:hover {
+  border-color: var(--room-accent);
+}
+
+.scorer-layout-card.is-selected {
+  border-color: var(--room-accent);
+  box-shadow: inset 0 0 0 1px var(--room-accent);
+  background: var(--room-info-bg);
+}
+
+.scorer-layout-card:focus-visible {
+  outline: 2px solid var(--room-accent);
+  outline-offset: 1px;
+}
+
+/*
+ * The selected card is also autofocus when the chooser opens. Keep that focus visible without
+ * drawing a second detached rectangle around the already-accented selection.
+ */
+.scorer-layout-card.is-selected:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--room-accent);
+}
+
+.scorer-layout-card .scorer-layout-option-name {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.scorer-layout-card-tagline {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--room-accent);
+}
+
+.scorer-layout-card-detail {
+  font-size: 0.8125rem;
+  color: var(--room-muted);
+}
+
+/*
+ * The first-use hint, and the note after a bulk lineup change.
+ *
+ * Both are notes and neither is a gate: scoring works with either of them on screen, and neither
+ * takes the keyboard. They are ruled off rather than boxed, like everything else on the sheet.
+ */
+.scorer-table-hint,
+.scorer-table-notice {
+  margin: 8px 16px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--room-border);
+  border-left: 3px solid var(--room-accent);
+  border-radius: 4px;
+  background: var(--room-surface-sunken);
+  font-size: 0.8125rem;
+}
+
+.scorer-table-notice {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.scorer-table-hint-title {
+  margin: 0;
+  font-weight: 600;
+}
+
+.scorer-table-hint-body {
+  margin: 2px 0 0;
+  color: var(--room-muted);
+}
+
+.scorer-table-hint-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+/* One sheet in two columns divided by a rule, exactly as the scoresheet lays its teams out. */
+.scorer-table-teams {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1px 1fr;
+  align-content: start;
+}
+
+.scorer-table-teams::before {
+  content: '';
+  grid-column: 2;
+  grid-row: 1;
+  background: var(--room-border);
+}
+
+.scorer-table-team {
+  grid-row: 1;
+  min-width: 0;
+  padding: 14px 16px 16px;
+}
+
+.scorer-table-team:first-of-type {
+  grid-column: 1;
+}
+
+.scorer-table-team:last-of-type {
+  grid-column: 3;
+}
+
+/* The scoresheet's head, reused rather than restated: one baseline across the sheet. */
+.scorer-table-team-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--room-border);
+}
+
+/*
+ * The table.
+ *
+ * A quiet rectangle whose only job is to say that these chairs belong to one table. It is not the
+ * target — the tiles inside it are — so it carries the faintest border on the sheet and no shadow.
+ */
+.scorer-table-surface {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--room-border);
+  border-radius: 6px;
+  background: var(--room-surface-sunken);
+}
+
+/*
+ * The seats, in physical order, along one axis.
+ *
+ * `grid-auto-flow: column` and not a wrap: a table with five people at it is five people in a row,
+ * and folding the fifth onto a second line would be drawing a table nobody is sitting at. A roster
+ * wider than the column scrolls instead, which keeps the targets the size a thumb needs.
+ */
+.scorer-table-seats {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(112px, 1fr);
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.scorer-table-seat {
+  min-width: 0;
+}
+
+/* The FLIP transform for a seat travelling to a new position. See `LineupMotion`. */
+@media (prefers-reduced-motion: no-preference) {
+  .scorer-table-seat.is-moving {
+    transition: transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    will-change: transform;
+  }
+
+  /*
+   * Everybody stepping aside for a carried player.
+   *
+   * Only the tiles that are not being dragged: the dragged one follows the pointer exactly, and a
+   * transition on it would make it lag the finger holding it. The FLIP above and this never run on
+   * the same element — one moves the list item, the other moves the tile inside it — which is what
+   * keeps a discrete arrow press and a drag from animating the same movement twice.
+   */
+  .scorer-table-player.is-arranging:not(.is-dragging) {
+    transition: transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+}
+
+/*
+ * A chair.
+ *
+ * Large on purpose — comfortably past the 44px minimum, because this is the control a scorekeeper
+ * hits without looking at the screen. Neutral, for the reason the answer buttons are neutral: a
+ * table of accent-coloured rectangles reads as a page of links and gives the eye nothing to catch.
+ */
+.scorer-table-player {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  min-height: 64px;
+  padding: 10px 12px;
+  font: inherit;
+  text-align: left;
+  color: var(--room-text);
+  background: var(--room-surface);
+  border: 1px solid var(--room-border-strong);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.scorer-table-player:hover:not(:disabled) {
+  border-color: var(--room-accent);
+  color: var(--room-accent);
+}
+
+.scorer-table-player:focus-visible {
+  outline: 2px solid var(--room-accent);
+  outline-offset: 1px;
+}
+
+/*
+ * The chair whose picker is open.
+ *
+ * Border weight and a sunken surface rather than a colour alone: the state has to survive a
+ * monochrome screen and a scorekeeper who does not distinguish the accent from the text.
+ */
+.scorer-table-player.is-selected {
+  border-color: var(--room-accent);
+  box-shadow: inset 0 0 0 1px var(--room-accent);
+  background: var(--room-info-bg);
+}
+
+/*
+ * A team that has already answered this tossup.
+ *
+ * Inert, not deleted. The person is still sitting there and the scorekeeper still needs to see
+ * where — so the name stays legible, the rectangle stays exactly where it was, and what goes is the
+ * affordance: the border softens, the surface flattens, the cursor stops offering.
+ */
+.scorer-table-player:disabled,
+.scorer-table-player.is-disabled {
+  color: var(--room-muted);
+  background: transparent;
+  border-color: var(--room-border);
+  border-style: dashed;
+  cursor: default;
+}
+
+/* The chair a ruling landed in, and the neg treatment the rest of the sheet already uses for one. */
+.scorer-table-player.is-recorded {
+  background: var(--room-surface-sunken);
+  border-color: var(--room-border-strong);
+}
+
+.scorer-table-player.is-recorded.is-neg-recorded {
+  background: var(--room-error-bg);
+  border-color: var(--room-error);
+}
+
+/* The keyboard echo: the same wash the scoresheet's row gets, on the chair the keystroke addressed. */
+.scorer-table-player.is-keyed {
+  background: var(--room-info-bg);
+}
+
+/* A substitution landing. The chair does not move; see the animation block at the end of this file. */
+.scorer-table-player.is-substituted {
+  background: var(--room-surface-sunken);
+}
+
+/*
+ * A player, while the room is saying where they sit.
+ *
+ * The whole tile is the handle, because the whole tile is the thing being moved: a grip you have to
+ * find first would make a direct gesture into a two-step one. `pan-y` leaves vertical scrolling to
+ * the page and claims horizontal movement for the drag, which is what stops a crowded table's own
+ * sideways scroll fighting the gesture.
+ */
+.scorer-table-player.is-arranging {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  cursor: grab;
+  border-style: dashed;
+  touch-action: pan-y;
+  user-select: none;
+}
+
+.scorer-table-player.is-arranging:hover {
+  border-color: var(--room-accent);
+  color: var(--room-text);
+}
+
+/* Lifted, and above everything it is being carried past. */
+.scorer-table-player.is-arranging.is-dragging {
+  cursor: grabbing;
+  position: relative;
+  z-index: 2;
+  border-style: solid;
+  border-color: var(--room-accent);
+  background: var(--room-surface);
+  box-shadow: var(--room-shadow-strong);
+}
+
+/* The three ridges every sortable list in every application uses. Cheaper than a word. */
+.scorer-table-grip {
+  flex: none;
+  width: 10px;
+  height: 12px;
+  margin-left: auto;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    var(--room-faint) 0,
+    var(--room-faint) 2px,
+    transparent 2px,
+    transparent 4px
+  );
+}
+
+/*
+ * The way round for a pointer that cannot drag.
+ *
+ * Small, at the two edges of the tile, and only drawn once somebody is looking at that seat — the
+ * table has to say "drag these" first, and an arrow on every seat all the time said the opposite
+ * loudly enough to be the only thing anybody tried.
+ */
+.scorer-table-nudge {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 2px;
+  pointer-events: none;
+  opacity: 0;
+}
+
+.scorer-table-seat:hover .scorer-table-nudge,
+.scorer-table-seat:focus-within .scorer-table-nudge {
+  opacity: 1;
+}
+
+.scorer-table-seat:hover .scorer-table-nudge-action,
+.scorer-table-seat:focus-within .scorer-table-nudge-action {
+  pointer-events: auto;
+}
+
+.scorer-table-nudge.is-hidden {
+  opacity: 0;
+}
+
+.scorer-table-nudge-action {
+  /*
+   * Not a target until it can be seen.
+   *
+   * These sit over the two ends of the tile, which is also where a drag often starts. Invisible and
+   * clickable, they would swallow the gesture they exist as an alternative to. Hovering reveals
+   * them, which is also the only way a pointer reaches one; a keyboard reaches them through
+   * `:focus-within` and activates them without needing a pointer at all.
+   */
+  pointer-events: none;
+  width: 24px;
+  min-height: 32px;
+  padding: 0;
+  font: inherit;
+  font-size: 1rem;
+  line-height: 1;
+  color: var(--room-accent);
+  background: var(--room-surface);
+  border: 1px solid var(--room-border-strong);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.scorer-table-nudge-action:disabled {
+  visibility: hidden;
+}
+
+.scorer-table-nudge-action:focus-visible {
+  outline: 2px solid var(--room-accent);
+  outline-offset: 1px;
+}
+
+/* The seats need a positioning context for the nudge overlay, and nothing else. */
+.scorer-table-seats.is-arranging .scorer-table-seat {
+  position: relative;
+}
+
+/* While a drag is in flight nothing else on the strip is a target. */
+.scorer-table-seats.is-dragging {
+  cursor: grabbing;
+}
+
+/*
+ * The seat number: small, muted, and second.
+ *
+ * It is a label for the chair rather than a value anybody reads for meaning — the name is what the
+ * eye is looking for — but it is also the key the keyboard layer addresses, so it is always there.
+ */
+.scorer-table-player-seat {
+  font-size: 0.6875rem;
+  color: var(--room-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.scorer-table-player-name {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scorer-table-arrange-actions {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.scorer-table-arrange-actions .scorer-text-action {
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0;
+  text-align: center;
+}
+
+.scorer-table-empty {
+  padding: 10px 2px;
+  font-size: 0.8125rem;
+  color: var(--room-faint);
+}
+
+/*
+ * The ruling picker.
+ *
+ * Fixed rather than absolute, because it is a portal on `document.body` positioned from a
+ * `getBoundingClientRect` — which is already viewport-relative. It is the one thing in this view
+ * that floats, and it earns that the way the keyboard readout does: it is true for about a second,
+ * it belongs to the scorekeeper's own half-finished action, and it has to sit over the sheet rather
+ * than push it around.
+ *
+ * Nothing dims behind it. The whole reason it is anchored is that the answer to "who" must stay
+ * visible while the second half of the decision is made.
+ */
+.scorer-ruling-picker {
+  position: fixed;
+  z-index: 30;
+  min-width: 176px;
+  max-width: min(320px, calc(100vw - 16px));
+  padding: 10px;
+  border: 1px solid var(--room-border-strong);
+  border-radius: 6px;
+  background: var(--room-surface);
+  box-shadow: var(--room-shadow-strong);
+}
+
+.scorer-ruling-picker-title {
+  margin: 0 0 8px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--room-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * Two columns, so the pairs a scorekeeper knows sit where they expect them: the values in reading
+ * order, the zero last. Not one column — a vertical list of four turns a glance into a scan.
+ */
+.scorer-ruling-picker-choices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(76px, 1fr));
+  gap: 6px;
+}
+
+.scorer-ruling-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  min-height: 48px;
+  padding: 7px 10px;
+  font: inherit;
+  color: var(--room-text);
+  background: var(--room-surface);
+  border: 1px solid var(--room-border-strong);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.scorer-ruling-choice:hover {
+  border-color: var(--room-accent);
+  color: var(--room-accent);
+}
+
+.scorer-ruling-choice:focus-visible {
+  outline: 2px solid var(--room-accent);
+  outline-offset: 1px;
+}
+
+/* Red is a neg here for the same reason it is one on the scoresheet: it is the misclick that costs. */
+.scorer-ruling-choice.is-neg {
+  color: var(--room-error);
+}
+
+.scorer-ruling-choice.is-neg:hover {
+  border-color: var(--room-error);
+  color: var(--room-error);
+  background: var(--room-error-bg);
+}
+
+.scorer-ruling-choice-value {
+  font-size: 1.0625rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.scorer-ruling-choice-name {
+  font-size: 0.6875rem;
+  color: var(--room-muted);
+  line-height: 1.1;
+}
+
+.scorer-ruling-choice:hover .scorer-ruling-choice-name {
+  color: inherit;
+}
+
+/* #region Motion
+ *
+ * Short, and only where it explains something: where the picker came from, which chair a ruling
+ * landed in, that a person changed but a seat did not. Nothing here delays a state change — the
+ * event is already written by the time any of it starts.
+ */
+
+@keyframes qbsheet-picker-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes qbsheet-picker-in-above {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes qbsheet-table-ruling {
+  0%,
+  50% {
+    background-color: var(--room-surface-sunken);
+  }
+
+  100% {
+    background-color: var(--room-surface);
+  }
+}
+
+@keyframes qbsheet-table-neg-ruling {
+  0%,
+  50% {
+    background-color: var(--room-error-bg);
+  }
+
+  100% {
+    background-color: var(--room-surface);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* Growing out of the tile it belongs to: the origin points back at the chair that was pressed. */
+  .scorer-ruling-picker {
+    transform-origin: var(--scorer-picker-origin-x, 50%) top;
+    animation: qbsheet-picker-in 140ms var(--room-ease-out) both;
+  }
+
+  .scorer-ruling-picker[data-placement='above'] {
+    transform-origin: var(--scorer-picker-origin-x, 50%) bottom;
+    animation-name: qbsheet-picker-in-above;
+  }
+
+  /* Becoming inert is a change of state, not a departure. Slow enough to read, fast enough to ignore. */
+  .scorer-table-player {
+    transition:
+      color var(--room-motion-standard) var(--room-ease-standard),
+      background-color var(--room-motion-standard) var(--room-ease-standard),
+      border-color var(--room-motion-standard) var(--room-ease-standard),
+      box-shadow var(--room-motion-fast) var(--room-ease-standard);
+  }
+
+  .scorer-table-player.is-selected {
+    transform: none;
+  }
+
+  .scorer-table-player.is-recorded {
+    animation: qbsheet-table-ruling 220ms var(--room-ease-out) both;
+  }
+
+  .scorer-table-player.is-recorded.is-neg-recorded {
+    animation-name: qbsheet-table-neg-ruling;
+  }
+
+  /*
+   * A substitution.
+   *
+   * The chair keeps its wash and the arriving name has the entrance, which is the whole sentence:
+   * same seat, different person. Nothing travels — a rectangle that flew across the table would be
+   * saying the seat moved, and the seat is the one thing that did not.
+   */
+  .scorer-table-player.is-substituted .scorer-table-player-name {
+    animation: qbsheet-rise-in var(--room-motion-standard) var(--room-ease-out) both;
+  }
+
+  /* Swapping between the two views. A short fade, and no layout theatre. */
+  .scorer-table-view,
+  .scorer-teams {
+    animation: qbsheet-fade-in 170ms var(--room-ease-out) both;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scorer-ruling-picker,
+  .scorer-table-player-name,
+  .scorer-table-seat {
+    animation: none;
+    transition: none;
+    transform: none;
+  }
+
+  /*
+   * The tile keeps its transform and loses its transition.
+   *
+   * A drag is direct manipulation rather than decoration: the tile has to stay under the finger
+   * holding it, and the seats it displaces have to be somewhere a scorekeeper can see they have
+   * moved. What goes is the interpolation between those positions.
+   */
+  .scorer-table-player {
+    animation: none;
+    transition: none;
+  }
+}
+
+/* #endregion */
+
+/* #region Narrower screens */
+
+/*
+ * Stacked at the same width the scoresheet stacks at, and for the same reason: two tables squeezed
+ * into half a phone are two tables nobody can hit. The seats still run along their own axis inside
+ * each team — the physical order is the point of this view and does not bend to a viewport.
+ */
+@media (max-width: 820px) {
+  .scorer-table-teams {
+    grid-template-columns: 1fr;
+  }
+
+  .scorer-table-teams::before {
+    grid-column: 1;
+    grid-row: 2;
+    height: 1px;
+  }
+
+  .scorer-table-team:first-of-type {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .scorer-table-team:last-of-type {
+    grid-column: 1;
+    grid-row: 3;
+  }
+}
+
+@media (max-width: 560px) {
+  .scorer-table-seats {
+    grid-auto-columns: minmax(104px, 1fr);
+  }
+
+  /*
+   * The switch stays two full-width halves rather than becoming an icon.
+   *
+   * Which layout you are in and which you would get are the whole content of this control, and a
+   * glyph would be a guess about both. The word "Scoring layout" is what goes, because the options
+   * name themselves.
+   */
+  .scorer-layout-bar {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .scorer-layout-bar-label {
+    display: none;
+  }
+
+  .scorer-layout-segmented {
+    flex: 1 1 auto;
+  }
+
+  .scorer-layout-option {
+    flex: 1 1 0;
+    min-height: 36px;
+  }
+
+  /* Clear of the fixed control bar, which leaves the flow at this width. */
+  .scorer-ruling-picker {
+    max-width: calc(100vw - 16px);
+  }
+}
+
+/* #endregion */

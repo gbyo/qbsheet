@@ -41,7 +41,16 @@ import { ScoreEvent } from '../scoring/ScoreEvents';
 
 /** Which dialog an entry opens. The scorer's own `OpenDialog`, named here so this file is honest. */
 export type MenuDialog =
-  'notes' | 'details' | 'lightning' | 'timeout' | 'adjust' | 'recovery' | 'end-early' | 'forfeit' | 'export';
+  | 'notes'
+  | 'details'
+  | 'lightning'
+  | 'timeout'
+  | 'adjust'
+  | 'recovery'
+  | 'end-early'
+  | 'forfeit'
+  | 'export'
+  | 'scoring-layout';
 
 export interface IScorerMenuInput {
   game: IDerivedGame;
@@ -53,6 +62,12 @@ export interface IScorerMenuInput {
   /** The last tossup with anything recorded against it. A displayed question is not a read one. */
   lastPlayed: number;
   keyboardEnabled: boolean;
+  /**
+   * Which surface the scorekeeper is scoring from.
+   *
+   * A device preference and a presentation one — both views record through the same callbacks — so it
+   * sits beside keyboard scoring rather than anywhere the game is described. See `TableView`.
+   */
   /** True while a submission is in flight, when nothing about the game may change. */
   submitting: boolean;
   /** Present only when the host can deliver a mid-game or legacy QBJ. */
@@ -120,6 +135,19 @@ export default function scorerMenuItems(input: IScorerMenuInput): IGameMenuItem[
       label: keyboardEnabled ? 'Keyboard scoring: on' : 'Keyboard scoring: off',
       icon: 'game',
       onSelect: () => setKeyboardEnabled(!keyboardEnabled),
+    },
+    {
+      /*
+       * A second way to the same question, for anybody who does not find the switcher above the
+       * scoring surface.
+       *
+       * It opens the chooser rather than toggling. The entry this replaces read "Scoring view:
+       * Scoresheet" and switched to the table — a label naming the current state on a control that
+       * changes it, which is the one shape of toggle nobody can read at speed.
+       */
+      label: 'Scoring layout…',
+      icon: 'game',
+      onSelect: () => openDialog('scoring-layout'),
     },
     { label: 'Notes', icon: 'note', onSelect: () => openDialog('notes'), disabled: submitting },
     { label: 'Game details', icon: 'details', onSelect: () => openDialog('details') },

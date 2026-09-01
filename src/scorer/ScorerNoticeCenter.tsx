@@ -41,7 +41,7 @@ export interface IScorerNotice {
   onDismiss?: () => void;
   /** Optional separate callback for auto-expiry. */
   onExpire?: () => void;
-  /** Most notices use a CSS close glyph. This exists for compatibility with the recovery copy. */
+  /** Retained for compatibility; the close glyph itself is provided by the notice CSS. */
   dismissGlyph?: boolean;
   dismissLabel?: string;
 }
@@ -105,9 +105,7 @@ function NoticeSurface(props: {
           aria-label={notice.dismissLabel ?? `Dismiss ${heading ?? 'notice'}`}
           title={notice.dismissLabel ?? `Dismiss ${heading ?? 'notice'}`}
           onClick={() => onDismiss(notice)}
-        >
-          {notice.dismissGlyph ? <span aria-hidden="true">×</span> : null}
-        </button>
+        />
       )}
     </div>
   );
@@ -203,11 +201,21 @@ export default function ScorerNoticeCenter(props: { notices: IScorerNotice[] }) 
     setIssuesOpen(false);
   }, []);
 
+  if (!active && !showIssues) return null;
+
+  const compact = active === undefined;
+
   return (
-    <section className="scorer-notice-region" aria-label="Game status">
-      <div className="scorer-notice-slot">
-        {active && <NoticeSurface notice={active} onDismiss={dismiss} onHoverChange={setPaused} />}
-      </div>
+    <section
+      className={`scorer-notice-region${compact ? ' is-compact' : ''}`}
+      aria-label="Game status"
+      style={compact ? { minHeight: 'auto', padding: '4px 16px' } : undefined}
+    >
+      {active && (
+        <div className="scorer-notice-slot">
+          <NoticeSurface notice={active} onDismiss={dismiss} onHoverChange={setPaused} />
+        </div>
+      )}
       {showIssues && (
         <button
           type="button"
@@ -215,6 +223,7 @@ export default function ScorerNoticeCenter(props: { notices: IScorerNotice[] }) 
           aria-expanded={issuesOpen}
           aria-controls="scorer-notice-issues-view"
           onClick={() => setIssuesOpen((current) => !current)}
+          style={compact ? { position: 'static', display: 'block', marginLeft: 'auto' } : undefined}
         >
           {active ? `${hiddenIssueCount} more` : `Issues ${unresolved.length}`}
         </button>

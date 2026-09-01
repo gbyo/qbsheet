@@ -9,6 +9,7 @@
  */
 import { expect, test, type Page } from '@playwright/test';
 import { validPackage } from '../tests/packages';
+import { chooseScoringLayout } from './support/scoringLayout';
 
 async function openGameWithBouncebacks(page: Page): Promise<void> {
   const packageValue = validPackage();
@@ -24,6 +25,7 @@ async function openGameWithBouncebacks(page: Page): Promise<void> {
     buffer: Buffer.from(JSON.stringify(packageValue)),
   });
 
+  await chooseScoringLayout(page);
   await expect(page.getByRole('heading', { name: 'Who is starting?' })).toBeVisible();
   const prompt = page.getByLabel('Starting lineups');
   for (const player of ['Sarah Mitchell', 'James Okafor']) {
@@ -75,14 +77,21 @@ async function partEditorLayout(page: Page) {
   });
 }
 
-async function openPartEditor(page: Page): Promise<void> {
+/** Score the bonus as totals, which a bouncing format now reaches through its own way out. */
+async function recordBonusTotals(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'Sarah Mitchell 10', exact: true }).click();
-  await page.getByLabel('Bonus').getByRole('button', { name: '20', exact: true }).click();
-  await page.getByLabel('Bounceback').getByRole('button', { name: '10', exact: true }).click();
+  const bonus = page.getByLabel('Bonus');
+  await bonus.getByRole('button', { name: 'Enter totals instead' }).click();
+  await bonus.getByRole('button', { name: 'Ninety Six A, 20 points' }).click();
+  await bonus.getByRole('button', { name: 'Greenwood Consolidated Regional, 10 points' }).click();
+}
+
+async function openPartEditor(page: Page): Promise<void> {
+  await recordBonusTotals(page);
 
   await page.getByRole('button', { name: 'Review question 1' }).click();
   await expect(page.getByRole('dialog', { name: 'Edit Question 1' })).toBeVisible();
-  await page.getByRole('button', { name: 'Edit individual parts…' }).click();
+  await page.getByRole('button', { name: 'Edit by part' }).click();
   await expect(page.getByRole('group', { name: 'Bonus part 1 outcome' })).toBeVisible();
 }
 

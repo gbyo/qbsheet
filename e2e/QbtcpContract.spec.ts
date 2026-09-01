@@ -15,6 +15,7 @@
  * the second one is. Neither can be satisfied by a client that guessed.
  */
 import { expect, test, type Page } from '@playwright/test';
+import { chooseScoringLayout } from './support/scoringLayout';
 import { assignmentPollIntervalMs } from '../src/app/useConnectedRuntime';
 import {
   ITournamentControl,
@@ -52,6 +53,7 @@ async function startAssignedGame(page: Page, round: 4 | 5): Promise<void> {
   await expect(page.locator('.assignment-team').nth(1)).toHaveText(spec.right.name);
   await page.getByRole('button', { name: /^(Start|Resume) scoring$/ }).click();
 
+  await chooseScoringLayout(page);
   const lineup = page.getByRole('heading', { name: 'Who is starting?' });
   const scoresheet = page.getByText('Tossup 1 of 20', { exact: true });
 
@@ -202,6 +204,7 @@ test.describe('a server that speaks only QBTCP', () => {
       mimeType: 'application/json',
       buffer: Buffer.from(JSON.stringify(assignmentFor(4))),
     });
+    await chooseScoringLayout(page);
     const lineupHeading = page.getByRole('heading', { name: 'Who is starting?' });
     if (await lineupHeading.count()) {
       await expect(lineupHeading).toBeVisible();

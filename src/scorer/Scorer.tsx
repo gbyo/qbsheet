@@ -101,7 +101,8 @@ import canApplyScoreEvent from '../scoring/canApplyScoreEvent';
 import { attachScorerRecovery } from './ScorerRecovery';
 import useRoomClock from './useRoomClock';
 import usePlayerSeating from './usePlayerSeating';
-import { orderBySeating } from './PlayerSeating';
+import { orderBySeating, PlayerSeating, reseatLineup } from './PlayerSeating';
+import { sameMembership } from './LineupEditing';
 import useScreenWakeLock from './useScreenWakeLock';
 import {
   exportRoomClocks,
@@ -114,10 +115,23 @@ import { createQbsheetBackup, IQbsheetBackup } from './QBSheetBackup';
 import useScorerKeyboard from './useScorerKeyboard';
 import KeyboardMap, { KeyboardMapContext } from './KeyboardMap';
 import KeyboardStatus, { type KeyboardStatus as IKeyboardStatus } from './KeyboardStatus';
-import { availableActionKeys, keyboardActionNames, sequenceLegend, bonusKeyLegend } from './KeyboardScoring';
+import {
+  availableActionKeys,
+  bonusKeyLegend,
+  bonusPartKeyLegend,
+  keyboardActionNames,
+  sequenceLegend,
+  type BonusKeyboardStage,
+} from './KeyboardScoring';
 import { rulingLabel, unreachableAnswerTypes } from './tossupRulings';
 import { setKeyboardEnabled } from './keyboardPreference';
 import useKeyboardEnabled from './useKeyboardEnabled';
+import TableView from './TableView';
+import { ScoringView, setScoringView } from './scoringViewPreference';
+import useScoringView from './useScoringView';
+import ScoringLayoutSwitcher from './ScoringLayoutSwitcher';
+import ScoringLayoutDialog from './ScoringLayoutDialog';
+import { rememberScoringLayoutChoice, scoringLayoutChosen } from './scoringLayoutPrompt';
 import {
   ConnectionDetailDialog,
   IScorerAlert,
@@ -133,7 +147,7 @@ import MotionNumber, {
   noBuzzAcknowledgementMotionMs,
   recentMotionMs,
 } from './ScoringMotion';
-import { bouncebackNeedsTypedEntry, bouncebackOptions, regularBonusTotals } from './bonusOptions';
+import { bonusPartResultTotals, bouncebackOptions, regularBonusTotals } from './bonusOptions';
 import { extraTimeoutsGranted, substitutionAllowed } from '../scoring/ProcedureExceptions';
 import removeOvertime, { overtimeQuestionNumbers, overtimeRemovalNote } from '../scoring/overtimeCorrection';
 import { canonicalSideForDisplay, displaySideForCanonical, mapSides } from './DisplaySideMapping';
@@ -294,6 +308,7 @@ type OpenDialog =
   | 'connection'
   | 'scoring-rules'
   | 'export'
+  | 'scoring-layout'
   | 'procedure'
   | null;
 
@@ -334,10 +349,35 @@ export const operationNoticeMs = 3000;
 /** How long the local recovery explanation stays before getting out of the way of the scoresheet. */
 export const recoveryNoticeMs = 15_000;
 
+/**
+ * One row of the snapshot of a totals panel: a team's choices and the one that was pressed.
+ *
+ * Rows rather than a single option list, because the bounceback panel has two teams on it and the
+ * copy left behind has to show what the scorekeeper was actually looking at when they finished.
+ */
+interface IBonusExitRow {
+  /** The team the row belongs to, omitted where there is only one and the title already names it. */
+  label?: string;
+  options: number[];
+  selected: number | null;
+}
+
+interface IBonusExitField {
+  label: string;
+  value: number;
+}
+
 type BonusExitContent =
-  | { kind: 'choices'; options: number[]; selected: number }
-  | { kind: 'typed'; fieldLabel: string; selected: number }
-  | { kind: 'parts'; parts: IBonusPartResult[]; pointsPerPart: number; bounceBack: boolean };
+  | { kind: 'choices'; rows: IBonusExitRow[] }
+  | { kind: 'typed'; fields: IBonusExitField[] }
+  | {
+      kind: 'parts';
+      parts: IBonusPartResult[];
+      pointsPerPart: number;
+      bounceBack: boolean;
+      controllingTeamName: string;
+      opponentName: string;
+    };
 
 interface IBonusExit {
   token: number;
@@ -346,7 +386,16 @@ interface IBonusExit {
   content: BonusExitContent;
 }
 
-/** An inert snapshot of the prompt that committed the bonus, kept intact for its brief exit. */
+/**
+ * An inert snapshot of the prompt that committed the bonus, kept intact for its brief exit.
+ *
+ * Presentation only: every label is a data attribute painted by CSS, so the copy on its way out
+ * cannot be read as text, found by a query, or pressed. The bonus is already recorded and the next
+ * phase is already underneath — this is the acknowledgement that the whole thing landed, shown where
+ * the scorekeeper's eyes already are rather than in a toast somewhere else on the screen. For a part
+ * breakdown that means the teams named across the top and the outcome chosen for each part, which is
+ * exactly what was just answered.
+ */
 function BonusExitPrompt({ exit }: { exit: IBonusExit }) {
   const content = exit.content;
   return (
@@ -362,35 +411,55 @@ function BonusExitPrompt({ exit }: { exit: IBonusExit }) {
           <span className="scorer-prompt-context">{exit.context}</span>
         </p>
         {content.kind === 'choices' && (
-          <div className="scorer-choices">
-            {content.options.map((points) => (
-              <span
-                key={points}
-                className={`scorer-choice${points === content.selected ? ' is-selected' : ''}`}
-                data-presentation-label={points}
-              />
+          <div className="scorer-bonus-totals">
+            {content.rows.map((row, index) => (
+              <div key={row.label ?? index} className="scorer-bonus-total-row">
+                {row.label !== undefined && (
+                  <span className="scorer-bonus-total-label" data-presentation-label={row.label} />
+                )}
+                <div className="scorer-choices">
+                  {row.options.map((points) => (
+                    <span
+                      key={points}
+                      className={`scorer-choice${points === row.selected ? ' is-selected' : ''}`}
+                      data-presentation-label={points}
+                    />
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
         )}
         {content.kind === 'typed' && (
-          <div className="scorer-inline-form">
-            <label>
-              {content.fieldLabel}
-              <input type="number" value={content.selected} readOnly disabled />
-            </label>
-            <span className="scorer-choice is-selected" data-presentation-label="Record" />
+          <div className="scorer-bonus-typed">
+            {content.fields.map((field) => (
+              <div key={field.label} className="scorer-bonus-typed-team">
+                <label>
+                  {field.label}
+                  <input type="number" value={field.value} readOnly disabled />
+                </label>
+              </div>
+            ))}
+            <span className="scorer-choice is-selected" data-presentation-label="Record bonus" />
           </div>
         )}
         {content.kind === 'parts' &&
           (() => {
-            const controlledTotal = content.parts.reduce((sum, part) => sum + part.controlledPoints, 0);
-            const bouncebackTotal = content.parts.reduce(
-              (sum, part) => sum + (part.bouncebackPoints ?? 0),
-              0,
-            );
+            const totals = bonusPartResultTotals(content.parts);
             return (
               <div className="scorer-bonus-parts">
-                <ol className="scorer-part-list">
+                <div className={content.bounceBack ? 'scorer-part-head' : 'scorer-part-head is-two-way'}>
+                  <span />
+                  <span
+                    className="scorer-part-column"
+                    data-presentation-label={content.controllingTeamName}
+                  />
+                  {content.bounceBack && (
+                    <span className="scorer-part-column" data-presentation-label={content.opponentName} />
+                  )}
+                  <span />
+                </div>
+                <div className="scorer-part-list">
                   {content.parts.map((part, index) => {
                     const outcome =
                       part.controlledPoints > 0
@@ -399,38 +468,39 @@ function BonusExitPrompt({ exit }: { exit: IBonusExit }) {
                           ? 'bounceback'
                           : 'missed';
                     return (
-                      <li key={index} className="scorer-part-row">
+                      <div
+                        key={index}
+                        className={
+                          content.bounceBack
+                            ? 'scorer-part-row is-answered'
+                            : 'scorer-part-row is-two-way is-answered'
+                        }
+                      >
                         <span className="scorer-part-label" data-presentation-label={`Part ${index + 1}`} />
-                        <span className="scorer-choices">
+                        <span
+                          className={`scorer-choice${outcome === 'controlled' ? ' is-selected' : ''}`}
+                          data-presentation-label={`+${content.pointsPerPart}`}
+                        />
+                        {content.bounceBack && (
                           <span
-                            className={`scorer-choice${outcome === 'controlled' ? ' is-selected' : ''}`}
+                            className={`scorer-choice${outcome === 'bounceback' ? ' is-selected' : ''}`}
                             data-presentation-label={`+${content.pointsPerPart}`}
                           />
-                          {content.bounceBack && (
-                            <span
-                              className={`scorer-choice${outcome === 'bounceback' ? ' is-selected' : ''}`}
-                              data-presentation-label="Bounce"
-                            />
-                          )}
-                          <span
-                            className={`scorer-choice${outcome === 'missed' ? ' is-selected' : ''}`}
-                            data-presentation-label="Miss"
-                          />
-                        </span>
-                      </li>
+                        )}
+                        <span
+                          className={`scorer-choice${outcome === 'missed' ? ' is-selected' : ''}`}
+                          data-presentation-label="No points"
+                        />
+                      </div>
                     );
                   })}
-                </ol>
+                </div>
                 <p
                   className="scorer-part-total"
-                  data-presentation-label={`${controlledTotal}${
-                    content.bounceBack && bouncebackTotal > 0 ? ` · ${bouncebackTotal} bounced back` : ''
+                  data-presentation-label={`${content.controllingTeamName} ${totals.controlled}${
+                    content.bounceBack ? ` · ${content.opponentName} ${totals.bounceback}` : ''
                   }`}
                 />
-                <div className="scorer-choices">
-                  <span className="scorer-choice is-selected" data-presentation-label="Record parts" />
-                  <span className="scorer-action" data-presentation-label="Back to totals" />
-                </div>
               </div>
             );
           })()}
@@ -636,18 +706,38 @@ export default function Scorer(props: IScorerProps) {
    */
   const keyboardEnabled = useKeyboardEnabled();
   /**
-   * Which set of choices the bonus is currently asking for, reported up by `BonusPrompt`.
+   * Which layout this scorekeeper is scoring in.
    *
-   * The legend has to change when the bonus does — showing seat sequences while a bounceback is on screen
-   * would be showing bindings that do nothing — and the choices live in that component with its own
-   * state. Reporting the stage upward is smaller than lifting the state, and keeps the shortcut in the
-   * same file as the buttons it stands in for.
+   * Presentation only, and beside the keyboard preference deliberately: both belong to the device,
+   * neither reaches the game. The table is handed the display-mapped state below and the same
+   * callbacks `TeamPanel` gets, so nothing about what is recorded depends on this value.
    */
-  const [bonusStage, setBonusStage] = useState<{
-    title: string;
-    options: number[];
-    cancellable: boolean;
-  } | null>(null);
+  const scoringLayout = useScoringView();
+  /**
+   * Whether this game still has to be asked which layout to score it in.
+   *
+   * Decided once, from the journal as it was when the scoresheet opened. An empty journal is a game
+   * nobody has scored yet, which is the only moment a modal costs nothing; anything recovered,
+   * reloaded or already in progress is left alone. See `scoringLayoutPrompt` for why the answer is
+   * remembered per game rather than only per device.
+   */
+  const [layoutPromptOpen, setLayoutPromptOpen] = useState(
+    () => events.events.length === 0 && !scoringLayoutChosen(gameKey),
+  );
+  /** True while the room is putting the tables in the order it is actually sitting in. */
+  const [arrangingTable, setArrangingTable] = useState(false);
+  // Arranging is something only the table can do, so leaving the table ends it.
+  if (arrangingTable && scoringLayout !== 'table') setArrangingTable(false);
+  /**
+   * What the bonus is currently asking for, reported up by `BonusPrompt`.
+   *
+   * The legend has to change when the bonus does — showing seat sequences while a bonus part is on
+   * screen would be showing bindings that do nothing — and the choices live in that component with its
+   * own state. Reporting the stage upward is smaller than lifting the state, and keeps the shortcut in
+   * the same file as the buttons it stands in for. It is a union rather than a list of numbers because
+   * a part stage is a genuinely different question from a totals stage, and the legend has to say which.
+   */
+  const [bonusStage, setBonusStage] = useState<BonusKeyboardStage | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const submitInFlight = useRef(false);
   const [submitResult, setSubmitResult] = useState<IScorerSubmitResult | null>(null);
@@ -1250,40 +1340,61 @@ export default function Scorer(props: IScorerProps) {
         ...payload,
       });
       if (accepted) {
+        /*
+         * The snapshot is of the panel that was on screen, not of a generic bonus. A part breakdown
+         * leaves the part grid with its teams and its chosen outcomes; a totals panel with
+         * bouncebacks leaves both rows, because both were visible when the last press landed.
+         */
+        const context = `Q${phase.questionNumber}`;
         if (payload.parts) {
           setBonusExit({
             token: nextTransientToken(),
             title: `${controllingTeamName} bonus`,
-            context: `Q${phase.questionNumber}`,
+            context,
             content: {
               kind: 'parts',
               parts: payload.parts,
               pointsPerPart: format.bonus.pointsPerPart ?? 0,
               bounceBack: format.bonus.bounceBack,
+              controllingTeamName,
+              opponentName,
             },
           });
         } else {
           const controlledPoints = payload.controlledPoints ?? 0;
-          const completingBounceback = format.bonus.bounceBack && payload.bouncebackPoints !== undefined;
-          const options = completingBounceback
-            ? bouncebackNeedsTypedEntry(format.bonus, controlledPoints)
-              ? null
-              : bouncebackOptions(format.bonus, controlledPoints)
-            : regularBonusTotals(format.bonus);
-          const selected = completingBounceback ? (payload.bouncebackPoints as number) : controlledPoints;
+          const bouncebackPoints = payload.bouncebackPoints ?? 0;
+          const bouncesBack = format.bonus.bounceBack;
+          const totals = regularBonusTotals(format.bonus);
+          const opponentTotals =
+            bouncesBack && totals !== null ? bouncebackOptions(format.bonus, controlledPoints) : null;
           setBonusExit({
             token: nextTransientToken(),
-            title: completingBounceback ? `${opponentName} bounceback` : `${controllingTeamName} bonus`,
-            context: completingBounceback
-              ? `Q${phase.questionNumber} · ${controllingTeamName} took ${controlledPoints}`
-              : `Q${phase.questionNumber}`,
-            content: options
-              ? { kind: 'choices', options, selected }
-              : {
-                  kind: 'typed',
-                  fieldLabel: completingBounceback ? 'Bounceback points' : 'Bonus points',
-                  selected,
-                },
+            title: `${controllingTeamName} bonus`,
+            context,
+            content:
+              totals !== null
+                ? {
+                    kind: 'choices',
+                    rows: [
+                      {
+                        label: bouncesBack ? controllingTeamName : undefined,
+                        options: totals,
+                        selected: controlledPoints,
+                      },
+                      ...(opponentTotals
+                        ? [{ label: opponentName, options: opponentTotals, selected: bouncebackPoints }]
+                        : []),
+                    ],
+                  }
+                : {
+                    kind: 'typed',
+                    fields: [
+                      { label: 'Bonus points', value: controlledPoints },
+                      ...(bouncesBack
+                        ? [{ label: 'Points from missed parts', value: bouncebackPoints }]
+                        : []),
+                    ],
+                  },
           });
         }
       }
@@ -1471,6 +1582,98 @@ export default function Scorer(props: IScorerProps) {
     [displaySideMapping, displayedTeams, seating.seating],
   );
 
+  /**
+   * Keeping the table standing across a lineup change nobody described seat by seat.
+   *
+   * A one-for-one substitution already says who sat down where — `seating.substitute` is called at the
+   * moment the room says "eleven for four", and by the time this runs there is nothing left to work
+   * out. A bulk change is the other case: the event stores the complete lineup and deliberately says
+   * nothing about physical seats, because a seat is not scoring history and putting one in a
+   * substitution event would be recording a fact nobody stated.
+   *
+   * So the seats are reconciled here instead — survivors keep their chairs, the emptied ones are
+   * filled in order — and when two or more chairs changed hands the scorekeeper is told to check it
+   * rather than left to discover it. See `reseatLineup`.
+   *
+   * Canonical sides throughout: this is the seat order itself, not a view of it.
+   */
+  const [tableOrderCheck, setTableOrderCheck] = useState<{ token: number } | null>(null);
+  const previousActivePlayers = useRef<Record<LeftOrRight, readonly string[]> | null>(null);
+  useEffect(() => {
+    const next: Record<LeftOrRight, readonly string[]> = {
+      left: game.left.activePlayers,
+      right: game.right.activePlayers,
+    };
+    const previous = previousActivePlayers.current;
+    previousActivePlayers.current = next;
+    // Nothing to preserve on the first render, and nothing to preserve before anybody is on the floor.
+    if (previous === null) return;
+
+    const rosterNames: PlayerSeating = {
+      left: game.left.players.map((player) => player.name),
+      right: game.right.players.map((player) => player.name),
+    };
+    const visibleOrders: Partial<PlayerSeating> = {};
+    let bulk = false;
+    for (const side of ['left', 'right'] as LeftOrRight[]) {
+      if (sameMembership(previous[side], next[side])) continue;
+      const seated = orderBySeating(next[side], seating.seating[side], (name) => name);
+      const result = reseatLineup(seating.seating[side], previous[side], next[side]);
+      if (result.vacated >= 2) bulk = true;
+      // A change the seating store has already absorbed leaves the order it would produce, so
+      // writing it again would be a storage write per substitution for no change at all.
+      if (result.seats.length !== seated.length || result.seats.some((name, seat) => name !== seated[seat])) {
+        visibleOrders[side] = result.seats;
+      }
+    }
+    if (Object.keys(visibleOrders).length > 0) seating.arrange(rosterNames, visibleOrders);
+    if (bulk) setTableOrderCheck({ token: nextTransientToken() });
+  }, [game.left, game.right, nextTransientToken, seating]);
+
+  /**
+   * Nobody on this device has said what order the room is sitting in.
+   *
+   * The starting-lineup prompt writes a seating preference when it confirms, so this is only ever
+   * true for the game it never appears for: a roster of exactly the maximum, everybody starting
+   * automatically, and a table whose order is therefore whatever the roster happened to be in.
+   */
+  const arrangementUnconfirmed = seating.seating.left.length === 0 && seating.seating.right.length === 0;
+  /*
+   * Whether the room has already answered that question.
+   *
+   * Held here rather than in `TableView`, which is unmounted every time the scorekeeper looks at the
+   * scoresheet: a hint that came back after being dismissed would be a hint nobody had really been
+   * asked. Presentation only, and deliberately not persisted — it is true for this sitting.
+   */
+  const [tableHintDismissed, setTableHintDismissed] = useState(false);
+
+  /**
+   * Whether anything modal currently owns the screen.
+   *
+   * The layout question is not one of the scorer's ordinary dialogs — it opens on its own, from the
+   * state of the game rather than from a menu — but it is a dialog, and everything that has to stand
+   * back for one has to stand back for it: the keyboard layer, the ruling picker, the legend.
+   */
+  const layoutChooserOpen = layoutPromptOpen || dialog === 'scoring-layout';
+  const anyDialogOpen = dialog !== null || layoutPromptOpen;
+
+  /**
+   * The layout question, answered.
+   *
+   * One press does all of it: the layout changes, the device remembers it for the next game, and
+   * this game is marked as asked so a reload does not ask again. Dismissing without choosing is the
+   * same answer with the preselected layout, which is why it records the same acknowledgement.
+   */
+  const answerLayoutPrompt = useCallback(
+    (layout?: ScoringView) => {
+      if (layout) setScoringView(layout);
+      rememberScoringLayoutChoice(gameKey);
+      setLayoutPromptOpen(false);
+      setDialog((current) => (current === 'scoring-layout' ? null : current));
+    },
+    [gameKey],
+  );
+
   /** The seat a keystroke just scored into, flashed briefly and then forgotten. */
   const [keyEcho, setKeyEcho] = useState<{ side: LeftOrRight; seat: number } | null>(null);
   useEffect(() => {
@@ -1504,7 +1707,7 @@ export default function Scorer(props: IScorerProps) {
     negsAvailable: displayedNegsAvailable,
     eligible: displayedEligible,
     seatedPlayers,
-    dialogOpen: dialog !== null,
+    dialogOpen: anyDialogOpen,
     noBuzzAllowed: phase.kind === 'tossup' && !playBlockedByProtest,
     seatLayoutKey: displaySideMapping.left,
     // The same callbacks the buttons are given. A keystroke cannot reach a code path a tap cannot.
@@ -1542,17 +1745,30 @@ export default function Scorer(props: IScorerProps) {
    * has the keyboard: a dialog takes everything, then the bonus, then the tossup.
    */
   const keyboardContext = useMemo<KeyboardMapContext>(() => {
-    if (dialog !== null) return { kind: 'inactive', reason: 'Finish what is open first.' };
+    if (anyDialogOpen) return { kind: 'inactive', reason: 'Finish what is open first.' };
     if (bonusStage !== null) {
-      return {
-        kind: 'choices',
-        title: bonusStage.title,
-        choices: bonusKeyLegend(bonusStage.options),
-        cancellable: bonusStage.cancellable,
-      };
+      /*
+       * Both bonus stages render as the same strip of key/meaning rows, but what a row means is not
+       * the same thing: a totals row is a value and a part row is who scored it. The meanings are
+       * built where the distinction is still in the type, so the legend names the actual teams
+       * rather than listing numbers that would not answer the question being asked.
+       */
+      return bonusStage.kind === 'part'
+        ? {
+            kind: 'choices',
+            title: bonusStage.title,
+            choices: bonusPartKeyLegend(bonusStage.choices),
+            cancellable: false,
+          }
+        : {
+            kind: 'choices',
+            title: bonusStage.title,
+            choices: bonusKeyLegend(bonusStage.options),
+            cancellable: bonusStage.cancellable,
+          };
     }
     if (phase.kind === 'bonus') {
-      // A bonus whose total is typed rather than chosen. Its digits belong to the number field.
+      // A bonus whose totals are typed rather than chosen. Its digits belong to the number fields.
       return { kind: 'inactive', reason: 'Type the bonus total.' };
     }
     if (phase.kind !== 'tossup') return { kind: 'inactive', reason: 'No tossup is live.' };
@@ -1562,7 +1778,7 @@ export default function Scorer(props: IScorerProps) {
       actions: sequenceLegend(format, anyNegAvailable),
       unreachable: unreachableAnswerTypes(format).map(rulingLabel),
     };
-  }, [dialog, bonusStage, phase.kind, playBlockedByProtest, format, anyNegAvailable]);
+  }, [anyDialogOpen, bonusStage, phase.kind, playBlockedByProtest, format, anyNegAvailable]);
 
   const lineupChangeAllowed = lineupChangeAllowedAtPhase(substitutionPolicy(procedure), phase.kind);
   /**
@@ -1835,6 +2051,18 @@ export default function Scorer(props: IScorerProps) {
       changes: attempt.changes,
       summary: attempt.summary,
     });
+    /*
+     * The seat follows the corrected name.
+     *
+     * The seating preference is keyed by name, so leaving it alone would point it at a spelling
+     * nobody has any more — and `orderBySeating` puts a name it does not recognize at the end. A
+     * scorekeeper who fixed a typo would watch that player cross the room. Not an event, because
+     * nobody moved; the correction that renamed them is already in the history.
+     *
+     * After the write and not before it: a host that refuses the correction must not be left with a
+     * table arranged around a name the roster never took.
+     */
+    seating.rename(side, from, to);
   };
 
   /**
@@ -2396,58 +2624,163 @@ export default function Scorer(props: IScorerProps) {
       {phase.kind !== 'lineup' && phase.kind !== 'complete' && (
         <div className="scorer-body">
           <main className="scorer-main">
-            <div className="scorer-teams">
-              <TeamPanel
-                key={displaySideMapping.left}
-                format={format}
-                team={displayedTeams.left}
-                seatOrder={seating.seating[displaySideMapping.left]}
-                flashSeat={keyEcho?.side === 'left' ? keyEcho.seat : undefined}
-                scoringEnabled={scoringEnabled}
-                eligible={displayedEligible('left')}
-                negsAvailable={displayedNegsAvailable('left')}
-                timeoutsUsed={
-                  (procedure?.timeoutsPerTeam ?? 0) > 0 ? game.timeouts[displaySideMapping.left] : undefined
-                }
-                timeoutsPerTeam={
-                  (procedure?.timeoutsPerTeam ?? 0) > 0 ? procedure?.timeoutsPerTeam : undefined
-                }
-                onBuzz={(playerName, answerType) => recordDisplayedBuzz('left', playerName, answerType)}
-                onWrongNoPenalty={(playerName) => recordDisplayedWrongNoPenalty('left', playerName)}
-                onSubstitute={(outgoing, incoming) =>
-                  substituteFromRow(displaySideMapping.left, outgoing, incoming)
-                }
-                benchPlayers={benchFor(displaySideMapping.left)}
-                substitutionAllowed={lineupChangeAllowed || lineupChangeAuthorized[displaySideMapping.left]}
-                substitutionBlockedReason={lineupChangeReason}
-                substitutionQuestionNumber={lineupQuestion}
-              />
-              <TeamPanel
-                key={displaySideMapping.right}
-                format={format}
-                team={displayedTeams.right}
-                seatOrder={seating.seating[displaySideMapping.right]}
-                flashSeat={keyEcho?.side === 'right' ? keyEcho.seat : undefined}
-                scoringEnabled={scoringEnabled}
-                eligible={displayedEligible('right')}
-                negsAvailable={displayedNegsAvailable('right')}
-                timeoutsUsed={
-                  (procedure?.timeoutsPerTeam ?? 0) > 0 ? game.timeouts[displaySideMapping.right] : undefined
-                }
-                timeoutsPerTeam={
-                  (procedure?.timeoutsPerTeam ?? 0) > 0 ? procedure?.timeoutsPerTeam : undefined
-                }
-                onBuzz={(playerName, answerType) => recordDisplayedBuzz('right', playerName, answerType)}
-                onWrongNoPenalty={(playerName) => recordDisplayedWrongNoPenalty('right', playerName)}
-                onSubstitute={(outgoing, incoming) =>
-                  substituteFromRow(displaySideMapping.right, outgoing, incoming)
-                }
-                benchPlayers={benchFor(displaySideMapping.right)}
-                substitutionAllowed={lineupChangeAllowed || lineupChangeAuthorized[displaySideMapping.right]}
-                substitutionBlockedReason={lineupChangeReason}
-                substitutionQuestionNumber={lineupQuestion}
-              />
+            {/*
+              The switch, and — in the table layout — the one editing action the table has.
+
+              Outside the choice below on purpose: a control that moved when it was used would make
+              switching back a hunt. Two visible options rather than a toggle naming the current one,
+              for the reason `ScoringLayoutSwitcher` gives. Not in the footer either: that row is
+              Undo, Redo, Players and Flag, all of which do something to the game, and this does
+              something to the screen.
+            */}
+            <div className="scorer-layout-bar">
+              <span className="scorer-layout-bar-label" aria-hidden="true">
+                Scoring layout
+              </span>
+              <ScoringLayoutSwitcher value={scoringLayout} onChange={(layout) => setScoringView(layout)} />
+              {scoringLayout === 'table' && !submitting && (
+                <button
+                  type="button"
+                  className="scorer-text-action scorer-layout-bar-action"
+                  onClick={() => {
+                    setArrangingTable((current) => !current);
+                    setTableHintDismissed(true);
+                    setTableOrderCheck(null);
+                  }}
+                >
+                  {arrangingTable ? 'Done arranging' : 'Arrange table'}
+                </button>
+              )}
             </div>
+
+            {/*
+              One surface or the other, never both.
+
+              The table is not a second scorer: it is handed the same display-mapped teams, the same
+              seat order, the same eligibility questions and the same two record callbacks the panels
+              below are given. Switching between them changes what is drawn and nothing else, which is
+              why the choice is a device preference rather than anything the game knows about. Keyed,
+              so the outgoing tree is unmounted rather than left running behind the one on screen.
+            */}
+            {scoringLayout === 'table' ? (
+              <TableView
+                key="table"
+                format={format}
+                teams={displayedTeams}
+                seatedPlayers={seatedPlayers}
+                scoringEnabled={scoringEnabled}
+                eligible={displayedEligible}
+                negsAvailable={displayedNegsAvailable}
+                flashSeat={keyEcho}
+                onBuzz={recordDisplayedBuzz}
+                onWrongNoPenalty={recordDisplayedWrongNoPenalty}
+                sideLayoutKey={displaySideMapping.left}
+                dialogOpen={anyDialogOpen}
+                timeouts={
+                  (procedure?.timeoutsPerTeam ?? 0) > 0
+                    ? mapSides(game.timeouts, displaySideMapping)
+                    : undefined
+                }
+                timeoutsPerTeam={
+                  (procedure?.timeoutsPerTeam ?? 0) > 0 ? procedure?.timeoutsPerTeam : undefined
+                }
+                arranging={arrangingTable}
+                onArrangingChange={setArrangingTable}
+                arrangementUnconfirmed={arrangementUnconfirmed && !tableHintDismissed}
+                onDismissArrangementHint={() => setTableHintDismissed(true)}
+                lineupOrderCheck={tableOrderCheck}
+                onDismissOrderCheck={() => setTableOrderCheck(null)}
+                onArrangeSeats={
+                  submitting
+                    ? undefined
+                    : (displaySide, visibleNames) => {
+                        // The side a scorekeeper touched, mapped back to the team the game stores,
+                        // exactly as every scoring callback here does. `seating.arrange` is the one
+                        // physical seat order — the same one the scoresheet rows and the keyboard's
+                        // seat mapping read — so a drag on the table moves all three or none.
+                        const side = canonicalForDisplay(displaySide);
+                        seating.arrange(
+                          {
+                            left: game.left.players.map((player) => player.name),
+                            right: game.right.players.map((player) => player.name),
+                          },
+                          { [side]: [...visibleNames] },
+                        );
+                      }
+                }
+                onConfirmArrangement={() => {
+                  // The room saying the roster order is the table order. A seating preference and
+                  // nothing else: no event, no lineup, nothing that reaches the scoresheet.
+                  const canonicalSeats: Partial<PlayerSeating> = {};
+                  canonicalSeats[canonicalForDisplay('left')] = [...seatedPlayers.left];
+                  canonicalSeats[canonicalForDisplay('right')] = [...seatedPlayers.right];
+                  seating.arrange(
+                    {
+                      left: game.left.players.map((player) => player.name),
+                      right: game.right.players.map((player) => player.name),
+                    },
+                    canonicalSeats,
+                  );
+                }}
+              />
+            ) : (
+              <div key="scoresheet" className="scorer-teams">
+                <TeamPanel
+                  key={displaySideMapping.left}
+                  format={format}
+                  team={displayedTeams.left}
+                  seatOrder={seating.seating[displaySideMapping.left]}
+                  flashSeat={keyEcho?.side === 'left' ? keyEcho.seat : undefined}
+                  scoringEnabled={scoringEnabled}
+                  eligible={displayedEligible('left')}
+                  negsAvailable={displayedNegsAvailable('left')}
+                  timeoutsUsed={
+                    (procedure?.timeoutsPerTeam ?? 0) > 0 ? game.timeouts[displaySideMapping.left] : undefined
+                  }
+                  timeoutsPerTeam={
+                    (procedure?.timeoutsPerTeam ?? 0) > 0 ? procedure?.timeoutsPerTeam : undefined
+                  }
+                  onBuzz={(playerName, answerType) => recordDisplayedBuzz('left', playerName, answerType)}
+                  onWrongNoPenalty={(playerName) => recordDisplayedWrongNoPenalty('left', playerName)}
+                  onSubstitute={(outgoing, incoming) =>
+                    substituteFromRow(displaySideMapping.left, outgoing, incoming)
+                  }
+                  benchPlayers={benchFor(displaySideMapping.left)}
+                  substitutionAllowed={lineupChangeAllowed || lineupChangeAuthorized[displaySideMapping.left]}
+                  substitutionBlockedReason={lineupChangeReason}
+                  substitutionQuestionNumber={lineupQuestion}
+                />
+                <TeamPanel
+                  key={displaySideMapping.right}
+                  format={format}
+                  team={displayedTeams.right}
+                  seatOrder={seating.seating[displaySideMapping.right]}
+                  flashSeat={keyEcho?.side === 'right' ? keyEcho.seat : undefined}
+                  scoringEnabled={scoringEnabled}
+                  eligible={displayedEligible('right')}
+                  negsAvailable={displayedNegsAvailable('right')}
+                  timeoutsUsed={
+                    (procedure?.timeoutsPerTeam ?? 0) > 0
+                      ? game.timeouts[displaySideMapping.right]
+                      : undefined
+                  }
+                  timeoutsPerTeam={
+                    (procedure?.timeoutsPerTeam ?? 0) > 0 ? procedure?.timeoutsPerTeam : undefined
+                  }
+                  onBuzz={(playerName, answerType) => recordDisplayedBuzz('right', playerName, answerType)}
+                  onWrongNoPenalty={(playerName) => recordDisplayedWrongNoPenalty('right', playerName)}
+                  onSubstitute={(outgoing, incoming) =>
+                    substituteFromRow(displaySideMapping.right, outgoing, incoming)
+                  }
+                  benchPlayers={benchFor(displaySideMapping.right)}
+                  substitutionAllowed={
+                    lineupChangeAllowed || lineupChangeAuthorized[displaySideMapping.right]
+                  }
+                  substitutionBlockedReason={lineupChangeReason}
+                  substitutionQuestionNumber={lineupQuestion}
+                />
+              </div>
+            )}
 
             {/* After the teams and before the control bar, so it sits beside the rulings it describes
                 without joining the two-column grid they are laid out in. */}
@@ -2592,7 +2925,6 @@ export default function Scorer(props: IScorerProps) {
                   key={phase.questionNumber}
                   format={format}
                   controllingTeamName={phase.team === 'left' ? game.left.name : game.right.name}
-                  controllingSide={displayForCanonical(phase.team)}
                   opponentName={phase.team === 'left' ? game.right.name : game.left.name}
                   questionNumber={phase.questionNumber}
                   onRecord={recordBonus}
@@ -3072,6 +3404,19 @@ export default function Scorer(props: IScorerProps) {
           displaySides={displaySideMapping}
           onSwapSides={displaySideState.swap}
           onClose={() => setDialog(null)}
+        />
+      )}
+      {/*
+        Which layout, asked once a game.
+
+        The same dialog from both routes: automatically for a game nobody has scored yet, and from
+        the Game menu whenever somebody wants to read what the two are. See `scoringLayoutPrompt`.
+      */}
+      {layoutChooserOpen && (
+        <ScoringLayoutDialog
+          value={scoringLayout}
+          onChoose={answerLayoutPrompt}
+          onClose={() => answerLayoutPrompt()}
         />
       )}
       {dialog === 'export' && (

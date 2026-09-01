@@ -13,6 +13,7 @@ import {
   moveWithin,
   orderBySeating,
   PlayerSeating,
+  renameSeatPlayer,
   saveSeating,
   takeSeat,
 } from './PlayerSeating';
@@ -33,6 +34,14 @@ export interface IPlayerSeatingApi {
   arrange: (rosterNames: PlayerSeating, visibleOrders: Partial<PlayerSeating>) => void;
   /** Seat the incoming player where the outgoing one was. */
   substitute: (side: LeftOrRight, rosterNames: readonly string[], outgoing: string, incoming: string) => void;
+  /**
+   * Follow a corrected name to the seat its owner is already in.
+   *
+   * The preference is keyed by name, so a correction that did not reach it would move the corrected
+   * player to the end of the table. Not an event and never one: the person did not move, and the
+   * scoresheet already recorded the correction that renamed them.
+   */
+  rename: (side: LeftOrRight, from: string, to: string) => void;
 }
 
 export default function usePlayerSeating(gameKey: string): IPlayerSeatingApi {
@@ -87,8 +96,24 @@ export default function usePlayerSeating(gameKey: string): IPlayerSeatingApi {
     [commit, seating],
   );
 
+  const rename = useCallback(
+    (side: LeftOrRight, from: string, to: string) => {
+      const next = renameSeatPlayer(seating[side], from, to);
+      // A side nobody has arranged has nothing to rewrite, and writing anyway would create a
+      // preference out of a spelling correction.
+      if (
+        next.length === seating[side].length &&
+        next.every((name, index) => name === seating[side][index])
+      ) {
+        return;
+      }
+      commit({ ...seating, [side]: next });
+    },
+    [commit, seating],
+  );
+
   return useMemo(
-    () => ({ seating, order, move, arrange, substitute }),
-    [seating, order, move, arrange, substitute],
+    () => ({ seating, order, move, arrange, substitute, rename }),
+    [seating, order, move, arrange, substitute, rename],
   );
 }

@@ -16,6 +16,7 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import ScorerHost from '../src/scorer/ScorerHost';
+import { rememberScoringLayoutChoice } from '../src/scorer/scoringLayoutPrompt';
 import scoringRulesToScorekeeperFormat, { CommonRuleSets, ScoringRules } from './rules';
 import { IScorekeeperFormat } from '../src/scoring/ScorekeeperFormat';
 import { IRoomProcedure } from '../src/scoring/RoomProcedure';
@@ -45,9 +46,11 @@ function renderScorer(
   } = {},
 ) {
   gameCounter += 1;
+  const gameKey = `correction-ui-${gameCounter}`;
+  rememberScoringLayoutChoice(gameKey);
   render(
     <ScorerHost
-      gameKey={`correction-ui-${gameCounter}`}
+      gameKey={gameKey}
       format={formatFor()}
       leftTeam={leftTeam}
       rightTeam={rightTeam}
@@ -291,6 +294,7 @@ describe('a correction made offline', () => {
   test('survives a reload, with a disconnected room and a server holding a stale snapshot', async () => {
     gameCounter += 1;
     const gameKey = `offline-correction-${gameCounter}`;
+    rememberScoringLayoutChoice(gameKey);
     const recoverFromServer = vi.fn().mockResolvedValue({});
     const render1 = (
       <ScorerHost

@@ -636,6 +636,119 @@ describe('the bonus', () => {
     expect(screen.getByLabelText('Bonus')).toBeInTheDocument();
   });
 
+  /**
+   * A bonus scored part by part, from the keyboard.
+   *
+   * The digits here are not positions in a row of totals — there is no row of totals on screen. They
+   * answer the same question the buttons do, one part at a time, and the map has to say so in the
+   * names of the teams playing rather than by listing values that would mean nothing.
+   */
+  describe('scored part by part', () => {
+    function bouncebackFile(): File {
+      const base = validPackage();
+      return gameFile({
+        scorekeeperFormat: {
+          ...base.scorekeeperFormat,
+          bonus: { ...base.scorekeeperFormat.bonus, bounceBack: true },
+        },
+      });
+    }
+
+    async function openBounceBonus(): Promise<void> {
+      await openScoringWithKeyboard(bouncebackFile());
+      await pressKey('KeyA');
+      await screen.findByLabelText('Bonus');
+    }
+
+    test('the legend names the current part and both teams by name', async () => {
+      await openBounceBonus();
+
+      const map = screen.getByLabelText('Keyboard scoring');
+      expect(within(map).getByText('Bonus part 1 of 3')).toBeInTheDocument();
+      expect(Array.from(map.querySelectorAll('.scorer-keymap-row'), (row) => row.textContent)).toEqual([
+        '1part 1 to Ninety Six A',
+        '2part 1 to Greenwood',
+        '0no points on part 1',
+      ]);
+      // Seat keys would be bindings that do nothing while the bonus owns the number row.
+      expect(within(map).queryByText('Left')).toBeNull();
+    });
+
+    test('each keystroke answers the active part and the legend moves on with it', async () => {
+      await openBounceBonus();
+
+      await act(async () => {
+        fireEvent.keyDown(document, { code: 'Digit1', key: '1' });
+      });
+
+      // Acknowledged on the part it landed on, exactly as a press would be.
+      const firstRow = screen.getByText('Part 1').closest('.scorer-part-row') as HTMLElement;
+      expect(firstRow).toHaveClass('is-answered');
+      expect(
+        within(firstRow).getByRole('button', { name: 'Part 1 to Ninety Six A, 10 points' }),
+      ).toHaveAttribute('aria-pressed', 'true');
+      expect(screen.getByText('Part 2').closest('.scorer-part-row')).toHaveClass('is-active');
+      expect(
+        within(screen.getByLabelText('Keyboard scoring')).getByText('Bonus part 2 of 3'),
+      ).toBeInTheDocument();
+    });
+
+    test('the last keystroke records exactly one bonus and the game moves on', async () => {
+      await openBounceBonus();
+
+      for (const code of ['Digit1', 'Digit2', 'Digit0']) {
+        await act(async () => {
+          fireEvent.keyDown(document, { code, key: code.replace('Digit', '') });
+        });
+      }
+
+      await waitFor(() => expect(screen.queryByLabelText('Bonus')).toBeNull());
+      // The tossup's 10 plus one part; the opponent's bounced part; nothing else written.
+      expect(leftScore()).toContain('20');
+      expect(rightScore()).toContain('10');
+
+      /*
+       * One event, not three. A single undo takes the whole bonus back to an unanswered prompt —
+       * which it could not do if each part had written something of its own.
+       */
+      await act(async () => {
+        fireEvent.keyDown(document, { code: 'KeyZ', key: 'z', ctrlKey: true });
+      });
+      expect(await screen.findByLabelText('Bonus')).toBeInTheDocument();
+      expect(leftScore()).toContain('10');
+      expect(rightScore()).toContain('0');
+    });
+
+    test('a seat sequence cannot leak through to the tossup while the parts are open', async () => {
+      await openBounceBonus();
+
+      // 8 is a valid seat number and addresses nothing on this stage. It must not arm a seat.
+      await pressSequence(8, 'c');
+
+      expect(screen.getByLabelText('Bonus')).toBeInTheDocument();
+      expect(screen.getByText('Part 1').closest('.scorer-part-row')).toHaveClass('is-active');
+      expect(leftScore()).toContain('10');
+    });
+
+    test('Escape does not erase parts that have already been answered', async () => {
+      await openBounceBonus();
+      await act(async () => {
+        fireEvent.keyDown(document, { code: 'Digit1', key: '1' });
+      });
+
+      await act(async () => {
+        fireEvent.keyDown(document, { code: 'Escape', key: 'Escape' });
+      });
+
+      expect(
+        within(screen.getByText('Part 1').closest('.scorer-part-row') as HTMLElement).getByRole('button', {
+          name: 'Part 1 to Ninety Six A, 10 points',
+        }),
+      ).toHaveAttribute('aria-pressed', 'true');
+      expect(screen.getByLabelText('Bonus')).toBeInTheDocument();
+    });
+  });
+
   test('an irregular bonus is typed, and its digits stay its own', async () => {
     // A format whose bonuses have no fixed per-part value has nothing to enumerate, so the prompt is a
     // number field. Its digits must not also be shortcuts.

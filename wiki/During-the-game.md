@@ -42,8 +42,19 @@ When one team is still eligible, the button reads *`<team>` has no answer*.
 
 ## Score a bonus
 
-QBSheet shows the bonus prompt after a correct tossup answer. Select the result for each part. The
-prompt follows the bonus rules in the format, which include the bounce-back rule.
+QBSheet shows the bonus prompt after a correct tossup answer, and asks for the bonus the way the
+format defines one.
+
+Where bonuses bounce back, the prompt asks who scored each part: the team that took the tossup, the
+other team, or nobody. The totals for both teams are worked out for you and the bonus is recorded as
+soon as the last part has an answer. Choose *Enter totals instead* if you were given the totals
+rather than the parts.
+
+Where bonuses do not bounce back, the prompt offers the totals the format can produce and one press
+records the bonus. *Score by part* is there if you would rather record each part.
+
+A format whose bonus parts are not all worth the same asks for a number for each team instead, since
+there is no fixed part value to offer.
 
 ## Undo a mistake
 
