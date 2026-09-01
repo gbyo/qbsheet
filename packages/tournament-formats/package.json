@@ -1,0 +1,24 @@
+{
+  "name": "@qbsheet/tournament-formats",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Validated portable tournament, QBJ, SQBS, and statistics interchange adapters for QBSheet Director",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest --run tests",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "fflate": "^0.8.3"
+  }
+}
