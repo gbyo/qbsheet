@@ -14,6 +14,10 @@ on:
 permissions:
   contents: read
 
+env:
+  # This cache lives only inside the disposable runner workspace; it is never an Actions cache.
+  NPM_CONFIG_CACHE: ${{ github.workspace }}/.qbtcp-npm-cache
+
 concurrency:
   group: cross-repo-tournament-torture
   cancel-in-progress: false
@@ -21,10 +25,6 @@ concurrency:
 jobs:
   shard:
     name: ${{ matrix.name }}
-    # Scheduled/manual runs can select another repository ref, so keep execution behind the same
-    # environment reviewers used for other untrusted cross-repository code.
-    environment:
-      name: qbtcp-untrusted-interop
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -44,7 +44,8 @@ jobs:
     steps:
       - name: Check out QBSheet
         uses: actions/checkout@v7
-
+        with:
+          persist-credentials: false
       - name: Resolve YellowFruit companion ref
         id: resolve-yellowfruit
         env:
@@ -62,12 +63,15 @@ jobs:
           sha="${remote_line%%$'\t'*}"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
-      - name: Check out YellowFruit companion
-        uses: actions/checkout@v7
-        with:
-          repository: gbyo/yellowfruit-link
-          ref: ${{ steps.resolve-yellowfruit.outputs.sha }}
-          path: yellowfruit-link
+      - name: Fetch YellowFruit companion
+        env:
+          COMPANION_COMMIT: ${{ steps.resolve-yellowfruit.outputs.sha }}
+        run: |
+          set -euo pipefail
+          git init --quiet yellowfruit-link
+          git -C yellowfruit-link fetch --no-tags --depth=1 \
+            https://github.com/gbyo/yellowfruit-link.git "$COMPANION_COMMIT"
+          git -C yellowfruit-link checkout --detach FETCH_HEAD
 
       - name: Set up Node.js
         uses: actions/setup-node@v7

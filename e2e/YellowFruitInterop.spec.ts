@@ -6,20 +6,10 @@
  * checkout is available, proving that the two applications can pair, exchange progress, submit a
  * QBJ result, and leave a durable review record together.
  */
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 import { rounds } from './support/tournamentControl';
+import { chooseScoringLayout } from './support/scoringLayout';
 import { startYellowFruitControl, yellowFruitHarnessAvailable } from './support/yellowfruitControl';
-
-async function chooseScoringLayout(page: Page): Promise<void> {
-  const chooser = page.getByRole('dialog', { name: 'Choose a scoring layout' });
-  const asked = await chooser
-    .waitFor({ state: 'visible', timeout: 2_000 })
-    .then(() => true)
-    .catch(() => false);
-  if (!asked) return;
-  await chooser.getByRole('radio', { name: 'Scoresheet', exact: true }).click();
-  await expect(chooser).toBeHidden();
-}
 
 test.describe('QBSheet against the real YellowFruit QBTCP server', () => {
   test.skip(

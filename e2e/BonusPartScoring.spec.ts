@@ -10,6 +10,7 @@
  */
 import { expect, test, type Page } from '@playwright/test';
 import { validPackage } from '../tests/packages';
+import { chooseScoringLayout } from './support/scoringLayout';
 
 const opponent = 'Greenwood Consolidated Regional';
 
@@ -27,6 +28,7 @@ async function openBounceGame(page: Page): Promise<void> {
     buffer: Buffer.from(JSON.stringify(packageValue)),
   });
 
+  await chooseScoringLayout(page);
   await expect(page.getByRole('heading', { name: 'Who is starting?' })).toBeVisible();
   const prompt = page.getByLabel('Starting lineups');
   for (const player of ['Sarah Mitchell', 'James Okafor']) {
@@ -43,12 +45,12 @@ async function openBounceGame(page: Page): Promise<void> {
   }
   await page.getByRole('button', { name: 'Start game' }).click();
   await page.getByRole('button', { name: 'Sarah Mitchell 10', exact: true }).click();
-  await expect(page.getByLabel('Bonus')).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Bonus' })).toBeVisible();
 }
 
 /** The panel, and the widest thing inside the part grid, measured against each other. */
 async function partLayout(page: Page) {
-  return page.getByLabel('Bonus').evaluate((element) => {
+  return page.getByRole('region', { name: 'Bonus' }).evaluate((element) => {
     const bounds = element.getBoundingClientRect();
     const rows = Array.from(element.querySelectorAll('.scorer-part-row')).map((row) => {
       const box = row.getBoundingClientRect();
@@ -134,7 +136,7 @@ test('answering the parts records one bonus without the rows moving under the po
   await page.getByRole('button', { name: 'No points on part 3' }).click();
 
   // Recorded on the last press, with no Record button in between, and the room already moved on.
-  await expect(page.getByLabel('Bonus')).toBeHidden();
+  await expect(page.getByRole('region', { name: 'Bonus' })).toBeHidden();
   await expect(page.getByLabel('Ninety Six A score')).toHaveText('20');
   await expect(page.getByLabel(`${opponent} score`)).toHaveText('10');
 });
