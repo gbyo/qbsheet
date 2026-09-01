@@ -1,4 +1,5 @@
 import { emptyDirectorState, type DirectorState, directorSchemaVersion } from '../domain';
+import { normalizeTransferState } from '../transfers/model';
 
 const databaseName = 'qbsheet-director';
 const databaseVersion = 1;
@@ -55,6 +56,9 @@ function normalizeState(value: unknown): DirectorState {
     protests: candidate.protests ?? [],
     audit: candidate.audit ?? [],
     qbtcpSessions: candidate.qbtcpSessions ?? [],
+    // A document written before Transfers existed has no `transfers` block at all, and every caller
+    // downstream reads its arrays without checking. Repairing it here keeps that assumption true.
+    transfers: normalizeTransferState(candidate.transfers),
   };
 }
 

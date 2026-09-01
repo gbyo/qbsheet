@@ -3,14 +3,17 @@ import type { DirectorState, TeamGameScore } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
 import { Button, FormField, StateLabel } from '../components/Controls';
 import { PageHeader } from '../components/PageHeader';
+import type { SectionId } from '../app/navigation';
 
 export function ResultsView({
   state,
   controller,
+  onNavigate,
   onAnnounce,
 }: {
   state: DirectorState;
   controller: DirectorController;
+  onNavigate?: (section: SectionId) => void;
   onAnnounce: (message: string) => void;
 }) {
   const [filter, setFilter] = useState<'all' | 'review' | 'accepted' | 'rejected'>('all');
@@ -36,9 +39,16 @@ export function ResultsView({
         title="Results"
         description={`${reviewCount} result${reviewCount === 1 ? '' : 's'} need${reviewCount === 1 ? 's' : ''} review · raw submissions are retained`}
         actions={
-          <Button variant="primary" icon="plus" onClick={() => setShowManual((value) => !value)}>
-            Enter result
-          </Button>
+          <>
+            {onNavigate && (
+              <Button variant="secondary" icon="upload" onClick={() => onNavigate('transfers')}>
+                Import result files
+              </Button>
+            )}
+            <Button variant="primary" icon="plus" onClick={() => setShowManual((value) => !value)}>
+              Enter result
+            </Button>
+          </>
         }
       />
       <div className="director-page-stack">

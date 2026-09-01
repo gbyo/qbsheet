@@ -9,11 +9,27 @@ import {
   type DirectorId,
   type DirectorState,
   type GameRecord,
-  type PlayerGameStat,
   type ResultSubmission,
   type TeamGameScore,
 } from '../domain';
 import { createDirectorRepository, type DirectorRepository } from '../persistence';
+import { assessIncomingDocument, stageIncomingDocument, type IncomingDocument } from '../transfers/ingest';
+import {
+  addTransferLocation,
+  dismissTransferArtifact,
+  importTransferDocuments,
+  noteTransferScan,
+  recordPreparedAssignments,
+  recordQbtcpDelivery,
+  removeTransferLocation,
+  setTransferWatching,
+  syncRemovableVolumes,
+  type AddLocationInput,
+  type ImportInput,
+  type ImportSummary,
+  type RecordPreparedInput,
+} from '../transfers/state';
+import type { TransferVolume } from '../transfers/ports';
 import {
   readNativeServerSnapshot,
   type NativeProgressSnapshot,
@@ -123,6 +139,22 @@ export interface DirectorController {
   ): void;
   ruleProtest(protestId: DirectorId, ruling: string, scoreAdjustment?: number): void;
   syncQbtcp(): Promise<void>;
+  /** Add or re-adopt a place assignments can be written to and results read from. */
+  addTransferLocation(input: AddLocationInput): void;
+  removeTransferLocation(locationId: DirectorId): void;
+  setTransferWatching(locationId: DirectorId, watching: boolean): void;
+  /** Reconcile known removable locations against what the platform currently sees. */
+  syncTransferVolumes(volumes: TransferVolume[]): void;
+  noteTransferScan(locationId: DirectorId, outcome: { at: string; message?: string; found?: number }): void;
+  recordPreparedAssignments(input: RecordPreparedInput): void;
+  /**
+   * Import a batch of documents through the shared result pipeline.
+   *
+   * Returns what happened so the caller can say it in one line. Nothing here accepts a result: the
+   * batch lands in the results inbox and a director accepts it there, the same as a QBTCP arrival.
+   */
+  importTransferDocuments(inputs: ImportInput[]): ImportSummary;
+  dismissTransferArtifact(artifactId: DirectorId): void;
   checkpoint(reason: string): Promise<void>;
   exportSnapshot(): string;
   importSnapshot(value: unknown): boolean;
@@ -733,6 +765,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
           summary: `Released ${round.name}.`,
           entityId: roundId,
         });
+        // Releasing a round is QBTCP's delivery. Recording it as a transfer keeps the unified
+        // history honest: "how did this room get its assignment" has one table with one answer,
+        // whether that answer was the network, a stick, or both.
+        recordQbtcpDelivery(draft, roundId);
       }),
     [commit],
   );
@@ -954,6 +990,73 @@ export function useDirectorController(repository = createDirectorRepository()): 
     });
   }, [persist]);
 
+  const addTransferLocationAction = useCallback(
+    (input: AddLocationInput) => commit((draft) => void addTransferLocation(draft, input)),
+    [commit],
+  );
+
+  const removeTransferLocationAction = useCallback(
+    (locationId: DirectorId) => commit((draft) => removeTransferLocation(draft, locationId)),
+    [commit],
+  );
+
+  const setTransferWatchingAction = useCallback(
+    (locationId: DirectorId, watching: boolean) =>
+      commit((draft) => setTransferWatching(draft, locationId, watching)),
+    [commit],
+  );
+
+  const syncTransferVolumesAction = useCallback(
+    (volumes: TransferVolume[]) =>
+      setState((previous) => {
+        // Volume polling runs on a timer, so it must not write state on a tick where nothing moved:
+        // a save per poll would rewrite the tournament document every few seconds all day.
+        const next = structuredClone(previous);
+        const changes = syncRemovableVolumes(next, volumes);
+        if (changes.appeared.length === 0 && changes.disappeared.length === 0) return previous;
+        next.metadata.lastSavedAt = isoNow();
+        persist(next);
+        return next;
+      }),
+    [persist],
+  );
+
+  const noteTransferScanAction = useCallback(
+    (locationId: DirectorId, outcome: { at: string; message?: string; found?: number }) =>
+      commit((draft) => noteTransferScan(draft, locationId, outcome)),
+    [commit],
+  );
+
+  const recordPreparedAssignmentsAction = useCallback(
+    (input: RecordPreparedInput) => commit((draft) => recordPreparedAssignments(draft, input)),
+    [commit],
+  );
+
+  const importTransferDocumentsAction = useCallback(
+    (inputs: ImportInput[]) => {
+      let summary: ImportSummary = {
+        imported: 0,
+        duplicates: 0,
+        needsReview: 0,
+        assignments: 0,
+        invalid: 0,
+        skipped: 0,
+        classifications: [],
+        messages: [],
+      };
+      commit((draft) => {
+        summary = importTransferDocuments(draft, inputs);
+      });
+      return summary;
+    },
+    [commit],
+  );
+
+  const dismissTransferArtifactAction = useCallback(
+    (artifactId: DirectorId) => commit((draft) => dismissTransferArtifact(draft, artifactId)),
+    [commit],
+  );
+
   const checkpoint = useCallback(
     async (reason: string) => {
       const next = structuredClone(state);
@@ -1034,6 +1137,14 @@ export function useDirectorController(repository = createDirectorRepository()): 
     addProtest,
     ruleProtest,
     syncQbtcp,
+    addTransferLocation: addTransferLocationAction,
+    removeTransferLocation: removeTransferLocationAction,
+    setTransferWatching: setTransferWatchingAction,
+    syncTransferVolumes: syncTransferVolumesAction,
+    noteTransferScan: noteTransferScanAction,
+    recordPreparedAssignments: recordPreparedAssignmentsAction,
+    importTransferDocuments: importTransferDocumentsAction,
+    dismissTransferArtifact: dismissTransferArtifactAction,
     checkpoint,
     exportSnapshot,
     importSnapshot,
@@ -1124,56 +1235,49 @@ function applyNativeProgress(state: DirectorState, records: NativeProgressSnapsh
   return changed;
 }
 
+/**
+ * Fold QBTCP arrivals into the same pipeline every other transport uses.
+ *
+ * This function used to do its own matching, its own score extraction and its own duplicate check.
+ * It does none of those now: it turns a `NativeResultSnapshot` into an `IncomingDocument` and hands
+ * it to `assessIncomingDocument`, which is the same call a USB scan and a dropped file make. A
+ * QBTCP result and its later USB backup therefore compare on the same fingerprint, computed the
+ * same way, and the duplicate is recognised rather than accepted twice.
+ *
+ * The transport's own result id and warnings ride along for correlation with the server's log. They
+ * do not decide anything; the assessment does.
+ */
 function applyNativeResults(state: DirectorState, snapshot: NativeServerSnapshot): boolean {
   let changed = false;
   for (const result of snapshot.results) {
     if (state.submissions.some((submission) => submission.transportResultId === result.id)) continue;
     const qbj = result.qbj ?? decodeRawQbj(result.rawBase64);
-    const matchId = result.matchId ?? matchIdentity(qbj);
-    const scheduled = findScheduledByMatchId(state, matchId);
-    const parsed = resultScores(qbj, state, scheduled);
-    const gameId = newDirectorId('game-record');
-    const now = isoNow();
-    const game: GameRecord = {
-      id: gameId,
-      scheduledGameId: scheduled?.id ?? matchId ?? `unmatched-${result.id}`,
-      roundId: scheduled?.roundId ?? 'unmatched-round',
-      packetId: scheduled?.packetId ?? null,
-      status: 'submitted',
-      scores: parsed.scores,
-      playerStats: parsed.playerStats,
-      source: 'qbtcp',
-      transportResultId: result.id,
-      rawQbj: qbj,
-      finishedAt: now,
-    };
-    state.games.push(game);
-    state.submissions.push({
-      id: newDirectorId('submission'),
-      gameId,
+    const progress = snapshot.progress.find((entry) => entry.sessionId === result.sessionId);
+    const roomId = progress?.roomId ?? '';
+    const roomName = state.rooms.find((entry) => entry.id === roomId)?.name;
+    const document: IncomingDocument = {
+      sourceKind: 'qbtcp',
+      sourceLabel: roomName ? `${roomName} (QBTCP)` : 'QBTCP',
+      fileName: `${result.id}.qbj`,
+      byteLength: result.rawBase64 ? Math.ceil((result.rawBase64.length * 3) / 4) : 0,
+      digest: `qbtcp-${result.id}`,
+      qbj,
       transportResultId: result.id,
       sessionId: result.sessionId,
-      receivedAt: now,
-      fingerprint: result.fingerprint,
-      status: result.reviewRequired ? 'review' : 'received',
-      rawSubmission: {
-        protocol: 'QBTCP v1',
-        resultId: result.id,
-        qbj,
-        rawBase64: result.rawBase64,
-      },
-      warnings: result.warnings,
-      conflictWith: result.conflictWith,
-    });
-    if (scheduled && scheduled.status !== 'accepted') scheduled.status = 'submitted';
+      transportWarnings: result.warnings,
+    };
+    const assessment = assessIncomingDocument(state, document);
+    const outcome = stageIncomingDocument(state, document, assessment);
+    const scheduled = state.scheduledGames.find((entry) => entry.id === assessment.scheduledGameId);
+
     const session = state.qbtcpSessions.find((entry) => entry.sessionId === result.sessionId);
+    const now = isoNow();
     if (session) {
       session.state = 'result-received';
       session.lastSeenAt = now;
     } else {
-      const progress = snapshot.progress.find((entry) => entry.sessionId === result.sessionId);
       state.qbtcpSessions.push({
-        roomId: progress?.roomId ?? scheduled?.roomId ?? '',
+        roomId: roomId || (scheduled?.roomId ?? ''),
         sessionId: result.sessionId,
         deviceId: '',
         state: 'result-received',
@@ -1182,49 +1286,13 @@ function applyNativeResults(state: DirectorState, snapshot: NativeServerSnapshot
         helpRequestId: null,
       });
     }
-    if (scheduled?.roomId) {
+    if (scheduled?.roomId && outcome.submissionId) {
       const room = state.rooms.find((entry) => entry.id === scheduled.roomId);
       if (room && room.status !== 'finished') room.status = 'finished';
     }
-    state.audit.push({
-      id: newDirectorId('audit'),
-      at: now,
-      actor: 'QBTCP',
-      type: 'result-received',
-      summary: `Received a result for ${scheduled ? gameLabel(state, scheduled.id) : (matchId ?? 'an unmatched game')}.`,
-      entityId: gameId,
-      details: {
-        transportResultId: result.id,
-        warnings: result.warnings,
-        conflictWith: result.conflictWith,
-      },
-    });
     changed = true;
   }
   return changed;
-}
-
-function findScheduledByMatchId(state: DirectorState, matchId: string | undefined) {
-  if (!matchId) return undefined;
-  const direct = state.scheduledGames.find((game) => game.id === matchId);
-  if (direct) return direct;
-  return state.scheduledGames.find((game) => {
-    const record = state.games.find((entry) => entry.scheduledGameId === game.id && entry.rawQbj);
-    return matchIdentity(record?.rawQbj) === matchId;
-  });
-}
-
-function matchIdentity(value: unknown): string | undefined {
-  if (!value || typeof value !== 'object') return undefined;
-  const root = value as { id?: unknown; type?: unknown; objects?: unknown };
-  if (root.type === 'Match' && typeof root.id === 'string') return root.id;
-  if (Array.isArray(root.objects)) {
-    const match = root.objects.find((entry): entry is { type?: unknown; id?: unknown } =>
-      Boolean(entry && typeof entry === 'object' && (entry as { type?: unknown }).type === 'Match'),
-    );
-    return match && typeof match.id === 'string' ? match.id : undefined;
-  }
-  return undefined;
 }
 
 function decodeRawQbj(value: string | undefined): unknown {
@@ -1236,121 +1304,6 @@ function decodeRawQbj(value: string | undefined): unknown {
   }
 }
 
-function resultScores(
-  value: unknown,
-  state: DirectorState,
-  scheduled: DirectorState['scheduledGames'][number] | undefined,
-): { scores: TeamGameScore[]; playerStats: PlayerGameStat[] } {
-  const match = matchObject(value);
-  const entries = Array.isArray(match?.match_teams) ? match.match_teams : [];
-  const scores = entries
-    .map((entry) => {
-      if (!entry || typeof entry !== 'object') return null;
-      const record = entry as Record<string, unknown>;
-      const teamId = resultTeamId(record.team, state, scheduled);
-      const score = finiteNumber(record.points);
-      if (!teamId || score === undefined) return null;
-      const stats = teamAggregate(record, state);
-      return { teamId, score, ...stats };
-    })
-    .filter((entry): entry is TeamGameScore => entry !== null);
-  const playerStats = entries.flatMap((entry) => {
-    if (!entry || typeof entry !== 'object') return [];
-    const record = entry as Record<string, unknown>;
-    const teamId = resultTeamId(record.team, state, scheduled);
-    if (!teamId || !Array.isArray(record.match_players)) return [];
-    return record.match_players.flatMap((candidate): PlayerGameStat[] => {
-      if (!candidate || typeof candidate !== 'object') return [];
-      const playerRecord = candidate as Record<string, unknown>;
-      const playerName = namedValue(playerRecord.player);
-      const player = state.players.find(
-        (entry) =>
-          entry.teamId === teamId && entry.name.toLocaleLowerCase() === playerName?.toLocaleLowerCase(),
-      );
-      if (!player) return [];
-      const counts = Array.isArray(playerRecord.answer_counts) ? playerRecord.answer_counts : [];
-      let powers = 0;
-      let gets = 0;
-      let negs = 0;
-      for (const count of counts) {
-        if (!count || typeof count !== 'object') continue;
-        const answer = (count as Record<string, unknown>).answer_type;
-        const value =
-          answer && typeof answer === 'object'
-            ? finiteNumber((answer as Record<string, unknown>).value)
-            : undefined;
-        const number = finiteNumber((count as Record<string, unknown>).number)
-          ? Number((count as Record<string, unknown>).number)
-          : 0;
-        if (value === undefined) continue;
-        if (value === (state.tournament?.rules.powerValue ?? 15)) powers += number;
-        else if (value === (state.tournament?.rules.tossupValue ?? 10)) gets += number;
-        else if (value < 0) negs += number;
-      }
-      return [
-        {
-          playerId: player.id,
-          teamId,
-          powers,
-          gets,
-          negs,
-          bonusPoints: 0,
-          tossupsHeard: finiteNumber(playerRecord.tossups_heard)
-            ? Number(playerRecord.tossups_heard)
-            : powers + gets + negs,
-        },
-      ];
-    });
-  });
-  return { scores, playerStats };
-}
-
-function teamAggregate(
-  entry: Record<string, unknown>,
-  state: DirectorState,
-): Omit<TeamGameScore, 'teamId' | 'score'> {
-  let powers = 0;
-  let gets = 0;
-  let negs = 0;
-  if (Array.isArray(entry.match_players)) {
-    for (const candidate of entry.match_players) {
-      if (!candidate || typeof candidate !== 'object') continue;
-      const counts = (candidate as Record<string, unknown>).answer_counts;
-      if (!Array.isArray(counts)) continue;
-      for (const count of counts) {
-        if (!count || typeof count !== 'object') continue;
-        const answer = (count as Record<string, unknown>).answer_type;
-        const value =
-          answer && typeof answer === 'object'
-            ? finiteNumber((answer as Record<string, unknown>).value)
-            : undefined;
-        const number = finiteNumber((count as Record<string, unknown>).number)
-          ? Number((count as Record<string, unknown>).number)
-          : 0;
-        if (value === undefined) continue;
-        if (value === (state.tournament?.rules.powerValue ?? 15)) powers += number;
-        else if (value === (state.tournament?.rules.tossupValue ?? 10)) gets += number;
-        else if (value < 0) negs += number;
-      }
-    }
-  }
-  const bouncebacks = finiteNumber(entry.bonus_bounceback_points) ? Number(entry.bonus_bounceback_points) : 0;
-  const lightning = finiteNumber(entry.lightning_points) ? Number(entry.lightning_points) : 0;
-  const tossupPoints =
-    powers * (state.tournament?.rules.powerValue ?? 15) +
-    gets * (state.tournament?.rules.tossupValue ?? 10) +
-    negs * (state.tournament?.rules.negValue ?? -5);
-  const points = finiteNumber(entry.points) ? Number(entry.points) : tossupPoints;
-  return {
-    powers,
-    gets,
-    negs,
-    bonuses: finiteNumber(entry.bonuses) ? Number(entry.bonuses) : 0,
-    bonusPoints: points - tossupPoints - bouncebacks - lightning,
-    bouncebacks,
-  };
-}
-
 function matchObject(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== 'object') return undefined;
   const root = value as Record<string, unknown>;
@@ -1360,37 +1313,6 @@ function matchObject(value: unknown): Record<string, unknown> | undefined {
         Boolean(entry && typeof entry === 'object' && (entry as Record<string, unknown>).type === 'Match'),
       ) ?? undefined)
     : undefined;
-}
-
-function resultTeamId(
-  value: unknown,
-  state: DirectorState,
-  scheduled: DirectorState['scheduledGames'][number] | undefined,
-): string | undefined {
-  const identity = namedIdentity(value);
-  const candidates = [scheduled?.leftTeamId, scheduled?.rightTeamId].filter((entry): entry is string =>
-    Boolean(entry),
-  );
-  if (identity && candidates.includes(identity)) return identity;
-  const team = state.teams.find(
-    (entry) =>
-      entry.id === identity || entry.displayName.toLocaleLowerCase() === identity?.toLocaleLowerCase(),
-  );
-  return team?.id;
-}
-
-function namedIdentity(value: unknown): string | undefined {
-  if (!value || typeof value !== 'object') return undefined;
-  const record = value as Record<string, unknown>;
-  if (typeof record.$ref === 'string') return record.$ref;
-  if (typeof record.id === 'string') return record.id;
-  return typeof record.name === 'string' ? record.name : undefined;
-}
-
-function namedValue(value: unknown): string | undefined {
-  if (!value || typeof value !== 'object') return undefined;
-  const record = value as Record<string, unknown>;
-  return typeof record.name === 'string' ? record.name : undefined;
 }
 
 function finiteNumber(value: unknown): number | undefined {
@@ -1416,14 +1338,4 @@ function progressSummary(
     leftScore: points[0] ?? 0,
     rightScore: points[1] ?? (scheduled?.rightTeamId ? 0 : 0),
   };
-}
-
-function gameLabel(state: DirectorState, scheduledId: string): string {
-  const scheduled = state.scheduledGames.find((game) => game.id === scheduledId);
-  if (!scheduled) return scheduledId;
-  const left = state.teams.find((team) => team.id === scheduled.leftTeamId)?.displayName ?? 'Team';
-  const right = scheduled.rightTeamId
-    ? (state.teams.find((team) => team.id === scheduled.rightTeamId)?.displayName ?? 'Team')
-    : 'Bye';
-  return `${left} vs ${right}`;
 }

@@ -3,6 +3,7 @@
 mod commands;
 mod server;
 mod store;
+mod transfers;
 
 use tauri::{Manager, Wry};
 
@@ -35,6 +36,7 @@ pub fn run() {
             })?;
             app.manage(store);
             app.manage(server::ServerRuntime::default());
+            app.manage(transfers::TransferRoots::default());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -52,6 +54,16 @@ pub fn run() {
             commands::save_tournament_file,
             commands::get_diagnostics_snapshot,
             commands::save_diagnostics_bundle,
+            transfers::transfers_list_volumes,
+            transfers::transfers_choose_folder,
+            transfers::transfers_authorize_root,
+            transfers::transfers_forget_root,
+            transfers::transfers_list_directory,
+            transfers::transfers_read_file,
+            transfers::transfers_write_file,
+            transfers::transfers_create_directory,
+            transfers::transfers_exists,
+            transfers::transfers_available_bytes,
         ])
         .run(tauri::generate_context!())
         .expect("error while running QBSheet Director");

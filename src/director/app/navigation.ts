@@ -7,6 +7,7 @@ export type SectionId =
   | 'rooms'
   | 'packets'
   | 'tournament'
+  | 'transfers'
   | 'results'
   | 'standings'
   | 'publish'
@@ -30,6 +31,7 @@ export const navigation: Array<{
     label: 'Run',
     items: [
       { id: 'tournament', label: 'Tournament', icon: 'tournament' },
+      { id: 'transfers', label: 'Transfers', icon: 'upload' },
       { id: 'results', label: 'Results', icon: 'inbox' },
     ],
   },
