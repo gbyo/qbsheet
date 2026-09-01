@@ -715,10 +715,12 @@
 /*
  * The live bonus, part by part.
  *
- * One stable grid: a column per team plus one for a part nobody got, and a row per part that never
- * moves. The headings are what make two identical `+10` buttons mean different things, so the rows
- * and the heading share one grid rather than a flex row with a guessed label width — a long team
- * name is the ordinary case, not the exception.
+ * One stable grid: a column per possible answer and a row per part that never moves. The columns
+ * are aligned so the same team is always in the same place under the hand, but nothing depends on
+ * that alignment to be understood — each button carries its own team name, at every width, so the
+ * answer to "which of these two is the bounce?" is written on the button rather than in a heading
+ * somewhere above it. That heading row is gone, and with it the only part of this panel that
+ * disappeared on a narrow screen.
  */
 .scorer-bonus-parts {
   display: flex;
@@ -726,49 +728,31 @@
   gap: 8px;
 }
 
-.scorer-part-head,
-.scorer-part-row {
-  display: grid;
-  grid-template-columns: 64px repeat(3, minmax(0, 1fr));
-  gap: 8px;
-  align-items: center;
-}
-
-/* Without bouncebacks a part is taken or missed, and the opponent column has nothing to hold. */
-.scorer-part-head.is-two-way,
-.scorer-part-row.is-two-way {
-  grid-template-columns: 64px repeat(2, minmax(0, 1fr));
-}
-
-.scorer-part-head {
-  padding-bottom: 2px;
-  font-size: 0.75rem;
+/* The format in a sentence, under the title, where a subtitle goes. */
+.scorer-prompt-note {
+  margin: -6px 0 10px;
+  font-size: 0.8125rem;
   color: var(--room-muted);
-}
-
-/*
- * A long team name is truncated rather than allowed to widen its column, and stays available in
- * full to anything that reads the buttons — every one of which names its own team and part.
- */
-.scorer-part-column {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Says what the second column is for, so "bounceback" explains the format without being the answer. */
-.scorer-part-column-note {
-  font-size: 0.6875rem;
-  color: var(--room-faint);
 }
 
 .scorer-part-list {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.scorer-part-row {
+  display: grid;
+  grid-template-columns: 64px repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  align-items: center;
+  padding-left: 8px;
+  border-left: 2px solid transparent;
+}
+
+/* Without bouncebacks a part is taken or missed, and the opponent column has nothing to hold. */
+.scorer-part-row.is-two-way {
+  grid-template-columns: 64px repeat(2, minmax(0, 1fr));
 }
 
 /*
@@ -778,11 +762,6 @@
  * legible and entirely pressable, because correcting part 1 after answering part 2 is an ordinary
  * thing to need and not a mode to enter.
  */
-.scorer-part-row {
-  padding-left: 8px;
-  border-left: 2px solid transparent;
-}
-
 .scorer-part-row.is-active {
   border-left-color: var(--room-accent);
 }
@@ -798,6 +777,7 @@
   color: var(--room-muted);
 }
 
+/* A team name too long for its column is truncated in paint; `title` and the accessible name keep it. */
 .scorer-part-row .scorer-choice {
   min-width: 0;
   padding: 10px 8px;
@@ -815,7 +795,7 @@
 }
 
 /*
- * A non-breaking space: a trailing one in `content` collapses and the tick lands on the number.
+ * A non-breaking space: a trailing one in `content` collapses and the tick lands on the name.
  *
  * Excluding the presentation labels, because in the inert exit copy the same pseudo-element is what
  * paints the button's text. That copy gets the tick as part of its label instead, one rule down, so
@@ -843,13 +823,18 @@
   opacity: 1;
 }
 
-/* The column heading names the team on wide screens; this repeats it once the heading folds away. */
-.scorer-part-choice-team {
-  display: none;
+/* What the parts come to, and the press that writes them, on one line under the grid. */
+.scorer-part-footer {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 2px;
 }
 
 /*
- * Who has what, in the only terms that matter at the table. Not "20 controlled · 10 bounceback".
+ * Whose points these are, in the only terms that matter at the table. Not "20 controlled · 10
+ * bounceback".
  */
 .scorer-part-total {
   margin: 0;
@@ -861,38 +846,81 @@
   white-space: nowrap;
 }
 
+/* The one press on this panel that changes the game, so it does not sit in the row being aimed at. */
+.scorer-part-record {
+  margin-inline-start: auto;
+}
+
 .scorer-part-progress {
   margin: 0;
+  flex-basis: 100%;
   font-size: 0.75rem;
   color: var(--room-muted);
 }
 
 /*
- * Narrow enough that four columns would be four slivers: the heading row goes, each part becomes a
- * block, and the buttons name their own team instead of relying on a heading that is no longer
- * there. Part N still leads the block, so which outcomes belong to which part stays obvious, and the
- * targets get taller rather than narrower.
+ * Narrow enough that three columns would be three slivers, but not so narrow that one button per
+ * line is affordable.
+ *
+ * Nine full-width buttons made the panel 756px tall on a phone: it covered the roster it is meant
+ * to sit under and pushed its own Record button off the bottom of the screen. So the two teams —
+ * the pair that actually has to be told apart — go side by side, and the answer that is neither of
+ * them takes the line below. Names wrap here instead of truncating: at half a phone's width an
+ * ellipsis is what turns two long school names into the same button.
  */
 @media (max-width: 560px) {
-  .scorer-part-head {
-    display: none;
-  }
-
+  /*
+   * Stretched, not centred: with a two-line name beside a one-line one, centred buttons sit at
+   * different heights and the pair stops reading as one question. The part number stays centred
+   * against them.
+   */
   .scorer-part-row,
   .scorer-part-row.is-two-way {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 4px;
-    padding-bottom: 6px;
+    grid-template-columns: 44px repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    align-items: stretch;
+    padding-bottom: 8px;
   }
 
+  .scorer-part-row .scorer-part-label {
+    align-self: center;
+  }
+
+  /* Three answers: the two teams paired, then the one that is neither, across the rest of the row. */
+  .scorer-part-row:not(.is-two-way) .scorer-choice:last-of-type {
+    grid-column: 2 / -1;
+  }
+
+  /*
+   * Two lines, then stop.
+   *
+   * Wrapping is what keeps two long school names apart at this width, but an unbounded wrap sets
+   * the height of the whole row — three lines a part is what made this panel taller than the phone
+   * it was on. Anything past two lines is in `title` and in the accessible name, both of which are
+   * the whole name.
+   */
   .scorer-part-row .scorer-choice {
+    display: -webkit-box;
     justify-self: stretch;
     padding: 12px 10px;
-    text-align: left;
+    overflow: hidden;
+    white-space: normal;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
   }
 
-  .scorer-part-choice-team {
-    display: inline;
+  /*
+   * Deliberately not given a scroller of its own.
+   *
+   * The contextual row is `position: static` at this width — the whole sheet scrolls rather than
+   * pinning two bars over a quarter of a phone screen — so a nested scroller here would be a
+   * scroll inside a scroll, and the parts are the thing a scorekeeper is actually looking at. What
+   * this layout buys instead is height: pairing the teams and holding each name to two lines took
+   * an ordinary bonus from nine stacked buttons down to three compact blocks.
+   */
+  .scorer-part-record {
+    padding-block: 12px;
   }
 }
 

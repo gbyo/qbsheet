@@ -29,7 +29,7 @@
  * What is recorded is exactly what the old part route recorded — one `bonus` event carrying
  * `parts`. There is no such thing as a per-part event, and undo still takes the whole bonus.
  */
-import { ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
 import { IBonusPartResult } from '../scoring/ScoreEvents';
 import {
@@ -109,6 +109,10 @@ function useBonusKeys(
         return;
       }
 
+      // Every part answered. The digits address nothing — there is no current part — and the key
+      // that finishes the bonus is Enter on the focused Record button, which needs nothing here.
+      if (current.stage.kind === 'record') return;
+
       const outcome = bonusPartOutcomeForCode(event.code, current.stage.choices);
       if (outcome === null) return;
       event.preventDefault();
@@ -159,6 +163,7 @@ export default function BonusPrompt(props: IBonusPromptProps) {
   const [typedBounceback, setTypedBounceback] = useState('');
   const [acknowledgement, setAcknowledgement] = useState<IPartAcknowledgement | null>(null);
   const acknowledgementSequence = useRef(0);
+  const recordRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     if (!acknowledgement) return undefined;
@@ -181,20 +186,25 @@ export default function BonusPrompt(props: IBonusPromptProps) {
   const answeredCount = outcomes.filter((outcome) => outcome !== null).length;
   const runningTotals = bonusOutcomeTotals(format.bonus, outcomes);
 
-  /**
-   * Answer one part, and record the bonus if that was the last of them.
-   *
-   * The event is committed inside the press that completes the breakdown — not after an animation,
-   * and not behind a confirmation. The acknowledgement below describes something that has already
-   * happened.
-   */
+  /** Answer one part. Answering is not recording; see `recordParts`. */
   const choosePart = (index: number, outcome: BonusPartOutcome) => {
-    const next = outcomes.map((existing, position) => (position === index ? outcome : existing));
-    setOutcomes(next);
+    setOutcomes((current) => current.map((existing, position) => (position === index ? outcome : existing)));
     acknowledgementSequence.current += 1;
     setAcknowledgement({ index, outcome, token: acknowledgementSequence.current });
-    if (next.some((entry) => entry === null)) return;
-    onRecordParts(next.map((entry) => bonusPartForOutcome(format.bonus, entry as BonusPartOutcome)));
+  };
+
+  /**
+   * Write the bonus.
+   *
+   * A deliberate act, and the only one on this panel that changes the game. Committing on the last
+   * part press instead read as an ambush: three presses that did nothing and a fourth that silently
+   * ended the bonus and moved the room on, with no moment in between to look at what had been
+   * entered. A bonus is worth up to thirty points and the panel is worked at speed — the press that
+   * says "yes, that" should be a press that says only that.
+   */
+  const recordParts = () => {
+    if (outcomes.some((entry) => entry === null)) return;
+    onRecordParts(outcomes.map((entry) => bonusPartForOutcome(format.bonus, entry as BonusPartOutcome)));
   };
 
   /** The controlling team's total. Without bouncebacks that is the whole bonus. */
@@ -250,7 +260,15 @@ export default function BonusPrompt(props: IBonusPromptProps) {
    */
   const stage = useMemo<BonusKeyboardStage | null>(() => {
     if (byParts && partCount !== null) {
-      if (activeIndex === -1) return null;
+      if (activeIndex === -1) {
+        return {
+          kind: 'record',
+          title: 'Bonus · every part answered',
+          summary: bouncesBack
+            ? `${controllingTeamName} ${runningTotals.controlled} · ${opponentName} ${runningTotals.bounceback}`
+            : `${controllingTeamName} ${runningTotals.controlled}`,
+        };
+      }
       return {
         kind: 'part',
         title: `Bonus part ${activeIndex + 1} of ${partCount}`,
@@ -287,6 +305,8 @@ export default function BonusPrompt(props: IBonusPromptProps) {
     totals,
     controlled,
     opponentOptions,
+    runningTotals.controlled,
+    runningTotals.bounceback,
   ]);
 
   useEffect(() => {
@@ -310,6 +330,21 @@ export default function BonusPrompt(props: IBonusPromptProps) {
     [controlled, activeIndex, outcomes, onRecord, format.bonus],
   );
   useBonusKeys(stage, keyHandlers, keyboardEnabled);
+
+  /**
+   * Take the focus to Record the moment the breakdown is finished.
+   *
+   * This is what makes Enter finish a bonus without a shortcut being invented for it: the button is
+   * focused, so Enter is that button, whether or not the keyboard layer is switched on. Only on the
+   * transition into complete, so correcting an answered part afterwards does not snatch the focus
+   * back off whatever the scorekeeper has moved to.
+   */
+  const partsComplete = byParts && partCount !== null && activeIndex === -1;
+  const wasComplete = useRef(false);
+  useEffect(() => {
+    if (partsComplete && !wasComplete.current) recordRef.current?.focus();
+    wasComplete.current = partsComplete;
+  }, [partsComplete]);
 
   /**
    * Escape releases a chosen controlling total without recording anything.
@@ -339,6 +374,7 @@ export default function BonusPrompt(props: IBonusPromptProps) {
   );
 
   if (byParts && partCount !== null) {
+    const complete = activeIndex === -1;
     /** Three cues on a chosen outcome — fill, weight and a tick — so it does not rest on colour. */
     const choiceClass = (index: number, outcome: BonusPartOutcome, selected: boolean) =>
       [
@@ -349,16 +385,28 @@ export default function BonusPrompt(props: IBonusPromptProps) {
         .filter(Boolean)
         .join(' ');
 
-    const partChoice = (
-      index: number,
-      outcome: BonusPartOutcome,
-      label: ReactNode,
-      accessibleName: string,
-    ) => (
+    /**
+     * One outcome for one part.
+     *
+     * The button says whose points these are, on every row, at every width. It used to say `+10`
+     * and leave a column heading three rows above it to explain which `+10` this was — which meant
+     * the answer to "who is getting the bounceback?" lived nowhere near the button that answered it,
+     * and vanished entirely on a narrow screen. The value is the same for every part of a regular
+     * bonus and is in the context line and the running total; the team is the thing that differs
+     * between two buttons sitting side by side, so the team is what is written on them.
+     */
+    const partChoice = (index: number, outcome: BonusPartOutcome, label: string, teamName?: string) => (
       <button
         type="button"
         aria-pressed={outcomes[index] === outcome}
-        aria-label={accessibleName}
+        aria-label={
+          teamName === undefined
+            ? `No points on part ${index + 1}`
+            : `Part ${index + 1} to ${teamName}, ${perPart} points`
+        }
+        // A name too long for its column is truncated in paint only; this and the accessible name
+        // both keep the whole of it.
+        title={teamName}
         className={choiceClass(index, outcome, outcomes[index] === outcome)}
         data-selection-token={
           acknowledgement?.index === index && acknowledgement.outcome === outcome
@@ -374,31 +422,27 @@ export default function BonusPrompt(props: IBonusPromptProps) {
     return (
       <section className="scorer-prompt scorer-bonus-prompt" aria-label="Bonus">
         <div className="scorer-prompt-content">
-          {title}
+          <p className="scorer-prompt-title">
+            <span className="scorer-prompt-team">{controllingTeamName}</span> bonus
+            <span className="scorer-prompt-context">
+              Q{questionNumber} · {partCount} {partCount === 1 ? 'part' : 'parts'}, {perPart} each
+            </span>
+          </p>
+          {/*
+            The format, explained once, in a sentence, where a subtitle goes — rather than as a note
+            wedged under a column heading. It names both teams and says what the bounce actually is,
+            which is the one thing about this bonus a scorekeeper new to the format needs told.
+          */}
+          {bouncesBack && (
+            <p className="scorer-prompt-note">
+              {opponentName} can score any part {controllingTeamName} misses.
+            </p>
+          )}
           <div className="scorer-bonus-parts">
-            {/*
-              The column headings say who receives the points, which is the question being answered.
-              Hidden from assistive technology because every button already names its own team and
-              part; read out as well, they would be a second, wordier copy of the same grid.
-            */}
-            <div
-              className={bouncesBack ? 'scorer-part-head' : 'scorer-part-head is-two-way'}
-              aria-hidden="true"
-            >
-              <span />
-              <span className="scorer-part-column">{controllingTeamName}</span>
-              {bouncesBack && (
-                <span className="scorer-part-column">
-                  {opponentName}
-                  <small className="scorer-part-column-note">can score missed parts</small>
-                </span>
-              )}
-              <span />
-            </div>
             {/*
               Not a list: every row is a `group`, and an `<ol>` whose children all carry another role
               is announced as a list with nothing in it. The grouping that matters is the one that
-              says which part these three buttons belong to, and that is on the row itself.
+              says which part these buttons belong to, and that is on the row itself.
             */}
             <div className="scorer-part-list">
               {outcomes.map((outcome, index) => {
@@ -421,25 +465,9 @@ export default function BonusPrompt(props: IBonusPromptProps) {
                     aria-label={`Part ${index + 1} of ${partCount}`}
                   >
                     <span className="scorer-part-label">Part {index + 1}</span>
-                    {partChoice(
-                      index,
-                      'controlled',
-                      /* The team span shows once the headings fold away on a narrow screen. */
-                      <>
-                        <span className="scorer-part-choice-team">{controllingTeamName} </span>+{perPart}
-                      </>,
-                      `Part ${index + 1} to ${controllingTeamName}, ${perPart} points`,
-                    )}
-                    {bouncesBack &&
-                      partChoice(
-                        index,
-                        'bounceback',
-                        <>
-                          <span className="scorer-part-choice-team">{opponentName} </span>+{perPart}
-                        </>,
-                        `Part ${index + 1} to ${opponentName}, ${perPart} points`,
-                      )}
-                    {partChoice(index, 'missed', 'No points', `No points on part ${index + 1}`)}
+                    {partChoice(index, 'controlled', controllingTeamName, controllingTeamName)}
+                    {bouncesBack && partChoice(index, 'bounceback', opponentName, opponentName)}
+                    {partChoice(index, 'missed', 'No points')}
                   </div>
                 );
               })}
@@ -448,34 +476,50 @@ export default function BonusPrompt(props: IBonusPromptProps) {
               Whose points these are, not how they were come by. "20 controlled · 10 bounceback" is
               the storage; the room wants to know that Ninety Six has 20 and Greenwood has 10.
             */}
-            <p className="scorer-part-total">
-              <span className="scorer-part-total-team">
-                <span aria-hidden="true">{controllingTeamName} </span>
-                <MotionNumber
-                  value={runningTotals.controlled}
-                  minimumDigits={2}
-                  aria-label={`${controllingTeamName} ${runningTotals.controlled} points`}
-                />
-              </span>
-              {bouncesBack && (
-                <>
-                  <span aria-hidden="true"> · </span>
-                  <span className="scorer-part-total-team">
-                    <span aria-hidden="true">{opponentName} </span>
-                    <MotionNumber
-                      value={runningTotals.bounceback}
-                      minimumDigits={2}
-                      aria-label={`${opponentName} ${runningTotals.bounceback} points`}
-                    />
-                  </span>
-                </>
-              )}
-            </p>
-            {activeIndex !== -1 && (
-              <p className="scorer-part-progress">
-                {answeredCount} of {partCount} parts scored
+            <div className="scorer-part-footer">
+              <p className="scorer-part-total">
+                <span className="scorer-part-total-team">
+                  <span aria-hidden="true">{controllingTeamName} </span>
+                  <MotionNumber
+                    value={runningTotals.controlled}
+                    minimumDigits={2}
+                    aria-label={`${controllingTeamName} ${runningTotals.controlled} points`}
+                  />
+                </span>
+                {bouncesBack && (
+                  <>
+                    <span aria-hidden="true"> · </span>
+                    <span className="scorer-part-total-team">
+                      <span aria-hidden="true">{opponentName} </span>
+                      <MotionNumber
+                        value={runningTotals.bounceback}
+                        minimumDigits={2}
+                        aria-label={`${opponentName} ${runningTotals.bounceback} points`}
+                      />
+                    </span>
+                  </>
+                )}
               </p>
-            )}
+              {/*
+                Focused the moment the last part is answered, so the key that finishes a bonus is
+                Enter without a shortcut having to be invented for it — and so the eye is taken to
+                the one thing left to do.
+              */}
+              <button
+                ref={recordRef}
+                type="button"
+                className="scorer-choice scorer-part-record"
+                disabled={!complete}
+                onClick={recordParts}
+              >
+                Record bonus
+              </button>
+              {!complete && (
+                <p className="scorer-part-progress">
+                  {answeredCount} of {partCount} parts scored
+                </p>
+              )}
+            </div>
             {/*
               For the bonus somebody was given as totals afterwards, or a cycle being reconstructed.
               Quiet, and never sticky: the next bonus opens on its parts again.

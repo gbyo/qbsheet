@@ -695,7 +695,7 @@ describe('the bonus', () => {
       ).toBeInTheDocument();
     });
 
-    test('the last keystroke records exactly one bonus and the game moves on', async () => {
+    test('the map stops offering digits once every part is answered, and says what Enter will write', async () => {
       await openBounceBonus();
 
       for (const code of ['Digit1', 'Digit2', 'Digit0']) {
@@ -703,6 +703,36 @@ describe('the bonus', () => {
           fireEvent.keyDown(document, { code, key: code.replace('Digit', '') });
         });
       }
+
+      const map = screen.getByLabelText('Keyboard scoring');
+      expect(within(map).getByText('Bonus · every part answered')).toBeInTheDocument();
+      expect(Array.from(map.querySelectorAll('.scorer-keymap-row'), (row) => row.textContent)).toEqual([
+        'Enterrecord Ninety Six A 10 · Greenwood 10',
+      ]);
+
+      /*
+       * Enter is not a shortcut of its own. Record has the focus by now, so Enter is that button —
+       * which is why it finishes a bonus whether or not the keyboard layer is switched on.
+       */
+      expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Record bonus' }));
+      // A digit here addresses no part, and must not be quietly taken as one.
+      await act(async () => {
+        fireEvent.keyDown(document, { code: 'Digit1', key: '1' });
+      });
+      expect(screen.getByLabelText('Bonus')).toBeInTheDocument();
+    });
+
+    test('the recording press writes exactly one bonus and the game moves on', async () => {
+      await openBounceBonus();
+
+      for (const code of ['Digit1', 'Digit2', 'Digit0']) {
+        await act(async () => {
+          fireEvent.keyDown(document, { code, key: code.replace('Digit', '') });
+        });
+      }
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Record bonus' }));
+      });
 
       await waitFor(() => expect(screen.queryByLabelText('Bonus')).toBeNull());
       // The tossup's 10 plus one part; the opponent's bounced part; nothing else written.

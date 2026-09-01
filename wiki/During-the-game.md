@@ -45,10 +45,11 @@ When one team is still eligible, the button reads *`<team>` has no answer*.
 QBSheet shows the bonus prompt after a correct tossup answer, and asks for the bonus the way the
 format defines one.
 
-Where bonuses bounce back, the prompt asks who scored each part: the team that took the tossup, the
-other team, or nobody. The totals for both teams are worked out for you and the bonus is recorded as
-soon as the last part has an answer. Choose *Enter totals instead* if you were given the totals
-rather than the parts.
+Where bonuses bounce back, the prompt asks who scored each part. Each part offers a button per
+answer and every one of them says what it is: the team that took the tossup, the other team, or *No
+points*. The totals for both teams are worked out as you go. When every part has an answer, press
+*Record bonus* — it takes the keyboard focus at that point, so Enter records the bonus too. Choose
+*Enter totals instead* if you were given the totals rather than the parts.
 
 Where bonuses do not bounce back, the prompt offers the totals the format can produce and one press
 records the bonus. *Score by part* is there if you would rather record each part.
