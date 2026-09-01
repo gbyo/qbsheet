@@ -453,4 +453,6 @@ time.
 ## See also
 
 - [`QBTCP.md`](QBTCP.md) — the live protocol, and the delivery of an assignment over HTTP
+- [`TRANSFERS.md`](TRANSFERS.md) — the same documents delivered and returned by USB, watched folders,
+  cloud-synced folders and downloads, and the one pipeline every returned result converges on
 - [`QBG_MIGRATION.md`](QBG_MIGRATION.md) — the retirement of the legacy `.qbg` package

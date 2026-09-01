@@ -11,6 +11,7 @@ import { RoomsView } from '../rooms/RoomsView';
 import { PacketsView } from '../packets/PacketsView';
 import { TournamentView } from '../tournament/TournamentView';
 import { ResultsView } from '../results/ResultsView';
+import { TransfersView } from '../transfers/TransfersView';
 import { StandingsView } from '../standings/StandingsView';
 import { PublishView } from '../publish/PublishView';
 import { SettingsView } from '../settings/SettingsView';
@@ -82,6 +83,9 @@ export default function DirectorApp() {
   const resultReviewCount = controller.state.submissions.filter(
     (submission) => submission.status === 'review' || submission.status === 'received',
   ).length;
+  const transferPendingCount = controller.state.transfers.artifacts.filter(
+    (artifact) => artifact.status === 'staged',
+  ).length;
   const sidebarServer = describeSidebarServer(qbtcpServerStatus, isNativeDirector());
   const renderPage = () => {
     switch (activeSection) {
@@ -113,7 +117,14 @@ export default function DirectorApp() {
           />
         );
       case 'rooms':
-        return <RoomsView state={controller.state} controller={controller} onAnnounce={setAnnouncement} />;
+        return (
+          <RoomsView
+            state={controller.state}
+            controller={controller}
+            onNavigate={navigate}
+            onAnnounce={setAnnouncement}
+          />
+        );
       case 'packets':
         return <PacketsView state={controller.state} controller={controller} onAnnounce={setAnnouncement} />;
       case 'tournament':
@@ -125,8 +136,24 @@ export default function DirectorApp() {
             onAnnounce={setAnnouncement}
           />
         );
+      case 'transfers':
+        return (
+          <TransfersView
+            state={controller.state}
+            controller={controller}
+            onNavigate={navigate}
+            onAnnounce={setAnnouncement}
+          />
+        );
       case 'results':
-        return <ResultsView state={controller.state} controller={controller} onAnnounce={setAnnouncement} />;
+        return (
+          <ResultsView
+            state={controller.state}
+            controller={controller}
+            onNavigate={navigate}
+            onAnnounce={setAnnouncement}
+          />
+        );
       case 'standings':
         return (
           <StandingsView state={controller.state} controller={controller} onAnnounce={setAnnouncement} />
@@ -164,7 +191,13 @@ export default function DirectorApp() {
                   section={item}
                   active={item.id === activeSection}
                   onSelect={navigate}
-                  count={item.id === 'results' ? resultReviewCount : undefined}
+                  count={
+                    item.id === 'results'
+                      ? resultReviewCount
+                      : item.id === 'transfers'
+                        ? transferPendingCount || undefined
+                        : undefined
+                  }
                 />
               ))}
             </div>
