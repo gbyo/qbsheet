@@ -66,6 +66,9 @@ describe('the generated scorer service worker', () => {
     // Every marketing page, however deep. The rule is the `about/` prefix and not a list of files,
     // so a page added below it is outside the scorer's shell without anybody remembering to say so.
     expect(isScorerPrecacheAsset('about/self-host/index.html')).toBe(false);
+    expect(isScorerPrecacheAsset('director.html')).toBe(false);
+    expect(isScorerPrecacheAsset('director/assets/director-a1b2.js')).toBe(false);
+    expect(isScorerPrecacheAsset('director/assets/director-a1b2.css')).toBe(false);
   });
 
   /**
@@ -104,6 +107,22 @@ describe('the generated scorer service worker', () => {
 
     expect(navigation.respondWith).not.toHaveBeenCalled();
     expect(nested.respondWith).not.toHaveBeenCalled();
+    expect(asset.respondWith).not.toHaveBeenCalled();
+    expect(harness.fetch).not.toHaveBeenCalled();
+    expect(harness.caches.open).not.toHaveBeenCalled();
+    expect(harness.cache.put).not.toHaveBeenCalled();
+  });
+
+  test('leaves the Director preview and its assets entirely to the network', () => {
+    const harness = workerHarness({ scope: 'https://qbsheet.com/qbsheet/' });
+
+    const navigation = harness.dispatchFetch('https://qbsheet.com/qbsheet/director.html');
+    const asset = harness.dispatchFetch(
+      'https://qbsheet.com/qbsheet/director/assets/director-a1b2.js',
+      'cors',
+    );
+
+    expect(navigation.respondWith).not.toHaveBeenCalled();
     expect(asset.respondWith).not.toHaveBeenCalled();
     expect(harness.fetch).not.toHaveBeenCalled();
     expect(harness.caches.open).not.toHaveBeenCalled();
