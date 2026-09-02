@@ -293,7 +293,7 @@ pub async fn save_tournament_file(
         .saturating_mul(4);
     if request.content_base64.len() as u64 > maximum_encoded_bytes {
         return Err(CommandError::file_too_large(
-            MAX_NATIVE_FILE_BYTES.saturating_add(1),
+            request.content_base64.len() as u64,
             MAX_NATIVE_FILE_BYTES,
         ));
     }

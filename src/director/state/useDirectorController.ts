@@ -435,7 +435,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
             continue;
           }
           const organizationName = input.organizationId?.trim();
-          let organizationId: DirectorId | null = organizationName || null;
+          let organizationId: DirectorId | null = null;
           if (organizationName) {
             const organization = draft.organizations.find(
               (candidate) =>
@@ -443,7 +443,11 @@ export function useDirectorController(repository = createDirectorRepository()): 
                 candidate.name.toLocaleLowerCase() === organizationName.toLocaleLowerCase(),
             );
             if (organization) organizationId = organization.id;
-            else draft.organizations.push({ id: organizationName, name: organizationName });
+            else {
+              const newOrgId = newDirectorId('organization');
+              draft.organizations.push({ id: newOrgId, name: organizationName });
+              organizationId = newOrgId;
+            }
           }
           draft.teams.push({
             id: teamId,

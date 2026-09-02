@@ -359,6 +359,10 @@ function isNativeSessionSnapshot(value: unknown): value is NativeSessionSnapshot
     (value.operatorName === undefined || typeof value.operatorName === 'string') &&
     typeof value.resumable === 'boolean' &&
     typeof value.resultReceived === 'boolean' &&
+    (value.progressSequence === undefined ||
+      (typeof value.progressSequence === 'number' &&
+        Number.isSafeInteger(value.progressSequence) &&
+        value.progressSequence >= 0)) &&
     nonEmptyString(value.updatedAt)
   );
 }
