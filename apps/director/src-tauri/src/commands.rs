@@ -107,6 +107,11 @@ pub struct SavedFile {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiagnosticsSnapshot {
+    /// Whether this database carries QBSheet Live publication state.
+    ///
+    /// Reported so a support conversation about "the tournament is not publishing" can start from
+    /// whether the schema is even there, rather than from a screenshot.
+    pub live_tables: bool,
     pub app_version: String,
     pub protocol: String,
     pub qbj_version: String,
@@ -381,6 +386,9 @@ fn diagnostics_snapshot(
         os: std::env::consts::OS.to_string(),
         arch: std::env::consts::ARCH.to_string(),
         paths: app_paths(app)?,
+        live_tables: crate::live::tables_exist(std::path::Path::new(
+            &store.status().map_err(CommandError::store)?.database_path,
+        )),
         store: store.status().map_err(CommandError::store)?,
         server: server.status(),
     })
@@ -570,3 +578,185 @@ mod tests {
         let _ = fs::remove_dir(directory);
     }
 }
+
+// ---------------------------------------------------------------------------
+// QBSheet Live
+// ---------------------------------------------------------------------------
+
+/// The credential store, held as Tauri state.
+///
+/// A struct rather than a bare `KeychainCredentialStore` so that a platform without a keychain, and
+/// a test, can substitute one without the command layer knowing.
+pub struct LiveCredentials {
+    store: Box<dyn crate::live::CredentialStore>,
+}
+
+impl Default for LiveCredentials {
+    fn default() -> Self {
+        Self {
+            store: Box::new(crate::live::KeychainCredentialStore),
+        }
+    }
+}
+
+impl LiveCredentials {
+    #[cfg(test)]
+    pub fn with_store(store: Box<dyn crate::live::CredentialStore>) -> Self {
+        Self { store }
+    }
+}
+
+impl From<crate::live::LiveError> for CommandError {
+    fn from(value: crate::live::LiveError) -> Self {
+        CommandError {
+            code: "live",
+            message: value.to_string(),
+        }
+    }
+}
+
+/// Store a QBSheet Live management credential.
+///
+/// The publication id is validated before it becomes a keychain account name: it arrives over the
+/// bridge, and an unvalidated value would name an arbitrary keychain entry.
+#[tauri::command]
+pub fn director_store_live_credential(
+    credentials: State<'_, LiveCredentials>,
+    publication_id: String,
+    token: String,
+) -> Result<(), CommandError> {
+    if !crate::live::is_publication_id(&publication_id) {
+        return Err(crate::live::LiveError::InvalidPublicationId.into());
+    }
+    credentials.store.store(&publication_id, &token)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn director_read_live_credential(
+    credentials: State<'_, LiveCredentials>,
+    publication_id: String,
+) -> Result<Option<String>, CommandError> {
+    if !crate::live::is_publication_id(&publication_id) {
+        return Err(crate::live::LiveError::InvalidPublicationId.into());
+    }
+    Ok(credentials.store.read(&publication_id)?)
+}
+
+#[tauri::command]
+pub fn director_forget_live_credential(
+    credentials: State<'_, LiveCredentials>,
+    publication_id: String,
+) -> Result<(), CommandError> {
+    if !crate::live::is_publication_id(&publication_id) {
+        return Err(crate::live::LiveError::InvalidPublicationId.into());
+    }
+    credentials.store.forget(&publication_id)?;
+    Ok(())
+}
+
+/// The publication as the normalized tables see it.
+///
+/// Read from the rows rather than from the document, so that after a crash this answers "what had
+/// Director not yet published" from what actually survived to disk.
+#[tauri::command]
+pub fn director_live_status(
+    store: State<'_, DirectorStore>,
+) -> Result<Option<crate::live::LivePublicationRow>, CommandError> {
+    store.live_status().map_err(CommandError::store)
+}
+
+#[cfg(test)]
+mod live_tests {
+    use super::*;
+    use crate::live::MemoryCredentialStore;
+
+    #[test]
+    fn a_credential_round_trips_through_the_store() {
+        let credentials = LiveCredentials::with_store(Box::new(MemoryCredentialStore::default()));
+        let publication = "bcdfghjkmnpqrstvwxyz";
+        assert_eq!(credentials.store.read(publication).expect("read"), None);
+        credentials
+            .store
+            .store(publication, "token")
+            .expect("store");
+        assert_eq!(
+            credentials
+                .store
+                .read(publication)
+                .expect("read")
+                .as_deref(),
+            Some("token")
+        );
+        credentials.store.forget(publication).expect("forget");
+        assert_eq!(credentials.store.read(publication).expect("read"), None);
+    }
+
+    /// A publication id arrives over the Tauri bridge. Nothing stops a compromised renderer from
+    /// sending a path, so the command layer validates before the value names a keychain entry.
+    #[test]
+    fn a_forged_publication_id_never_reaches_the_credential_store() {
+        for forged in ["../../etc/passwd", "", "short", "AEIOU"] {
+            assert!(
+                !crate::live::is_publication_id(forged),
+                "{forged} must not be accepted as a publication id"
+            );
+        }
+    }
+}
+
+/// The QBSheet Live local-network server.
+///
+/// A separate listener from QBTCP on purpose. QBTCP carries pairing codes and session tokens;
+/// QBLive is a public read-only surface. Two listeners make "a spectator reached a QBTCP route"
+/// impossible rather than merely unlikely. See `live_server.rs`.
+#[tauri::command]
+pub async fn director_start_live_server(
+    runtime: State<'_, crate::live_server::LiveServerRuntime>,
+    port: Option<u16>,
+) -> Result<crate::live_server::LiveServerStatus, CommandError> {
+    runtime
+        .start(port.unwrap_or(DEFAULT_LIVE_PORT))
+        .await
+        .map_err(|error| CommandError {
+            code: "live-server",
+            message: error.to_string(),
+        })
+}
+
+#[tauri::command]
+pub fn director_stop_live_server(
+    runtime: State<'_, crate::live_server::LiveServerRuntime>,
+) -> Result<crate::live_server::LiveServerStatus, CommandError> {
+    runtime.stop().map_err(|error| CommandError {
+        code: "live-server",
+        message: error.to_string(),
+    })
+}
+
+#[tauri::command]
+pub fn director_live_server_status(
+    runtime: State<'_, crate::live_server::LiveServerRuntime>,
+) -> crate::live_server::LiveServerStatus {
+    runtime.status()
+}
+
+/// Hand the local server a sanitized snapshot.
+///
+/// The value is whatever Director's publication path produced — the same document it would send to
+/// a remote backend. Nothing here inspects the tournament, which is what keeps the privacy boundary
+/// in exactly one place.
+#[tauri::command]
+pub fn director_publish_local_live(
+    runtime: State<'_, crate::live_server::LiveServerRuntime>,
+    snapshot: Value,
+) -> Result<crate::live_server::LiveServerStatus, CommandError> {
+    runtime.publish(snapshot);
+    Ok(runtime.status())
+}
+
+/// The default port for the local QBSheet Live server.
+///
+/// Adjacent to QBTCP's 8787 so a Director explaining a firewall exception has two numbers next to
+/// each other, and deliberately not the same one.
+pub const DEFAULT_LIVE_PORT: u16 = 8790;

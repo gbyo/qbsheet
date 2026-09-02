@@ -1,6 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
+mod live;
+mod live_server;
 mod server;
 mod store;
 mod transfers;
@@ -37,6 +39,10 @@ pub fn run() {
             app.manage(store);
             app.manage(server::ServerRuntime::default());
             app.manage(transfers::TransferRoots::default());
+            // The QBSheet Live management credential goes to the operating system's credential
+            // store, never to the tournament database. See `live.rs`.
+            app.manage(commands::LiveCredentials::default());
+            app.manage(live_server::LiveServerRuntime::default());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -48,6 +54,14 @@ pub fn run() {
             commands::director_server_status,
             commands::director_server_snapshot,
             commands::director_issue_qbtcp_pairing,
+            commands::director_store_live_credential,
+            commands::director_read_live_credential,
+            commands::director_forget_live_credential,
+            commands::director_live_status,
+            commands::director_start_live_server,
+            commands::director_stop_live_server,
+            commands::director_live_server_status,
+            commands::director_publish_local_live,
             commands::director_start_qbtcp_server,
             commands::director_stop_qbtcp_server,
             commands::checkpoint_store,
