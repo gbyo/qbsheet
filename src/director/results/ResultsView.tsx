@@ -275,7 +275,7 @@ function ResultRow({
             controller={controller}
           />
         )}
-        {submission.status === 'accepted' && action === 'protest' && game && (
+        {submission.status === 'accepted' && action === 'protest' && game && scheduled?.rightTeamId && (
           <ProtestCreator
             game={game}
             controller={controller}

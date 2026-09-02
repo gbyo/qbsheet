@@ -182,6 +182,29 @@ test('Director runs a local tournament slice and reopens its result', async ({ p
   await expect(page.getByRole('cell', { name: '210', exact: true }).first()).toBeVisible();
 });
 
+test('Director edits scoring rules without persisting an incomplete numeric field', async ({ page }) => {
+  await createTournament(page);
+
+  const navigation = page.locator('nav[aria-label="Tournament sections"]');
+  await navigation.getByRole('button', { name: 'Format', exact: true }).click();
+
+  const bonusValue = page.getByLabel('Bonus value');
+  await expect(bonusValue).toHaveValue('10');
+  await bonusValue.fill('12');
+  await bonusValue.blur();
+  await expect(bonusValue).toHaveValue('12');
+
+  const tossupValue = page.getByLabel('Tossup value');
+  await tossupValue.fill('');
+  await tossupValue.blur();
+  await expect(page.getByRole('status').last()).toContainText('Tossup value must be a number.');
+
+  await page.reload();
+  await navigation.getByRole('button', { name: 'Format', exact: true }).click();
+  await expect(page.getByLabel('Bonus value')).toHaveValue('12');
+  await expect(page.getByLabel('Tossup value')).toHaveValue('10');
+});
+
 test('Director supports keyboard search, inline edits, and audited result review', async ({ page }) => {
   await createTournament(page);
 

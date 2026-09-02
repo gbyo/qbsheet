@@ -91,7 +91,13 @@ export function formatGenerationAvailability(state: DirectorState): FormatGenera
     if (pools.length === 0) {
       return { supported: false, message: 'Configure at least one pool before generating this format.' };
     }
-    const configurationProblem = poolConfigurationProblem(state, phase, pools, format.allowByes);
+    const configurationProblem = poolConfigurationProblem(
+      state,
+      phase,
+      pools,
+      format.allowByes,
+      format.kind !== 'playoff-pools',
+    );
     return configurationProblem
       ? { supported: false, message: configurationProblem }
       : { supported: true, message: 'Pool round-robin generation is available for this phase.' };
@@ -110,6 +116,7 @@ function poolConfigurationProblem(
   phase: Phase,
   pools: Pool[],
   allowByes: boolean,
+  requireAllConfirmedTeams: boolean,
 ): string | null {
   const teamsById = new Map(state.teams.map((team) => [team.id, team]));
   const confirmedTeamIds = state.teams.filter((team) => team.status === 'confirmed').map((team) => team.id);
@@ -118,7 +125,13 @@ function poolConfigurationProblem(
     if (pool.phaseId !== phase.id) return `Pool ${pool.name} belongs to a different phase.`;
     for (const teamId of pool.teamIds) counts.set(teamId, (counts.get(teamId) ?? 0) + 1);
   }
-  const missing = confirmedTeamIds.filter((teamId) => !counts.has(teamId));
+  // Preliminary pools partition the entire confirmed field. A playoff-pools phase instead
+  // receives the advancing teams as its pool membership, so confirmed teams left outside those
+  // pools are valid and must not block generation.
+  const expectedTeamIds = requireAllConfirmedTeams
+    ? confirmedTeamIds
+    : [...new Set(pools.flatMap((pool) => pool.teamIds))];
+  const missing = expectedTeamIds.filter((teamId) => !counts.has(teamId));
   if (missing.length > 0) {
     return `Assign every confirmed team to exactly one pool before generating: ${missing
       .map((teamId) => teamsById.get(teamId)?.displayName ?? teamId)
@@ -567,7 +580,9 @@ function generatePoolRound(
   const poolTeamIds = pools.flatMap((pool) => pool.teamIds);
   const poolTeamCounts = new Map<DirectorId, number>();
   for (const teamId of poolTeamIds) poolTeamCounts.set(teamId, (poolTeamCounts.get(teamId) ?? 0) + 1);
-  const missingFromPools = confirmedTeamIds.filter((teamId) => !poolTeamCounts.has(teamId));
+  const format = currentFormat(state);
+  const expectedTeamIds = format?.kind === 'playoff-pools' ? [...new Set(poolTeamIds)] : confirmedTeamIds;
+  const missingFromPools = expectedTeamIds.filter((teamId) => !poolTeamCounts.has(teamId));
   const duplicatePoolTeams = [...poolTeamCounts.entries()]
     .filter(([, count]) => count > 1)
     .map(([teamId]) => teamId);

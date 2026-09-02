@@ -176,7 +176,7 @@ export interface DirectorController {
   addPhase(name: string, kind?: NonNullable<DirectorState['phases'][number]>['kind']): void;
   addPool(input: NewPoolInput): boolean;
   updatePool(poolId: DirectorId, changes: { name?: string; teamIds?: DirectorId[] }): boolean;
-  updateRules(changes: Partial<NonNullable<DirectorState['tournament']>['rules']>): void;
+  updateRules(changes: Partial<NonNullable<DirectorState['tournament']>['rules']>): boolean;
   generateSchedule(options?: { seed?: number; avoidRematches?: boolean; avoidSameOrganization?: boolean }): {
     conflicts: string[];
     generated: boolean;
@@ -1149,7 +1149,16 @@ export function useDirectorController(repository = createDirectorRepository()): 
   );
 
   const updateRules = useCallback(
-    (changes: Partial<NonNullable<DirectorState['tournament']>['rules']>) =>
+    (changes: Partial<NonNullable<DirectorState['tournament']>['rules']>): boolean => {
+      if (!stateRef.current.tournament) {
+        setError('Create a tournament before editing scoring rules.');
+        return false;
+      }
+      const validationError = validateDirectorRuleChanges(changes);
+      if (validationError) {
+        setError(validationError);
+        return false;
+      }
       commit((draft) => {
         if (!draft.tournament) return;
         draft.tournament.rules = { ...draft.tournament.rules, ...changes };
@@ -1162,7 +1171,9 @@ export function useDirectorController(repository = createDirectorRepository()): 
           summary: 'Scoring rules updated.',
           entityId: draft.tournament.id,
         });
-      }),
+      });
+      return true;
+    },
     [commit],
   );
 
@@ -2707,6 +2718,48 @@ function restoreRoomStatusAfterHelp(state: DirectorState, roomId: DirectorId): b
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function validateDirectorRuleChanges(
+  changes: Partial<NonNullable<DirectorState['tournament']>['rules']>,
+): string | null {
+  if (
+    changes.tossupValue !== undefined &&
+    (!Number.isFinite(changes.tossupValue) || changes.tossupValue <= 0)
+  ) {
+    return 'Tossup value must be a finite positive number.';
+  }
+  if (changes.powerValue !== undefined && (!Number.isFinite(changes.powerValue) || changes.powerValue <= 0)) {
+    return 'Power value must be a finite positive number.';
+  }
+  if (changes.negValue !== undefined && (!Number.isFinite(changes.negValue) || changes.negValue > 0)) {
+    return 'Neg value must be a finite number of zero or less.';
+  }
+  if (changes.bonusValue !== undefined && (!Number.isFinite(changes.bonusValue) || changes.bonusValue < 0)) {
+    return 'Bonus value must be a finite non-negative number.';
+  }
+  if (
+    changes.tossupCount !== undefined &&
+    (!Number.isInteger(changes.tossupCount) || changes.tossupCount < 1)
+  ) {
+    return 'Tossups must be a positive whole number.';
+  }
+  if (changes.bonusParts !== undefined && (!Number.isInteger(changes.bonusParts) || changes.bonusParts < 1)) {
+    return 'Bonus parts must be a positive whole number.';
+  }
+  if (
+    changes.maximumActivePlayers !== undefined &&
+    (!Number.isInteger(changes.maximumActivePlayers) || changes.maximumActivePlayers < 1)
+  ) {
+    return 'Maximum active players must be a positive whole number.';
+  }
+  if (
+    changes.regulationMinutes !== undefined &&
+    (!Number.isFinite(changes.regulationMinutes) || changes.regulationMinutes <= 0)
+  ) {
+    return 'Regulation minutes must be a finite positive number.';
+  }
+  return null;
 }
 
 function markNativeSessionResult(

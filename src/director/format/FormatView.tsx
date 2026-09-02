@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { currentPhase, formatGenerationAvailability, type DirectorState } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
 import { Button, FormField, PanelBody, StateLabel } from '../components/Controls';
@@ -20,6 +20,32 @@ export function FormatView({
   const formatId = state.tournament?.formatId;
   const format = formatId ? state.formats.find((entry) => entry.id === formatId) : undefined;
   const [roundsPerTeam, setRoundsPerTeam] = useState(format?.roundsPerTeam?.toString() ?? '');
+  const rules = state.tournament?.rules;
+  const [scoringRuleDrafts, setScoringRuleDrafts] = useState(() => scoringRuleDraftsFor(rules));
+  useEffect(() => {
+    setScoringRuleDrafts(scoringRuleDraftsFor(rules));
+  }, [
+    state.tournament?.id,
+    rules?.tossupValue,
+    rules?.powerValue,
+    rules?.negValue,
+    rules?.bonusValue,
+    rules?.tossupCount,
+    rules?.bonusParts,
+  ]);
+  const commitScoringRule = (key: ScoringRuleKey, label: string): void => {
+    const raw = scoringRuleDrafts[key].trim();
+    if (!raw) {
+      onAnnounce(`${label} must be a number.`);
+      return;
+    }
+    const value = Number(raw);
+    if (!Number.isFinite(value)) {
+      onAnnounce(`${label} must be a finite number.`);
+      return;
+    }
+    controller.updateRules({ [key]: value } as Partial<NonNullable<DirectorState['tournament']>['rules']>);
+  };
   const phase = currentPhase(state);
   const generation = formatGenerationAvailability(state);
   const scheduleCount = state.rounds.filter((round) => round.phaseId === phase?.id).length;
@@ -195,38 +221,91 @@ export function FormatView({
                 <FormField label="Tossup value">
                   <input
                     type="number"
-                    value={state.tournament?.rules.tossupValue ?? 10}
-                    onChange={(event) => controller.updateRules({ tossupValue: Number(event.target.value) })}
+                    min="1"
+                    step="1"
+                    value={scoringRuleDrafts.tossupValue}
+                    onChange={(event) =>
+                      setScoringRuleDrafts((current) => ({
+                        ...current,
+                        tossupValue: event.target.value,
+                      }))
+                    }
+                    onBlur={() => commitScoringRule('tossupValue', 'Tossup value')}
                   />
                 </FormField>
                 <FormField label="Power value">
                   <input
                     type="number"
-                    value={state.tournament?.rules.powerValue ?? 15}
-                    onChange={(event) => controller.updateRules({ powerValue: Number(event.target.value) })}
+                    min="1"
+                    step="1"
+                    value={scoringRuleDrafts.powerValue}
+                    onChange={(event) =>
+                      setScoringRuleDrafts((current) => ({
+                        ...current,
+                        powerValue: event.target.value,
+                      }))
+                    }
+                    onBlur={() => commitScoringRule('powerValue', 'Power value')}
                   />
                 </FormField>
                 <FormField label="Neg value">
                   <input
                     type="number"
-                    value={state.tournament?.rules.negValue ?? -5}
-                    onChange={(event) => controller.updateRules({ negValue: Number(event.target.value) })}
+                    max="0"
+                    step="1"
+                    value={scoringRuleDrafts.negValue}
+                    onChange={(event) =>
+                      setScoringRuleDrafts((current) => ({
+                        ...current,
+                        negValue: event.target.value,
+                      }))
+                    }
+                    onBlur={() => commitScoringRule('negValue', 'Neg value')}
+                  />
+                </FormField>
+                <FormField label="Bonus value">
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={scoringRuleDrafts.bonusValue}
+                    onChange={(event) =>
+                      setScoringRuleDrafts((current) => ({
+                        ...current,
+                        bonusValue: event.target.value,
+                      }))
+                    }
+                    onBlur={() => commitScoringRule('bonusValue', 'Bonus value')}
                   />
                 </FormField>
                 <FormField label="Tossups">
                   <input
                     type="number"
                     min="1"
-                    value={state.tournament?.rules.tossupCount ?? 20}
-                    onChange={(event) => controller.updateRules({ tossupCount: Number(event.target.value) })}
+                    step="1"
+                    value={scoringRuleDrafts.tossupCount}
+                    onChange={(event) =>
+                      setScoringRuleDrafts((current) => ({
+                        ...current,
+                        tossupCount: event.target.value,
+                      }))
+                    }
+                    onBlur={() => commitScoringRule('tossupCount', 'Tossups')}
                   />
                 </FormField>
                 <FormField label="Bonus parts">
                   <input
                     type="number"
                     min="1"
-                    value={state.tournament?.rules.bonusParts ?? 3}
-                    onChange={(event) => controller.updateRules({ bonusParts: Number(event.target.value) })}
+                    step="1"
+                    value={scoringRuleDrafts.bonusParts}
+                    onChange={(event) =>
+                      setScoringRuleDrafts((current) => ({
+                        ...current,
+                        bonusParts: event.target.value,
+                      }))
+                    }
+                    onBlur={() => commitScoringRule('bonusParts', 'Bonus parts')}
                   />
                 </FormField>
               </div>
@@ -486,8 +565,13 @@ function PoolEditor({
     pools.filter((candidate) => candidate.id !== pool.id).flatMap((candidate) => candidate.teamIds),
   );
   const save = () => {
-    if (!controller.updatePool(pool.id, { name, teamIds })) return;
-    onAnnounce(`${name.trim() || pool.name} updated.`);
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      onAnnounce('Enter a pool name first.');
+      return;
+    }
+    if (!controller.updatePool(pool.id, { name: trimmedName, teamIds })) return;
+    onAnnounce(`${trimmedName} updated.`);
   };
   return (
     <form
@@ -551,6 +635,24 @@ function formatDescription(kind: string): string {
     )[kind] ?? 'custom pairing plan'
   );
 }
+
+type ScoringRuleKey = 'tossupValue' | 'powerValue' | 'negValue' | 'bonusValue' | 'tossupCount' | 'bonusParts';
+
+type ScoringRuleDrafts = Record<ScoringRuleKey, string>;
+
+function scoringRuleDraftsFor(
+  rules: NonNullable<DirectorState['tournament']>['rules'] | undefined,
+): ScoringRuleDrafts {
+  return {
+    tossupValue: String(rules?.tossupValue ?? 10),
+    powerValue: String(rules?.powerValue ?? 15),
+    negValue: String(rules?.negValue ?? -5),
+    bonusValue: String(rules?.bonusValue ?? 10),
+    tossupCount: String(rules?.tossupCount ?? 20),
+    bonusParts: String(rules?.bonusParts ?? 3),
+  };
+}
+
 function formatName(kind: string): string {
   return (
     (

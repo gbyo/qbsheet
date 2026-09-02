@@ -234,6 +234,37 @@ describe('Director integration hardening', () => {
     expect(new Set(hook.result.current.state.scheduledGames.map((game) => game.poolId)).size).toBe(2);
   });
 
+  test('playoff pools can generate from advancing teams without reassigning the full field', async () => {
+    const { hook } = await directorWithSetup(4);
+    const phaseId = hook.result.current.state.phases[0]?.id;
+    const advancingTeamIds = hook.result.current.state.teams.slice(0, 2).map((entry) => entry.id);
+    if (!phaseId || advancingTeamIds.length !== 2)
+      throw new Error('test setup did not create playoff entrants');
+
+    act(() => hook.result.current.updateFormat({ kind: 'playoff-pools', name: 'Playoff pools' }));
+    act(() => {
+      expect(
+        hook.result.current.addPool({ phaseId, name: 'Championship pool', teamIds: advancingTeamIds }),
+      ).toBe(true);
+    });
+
+    expect(formatGenerationAvailability(hook.result.current.state).supported).toBe(true);
+    let result: { generated: boolean; conflicts: string[] } | undefined;
+    act(() => {
+      result = hook.result.current.generateSchedule();
+    });
+
+    expect(result?.generated).toBe(true);
+    expect(hook.result.current.state.scheduledGames).toHaveLength(1);
+    expect(
+      new Set(
+        hook.result.current.state.scheduledGames.flatMap((game) =>
+          game.rightTeamId ? [game.leftTeamId, game.rightTeamId] : [game.leftTeamId],
+        ),
+      ),
+    ).toEqual(new Set(advancingTeamIds));
+  });
+
   test('pool generation availability explains incomplete membership before the generate action', async () => {
     const { hook } = await directorWithSetup(4);
     const phaseId = hook.result.current.state.phases[0]?.id;
@@ -416,6 +447,21 @@ describe('Director integration hardening', () => {
       });
     });
     expect(hook.result.current.state.games).toHaveLength(gameCount);
+  });
+
+  test('scoring rule updates keep incomplete numeric edits out of persisted state', async () => {
+    const { hook } = await directorWithSetup();
+
+    act(() => {
+      expect(hook.result.current.updateRules({ bonusValue: 12 })).toBe(true);
+    });
+    expect(hook.result.current.state.tournament?.rules.bonusValue).toBe(12);
+
+    act(() => {
+      expect(hook.result.current.updateRules({ tossupValue: Number.NaN })).toBe(false);
+    });
+    expect(hook.result.current.state.tournament?.rules.tossupValue).toBe(10);
+    expect(hook.result.current.error).toMatch(/finite positive number/i);
   });
 
   test('editing a team keeps organization data relational', async () => {
