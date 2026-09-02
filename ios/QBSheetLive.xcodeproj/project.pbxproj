@@ -1,0 +1,802 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0321E9D4E69D9F6170910450 /* QBSheetLiveClipActivity.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 5B0A531D9AFEBB7A276A454D /* QBSheetLiveClipActivity.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		22A627561B063CD238C581E0 /* QBSheetLiveClipActivityBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CC64EBC8BFFC3D1BBA882BB /* QBSheetLiveClipActivityBundle.swift */; };
+		25BFCF7EAA9802114F10EA1B /* QBSheetLiveKit in Frameworks */ = {isa = PBXBuildFile; productRef = 788A6AA3AA3B9B16AAD2F9A7 /* QBSheetLiveKit */; };
+		44ECD5F83AAB4C0D7B3FB23E /* QBSheetLiveClipApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2D6B8A0EB6CD35B5D76050B /* QBSheetLiveClipApp.swift */; };
+		58A6BFD0BDA0E1E155CCC10A /* QBSheetLiveKit in Frameworks */ = {isa = PBXBuildFile; productRef = 04DB2AD7D394B0997EDACB3D /* QBSheetLiveKit */; };
+		7AC26A4C646A2175481BFB79 /* QBSheetLiveActivity.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = C966ACAB030C694C31D32219 /* QBSheetLiveActivity.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		8BE045753AC5B49E247E3ED5 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5E879839C1E73707E97D4B35 /* Assets.xcassets */; };
+		98E29F210AB7660A49F3AA1E /* QBSheetLiveActivityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 534BB41DBB445CB81E48F059 /* QBSheetLiveActivityView.swift */; };
+		C77ED66044D9900501B7BA71 /* QBSheetLiveKit in Frameworks */ = {isa = PBXBuildFile; productRef = 82C95B2EC17DC5A8D4C234A6 /* QBSheetLiveKit */; };
+		C949124C57ACC0AF0252EA88 /* QBSheetLiveClip.app in Embed App Clips */ = {isa = PBXBuildFile; fileRef = B7AEEF05B5F8897A91C31143 /* QBSheetLiveClip.app */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		CEB9C27158E1A19D99A44F19 /* QBSheetLiveActivityBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35812C838B9F0451E80B5697 /* QBSheetLiveActivityBundle.swift */; };
+		DFA498AF84044880105F44FE /* LiveActivityCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0218F4F96CB71203DC99819 /* LiveActivityCoordinator.swift */; };
+		E14BB340AFC2B5ED258124A3 /* QBSheetLiveKit in Frameworks */ = {isa = PBXBuildFile; productRef = 5E75C039098FA4F6881C8FB5 /* QBSheetLiveKit */; };
+		E2CFAE1E2612D88B841EDB21 /* AppEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1D31CEA8713DB5B48005237 /* AppEntry.swift */; };
+		E83ABD28601C6953D88C00BF /* QBSheetLiveActivityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 534BB41DBB445CB81E48F059 /* QBSheetLiveActivityView.swift */; };
+		E8C79B815AA4E497D428EDBC /* LiveActivityCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0218F4F96CB71203DC99819 /* LiveActivityCoordinator.swift */; };
+		F2DA8BA7F25D4B3BED8D7EA4 /* QBSheetLiveApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36B55E8E5DD547A1968195A8 /* QBSheetLiveApp.swift */; };
+		FECFF2A765CBAFE00A29D5F2 /* AppEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1D31CEA8713DB5B48005237 /* AppEntry.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		AC593939C1ECF59D9862CBB8 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 1282CA8EAD75C2DCE81D9394 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 1385C6DAB3CCED8FB8F03ECF;
+			remoteInfo = QBSheetLiveClip;
+		};
+		BE5240CE8E35E291EE8AA3AF /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 1282CA8EAD75C2DCE81D9394 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D5D01D0FDDBF81071EB7B3E3;
+			remoteInfo = QBSheetLiveClipActivity;
+		};
+		C023F7E9B5916336A4F86CE2 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 1282CA8EAD75C2DCE81D9394 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 1B0DC49096381806966DB79F;
+			remoteInfo = QBSheetLiveActivity;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		0C4C8E769F1D80B9B891B0EC /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				0321E9D4E69D9F6170910450 /* QBSheetLiveClipActivity.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		63A2E9B6289CD8A17E7A5109 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				7AC26A4C646A2175481BFB79 /* QBSheetLiveActivity.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E59A12C5DF1682C8684247CB /* Embed App Clips */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/AppClips";
+			dstSubfolderSpec = 16;
+			files = (
+				C949124C57ACC0AF0252EA88 /* QBSheetLiveClip.app in Embed App Clips */,
+			);
+			name = "Embed App Clips";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		00A1BBFF24C5D9A8321D026D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		0CC64EBC8BFFC3D1BBA882BB /* QBSheetLiveClipActivityBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QBSheetLiveClipActivityBundle.swift; sourceTree = "<group>"; };
+		11A450A0EE5237DD04C878F9 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		1FE96BE5B83F54057307CE7C /* QBSheetLiveActivity.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = QBSheetLiveActivity.entitlements; sourceTree = "<group>"; };
+		35812C838B9F0451E80B5697 /* QBSheetLiveActivityBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QBSheetLiveActivityBundle.swift; sourceTree = "<group>"; };
+		36B55E8E5DD547A1968195A8 /* QBSheetLiveApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QBSheetLiveApp.swift; sourceTree = "<group>"; };
+		476C78C90140AC42D40194EA /* QBSheetLiveClipActivity.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = QBSheetLiveClipActivity.entitlements; sourceTree = "<group>"; };
+		48A7FD43AB490E327E867BA8 /* QBSheetLiveKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = QBSheetLiveKit; path = QBSheetLiveKit; sourceTree = SOURCE_ROOT; };
+		534BB41DBB445CB81E48F059 /* QBSheetLiveActivityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QBSheetLiveActivityView.swift; sourceTree = "<group>"; };
+		5B0A531D9AFEBB7A276A454D /* QBSheetLiveClipActivity.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = QBSheetLiveClipActivity.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		5E879839C1E73707E97D4B35 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		75C5AFF918B536AB72AD1C6C /* QBSheetLive.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = QBSheetLive.entitlements; sourceTree = "<group>"; };
+		8CB24809286F9AAF31C46D1E /* QBSheetLiveClip.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = QBSheetLiveClip.entitlements; sourceTree = "<group>"; };
+		9C362DEE9D14D24209E18D6B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		B0DC7F786AEC274AB03067F6 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		B1D31CEA8713DB5B48005237 /* AppEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppEntry.swift; sourceTree = "<group>"; };
+		B7AEEF05B5F8897A91C31143 /* QBSheetLiveClip.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = QBSheetLiveClip.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		C966ACAB030C694C31D32219 /* QBSheetLiveActivity.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = QBSheetLiveActivity.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		D7BEC35290A163998C834F67 /* QBSheetLive.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = QBSheetLive.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		F0218F4F96CB71203DC99819 /* LiveActivityCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityCoordinator.swift; sourceTree = "<group>"; };
+		F2D6B8A0EB6CD35B5D76050B /* QBSheetLiveClipApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QBSheetLiveClipApp.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		12D386CF2F0B69DCC321DC8C /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C77ED66044D9900501B7BA71 /* QBSheetLiveKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		22B9E1074AB12145CFB787F6 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				25BFCF7EAA9802114F10EA1B /* QBSheetLiveKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A3407EF7799A59BED77F4941 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E14BB340AFC2B5ED258124A3 /* QBSheetLiveKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DE6AD7A678043AA37B71A1D4 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				58A6BFD0BDA0E1E155CCC10A /* QBSheetLiveKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		26B82245747A8522CF8BA7A2 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				48A7FD43AB490E327E867BA8 /* QBSheetLiveKit */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+		37315152CA6A4EFA6D6347D9 /* QBSheetLiveActivity */ = {
+			isa = PBXGroup;
+			children = (
+				11A450A0EE5237DD04C878F9 /* Info.plist */,
+				1FE96BE5B83F54057307CE7C /* QBSheetLiveActivity.entitlements */,
+				35812C838B9F0451E80B5697 /* QBSheetLiveActivityBundle.swift */,
+				534BB41DBB445CB81E48F059 /* QBSheetLiveActivityView.swift */,
+			);
+			path = QBSheetLiveActivity;
+			sourceTree = "<group>";
+		};
+		416320067FA5EAB9EC000CB5 /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				B1D31CEA8713DB5B48005237 /* AppEntry.swift */,
+				F0218F4F96CB71203DC99819 /* LiveActivityCoordinator.swift */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		8D5D42B3C13115B1C9956025 = {
+			isa = PBXGroup;
+			children = (
+				26B82245747A8522CF8BA7A2 /* Packages */,
+				ACA19495DC4FFEB7044478C9 /* QBSheetLive */,
+				37315152CA6A4EFA6D6347D9 /* QBSheetLiveActivity */,
+				92EF387489A03D9F61EF3791 /* QBSheetLiveClip */,
+				AEA93CA7E7CB15C7BC02DBB1 /* QBSheetLiveClipActivity */,
+				416320067FA5EAB9EC000CB5 /* Shared */,
+				CA67EAECCC6592ADD03AE313 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		92EF387489A03D9F61EF3791 /* QBSheetLiveClip */ = {
+			isa = PBXGroup;
+			children = (
+				B0DC7F786AEC274AB03067F6 /* Info.plist */,
+				8CB24809286F9AAF31C46D1E /* QBSheetLiveClip.entitlements */,
+				F2D6B8A0EB6CD35B5D76050B /* QBSheetLiveClipApp.swift */,
+			);
+			path = QBSheetLiveClip;
+			sourceTree = "<group>";
+		};
+		ACA19495DC4FFEB7044478C9 /* QBSheetLive */ = {
+			isa = PBXGroup;
+			children = (
+				5E879839C1E73707E97D4B35 /* Assets.xcassets */,
+				00A1BBFF24C5D9A8321D026D /* Info.plist */,
+				75C5AFF918B536AB72AD1C6C /* QBSheetLive.entitlements */,
+				36B55E8E5DD547A1968195A8 /* QBSheetLiveApp.swift */,
+			);
+			path = QBSheetLive;
+			sourceTree = "<group>";
+		};
+		AEA93CA7E7CB15C7BC02DBB1 /* QBSheetLiveClipActivity */ = {
+			isa = PBXGroup;
+			children = (
+				9C362DEE9D14D24209E18D6B /* Info.plist */,
+				476C78C90140AC42D40194EA /* QBSheetLiveClipActivity.entitlements */,
+				0CC64EBC8BFFC3D1BBA882BB /* QBSheetLiveClipActivityBundle.swift */,
+			);
+			path = QBSheetLiveClipActivity;
+			sourceTree = "<group>";
+		};
+		CA67EAECCC6592ADD03AE313 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				D7BEC35290A163998C834F67 /* QBSheetLive.app */,
+				C966ACAB030C694C31D32219 /* QBSheetLiveActivity.appex */,
+				B7AEEF05B5F8897A91C31143 /* QBSheetLiveClip.app */,
+				5B0A531D9AFEBB7A276A454D /* QBSheetLiveClipActivity.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		1385C6DAB3CCED8FB8F03ECF /* QBSheetLiveClip */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5594DC574455ECD42ACFB3A8 /* Build configuration list for PBXNativeTarget "QBSheetLiveClip" */;
+			buildPhases = (
+				E73DB52AF3FE8F9A5C10B23A /* Sources */,
+				22B9E1074AB12145CFB787F6 /* Frameworks */,
+				0C4C8E769F1D80B9B891B0EC /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A7788E47C3913F637F5F69C4 /* PBXTargetDependency */,
+			);
+			name = QBSheetLiveClip;
+			packageProductDependencies = (
+				788A6AA3AA3B9B16AAD2F9A7 /* QBSheetLiveKit */,
+			);
+			productName = QBSheetLiveClip;
+			productReference = B7AEEF05B5F8897A91C31143 /* QBSheetLiveClip.app */;
+			productType = "com.apple.product-type.application.on-demand-install-capable";
+		};
+		1B0DC49096381806966DB79F /* QBSheetLiveActivity */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 715EE41CBBCD96A59231E2EC /* Build configuration list for PBXNativeTarget "QBSheetLiveActivity" */;
+			buildPhases = (
+				D1B461A7782D977FAF95ABDF /* Sources */,
+				DE6AD7A678043AA37B71A1D4 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = QBSheetLiveActivity;
+			packageProductDependencies = (
+				04DB2AD7D394B0997EDACB3D /* QBSheetLiveKit */,
+			);
+			productName = QBSheetLiveActivity;
+			productReference = C966ACAB030C694C31D32219 /* QBSheetLiveActivity.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		D5D01D0FDDBF81071EB7B3E3 /* QBSheetLiveClipActivity */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C1DF9651F47BD49D481EC6F1 /* Build configuration list for PBXNativeTarget "QBSheetLiveClipActivity" */;
+			buildPhases = (
+				6A6D8B1C19063F4B75926A55 /* Sources */,
+				A3407EF7799A59BED77F4941 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = QBSheetLiveClipActivity;
+			packageProductDependencies = (
+				5E75C039098FA4F6881C8FB5 /* QBSheetLiveKit */,
+			);
+			productName = QBSheetLiveClipActivity;
+			productReference = 5B0A531D9AFEBB7A276A454D /* QBSheetLiveClipActivity.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		F460577D39B07DC9970A91C4 /* QBSheetLive */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B89AAF2FCC96B156C9F97A51 /* Build configuration list for PBXNativeTarget "QBSheetLive" */;
+			buildPhases = (
+				AAE9B04115B1AEA028DF75D1 /* Sources */,
+				72548C36DC8BA282E44EFE1B /* Resources */,
+				12D386CF2F0B69DCC321DC8C /* Frameworks */,
+				63A2E9B6289CD8A17E7A5109 /* Embed Foundation Extensions */,
+				E59A12C5DF1682C8684247CB /* Embed App Clips */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				F7FF5BEBF970B493B8E73106 /* PBXTargetDependency */,
+				C5E125766C6D0183EB7F6366 /* PBXTargetDependency */,
+			);
+			name = QBSheetLive;
+			packageProductDependencies = (
+				82C95B2EC17DC5A8D4C234A6 /* QBSheetLiveKit */,
+			);
+			productName = QBSheetLive;
+			productReference = D7BEC35290A163998C834F67 /* QBSheetLive.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		1282CA8EAD75C2DCE81D9394 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 2600;
+				TargetAttributes = {
+					1385C6DAB3CCED8FB8F03ECF = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+					1B0DC49096381806966DB79F = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+					D5D01D0FDDBF81071EB7B3E3 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+					F460577D39B07DC9970A91C4 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 2C8931B9F2D04D86E80DA8CA /* Build configuration list for PBXProject "QBSheetLive" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 8D5D42B3C13115B1C9956025;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				2B8C2F1B5B8152AB033D2EC0 /* XCLocalSwiftPackageReference "QBSheetLiveKit" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = CA67EAECCC6592ADD03AE313 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				F460577D39B07DC9970A91C4 /* QBSheetLive */,
+				1385C6DAB3CCED8FB8F03ECF /* QBSheetLiveClip */,
+				1B0DC49096381806966DB79F /* QBSheetLiveActivity */,
+				D5D01D0FDDBF81071EB7B3E3 /* QBSheetLiveClipActivity */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		72548C36DC8BA282E44EFE1B /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8BE045753AC5B49E247E3ED5 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		6A6D8B1C19063F4B75926A55 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				98E29F210AB7660A49F3AA1E /* QBSheetLiveActivityView.swift in Sources */,
+				22A627561B063CD238C581E0 /* QBSheetLiveClipActivityBundle.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AAE9B04115B1AEA028DF75D1 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				FECFF2A765CBAFE00A29D5F2 /* AppEntry.swift in Sources */,
+				E8C79B815AA4E497D428EDBC /* LiveActivityCoordinator.swift in Sources */,
+				F2DA8BA7F25D4B3BED8D7EA4 /* QBSheetLiveApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D1B461A7782D977FAF95ABDF /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CEB9C27158E1A19D99A44F19 /* QBSheetLiveActivityBundle.swift in Sources */,
+				E83ABD28601C6953D88C00BF /* QBSheetLiveActivityView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E73DB52AF3FE8F9A5C10B23A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E2CFAE1E2612D88B841EDB21 /* AppEntry.swift in Sources */,
+				DFA498AF84044880105F44FE /* LiveActivityCoordinator.swift in Sources */,
+				44ECD5F83AAB4C0D7B3FB23E /* QBSheetLiveClipApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		A7788E47C3913F637F5F69C4 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D5D01D0FDDBF81071EB7B3E3 /* QBSheetLiveClipActivity */;
+			targetProxy = BE5240CE8E35E291EE8AA3AF /* PBXContainerItemProxy */;
+		};
+		C5E125766C6D0183EB7F6366 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 1385C6DAB3CCED8FB8F03ECF /* QBSheetLiveClip */;
+			targetProxy = AC593939C1ECF59D9862CBB8 /* PBXContainerItemProxy */;
+		};
+		F7FF5BEBF970B493B8E73106 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 1B0DC49096381806966DB79F /* QBSheetLiveActivity */;
+			targetProxy = C023F7E9B5916336A4F86CE2 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		06AB90ACB04704B6B9C07A7E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_TREAT_WARNINGS_AS_ERRORS = NO;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MARKETING_VERSION = 1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_TREAT_WARNINGS_AS_ERRORS = NO;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		0732BFEA755D08D27AAEC98E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = QBSheetLiveClip/QBSheetLiveClip.entitlements;
+				INFOPLIST_FILE = QBSheetLiveClip/Info.plist;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.qbsheet.live.Clip;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		3A3F4667582D48B4CA9A9E3A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = QBSheetLive/QBSheetLive.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = QBSheetLive/Info.plist;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.qbsheet.live;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		5B0B97BCF91261D8795657D1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = QBSheetLiveActivity/QBSheetLiveActivity.entitlements;
+				INFOPLIST_FILE = QBSheetLiveActivity/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.qbsheet.live.Activity;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		885299F4F583923C2677212E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = QBSheetLiveClipActivity/QBSheetLiveClipActivity.entitlements;
+				INFOPLIST_FILE = QBSheetLiveClipActivity/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.qbsheet.live.Clip.Activity;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		8AB616341F67193AE0B17D10 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = QBSheetLive/QBSheetLive.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = QBSheetLive/Info.plist;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.qbsheet.live;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		9D812A7E30BB4C7209BFD755 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = "";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_TREAT_WARNINGS_AS_ERRORS = NO;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MARKETING_VERSION = 1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_TREAT_WARNINGS_AS_ERRORS = NO;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		A632D36BE5D24CAC98B4AB0E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = QBSheetLiveActivity/QBSheetLiveActivity.entitlements;
+				INFOPLIST_FILE = QBSheetLiveActivity/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.qbsheet.live.Activity;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		B778501DE9FE254B25849F5D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = QBSheetLiveClipActivity/QBSheetLiveClipActivity.entitlements;
+				INFOPLIST_FILE = QBSheetLiveClipActivity/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.qbsheet.live.Clip.Activity;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		CCAFA871E69039C0555D8381 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = QBSheetLiveClip/QBSheetLiveClip.entitlements;
+				INFOPLIST_FILE = QBSheetLiveClip/Info.plist;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.qbsheet.live.Clip;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		2C8931B9F2D04D86E80DA8CA /* Build configuration list for PBXProject "QBSheetLive" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				06AB90ACB04704B6B9C07A7E /* Debug */,
+				9D812A7E30BB4C7209BFD755 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		5594DC574455ECD42ACFB3A8 /* Build configuration list for PBXNativeTarget "QBSheetLiveClip" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CCAFA871E69039C0555D8381 /* Debug */,
+				0732BFEA755D08D27AAEC98E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		715EE41CBBCD96A59231E2EC /* Build configuration list for PBXNativeTarget "QBSheetLiveActivity" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5B0B97BCF91261D8795657D1 /* Debug */,
+				A632D36BE5D24CAC98B4AB0E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		B89AAF2FCC96B156C9F97A51 /* Build configuration list for PBXNativeTarget "QBSheetLive" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				3A3F4667582D48B4CA9A9E3A /* Debug */,
+				8AB616341F67193AE0B17D10 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		C1DF9651F47BD49D481EC6F1 /* Build configuration list for PBXNativeTarget "QBSheetLiveClipActivity" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				885299F4F583923C2677212E /* Debug */,
+				B778501DE9FE254B25849F5D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		2B8C2F1B5B8152AB033D2EC0 /* XCLocalSwiftPackageReference "QBSheetLiveKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = QBSheetLiveKit;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		04DB2AD7D394B0997EDACB3D /* QBSheetLiveKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = QBSheetLiveKit;
+		};
+		5E75C039098FA4F6881C8FB5 /* QBSheetLiveKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = QBSheetLiveKit;
+		};
+		788A6AA3AA3B9B16AAD2F9A7 /* QBSheetLiveKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = QBSheetLiveKit;
+		};
+		82C95B2EC17DC5A8D4C234A6 /* QBSheetLiveKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = QBSheetLiveKit;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 1282CA8EAD75C2DCE81D9394 /* Project object */;
+}

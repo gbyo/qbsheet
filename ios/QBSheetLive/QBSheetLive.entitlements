@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  QBSheet Live, full app.
+
+  `applinks:` claims the universal link so an installed app handles a scanned code instead of the
+  App Clip. `appclips:` is what lets the App Clip be invoked from the same domain.
+
+  The paths are narrow on purpose. `/t/*` is the only route QBSheet Live handles; claiming the whole
+  domain would take over every URL on live.qbsheet.com, including pages that are meant to open in a
+  browser. See docs/QBLIVE_IOS.md and public/.well-known/apple-app-site-association.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>com.apple.developer.associated-domains</key>
+  <array>
+    <string>applinks:live.qbsheet.com</string>
+    <string>appclips:live.qbsheet.com</string>
+  </array>
+  <key>com.apple.security.application-groups</key>
+  <array>
+    <string>group.com.qbsheet.live</string>
+  </array>
+  <key>aps-environment</key>
+  <string>development</string>
+</dict>
+</plist>
