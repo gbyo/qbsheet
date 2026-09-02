@@ -157,7 +157,9 @@ export function startPublicationWorker(hooks: WorkerHooks, intervalMs = 1000): (
     if (stopped || running) return;
     running = true;
     try {
-      let { publication, snapshot } = hooks.read();
+      const read = hooks.read();
+      let publication = read.publication;
+      const snapshot = read.snapshot;
       if (!publication || !publication.settings.enabled) return;
       // Recover any work that was left in-flight by a previous crash or tab close.
       const recovered = recoverStaleInFlight(publication);

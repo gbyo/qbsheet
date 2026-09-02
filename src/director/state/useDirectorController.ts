@@ -3006,7 +3006,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         })();
       },
     }),
-    [commit, liveClientFor],
+    [commit],
   );
 
   const prevOutboxRef = useRef<LiveOutboxItem[]>([]);
