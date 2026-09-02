@@ -87,12 +87,7 @@ jobs:
 
           path = Path('src/director/domain/model.ts')
           text = path.read_text()
-          text = replace_once(
-              text,
-              "\nexport const directorSchemaVersion = 1;\n",
-              '\n',
-              'duplicate Director schema version',
-          )
+          text = replace_once(text, "\nexport const directorSchemaVersion = 1;\n", '\n', 'duplicate Director schema version')
           path.write_text(text)
 
           path = Path('src/director/persistence/DirectorRepository.ts')
@@ -111,12 +106,24 @@ jobs:
           PY
       - name: Install dependencies
         run: npm ci
-      - name: Format merged sources
-        run: |
-          npm run format
-          cargo fmt --manifest-path crates/tournament-store/Cargo.toml --all
-          cargo fmt --manifest-path apps/director/src-tauri/Cargo.toml --all
-          cargo fmt --manifest-path crates/qbtcp-server/Cargo.toml --all
+      - name: Format controller merge
+        run: npx prettier --write src/director/state/useDirectorController.ts
+      - name: Format model merge
+        run: npx prettier --write src/director/domain/model.ts
+      - name: Format repository merge
+        run: npx prettier --write src/director/persistence/DirectorRepository.ts
+      - name: Format rooms merge
+        run: npx prettier --write src/director/rooms/RoomsView.tsx
+      - name: Format core scheduling merge
+        run: npx prettier --write packages/tournament-core/src/scheduling.ts
+      - name: Format all JS sources
+        run: npm run format
+      - name: Format tournament store
+        run: cargo fmt --manifest-path crates/tournament-store/Cargo.toml --all
+      - name: Format Director native crate
+        run: cargo fmt --manifest-path apps/director/src-tauri/Cargo.toml --all
+      - name: Format QBTCP server
+        run: cargo fmt --manifest-path crates/qbtcp-server/Cargo.toml --all
       - name: Validate merge result
         run: |
           npm run format:check
