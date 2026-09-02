@@ -233,7 +233,7 @@ describe('specific disclosures', () => {
   test('a game with no scheduled time publishes no time rather than an estimate', () => {
     const snapshot = project({ ...defaultLivePublicationSettings(), enabled: true });
     const game = snapshot.schedule.find((entry) => entry.id === 'game-3');
-    expect(game?.scheduledStart).toBe('2026-09-05T10:00:00-04:00');
+    expect(game?.scheduledStart).toBeNull();
     // Nothing anywhere in the document claims a time that Director did not state.
     const serialized = JSON.stringify(snapshot);
     expect(serialized).not.toMatch(/estimat/i);
