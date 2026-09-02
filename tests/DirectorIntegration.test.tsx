@@ -503,7 +503,8 @@ describe('Director integration hardening', () => {
       released = hook.result.current.releaseRound(roundId);
     });
     expect(released).toBe(true);
-    expect(hook.result.current.state.rounds[0]?.startedAt).not.toBeNull();
+    expect(hook.result.current.state.rounds[0]?.releasedAt).not.toBeNull();
+    expect(hook.result.current.state.rounds[0]?.startedAt).toBeNull();
     await waitFor(() => expect(hook.result.current.saving).toBe(false));
   });
 
@@ -1527,6 +1528,8 @@ describe('Director integration hardening', () => {
         status: 'released',
         packetId: 'packet-shared',
         scheduledGameIds: ['scheduled-round-1'],
+        scheduledStart: null,
+        releasedAt: null,
         startedAt: null,
         closedAt: null,
       },
@@ -1539,6 +1542,8 @@ describe('Director integration hardening', () => {
         status: 'released',
         packetId: null,
         scheduledGameIds: ['scheduled-round-2'],
+        scheduledStart: null,
+        releasedAt: null,
         startedAt: null,
         closedAt: null,
       },
@@ -1980,6 +1985,8 @@ describe('Director integration hardening', () => {
         status: 'closed',
         packetId: null,
         scheduledGameIds: [],
+        scheduledStart: null,
+        releasedAt: null,
         startedAt: null,
         closedAt: null,
       },
@@ -1992,6 +1999,8 @@ describe('Director integration hardening', () => {
         status: 'closed',
         packetId: null,
         scheduledGameIds: [],
+        scheduledStart: null,
+        releasedAt: null,
         startedAt: null,
         closedAt: null,
       },
@@ -2087,6 +2096,31 @@ describe('Director integration hardening', () => {
     normalized.tournament.rules.tossupValue = 99;
     expect(defaultRules.tossupValue).toBe(10);
     expect(normalizeDirectorState(legacy).tournament?.rules.tossupValue).toBe(10);
+  });
+
+  test('v3 round timestamps migrate from release time without inventing an actual start', () => {
+    const legacy = emptyDirectorState() as unknown as Record<string, unknown>;
+    legacy.schemaVersion = 3;
+    legacy.rounds = [
+      {
+        id: 'legacy-round',
+        phaseId: 'phase-1',
+        name: 'Legacy round',
+        number: 1,
+        revision: 1,
+        status: 'released',
+        packetId: null,
+        scheduledGameIds: [],
+        startedAt: '2026-09-05T13:53:00.000Z',
+        closedAt: null,
+      },
+    ];
+    const migrated = normalizeDirectorState(legacy);
+    expect(migrated.rounds[0]).toMatchObject({
+      scheduledStart: null,
+      releasedAt: '2026-09-05T13:53:00.000Z',
+      startedAt: null,
+    });
   });
 
   test('a partial or invalid rules object is completed without preserving unsafe fields', () => {

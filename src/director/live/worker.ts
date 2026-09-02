@@ -129,24 +129,35 @@ export interface WorkerHooks {
  */
 export const staleInFlightMs = 30_000;
 
-export function recoverStaleInFlight(
-  publication: LivePublication,
-  at = new Date(),
-): LivePublication {
+export function recoverStaleInFlight(publication: LivePublication, at = new Date()): LivePublication {
   let changed = false;
-  const outbox = publication.outbox.map((item) => {
-    if (item.state !== 'in-flight') return item;
+  const outbox: LiveOutboxItem[] = [];
+  for (const item of publication.outbox) {
+    if (item.state !== 'in-flight') {
+      outbox.push(item);
+      continue;
+    }
     const last = item.lastAttemptAt ? Date.parse(item.lastAttemptAt) : 0;
-    if (Number.isFinite(last) && at.getTime() - last < staleInFlightMs) return item;
+    if (Number.isFinite(last) && at.getTime() - last < staleInFlightMs) {
+      outbox.push(item);
+      continue;
+    }
     changed = true;
-    return {
+    const supersededByBarrier =
+      (publication.lifecycle === 'deleting' || publication.lifecycle === 'unpublishing') &&
+      item.kind !== 'delete' &&
+      item.kind !== 'unpublish';
+    if (supersededByBarrier) continue;
+    outbox.push({
       ...item,
       state: 'failed' as const,
       lastError: item.lastError ?? 'Publish was interrupted before it could finish.',
       nextAttemptAt: at.toISOString(),
-    };
-  });
-  return changed ? { ...publication, outbox } : publication;
+    });
+  }
+  return changed
+    ? { ...publication, outbox, sync: { ...publication.sync, pendingItems: outbox.length } }
+    : publication;
 }
 
 export function startPublicationWorker(hooks: WorkerHooks, intervalMs = 1000): () => void {

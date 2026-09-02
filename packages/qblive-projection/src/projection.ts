@@ -180,8 +180,8 @@ function publicGameState(game: ScheduledGame, hasResult: boolean): QbliveSchedul
  * A round's actual start is not a scheduled start. Until the tournament records an explicit
  * scheduled time for the round, `scheduledStart` is `null`.
  */
-function scheduledStartFor(_round: Round | undefined, _timeZone: string): string | null {
-  return null;
+function scheduledStartFor(game: ScheduledGame, round: Round | undefined, timeZone: string): string | null {
+  return zonedIsoOrNull(game.scheduledStart ?? round?.scheduledStart ?? null, timeZone);
 }
 
 function projectTournament(state: DirectorState, timeZone: string): QblivePublicTournament {
@@ -297,7 +297,7 @@ function projectSchedule(
       poolName: pool?.name ?? null,
       teamIds,
       roomId: settings.roomLocations ? game.roomId : null,
-      scheduledStart: scheduledStartFor(round, timeZone),
+      scheduledStart: scheduledStartFor(game, round, timeZone),
       state: publicGameState(game, resultsByGame.has(game.id)),
     });
   }

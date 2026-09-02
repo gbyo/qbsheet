@@ -599,6 +599,15 @@ impl Default for LiveCredentials {
     }
 }
 
+/// Prove secure persistence is available before Director consumes a one-time setup token.
+#[tauri::command]
+pub fn director_probe_live_credential_store(
+    credentials: State<'_, LiveCredentials>,
+) -> Result<(), CommandError> {
+    credentials.store.probe()?;
+    Ok(())
+}
+
 impl LiveCredentials {
     #[cfg(test)]
     pub fn with_store(store: Box<dyn crate::live::CredentialStore>) -> Self {
@@ -692,6 +701,26 @@ mod live_tests {
         assert_eq!(credentials.store.read(publication).expect("read"), None);
     }
 
+    #[test]
+    fn a_credential_survives_reopening_the_store_abstraction() {
+        let shared = MemoryCredentialStore::default();
+        let first = LiveCredentials::with_store(Box::new(shared.clone()));
+        first
+            .store
+            .store("bcdfghjkmnpqrstvwxyz", "restart-token")
+            .expect("store before restart");
+        drop(first);
+        let reopened = LiveCredentials::with_store(Box::new(shared));
+        assert_eq!(
+            reopened
+                .store
+                .read("bcdfghjkmnpqrstvwxyz")
+                .expect("read after restart")
+                .as_deref(),
+            Some("restart-token")
+        );
+    }
+
     /// A publication id arrives over the Tauri bridge. Nothing stops a compromised renderer from
     /// sending a path, so the command layer validates before the value names a keychain entry.
     #[test]
@@ -753,6 +782,21 @@ pub fn director_publish_local_live(
 ) -> Result<crate::live_server::LiveServerStatus, CommandError> {
     runtime.publish(snapshot);
     Ok(runtime.status())
+}
+
+/// Clear a local publication. Unpublish retains a tombstone so open spectator tabs receive 410;
+/// Delete forgets the id entirely. Neither command touches the separate QBTCP listener.
+#[tauri::command]
+pub fn director_clear_local_live(
+    runtime: State<'_, crate::live_server::LiveServerRuntime>,
+    remember_as_gone: bool,
+) -> Result<crate::live_server::LiveServerStatus, CommandError> {
+    runtime
+        .clear(remember_as_gone)
+        .map_err(|error| CommandError {
+            code: "live-server",
+            message: error.to_string(),
+        })
 }
 
 /// The default port for the local QBSheet Live server.

@@ -48,6 +48,13 @@ const emptyState: LiveWebState = {
   error: null,
 };
 
+declare global {
+  interface Window {
+    /** Injected only by Director's embedded, offline local-network server. */
+    __QBSHEET_LIVE_LOCAL__?: { publicationId: string; backendOrigin: string };
+  }
+}
+
 /**
  * Resolve the bootstrap from the address bar, falling back to the last tournament this device saw
  * only for a bare visit (no tournament bootstrap attempt). A URL that clearly tries to name a
@@ -60,6 +67,8 @@ const emptyState: LiveWebState = {
 function resolveBootstrap(
   href: string,
 ): { publicationId: string; backendOrigin: string } | { error: string } {
+  const local = window.__QBSHEET_LIVE_LOCAL__;
+  if (local?.publicationId && local.backendOrigin) return local;
   let hasBootstrapAttempt = false;
   try {
     hasBootstrapAttempt = hasBootstrapAttemptInUrl(href);
@@ -112,6 +121,7 @@ export default function App() {
   });
   const [tab, setTab] = useState<TabId>('home');
   const [choosingPlayer, setChoosingPlayer] = useState(false);
+  const [showRemovedCache, setShowRemovedCache] = useState(false);
   const [now, setNow] = useState(() => new Date());
   const connectionRef = useRef<LiveConnection | null>(null);
 
@@ -188,13 +198,41 @@ export default function App() {
     setChoosingPlayer(false);
   }, []);
 
-  const refresh = useCallback(() => void connectionRef.current?.refresh(), []);
+  const refresh = useCallback(() => {
+    setState((previous) => ({
+      ...previous,
+      connection: previous.snapshot ? 'offline' : 'loading',
+    }));
+    void connectionRef.current?.refresh();
+  }, []);
 
-  const stale = state.connection === 'offline' || state.connection === 'polling';
+  const stale =
+    state.connection === 'offline' || state.connection === 'polling' || state.connection === 'removed';
   const age = useMemo(() => formatAge(state.receivedAt, now.getTime()), [state.receivedAt, now]);
+  const savedAge = age.replace(/^Updated\s*/i, '');
 
+  if (state.connection === 'removed' && (!state.snapshot || !showRemovedCache)) {
+    return (
+      <Problem
+        title="This tournament is no longer available"
+        detail={state.error ?? 'The tournament was unpublished or deleted.'}
+        {...(state.snapshot
+          ? { secondaryLabel: 'View saved copy', onSecondary: () => setShowRemovedCache(true) }
+          : {})}
+      />
+    );
+  }
   if (state.connection === 'error' && !state.snapshot) {
     return <Problem title="This link did not open a tournament" detail={state.error ?? 'Unknown problem.'} />;
+  }
+  if (state.connection === 'offline' && !state.snapshot) {
+    return (
+      <Problem
+        title="The tournament server is offline"
+        detail={state.error ?? 'The tournament server could not be reached.'}
+        onRetry={refresh}
+      />
+    );
   }
   if (!state.snapshot) {
     return (
@@ -207,7 +245,12 @@ export default function App() {
   const snapshot = state.snapshot;
 
   if (!state.followedTeamId) {
-    return <FollowTeam snapshot={snapshot} onFollow={follow} />;
+    return (
+      <>
+        {state.connection === 'removed' && <RemovedWarning age={savedAge} />}
+        <FollowTeam snapshot={snapshot} onFollow={follow} />
+      </>
+    );
   }
   if (choosingPlayer && publishesPlayers(snapshot)) {
     return (
@@ -230,7 +273,13 @@ export default function App() {
           <h1>{snapshot.tournament.name}</h1>
           <span className="status" data-connection={state.connection}>
             <span className="status-dot" aria-hidden="true" />
-            {state.connection === 'live' ? 'Live' : state.connection === 'offline' ? 'Offline' : 'Updated'}
+            {state.connection === 'live'
+              ? 'Live'
+              : state.connection === 'offline'
+                ? 'Offline'
+                : state.connection === 'removed'
+                  ? 'Removed'
+                  : 'Updated'}
           </span>
         </div>
       </header>
@@ -240,15 +289,18 @@ export default function App() {
             never lets cached data look current. */}
         {stale && (
           <p className="stale" role="status">
-            {age}
-            {state.connection === 'offline' && ' · reconnecting'}{' '}
-            <button
-              type="button"
-              onClick={refresh}
-              style={{ minHeight: 32, padding: '0 10px', marginLeft: 8, fontSize: 14 }}
-            >
-              Refresh
-            </button>
+            {state.connection === 'removed'
+              ? `Removed · saved copy ${savedAge.toLowerCase()}`
+              : `${age}${state.connection === 'offline' ? ' · reconnecting' : ''}`}{' '}
+            {state.connection !== 'removed' && (
+              <button
+                type="button"
+                onClick={refresh}
+                style={{ minHeight: 32, padding: '0 10px', marginLeft: 8, fontSize: 14 }}
+              >
+                Refresh
+              </button>
+            )}
           </p>
         )}
         {snapshot.final && (
@@ -310,5 +362,13 @@ export default function App() {
         ))}
       </nav>
     </>
+  );
+}
+
+function RemovedWarning({ age }: { age: string }) {
+  return (
+    <p className="stale" role="status">
+      This tournament is no longer published. Showing a saved copy · {age.toLowerCase()}.
+    </p>
   );
 }

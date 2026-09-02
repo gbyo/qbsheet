@@ -1,0 +1,6 @@
+{
+  "snapshot": true,
+  "events": true,
+  "stream": false,
+  "applePush": false
+}

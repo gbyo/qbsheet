@@ -30,7 +30,7 @@ import { qrSvg } from './qr';
 import { syncSummary } from './publication';
 
 export interface LiveViewActions {
-  enable(backend: LiveBackendDescriptor, setupToken: string | null): void;
+  enable(backend: LiveBackendDescriptor, setupToken: string | null): Promise<void>;
   disable(): void;
   updateSettings(changes: Partial<LivePublicationSettings>): void;
   publishAnnouncement(input: {
@@ -110,31 +110,39 @@ function SetupPanel({
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  const submit = (): void => {
+  const submit = async (): Promise<void> => {
     if (submitting) return;
     setError(null);
     const trimmed = origin.trim().replace(/\/+$/, '');
-    if (!trimmed) {
+    if (kind !== 'local' && !trimmed) {
       setError('Enter the address of the tournament server.');
       return;
     }
     try {
       // Validated here rather than after the round trip, so a typo is a sentence rather than a
       // failed request. The same validator the clients use.
-      buildBootstrapUrl({ publicationId: newPublicationId(), backendOrigin: trimmed });
+      if (kind !== 'local') {
+        buildBootstrapUrl({ publicationId: newPublicationId(), backendOrigin: trimmed });
+      }
     } catch (reason) {
       setError(reason instanceof QbliveBootstrapError ? reason.message : 'That address is not valid.');
       return;
     }
     setSubmitting(true);
-    actions.enable(
-      { kind, origin: trimmed, displayName: displayName.trim() || undefined },
-      kind === 'local' ? null : setupToken.trim() || null,
-    );
     onAnnounce('Connecting to the QBSheet Live backend.');
-    // Re-enable after a short cooldown so a transient failure can be retried without
-    // allowing an immediate double-click to create two publication IDs.
-    window.setTimeout(() => setSubmitting(false), 1500);
+    try {
+      await actions.enable(
+        { kind, origin: kind === 'local' ? '' : trimmed, displayName: displayName.trim() || undefined },
+        kind === 'local' ? null : setupToken.trim() || null,
+      );
+      onAnnounce('QBSheet Live setup completed. The initial snapshot is queued for publication.');
+    } catch (reason) {
+      setError(
+        reason instanceof Error ? reason.message : 'The QBSheet Live backend could not be configured.',
+      );
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -156,7 +164,11 @@ function SetupPanel({
           <BackendChoice
             id="cloudflare"
             selected={kind}
-            onSelect={setKind}
+            onSelect={(next) => {
+              setKind(next);
+              setError(null);
+            }}
+            disabled={submitting}
             title="Set up with Cloudflare"
             badge="Recommended"
             description="A Worker and a Durable Object in your own Cloudflare account. Deploy the template, paste the address and the one-time setup token."
@@ -164,7 +176,11 @@ function SetupPanel({
           <BackendChoice
             id="custom"
             selected={kind}
-            onSelect={setKind}
+            onSelect={(next) => {
+              setKind(next);
+              setError(null);
+            }}
+            disabled={submitting}
             title="Connect a custom server"
             badge="Advanced"
             description="Any server that implements QBLive v1. Director checks the address and protocol version before publishing; full conformance is available via the QBLive conformance suite."
@@ -172,32 +188,40 @@ function SetupPanel({
           <BackendChoice
             id="local"
             selected={kind}
-            onSelect={setKind}
+            onSelect={(next) => {
+              setKind(next);
+              setError(null);
+            }}
+            disabled={submitting}
             title="Local network only"
             badge="No internet"
             description="Director serves QBSheet Live on this network. Participants use the web client; the App Clip needs the internet and will not be offered."
           />
         </div>
 
-        <FormField
-          label={kind === 'local' ? 'Local address' : 'Server address'}
-          hint={
-            kind === 'cloudflare'
-              ? 'The Worker URL Cloudflare gave you, for example https://qblive-backend.your-name.workers.dev'
-              : kind === 'local'
-                ? 'Filled in automatically when Director starts the local server.'
+        {kind !== 'local' && (
+          <FormField
+            label="Server address"
+            hint={
+              kind === 'cloudflare'
+                ? 'The Worker URL Cloudflare gave you, for example https://qblive-backend.your-name.workers.dev'
                 : 'The HTTPS origin of your QBLive server, with no path.'
-          }
-        >
-          <input
-            type="url"
-            value={origin}
-            onChange={(event) => setOrigin(event.target.value)}
-            placeholder={kind === 'local' ? 'http://192.168.1.20:8790' : 'https://…'}
-            autoComplete="off"
-            spellCheck={false}
-          />
-        </FormField>
+            }
+          >
+            <input
+              type="url"
+              value={origin}
+              onChange={(event) => {
+                setOrigin(event.target.value);
+                setError(null);
+              }}
+              placeholder="https://…"
+              disabled={submitting}
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </FormField>
+        )}
 
         {kind !== 'local' && (
           <FormField
@@ -207,7 +231,11 @@ function SetupPanel({
             <input
               type="password"
               value={setupToken}
-              onChange={(event) => setSetupToken(event.target.value)}
+              onChange={(event) => {
+                setSetupToken(event.target.value);
+                setError(null);
+              }}
+              disabled={submitting}
               autoComplete="off"
               spellCheck={false}
             />
@@ -219,6 +247,7 @@ function SetupPanel({
             type="text"
             value={displayName}
             onChange={(event) => setDisplayName(event.target.value)}
+            disabled={submitting}
             placeholder="Optional"
           />
         </FormField>
@@ -245,6 +274,7 @@ function BackendChoice({
   title,
   badge,
   description,
+  disabled,
 }: {
   id: LiveBackendDescriptor['kind'];
   selected: LiveBackendDescriptor['kind'];
@@ -252,12 +282,14 @@ function BackendChoice({
   title: string;
   badge: string;
   description: string;
+  disabled: boolean;
 }) {
   return (
     <button
       type="button"
       role="radio"
       aria-checked={selected === id}
+      disabled={disabled}
       className="director-live-choice"
       onClick={() => onSelect(id)}
     >
@@ -530,7 +562,9 @@ const visibilityGroups: {
   },
 ];
 
-const visibilityDependencies: Partial<Record<keyof LivePublicationSettings, { parent: keyof LivePublicationSettings; label: string }>> = {
+const visibilityDependencies: Partial<
+  Record<keyof LivePublicationSettings, { parent: keyof LivePublicationSettings; label: string }>
+> = {
   playerStatistics: { parent: 'playerNames', label: 'Player names' },
   liveScores: { parent: 'liveGameStatus', label: 'Live game status' },
   liveProgress: { parent: 'liveGameStatus', label: 'Live game status' },
@@ -714,7 +748,8 @@ function AnnouncementsPanel({
               <span>
                 <span>{announcement.title}</span>
                 <small className="director-muted" title={announcement.publishedAt}>
-                  {announcement.severity} · {formatLiveTimestamp(announcement.publishedAt) ?? announcement.publishedAt}
+                  {announcement.severity} ·{' '}
+                  {formatLiveTimestamp(announcement.publishedAt) ?? announcement.publishedAt}
                 </small>
               </span>
               <Button variant="quiet" onClick={() => actions.withdrawAnnouncement(announcement.id)}>
@@ -764,7 +799,7 @@ function LifecyclePanel({
               actions.finalize();
               onAnnounce('Final results queued for publication.');
             }}
-            disabled={publication.lifecycle === 'final'}
+            disabled={publication.lifecycle !== 'live'}
           >
             {publication.lifecycle === 'final' ? 'Published' : 'Publish final'}
           </Button>
@@ -779,11 +814,17 @@ function LifecyclePanel({
           <Button
             onClick={() => {
               actions.unpublish();
-              onAnnounce('Tournament unpublished.');
+              onAnnounce(
+                'Unpublish queued. The public page remains available until the backend confirms it.',
+              );
             }}
-            disabled={publication.lifecycle === 'unpublished'}
+            disabled={
+              publication.lifecycle === 'unpublishing' ||
+              publication.lifecycle === 'unpublished' ||
+              publication.lifecycle === 'deleting'
+            }
           >
-            Unpublish
+            {publication.lifecycle === 'unpublishing' ? 'Unpublishing…' : 'Unpublish'}
           </Button>
         </div>
         <div className="director-live-row">
@@ -802,15 +843,22 @@ function LifecyclePanel({
                 onClick={() => {
                   actions.destroy();
                   setConfirmingDelete(false);
-                  onAnnounce('QBSheet Live publication deleted.');
+                  onAnnounce(
+                    'Delete queued. Director will clear the publication after backend confirmation.',
+                  );
                 }}
+                disabled={publication.lifecycle === 'deleting'}
               >
-                Delete permanently
+                {publication.lifecycle === 'deleting' ? 'Deleting…' : 'Delete permanently'}
               </Button>
             </span>
           ) : (
-            <Button variant="danger" onClick={() => setConfirmingDelete(true)}>
-              Delete
+            <Button
+              variant="danger"
+              onClick={() => setConfirmingDelete(true)}
+              disabled={publication.lifecycle === 'deleting'}
+            >
+              {publication.lifecycle === 'deleting' ? 'Deleting…' : 'Delete'}
             </Button>
           )}
         </div>
@@ -818,10 +866,19 @@ function LifecyclePanel({
           <span>
             <span>Turn QBSheet Live off</span>
             <small className="director-muted">
-              Stops publishing from this Director. Nothing already published changes.
+              {publication.backend?.kind === 'local'
+                ? 'Clears the local public page and stops the separate QBSheet Live listener.'
+                : 'Stops publishing from this Director. Nothing already published changes.'}
             </small>
           </span>
-          <Button onClick={actions.disable}>Turn off</Button>
+          <Button
+            onClick={actions.disable}
+            disabled={publication.lifecycle === 'unpublishing' || publication.lifecycle === 'deleting'}
+          >
+            {publication.backend?.kind === 'local' && publication.lifecycle === 'deleting'
+              ? 'Turning off…'
+              : 'Turn off'}
+          </Button>
         </div>
       </div>
     </section>

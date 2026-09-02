@@ -112,7 +112,19 @@ export function SelectPlayer({
 }
 
 /** Shown when the link is malformed, the tournament is gone, or the backend cannot be reached. */
-export function Problem({ title, detail, onRetry }: { title: string; detail: string; onRetry?: () => void }) {
+export function Problem({
+  title,
+  detail,
+  onRetry,
+  secondaryLabel,
+  onSecondary,
+}: {
+  title: string;
+  detail: string;
+  onRetry?: () => void;
+  secondaryLabel?: string;
+  onSecondary?: () => void;
+}) {
   return (
     <div className="gate">
       <h1>{title}</h1>
@@ -120,6 +132,11 @@ export function Problem({ title, detail, onRetry }: { title: string; detail: str
       {onRetry && (
         <button type="button" className="primary" onClick={onRetry} style={{ width: '100%' }}>
           Try again
+        </button>
+      )}
+      {secondaryLabel && onSecondary && (
+        <button type="button" onClick={onSecondary} style={{ width: '100%', marginTop: 12 }}>
+          {secondaryLabel}
         </button>
       )}
     </div>

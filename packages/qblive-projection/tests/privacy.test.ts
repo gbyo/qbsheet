@@ -230,14 +230,48 @@ describe('specific disclosures', () => {
     expect(snapshot.tournament.timeZone).toBe('America/New_York');
   });
 
-  test('a game with no scheduled time publishes no time rather than an estimate', () => {
-    const snapshot = project({ ...defaultLivePublicationSettings(), enabled: true });
-    const game = snapshot.schedule.find((entry) => entry.id === 'game-3');
-    expect(game?.scheduledStart).toBeNull();
+  test('an explicit scheduled time publishes in the tournament zone across DST', () => {
+    const state = privacyFixture();
+    state.rounds.find((round) => round.id === 'round-2')!.scheduledStart = '2026-11-01T06:30:00.000Z';
+    const snapshot = projectLiveSnapshot({
+      state,
+      settings: { ...defaultLivePublicationSettings(), enabled: true },
+      publicationId: 'bcdfghjkmnpqrstvwxyz',
+      revision: 42,
+      generatedAt,
+      capabilities,
+    });
+    expect(snapshot.schedule.find((entry) => entry.id === 'game-3')?.scheduledStart).toBe(
+      '2026-11-01T01:30:00-05:00',
+    );
+  });
+
+  test('no scheduled time remains null and is never derived from release or actual start', () => {
+    const state = privacyFixture();
+    const round = state.rounds.find((entry) => entry.id === 'round-2')!;
+    round.scheduledStart = null;
+    round.releasedAt = '2026-09-05T13:53:00.000Z';
+    round.startedAt = '2026-09-05T14:17:00.000Z';
+    const snapshot = projectLiveSnapshot({
+      state,
+      settings: { ...defaultLivePublicationSettings(), enabled: true },
+      publicationId: 'bcdfghjkmnpqrstvwxyz',
+      revision: 42,
+      generatedAt,
+      capabilities,
+    });
+    expect(snapshot.schedule.find((entry) => entry.id === 'game-3')?.scheduledStart).toBeNull();
     // Nothing anywhere in the document claims a time that Director did not state.
     const serialized = JSON.stringify(snapshot);
     expect(serialized).not.toMatch(/estimat/i);
     expect(serialized).not.toMatch(/probably/i);
+  });
+
+  test('release before the scheduled time and a different actual start do not change the plan', () => {
+    const snapshot = project({ ...defaultLivePublicationSettings(), enabled: true });
+    expect(snapshot.schedule.find((entry) => entry.id === 'game-3')?.scheduledStart).toBe(
+      '2026-09-05T10:00:00-04:00',
+    );
   });
 });
 

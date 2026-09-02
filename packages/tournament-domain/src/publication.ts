@@ -20,7 +20,8 @@ export const qbliveProtocolVersion = 1 as const;
 
 export type LiveBackendKind = 'cloudflare' | 'custom' | 'local';
 
-export type LivePublicationLifecycle = 'disabled' | 'configuring' | 'live' | 'final' | 'unpublished';
+export type LivePublicationLifecycle =
+  'disabled' | 'configuring' | 'live' | 'final' | 'unpublishing' | 'unpublished' | 'deleting';
 
 /**
  * Public visibility switches.

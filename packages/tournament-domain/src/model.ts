@@ -11,7 +11,7 @@ import type { IanaTimeZone } from './timezone.js';
 import type { TournamentTimelineEvent } from './timeline.js';
 import type { LivePublication } from './publication.js';
 
-export const directorSchemaVersion = 3;
+export const directorSchemaVersion = 4;
 
 export type {
   ArtifactClassification,
@@ -199,6 +199,11 @@ export interface Round {
   status: 'planned' | 'prepared' | 'released' | 'closed';
   packetId: DirectorId | null;
   scheduledGameIds: DirectorId[];
+  /** When the round was planned to begin, if the schedule has an explicit time. */
+  scheduledStart: string | null;
+  /** When assignments were released to rooms. This is not a scheduled or actual start. */
+  releasedAt: string | null;
+  /** When play actually began, if Director has observed it. */
   startedAt: string | null;
   closedAt: string | null;
 }
@@ -213,6 +218,8 @@ export interface ScheduledGame {
   rightTeamId: DirectorId | null;
   bye: boolean;
   status: 'scheduled' | 'released' | 'live' | 'submitted' | 'accepted' | 'cancelled';
+  /** Per-game planned start. Falls back to the round's planned start when absent. */
+  scheduledStart?: string | null;
   /**
    * Whether this game may reach the public projection.
    *
