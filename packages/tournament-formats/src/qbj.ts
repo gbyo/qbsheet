@@ -1138,6 +1138,13 @@ function importQbjValue(
         ),
       );
     const context = contexts.get(id);
+    const poolId = pools.find((pool) => {
+      const poolTeamIds = pool.teamIds ?? [];
+      return (
+        teamIds.some((teamId) => teamId !== null && poolTeamIds.includes(teamId)) &&
+        teamIds.every((teamId) => teamId === null || poolTeamIds.includes(teamId))
+      );
+    })?.id;
     const qbtcp = asJsonObject(match._qbtcp);
     const roomId = asString(qbtcp?.room_id);
     const hasScoring =
@@ -1155,6 +1162,7 @@ function importQbjValue(
       id,
       ...(context?.phaseId ? { phaseId: context.phaseId } : {}),
       ...(context?.roundId ? { roundId: context.roundId } : {}),
+      ...(poolId ? { poolId } : {}),
       ...(roomId ? { roomId } : {}),
       teamIds,
       status: hasScoring ? (result?.forfeit ? 'forfeit' : 'complete') : 'scheduled',
@@ -1167,6 +1175,7 @@ function importQbjValue(
       id,
       ...(game.phaseId ? { phaseId: game.phaseId } : {}),
       ...(game.roundId ? { roundId: game.roundId } : {}),
+      ...(poolId ? { poolId } : {}),
       ...(roomId ? { roomId } : {}),
       teamIds,
       status: hasScoring ? 'complete' : 'scheduled',

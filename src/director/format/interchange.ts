@@ -214,6 +214,7 @@ function toInterchangeGame(state: DirectorState, game: GameRecord): InterchangeG
     id: game.id,
     scheduledGameId: game.scheduledGameId,
     roundId: game.roundId,
+    ...(scheduled?.poolId ? { poolId: scheduled.poolId } : {}),
     ...(scheduled?.roomId ? { roomId: scheduled.roomId } : {}),
     ...(game.packetId ? { packetId: game.packetId } : {}),
     teamIds: [
@@ -275,6 +276,7 @@ export function toInterchange(state: DirectorState): DirectorTournament {
   const scheduledGames = state.scheduledGames.map((game) => ({
     id: game.id,
     roundId: game.roundId,
+    poolId: game.poolId ?? undefined,
     roomId: game.roomId ?? undefined,
     packetId: game.packetId ?? undefined,
     teamIds: [game.leftTeamId, game.rightTeamId] as [string | null, string | null],
@@ -583,6 +585,7 @@ function fromInterchange(data: DirectorTournament): DirectorState {
   state.scheduledGames = data.scheduledGames.map((game) => ({
     id: game.id,
     roundId: game.roundId ?? '',
+    poolId: game.poolId ?? null,
     roomId: game.roomId ?? null,
     packetId: game.packetId ?? null,
     leftTeamId: game.teamIds?.[0] ?? '',

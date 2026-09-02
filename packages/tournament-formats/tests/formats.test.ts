@@ -469,6 +469,56 @@ describe('QBJ compatibility adapters', () => {
     expect(imported.warnings.some((entry) => entry.code === 'incomplete-answer-counts')).toBe(true);
   });
 
+  test('retains pool membership for matches nested in a phase round', () => {
+    const input = {
+      version: qbjSerializationVersion,
+      objects: [
+        {
+          type: 'Tournament',
+          id: 't-pool-context',
+          name: 'Pool Context Invitational',
+          phases: [
+            {
+              type: 'Phase',
+              id: 'phase-pools',
+              kind: 'preliminary',
+              pools: [
+                {
+                  type: 'Pool',
+                  id: 'pool-a',
+                  teams: [{ $ref: 'team-a' }, { $ref: 'team-b' }],
+                },
+              ],
+              rounds: [
+                {
+                  type: 'Round',
+                  id: 'round-pools',
+                  matches: [{ $ref: 'match-pools' }],
+                },
+              ],
+            },
+          ],
+        },
+        { type: 'Team', id: 'team-a', name: 'Alpha A' },
+        { type: 'Team', id: 'team-b', name: 'Beta A' },
+        {
+          type: 'Match',
+          id: 'match-pools',
+          match_teams: [
+            { team: { $ref: 'team-a' }, points: 100 },
+            { team: { $ref: 'team-b' }, points: 90 },
+          ],
+        },
+      ],
+    } as unknown as JsonObject;
+
+    const imported = importQbj(input);
+    expect(imported.ok).toBe(true);
+    if (!imported.ok) return;
+    expect(imported.value.tournament.games[0]?.poolId).toBe('pool-a');
+    expect(imported.value.tournament.scheduledGames[0]?.poolId).toBe('pool-a');
+  });
+
   test('refuses an unsupported QBJ serialization version', () => {
     const invalid = fixture('sample.qbj').replace('"version": "2.1.1"', '"version": "9.9.9"');
     const imported = importQbj(invalid);
