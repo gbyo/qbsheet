@@ -316,10 +316,15 @@ export function importTeamsCsv(text: string): FormatReport<TeamRecord[]> {
       return;
     }
     const explicitId = rowValue(row, 'team_id').trim();
-    const key = explicitId || name.toLocaleLowerCase();
+    const organizationId = rowValue(row, 'organization_id').trim();
+    const letter = rowValue(row, 'letter').trim();
+    const fallbackIdentity = JSON.stringify(
+      [name, organizationId, letter].map((value) => value.toLocaleLowerCase()),
+    );
+    const key = explicitId ? `id:${explicitId}` : `identity:${fallbackIdentity}`;
     let team = byKey.get(key);
     if (!team) {
-      const id = explicitId || slugId('team', name);
+      const id = explicitId || slugId('team', name, organizationId, letter);
       if (!explicitId)
         warnings.push(
           warning(
@@ -340,8 +345,6 @@ export function importTeamsCsv(text: string): FormatReport<TeamRecord[]> {
         ),
       );
     }
-    const organizationId = rowValue(row, 'organization_id').trim();
-    const letter = rowValue(row, 'letter').trim();
     const seedText = rowValue(row, 'seed').trim();
     const seed = seedText === '' ? undefined : Number(seedText);
     if (seedText !== '' && !Number.isFinite(seed))
