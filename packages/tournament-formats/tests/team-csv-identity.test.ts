@@ -3,13 +3,7 @@ import { importTeamsCsv } from '../src/csv';
 
 describe('team CSV fallback identity', () => {
   test('keeps sibling teams with the same name but different letters separate', () => {
-    const imported = importTeamsCsv(
-      [
-        'team_name,organization_id,letter',
-        'Wren,,A',
-        'Wren,,B',
-      ].join('\n'),
-    );
+    const imported = importTeamsCsv(['team_name,organization_id,letter', 'Wren,,A', 'Wren,,B'].join('\n'));
 
     expect(imported.ok).toBe(true);
     if (!imported.ok) return;
