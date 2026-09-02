@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>QBSheet Live</title>
+    <meta name="description" content="Follow a quiz bowl tournament: schedule, standings, results, and updates." />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#14181d" media="(prefers-color-scheme: dark)" />
+    <!--
+      No favicon request, no font request, no analytics. Everything this page needs is in the two
+      files Vite emits, because the page is opened by a few hundred phones on one school's WiFi at
+      the same moment.
+    -->
+    <link rel="icon" href="data:," />
+  </head>
+  <body>
+    <div id="root"></div>
+    <noscript>QBSheet Live needs JavaScript to show a tournament.</noscript>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

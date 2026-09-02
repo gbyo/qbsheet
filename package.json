@@ -5,6 +5,7 @@
   "description": "QBSheet, an offline-first electronic quiz bowl scoresheet that runs entirely in the browser",
   "workspaces": [
     "apps/director",
+    "apps/live-web",
     "packages/*"
   ],
   "repository": {
@@ -51,7 +52,11 @@
     "test:mutation": "stryker run",
     "test:mutation:dry": "stryker run --dryRunOnly",
     "prepare": "npm run build --workspace=@qbsheet/tournament-domain && npm run build --workspace=@qbsheet/qblive-protocol && npm run build --workspace=@qbsheet/qblive-projection && npm run build --workspace=@qbsheet/qblive-activity && npm run build:core && npm run build --workspace=@qbsheet/tournament-core && npm run build --workspace=@qbsheet/tournament-formats",
-    "director:domain:test": "npm run test --workspace=@qbsheet/tournament-domain"
+    "director:domain:test": "npm run test --workspace=@qbsheet/tournament-domain",
+    "live:dev": "npm run dev --workspace=@qbsheet/live-web",
+    "live:build": "npm run build --workspace=@qbsheet/live-web",
+    "live:test": "npm run test --workspace=@qbsheet/live-web",
+    "qblive:test": "npm run test --workspace=@qbsheet/qblive-protocol && npm run test --workspace=@qbsheet/qblive-projection && npm run test --workspace=@qbsheet/qblive-activity"
   },
   "dependencies": {
     "@fontsource/ibm-plex-sans": "^5.2.5",
