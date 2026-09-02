@@ -45,13 +45,10 @@ export interface RoundRobinScheduleOptions {
   readonly packetIds?: readonly EntityId[];
   readonly rounds?: readonly ScheduleRoundDefinition[];
   readonly roundCount?: number;
-  /** Exact number of games each team should receive. */
-  readonly roundsPerTeam?: number;
   readonly repetitions?: number;
   readonly seed?: string | number;
   readonly rematchPolicy?: RematchPolicy;
   readonly avoidSameOrganization?: boolean;
-  readonly allowByes?: boolean;
   readonly requireRoomAssignments?: boolean;
   readonly idFactory?: ScheduleIdFactory;
 }
@@ -85,16 +82,6 @@ interface PlannedRound {
   readonly roundDefinition: ScheduleRoundDefinition;
   readonly poolId: EntityId | null;
   readonly pairings: readonly Pairing[];
-}
-
-interface PairingPlan {
-  readonly rounds: readonly PairingRound[];
-  readonly issues: readonly ScheduleIssue[];
-}
-
-interface PlannedRoundPlan {
-  readonly rounds: readonly PlannedRound[];
-  readonly issues: readonly ScheduleIssue[];
 }
 
 function hashSeed(value: string | number): number {
@@ -159,221 +146,6 @@ function pairingRounds(teamIds: readonly EntityId[], seed: string | number): Pai
     rotating = [rotating[rotating.length - 1], ...rotating.slice(0, -1)];
   }
   return rounds;
-}
-
-function sameOrganization(left: Team | undefined, right: Team | undefined): boolean {
-  return Boolean(
-    left?.organizationId && right?.organizationId && left.organizationId === right.organizationId,
-  );
-}
-
-function preferredPartnerMap(pairing: PairingRound): Map<EntityId, EntityId | null> {
-  const partners = new Map<EntityId, EntityId | null>();
-  for (const pair of pairing.pairings) {
-    if (pair.teamAId) partners.set(pair.teamAId, pair.teamBId);
-    if (pair.teamBId) partners.set(pair.teamBId, pair.teamAId);
-  }
-  return partners;
-}
-
-function preferredPairingRank(pairing: PairingRound): Map<string, number> {
-  const ranks = new Map<string, number>();
-  pairing.pairings.forEach((pair, index) => {
-    if (pair.teamAId && pair.teamBId) ranks.set(pairKey(pair.teamAId, pair.teamBId), index);
-  });
-  return ranks;
-}
-
-/**
- * Enumerate complete matchings for one round in a deterministic, preferred-first order.
- *
- * The old Director implementation repaired one edge at a time. That can displace the team
- * originally paired with the replacement and make it disappear from the round. This search always
- * consumes both endpoints together (and consumes exactly one bye slot for an odd field), so every
- * returned candidate is a whole-round matching before resources are assigned.
- */
-function matchingCandidates(
-  teamIds: readonly EntityId[],
-  teamById: ReadonlyMap<EntityId, Team>,
-  preferred: PairingRound,
-  usedPairs: ReadonlySet<string>,
-  avoidRematches: boolean,
-  avoidSameOrganization: boolean,
-  limit: number,
-): PairingRound[] {
-  const preferredPartners = preferredPartnerMap(preferred);
-  const preferredRanks = preferredPairingRank(preferred);
-  const positions = new Map(teamIds.map((teamId, index) => [teamId, index]));
-  const remaining = new Set(teamIds);
-  const pairings: Pairing[] = [];
-  const candidates: PairingRound[] = [];
-  const oddField = teamIds.length % 2 === 1;
-
-  const partnerOptions = (teamId: EntityId): EntityId[] =>
-    [...remaining]
-      .filter((candidateId) => candidateId !== teamId)
-      .filter((candidateId) => {
-        if (avoidRematches && usedPairs.has(pairKey(teamId, candidateId))) return false;
-        if (avoidSameOrganization && sameOrganization(teamById.get(teamId), teamById.get(candidateId)))
-          return false;
-        return true;
-      })
-      .sort((candidateLeft, candidateRight) => {
-        const leftPreferred = preferredPartners.get(teamId) === candidateLeft ? 0 : 1;
-        const rightPreferred = preferredPartners.get(teamId) === candidateRight ? 0 : 1;
-        const leftRank = preferredRanks.get(pairKey(teamId, candidateLeft)) ?? Number.POSITIVE_INFINITY;
-        const rightRank = preferredRanks.get(pairKey(teamId, candidateRight)) ?? Number.POSITIVE_INFINITY;
-        return (
-          leftPreferred - rightPreferred ||
-          leftRank - rightRank ||
-          (positions.get(candidateLeft) ?? 0) - (positions.get(candidateRight) ?? 0) ||
-          candidateLeft.localeCompare(candidateRight)
-        );
-      });
-
-  const chooseLeft = (): EntityId | null => {
-    if (remaining.size === 0) return null;
-    const ordered = [...remaining].sort((left, right) => {
-      const leftOptions = partnerOptions(left).length + (oddField ? 1 : 0);
-      const rightOptions = partnerOptions(right).length + (oddField ? 1 : 0);
-      return leftOptions - rightOptions || (positions.get(left) ?? 0) - (positions.get(right) ?? 0);
-    });
-    return ordered[0] ?? null;
-  };
-
-  const search = (byeUsed: boolean): void => {
-    if (candidates.length >= limit) return;
-    if (remaining.size === 0) {
-      if (!oddField || byeUsed) candidates.push({ pairings: [...pairings] });
-      return;
-    }
-    const left = chooseLeft();
-    if (!left) return;
-
-    const preferredBye = preferredPartners.get(left) === null;
-    const tryBye = oddField && !byeUsed && (preferredBye || remaining.size === 1);
-    const branch = (): void => {
-      remaining.delete(left);
-      pairings.push({ teamAId: left, teamBId: null });
-      search(true);
-      pairings.pop();
-      remaining.add(left);
-    };
-    if (tryBye) branch();
-
-    for (const right of partnerOptions(left)) {
-      if (candidates.length >= limit) return;
-      remaining.delete(left);
-      remaining.delete(right);
-      pairings.push({ teamAId: left, teamBId: right });
-      search(byeUsed);
-      pairings.pop();
-      remaining.add(left);
-      remaining.add(right);
-    }
-    if (oddField && !byeUsed && !tryBye) branch();
-  };
-
-  search(false);
-  return candidates;
-}
-
-function addPairingsToSet(pairing: PairingRound, usedPairs: Set<string>): void {
-  for (const pair of pairing.pairings) {
-    if (pair.teamAId && pair.teamBId) usedPairs.add(pairKey(pair.teamAId, pair.teamBId));
-  }
-}
-
-function constrainedPairingPlan(
-  teamIds: readonly EntityId[],
-  teams: readonly Team[],
-  repetitions: number,
-  seed: string | number,
-  rematchPolicy: RematchPolicy,
-  avoidSameOrganization: boolean,
-  requestedRoundCount: number,
-): PairingPlan {
-  const baseRounds = cyclePlans(teamIds, repetitions, seed, rematchPolicy);
-  const count = Math.min(baseRounds.length, Math.max(0, requestedRoundCount));
-  if (count === 0) return { rounds: [], issues: [] };
-  if (!avoidSameOrganization) return { rounds: baseRounds.slice(0, count), issues: [] };
-
-  const teamById = new Map(teams.map((team) => [team.id, team]));
-  const fullCycleRounds = teamIds.length % 2 === 0 ? Math.max(0, teamIds.length - 1) : teamIds.length;
-  const strictRematchRounds = rematchPolicy === 'allow' ? 0 : Math.min(count, fullCycleRounds);
-
-  const searchSchedule = (avoidRematches: boolean, avoidOrganizations: boolean): PairingRound[] | null => {
-    const selected: PairingRound[] = [];
-    const usedPairs = new Set<string>();
-    const search = (index: number): boolean => {
-      if (index === count) return true;
-      const strictRematches = avoidRematches && index < strictRematchRounds;
-      const candidates = matchingCandidates(
-        teamIds,
-        teamById,
-        baseRounds[index],
-        usedPairs,
-        strictRematches,
-        avoidOrganizations,
-        Math.max(64, teamIds.length * 8),
-      );
-      for (const candidate of candidates) {
-        selected.push(candidate);
-        const before = new Set(usedPairs);
-        addPairingsToSet(candidate, usedPairs);
-        if (search(index + 1)) return true;
-        usedPairs.clear();
-        for (const value of before) usedPairs.add(value);
-        selected.pop();
-      }
-      return false;
-    };
-    return search(0) ? selected : null;
-  };
-
-  const strict = searchSchedule(rematchPolicy !== 'allow', true);
-  if (strict) return { rounds: strict, issues: [] };
-
-  const relaxedRematches = searchSchedule(false, true);
-  if (relaxedRematches) {
-    return {
-      rounds: relaxedRematches,
-      issues: [
-        issue(
-          'rematches-unavoidable',
-          'warning',
-          'The organization constraint can be satisfied only by allowing a rematch in a later round.',
-        ),
-      ],
-    };
-  }
-
-  const relaxedOrganizations = searchSchedule(false, false);
-  if (relaxedOrganizations) {
-    return {
-      rounds: relaxedOrganizations,
-      issues: [
-        issue(
-          'same-organization-unavoidable',
-          'warning',
-          'No complete schedule satisfies the organization constraint; structurally valid same-organization games were retained.',
-        ),
-      ],
-    };
-  }
-
-  // The circle method is a known complete fallback. It is used only if the constrained search was
-  // unable to find a schedule, and validation below still guards the structural invariants.
-  return {
-    rounds: baseRounds.slice(0, count),
-    issues: [
-      issue(
-        'matching-constraint-unsatisfied',
-        'warning',
-        'The requested organization/rematch constraints could not be satisfied for every round; the complete circle schedule was retained.',
-      ),
-    ],
-  };
 }
 
 function pairKey(teamAId: EntityId, teamBId: EntityId): string {
@@ -446,8 +218,8 @@ function cyclePlans(
 }
 
 function activeRoomIds(options: Pick<RoundRobinScheduleOptions, 'rooms' | 'roomIds'>): EntityId[] {
-  if (options.roomIds) return [...new Set(options.roomIds)];
-  return [...new Set(options.rooms?.filter((room) => room.active).map((room) => room.id) ?? [])];
+  if (options.roomIds) return [...options.roomIds];
+  return options.rooms?.filter((room) => room.active).map((room) => room.id) ?? [];
 }
 
 function makeGameId(
@@ -593,45 +365,25 @@ function assignResources(
 function planRounds(
   phaseId: EntityId,
   poolId: EntityId | null,
-  teams: readonly Team[],
+  teamIds: readonly EntityId[],
   rounds: readonly ScheduleRoundDefinition[] | undefined,
   roundCount: number | undefined,
-  roundsPerTeam: number | undefined,
   repetitions: number,
   seed: string | number,
   rematchPolicy: RematchPolicy,
-  avoidSameOrganization: boolean,
-): PlannedRoundPlan {
-  const teamIds = teamOrder(teams);
+): PlannedRound[] {
   const fullCycleRounds = teamIds.length % 2 === 0 ? Math.max(0, teamIds.length - 1) : teamIds.length;
   const fullRoundCount = fullCycleRounds * repetitions;
-  const gamesPerFullCycle = Math.max(0, teamIds.length - 1);
-  const requestedRoundCount =
-    roundsPerTeam === undefined
-      ? (roundCount ?? rounds?.length ?? fullRoundCount)
-      : teamIds.length % 2 === 0
-        ? roundsPerTeam
-        : (roundsPerTeam / Math.max(1, gamesPerFullCycle)) * teamIds.length;
+  const requestedRoundCount = roundCount ?? rounds?.length ?? fullRoundCount;
   const count = Math.min(fullRoundCount, Math.max(0, requestedRoundCount));
-  const pairingPlan = constrainedPairingPlan(
-    teamIds,
-    teams,
-    repetitions,
-    seed,
-    rematchPolicy,
-    avoidSameOrganization,
-    count,
-  );
-  return {
-    rounds: pairingPlan.rounds.map((pairing, index) => ({
-      phaseId,
-      roundIndex: index,
-      roundDefinition: roundDefinitionAt(rounds, phaseId, poolId, index),
-      poolId,
-      pairings: pairing.pairings,
-    })),
-    issues: pairingPlan.issues,
-  };
+  const plannedPairings = cyclePlans(teamIds, repetitions, seed, rematchPolicy).slice(0, count);
+  return plannedPairings.map((pairing, index) => ({
+    phaseId,
+    roundIndex: index,
+    roundDefinition: roundDefinitionAt(rounds, phaseId, poolId, index),
+    poolId,
+    pairings: pairing.pairings,
+  }));
 }
 
 function duplicateTeamIds(teams: readonly Team[]): EntityId[] {
@@ -644,15 +396,8 @@ function duplicateTeamIds(teams: readonly Team[]): EntityId[] {
   return [...duplicates];
 }
 
-function hasStructuralScheduleError(issues: readonly ScheduleIssue[]): boolean {
-  // Do not return a value that callers can persist alongside an error describing why it is
-  // invalid. Warnings and recommendations can remain attached to an otherwise valid schedule.
-  return issues.some((current) => current.severity === 'error');
-}
-
 /** Generate a deterministic single-pool round-robin schedule. */
 export function generateRoundRobinSchedule(options: RoundRobinScheduleOptions): GeneratedSchedule {
-  const requestedRoundsPerTeam = options.roundsPerTeam;
   const repetitions = options.repetitions ?? 1;
   const rematchPolicy = options.rematchPolicy ?? 'avoid-when-possible';
   const issues: ScheduleIssue[] = [];
@@ -660,17 +405,6 @@ export function generateRoundRobinSchedule(options: RoundRobinScheduleOptions): 
     return {
       games: [],
       issues: [issue('invalid-repetitions', 'error', 'Repetitions must be a positive integer.')],
-      expectedGamesPerTeam: null,
-      roundCount: 0,
-    };
-  }
-  if (
-    requestedRoundsPerTeam !== undefined &&
-    (!Number.isInteger(requestedRoundsPerTeam) || requestedRoundsPerTeam < 1)
-  ) {
-    return {
-      games: [],
-      issues: [issue('invalid-rounds-per-team', 'error', 'roundsPerTeam must be a positive integer.')],
       expectedGamesPerTeam: null,
       roundCount: 0,
     };
@@ -691,78 +425,34 @@ export function generateRoundRobinSchedule(options: RoundRobinScheduleOptions): 
   if (options.teams.length < 2) {
     issues.push(issue('too-few-teams', 'error', 'A schedule needs at least two teams.'));
   }
-  if (options.teams.length % 2 === 1 && options.allowByes === false) {
-    issues.push(
-      issue(
-        'byes-not-allowed',
-        'error',
-        'This field needs a bye, but allowByes is false.',
-        null,
-        [],
-        options.teams.map((team) => team.id),
-      ),
-    );
-  }
-  if (issues.some((current) => current.severity === 'error')) {
-    return { games: [], issues, expectedGamesPerTeam: null, roundCount: 0 };
-  }
-
-  const gamesPerFullCycle = options.teams.length - 1;
-  if (
-    requestedRoundsPerTeam !== undefined &&
-    options.teams.length % 2 === 1 &&
-    requestedRoundsPerTeam % gamesPerFullCycle !== 0
-  ) {
-    issues.push(
-      issue(
-        'rounds-per-team-unachievable',
-        'error',
-        `An odd field can give every team the same number of games only in complete cycles of ${gamesPerFullCycle} games per team.`,
-      ),
-    );
-    return { games: [], issues, expectedGamesPerTeam: null, roundCount: 0 };
-  }
-
-  const effectiveRepetitions =
-    requestedRoundsPerTeam === undefined
-      ? repetitions
-      : Math.max(repetitions, Math.ceil(requestedRoundsPerTeam / Math.max(1, gamesPerFullCycle)));
-  const seed = options.seed ?? `${options.phaseId}:${options.poolId ?? 'main'}`;
-  const planned = planRounds(
-    options.phaseId,
-    options.poolId ?? null,
-    options.teams,
-    options.rounds,
-    options.roundCount,
-    requestedRoundsPerTeam,
-    effectiveRepetitions,
-    seed,
-    rematchPolicy,
-    options.avoidSameOrganization ?? false,
-  );
-  issues.push(...planned.issues);
-  const fullCycleRounds =
-    options.teams.length % 2 === 0 ? Math.max(0, options.teams.length - 1) : options.teams.length;
-  if (rematchPolicy === 'forbid' && planned.rounds.length > fullCycleRounds) {
+  if (rematchPolicy === 'forbid' && repetitions > 1 && options.teams.length > 1) {
     issues.push(
       issue(
         'rematches-required',
         'error',
-        'The requested number of rounds requires at least one rematch, but rematchPolicy is forbid.',
+        'Repeated round robin requires rematches, but rematchPolicy is forbid.',
       ),
     );
   }
-  const assigned = assignResources(planned.rounds, options);
+  const ids = teamOrder(options.teams);
+  const seed = options.seed ?? `${options.phaseId}:${options.poolId ?? 'main'}`;
+  const planned = planRounds(
+    options.phaseId,
+    options.poolId ?? null,
+    ids,
+    options.rounds,
+    options.roundCount,
+    repetitions,
+    seed,
+    rematchPolicy,
+  );
+  const assigned = assignResources(planned, options);
   issues.push(...assigned.issues);
-  const fullRoundCount = fullCycleRounds * effectiveRepetitions;
+  const fullCycleRounds =
+    options.teams.length % 2 === 0 ? Math.max(0, options.teams.length - 1) : options.teams.length;
+  const fullRoundCount = fullCycleRounds * repetitions;
   const expectedGamesPerTeam =
-    requestedRoundsPerTeam ??
-    (planned.rounds.length === fullRoundCount
-      ? Math.max(0, options.teams.length - 1) * effectiveRepetitions
-      : options.teams.length % 2 === 0
-        ? planned.rounds.length
-        : null);
-  const effectiveRounds = planned.rounds.map((round) => round.roundDefinition);
+    planned.length === fullRoundCount ? Math.max(0, options.teams.length - 1) * repetitions : null;
   const validation = validateSchedule(assigned.games, options.teams, {
     rooms: options.rooms,
     roomIds: options.roomIds,
@@ -771,18 +461,13 @@ export function generateRoundRobinSchedule(options: RoundRobinScheduleOptions): 
     avoidSameOrganization: options.avoidSameOrganization,
     requireRoomAssignments: options.requireRoomAssignments,
     requireExplicitByes: options.teams.length % 2 === 1,
-    requireCompleteRounds: true,
-    phaseId: options.phaseId,
-    poolId: options.poolId ?? null,
-    rounds: effectiveRounds,
   });
   issues.push(...validation);
-  const games = hasStructuralScheduleError(issues) ? [] : assigned.games;
   return {
-    games,
+    games: assigned.games,
     issues,
     expectedGamesPerTeam,
-    roundCount: games.length === 0 ? 0 : planned.rounds.length,
+    roundCount: planned.length,
   };
 }
 
@@ -802,134 +487,6 @@ export function generatePoolSchedule(options: PoolScheduleOptions): GeneratedSch
   let expectedGamesPerTeam: number | null = null;
   let maxRoundCount = 0;
   const rematchPolicy = options.rematchPolicy ?? 'avoid-when-possible';
-  const requestedRoundsPerTeam = options.roundsPerTeam;
-
-  if (!Number.isInteger(options.repetitions ?? 1) || (options.repetitions ?? 1) < 1) {
-    return {
-      games: [],
-      issues: [issue('invalid-repetitions', 'error', 'Repetitions must be a positive integer.')],
-      expectedGamesPerTeam: null,
-      roundCount: 0,
-    };
-  }
-  if (
-    requestedRoundsPerTeam !== undefined &&
-    (!Number.isInteger(requestedRoundsPerTeam) || requestedRoundsPerTeam < 1)
-  ) {
-    return {
-      games: [],
-      issues: [issue('invalid-rounds-per-team', 'error', 'roundsPerTeam must be a positive integer.')],
-      expectedGamesPerTeam: null,
-      roundCount: 0,
-    };
-  }
-  const duplicatePoolIds = new Set<EntityId>();
-  const teamPoolById = new Map<EntityId, EntityId>();
-  for (const pool of options.pools) {
-    if (duplicatePoolIds.has(pool.id)) {
-      issues.push(issue('duplicate-pool-id', 'error', `Pool “${pool.id}” appears more than once.`, pool.id));
-    }
-    duplicatePoolIds.add(pool.id);
-    if (pool.phaseId !== options.phaseId) {
-      issues.push(
-        issue(
-          'invalid-pool-phase',
-          'error',
-          `Pool “${pool.name}” does not belong to phase “${options.phaseId}”.`,
-          pool.id,
-        ),
-      );
-    }
-    if (pool.teamIds.length < 2) {
-      issues.push(
-        issue(
-          'too-few-teams',
-          'error',
-          `Pool “${pool.name}” needs at least two teams for a round-robin schedule.`,
-          pool.id,
-          [],
-          pool.teamIds,
-        ),
-      );
-    }
-    const teamIdsInPool = new Set<EntityId>();
-    for (const teamId of pool.teamIds) {
-      if (teamIdsInPool.has(teamId)) {
-        issues.push(
-          issue(
-            'duplicate-pool-team',
-            'error',
-            `Team “${teamId}” appears more than once in pool “${pool.name}”.`,
-            pool.id,
-            [],
-            [teamId],
-          ),
-        );
-      } else {
-        teamIdsInPool.add(teamId);
-      }
-      const previousPoolId = teamPoolById.get(teamId);
-      if (teamPoolById.has(teamId) && previousPoolId !== pool.id) {
-        issues.push(
-          issue(
-            'duplicate-pool-team',
-            'error',
-            `Team “${teamId}” is assigned to more than one pool.`,
-            pool.id,
-            [],
-            [teamId],
-          ),
-        );
-      } else if (!teamPoolById.has(teamId)) {
-        teamPoolById.set(teamId, pool.id);
-      }
-    }
-    if (pool.teamIds.length % 2 === 1 && options.allowByes === false) {
-      issues.push(
-        issue(
-          'byes-not-allowed',
-          'error',
-          `Pool “${pool.name}” needs a bye, but allowByes is false.`,
-          null,
-          [],
-          pool.teamIds,
-        ),
-      );
-    }
-    if (
-      requestedRoundsPerTeam !== undefined &&
-      pool.teamIds.length > 1 &&
-      pool.teamIds.length % 2 === 1 &&
-      requestedRoundsPerTeam % (pool.teamIds.length - 1) !== 0
-    ) {
-      issues.push(
-        issue(
-          'rounds-per-team-unachievable',
-          'error',
-          `Pool “${pool.name}” cannot give every team exactly ${requestedRoundsPerTeam} games in complete rounds.`,
-          pool.id,
-          [],
-          pool.teamIds,
-        ),
-      );
-    }
-  }
-  const duplicateIds = duplicateTeamIds(options.teams);
-  if (duplicateIds.length > 0) {
-    issues.push(
-      issue(
-        'duplicate-team-id',
-        'error',
-        'A schedule cannot contain the same team id twice.',
-        null,
-        [],
-        duplicateIds,
-      ),
-    );
-  }
-  if (issues.some((current) => current.severity === 'error')) {
-    return { games: [], issues, expectedGamesPerTeam: null, roundCount: 0 };
-  }
 
   for (const pool of [...options.pools].sort(
     (left, right) => left.order - right.order || left.id.localeCompare(right.id),
@@ -951,52 +508,31 @@ export function generatePoolSchedule(options: PoolScheduleOptions): GeneratedSch
       );
     }
     const poolRounds = options.roundDefinitionsByPool?.[pool.id] ?? options.rounds;
-    const poolGamesPerCycle = Math.max(1, poolTeams.length - 1);
-    const poolRepetitions =
-      requestedRoundsPerTeam === undefined
-        ? (options.repetitions ?? 1)
-        : Math.max(options.repetitions ?? 1, Math.ceil(requestedRoundsPerTeam / poolGamesPerCycle));
     const poolPlan = planRounds(
       options.phaseId,
       pool.id,
-      poolTeams,
+      teamOrder(poolTeams),
       poolRounds,
-      options.roundsPerTeam === undefined ? (poolRounds?.length ?? options.roundCount) : undefined,
-      requestedRoundsPerTeam,
-      poolRepetitions,
+      poolRounds?.length ?? options.roundCount,
+      options.repetitions ?? 1,
       options.seed ?? `${options.phaseId}:${pool.id}`,
       rematchPolicy,
-      options.avoidSameOrganization ?? false,
     );
-    issues.push(...poolPlan.issues);
-    maxRoundCount = Math.max(maxRoundCount, poolPlan.rounds.length);
+    maxRoundCount = Math.max(maxRoundCount, poolPlan.length);
     const fullCycleRounds = poolTeams.length % 2 === 0 ? Math.max(0, poolTeams.length - 1) : poolTeams.length;
-    const fullRoundCount = fullCycleRounds * poolRepetitions;
-    if (rematchPolicy === 'forbid' && poolPlan.rounds.length > fullCycleRounds) {
-      issues.push(
-        issue(
-          'rematches-required',
-          'error',
-          `Pool “${pool.name}” requires a rematch for the requested number of rounds, but rematchPolicy is forbid.`,
-          pool.id,
-        ),
-      );
-    }
+    const fullRoundCount = fullCycleRounds * (options.repetitions ?? 1);
     const poolExpectedGamesPerTeam =
-      requestedRoundsPerTeam ??
-      (poolPlan.rounds.length === fullRoundCount
-        ? Math.max(0, poolTeams.length - 1) * poolRepetitions
-        : poolTeams.length % 2 === 0
-          ? poolPlan.rounds.length
-          : null);
+      poolPlan.length === fullRoundCount
+        ? Math.max(0, poolTeams.length - 1) * (options.repetitions ?? 1)
+        : null;
     if (expectedGamesPerTeam === null) expectedGamesPerTeam = poolExpectedGamesPerTeam;
     else if (expectedGamesPerTeam !== poolExpectedGamesPerTeam) expectedGamesPerTeam = null;
     poolPlans.set(pool.id, {
       teamIds: poolTeams.map((team) => team.id),
-      rounds: poolPlan.rounds,
+      rounds: poolPlan,
       expectedGamesPerTeam: poolExpectedGamesPerTeam,
     });
-    planned.push(...poolPlan.rounds);
+    planned.push(...poolPlan);
   }
 
   const assigned = assignResources(planned, options);
@@ -1007,12 +543,9 @@ export function generatePoolSchedule(options: PoolScheduleOptions): GeneratedSch
     rematchPolicy,
     avoidSameOrganization: options.avoidSameOrganization,
     requireRoomAssignments: options.requireRoomAssignments,
-    allowMixedPoolsPerRound: true,
-    validateByeParity: false,
   });
   issues.push(...validation);
   for (const [poolId, plan] of poolPlans) {
-    const effectivePoolRounds = plan.rounds.map((round) => round.roundDefinition);
     issues.push(
       ...validateSchedule(
         assigned.games.filter((game) => game.poolId === poolId),
@@ -1025,34 +558,21 @@ export function generatePoolSchedule(options: PoolScheduleOptions): GeneratedSch
           avoidSameOrganization: options.avoidSameOrganization,
           requireRoomAssignments: options.requireRoomAssignments,
           requireExplicitByes: plan.teamIds.length % 2 === 1,
-          requireCompleteRounds: true,
-          phaseId: options.phaseId,
-          poolId,
-          rounds: effectivePoolRounds,
         },
       ),
     );
   }
-  const games = hasStructuralScheduleError(issues) ? [] : assigned.games;
-  return { games, issues, expectedGamesPerTeam, roundCount: games.length === 0 ? 0 : maxRoundCount };
+  return { games: assigned.games, issues, expectedGamesPerTeam, roundCount: maxRoundCount };
 }
 
 export interface ScheduleValidationOptions {
   readonly rooms?: readonly Room[];
   readonly roomIds?: readonly EntityId[];
-  readonly phaseId?: EntityId;
-  readonly poolId?: EntityId | null;
-  readonly rounds?: readonly ScheduleRoundDefinition[];
-  /** Permit synchronized pool schedules to share a round id without treating that as malformed. */
-  readonly allowMixedPoolsPerRound?: boolean;
-  /** Disable the global even/odd bye check when validating an aggregate of separate pools. */
-  readonly validateByeParity?: boolean;
   readonly expectedGamesPerTeam?: number;
   readonly rematchPolicy?: RematchPolicy;
   readonly avoidSameOrganization?: boolean;
   readonly requireRoomAssignments?: boolean;
   readonly requireExplicitByes?: boolean;
-  readonly requireCompleteRounds?: boolean;
 }
 
 function hasSameOrganization(left: Team | undefined, right: Team | undefined): boolean {
@@ -1077,7 +597,6 @@ export function validateSchedule(
   const gameIds = new Set<EntityId>();
   const teamGameCounts = new Map<EntityId, number>();
   const duplicateTeamIds = duplicateTeamIdsFromGames(games);
-  const roundDefinitions = new Map((options.rounds ?? []).map((round) => [round.id, round]));
 
   if (new Set(teams.map((team) => team.id)).size !== teams.length) {
     issues.push(issue('duplicate-team-id', 'error', 'The team list contains duplicate ids.'));
@@ -1092,53 +611,6 @@ export function validateSchedule(
     const roundGames = byRound.get(game.roundId) ?? [];
     roundGames.push(game);
     byRound.set(game.roundId, roundGames);
-
-    if (options.phaseId && game.phaseId !== options.phaseId) {
-      issues.push(
-        issue(
-          'round-phase-mismatch',
-          'error',
-          `Game “${game.id}” belongs to phase “${game.phaseId}”, not “${options.phaseId}”.`,
-          game.roundId,
-          [game.id],
-        ),
-      );
-    }
-    if (options.poolId !== undefined && game.poolId !== options.poolId) {
-      issues.push(
-        issue(
-          'round-pool-mismatch',
-          'error',
-          `Game “${game.id}” does not belong to the expected pool.`,
-          game.roundId,
-          [game.id],
-        ),
-      );
-    }
-    const roundDefinition = roundDefinitions.get(game.roundId);
-    if (options.rounds && !roundDefinition) {
-      issues.push(
-        issue(
-          'unknown-round',
-          'error',
-          `Game “${game.id}” references a round that is not in the supplied round definitions.`,
-          game.roundId,
-          [game.id],
-        ),
-      );
-    } else if (roundDefinition) {
-      if (roundDefinition.poolId !== undefined && roundDefinition.poolId !== game.poolId) {
-        issues.push(
-          issue(
-            'round-pool-mismatch',
-            'error',
-            `Game “${game.id}” does not match the pool recorded for round “${game.roundId}”.`,
-            game.roundId,
-            [game.id],
-          ),
-        );
-      }
-    }
 
     if (game.kind === 'bye') {
       if (!teamById.has(game.byeTeamId)) {
@@ -1155,20 +627,6 @@ export function validateSchedule(
       }
       const count = teamGameCounts.get(game.byeTeamId) ?? 0;
       teamGameCounts.set(game.byeTeamId, count);
-      continue;
-    }
-
-    if (!game.teamAId || !game.teamBId) {
-      issues.push(
-        issue(
-          'missing-opponent',
-          'error',
-          `Game “${game.id}” is missing one of its two opponents.`,
-          game.roundId,
-          [game.id],
-          [game.teamAId, game.teamBId].filter(Boolean),
-        ),
-      );
       continue;
     }
 
@@ -1246,30 +704,10 @@ export function validateSchedule(
 
   for (const [roundId, roundGames] of byRound) {
     const teamsInRound = new Map<EntityId, EntityId[]>();
-    const matchIdsByTeam = new Map<EntityId, EntityId[]>();
-    const byeIdsByTeam = new Map<EntityId, EntityId[]>();
     const roomsInRound = new Map<EntityId, EntityId[]>();
-    const sequences = new Set<string>();
-    const phaseIds = new Set<EntityId>();
-    const poolIds = new Set<EntityId | null>();
+    const sequences = new Set<number>();
     for (const game of roundGames) {
-      phaseIds.add(game.phaseId);
-      poolIds.add(game.poolId);
-      if (!Number.isInteger(game.sequence) || game.sequence < 0) {
-        issues.push(
-          issue(
-            'invalid-sequence',
-            'error',
-            `Round “${roundId}” contains an invalid sequence number.`,
-            roundId,
-            [game.id],
-          ),
-        );
-      }
-      const sequenceKey = options.allowMixedPoolsPerRound
-        ? `${game.poolId ?? ''}\u0000${game.sequence}`
-        : String(game.sequence);
-      if (sequences.has(sequenceKey)) {
+      if (sequences.has(game.sequence)) {
         issues.push(
           issue(
             'duplicate-sequence',
@@ -1280,60 +718,17 @@ export function validateSchedule(
           ),
         );
       }
-      sequences.add(sequenceKey);
+      sequences.add(game.sequence);
       const participants = game.kind === 'bye' ? [game.byeTeamId] : [game.teamAId, game.teamBId];
       for (const teamId of participants) {
-        if (!teamId) continue;
         const previous = teamsInRound.get(teamId) ?? [];
         previous.push(game.id);
         teamsInRound.set(teamId, previous);
-        const idsByKind = game.kind === 'bye' ? byeIdsByTeam : matchIdsByTeam;
-        const kindIds = idsByKind.get(teamId) ?? [];
-        kindIds.push(game.id);
-        idsByKind.set(teamId, kindIds);
       }
       if (game.kind !== 'bye' && game.roomId) {
         const roomGames = roomsInRound.get(game.roomId) ?? [];
         roomGames.push(game.id);
         roomsInRound.set(game.roomId, roomGames);
-      }
-    }
-    if (phaseIds.size > 1 || (!options.allowMixedPoolsPerRound && poolIds.size > 1)) {
-      issues.push(
-        issue(
-          'mixed-round-membership',
-          'error',
-          `Round “${roundId}” contains games from more than one phase or pool.`,
-          roundId,
-          roundGames.map((game) => game.id),
-        ),
-      );
-    }
-    for (const [teamId, byeIds] of byeIdsByTeam) {
-      if (byeIds.length > 1) {
-        issues.push(
-          issue(
-            'duplicate-bye',
-            'error',
-            `Team “${teamId}” has more than one bye in round “${roundId}”.`,
-            roundId,
-            byeIds,
-            [teamId],
-          ),
-        );
-      }
-      const matchIds = matchIdsByTeam.get(teamId) ?? [];
-      if (matchIds.length > 0) {
-        issues.push(
-          issue(
-            'team-game-and-bye',
-            'error',
-            `Team “${teamId}” has both a game and a bye in round “${roundId}”.`,
-            roundId,
-            [...matchIds, ...byeIds],
-            [teamId],
-          ),
-        );
       }
     }
     for (const [teamId, teamGameIds] of teamsInRound) {
@@ -1363,29 +758,7 @@ export function validateSchedule(
         );
       }
     }
-    const byeCount = roundGames.filter((game) => game.kind === 'bye').length;
-    if ((options.validateByeParity ?? true) && teams.length % 2 === 0 && byeCount > 0) {
-      issues.push(
-        issue(
-          'unexpected-bye',
-          'error',
-          `Round “${roundId}” contains a bye even though the field has an even number of teams.`,
-          roundId,
-          roundGames.filter((game) => game.kind === 'bye').map((game) => game.id),
-        ),
-      );
-    }
     if (options.requireExplicitByes && teams.length % 2 === 1) {
-      if (byeCount === 0) {
-        issues.push(
-          issue(
-            'missing-explicit-bye',
-            'error',
-            `Round “${roundId}” has an odd field but no explicit bye.`,
-            roundId,
-          ),
-        );
-      }
       for (const team of teams) {
         if (!teamsInRound.has(team.id)) {
           issues.push(
@@ -1393,22 +766,6 @@ export function validateSchedule(
               'missing-explicit-bye',
               'error',
               `Team “${team.displayName}” is absent from round “${roundId}” without an explicit bye.`,
-              roundId,
-              [],
-              [team.id],
-            ),
-          );
-        }
-      }
-    }
-    if (options.requireCompleteRounds) {
-      for (const team of teams) {
-        if (!teamsInRound.has(team.id)) {
-          issues.push(
-            issue(
-              'missing-team-in-round',
-              'error',
-              `Team “${team.displayName}” is not present in round “${roundId}”.`,
               roundId,
               [],
               [team.id],

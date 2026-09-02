@@ -6,14 +6,9 @@ import type {
   Phase,
   Pool,
   ScheduledGame,
-  Player,
   TournamentSnapshot,
-  Tiebreaker,
-  Team,
-  TournamentRules,
 } from './model';
 import { DomainError, recordAuditEvent } from './model';
-import { deriveStandings } from './statistics';
 import type { StandingsReport, TeamStandingRow } from './statistics';
 
 export interface AdvancementOverride {
@@ -67,13 +62,6 @@ export interface AdvancementInput {
   readonly standings: StandingsReport | readonly StandingsReport[];
   readonly scheduledGames: readonly ScheduledGame[];
   readonly acceptedResults: readonly GameResult[];
-  /** Optional explicit scope used when the supplied standings were derived from a subset of games. */
-  readonly gameIds?: readonly EntityId[];
-  readonly teams?: readonly Team[];
-  readonly players?: readonly Player[];
-  readonly tiebreakers?: readonly Tiebreaker[];
-  readonly scoring?: Pick<TournamentRules, 'tossupPoints' | 'powerPoints' | 'negPoints'>;
-  readonly includeDroppedTeams?: boolean;
   readonly overrides?: readonly AdvancementOverride[];
 }
 
@@ -100,195 +88,27 @@ function ruleForPhase(phase: Phase): AdvancementRule {
   );
 }
 
-interface ReportsByPoolResult {
-  readonly reports: Map<EntityId, TeamStandingRow[]>;
-  readonly scopeIssues: readonly AdvancementIssue[];
-}
-
 function reportsByPool(
   standings: StandingsReport | readonly StandingsReport[],
   sourcePools: readonly Pool[],
-  sourcePhase: Phase,
-  scheduledGames: readonly ScheduledGame[],
-  acceptedResults: readonly GameResult[],
-  gameIds: readonly EntityId[] | undefined,
-): ReportsByPoolResult {
+): Map<EntityId, TeamStandingRow[]> {
   const reports: readonly StandingsReport[] = Array.isArray(standings) ? standings : [standings];
   const byPool = new Map<EntityId, TeamStandingRow[]>();
-  const scopeIssues: AdvancementIssue[] = [];
-  const sourcePoolIds = new Set(sourcePools.map((pool) => pool.id));
-  const explicitGameIds = gameIds ? new Set(gameIds) : null;
-  const resultById = new Map(acceptedResults.map((result) => [result.id, result]));
-  const sourceGames = scheduledGames.filter(
-    (game) =>
-      game.kind !== 'bye' &&
-      game.phaseId === sourcePhase.id &&
-      (explicitGameIds === null || explicitGameIds.has(game.id)),
-  );
-  const reportsForPool = new Map<EntityId, StandingsReport[]>();
-  const unscopedReports: StandingsReport[] = [];
-
-  for (const report of reports) {
-    const rowPoolIds = [
-      ...new Set(
-        report.rows.map((row) => row.poolId).filter((poolId): poolId is EntityId => poolId !== null),
-      ),
-    ];
-    const declaredPoolId = report.poolId ?? (rowPoolIds.length === 1 ? rowPoolIds[0] : null);
-    const reportPoolId = declaredPoolId ?? (sourcePools.length === 1 ? sourcePools[0].id : null);
-    if (report.poolId && !sourcePoolIds.has(report.poolId)) {
-      scopeIssues.push(
-        issue(
-          'standings-pool-mismatch',
-          'error',
-          'The supplied standings identify a pool outside the advancement source pools.',
-          report.poolId,
-        ),
-      );
-    }
-    if (report.poolId && rowPoolIds.some((poolId) => poolId !== report.poolId)) {
-      scopeIssues.push(
-        issue(
-          'standings-pool-mismatch',
-          'error',
-          'A standings report contains rows from a different pool than its declared pool.',
-          report.poolId,
-        ),
-      );
-    }
-    if (reportPoolId && sourcePoolIds.has(reportPoolId)) {
-      const current = reportsForPool.get(reportPoolId) ?? [];
-      current.push(report);
-      reportsForPool.set(reportPoolId, current);
-    } else if (sourcePools.length === 1) {
-      const poolId = sourcePools[0].id;
-      const current = reportsForPool.get(poolId) ?? [];
-      current.push(report);
-      reportsForPool.set(poolId, current);
-    } else {
-      unscopedReports.push(report);
-    }
-
-    const reportScopeGameIds = new Set(
-      sourceGames
-        .filter((game) => reportPoolId === null || game.poolId === reportPoolId)
-        .map((game) => game.id),
-    );
-
-    if (report.phaseId !== undefined && report.phaseId !== null && report.phaseId !== sourcePhase.id) {
-      scopeIssues.push(
-        issue(
-          'standings-phase-mismatch',
-          'error',
-          'The supplied standings were derived from a different phase.',
-          report.poolId ?? null,
-        ),
-      );
-    }
-    if (report.includedGameIds) {
-      const outside = report.includedGameIds.filter((gameId) => !reportScopeGameIds.has(gameId));
-      if (outside.length > 0) {
-        scopeIssues.push(
-          issue(
-            'standings-out-of-scope',
-            'error',
-            'The supplied standings include games outside the advancement source phase/pool scope.',
-            report.poolId ?? null,
-            [],
-          ),
-        );
-      }
-    }
-    const resultGameIds = report.includedResultIds
-      .map((resultId) => resultById.get(resultId)?.scheduledGameId)
-      .filter((gameId): gameId is EntityId => Boolean(gameId));
-    const outsideResultGames = resultGameIds.filter((gameId) => !reportScopeGameIds.has(gameId));
-    if (outsideResultGames.length > 0) {
-      scopeIssues.push(
-        issue(
-          'standings-out-of-scope',
-          'error',
-          'The supplied standings include results outside the advancement source phase/pool scope.',
-          report.poolId ?? null,
-        ),
-      );
-    }
-  }
-
-  if (unscopedReports.length > 0) {
-    scopeIssues.push(
-      issue(
-        'ambiguous-standings-scope',
-        'error',
-        'Standings for multiple source pools must identify their pool explicitly.',
-      ),
-    );
-  }
-
   for (const pool of sourcePools) {
-    const poolReports = reportsForPool.get(pool.id) ?? [];
-    const rowsByTeam = new Map<EntityId, TeamStandingRow>();
-    for (const report of poolReports) {
-      for (const row of report.rows) {
-        if (row.poolId !== null && row.poolId !== pool.id) continue;
-        if (!pool.teamIds.includes(row.teamId)) continue;
-        const unresolved = report.unresolvedTies.some((tie) => tie.teamIds.includes(row.teamId));
-        const normalized =
-          unresolved && row.tieStatus === 'clear' ? { ...row, tieStatus: 'unresolved' as const } : row;
-        const previous = rowsByTeam.get(row.teamId);
-        if (previous && previous !== normalized) {
-          scopeIssues.push(
-            issue(
-              'duplicate-standings-team',
-              'error',
-              `Team “${row.teamId}” appears more than once in the standings for pool “${pool.name}”.`,
-              pool.id,
-              [row.teamId],
-            ),
-          );
-          continue;
-        }
-        rowsByTeam.set(row.teamId, normalized);
-      }
-    }
+    const direct = reports.find((report) => report.rows.some((row) => row.poolId === pool.id));
+    const report = direct ?? (reports.length === 1 ? reports[0] : undefined);
+    const rows =
+      report?.rows.filter(
+        (row) =>
+          row.poolId === pool.id ||
+          (report.rows.length === pool.teamIds.length && report.rows.every((row) => row.poolId === null)),
+      ) ?? [];
     byPool.set(
       pool.id,
-      [...rowsByTeam.values()].sort(
-        (left, right) => left.rank - right.rank || left.teamId.localeCompare(right.teamId),
-      ),
+      [...rows].sort((left, right) => left.rank - right.rank || left.teamId.localeCompare(right.teamId)),
     );
   }
-  return { reports: byPool, scopeIssues };
-}
-
-/** Derive one explicitly phase/pool-scoped standings report for every source pool. */
-export function deriveAdvancementStandings(input: {
-  readonly sourcePhase: Phase;
-  readonly sourcePools: readonly Pool[];
-  readonly teams: readonly Team[];
-  readonly players?: readonly Player[];
-  readonly scheduledGames: readonly ScheduledGame[];
-  readonly acceptedResults: readonly GameResult[];
-  readonly gameIds?: readonly EntityId[];
-  readonly tiebreakers?: readonly Tiebreaker[];
-  readonly scoring?: Pick<TournamentRules, 'tossupPoints' | 'powerPoints' | 'negPoints'>;
-  readonly includeDroppedTeams?: boolean;
-}): readonly StandingsReport[] {
-  return input.sourcePools.map((pool) =>
-    deriveStandings({
-      teams: input.teams,
-      players: input.players,
-      scheduledGames: input.scheduledGames,
-      acceptedResults: input.acceptedResults,
-      phaseId: input.sourcePhase.id,
-      poolId: pool.id,
-      teamIds: pool.teamIds,
-      gameIds: input.gameIds,
-      tiebreakers: input.tiebreakers,
-      scoring: input.scoring,
-      includeDroppedTeams: input.includeDroppedTeams,
-    }),
-  );
+  return byPool;
 }
 
 function overrideFor(
@@ -414,30 +234,7 @@ function buildCarryovers(
 export function previewAdvancement(input: AdvancementInput): AdvancementPreview {
   const rule = ruleForPhase(input.sourcePhase);
   const issues: AdvancementIssue[] = [];
-  const standings = input.teams
-    ? deriveAdvancementStandings({
-        sourcePhase: input.sourcePhase,
-        sourcePools: input.sourcePools,
-        teams: input.teams,
-        players: input.players,
-        scheduledGames: input.scheduledGames,
-        acceptedResults: input.acceptedResults,
-        gameIds: input.gameIds,
-        tiebreakers: input.tiebreakers,
-        scoring: input.scoring,
-        includeDroppedTeams: input.includeDroppedTeams,
-      })
-    : input.standings;
-  const reportSelection = reportsByPool(
-    standings,
-    input.sourcePools,
-    input.sourcePhase,
-    input.scheduledGames,
-    input.acceptedResults,
-    input.gameIds,
-  );
-  const byPool = reportSelection.reports;
-  issues.push(...reportSelection.scopeIssues);
+  const byPool = reportsByPool(input.standings, input.sourcePools);
   const overrides = input.overrides ?? [];
   const selected: { row: TeamStandingRow; sourcePoolId: EntityId }[] = [];
 
