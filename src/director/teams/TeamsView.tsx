@@ -311,6 +311,7 @@ function TeamRow({
 }) {
   const team = state.teams.find((entry) => entry.id === teamId);
   const [playerName, setPlayerName] = useState('');
+  const [playerCaptain, setPlayerCaptain] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editDisplayName, setEditDisplayName] = useState('');
   const [editOrganizationName, setEditOrganizationName] = useState('');
@@ -381,29 +382,38 @@ function TeamRow({
                   ))}
                 </ul>
               )}
-              <div className="director-inline-form director-roster-add-row">
+              <form
+                className="director-inline-form director-roster-add-row"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (!playerName.trim()) {
+                    onAnnounce('Enter a player name first.');
+                    return;
+                  }
+                  if (!controller.addPlayer(team.id, playerName, playerCaptain)) return;
+                  setPlayerName('');
+                  setPlayerCaptain(false);
+                  onAnnounce(`Player added to ${team.displayName}.`);
+                }}
+              >
                 <input
                   aria-label={`Add player to ${team.displayName}`}
                   value={playerName}
                   onChange={(event) => setPlayerName(event.target.value)}
                   placeholder="Add player"
                 />
-                <button
-                  type="button"
-                  className="director-inline-action director-roster-add-action"
-                  onClick={() => {
-                    if (!playerName.trim()) {
-                      onAnnounce('Enter a player name first.');
-                      return;
-                    }
-                    controller.addPlayer(team.id, playerName);
-                    setPlayerName('');
-                    onAnnounce(`Player added to ${team.displayName}.`);
-                  }}
-                >
+                <label className="director-checkbox-field director-roster-captain-field">
+                  <input
+                    type="checkbox"
+                    checked={playerCaptain}
+                    onChange={(event) => setPlayerCaptain(event.target.checked)}
+                  />
+                  <span>Captain</span>
+                </label>
+                <button type="submit" className="director-inline-action director-roster-add-action">
                   Add
                 </button>
-              </div>
+              </form>
             </div>
           </details>
         </td>

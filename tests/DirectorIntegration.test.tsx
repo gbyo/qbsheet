@@ -4,6 +4,7 @@ import {
   defaultRules,
   deriveTeamStandings,
   emptyDirectorState,
+  formatGenerationAvailability,
   generateRoundRobinRound,
   packetUseConflicts,
   previewAdvancement,
@@ -231,6 +232,42 @@ describe('Director integration hardening', () => {
     expect(complete?.generated).toBe(true);
     expect(hook.result.current.state.scheduledGames).toHaveLength(2);
     expect(new Set(hook.result.current.state.scheduledGames.map((game) => game.poolId)).size).toBe(2);
+  });
+
+  test('pool generation availability explains incomplete membership before the generate action', async () => {
+    const { hook } = await directorWithSetup(4);
+    const phaseId = hook.result.current.state.phases[0]?.id;
+    const teamIds = hook.result.current.state.teams.map((entry) => entry.id);
+    if (!phaseId || teamIds.length !== 4) throw new Error('test setup did not create the pool field');
+    act(() => hook.result.current.updateFormat({ kind: 'pools', name: 'Preliminary pools' }));
+    act(() => {
+      expect(hook.result.current.addPool({ phaseId, name: 'Pool A', teamIds: teamIds.slice(0, 2) })).toBe(
+        true,
+      );
+    });
+
+    const availability = formatGenerationAvailability(hook.result.current.state);
+    expect(availability.supported).toBe(false);
+    expect(availability.message).toMatch(/every confirmed team/i);
+    expect(
+      runPreflight(hook.result.current.state).some((issue) => issue.id === 'format-generation-unavailable'),
+    ).toBe(true);
+  });
+
+  test('player roster entry rejects an active duplicate and supports captain assignment', async () => {
+    const { hook } = await directorWithSetup();
+    const teamId = hook.result.current.state.teams[0]?.id;
+    if (!teamId) throw new Error('test setup did not create a team');
+    act(() => {
+      expect(hook.result.current.addPlayer(teamId, 'Ada', true)).toBe(true);
+    });
+    expect(hook.result.current.state.players).toContainEqual(
+      expect.objectContaining({ teamId, name: 'Ada', captain: true, active: true }),
+    );
+    act(() => {
+      expect(hook.result.current.addPlayer(teamId, ' ada ')).toBe(false);
+    });
+    expect(hook.result.current.state.players.filter((player) => player.teamId === teamId)).toHaveLength(1);
   });
 
   test('format type changes are blocked after schedule generation', async () => {
@@ -672,7 +709,7 @@ describe('Director integration hardening', () => {
     expect(issues.some((issue) => issue.id === `packet-assignment-conflict-${scheduled.id}`)).toBe(true);
   });
 
-  test('unmatched QBTCP results stay review-only and do not change a schedule', async () => {
+  test('unmatched QBTCP results stay review-only until a director associates them', async () => {
     const { hook } = await directorWithSetup();
     act(() => hook.result.current.generateSchedule());
     const scheduled = hook.result.current.state.scheduledGames[0];
@@ -715,6 +752,25 @@ describe('Director integration hardening', () => {
     expect(submission?.status).toBe('review');
     expect(state.scheduledGames.find((game) => game.id === scheduled.id)?.status).toBe('scheduled');
     expect(submission && hook.result.current.acceptSubmission(submission.id)).toBe(false);
+    if (!submission) throw new Error('test setup did not stage an unmatched result');
+    act(() => {
+      expect(hook.result.current.associateSubmission(submission.id, scheduled.id)).toBe(true);
+    });
+    const associated = hook.result.current.state.games.find((game) => game.id === submission.gameId);
+    expect(associated?.scheduledGameId).toBe(scheduled.id);
+    expect(associated?.scores.map((entry) => entry.teamId)).toEqual([
+      scheduled.leftTeamId,
+      scheduled.rightTeamId,
+    ]);
+    expect(hook.result.current.state.submissions.find((entry) => entry.id === submission.id)?.status).toBe(
+      'review',
+    );
+    act(() => {
+      expect(hook.result.current.acceptSubmission(submission.id)).toBe(true);
+    });
+    expect(hook.result.current.state.scheduledGames.find((game) => game.id === scheduled.id)?.status).toBe(
+      'accepted',
+    );
   });
 
   test('QBTCP stable team references beat renamed display names and ambiguous names stay in review', async () => {
@@ -1104,15 +1160,21 @@ describe('Director integration hardening', () => {
   });
 
   test('browser fallback reports a write failure when localStorage is unavailable', async () => {
-    const setItem = vi.spyOn(window.localStorage, 'setItem').mockImplementation(() => {
+    // jsdom exposes Storage as a proxy in some Node versions. Spying on the instance can then
+    // shadow a named storage entry instead of the method that bare `localStorage` resolves to.
+    const storage = Object.getPrototypeOf(window.localStorage) as Storage;
+    const setItem = vi.spyOn(storage, 'setItem').mockImplementation(() => {
       throw new Error('quota');
     });
-    const repository = new IndexedDbDirectorRepository();
-    (repository as unknown as { databasePromise: Promise<IDBDatabase | null> | null }).databasePromise =
-      Promise.resolve(null);
-    await expect(repository.save(emptyDirectorState())).rejects.toThrow(
-      /quota|permissions|could not be saved/i,
-    );
-    setItem.mockRestore();
+    try {
+      const repository = new IndexedDbDirectorRepository();
+      (repository as unknown as { databasePromise: Promise<IDBDatabase | null> | null }).databasePromise =
+        Promise.resolve(null);
+      await expect(repository.save(emptyDirectorState())).rejects.toThrow(
+        /quota|permissions|could not be saved/i,
+      );
+    } finally {
+      setItem.mockRestore();
+    }
   });
 });

@@ -143,6 +143,7 @@ export function FormatView({
                   <input
                     type="checkbox"
                     checked={format.avoidRematches}
+                    disabled={!format.editable}
                     onChange={(event) => controller.updateFormat({ avoidRematches: event.target.checked })}
                   />
                   <span>Avoid rematches when possible</span>
@@ -151,6 +152,7 @@ export function FormatView({
                   <input
                     type="checkbox"
                     checked={format.avoidSameOrganization}
+                    disabled={!format.editable}
                     onChange={(event) =>
                       controller.updateFormat({ avoidSameOrganization: event.target.checked })
                     }
@@ -161,6 +163,7 @@ export function FormatView({
                   <input
                     type="checkbox"
                     checked={format.allowByes}
+                    disabled={!format.editable}
                     onChange={(event) => controller.updateFormat({ allowByes: event.target.checked })}
                   />
                   <span>Allow explicit byes for odd fields</span>

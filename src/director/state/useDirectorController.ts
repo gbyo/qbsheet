@@ -18,7 +18,13 @@ import {
   type TeamGameScore,
 } from '../domain';
 import { createDirectorRepository, normalizeDirectorState, type DirectorRepository } from '../persistence';
-import { assessIncomingDocument, stageIncomingDocument, type IncomingDocument } from '../transfers/ingest';
+import {
+  assessIncomingDocument,
+  ingestWarnings,
+  readResultStatisticsForAssociation,
+  stageIncomingDocument,
+  type IncomingDocument,
+} from '../transfers/ingest';
 import {
   addTransferLocation,
   dismissTransferArtifact,
@@ -124,7 +130,7 @@ export interface DirectorController {
   updateTeam(teamId: DirectorId, changes: Partial<NewTeamInput>): void;
   dropTeam(teamId: DirectorId, reason?: string): void;
   restoreTeam(teamId: DirectorId): void;
-  addPlayer(teamId: DirectorId, name: string, captain?: boolean): void;
+  addPlayer(teamId: DirectorId, name: string, captain?: boolean): boolean;
   removePlayer(playerId: DirectorId): void;
   addRoom(input: NewRoomInput): void;
   updateRoom(
@@ -169,6 +175,7 @@ export interface DirectorController {
   releaseRound(roundId: DirectorId): boolean;
   closeRound(roundId: DirectorId): boolean;
   addManualResult(input: ManualResultInput): boolean;
+  associateSubmission(submissionId: DirectorId, scheduledGameId: DirectorId): boolean;
   acceptSubmission(submissionId: DirectorId, actor?: string): boolean;
   rejectSubmission(submissionId: DirectorId, reason?: string): boolean;
   editAcceptedResult(gameId: DirectorId, scores: TeamGameScore[], note?: string): boolean;
@@ -590,24 +597,45 @@ export function useDirectorController(repository = createDirectorRepository()): 
   );
 
   const addPlayer = useCallback(
-    (teamId: DirectorId, name: string, captain = false) => {
-      if (!name.trim()) return;
+    (teamId: DirectorId, name: string, captain = false): boolean => {
+      const normalizedName = name.trim();
+      const snapshot = stateRef.current;
+      if (!normalizedName) {
+        setError('A player name is required.');
+        return false;
+      }
+      if (!snapshot.teams.some((team) => team.id === teamId)) {
+        setError('A player must belong to an existing team.');
+        return false;
+      }
+      if (
+        snapshot.players.some(
+          (player) =>
+            player.teamId === teamId &&
+            player.active &&
+            player.name.trim().toLocaleLowerCase() === normalizedName.toLocaleLowerCase(),
+        )
+      ) {
+        setError(`“${normalizedName}” is already on this active roster.`);
+        return false;
+      }
       commit((draft) => {
         const playerId = newDirectorId('player');
         if (captain)
           draft.players
             .filter((player) => player.teamId === teamId)
             .forEach((player) => (player.captain = false));
-        draft.players.push({ id: playerId, teamId, name: name.trim(), captain, active: true });
+        draft.players.push({ id: playerId, teamId, name: normalizedName, captain, active: true });
         draft.audit.push({
           id: newDirectorId('audit'),
           at: isoNow(),
           actor: 'Director',
           type: 'team-changed',
-          summary: `Added ${name.trim()} to a roster.`,
+          summary: `Added ${normalizedName} to a roster.`,
           entityId: playerId,
         });
       });
+      return true;
     },
     [commit],
   );
@@ -1383,6 +1411,101 @@ export function useDirectorController(repository = createDirectorRepository()): 
     [commit],
   );
 
+  const associateSubmission = useCallback(
+    (submissionId: DirectorId, scheduledGameId: DirectorId): boolean => {
+      const snapshot = stateRef.current;
+      const submission = snapshot.submissions.find((entry) => entry.id === submissionId);
+      const game = submission ? snapshot.games.find((entry) => entry.id === submission.gameId) : undefined;
+      const scheduled = snapshot.scheduledGames.find((entry) => entry.id === scheduledGameId);
+      if (!submission || (submission.status !== 'received' && submission.status !== 'review') || !game) {
+        setError('Only a result waiting for review can be associated.');
+        return false;
+      }
+      if (!scheduled || scheduled.bye || scheduled.status === 'cancelled') {
+        setError('Choose a non-bye scheduled game that has not been cancelled.');
+        return false;
+      }
+      if (canonicalAcceptedGame(snapshot, scheduled.id) || scheduled.status === 'accepted') {
+        setError('That scheduled game already has a canonical accepted result.');
+        return false;
+      }
+      if (game.scheduledGameId === scheduled.id) {
+        setError('This result is already associated with that scheduled game.');
+        return false;
+      }
+
+      const rawSubmission = isRecordLike(submission.rawSubmission) ? submission.rawSubmission : undefined;
+      const rawQbj = rawSubmission?.qbj ?? game.rawQbj;
+      const parsed =
+        rawQbj === undefined ? undefined : readResultStatisticsForAssociation(rawQbj, snapshot, scheduled);
+      const warnings = new Set(
+        (submission.warnings ?? []).filter(
+          (warning) =>
+            warning !== 'unknown-match' &&
+            warning !== 'matched-by-teams' &&
+            (warning !== ingestWarnings.statisticsWarning || parsed?.scores.length === 2),
+        ),
+      );
+      for (const warning of parsed?.warnings ?? []) warnings.add(warning);
+      if (!parsed || parsed.scores.length < 2) warnings.add(ingestWarnings.statisticsWarning);
+      warnings.add(ingestWarnings.directorAssociation);
+
+      commit((draft) => {
+        const targetSubmission = draft.submissions.find((entry) => entry.id === submissionId);
+        const targetGame = targetSubmission
+          ? draft.games.find((entry) => entry.id === targetSubmission.gameId)
+          : undefined;
+        const targetScheduled = draft.scheduledGames.find((entry) => entry.id === scheduledGameId);
+        if (!targetSubmission || !targetGame || !targetScheduled) return;
+        targetGame.scheduledGameId = targetScheduled.id;
+        targetGame.roundId = targetScheduled.roundId;
+        targetGame.packetId = effectivePacketId(draft, targetScheduled);
+        if (parsed?.scores.length === 2) targetGame.scores = structuredClone(parsed.scores);
+        if (parsed) targetGame.playerStats = structuredClone(parsed.playerStats);
+        targetGame.status = 'submitted';
+        targetSubmission.status = 'review';
+        targetSubmission.warnings = [...warnings];
+        targetSubmission.reason = `Associated by Director with ${targetScheduled.id}; verify the retained review notes before accepting.`;
+        if (isRecordLike(targetSubmission.rawSubmission)) {
+          targetSubmission.rawSubmission = {
+            ...targetSubmission.rawSubmission,
+            association: 'director',
+            associatedScheduledGameId: targetScheduled.id,
+          };
+        } else {
+          targetSubmission.rawSubmission = {
+            original: targetSubmission.rawSubmission,
+            association: 'director',
+            associatedScheduledGameId: targetScheduled.id,
+          };
+        }
+        targetSubmission.conflictWith = undefined;
+        targetScheduled.status = 'submitted';
+        const artifact = draft.transfers.artifacts.find((entry) => entry.submissionId === submissionId);
+        if (artifact) {
+          artifact.scheduledGameId = targetScheduled.id;
+          artifact.detail = targetSubmission.reason;
+          artifact.warnings = [...warnings];
+        }
+        const now = isoNow();
+        draft.audit.push({
+          id: newDirectorId('audit'),
+          at: now,
+          actor: 'Director',
+          type: 'result-edited',
+          summary: `Associated result ${submissionId} with ${targetScheduled.id}.`,
+          entityId: targetGame.id,
+          details: {
+            scheduledGameId: targetScheduled.id,
+            positionalAssociation: parsed?.positionalAssociation ?? false,
+          },
+        });
+      });
+      return true;
+    },
+    [commit],
+  );
+
   const acceptSubmission = useCallback(
     (submissionId: DirectorId, actor = 'Director'): boolean => {
       const snapshot = stateRef.current;
@@ -1923,6 +2046,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
     releaseRound,
     closeRound: closeRoundAction,
     addManualResult,
+    associateSubmission,
     acceptSubmission,
     rejectSubmission,
     editAcceptedResult,

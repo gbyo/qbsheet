@@ -24,6 +24,14 @@ export function RoomsView({
   const [staffRole, setStaffRole] = useState<'moderator' | 'scorekeeper' | 'runner' | 'hq'>('moderator');
   const [equipmentKind, setEquipmentKind] = useState<'buzzer' | 'device' | 'other'>('buzzer');
   const [filter, setFilter] = useState<'all' | 'available' | 'live' | 'help' | 'offline'>('all');
+  const openForm = (kind: 'room' | 'staff' | 'equipment') => {
+    setShowForm(kind);
+    setName('');
+    setBuilding('');
+    setFloor('');
+    if (kind === 'staff') setStaffRole('moderator');
+    if (kind === 'equipment') setEquipmentKind('buzzer');
+  };
   const rooms = state.rooms.filter(
     (room) => filter === 'all' || (filter === 'available' ? room.available : room.status === filter),
   );
@@ -72,13 +80,13 @@ export function RoomsView({
         description={`${state.rooms.length} room${state.rooms.length === 1 ? '' : 's'} · staff and equipment assignments stay optional`}
         actions={
           <div className="director-row-actions">
-            <Button variant="quiet" icon="plus" onClick={() => setShowForm('staff')}>
+            <Button variant="quiet" icon="plus" onClick={() => openForm('staff')}>
               Add staff
             </Button>
-            <Button variant="quiet" icon="plus" onClick={() => setShowForm('equipment')}>
+            <Button variant="quiet" icon="plus" onClick={() => openForm('equipment')}>
               Add equipment
             </Button>
-            <Button variant="primary" icon="plus" onClick={() => setShowForm('room')}>
+            <Button variant="primary" icon="plus" onClick={() => openForm('room')}>
               Add room
             </Button>
           </div>
@@ -233,7 +241,7 @@ export function RoomsView({
             title="No rooms yet"
             description="Add the rooms that can host games. Room availability and assignments are persisted with the tournament."
           >
-            <Button variant="primary" icon="plus" onClick={() => setShowForm('room')}>
+            <Button variant="primary" icon="plus" onClick={() => openForm('room')}>
               Add first room
             </Button>
           </EmptyState>

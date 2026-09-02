@@ -88,9 +88,13 @@ export function formatGenerationAvailability(state: DirectorState): FormatGenera
   }
   if (format.kind === 'pools' || format.kind === 'playoff-pools') {
     const pools = state.pools.filter((pool) => phase.poolIds.includes(pool.id));
-    return pools.length > 0
-      ? { supported: true, message: 'Pool round-robin generation is available for this phase.' }
-      : { supported: false, message: 'Configure at least one pool before generating this format.' };
+    if (pools.length === 0) {
+      return { supported: false, message: 'Configure at least one pool before generating this format.' };
+    }
+    const configurationProblem = poolConfigurationProblem(state, phase, pools, format.allowByes);
+    return configurationProblem
+      ? { supported: false, message: configurationProblem }
+      : { supported: true, message: 'Pool round-robin generation is available for this phase.' };
   }
   if (format.kind === 'round-robin' || format.kind === 'double-round-robin') {
     return { supported: true, message: 'Round-robin generation is available for this format.' };
@@ -99,6 +103,43 @@ export function formatGenerationAvailability(state: DirectorState): FormatGenera
     supported: false,
     message: `${format.name} is not implemented in Director yet; generation is disabled.`,
   };
+}
+
+function poolConfigurationProblem(
+  state: DirectorState,
+  phase: Phase,
+  pools: Pool[],
+  allowByes: boolean,
+): string | null {
+  const teamsById = new Map(state.teams.map((team) => [team.id, team]));
+  const confirmedTeamIds = state.teams.filter((team) => team.status === 'confirmed').map((team) => team.id);
+  const counts = new Map<DirectorId, number>();
+  for (const pool of pools) {
+    if (pool.phaseId !== phase.id) return `Pool ${pool.name} belongs to a different phase.`;
+    for (const teamId of pool.teamIds) counts.set(teamId, (counts.get(teamId) ?? 0) + 1);
+  }
+  const missing = confirmedTeamIds.filter((teamId) => !counts.has(teamId));
+  if (missing.length > 0) {
+    return `Assign every confirmed team to exactly one pool before generating: ${missing
+      .map((teamId) => teamsById.get(teamId)?.displayName ?? teamId)
+      .join(', ')}.`;
+  }
+  const duplicate = [...counts.entries()].filter(([, count]) => count > 1).map(([teamId]) => teamId);
+  if (duplicate.length > 0) {
+    return `Remove duplicate pool membership before generating: ${duplicate
+      .map((teamId) => teamsById.get(teamId)?.displayName ?? teamId)
+      .join(', ')}.`;
+  }
+  for (const pool of pools) {
+    const confirmed = pool.teamIds.filter((teamId) => teamsById.get(teamId)?.status === 'confirmed');
+    const invalid = pool.teamIds.filter((teamId) => teamsById.get(teamId)?.status !== 'confirmed');
+    if (invalid.length > 0) return `Pool ${pool.name} contains a missing or non-confirmed team.`;
+    if (confirmed.length === 0) return `Pool ${pool.name} has no confirmed teams.`;
+    if (confirmed.length % 2 === 1 && !allowByes) {
+      return `Pool ${pool.name} needs a bye, but byes are disabled.`;
+    }
+  }
+  return null;
 }
 
 /** A small deterministic PRNG; repeatable schedules matter when a director regenerates a preview. */

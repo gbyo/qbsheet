@@ -14,10 +14,15 @@ export function SettingsView({
   onAnnounce: (message: string) => void;
 }) {
   const [name, setName] = useState(state.tournament?.name ?? '');
+  const [date, setDate] = useState(state.tournament?.date ?? '');
   const [venue, setVenue] = useState(state.tournament?.venue ?? '');
   const [organizer, setOrganizer] = useState(state.tournament?.organizer ?? '');
   const save = () => {
-    controller.updateTournament({ name, venue, organizer });
+    if (!name.trim()) {
+      onAnnounce('Enter a tournament name first.');
+      return;
+    }
+    controller.updateTournament({ name, date, venue, organizer });
     onAnnounce('Tournament details updated locally; saving now.');
   };
   return (
@@ -37,18 +42,19 @@ export function SettingsView({
               </div>
             </div>
             {state.tournament ? (
-              <>
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  save();
+                }}
+              >
                 <PanelBody>
                   <div className="director-form-grid director-form-grid-single">
                     <FormField label="Name">
                       <input value={name} onChange={(event) => setName(event.target.value)} />
                     </FormField>
                     <FormField label="Date">
-                      <input
-                        type="date"
-                        value={state.tournament.date}
-                        onChange={(event) => controller.updateTournament({ date: event.target.value })}
-                      />
+                      <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
                     </FormField>
                     <FormField label="Venue">
                       <input value={venue} onChange={(event) => setVenue(event.target.value)} />
@@ -59,11 +65,11 @@ export function SettingsView({
                   </div>
                 </PanelBody>
                 <PanelFooter className="director-form-actions">
-                  <Button variant="primary" onClick={save}>
+                  <Button variant="primary" type="submit">
                     Save details
                   </Button>
                 </PanelFooter>
-              </>
+              </form>
             ) : (
               <PanelBody>
                 <p className="director-empty-copy">No tournament is open.</p>

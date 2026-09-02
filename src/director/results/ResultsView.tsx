@@ -4,6 +4,7 @@ import type { DirectorController } from '../state/useDirectorController';
 import { Button, FormField, StateLabel } from '../components/Controls';
 import { PageHeader } from '../components/PageHeader';
 import type { SectionId } from '../app/navigation';
+import { describeWarning } from '../transfers/ingest';
 
 export function ResultsView({
   state,
@@ -139,34 +140,38 @@ function ResultRow({
   controller: DirectorController;
   onAnnounce: (message: string) => void;
 }) {
-  const [action, setAction] = useState<'edit' | 'protest' | null>(null);
+  const [action, setAction] = useState<'associate' | 'edit' | 'protest' | null>(null);
   const game = state.games.find((entry) => entry.id === submission.gameId);
   const scheduled = game
     ? state.scheduledGames.find((entry) => entry.id === game.scheduledGameId)
     : undefined;
   const left = scheduled
     ? (state.teams.find((team) => team.id === scheduled.leftTeamId)?.displayName ?? 'Unknown')
-    : 'Unknown';
+    : 'Unmatched result';
   const right = scheduled?.rightTeamId
     ? (state.teams.find((team) => team.id === scheduled.rightTeamId)?.displayName ?? 'Unknown')
     : 'Bye';
   const score = game
-    ? [scheduled?.leftTeamId, scheduled?.rightTeamId]
-        .map((teamId) => game.scores.find((entry) => entry.teamId === teamId)?.score ?? '—')
-        .join('–')
+    ? scheduled
+      ? [scheduled.leftTeamId, scheduled.rightTeamId]
+          .map((teamId) => game.scores.find((entry) => entry.teamId === teamId)?.score ?? '—')
+          .join('–')
+      : game.scores.map((entry) => entry.score).join('–') || '—'
     : '—';
+  const reviewWarnings = submission.warnings ?? [];
   return (
     <tr>
       <td>{formatTime(submission.receivedAt)}</td>
       <td>
-        <strong>
-          {left} · {right}
-        </strong>
+        <strong>{scheduled ? `${left} · ${right}` : left}</strong>
         <small className="director-table-subtext">
           {scheduled
             ? (state.rounds.find((round) => round.id === scheduled.roundId)?.name ?? 'Scheduled game')
-            : 'Unmatched game'}
+            : (submission.reason ?? 'Choose the scheduled game returned by this result.')}
         </small>
+        {reviewWarnings.length > 0 && (
+          <small className="director-table-subtext">{reviewWarnings.map(describeWarning).join(' ')}</small>
+        )}
       </td>
       <td className="director-score-cell">
         {score}
@@ -219,6 +224,15 @@ function ResultRow({
               >
                 Reject
               </Button>
+              {!scheduled && (
+                <Button
+                  variant={action === 'associate' ? 'secondary' : 'quiet'}
+                  icon="clipboard"
+                  onClick={() => setAction((current) => (current === 'associate' ? null : 'associate'))}
+                >
+                  Associate
+                </Button>
+              )}
             </>
           )}
           {submission.status === 'accepted' && (
@@ -240,6 +254,16 @@ function ResultRow({
             </>
           )}
         </div>
+        {!scheduled && action === 'associate' && game && (
+          <AssociateResult
+            state={state}
+            submission={submission}
+            controller={controller}
+            onCancel={() => setAction(null)}
+            onSuccess={() => setAction(null)}
+            onAnnounce={onAnnounce}
+          />
+        )}
         {submission.status === 'accepted' && action === 'edit' && game && scheduled && (
           <AcceptedResultEditor
             state={state}
@@ -262,6 +286,75 @@ function ResultRow({
         )}
       </td>
     </tr>
+  );
+}
+
+function AssociateResult({
+  state,
+  submission,
+  controller,
+  onCancel,
+  onSuccess,
+  onAnnounce,
+}: {
+  state: DirectorState;
+  submission: DirectorState['submissions'][number];
+  controller: DirectorController;
+  onCancel: () => void;
+  onSuccess: () => void;
+  onAnnounce: (message: string) => void;
+}) {
+  const choices = state.scheduledGames.filter(
+    (game) => !game.bye && game.status !== 'accepted' && game.status !== 'cancelled',
+  );
+  const [scheduledGameId, setScheduledGameId] = useState(choices[0]?.id ?? '');
+  const associate = () => {
+    if (!scheduledGameId) {
+      onAnnounce('Choose the scheduled game before associating this result.');
+      return;
+    }
+    if (!controller.associateSubmission(submission.id, scheduledGameId)) return;
+    onSuccess();
+    onAnnounce('Result associated with the selected game and kept in review. Verify it before accepting.');
+  };
+  return (
+    <form
+      className="director-result-action-panel"
+      onSubmit={(event) => {
+        event.preventDefault();
+        associate();
+      }}
+    >
+      <p className="director-eyebrow">Director association</p>
+      {choices.length === 0 ? (
+        <p className="director-empty-copy">No unresolved scheduled game is available for this result.</p>
+      ) : (
+        <FormField
+          label="Scheduled game"
+          hint="Association does not accept the result. Review the score and warnings, then accept it separately."
+        >
+          <select value={scheduledGameId} onChange={(event) => setScheduledGameId(event.target.value)}>
+            {choices.map((game) => {
+              const round = state.rounds.find((entry) => entry.id === game.roundId);
+              return (
+                <option key={game.id} value={game.id}>
+                  {round?.name ?? 'Scheduled game'} · {teamLabel(state, game.leftTeamId)} ·{' '}
+                  {teamLabel(state, game.rightTeamId)}
+                </option>
+              );
+            })}
+          </select>
+        </FormField>
+      )}
+      <div className="director-row-actions">
+        <Button variant="primary" type="submit" disabled={choices.length === 0}>
+          Associate result
+        </Button>
+        <Button variant="quiet" onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
+    </form>
   );
 }
 

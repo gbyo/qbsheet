@@ -69,6 +69,7 @@ export const ingestWarnings = {
   unresolvedPlayerIdentity: 'unresolved-player-identity',
   lateAfterAbandon: 'late-after-abandon',
   transportReviewRequired: 'transport-review-required',
+  directorAssociation: 'director-association',
 } as const;
 
 export type IngestWarning = (typeof ingestWarnings)[keyof typeof ingestWarnings];
@@ -108,6 +109,8 @@ export function describeWarning(code: string): string {
       return 'The room had been marked abandoned when this arrived.';
     case ingestWarnings.transportReviewRequired:
       return 'The transport flagged this result for review.';
+    case ingestWarnings.directorAssociation:
+      return 'A director explicitly associated this result with the selected scheduled game; verify the matchup before accepting it.';
     default:
       return code;
   }
@@ -311,6 +314,57 @@ export function readResultStatistics(
     });
   });
   return { scores, playerStats, warnings };
+}
+
+/**
+ * Re-read a result after a director has selected its scheduled game.
+ *
+ * Most files carry stable team ids or names and are already fully understood by
+ * `readResultStatistics`. A result from an older/offline scorer can instead carry two opaque team
+ * references. Once a director explicitly chooses the game, using the two result entries' existing
+ * left/right order is the safest available interpretation. It remains a review warning, and the
+ * result still needs a separate acceptance click.
+ */
+export function readResultStatisticsForAssociation(
+  value: unknown,
+  state: DirectorState,
+  scheduled: DirectorState['scheduledGames'][number] | undefined,
+): {
+  scores: TeamGameScore[];
+  playerStats: PlayerGameStat[];
+  warnings: string[];
+  positionalAssociation: boolean;
+} {
+  const direct = readResultStatistics(value, state, scheduled);
+  if (!scheduled?.rightTeamId || direct.scores.length >= 2) {
+    return { ...direct, positionalAssociation: false };
+  }
+  const match = matchObject(value);
+  const entries = Array.isArray(match?.match_teams) ? match.match_teams : [];
+  if (entries.length !== 2) return { ...direct, positionalAssociation: false };
+  try {
+    const remapped = structuredClone(value);
+    const remappedMatch = matchObject(remapped);
+    if (!remappedMatch || !Array.isArray(remappedMatch.match_teams))
+      return { ...direct, positionalAssociation: false };
+    const teamIds = [scheduled.leftTeamId, scheduled.rightTeamId];
+    remappedMatch.match_teams.forEach((entry, index) => {
+      if (!isRecord(entry)) return;
+      const teamId = teamIds[index];
+      if (teamId) entry.team = { $ref: teamId };
+    });
+    const reassociated = readResultStatistics(remapped, state, scheduled);
+    if (reassociated.scores.length < 2) return { ...direct, positionalAssociation: false };
+    return {
+      ...reassociated,
+      warnings: [
+        ...new Set([...direct.warnings, ...reassociated.warnings, ingestWarnings.directorAssociation]),
+      ],
+      positionalAssociation: true,
+    };
+  } catch {
+    return { ...direct, positionalAssociation: false };
+  }
 }
 
 /**
