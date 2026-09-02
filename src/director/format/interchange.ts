@@ -25,6 +25,7 @@ import {
   type TeamGameScore,
 } from '../domain';
 import { normalizeDirectorState } from '../persistence/stateMigrations';
+import { scoringRulesObject } from '../transfers/assignment';
 
 /**
  * Director-only state lives in a namespaced top-level extension. The QBJ writer intentionally
@@ -177,7 +178,7 @@ function interchangeTeam(state: DirectorState, team: DirectorState['teams'][numb
       ...(player.rosterNumber === undefined ? {} : { rosterNumber: player.rosterNumber }),
       ...(player.notes ? { notes: player.notes } : {}),
     }));
-  return {
+  const output = {
     id: team.id,
     name: team.displayName,
     displayName: team.displayName,
@@ -189,6 +190,7 @@ function interchangeTeam(state: DirectorState, team: DirectorState['teams'][numb
     playerIds: players.map((player) => player.id),
     players,
   };
+  return jsonValue(output) as unknown as TeamRecord;
 }
 
 function preservedDirectorState(data: DirectorTournament): DirectorState | undefined {
@@ -266,6 +268,7 @@ export function toInterchange(state: DirectorState): DirectorTournament {
     roundIds: phase.roundIds,
     ...(phase.advancementRule ? { advancement: jsonObject(phase.advancementRule) } : {}),
     carryovers: { enabled: phase.carryover },
+    ...(phase.archived ? { extensions: { archived: true } } : {}),
   }));
   const rounds = state.rounds.map((round) => ({
     id: round.id,
@@ -293,7 +296,7 @@ export function toInterchange(state: DirectorState): DirectorTournament {
     bye: game.bye,
     extensions: game.movedFromRoomId ? { movedFromRoomId: game.movedFromRoomId } : undefined,
   }));
-  return {
+  const output = {
     tournament: {
       id: tournament.id,
       name: tournament.name,
@@ -309,14 +312,22 @@ export function toInterchange(state: DirectorState): DirectorTournament {
         currentPhaseId: tournament.currentPhaseId,
         currentPacketId: tournament.currentPacketId,
         currentRoundId: tournament.currentRoundId,
+        timeZone: tournament.timeZone,
+        timed: tournament.rules.timed,
+        regulationMinutes: tournament.rules.regulationMinutes,
+        tiebreakers: tournament.rules.tiebreakers,
       },
     },
-    rules: jsonObject(tournament.rules),
+    // Director's camelCase rules are an internal editing model. Public QBJ needs the canonical
+    // ScoringRules vocabulary, otherwise a round exported from Director would silently lose
+    // maximum players, lightning, bonus structure, and answer values on the way to a scorer.
+    rules: jsonObject(scoringRulesObject(tournament.rules, `scoring-rules-${tournament.id}`)),
     organizations: state.organizations.map((organization) => ({
       id: organization.id,
       name: organization.name,
       ...(organization.shortName ? { city: organization.shortName } : {}),
       ...(organization.notes ? { notes: organization.notes } : {}),
+      ...(organization.archived ? { extensions: { archived: true } } : {}),
     })),
     players: state.players.map((player) => ({
       id: player.id,
@@ -368,7 +379,10 @@ export function toInterchange(state: DirectorState): DirectorTournament {
     packets: state.packets.map((packet) => ({
       id: packet.id,
       name: packet.name,
-      extensions: { source: packet.source },
+      extensions: {
+        source: packet.source,
+        ...(packet.retired ? { retired: true } : {}),
+      },
       gameIds: packet.assignedGameIds,
       replacementForId: packet.replacementForPacketId ?? undefined,
       tiebreaker: packet.tiebreaker,
@@ -382,6 +396,7 @@ export function toInterchange(state: DirectorState): DirectorTournament {
       name: pool.name,
       teamIds: pool.teamIds,
       order: pool.order,
+      ...(pool.archived ? { extensions: { archived: true } } : {}),
     })),
     rounds,
     scheduledGames,
@@ -428,6 +443,7 @@ export function toInterchange(state: DirectorState): DirectorTournament {
       [directorStateArchiveExtension]: jsonValue(state),
     },
   };
+  return jsonValue(output) as unknown as DirectorTournament;
 }
 
 function fromInterchange(data: DirectorTournament): DirectorState {
@@ -449,6 +465,14 @@ function fromInterchange(data: DirectorTournament): DirectorState {
     text(tournamentExtensions.currentPhaseId) ??
     data.rounds.find((round) => round.id === currentRoundId)?.phaseId ??
     (phaseIds.length === 1 ? phaseIds[0] : null);
+  const extensionRules: JsonObject = {};
+  if (typeof tournamentExtensions.timed === 'boolean') extensionRules.timed = tournamentExtensions.timed;
+  if (number(tournamentExtensions.regulationMinutes) !== undefined) {
+    extensionRules.regulationMinutes = number(tournamentExtensions.regulationMinutes)!;
+  }
+  if (Array.isArray(tournamentExtensions.tiebreakers)) {
+    extensionRules.tiebreakers = tournamentExtensions.tiebreakers;
+  }
   state.tournament = {
     id: data.tournament.id,
     name: data.tournament.name,
@@ -462,6 +486,7 @@ function fromInterchange(data: DirectorTournament): DirectorState {
     rules: {
       ...defaultRules,
       ...rulesFromInterchange(data.rules),
+      ...rulesFromInterchange(extensionRules),
     },
     formatId,
     currentPhaseId,
@@ -488,6 +513,7 @@ function fromInterchange(data: DirectorTournament): DirectorState {
     name: organization.name,
     shortName: organization.city,
     notes: organization.notes,
+    ...(organization.extensions?.archived === true ? { archived: true } : {}),
   }));
   const teamPlayers = new Map<string, string[]>();
   data.teams.forEach((team) =>
@@ -555,6 +581,7 @@ function fromInterchange(data: DirectorTournament): DirectorState {
     replacementForPacketId: packet.replacementForId ?? null,
     tiebreaker: packet.tiebreaker ?? false,
     notes: packet.notes,
+    ...(packet.extensions?.retired === true ? { retired: true } : {}),
   }));
   state.phases = data.phases.map((phase) => ({
     id: phase.id,
@@ -573,6 +600,7 @@ function fromInterchange(data: DirectorTournament): DirectorState {
       : null,
     carryover: typeof phase.carryovers?.enabled === 'boolean' ? phase.carryovers.enabled : false,
     status: 'planned',
+    ...(phase.extensions?.archived === true ? { archived: true } : {}),
   }));
   state.pools = data.pools.map((pool) => ({
     id: pool.id,
@@ -580,6 +608,7 @@ function fromInterchange(data: DirectorTournament): DirectorState {
     name: pool.name,
     teamIds: pool.teamIds ?? [],
     order: pool.order ?? 1,
+    ...(pool.extensions?.archived === true ? { archived: true } : {}),
   }));
   const roundById = new Map(data.rounds.map((round) => [round.id, round]));
   state.rounds = data.rounds.map((round) => ({
@@ -717,22 +746,60 @@ function rulesFromInterchange(
   const result: Partial<
     DirectorState['tournament'] extends infer T ? (T extends { rules: infer R } ? R : never) : never
   > = {};
-  const tossupValue = firstNumber(rules.tossupValue, rules.tossupPoints);
+  const answerTypes = Array.isArray(rules.answer_types) ? rules.answer_types : [];
+  const answerValue = (shortLabel: string, label: string): number | undefined => {
+    const answer = answerTypes.find(
+      (candidate) =>
+        candidate &&
+        typeof candidate === 'object' &&
+        !Array.isArray(candidate) &&
+        (candidate.short_label === shortLabel || candidate.label === label),
+    );
+    return answer && typeof answer === 'object' && !Array.isArray(answer) ? number(answer.value) : undefined;
+  };
+  const tossupValue = firstNumber(rules.tossupValue, rules.tossupPoints, answerValue('C', 'Correct'));
   if (tossupValue !== undefined) result.tossupValue = tossupValue;
-  const powerValue = firstNumber(rules.powerValue, rules.powerPoints);
+  const powerValue = firstNumber(rules.powerValue, rules.powerPoints, answerValue('P', 'Power'));
   if (powerValue !== undefined) result.powerValue = powerValue;
-  const negValue = firstNumber(rules.negValue, rules.negPoints);
+  const negValue = firstNumber(rules.negValue, rules.negPoints, answerValue('N', 'Neg'));
   if (negValue !== undefined) result.negValue = negValue;
-  const bonusValue = firstNumber(rules.bonusValue, rules.bonusPoints);
+  const bonusValue = firstNumber(rules.bonusValue, rules.bonusPoints, rules.points_per_bonus_part);
   if (bonusValue !== undefined) result.bonusValue = bonusValue;
-  const tossupCount = firstNumber(rules.tossupCount, rules.tossupsPerGame);
+  const tossupCount = firstNumber(
+    rules.tossupCount,
+    rules.tossupsPerGame,
+    rules.regulation_tossup_count,
+    rules.maximum_regulation_tossup_count,
+  );
   if (tossupCount !== undefined) result.tossupCount = tossupCount;
-  const bonusParts = firstNumber(rules.bonusParts);
+  const bonusParts = firstNumber(
+    rules.bonusParts,
+    rules.minimum_parts_per_bonus,
+    rules.maximum_parts_per_bonus,
+  );
   if (bonusParts !== undefined) result.bonusParts = bonusParts;
   if (typeof rules.bouncebacks === 'boolean') result.bouncebacks = rules.bouncebacks;
+  else if (typeof rules.bonuses_bounce_back === 'boolean') result.bouncebacks = rules.bonuses_bounce_back;
   if (typeof rules.overtime === 'boolean') result.overtime = rules.overtime;
+  else if (typeof rules.overtime_includes_bonuses === 'boolean')
+    result.overtime = rules.overtime_includes_bonuses;
+  if (typeof rules.timed === 'boolean') result.timed = rules.timed;
+  else {
+    const procedure = ['roomProcedure', 'room_procedure', 'procedure', 'regulation']
+      .map((key) => rules[key])
+      .find(
+        (value): value is JsonObject => Boolean(value) && typeof value === 'object' && !Array.isArray(value),
+      );
+    if (procedure && typeof procedure.timed === 'boolean') result.timed = procedure.timed;
+  }
   if (typeof rules.lightning === 'boolean') result.lightning = rules.lightning;
-  const maximumActivePlayers = firstNumber(rules.maximumActivePlayers, rules.maximumPlayersPerTeam);
+  else if (number(rules.lightning_count_per_team) !== undefined)
+    result.lightning = number(rules.lightning_count_per_team)! > 0;
+  const maximumActivePlayers = firstNumber(
+    rules.maximumActivePlayers,
+    rules.maximumPlayersPerTeam,
+    rules.maximum_players_per_team,
+  );
   if (maximumActivePlayers !== undefined) result.maximumActivePlayers = maximumActivePlayers;
   const regulationMinutes = firstNumber(rules.regulationMinutes);
   if (regulationMinutes !== undefined) result.regulationMinutes = regulationMinutes;

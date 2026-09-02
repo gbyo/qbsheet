@@ -12,17 +12,23 @@ import {
   type NativeServerStatus,
 } from '../platform/native';
 import type { SectionId } from '../app/navigation';
+import type { DirectorNavigationTarget } from '../app/navigationTarget';
+import { useNavigationHighlight } from '../app/useNavigationHighlight';
 
 export function TournamentView({
   state,
   controller,
   onNavigate,
   onAnnounce,
+  navigationTarget,
+  onClearNavigationTarget,
 }: {
   state: DirectorState;
   controller: DirectorController;
   onNavigate: (section: SectionId) => void;
   onAnnounce: (message: string) => void;
+  navigationTarget?: DirectorNavigationTarget | null;
+  onClearNavigationTarget?: () => void;
 }) {
   const [server, setServer] = useState<NativeServerStatus>({ running: false });
   const [serverLoading, setServerLoading] = useState(true);
@@ -136,6 +142,72 @@ export function TournamentView({
         }
       />
       <div className="director-page-stack">
+        <section className="director-panel" aria-labelledby="director-lifecycle-title">
+          <div className="director-panel-heading">
+            <div>
+              <p className="director-eyebrow">Tournament lifecycle</p>
+              <h2 id="director-lifecycle-title">{statusLabel(state.tournament?.status ?? 'draft')}</h2>
+            </div>
+            <StateLabel
+              state={state.tournament?.status ?? 'draft'}
+              label={state.tournament?.status ?? 'draft'}
+            />
+          </div>
+          <div className="director-panel-body">
+            <p className="director-empty-copy">
+              Closing a round records that round as complete; it does not finish the tournament. Finish the
+              event only after every round, result, protest, help request, and roster amendment has a
+              decision.
+            </p>
+            <div className="director-row-actions">
+              {state.tournament?.status === 'draft' && (
+                <LifecycleButton
+                  label="Start tournament"
+                  nextStatus="running"
+                  onChange={controller.setTournamentStatus}
+                  onAnnounce={onAnnounce}
+                />
+              )}
+              {state.tournament?.status === 'running' && (
+                <LifecycleButton
+                  label="Mark tournament complete"
+                  nextStatus="complete"
+                  onChange={controller.setTournamentStatus}
+                  onAnnounce={onAnnounce}
+                />
+              )}
+              {state.tournament?.status === 'complete' && (
+                <LifecycleButton
+                  label="Reopen for corrections"
+                  nextStatus="running"
+                  onChange={controller.setTournamentStatus}
+                  onAnnounce={onAnnounce}
+                />
+              )}
+              {state.tournament?.status === 'archived' && (
+                <LifecycleButton
+                  label="Reopen as draft"
+                  nextStatus="draft"
+                  onChange={controller.setTournamentStatus}
+                  onAnnounce={onAnnounce}
+                />
+              )}
+              {state.tournament?.status === 'complete' && (
+                <Button
+                  variant="quiet"
+                  onClick={() => {
+                    if (!confirm('Archive this completed tournament? It will remain reopenable.')) return;
+                    void controller.archiveTournament().then((archived) => {
+                      if (archived) onAnnounce('Tournament archived.');
+                    });
+                  }}
+                >
+                  Archive tournament
+                </Button>
+              )}
+            </div>
+          </div>
+        </section>
         <div className="director-two-column">
           <section className="director-panel">
             <div className="director-panel-heading">
@@ -292,83 +364,19 @@ export function TournamentView({
           ) : (
             <div className="director-panel-body director-panel-body-list">
               <ol className="director-list director-round-list">
-                {state.rounds.map((entry) => {
-                  const games = state.scheduledGames.filter((game) => game.roundId === entry.id);
-                  const accepted = games.filter((game) => game.status === 'accepted').length;
-                  return (
-                    <li
-                      className={`director-round-row ${entry.id === round?.id ? 'is-current' : ''}`}
-                      key={entry.id}
-                      aria-current={entry.id === round?.id ? 'step' : undefined}
-                    >
-                      <div className="director-round-number">{String(entry.number).padStart(2, '0')}</div>
-                      <div>
-                        <strong>{entry.name}</strong>
-                        <small>
-                          {games.length} game slots · {accepted} accepted · revision {entry.revision}
-                        </small>
-                      </div>
-                      <StateLabel state={entry.status} label={entry.status} />
-                      <div className="director-round-row-actions">
-                        {entry.status === 'planned' && (
-                          <Button
-                            variant="quiet"
-                            onClick={() => {
-                              const prepared = controller.prepareRound(entry.id);
-                              onAnnounce(
-                                prepared
-                                  ? `${entry.name} prepared.`
-                                  : `${entry.name} could not be prepared; review the schedule first.`,
-                              );
-                            }}
-                          >
-                            Prepare
-                          </Button>
-                        )}
-                        {entry.status === 'prepared' && (
-                          <Button
-                            variant="primary"
-                            onClick={() => {
-                              const released = controller.releaseRound(entry.id);
-                              onAnnounce(
-                                released
-                                  ? `${entry.name} released.`
-                                  : 'The round is not ready to release; review the Director error and room assignments.',
-                              );
-                            }}
-                          >
-                            Release
-                          </Button>
-                        )}
-                        {entry.status === 'released' && (
-                          <Button
-                            variant="secondary"
-                            onClick={() => {
-                              const closed = controller.closeRound(entry.id);
-                              onAnnounce(
-                                closed
-                                  ? `${entry.name} closed.`
-                                  : `${entry.name} could not close; accept or cancel every game first.`,
-                              );
-                            }}
-                          >
-                            Close
-                          </Button>
-                        )}
-                        {/*
-                          A shortcut, not a second implementation. Preparing files is one subsystem
-                          with one page; this navigates to it rather than growing a parallel
-                          prepare-and-write path inside round control.
-                        */}
-                        {entry.status !== 'planned' && (
-                          <Button variant="quiet" icon="upload" onClick={() => onNavigate('transfers')}>
-                            Prepare assignment files
-                          </Button>
-                        )}
-                      </div>
-                    </li>
-                  );
-                })}
+                {state.rounds.map((entry) => (
+                  <RoundRow
+                    key={entry.id}
+                    entry={entry}
+                    state={state}
+                    current={entry.id === round?.id}
+                    controller={controller}
+                    onNavigate={onNavigate}
+                    onAnnounce={onAnnounce}
+                    navigationTarget={navigationTarget}
+                    onClearNavigationTarget={onClearNavigationTarget}
+                  />
+                ))}
               </ol>
             </div>
           )}
@@ -444,6 +452,138 @@ export function TournamentView({
         )}
       </div>
     </>
+  );
+}
+
+function LifecycleButton({
+  label,
+  nextStatus,
+  onChange,
+  onAnnounce,
+}: {
+  label: string;
+  nextStatus: NonNullable<DirectorState['tournament']>['status'];
+  onChange: (status: NonNullable<DirectorState['tournament']>['status']) => boolean;
+  onAnnounce: (message: string) => void;
+}) {
+  return (
+    <Button
+      variant="secondary"
+      onClick={() => {
+        if (!confirm(`${label}?`)) return;
+        const changed = onChange(nextStatus);
+        onAnnounce(
+          changed
+            ? `${label}.`
+            : `The tournament could not be changed to ${nextStatus}; review the Director error.`,
+        );
+      }}
+    >
+      {label}
+    </Button>
+  );
+}
+
+function statusLabel(status: NonNullable<DirectorState['tournament']>['status']): string {
+  return status.charAt(0).toUpperCase() + status.slice(1);
+}
+
+function RoundRow({
+  entry,
+  state,
+  current,
+  controller,
+  onNavigate,
+  onAnnounce,
+  navigationTarget,
+  onClearNavigationTarget,
+}: {
+  entry: DirectorState['rounds'][number];
+  state: DirectorState;
+  current: boolean;
+  controller: DirectorController;
+  onNavigate: (section: SectionId) => void;
+  onAnnounce: (message: string) => void;
+  navigationTarget?: DirectorNavigationTarget | null;
+  onClearNavigationTarget?: () => void;
+}) {
+  const games = state.scheduledGames.filter((game) => game.roundId === entry.id);
+  const accepted = games.filter((game) => game.status === 'accepted').length;
+  const roundNavigation = useNavigationHighlight(
+    navigationTarget,
+    'tournament',
+    'round',
+    entry.id,
+    onClearNavigationTarget,
+  );
+  return (
+    <li
+      tabIndex={-1}
+      data-director-navigation-id={entry.id}
+      className={`director-round-row ${current ? 'is-current' : ''}${roundNavigation ? ' is-navigation-target' : ''}`}
+      aria-current={current ? 'step' : undefined}
+    >
+      <div className="director-round-number">{String(entry.number).padStart(2, '0')}</div>
+      <div>
+        <strong>{entry.name}</strong>
+        <small>
+          {games.length} game slots · {accepted} accepted · revision {entry.revision}
+        </small>
+      </div>
+      <StateLabel state={entry.status} label={entry.status} />
+      <div className="director-round-row-actions">
+        {entry.status === 'planned' && (
+          <Button
+            variant="quiet"
+            onClick={() => {
+              const prepared = controller.prepareRound(entry.id);
+              onAnnounce(
+                prepared
+                  ? `${entry.name} prepared.`
+                  : `${entry.name} could not be prepared; review the schedule first.`,
+              );
+            }}
+          >
+            Prepare
+          </Button>
+        )}
+        {entry.status === 'prepared' && (
+          <Button
+            variant="primary"
+            onClick={() => {
+              const released = controller.releaseRound(entry.id);
+              onAnnounce(
+                released
+                  ? `${entry.name} released.`
+                  : 'The round is not ready to release; review the Director error and room assignments.',
+              );
+            }}
+          >
+            Release
+          </Button>
+        )}
+        {entry.status === 'released' && (
+          <Button
+            variant="secondary"
+            onClick={() => {
+              const closed = controller.closeRound(entry.id);
+              onAnnounce(
+                closed
+                  ? `${entry.name} closed.`
+                  : `${entry.name} could not close; accept or cancel every game first.`,
+              );
+            }}
+          >
+            Close
+          </Button>
+        )}
+        {entry.status !== 'planned' && (
+          <Button variant="quiet" icon="upload" onClick={() => onNavigate('transfers')}>
+            Prepare assignment files
+          </Button>
+        )}
+      </div>
+    </li>
   );
 }
 

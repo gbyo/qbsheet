@@ -1046,6 +1046,32 @@ impl QbtcpServer {
         Ok(request)
     }
 
+    /// Resolve a help request from the trusted tournament-control host.
+    ///
+    /// This intentionally has no room token argument and is not mounted on the room HTTP
+    /// transport. A scorekeeper can cancel its own request; only Director can mark the request
+    /// resolved after the operator has handled it. The full request remains in the event history.
+    pub fn resolve_help(&self, help_id: &str) -> Result<HelpRequest, QbtcpError> {
+        self.require_capability("help")?;
+        let mut runtime = self.lock_runtime()?;
+        let (key, record) = runtime
+            .helps
+            .iter_mut()
+            .find(|(_, record)| {
+                record.request.id == help_id && record.request.status == HelpStatus::Open
+            })
+            .ok_or(QbtcpError::NotFound("The help request is no longer open."))?;
+        let _ = key;
+        record.request.status = HelpStatus::Resolved;
+        record.request.updated_at = now_iso();
+        let request = record.request.clone();
+        drop(runtime);
+        let _ = self
+            .state
+            .record_help_event(HelpEvent::Resolved(request.clone()));
+        Ok(request)
+    }
+
     /// Explicit native-host lifecycle action. It preserves recovery/results and revokes the
     /// writer and volatile progress, so a later final is retained as `late-after-abandon` rather
     /// than reopening the game.

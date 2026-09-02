@@ -5,25 +5,35 @@ import { Button, EmptyState, FormField, PanelBody, PanelFooter, StateLabel } fro
 import { Icon } from '../components/Icon';
 import { PageHeader } from '../components/PageHeader';
 import { importTeamsCsv, type TeamRecord } from '@qbsheet/tournament-formats';
+import type { DirectorNavigationTarget } from '../app/navigationTarget';
+import { useNavigationHighlight } from '../app/useNavigationHighlight';
 
 export function TeamsView({
   state,
   controller,
   search,
   onAnnounce,
+  navigationTarget,
+  onClearNavigationTarget,
 }: {
   state: DirectorState;
   controller: DirectorController;
   search: string;
   onAnnounce: (message: string) => void;
+  navigationTarget?: DirectorNavigationTarget | null;
+  onClearNavigationTarget?: () => void;
 }) {
   const [showForm, setShowForm] = useState(false);
   const [showPaste, setShowPaste] = useState(false);
+  const [showOrganizationForm, setShowOrganizationForm] = useState(false);
   const [displayName, setDisplayName] = useState('');
   const [organizationName, setOrganizationName] = useState('');
   const [teamLetter, setTeamLetter] = useState('');
   const [notes, setNotes] = useState('');
   const [paste, setPaste] = useState('');
+  const [newOrganizationName, setNewOrganizationName] = useState('');
+  const [newOrganizationShortName, setNewOrganizationShortName] = useState('');
+  const [newOrganizationNotes, setNewOrganizationNotes] = useState('');
   const visibleTeams = useMemo(() => {
     const needle = search.trim().toLocaleLowerCase();
     return state.teams.filter(
@@ -35,6 +45,23 @@ export function TeamsView({
           .includes(needle),
     );
   }, [search, state]);
+  const visibleOrganizations = useMemo(() => {
+    const needle = search.trim().toLocaleLowerCase();
+    return state.organizations.filter(
+      (organization) =>
+        !needle ||
+        [
+          organization.name,
+          organization.shortName,
+          organization.notes,
+          organization.archived ? 'archived' : 'active',
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLocaleLowerCase()
+          .includes(needle),
+    );
+  }, [search, state.organizations]);
 
   const submitTeam = () => {
     if (!displayName.trim()) {
@@ -96,6 +123,25 @@ export function TeamsView({
     setShowPaste(false);
   };
 
+  const submitOrganization = () => {
+    if (
+      !controller.addOrganization({
+        name: newOrganizationName,
+        shortName: newOrganizationShortName,
+        notes: newOrganizationNotes,
+      })
+    ) {
+      onAnnounce(controller.error ?? 'Organization was not added; review the Director error.');
+      return;
+    }
+    const label = newOrganizationName.trim();
+    setNewOrganizationName('');
+    setNewOrganizationShortName('');
+    setNewOrganizationNotes('');
+    setShowOrganizationForm(false);
+    onAnnounce(`${label} added as an organization.`);
+  };
+
   const importCsv = async (file: File | undefined) => {
     if (!file) return;
     try {
@@ -140,6 +186,13 @@ export function TeamsView({
             <Button variant="secondary" icon="clipboard" onClick={() => setShowPaste((value) => !value)}>
               Paste
             </Button>
+            <Button
+              variant="secondary"
+              icon="edit"
+              onClick={() => setShowOrganizationForm((value) => !value)}
+            >
+              Organizations
+            </Button>
             <Button variant="primary" icon="plus" onClick={() => setShowForm((value) => !value)}>
               Add team
             </Button>
@@ -175,6 +228,7 @@ export function TeamsView({
                   </FormField>
                   <FormField label="School / organization">
                     <input
+                      list="director-organization-options"
                       value={organizationName}
                       onChange={(event) => setOrganizationName(event.target.value)}
                       placeholder="Northview High"
@@ -252,6 +306,115 @@ export function TeamsView({
           </section>
         )}
 
+        <section className="director-panel" data-testid="director-organizations">
+          <div className="director-panel-heading">
+            <div>
+              <p className="director-eyebrow">Organizations</p>
+              <h2>{visibleOrganizations.length} shown</h2>
+            </div>
+            <div className="director-row-actions">
+              <span className="director-muted">
+                {state.organizations.filter((organization) => !organization.archived).length} active
+              </span>
+              <Button variant="quiet" icon="plus" onClick={() => setShowOrganizationForm((value) => !value)}>
+                Add organization
+              </Button>
+            </div>
+          </div>
+          {showOrganizationForm && (
+            <form
+              className="director-panel-body director-inline-edit"
+              onSubmit={(event) => {
+                event.preventDefault();
+                submitOrganization();
+              }}
+            >
+              <div className="director-form-grid director-form-grid-three">
+                <FormField label="Organization name">
+                  <input
+                    aria-label="Organization name"
+                    value={newOrganizationName}
+                    onChange={(event) => setNewOrganizationName(event.target.value)}
+                    placeholder="Northview High"
+                  />
+                </FormField>
+                <FormField label="Short name">
+                  <input
+                    value={newOrganizationShortName}
+                    onChange={(event) => setNewOrganizationShortName(event.target.value)}
+                    placeholder="Northview"
+                  />
+                </FormField>
+                <FormField label="Notes">
+                  <input
+                    value={newOrganizationNotes}
+                    onChange={(event) => setNewOrganizationNotes(event.target.value)}
+                    placeholder="Optional"
+                  />
+                </FormField>
+              </div>
+              <div className="director-row-actions">
+                <Button variant="primary" type="submit">
+                  Save organization
+                </Button>
+                <Button variant="quiet" onClick={() => setShowOrganizationForm(false)}>
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          )}
+          {state.organizations.length === 0 ? (
+            <PanelBody>
+              <p className="director-empty-copy">
+                No organizations yet. Teams can also create one as they are registered.
+              </p>
+            </PanelBody>
+          ) : (
+            <div className="director-table-wrap">
+              <table className="director-table">
+                <thead>
+                  <tr>
+                    <th>Organization</th>
+                    <th>Short name</th>
+                    <th>Teams</th>
+                    <th>Status</th>
+                    <th aria-label="Actions" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleOrganizations.length > 0 ? (
+                    visibleOrganizations.map((organization) => (
+                      <OrganizationRow
+                        key={organization.id}
+                        organization={organization}
+                        teamCount={
+                          state.teams.filter((team) => team.organizationId === organization.id).length
+                        }
+                        controller={controller}
+                        onAnnounce={onAnnounce}
+                      />
+                    ))
+                  ) : (
+                    <tr className="director-table-empty-row">
+                      <td colSpan={5}>
+                        <p className="director-empty-copy">No organizations match the current search.</p>
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
+        <datalist id="director-organization-options">
+          {state.organizations
+            .filter((organization) => organization.archived !== true)
+            .map((organization) => (
+              <option key={organization.id} value={organization.name} />
+            ))}
+        </datalist>
+
         {state.teams.length === 0 ? (
           <EmptyState
             title="No teams yet"
@@ -293,6 +456,8 @@ export function TeamsView({
                         teamId={team.id}
                         controller={controller}
                         onAnnounce={onAnnounce}
+                        navigationTarget={navigationTarget}
+                        onClearNavigationTarget={onClearNavigationTarget}
                       />
                     ))
                   ) : (
@@ -317,13 +482,24 @@ function TeamRow({
   teamId,
   controller,
   onAnnounce,
+  navigationTarget,
+  onClearNavigationTarget,
 }: {
   state: DirectorState;
   teamId: string;
   controller: DirectorController;
   onAnnounce: (message: string) => void;
+  navigationTarget?: DirectorNavigationTarget | null;
+  onClearNavigationTarget?: () => void;
 }) {
   const team = state.teams.find((entry) => entry.id === teamId);
+  const teamNavigation = useNavigationHighlight(
+    navigationTarget,
+    'teams',
+    'team',
+    teamId,
+    onClearNavigationTarget,
+  );
   const [playerName, setPlayerName] = useState('');
   const [playerCaptain, setPlayerCaptain] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -332,7 +508,12 @@ function TeamRow({
   const [editTeamLetter, setEditTeamLetter] = useState('');
   const [editSeed, setEditSeed] = useState('');
   const [editNotes, setEditNotes] = useState('');
+  const [rosterOpen, setRosterOpen] = useState(false);
   if (!team) return null;
+  const targetOpensRoster =
+    navigationTarget?.section === 'teams' &&
+    navigationTarget.entityType === 'player' &&
+    navigationTarget.parentId === team.id;
   const players = state.players.filter((player) => player.teamId === team.id);
   const activePlayerCount = players.filter((player) => player.active).length;
   const inactivePlayerCount = players.length - activePlayerCount;
@@ -372,8 +553,16 @@ function TeamRow({
   };
   return (
     <>
-      <tr>
-        <td>{team.seed ?? '—'}</td>
+      <tr
+        tabIndex={-1}
+        className={teamNavigation ? 'is-navigation-target' : undefined}
+        data-director-navigation-id={team.id}
+      >
+        <td>
+          <span data-director-navigation-focus tabIndex={-1}>
+            {team.seed ?? '—'}
+          </span>
+        </td>
         <td>
           <strong>{team.displayName}</strong>
           {team.teamLetter && <small className="director-table-subtext">Team {team.teamLetter}</small>}
@@ -381,7 +570,11 @@ function TeamRow({
         </td>
         <td>{organizationNameFor(state, team.organizationId) || '—'}</td>
         <td>
-          <details className="director-roster-details">
+          <details
+            className="director-roster-details"
+            open={rosterOpen || targetOpensRoster}
+            onToggle={(event) => setRosterOpen(event.currentTarget.open)}
+          >
             <summary className="director-roster-summary">
               {inactivePlayerCount > 0
                 ? `${activePlayerCount} active · ${inactivePlayerCount} inactive`
@@ -397,6 +590,11 @@ function TeamRow({
                       teamName={team.displayName}
                       controller={controller}
                       onAnnounce={onAnnounce}
+                      navigationTarget={navigationTarget}
+                      onClearNavigationTarget={() => {
+                        if (targetOpensRoster) setRosterOpen(true);
+                        onClearNavigationTarget?.();
+                      }}
                     />
                   ))}
                 </ul>
@@ -498,6 +696,7 @@ function TeamRow({
                 </FormField>
                 <FormField label="School / organization">
                   <input
+                    list="director-organization-options"
                     value={editOrganizationName}
                     onChange={(event) => setEditOrganizationName(event.target.value)}
                   />
@@ -548,17 +747,147 @@ function TeamRow({
   );
 }
 
+function OrganizationRow({
+  organization,
+  teamCount,
+  controller,
+  onAnnounce,
+}: {
+  organization: DirectorState['organizations'][number];
+  teamCount: number;
+  controller: DirectorController;
+  onAnnounce: (message: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(organization.name);
+  const [shortName, setShortName] = useState(organization.shortName ?? '');
+  const [notes, setNotes] = useState(organization.notes ?? '');
+  const beginEdit = () => {
+    setName(organization.name);
+    setShortName(organization.shortName ?? '');
+    setNotes(organization.notes ?? '');
+    setEditing(true);
+  };
+  const save = () => {
+    const nextName = name.trim();
+    if (!nextName) {
+      onAnnounce('Enter an organization name first.');
+      return;
+    }
+    if (!controller.updateOrganization(organization.id, { name: nextName, shortName, notes })) {
+      onAnnounce(controller.error ?? 'Organization changes were not saved.');
+      return;
+    }
+    setEditing(false);
+    onAnnounce(`${nextName} updated.`);
+  };
+  const toggleArchived = () => {
+    const archived = organization.archived !== true;
+    if (archived && !window.confirm(`Archive ${organization.name}? Historical team links will be retained.`))
+      return;
+    if (!controller.setOrganizationArchived(organization.id, archived)) {
+      onAnnounce(controller.error ?? 'Organization status was not changed.');
+      return;
+    }
+    onAnnounce(`${organization.name} ${archived ? 'archived' : 'reopened'}.`);
+  };
+  return (
+    <>
+      <tr className={organization.archived ? 'is-inactive' : undefined}>
+        <td>
+          <strong>{organization.name}</strong>
+          {organization.notes && <small className="director-table-subtext">{organization.notes}</small>}
+        </td>
+        <td>{organization.shortName || '—'}</td>
+        <td>{teamCount}</td>
+        <td>
+          <StateLabel
+            state={organization.archived ? 'archived' : 'active'}
+            label={organization.archived ? 'Archived' : 'Active'}
+          />
+        </td>
+        <td>
+          <div className="director-row-actions">
+            <button
+              type="button"
+              className="director-button director-button-quiet director-table-action"
+              aria-label={`Edit ${organization.name}`}
+              onClick={beginEdit}
+            >
+              <Icon name="edit" size={14} />
+              <span>Edit</span>
+            </button>
+            <button
+              type="button"
+              className="director-button director-button-quiet director-table-action"
+              aria-label={`${organization.archived ? 'Reopen' : 'Archive'} ${organization.name}`}
+              onClick={toggleArchived}
+            >
+              <Icon name={organization.archived ? 'refresh' : 'x'} size={14} />
+              <span>{organization.archived ? 'Reopen' : 'Archive'}</span>
+            </button>
+          </div>
+        </td>
+      </tr>
+      {editing && (
+        <tr className="director-table-edit-row">
+          <td colSpan={5}>
+            <form
+              className="director-inline-edit"
+              onSubmit={(event) => {
+                event.preventDefault();
+                save();
+              }}
+            >
+              <div className="director-form-grid director-form-grid-three">
+                <FormField label="Organization name">
+                  <input value={name} onChange={(event) => setName(event.target.value)} />
+                </FormField>
+                <FormField label="Short name">
+                  <input value={shortName} onChange={(event) => setShortName(event.target.value)} />
+                </FormField>
+                <FormField label="Notes">
+                  <input value={notes} onChange={(event) => setNotes(event.target.value)} />
+                </FormField>
+              </div>
+              <div className="director-row-actions">
+                <Button variant="primary" type="submit">
+                  Save changes
+                </Button>
+                <Button variant="quiet" onClick={() => setEditing(false)}>
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
 function PlayerRow({
   player,
   teamName,
   controller,
   onAnnounce,
+  navigationTarget,
+  onClearNavigationTarget,
 }: {
   player: DirectorState['players'][number];
   teamName: string;
   controller: DirectorController;
   onAnnounce: (message: string) => void;
+  navigationTarget?: DirectorNavigationTarget | null;
+  onClearNavigationTarget?: () => void;
 }) {
+  const playerNavigation = useNavigationHighlight(
+    navigationTarget,
+    'teams',
+    'player',
+    player.id,
+    onClearNavigationTarget,
+  );
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(player.name);
   const [captain, setCaptain] = useState(player.captain);
@@ -595,7 +924,11 @@ function PlayerRow({
   };
   return (
     <>
-      <li className={`director-list-row director-roster-row${player.active ? '' : ' is-inactive'}`}>
+      <li
+        tabIndex={-1}
+        data-director-navigation-id={player.id}
+        className={`director-list-row director-roster-row${player.active ? '' : ' is-inactive'}${playerNavigation ? ' is-navigation-target' : ''}`}
+      >
         <div className="director-roster-player-summary">
           <span>
             {player.name}

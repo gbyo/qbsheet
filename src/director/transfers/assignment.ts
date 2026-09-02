@@ -228,7 +228,7 @@ export function buildAssignment(
       assignment_revision: scheduled.assignmentRevision > 0 ? scheduled.assignmentRevision : 1,
       ...(room ? { room_id: room.id } : {}),
       ...(options.handoffInstruction ? { handoff_instruction: options.handoffInstruction } : {}),
-      scorekeeper: { timed: false },
+      scorekeeper: { timed: tournament.rules.timed },
     },
   };
 

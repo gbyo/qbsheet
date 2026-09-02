@@ -23,6 +23,9 @@ export default tseslint.config(
       '.stryker-tmp/**',
       // Wrangler's local dev bundle. Generated, and not ours to lint.
       '**/.wrangler/**',
+      // Bundled Live Web resources are generated from the production build and are not source
+      // modules for this repository's lint configuration.
+      'apps/director/src-tauri/assets/live-web/**',
     ],
   },
   js.configs.recommended,

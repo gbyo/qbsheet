@@ -9,7 +9,7 @@ use serde::Serialize;
 use serde_json::{json, Map, Value};
 use thiserror::Error;
 
-const SCHEMA_VERSION: i64 = 5;
+const SCHEMA_VERSION: i64 = 7;
 const MAX_STATE_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Debug, Error)]
@@ -50,6 +50,17 @@ pub struct StoreStatus {
     pub journal_mode: String,
     pub foreign_keys: bool,
     pub migration_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TournamentCatalogEntry {
+    pub id: String,
+    pub name: String,
+    pub date: String,
+    pub status: String,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 #[derive(Clone)]
@@ -127,6 +138,56 @@ impl DirectorStore {
         state_json
             .map(|value| serde_json::from_str(&value).map_err(StoreError::DecodeState))
             .transpose()
+    }
+
+    pub fn list_tournaments(&self) -> Result<Vec<TournamentCatalogEntry>, StoreError> {
+        let connection = self.connection.lock().map_err(|_| StoreError::Poisoned)?;
+        let mut statement = connection.prepare(
+            "SELECT id, name, date, status, created_at, updated_at
+             FROM tournament_documents
+             ORDER BY CASE WHEN status = 'archived' THEN 1 ELSE 0 END,
+                      updated_at DESC, name, id",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok(TournamentCatalogEntry {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                date: row.get(2)?,
+                status: row.get(3)?,
+                created_at: row.get(4)?,
+                updated_at: row.get(5)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StoreError::from)
+    }
+
+    pub fn read_tournament(&self, tournament_id: &str) -> Result<Value, StoreError> {
+        let connection = self.connection.lock().map_err(|_| StoreError::Poisoned)?;
+        let state_json: String = connection.query_row(
+            "SELECT state_json FROM tournament_documents WHERE id = ?1",
+            params![tournament_id],
+            |row| row.get(0),
+        )?;
+        serde_json::from_str(&state_json).map_err(StoreError::DecodeState)
+    }
+
+    /// Atomically select a catalog document as the active Director document and rebuild all native
+    /// projections from it. The previous document remains untouched in tournament_documents.
+    pub fn open_tournament(&self, tournament_id: &str) -> Result<Value, StoreError> {
+        let connection = self.connection.lock().map_err(|_| StoreError::Poisoned)?;
+        let transaction = connection.unchecked_transaction()?;
+        let state_json: String = transaction.query_row(
+            "SELECT state_json FROM tournament_documents WHERE id = ?1",
+            params![tournament_id],
+            |row| row.get(0),
+        )?;
+        let state = serde_json::from_str::<Value>(&state_json).map_err(StoreError::DecodeState)?;
+        upsert_state(&transaction, &state_json)?;
+        sync_normalized_state(&transaction, &state)?;
+        set_current_tournament_id(&transaction, tournament_id)?;
+        transaction.commit()?;
+        Ok(state)
     }
 
     pub fn load_qbtcp_results(
@@ -217,6 +278,28 @@ impl DirectorStore {
         let transaction = connection.unchecked_transaction()?;
         upsert_state(&transaction, &state_json)?;
         sync_normalized_state(&transaction, state)?;
+        upsert_tournament_document(&transaction, state, &state_json)?;
+        if let Some(tournament_id) = tournament_id_from_state(state) {
+            set_current_tournament_id(&transaction, &tournament_id)?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Persist a catalog document without activating it. This is used for edits to an archived or
+    /// inactive tournament so its state can change without replacing the native active projection.
+    pub fn save_document(&self, state: &Value, activate: bool) -> Result<(), StoreError> {
+        let state_json = encode_state(state)?;
+        let connection = self.connection.lock().map_err(|_| StoreError::Poisoned)?;
+        let transaction = connection.unchecked_transaction()?;
+        upsert_tournament_document(&transaction, state, &state_json)?;
+        if activate {
+            upsert_state(&transaction, &state_json)?;
+            sync_normalized_state(&transaction, state)?;
+            if let Some(tournament_id) = tournament_id_from_state(state) {
+                set_current_tournament_id(&transaction, &tournament_id)?;
+            }
+        }
         transaction.commit()?;
         Ok(())
     }
@@ -234,6 +317,10 @@ impl DirectorStore {
         let transaction = connection.unchecked_transaction()?;
         upsert_state(&transaction, &state_json)?;
         sync_normalized_state(&transaction, state)?;
+        upsert_tournament_document(&transaction, state, &state_json)?;
+        if let Some(tournament_id) = tournament_id_from_state(state) {
+            set_current_tournament_id(&transaction, &tournament_id)?;
+        }
         let checkpoint_id = format!("checkpoint-{}-{}", unix_timestamp_ms(), std::process::id());
         transaction.execute(
             "INSERT INTO audit_events (id, entity_type, entity_id, action, payload_json)
@@ -258,6 +345,61 @@ fn encode_state(state: &Value) -> Result<String, StoreError> {
         return Err(StoreError::StateTooLarge);
     }
     Ok(serialized)
+}
+
+fn tournament_id_from_state(state: &Value) -> Option<String> {
+    state
+        .get("tournament")
+        .and_then(Value::as_object)
+        .and_then(|tournament| text(tournament, "id"))
+}
+
+fn upsert_tournament_document(
+    transaction: &rusqlite::Transaction<'_>,
+    state: &Value,
+    state_json: &str,
+) -> Result<(), StoreError> {
+    let Some(tournament) = state.get("tournament").and_then(Value::as_object) else {
+        return Ok(());
+    };
+    let Some(id) = text(tournament, "id") else {
+        return Ok(());
+    };
+    transaction.execute(
+        "INSERT INTO tournament_documents
+            (id, name, date, status, created_at, updated_at, state_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+         ON CONFLICT(id) DO UPDATE SET
+            name = excluded.name,
+            date = excluded.date,
+            status = excluded.status,
+            created_at = excluded.created_at,
+            updated_at = excluded.updated_at,
+            state_json = excluded.state_json",
+        params![
+            id,
+            text(tournament, "name").unwrap_or_else(|| "Untitled tournament".to_owned()),
+            text(tournament, "date").unwrap_or_default(),
+            text(tournament, "status").unwrap_or_else(|| "draft".to_owned()),
+            text(tournament, "createdAt").unwrap_or_else(now_sql),
+            text(tournament, "updatedAt").unwrap_or_else(now_sql),
+            state_json,
+        ],
+    )?;
+    Ok(())
+}
+
+fn set_current_tournament_id(
+    transaction: &rusqlite::Transaction<'_>,
+    tournament_id: &str,
+) -> Result<(), StoreError> {
+    transaction.execute(
+        "INSERT INTO application_metadata (key, value, updated_at)
+         VALUES ('current_tournament_id', ?1, CURRENT_TIMESTAMP)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP",
+        params![json_text(&Value::String(tournament_id.to_owned()))],
+    )?;
+    Ok(())
 }
 
 fn upsert_state(
@@ -314,7 +456,7 @@ fn sync_normalized_state(
          -- events (notably checkpoint records) are append-only and must survive that rebuild.
          DELETE FROM audit_events
           WHERE entity_type <> 'application' OR action <> 'checkpoint';
-         DELETE FROM application_metadata;",
+         DELETE FROM application_metadata WHERE key <> 'current_tournament_id';",
     )?;
 
     let saved_at = state
@@ -333,12 +475,16 @@ fn sync_normalized_state(
             .unwrap_or_else(|| "{}".to_owned());
         transaction.execute(
             "INSERT INTO tournaments
-                (id, name, short_name, status, rules_json, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
+                (id, name, short_name, date, venue, organizer, time_zone, status, rules_json, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)",
             params![
                 id,
                 text(tournament, "name").unwrap_or_else(|| "QBSheet Director".to_owned()),
                 "",
+                text(tournament, "date").unwrap_or_default(),
+                text(tournament, "venue").unwrap_or_default(),
+                text(tournament, "organizer").unwrap_or_default(),
+                text(tournament, "timeZone").unwrap_or_else(|| "UTC".to_owned()),
                 text(tournament, "status").unwrap_or_else(|| "draft".to_owned()),
                 rules,
                 saved_at,
@@ -528,6 +674,7 @@ fn sync_normalized_state(
             .get("usedGameIds")
             .and_then(Value::as_array)
             .is_some_and(|values| !values.is_empty());
+        let retired = bool_value(packet.get("retired"));
         transaction.execute(
             "INSERT INTO packets
                 (id, name, packet_type, source, status, security_notes, used_at)
@@ -541,7 +688,13 @@ fn sync_normalized_state(
                     "regular"
                 },
                 text(packet, "source").unwrap_or_default(),
-                if used { "used" } else { "available" },
+                if retired {
+                    "retired"
+                } else if used {
+                    "used"
+                } else {
+                    "available"
+                },
                 text(packet, "notes").unwrap_or_default(),
                 used.then(|| saved_at.clone()),
             ],
@@ -568,7 +721,11 @@ fn sync_normalized_state(
                 text(phase, "kind").unwrap_or_else(|| "custom".to_owned()),
                 integer(phase.get("order")).unwrap_or(0),
                 json_text(phase.get("advancementRule").unwrap_or(&Value::Null)),
-                text(phase, "status").unwrap_or_else(|| "planned".to_owned()),
+                if bool_value(phase.get("archived")) {
+                    "archived".to_owned()
+                } else {
+                    text(phase, "status").unwrap_or_else(|| "planned".to_owned())
+                },
             ],
         )?;
     }
@@ -582,7 +739,11 @@ fn sync_normalized_state(
                 text(pool, "phaseId").unwrap_or_default(),
                 text(pool, "name").unwrap_or_else(|| id.clone()),
                 integer(pool.get("order")).unwrap_or(0),
-                "{}",
+                if bool_value(pool.get("archived")) {
+                    "{\"archived\":true}".to_owned()
+                } else {
+                    "{}".to_owned()
+                },
             ],
         )?;
     }
@@ -596,8 +757,9 @@ fn sync_normalized_state(
             .unwrap_or_else(|| "{}".to_owned());
         transaction.execute(
             "INSERT INTO rounds
-                (id, phase_id, name, sequence, revision, status, packet_policy_json, started_at, closed_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                (id, phase_id, name, sequence, revision, status, packet_policy_json, started_at, closed_at,
+                 scheduled_start, released_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 id,
                 text(round, "phaseId").unwrap_or_default(),
@@ -608,6 +770,8 @@ fn sync_normalized_state(
                 packet_policy,
                 text(round, "startedAt"),
                 text(round, "closedAt"),
+                text(round, "scheduledStart"),
+                text(round, "releasedAt"),
             ],
         )?;
     }
@@ -617,8 +781,8 @@ fn sync_normalized_state(
         transaction.execute(
             "INSERT INTO scheduled_games
                 (id, round_id, room_id, packet_id, home_team_id, away_team_id, sequence, status,
-                 assignment_json, pool_id, bye, assignment_revision, moved_from_room_id, notes)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                 assignment_json, pool_id, bye, assignment_revision, moved_from_room_id, notes, scheduled_start)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             params![
                 id,
                 text(game, "roundId").unwrap_or_default(),
@@ -636,6 +800,7 @@ fn sync_normalized_state(
                 text(game, "notes")
                     .or_else(|| text(game, "note"))
                     .unwrap_or_default(),
+                text(game, "scheduledStart"),
             ],
         )?;
     }
@@ -1538,6 +1703,66 @@ fn migrate(connection: &mut Connection) -> Result<(), StoreError> {
         )?;
     }
 
+    if current < 6 {
+        transaction.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS tournament_documents (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                date TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'draft',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                state_json TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS tournament_documents_recent_idx
+                ON tournament_documents(status, updated_at DESC, name);
+            ",
+        )?;
+        // A v1-v5 database has exactly one useful document in director_state. Copy it into the
+        // catalog before the first multi-document save so an upgrade cannot strand that event.
+        let legacy_state: Option<String> = transaction
+            .query_row(
+                "SELECT state_json FROM director_state WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if let Some(state_json) = legacy_state {
+            let state =
+                serde_json::from_str::<Value>(&state_json).map_err(StoreError::DecodeState)?;
+            if let Some(tournament_id) = tournament_id_from_state(&state) {
+                upsert_tournament_document(&transaction, &state, &state_json)?;
+                set_current_tournament_id(&transaction, &tournament_id)?;
+            }
+        }
+        transaction.execute(
+            "INSERT INTO schema_migrations (version) VALUES (?1)",
+            params![6_i64],
+        )?;
+    }
+
+    if current < 7 {
+        // Keep the normalized native projection semantically aligned with the canonical document:
+        // planned, released, and actual clocks are distinct facts. Existing databases receive
+        // nullable columns so their historical values remain unknown instead of being guessed.
+        transaction.execute_batch(
+            "
+            ALTER TABLE tournaments ADD COLUMN date TEXT NOT NULL DEFAULT '';
+            ALTER TABLE tournaments ADD COLUMN venue TEXT NOT NULL DEFAULT '';
+            ALTER TABLE tournaments ADD COLUMN organizer TEXT NOT NULL DEFAULT '';
+            ALTER TABLE tournaments ADD COLUMN time_zone TEXT NOT NULL DEFAULT 'UTC';
+            ALTER TABLE rounds ADD COLUMN scheduled_start TEXT;
+            ALTER TABLE rounds ADD COLUMN released_at TEXT;
+            ALTER TABLE scheduled_games ADD COLUMN scheduled_start TEXT;
+            ",
+        )?;
+        transaction.execute(
+            "INSERT INTO schema_migrations (version) VALUES (?1)",
+            params![7_i64],
+        )?;
+    }
+
     transaction.commit()?;
     Ok(())
 }
@@ -1614,6 +1839,7 @@ mod tests {
             "qbtcp_results",
             "protests",
             "audit_events",
+            "tournament_documents",
         ] {
             let exists: i64 = connection
                 .query_row(
@@ -1731,6 +1957,146 @@ mod tests {
             Err(StoreError::StateTooLarge)
         ));
         drop(store);
+        cleanup(&path);
+    }
+
+    #[test]
+    fn v6_single_document_upgrade_copies_the_active_document_without_data_loss() {
+        let path = temporary_database_path("v6-upgrade");
+        let store = DirectorStore::open(path.clone()).expect("database opens");
+        let legacy = json!({
+            "schemaVersion": 4,
+            "tournament": {
+                "id": "legacy-tournament",
+                "name": "Legacy event",
+                "date": "2026-09-02",
+                "venue": "Main hall",
+                "organizer": "QBSheet",
+                "status": "running",
+                "timeZone": "UTC",
+                "rules": {"tossupValue": 10},
+                "createdAt": "2026-09-02T10:00:00Z",
+                "updatedAt": "2026-09-02T11:00:00Z"
+            },
+            "teams": [{"id": "team-1", "displayName": "Northview", "status": "confirmed"}],
+            "players": [{"id": "player-1", "teamId": "team-1", "name": "Ada", "active": true}],
+            "rounds": [{"id": "round-1", "phaseId": "phase-1", "name": "Round 1", "number": 1,
+                "status": "released", "scheduledStart": "2026-09-02T14:00:00Z",
+                "releasedAt": "2026-09-02T13:50:00Z", "startedAt": null, "closedAt": null}],
+            "scheduledGames": []
+        });
+        {
+            let connection = store.connection.lock().expect("database lock");
+            connection
+                .execute_batch(
+                    "
+                    DELETE FROM schema_migrations WHERE version IN (6, 7);
+                    DROP INDEX IF EXISTS tournament_documents_recent_idx;
+                    DROP TABLE IF EXISTS tournament_documents;
+                    ALTER TABLE tournaments DROP COLUMN date;
+                    ALTER TABLE tournaments DROP COLUMN venue;
+                    ALTER TABLE tournaments DROP COLUMN organizer;
+                    ALTER TABLE tournaments DROP COLUMN time_zone;
+                    ALTER TABLE rounds DROP COLUMN scheduled_start;
+                    ALTER TABLE rounds DROP COLUMN released_at;
+                    ALTER TABLE scheduled_games DROP COLUMN scheduled_start;
+                    DELETE FROM director_state;
+                    ",
+                )
+                .expect("v6 shape restored");
+            connection
+                .execute(
+                    "INSERT INTO director_state (id, schema_version, state_json) VALUES (1, 4, ?1)",
+                    params![legacy.to_string()],
+                )
+                .expect("legacy state inserted");
+        }
+        drop(store);
+
+        let upgraded = DirectorStore::open(path.clone()).expect("v6 database upgrades");
+        assert_eq!(
+            upgraded.load_state().expect("upgraded state loads"),
+            Some(legacy.clone())
+        );
+        let catalog = upgraded.list_tournaments().expect("catalog reads");
+        assert_eq!(catalog.len(), 1);
+        assert_eq!(catalog[0].id, "legacy-tournament");
+        assert_eq!(catalog[0].name, "Legacy event");
+        assert_eq!(
+            upgraded.status().expect("status reads").schema_version,
+            SCHEMA_VERSION
+        );
+        drop(upgraded);
+        cleanup(&path);
+    }
+
+    #[test]
+    fn native_catalog_switching_keeps_inactive_documents_and_selected_id_durable() {
+        let path = temporary_database_path("catalog-switch");
+        let store = DirectorStore::open(path.clone()).expect("database opens");
+        let document = |id: &str, name: &str| {
+            json!({
+                "schemaVersion": 5,
+                "tournament": {
+                    "id": id, "name": name, "date": "2026-09-02", "venue": "Hall",
+                    "organizer": "QBSheet", "status": "draft", "timeZone": "UTC",
+                    "rules": {}, "createdAt": "2026-09-02T10:00:00Z", "updatedAt": "2026-09-02T10:00:00Z"
+                },
+                "teams": [], "players": [], "organizations": [], "rooms": [], "staff": [], "equipment": [],
+                "packets": [], "formats": [], "phases": [], "pools": [], "rounds": [], "scheduledGames": [],
+                "games": [], "submissions": [], "protests": [], "audit": [], "qbtcpSessions": [],
+                "qbtcpHelpRequests": [], "qbtcpRosterAmendments": [], "timeline": [], "live": null,
+                "transfers": {"locations": [], "artifacts": []}, "metadata": {}
+            })
+        };
+        let mut a = document("native-a", "Native A");
+        let mut b = document("native-b", "Native B");
+        store.save_document(&a, true).expect("A saves");
+        store.save_document(&b, true).expect("B saves");
+        b["tournament"]["venue"] = json!("B venue");
+        store.save_document(&b, true).expect("B changes save");
+        a["tournament"]["venue"] = json!("A venue");
+        store
+            .save_document(&a, false)
+            .expect("inactive A changes save");
+        assert_eq!(
+            store.open_tournament("native-b").expect("B opens")["tournament"]["venue"],
+            json!("B venue")
+        );
+        assert_eq!(
+            store.open_tournament("native-a").expect("A opens")["tournament"]["venue"],
+            json!("A venue")
+        );
+        drop(store);
+        let reopened = DirectorStore::open(path.clone()).expect("database reopens");
+        assert_eq!(
+            reopened
+                .load_state()
+                .expect("selected document loads")
+                .as_ref()
+                .unwrap()["tournament"]["id"],
+            json!("native-a")
+        );
+        let mut archived = a.clone();
+        archived["tournament"]["status"] = json!("archived");
+        reopened
+            .save_document(&archived, false)
+            .expect("archive saves");
+        assert!(reopened
+            .list_tournaments()
+            .expect("catalog reads")
+            .iter()
+            .any(|entry| entry.id == "native-a" && entry.status == "archived"));
+        archived["tournament"]["status"] = json!("draft");
+        reopened
+            .save_document(&archived, false)
+            .expect("reopen saves");
+        assert!(reopened
+            .list_tournaments()
+            .expect("catalog reads")
+            .iter()
+            .any(|entry| entry.id == "native-a" && entry.status == "draft"));
+        drop(reopened);
         cleanup(&path);
     }
 

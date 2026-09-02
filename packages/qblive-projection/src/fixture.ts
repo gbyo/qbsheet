@@ -466,7 +466,17 @@ export function privacyFixture(): DirectorState {
     },
   ];
 
-  state.qbtcpRosterAmendments = [{ sessionId: SENTINEL, amendment: { internal: SENTINEL } }];
+  state.qbtcpRosterAmendments = [
+    {
+      id: 'roster-amendment-fixture',
+      sessionId: SENTINEL,
+      amendment: { internal: SENTINEL },
+      status: 'pending',
+      decidedAt: null,
+      decidedBy: null,
+      mappedPlayerId: null,
+    },
+  ];
 
   state.timeline = [
     {

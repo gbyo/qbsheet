@@ -4,6 +4,7 @@ export type SectionId =
   | 'overview'
   | 'teams'
   | 'format'
+  | 'schedule'
   | 'rooms'
   | 'packets'
   | 'tournament'
@@ -24,6 +25,7 @@ export const navigation: Array<{
     items: [
       { id: 'teams', label: 'Teams', icon: 'teams' },
       { id: 'format', label: 'Format', icon: 'format' },
+      { id: 'schedule', label: 'Schedule', icon: 'calendar' },
       { id: 'rooms', label: 'Rooms & staff', icon: 'rooms' },
       { id: 'packets', label: 'Packets', icon: 'file' },
     ],

@@ -59,6 +59,16 @@ describe('a one-game assignment', () => {
     expect((rules?.answer_types as unknown[]).length).toBe(3);
   });
 
+  it('carries the Director timed-regulation decision into the scorekeeper extension', () => {
+    const state = directorFixture();
+    state.tournament!.rules.timed = true;
+    const document = assignmentFor(state, 'game-5-1').document as {
+      objects: Array<Record<string, unknown>>;
+    };
+    const match = document.objects.find((object) => object.type === 'Match');
+    expect((match?._qbtcp as Record<string, unknown>).scorekeeper).toEqual({ timed: true });
+  });
+
   it('carries the round and assignment revisions so a stale return is detectable', () => {
     const state = directorFixture({ roundRevision: 3 });
     state.scheduledGames[0].assignmentRevision = 7;

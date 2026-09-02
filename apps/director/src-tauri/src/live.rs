@@ -68,105 +68,14 @@ pub trait CredentialStore: Send + Sync {
     fn forget(&self, account: &str) -> Result<(), LiveError>;
 }
 
-/// The macOS keychain, reached through `security(1)`.
-///
-/// Shelling out rather than linking a crate: this is three operations on a desktop app's own
-/// keychain, `security` is present on every macOS install, and it avoids adding a dependency that
-/// would also have to be audited for a tournament-control application. The secret is passed with
-/// `-w` and is therefore visible in this process's argv for the life of one short command — a
-/// tradeoff noted here rather than hidden, and the reason a future move to the Security framework
-/// would be an improvement rather than a rewrite.
-#[cfg(target_os = "macos")]
-#[derive(Default)]
-pub struct KeychainCredentialStore;
-
-#[cfg(target_os = "macos")]
-impl CredentialStore for KeychainCredentialStore {
-    fn probe(&self) -> Result<(), LiveError> {
-        const ACCOUNT: &str = "credential-store-probe";
-        self.store(ACCOUNT, "qbsheet-probe")?;
-        let read = self.read(ACCOUNT)?;
-        self.forget(ACCOUNT)?;
-        if read.as_deref() == Some("qbsheet-probe") {
-            Ok(())
-        } else {
-            Err(LiveError::CredentialStore(
-                "the operating system keychain did not retain a test credential".into(),
-            ))
-        }
-    }
-
-    fn store(&self, account: &str, secret: &str) -> Result<(), LiveError> {
-        let output = std::process::Command::new("security")
-            .args([
-                "add-generic-password",
-                "-s",
-                CREDENTIAL_SERVICE,
-                "-a",
-                account,
-                "-w",
-                secret,
-                // Replace an existing entry rather than failing: re-pairing a backend is ordinary.
-                "-U",
-            ])
-            .output()
-            .map_err(|error| LiveError::CredentialStore(error.to_string()))?;
-        if output.status.success() {
-            Ok(())
-        } else {
-            Err(LiveError::CredentialStore(
-                String::from_utf8_lossy(&output.stderr).trim().to_string(),
-            ))
-        }
-    }
-
-    fn read(&self, account: &str) -> Result<Option<String>, LiveError> {
-        let output = std::process::Command::new("security")
-            .args([
-                "find-generic-password",
-                "-s",
-                CREDENTIAL_SERVICE,
-                "-a",
-                account,
-                "-w",
-            ])
-            .output()
-            .map_err(|error| LiveError::CredentialStore(error.to_string()))?;
-        if output.status.success() {
-            Ok(Some(
-                String::from_utf8_lossy(&output.stdout).trim().to_string(),
-            ))
-        } else {
-            // `security` exits non-zero for "not found" as well as for a real failure. Treating a
-            // missing entry as absent rather than as an error is right: a fresh machine has none.
-            Ok(None)
-        }
-    }
-
-    fn forget(&self, account: &str) -> Result<(), LiveError> {
-        let _ = std::process::Command::new("security")
-            .args([
-                "delete-generic-password",
-                "-s",
-                CREDENTIAL_SERVICE,
-                "-a",
-                account,
-            ])
-            .output();
-        Ok(())
-    }
-}
-
-/// Windows Credential Manager and Linux Secret Service.
+/// macOS Keychain, Windows Credential Manager and Linux Secret Service.
 ///
 /// `keyring` selects the native credential backend at compile time. There is deliberately no
 /// plaintext or in-memory runtime fallback: Director probes this store before consuming a one-time
 /// backend setup token, so an unavailable desktop keyring fails safely before the claim.
-#[cfg(not(target_os = "macos"))]
 #[derive(Default)]
 pub struct KeychainCredentialStore;
 
-#[cfg(not(target_os = "macos"))]
 impl CredentialStore for KeychainCredentialStore {
     fn probe(&self) -> Result<(), LiveError> {
         const ACCOUNT: &str = "credential-store-probe";

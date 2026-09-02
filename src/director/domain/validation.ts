@@ -318,9 +318,27 @@ export function roundScheduleIsValid(state: DirectorState, roundId: DirectorId):
 
   const format = state.formats.find((candidate) => candidate.id === phase.formatId);
   if (!format || games.length === 0) return false;
-  const expectedTeams = expectedRoundTeams(state, phase);
+  // A single-elimination round is a resolvable slice of a bracket, not a field-wide pairing. The
+  // first slice may contain several bracket byes (for example, three byes in a five-team draw),
+  // while later slices contain only the winners that are ready to advance. The bracket adapter has
+  // already proved the dependency graph; here we enforce the operational invariants that matter
+  // before release: unique participants, no pool leakage, and stable bracket identities.
+  if (format.kind === 'single-elimination') {
+    return games.every((game) => game.poolId == null && Boolean(game.bracketKey)) && scheduleIsValid(games);
+  }
+  const expectedTeams =
+    format.kind === 'custom'
+      ? state.teams.filter(
+          (team) =>
+            team.status === 'confirmed' &&
+            games.some((game) => game.leftTeamId === team.id || game.rightTeamId === team.id),
+        )
+      : expectedRoundTeams(state, phase);
   if (expectedTeams.length < 2) return false;
-  const expectedByeCount = expectedRoundByeCount(state, phase, expectedTeams.length);
+  const expectedByeCount =
+    format.kind === 'custom'
+      ? expectedTeams.length % 2
+      : expectedRoundByeCount(state, phase, expectedTeams.length);
   if (
     !scheduleIsValid(games, expectedTeams, {
       expectedByeCount,
@@ -332,7 +350,9 @@ export function roundScheduleIsValid(state: DirectorState, roundId: DirectorId):
 
   if (phase.poolIds.length === 0) return games.every((game) => game.poolId == null);
 
-  const pools = phase.poolIds.map((poolId) => state.pools.find((pool) => pool.id === poolId));
+  const pools = phase.poolIds
+    .map((poolId) => state.pools.find((pool) => pool.id === poolId))
+    .filter((pool): pool is NonNullable<typeof pool> => pool !== undefined && pool.archived !== true);
   if (pools.some((pool) => !pool || pool.phaseId !== phase.id)) return false;
   const confirmedIds = new Set(
     state.teams.filter((team) => team.status === 'confirmed').map((team) => team.id),
@@ -347,7 +367,8 @@ export function roundScheduleIsValid(state: DirectorState, roundId: DirectorId):
   ) {
     return false;
   }
-  if (!games.every((game) => typeof game.poolId === 'string' && phase.poolIds.includes(game.poolId))) {
+  const activePoolIds = new Set(pools.map((pool) => pool.id));
+  if (!games.every((game) => typeof game.poolId === 'string' && activePoolIds.has(game.poolId))) {
     return false;
   }
   return pools.every((pool) => {
@@ -368,7 +389,9 @@ function expectedRoundTeams(state: DirectorState, phase: DirectorState['phases']
     return state.teams.filter((team) => team.status === 'confirmed');
   }
   const ids = new Set(
-    state.pools.filter((pool) => phase.poolIds.includes(pool.id)).flatMap((pool) => pool.teamIds),
+    state.pools
+      .filter((pool) => phase.poolIds.includes(pool.id) && pool.archived !== true)
+      .flatMap((pool) => pool.teamIds),
   );
   return state.teams.filter((team) => team.status === 'confirmed' && ids.has(team.id));
 }
@@ -380,7 +403,7 @@ function expectedRoundByeCount(
 ): number {
   if (!phase || phase.poolIds.length === 0) return expectedTeamCount % 2;
   return state.pools
-    .filter((pool) => phase.poolIds.includes(pool.id))
+    .filter((pool) => phase.poolIds.includes(pool.id) && pool.archived !== true)
     .reduce((count, pool) => {
       const activeCount = pool.teamIds.filter(
         (teamId) => state.teams.find((team) => team.id === teamId)?.status === 'confirmed',

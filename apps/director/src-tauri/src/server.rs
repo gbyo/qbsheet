@@ -41,6 +41,8 @@ pub enum ServerError {
     Unavailable,
     #[error("QBTCP server is not running")]
     NotRunning,
+    #[error("QBTCP operation failed: {0}")]
+    Operation(String),
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -380,6 +382,21 @@ impl ServerRuntime {
             .as_ref()
             .ok_or(ServerError::Unavailable)
             .and_then(|state| state.snapshot())
+    }
+
+    /// Resolve a room help request through the trusted Director host operation, not the room's
+    /// authenticated cancel endpoint.
+    pub fn resolve_help(&self, help_id: &str) -> Result<qbtcp_server::HelpRequest, ServerError> {
+        let server = self
+            .inner
+            .lock()
+            .map_err(|_| ServerError::Unavailable)?
+            .server
+            .clone()
+            .ok_or(ServerError::NotRunning)?;
+        server
+            .resolve_help(help_id.trim())
+            .map_err(|error| ServerError::Operation(format!("{error:?}")))
     }
 }
 
@@ -1071,7 +1088,8 @@ fn latest_help_requests(events: &[qbtcp_server::HelpEvent]) -> Vec<qbtcp_server:
     for event in events {
         let request = match event {
             qbtcp_server::HelpEvent::Opened(request)
-            | qbtcp_server::HelpEvent::Cancelled(request) => request,
+            | qbtcp_server::HelpEvent::Cancelled(request)
+            | qbtcp_server::HelpEvent::Resolved(request) => request,
         };
         by_id.insert(request.id.clone(), request.clone());
     }
@@ -1449,26 +1467,48 @@ fn generated_team(root: &Map<String, Value>, team_id: &str) -> Option<Value> {
 
 fn generated_scoring_rules(value: Option<&Value>, id: &str) -> Value {
     let rules = value.and_then(Value::as_object);
-    let tossup = i64_field(rules, "tossupValue").unwrap_or(10);
-    let power = i64_field(rules, "powerValue").unwrap_or(15);
-    let neg = i64_field(rules, "negValue").unwrap_or(-5);
-    let bonus = i64_field(rules, "bonusValue").unwrap_or(10).max(1);
+    let tossup = i64_field(rules, "tossupValue")
+        .or_else(|| answer_type_value(rules, "C", "Correct"))
+        .unwrap_or(10);
+    let power = i64_field(rules, "powerValue")
+        .or_else(|| answer_type_value(rules, "P", "Power"))
+        .unwrap_or(15);
+    let neg = i64_field(rules, "negValue")
+        .or_else(|| answer_type_value(rules, "N", "Neg"))
+        .unwrap_or(-5);
+    let bonus = i64_field(rules, "bonusValue")
+        .or_else(|| i64_field(rules, "points_per_bonus_part"))
+        .unwrap_or(10)
+        .max(1);
     let tossup_count = u32_field(rules, "tossupCount")
+        .or_else(|| u32_field(rules, "regulation_tossup_count"))
         .filter(|value| *value > 0)
         .unwrap_or(20);
     let bonus_parts = u32_field(rules, "bonusParts")
+        .or_else(|| u32_field(rules, "minimum_parts_per_bonus"))
         .filter(|value| *value > 0)
         .unwrap_or(3);
     let maximum_players = u32_field(rules, "maximumActivePlayers")
+        .or_else(|| u32_field(rules, "maximum_players_per_team"))
         .filter(|value| *value > 0)
         .unwrap_or(4);
     let bouncebacks = rules
         .and_then(|rules| rules.get("bouncebacks"))
         .and_then(Value::as_bool)
+        .or_else(|| {
+            rules
+                .and_then(|rules| rules.get("bonuses_bounce_back"))
+                .and_then(Value::as_bool)
+        })
         .unwrap_or(false);
     let overtime = rules
         .and_then(|rules| rules.get("overtime"))
         .and_then(Value::as_bool)
+        .or_else(|| {
+            rules
+                .and_then(|rules| rules.get("overtime_includes_bonuses"))
+                .and_then(Value::as_bool)
+        })
         .unwrap_or(true);
     let lightning = rules
         .and_then(|rules| rules.get("lightning"))
@@ -1502,6 +1542,25 @@ fn generated_scoring_rules(value: Option<&Value>, id: &str) -> Value {
         output["lightning_divisor"] = json!(10);
     }
     output
+}
+
+fn answer_type_value(
+    rules: Option<&Map<String, Value>>,
+    short_label: &str,
+    label: &str,
+) -> Option<i64> {
+    rules
+        .and_then(|rules| rules.get("answer_types"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_object)
+        .find(|answer| {
+            answer.get("short_label").and_then(Value::as_str) == Some(short_label)
+                || answer.get("label").and_then(Value::as_str) == Some(label)
+        })
+        .and_then(|answer| answer.get("value"))
+        .and_then(Value::as_i64)
 }
 
 fn timed_from_rules(value: Option<&Value>) -> Option<bool> {

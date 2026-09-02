@@ -177,6 +177,45 @@ pub fn director_load_state(store: State<'_, DirectorStore>) -> Result<Option<Val
 }
 
 #[tauri::command]
+pub fn director_list_tournaments(
+    store: State<'_, DirectorStore>,
+) -> Result<Vec<crate::store::TournamentCatalogEntry>, CommandError> {
+    store.list_tournaments().map_err(CommandError::store)
+}
+
+#[tauri::command]
+pub fn director_read_tournament(
+    tournament_id: String,
+    store: State<'_, DirectorStore>,
+) -> Result<Value, CommandError> {
+    store
+        .read_tournament(tournament_id.trim())
+        .map_err(CommandError::store)
+}
+
+#[tauri::command]
+pub async fn director_open_tournament(
+    tournament_id: String,
+    store: State<'_, DirectorStore>,
+    server: State<'_, ServerRuntime>,
+) -> Result<Value, CommandError> {
+    let restart_server = server.status().running;
+    if restart_server {
+        server.stop();
+    }
+    let state = store
+        .open_tournament(tournament_id.trim())
+        .map_err(CommandError::store)?;
+    if restart_server {
+        server
+            .start_with_store(Some(state.clone()), std::sync::Arc::new((*store).clone()))
+            .await
+            .map_err(CommandError::server)?;
+    }
+    Ok(state)
+}
+
+#[tauri::command]
 pub fn director_save_state(
     state: Value,
     store: State<'_, DirectorStore>,
@@ -184,6 +223,22 @@ pub fn director_save_state(
 ) -> Result<StoreStatus, CommandError> {
     store.save_state(&state).map_err(CommandError::store)?;
     server.refresh_state(Some(&state));
+    store.status().map_err(CommandError::store)
+}
+
+#[tauri::command]
+pub fn director_save_document(
+    state: Value,
+    activate: bool,
+    store: State<'_, DirectorStore>,
+    server: State<'_, ServerRuntime>,
+) -> Result<StoreStatus, CommandError> {
+    store
+        .save_document(&state, activate)
+        .map_err(CommandError::store)?;
+    if activate {
+        server.refresh_state(Some(&state));
+    }
     store.status().map_err(CommandError::store)
 }
 
@@ -217,6 +272,19 @@ pub fn director_server_snapshot(
     server: State<'_, ServerRuntime>,
 ) -> Result<ServerSnapshot, CommandError> {
     server.snapshot().map_err(CommandError::server)
+}
+
+#[tauri::command]
+pub fn director_resolve_qbtcp_help(
+    help_id: String,
+    server: State<'_, ServerRuntime>,
+) -> Result<qbtcp_server::HelpRequest, CommandError> {
+    if help_id.trim().is_empty() {
+        return Err(CommandError::dialog("A help request id is required."));
+    }
+    server
+        .resolve_help(help_id.trim())
+        .map_err(CommandError::server)
 }
 
 #[tauri::command]

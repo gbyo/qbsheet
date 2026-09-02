@@ -32,6 +32,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "resources": ["assets/live-web/**/*"],
     "createUpdaterArtifacts": false
   },
   "plugins": {

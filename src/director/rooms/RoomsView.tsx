@@ -3,6 +3,8 @@ import type { DirectorState, StaffRole } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
 import { Button, EmptyState, FormField, PanelBody, PanelFooter, StateLabel } from '../components/Controls';
 import type { SectionId } from '../app/navigation';
+import type { DirectorNavigationTarget } from '../app/navigationTarget';
+import { useNavigationHighlight } from '../app/useNavigationHighlight';
 import { Icon } from '../components/Icon';
 import { PageHeader } from '../components/PageHeader';
 
@@ -11,11 +13,15 @@ export function RoomsView({
   controller,
   onNavigate,
   onAnnounce,
+  navigationTarget,
+  onClearNavigationTarget,
 }: {
   state: DirectorState;
   controller: DirectorController;
   onNavigate?: (section: SectionId) => void;
   onAnnounce: (message: string) => void;
+  navigationTarget?: DirectorNavigationTarget | null;
+  onClearNavigationTarget?: () => void;
 }) {
   const [showForm, setShowForm] = useState<'room' | 'staff' | 'equipment' | null>(null);
   const [name, setName] = useState('');
@@ -27,6 +33,7 @@ export function RoomsView({
   const [staffRole, setStaffRole] = useState<'moderator' | 'scorekeeper' | 'runner' | 'hq'>('moderator');
   const [equipmentKind, setEquipmentKind] = useState<'buzzer' | 'device' | 'other'>('buzzer');
   const [filter, setFilter] = useState<'all' | 'available' | 'live' | 'help' | 'offline'>('all');
+  const [amendmentMappings, setAmendmentMappings] = useState<Record<string, string>>({});
   const openForm = (kind: 'room' | 'staff' | 'equipment') => {
     setShowForm(kind);
     setName('');
@@ -38,8 +45,15 @@ export function RoomsView({
     if (kind === 'staff') setStaffRole('moderator');
     if (kind === 'equipment') setEquipmentKind('buzzer');
   };
+  const targetRoomId =
+    navigationTarget?.section === 'rooms' && navigationTarget.entityType === 'room'
+      ? navigationTarget.entityId
+      : undefined;
   const rooms = state.rooms.filter(
-    (room) => filter === 'all' || (filter === 'available' ? room.available : room.status === filter),
+    (room) =>
+      room.id === targetRoomId ||
+      filter === 'all' ||
+      (filter === 'available' ? room.available : room.status === filter),
   );
   const helpRequests = [...state.qbtcpHelpRequests].sort((left, right) =>
     right.updatedAt.localeCompare(left.updatedAt),
@@ -355,6 +369,8 @@ export function RoomsView({
                         controller={controller}
                         onNavigate={onNavigate}
                         onAnnounce={onAnnounce}
+                        navigationTarget={navigationTarget}
+                        onClearNavigationTarget={onClearNavigationTarget}
                       />
                     ))
                   ) : (
@@ -411,6 +427,18 @@ export function RoomsView({
                           state={request.status === 'open' ? 'help' : 'finished'}
                           label={request.status === 'open' ? 'Open' : request.status}
                         />
+                        {request.status === 'open' && (
+                          <Button
+                            variant="quiet"
+                            onClick={() => {
+                              void controller.resolveQbtcpHelp(request.id).then((resolved) => {
+                                if (resolved) onAnnounce(`${request.roomName} help request resolved.`);
+                              });
+                            }}
+                          >
+                            Mark resolved
+                          </Button>
+                        )}
                       </li>
                     ))}
                   </ul>
@@ -420,24 +448,96 @@ export function RoomsView({
                 <>
                   <p className="director-eyebrow director-operations-subheading">Roster amendments</p>
                   <ul className="director-activity-list">
-                    {rosterAmendments.map((entry, index) => {
+                    {rosterAmendments.map((entry) => {
                       const playerName = stringField(entry.amendment.playerName) ?? 'Unrecognized player';
+                      const referencedTeamId = stringField(entry.amendment.teamId);
+                      const referencedTeamName = stringField(entry.amendment.teamName);
+                      const referencedTeam = referencedTeamId
+                        ? state.teams.find((candidate) => candidate.id === referencedTeamId)
+                        : referencedTeamName
+                          ? state.teams.find(
+                              (candidate) =>
+                                candidate.displayName.trim().toLocaleLowerCase() ===
+                                referencedTeamName.toLocaleLowerCase(),
+                            )
+                          : undefined;
                       const team =
-                        stringField(entry.amendment.teamName) ??
-                        stringField(entry.amendment.teamId) ??
+                        referencedTeam?.displayName ??
+                        referencedTeamName ??
+                        referencedTeamId ??
                         'Team unresolved';
+                      const candidates = state.players.filter(
+                        (player) => player.active && (!referencedTeam || player.teamId === referencedTeam.id),
+                      );
+                      const selectedPlayerId = amendmentMappings[entry.id] ?? '';
                       return (
-                        <li key={`${entry.sessionId}-${index}`}>
+                        <li key={entry.id}>
                           <div>
                             <strong>{playerName}</strong>
                             <span>
                               {team} · session {entry.sessionId}
                             </span>
                             <small className="director-table-subtext">
-                              Review only; the canonical roster was not changed.
+                              Original scorekeeper submission retained as evidence.
+                              {entry.decidedBy ? ` Decided by ${entry.decidedBy}.` : ''}
                             </small>
                           </div>
-                          <StateLabel state="review" label="Review" />
+                          <StateLabel
+                            state={entry.status === 'pending' ? 'review' : 'finished'}
+                            label={rosterAmendmentStatusLabel(entry.status)}
+                          />
+                          {entry.status === 'pending' && (
+                            <div className="director-row-actions director-roster-amendment-actions">
+                              <Button
+                                variant="quiet"
+                                onClick={() => {
+                                  if (controller.approveRosterAmendmentAsNew(entry.id)) {
+                                    onAnnounce(`${playerName} approved as a new canonical player.`);
+                                  }
+                                }}
+                              >
+                                Approve as new
+                              </Button>
+                              <select
+                                aria-label={`Map ${playerName} to an existing player`}
+                                value={selectedPlayerId}
+                                onChange={(event) =>
+                                  setAmendmentMappings((previous) => ({
+                                    ...previous,
+                                    [entry.id]: event.target.value,
+                                  }))
+                                }
+                              >
+                                <option value="">Map to existing…</option>
+                                {candidates.map((candidate) => (
+                                  <option key={candidate.id} value={candidate.id}>
+                                    {candidate.name} · {teamName(state, candidate.teamId)}
+                                  </option>
+                                ))}
+                              </select>
+                              <Button
+                                variant="quiet"
+                                disabled={!selectedPlayerId}
+                                onClick={() => {
+                                  if (controller.mapRosterAmendment(entry.id, selectedPlayerId)) {
+                                    onAnnounce(`${playerName} mapped to the canonical roster.`);
+                                  }
+                                }}
+                              >
+                                Map
+                              </Button>
+                              <Button
+                                variant="quiet"
+                                onClick={() => {
+                                  if (controller.rejectRosterAmendment(entry.id)) {
+                                    onAnnounce(`${playerName} roster amendment dismissed.`);
+                                  }
+                                }}
+                              >
+                                Reject
+                              </Button>
+                            </div>
+                          )}
                         </li>
                       );
                     })}
@@ -508,13 +608,24 @@ function RoomRows({
   controller,
   onNavigate,
   onAnnounce,
+  navigationTarget,
+  onClearNavigationTarget,
 }: {
   state: DirectorState;
   room: DirectorState['rooms'][number];
   controller: DirectorController;
   onNavigate?: (section: SectionId) => void;
   onAnnounce: (message: string) => void;
+  navigationTarget?: DirectorNavigationTarget | null;
+  onClearNavigationTarget?: () => void;
 }) {
+  const roomNavigation = useNavigationHighlight(
+    navigationTarget,
+    'rooms',
+    'room',
+    room.id,
+    onClearNavigationTarget,
+  );
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(room.name);
   const [building, setBuilding] = useState(room.building ?? '');
@@ -566,12 +677,18 @@ function RoomRows({
   };
   return (
     <>
-      <tr>
+      <tr
+        tabIndex={-1}
+        className={roomNavigation ? 'is-navigation-target' : undefined}
+        data-director-navigation-id={room.id}
+      >
         <td>
-          <strong>{room.name}</strong>
-          <small className="director-table-subtext">{room.accessibility || 'No access notes'}</small>
-          {room.directions && <small className="director-table-subtext">{room.directions}</small>}
-          {room.notes && <small className="director-table-subtext">{room.notes}</small>}
+          <span data-director-navigation-focus tabIndex={-1}>
+            <strong>{room.name}</strong>
+            <small className="director-table-subtext">{room.accessibility || 'No access notes'}</small>
+            {room.directions && <small className="director-table-subtext">{room.directions}</small>}
+            {room.notes && <small className="director-table-subtext">{room.notes}</small>}
+          </span>
         </td>
         <td>{[room.building, room.floor].filter(Boolean).join(' · ') || '—'}</td>
         <td>{staffName(state, room.moderatorId) || 'Unassigned'}</td>
@@ -739,10 +856,14 @@ function StaffResourceRow({
   member,
   controller,
   onAnnounce,
+  navigationTarget: _navigationTarget,
+  onClearNavigationTarget: _onClearNavigationTarget,
 }: {
   member: DirectorState['staff'][number];
   controller: DirectorController;
   onAnnounce: (message: string) => void;
+  navigationTarget?: DirectorNavigationTarget | null;
+  onClearNavigationTarget?: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(member.name);
@@ -871,10 +992,14 @@ function EquipmentResourceRow({
   item,
   controller,
   onAnnounce,
+  navigationTarget: _navigationTarget,
+  onClearNavigationTarget: _onClearNavigationTarget,
 }: {
   item: DirectorState['equipment'][number];
   controller: DirectorController;
   onAnnounce: (message: string) => void;
+  navigationTarget?: DirectorNavigationTarget | null;
+  onClearNavigationTarget?: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(item.name);
@@ -1023,6 +1148,25 @@ function staffName(state: DirectorState, id: string | null): string {
 }
 function equipmentName(state: DirectorState, id: string | null): string {
   return id ? (state.equipment.find((item) => item.id === id)?.name ?? '') : '';
+}
+
+function teamName(state: DirectorState, id: string): string {
+  return state.teams.find((team) => team.id === id)?.displayName ?? 'Unknown team';
+}
+
+function rosterAmendmentStatusLabel(
+  status: DirectorState['qbtcpRosterAmendments'][number]['status'],
+): string {
+  switch (status) {
+    case 'approved-new':
+      return 'Approved as new';
+    case 'mapped-existing':
+      return 'Mapped to existing';
+    case 'rejected':
+      return 'Rejected';
+    default:
+      return 'Review';
+  }
 }
 
 function stringField(value: unknown): string | undefined {

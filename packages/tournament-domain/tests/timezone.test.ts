@@ -11,10 +11,12 @@ import { describe, expect, test } from 'vitest';
 import {
   fallbackTimeZone,
   hostTimeZone,
+  isoToZonedDateTimeInput,
   isValidTimeZone,
   normalizeTimeZone,
   toZonedIso,
   utcOffsetAt,
+  zonedDateTimeInputToIso,
   zonedIsoOrNull,
 } from '../src/timezone.js';
 
@@ -143,5 +145,28 @@ describe('optional timestamps', () => {
 
   test('a real value is re-expressed in the tournament zone', () => {
     expect(zonedIsoOrNull('2026-09-05T16:00:00.000Z', 'America/New_York')).toBe('2026-09-05T12:00:00-04:00');
+  });
+});
+
+describe('datetime-local editing', () => {
+  test('interprets a Director wall-clock value in the tournament zone, not the host zone', () => {
+    const iso = zonedDateTimeInputToIso('2026-09-05T12:00', 'America/New_York');
+    expect(iso).toBe('2026-09-05T16:00:00.000Z');
+    expect(isoToZonedDateTimeInput(iso, 'America/New_York')).toBe('2026-09-05T12:00');
+  });
+
+  test('rejects a local time removed by the spring-forward DST transition', () => {
+    expect(zonedDateTimeInputToIso('2026-03-08T02:30', 'America/New_York')).toBeNull();
+  });
+
+  test('uses the earlier occurrence for an ambiguous fall-back wall-clock value', () => {
+    // The policy is deterministic: 01:30 on the fall-back day means the first 01:30 (-04:00).
+    expect(zonedDateTimeInputToIso('2026-11-01T01:30', 'America/New_York')).toBe('2026-11-01T05:30:00.000Z');
+    expect(isoToZonedDateTimeInput('2026-11-01T06:30:00.000Z', 'America/New_York')).toBe('2026-11-01T01:30');
+  });
+
+  test('rejects malformed or nonexistent values instead of silently changing their date', () => {
+    expect(zonedDateTimeInputToIso('2026-02-31T12:00', 'UTC')).toBeNull();
+    expect(zonedDateTimeInputToIso('not-a-local-time', 'UTC')).toBeNull();
   });
 });

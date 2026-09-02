@@ -27,14 +27,6 @@ function native(): NativeBridge | null {
   return window.__TAURI_INTERNALS__ ?? null;
 }
 
-/**
- * Session-only storage for the browser preview.
- *
- * A module-level map, so it dies with the tab. Deliberately not `sessionStorage`: the point is that
- * it is not persisted anywhere a later page load or another script can reach.
- */
-const sessionCredentials = new Map<string, string>();
-
 export function credentialRefFor(publicationId: string): LivePublicationCredentialRef {
   return { keychainService, keychainAccount: publicationId, verifiedAt: null };
 }
@@ -44,11 +36,12 @@ export async function storeLiveCredential(
   token: string,
 ): Promise<LivePublicationCredentialRef> {
   const bridge = native();
-  if (bridge) {
-    await bridge.invoke('director_store_live_credential', { publicationId, token });
-  } else {
-    sessionCredentials.set(publicationId, token);
+  if (!bridge) {
+    throw new LiveClaimError(
+      'QBSheet Live credentials can only be stored by the Director desktop app and its operating-system credential store.',
+    );
   }
+  await bridge.invoke('director_store_live_credential', { publicationId, token });
   return { ...credentialRefFor(publicationId), verifiedAt: new Date().toISOString() };
 }
 
@@ -69,13 +62,19 @@ export async function readLiveCredential(publicationId: string): Promise<string 
     const value = await bridge.invoke('director_read_live_credential', { publicationId });
     return typeof value === 'string' && value.length > 0 ? value : null;
   }
-  return sessionCredentials.get(publicationId) ?? null;
+  throw new LiveClaimError(
+    'QBSheet Live credentials are unavailable outside the Director desktop app and its operating-system credential store.',
+  );
 }
 
 export async function forgetLiveCredential(publicationId: string): Promise<void> {
   const bridge = native();
-  if (bridge) await bridge.invoke('director_forget_live_credential', { publicationId });
-  sessionCredentials.delete(publicationId);
+  if (!bridge) {
+    throw new LiveClaimError(
+      'QBSheet Live credentials can only be removed by the Director desktop app and its operating-system credential store.',
+    );
+  }
+  await bridge.invoke('director_forget_live_credential', { publicationId });
 }
 
 /** True when this build can keep a credential across restarts. Drives what the UI promises. */
@@ -104,6 +103,11 @@ export async function claimLiveBackend(options: {
   displayName?: string;
   fetchImpl?: typeof fetch;
 }): Promise<{ managementToken: string; origin: string }> {
+  // This guard belongs here as well as in the controller: callers must not be able to spend a
+  // one-time backend token through this helper unless the resulting credential has a durable
+  // destination. The controller's earlier probe is an inexpensive UX improvement, not the
+  // security boundary.
+  await ensureLiveCredentialStore();
   const doFetch = options.fetchImpl ?? fetch;
   let response: Response;
   try {

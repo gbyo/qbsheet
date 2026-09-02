@@ -22,6 +22,7 @@ use std::net::Ipv4Addr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
+use axum::body::Body;
 use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderValue, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
@@ -43,6 +44,8 @@ const REPLAY_WINDOW: usize = 64;
 /// The bundle is checked in so native-only builds never need Node, and regenerated with
 /// `npm run live:bundle-local` whenever Live Web changes. It contains no remote assets or URLs.
 const LIVE_WEB_HTML: &str = include_str!("../assets/live-web.html");
+const LIVE_WEB_JS: &[u8] = include_bytes!("../assets/live-web/app.js");
+const LIVE_WEB_CSS: &[u8] = include_bytes!("../assets/live-web/styles.css");
 
 /// Shared verbatim with Director's TypeScript projection.
 const LOCAL_CAPABILITIES_JSON: &str =
@@ -252,6 +255,8 @@ type Shared = Arc<RwLock<Published>>;
 fn router(published: Shared) -> Router {
     Router::new()
         .route("/live/{publication_id}", get(live_web))
+        .route("/live/{publication_id}/assets/{asset}", get(live_asset))
+        .route("/live/{publication_id}/{*path}", get(live_web_fallback))
         .route(
             "/qblive/v1/tournaments/{publication_id}/manifest",
             get(manifest),
@@ -276,8 +281,39 @@ async fn live_web(State(published): State<Shared>, Path(id): Path<String>) -> Re
     let bootstrap = format!(
         "<script>window.__QBSHEET_LIVE_LOCAL__={{publicationId:{publication_id},backendOrigin:window.location.origin}};</script>"
     );
-    let html = LIVE_WEB_HTML.replace("<!--QBSHEET_LOCAL_BOOTSTRAP-->", &bootstrap);
+    let html = LIVE_WEB_HTML
+        .replace("<!--QBSHEET_LOCAL_BASE-->", &format!("/live/{id}/"))
+        .replace("<!--QBSHEET_LOCAL_BOOTSTRAP-->", &bootstrap);
     let mut response = Html(html).into_response();
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    response
+}
+
+async fn live_web_fallback(
+    State(published): State<Shared>,
+    Path((id, _path)): Path<(String, String)>,
+) -> Response {
+    live_web(State(published), Path(id)).await
+}
+
+async fn live_asset(
+    State(published): State<Shared>,
+    Path((id, asset)): Path<(String, String)>,
+) -> Response {
+    if let Err(response) = require(&published, &id) {
+        return *response;
+    }
+    let (bytes, content_type): (&'static [u8], &'static str) = match asset.as_str() {
+        "app.js" => (LIVE_WEB_JS, "text/javascript; charset=utf-8"),
+        "styles.css" => (LIVE_WEB_CSS, "text/css; charset=utf-8"),
+        _ => return error_json(StatusCode::NOT_FOUND, "not-found", "No such Live asset."),
+    };
+    let mut response = Response::new(Body::from(bytes));
+    response
+        .headers_mut()
+        .insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
     response
         .headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
@@ -537,9 +573,10 @@ mod tests {
         assert!(html.contains("qbsheet-live-local-bundle"));
         assert!(html.contains("__QBSHEET_LIVE_LOCAL__"));
         assert!(html.contains(PUBLICATION));
+        assert!(html.contains(&format!("<base href=\"/live/{PUBLICATION}/\">")));
         assert!(html.contains("backendOrigin:window.location.origin"));
-        assert!(!html.contains("<script type=\"module\" crossorigin src=\"/assets/"));
-        assert!(!html.contains("<link rel=\"stylesheet\" crossorigin href=\"/assets/"));
+        assert!(html.contains("<script type=\"module\" src=\"./assets/app.js\"></script>"));
+        assert!(html.contains("<link rel=\"stylesheet\" href=\"./assets/styles.css\">"));
 
         let origin = format!(
             "http://{}:{}",
@@ -554,6 +591,40 @@ mod tests {
             .expect("local API request");
             assert_eq!(response.status(), reqwest::StatusCode::OK, "{path}");
         }
+        let javascript = reqwest::get(format!("{origin}/live/{PUBLICATION}/assets/app.js"))
+            .await
+            .expect("local JavaScript asset");
+        assert_eq!(javascript.status(), reqwest::StatusCode::OK);
+        assert_eq!(
+            javascript.headers()[reqwest::header::CONTENT_TYPE],
+            "text/javascript; charset=utf-8"
+        );
+        assert!(javascript
+            .text()
+            .await
+            .expect("JavaScript body")
+            .contains("QBSheet Live"));
+        let stylesheet = reqwest::get(format!("{origin}/live/{PUBLICATION}/assets/styles.css"))
+            .await
+            .expect("local stylesheet asset");
+        assert_eq!(stylesheet.status(), reqwest::StatusCode::OK);
+        assert_eq!(
+            stylesheet.headers()[reqwest::header::CONTENT_TYPE],
+            "text/css; charset=utf-8"
+        );
+        let deep_link = reqwest::get(format!("{origin}/live/{PUBLICATION}/standings"))
+            .await
+            .expect("local Live deep link");
+        assert_eq!(deep_link.status(), reqwest::StatusCode::OK);
+        assert!(deep_link
+            .text()
+            .await
+            .expect("deep link body")
+            .contains("qbsheet-live-local-bundle"));
+        let unknown_asset = reqwest::get(format!("{origin}/live/{PUBLICATION}/assets/secret.txt"))
+            .await
+            .expect("unknown local asset");
+        assert_eq!(unknown_asset.status(), reqwest::StatusCode::NOT_FOUND);
         runtime.stop().expect("stop server");
     }
 

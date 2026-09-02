@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import type { DirectorState } from '../domain';
+import { availableTimeZones, isValidTimeZone, timeZoneLabel, type DirectorState } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
+import type { OperatorProfile } from '../operator/operatorProfile';
 import { Button, FormField, PanelBody, PanelFooter, StateLabel } from '../components/Controls';
 import { PageHeader } from '../components/PageHeader';
 
@@ -8,21 +9,76 @@ export function SettingsView({
   state,
   controller,
   onAnnounce,
+  operatorProfile,
+  onSaveOperator,
 }: {
   state: DirectorState;
   controller: DirectorController;
   onAnnounce: (message: string) => void;
+  operatorProfile?: OperatorProfile;
+  onSaveOperator?: (profile: OperatorProfile) => void;
 }) {
-  const [name, setName] = useState(state.tournament?.name ?? '');
-  const [date, setDate] = useState(state.tournament?.date ?? '');
-  const [venue, setVenue] = useState(state.tournament?.venue ?? '');
-  const [organizer, setOrganizer] = useState(state.tournament?.organizer ?? '');
+  const tournamentDraftKey = [
+    state.tournament?.id ?? '',
+    state.tournament?.name ?? '',
+    state.tournament?.date ?? '',
+    state.tournament?.venue ?? '',
+    state.tournament?.organizer ?? '',
+    state.tournament?.timeZone ?? 'UTC',
+  ].join('|');
+  const [tournamentDraft, setTournamentDraft] = useState({
+    key: tournamentDraftKey,
+    name: state.tournament?.name ?? '',
+    date: state.tournament?.date ?? '',
+    venue: state.tournament?.venue ?? '',
+    organizer: state.tournament?.organizer ?? '',
+    timeZone: state.tournament?.timeZone ?? 'UTC',
+  });
+  const details =
+    tournamentDraft.key === tournamentDraftKey
+      ? tournamentDraft
+      : {
+          key: tournamentDraftKey,
+          name: state.tournament?.name ?? '',
+          date: state.tournament?.date ?? '',
+          venue: state.tournament?.venue ?? '',
+          organizer: state.tournament?.organizer ?? '',
+          timeZone: state.tournament?.timeZone ?? 'UTC',
+        };
+  const updateDetails = (changes: Partial<Omit<typeof details, 'key'>>) =>
+    setTournamentDraft({ ...details, ...changes, key: tournamentDraftKey });
+  const operatorDraftKey = `${operatorProfile?.displayName ?? ''}|${operatorProfile?.role ?? ''}`;
+  const [operatorDraft, setOperatorDraft] = useState({
+    key: operatorDraftKey,
+    name: operatorProfile?.displayName ?? 'Local operator',
+    role: operatorProfile?.role ?? '',
+  });
+  const operator =
+    operatorDraft.key === operatorDraftKey
+      ? operatorDraft
+      : {
+          key: operatorDraftKey,
+          name: operatorProfile?.displayName ?? 'Local operator',
+          role: operatorProfile?.role ?? '',
+        };
   const save = () => {
-    if (!name.trim()) {
+    if (!details.name.trim()) {
       onAnnounce('Enter a tournament name first.');
       return;
     }
-    if (!controller.updateTournament({ name, date, venue, organizer })) {
+    if (!isValidTimeZone(details.timeZone)) {
+      onAnnounce('Choose a recognized IANA timezone.');
+      return;
+    }
+    if (
+      !controller.updateTournament({
+        name: details.name,
+        date: details.date,
+        venue: details.venue,
+        organizer: details.organizer,
+        timeZone: details.timeZone,
+      })
+    ) {
       onAnnounce('Tournament details were not updated; review the Director error.');
       return;
     }
@@ -40,6 +96,55 @@ export function SettingsView({
           <section className="director-panel">
             <div className="director-panel-heading">
               <div>
+                <p className="director-eyebrow">Operator</p>
+                <h2>Local identity</h2>
+              </div>
+              <StateLabel state="info" label="App setting" />
+            </div>
+            <PanelBody>
+              <p className="director-panel-footnote">
+                Used to attribute new Director decisions. It is not authentication and is never copied into
+                QBJ, tournament archives, or QBSheet Live.
+              </p>
+              <div className="director-form-grid director-form-grid-two">
+                <FormField label="Display name">
+                  <input
+                    value={operator.name}
+                    onChange={(event) =>
+                      setOperatorDraft({ ...operator, key: operatorDraftKey, name: event.target.value })
+                    }
+                  />
+                </FormField>
+                <FormField label="Role">
+                  <input
+                    value={operator.role}
+                    onChange={(event) =>
+                      setOperatorDraft({ ...operator, key: operatorDraftKey, role: event.target.value })
+                    }
+                    placeholder="Tournament director"
+                  />
+                </FormField>
+              </div>
+            </PanelBody>
+            <PanelFooter>
+              <Button
+                variant="secondary"
+                disabled={!onSaveOperator || !operator.name.trim()}
+                onClick={() => {
+                  onSaveOperator?.({
+                    displayName: operator.name.trim(),
+                    role: operator.role.trim() || undefined,
+                  });
+                  onAnnounce('Operator identity saved locally.');
+                }}
+              >
+                Save operator
+              </Button>
+            </PanelFooter>
+          </section>
+          <section className="director-panel">
+            <div className="director-panel-heading">
+              <div>
                 <p className="director-eyebrow">Tournament</p>
                 <h2>Details</h2>
               </div>
@@ -54,17 +159,48 @@ export function SettingsView({
                 <PanelBody>
                   <div className="director-form-grid director-form-grid-single">
                     <FormField label="Name">
-                      <input value={name} onChange={(event) => setName(event.target.value)} />
+                      <input
+                        value={details.name}
+                        onChange={(event) => updateDetails({ name: event.target.value })}
+                      />
                     </FormField>
                     <FormField label="Date">
-                      <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+                      <input
+                        type="date"
+                        value={details.date}
+                        onChange={(event) => updateDetails({ date: event.target.value })}
+                      />
                     </FormField>
                     <FormField label="Venue">
-                      <input value={venue} onChange={(event) => setVenue(event.target.value)} />
+                      <input
+                        value={details.venue}
+                        onChange={(event) => updateDetails({ venue: event.target.value })}
+                      />
                     </FormField>
                     <FormField label="Organizer">
-                      <input value={organizer} onChange={(event) => setOrganizer(event.target.value)} />
+                      <input
+                        value={details.organizer}
+                        onChange={(event) => updateDetails({ organizer: event.target.value })}
+                      />
                     </FormField>
+                    <FormField
+                      label="Tournament timezone"
+                      hint={`${timeZoneLabel(details.timeZone)}. Changing this affects how future schedule inputs are interpreted; stored instants are not shifted.`}
+                    >
+                      <input
+                        list="director-time-zone-options"
+                        value={details.timeZone}
+                        onChange={(event) => updateDetails({ timeZone: event.target.value })}
+                        aria-label="Tournament timezone"
+                      />
+                    </FormField>
+                    <datalist id="director-time-zone-options">
+                      {availableTimeZones().map((zone) => (
+                        <option key={zone} value={zone}>
+                          {timeZoneLabel(zone)}
+                        </option>
+                      ))}
+                    </datalist>
                   </div>
                 </PanelBody>
                 <PanelFooter className="director-form-actions">
@@ -179,6 +315,53 @@ export function SettingsView({
               </table>
             </div>
           )}
+        </section>
+        <div className="director-two-column">
+          <section className="director-panel">
+            <div className="director-panel-heading">
+              <div>
+                <p className="director-eyebrow">Storage & recovery</p>
+                <h2>Local durability</h2>
+              </div>
+            </div>
+            <PanelBody>
+              <p>
+                Director checkpoints the active tournament locally. Browser preview uses IndexedDB; the
+                desktop app uses SQLite. Portable archives contain tournament data only, not the operator
+                profile or Live credential.
+              </p>
+            </PanelBody>
+          </section>
+          <section className="director-panel">
+            <div className="director-panel-heading">
+              <div>
+                <p className="director-eyebrow">Local network</p>
+                <h2>QBTCP and Live</h2>
+              </div>
+            </div>
+            <PanelBody>
+              <p>
+                QBTCP room control and the optional local QBSheet Live server are separate listeners. Start
+                and inspect them from their operational sections; spectator URLs never contain management
+                credentials.
+              </p>
+            </PanelBody>
+          </section>
+        </div>
+        <section className="director-panel">
+          <div className="director-panel-heading">
+            <div>
+              <p className="director-eyebrow">About & diagnostics</p>
+              <h2>Build information</h2>
+            </div>
+          </div>
+          <PanelBody>
+            <p>
+              Director schema v{state.schemaVersion} · {controller.repositoryKind}. If support is needed,
+              export diagnostics from the desktop app without sending private tournament content unless
+              requested.
+            </p>
+          </PanelBody>
         </section>
       </div>
     </>

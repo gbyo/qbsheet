@@ -576,6 +576,41 @@ async fn presence_help_and_roster_amendments_are_scoped_and_persisted() {
     assert_eq!(status, StatusCode::OK);
     assert!(idle["request"].is_null());
 
+    // Room DELETE is cancellation, not Director resolution. The trusted tournament-control
+    // operation records a distinct terminal event while keeping the request in history.
+    let (status, _, reopened_help) = request(
+        &server,
+        Method::POST,
+        "/qbtcp/v1/help",
+        &help_headers,
+        Some(
+            serde_json::to_vec(&json!({
+                "category": "rules-question",
+                "message": "Please confirm the round procedure."
+            }))
+            .unwrap(),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let resolved_id = reopened_help["request"]["id"].as_str().unwrap().to_owned();
+    let resolved = server.resolve_help(&resolved_id).unwrap();
+    assert_eq!(resolved.status, qbtcp_server::HelpStatus::Resolved);
+    assert!(matches!(
+        state.help_events().last(),
+        Some(qbtcp_server::HelpEvent::Resolved(request)) if request.id == resolved_id
+    ));
+    assert!(server.resolve_help(&resolved_id).is_err());
+    let (status, _, _) = request(
+        &server,
+        Method::DELETE,
+        &format!("/qbtcp/v1/help/{resolved_id}"),
+        &help_headers[..3],
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
     let roster = serde_json::to_vec(&json!({
         "sessionId": session_id,
         "team_id": "team-1",
