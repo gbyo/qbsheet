@@ -14,6 +14,7 @@ import { QbliveClient, QbliveClientError, type QbliveSnapshot } from '@qbsheet/q
 import type { LiveOutboxItem, LivePublication } from '../domain';
 import {
   acknowledgeOutboxItem,
+  markOutboxItemInFlight,
   nextOutboxItem,
   recordOutboxFailure,
   type PublishFailure,
@@ -69,19 +70,20 @@ export async function publishOnce(
 ): Promise<PublishAttempt | null> {
   const item = nextOutboxItem(publication, at);
   if (!item) return null;
+  const inFlight = markOutboxItemInFlight(publication, item.id, at);
 
   try {
     const acknowledged = await send(client, item);
     return {
       item,
       outcome: 'published',
-      publication: acknowledgeOutboxItem(publication, item.id, acknowledged, at),
+      publication: acknowledgeOutboxItem(inFlight, item.id, acknowledged, at),
     };
   } catch (reason) {
     return {
       item,
       outcome: 'failed',
-      publication: recordOutboxFailure(publication, item.id, classifyFailure(reason), currentSnapshot, at),
+      publication: recordOutboxFailure(inFlight, item.id, classifyFailure(reason), currentSnapshot, at),
     };
   }
 }
@@ -128,9 +130,13 @@ export function startPublicationWorker(hooks: WorkerHooks, intervalMs = 1000): (
     try {
       const { publication, snapshot } = hooks.read();
       if (!publication || !publication.settings.enabled) return;
-      const client = hooks.client(publication);
+      const next = nextOutboxItem(publication);
+      if (!next) return;
+      const inFlight = markOutboxItemInFlight(publication, next.id);
+      await hooks.write(inFlight);
+      const client = hooks.client(inFlight);
       if (!client) return;
-      const attempt = await publishOnce(publication, client, snapshot);
+      const attempt = await publishOnce(inFlight, client, snapshot);
       if (attempt) await hooks.write(attempt.publication);
     } catch {
       // A worker that throws is a worker that stops. Nothing here is allowed to be fatal: the

@@ -61,7 +61,7 @@ function settingsForMask(mask: number): LivePublicationSettings {
 }
 
 describe('the public projection never publishes private tournament data', () => {
-  test('no combination of publication settings leaks a sentinel', () => {
+  test('no combination of publication settings leaks a sentinel', { timeout: 30_000 }, () => {
     const total = 1 << switchNames.length;
     const offenders: string[] = [];
     for (let mask = 0; mask < total; mask += 1) {

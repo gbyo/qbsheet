@@ -459,8 +459,9 @@ export class QblivePublication extends DurableObject<Env> {
     if (snapshot.publicationId !== row.publication_id) {
       throw new HttpError(400, 'bad-request', 'That snapshot is for a different publication.');
     }
-    // A full snapshot is the conflict-repair path, so it is allowed to move the revision backwards
-    // as well as forwards: the publisher is asserting the authoritative state, not appending to it.
+    if (snapshot.revision <= row.revision) {
+      throw new HttpError(409, 'conflict', 'That revision has already been published.', row.revision);
+    }
     const sections: Partial<QbliveSections> = {};
     for (const name of qbliveSectionNames) {
       (sections as Record<string, unknown>)[name] = snapshot[name];
@@ -557,6 +558,9 @@ export class QblivePublication extends DurableObject<Env> {
     const row = await this.authorize(request);
     const body = (await this.readJson(request)) as { revision?: unknown; snapshot?: unknown };
     const snapshot = parseSnapshot(body.snapshot);
+    if (snapshot.revision <= row.revision) {
+      throw new HttpError(409, 'conflict', 'That revision has already been published.', row.revision);
+    }
     const sections: Partial<QbliveSections> = {};
     for (const name of qbliveSectionNames) (sections as Record<string, unknown>)[name] = snapshot[name];
     this.writeSections(sections, snapshot.revision);

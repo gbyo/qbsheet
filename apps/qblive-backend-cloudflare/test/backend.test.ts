@@ -158,12 +158,32 @@ describe('publishing', () => {
     expect(await response.json()).toMatchObject({ error: 'conflict', currentRevision: 5 });
   });
 
-  it('lets a full snapshot repair a conflict', async () => {
+  it('lets a full snapshot repair a conflict when the revision is newer', async () => {
     const token = await claim();
     await publishSnapshot(token, 5);
     expect((await publishSnapshot(token, 6)).status).toBe(200);
     const snapshot = (await (await SELF.fetch(`${publicBase}/snapshot`)).json()) as QbliveSnapshot;
     expect(snapshot.revision).toBe(6);
+  });
+
+  it('rejects a stale snapshot whose revision is older than the current one', async () => {
+    const token = await claim();
+    await publishSnapshot(token, 5);
+    const response = await publishSnapshot(token, 3);
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: 'conflict', currentRevision: 5 });
+    const snapshot = (await (await SELF.fetch(`${publicBase}/snapshot`)).json()) as QbliveSnapshot;
+    expect(snapshot.revision).toBe(5);
+  });
+
+  it('rejects a snapshot whose revision equals the current one', async () => {
+    const token = await claim();
+    await publishSnapshot(token, 5);
+    const response = await publishSnapshot(token, 5);
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: 'conflict', currentRevision: 5 });
+    const snapshot = (await (await SELF.fetch(`${publicBase}/snapshot`)).json()) as QbliveSnapshot;
+    expect(snapshot.revision).toBe(5);
   });
 
   it('rejects a malformed section update', async () => {

@@ -372,6 +372,24 @@ export function nextOutboxItem(publication: LivePublication, at = new Date()): L
   return null;
 }
 
+/**
+ * Mark an outbox item as in-flight so transient coalescing cannot replace it.
+ *
+ * Must be called before awaiting the network: otherwise a new score update that arrives while
+ * the previous publish is in-flight would be coalesced onto the same id and then be
+ * accidentally acknowledged when the in-flight request succeeds.
+ */
+export function markOutboxItemInFlight(
+  publication: LivePublication,
+  itemId: string,
+  at = new Date(),
+): LivePublication {
+  const outbox = publication.outbox.map((item) =>
+    item.id === itemId ? { ...item, state: 'in-flight' as const, lastAttemptAt: at.toISOString() } : item,
+  );
+  return { ...publication, outbox };
+}
+
 export interface NewAnnouncementInput {
   title: string;
   body: string;

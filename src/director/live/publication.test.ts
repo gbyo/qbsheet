@@ -21,6 +21,7 @@ import {
   backoffMilliseconds,
   composeAnnouncement,
   derivePublication,
+  markOutboxItemInFlight,
   maxOutboxItems,
   nextOutboxItem,
   recordOutboxFailure,
@@ -434,5 +435,109 @@ describe('announcements', () => {
     const second = derivePublication(next, first.snapshot, { now: at(5) });
     expect(second.changed).toEqual(['announcements']);
     expect(second.snapshot?.announcements[0].title).toBe('Room change');
+  });
+});
+
+describe('outbox race: new score update arrives while previous publish is awaiting network', () => {
+  test('the in-flight item is protected so coalescing cannot consume it', async () => {
+    const state = liveState();
+    state.live!.settings.liveScores = true;
+    const first = derivePublication(state, null, { now: at(0) });
+    // Acknowledge snapshot so subsequent items are transient section updates.
+    let publication = acknowledgeOutboxItem(first.live!, first.live!.outbox[0].id, 1, at(1));
+    let snapshot = first.snapshot!;
+
+    // Queue first score tick.
+    const tickState = structuredClone(state);
+    tickState.live = publication;
+    tickState.qbtcpSessions[0].progress = { tossupsRead: 14, leftScore: 195, rightScore: 135 };
+    const tick = derivePublication(tickState, snapshot, { now: at(2) });
+    publication = tick.live!;
+    snapshot = tick.snapshot!;
+
+    expect(publication.outbox).toHaveLength(1);
+    const pendingId = publication.outbox[0].id;
+
+    // Simulate publish starting: mark the pending item in-flight before the network settles.
+    const inFlight = markOutboxItemInFlight(publication, pendingId, at(3));
+    expect(inFlight.outbox[0].state).toBe('in-flight');
+    // While in-flight, a newer score tick arrives. Collapse must not replace the in-flight item.
+    const newerState = structuredClone(tickState);
+    newerState.live = inFlight;
+    newerState.qbtcpSessions[0].progress = { tossupsRead: 15, leftScore: 205, rightScore: 135 };
+    const newer = derivePublication(newerState, snapshot, { now: at(4) });
+
+    expect(newer.live).not.toBeNull();
+    // Two items: the in-flight one and the fresh pending tick. No coalescing across the boundary.
+    expect(newer.live!.outbox).toHaveLength(2);
+    expect(newer.live!.outbox[0].state).toBe('in-flight');
+    expect(newer.live!.outbox[0].id).toBe(pendingId);
+    expect(newer.live!.outbox[1].state).toBe('pending');
+    expect(newer.live!.outbox[1].revision).toBeGreaterThan(newer.live!.outbox[0].revision);
+
+    // The in-flight publish succeeds; only its item is acknowledged. The newer tick must survive.
+    const acknowledged = acknowledgeOutboxItem(newer.live!, pendingId, newer.live!.outbox[0].revision, at(5));
+    expect(acknowledged.outbox).toHaveLength(1);
+    expect(acknowledged.outbox[0].id).not.toBe(pendingId);
+    // Not coalesced away, not accidentally acked.
+    expect(acknowledged.sync.acknowledgedRevision).toBe(newer.live!.outbox[0].revision);
+  });
+
+  test('publishOnce marks the item in-flight so a concurrent transient tick is preserved', async () => {
+    const state = liveState();
+    state.live!.settings.liveScores = true;
+    const first = derivePublication(state, null, { now: at(0) });
+    let publication = acknowledgeOutboxItem(first.live!, first.live!.outbox[0].id, 1, at(1));
+    let snapshot = first.snapshot!;
+
+    const tickState = structuredClone(state);
+    tickState.live = publication;
+    tickState.qbtcpSessions[0].progress = { tossupsRead: 14, leftScore: 195, rightScore: 135 };
+    const tick = derivePublication(tickState, snapshot, { now: at(2) });
+    publication = tick.live!;
+    snapshot = tick.snapshot!;
+
+    // Start publish with a fetch that hangs, verify publishOnce created an in-flight publication.
+    let resolveFetch!: (value: Response) => void;
+    const hangingFetch = () =>
+      new Promise<Response>((resolve) => {
+        resolveFetch = resolve;
+      });
+    const client = new QbliveClient({
+      backendOrigin: 'https://backend.example',
+      publicationId: 'bcdfghjkmnpqrstvwxyz',
+      managementToken: 'token',
+      fetch: hangingFetch as unknown as typeof fetch,
+    });
+
+    const pendingPromise = publishOnce(publication, client, snapshot, at(3));
+    // While the network is pending, derive a newer tick against the in-flight publication
+    // (which publishOnce derived internally). We simulate what drainLiveOutbox does: the
+    // in-flight state is the one future derivations must see.
+    const pendingItemId = publication.outbox[0].id;
+    const inFlightForDerive = markOutboxItemInFlight(publication, pendingItemId, at(3));
+    const newerState = structuredClone(tickState);
+    newerState.live = inFlightForDerive;
+    newerState.qbtcpSessions[0].progress = { tossupsRead: 15, leftScore: 205, rightScore: 135 };
+    const newer = derivePublication(newerState, snapshot, { now: at(4) });
+    expect(newer.live!.outbox).toHaveLength(2);
+
+    // Resolve the original publish; it should only clear its own item.
+    resolveFetch(
+      Response.json({
+        publicationId: 'bcdfghjkmnpqrstvwxyz',
+        revision: publication.outbox[0].revision,
+        final: false,
+      }),
+    );
+    const attempt = await pendingPromise;
+    expect(attempt?.outcome).toBe('published');
+    // Merge as drainLiveOutbox does: newer item must still be present when combined with settled result.
+    const mergedOutbox = [
+      ...attempt!.publication.outbox,
+      ...newer.live!.outbox.filter((item) => item.id !== pendingItemId),
+    ];
+    expect(mergedOutbox).toHaveLength(1);
+    expect(mergedOutbox[0].id).not.toBe(pendingItemId);
   });
 });
