@@ -4,6 +4,8 @@ import type { DirectorController } from '../state/useDirectorController';
 import { Button, FormField, StateLabel } from '../components/Controls';
 import { PageHeader } from '../components/PageHeader';
 import type { SectionId } from '../app/navigation';
+import type { DirectorNavigationTarget } from '../app/navigationTarget';
+import { useNavigationHighlight } from '../app/useNavigationHighlight';
 import { describeWarning } from '../transfers/ingest';
 
 export function ResultsView({
@@ -11,29 +13,32 @@ export function ResultsView({
   controller,
   onNavigate,
   onAnnounce,
-  navigationTarget: _navigationTarget,
-  onClearNavigationTarget: _onClearNavigationTarget,
+  navigationTarget,
+  onClearNavigationTarget,
 }: {
   state: DirectorState;
   controller: DirectorController;
   onNavigate?: (section: SectionId) => void;
   onAnnounce: (message: string) => void;
-  navigationTarget?: any;
+  navigationTarget?: DirectorNavigationTarget | null;
   onClearNavigationTarget?: () => void;
 }) {
   const [filter, setFilter] = useState<'all' | 'review' | 'accepted' | 'rejected'>('all');
   const [showManual, setShowManual] = useState(false);
-  const submissions = useMemo(
-    () =>
-      state.submissions.filter(
-        (submission) =>
-          filter === 'all' ||
-          (filter === 'review'
-            ? submission.status === 'review' || submission.status === 'received'
-            : submission.status === filter),
-      ),
-    [filter, state.submissions],
-  );
+  const submissions = useMemo(() => {
+    const targetSubmissionId =
+      navigationTarget?.section === 'results' && navigationTarget.entityType === 'submission'
+        ? navigationTarget.entityId
+        : undefined;
+    return state.submissions.filter(
+      (submission) =>
+        submission.id === targetSubmissionId ||
+        filter === 'all' ||
+        (filter === 'review'
+          ? submission.status === 'review' || submission.status === 'received'
+          : submission.status === filter),
+    );
+  }, [filter, navigationTarget, state.submissions]);
   const reviewCount = state.submissions.filter(
     (submission) => submission.status === 'review' || submission.status === 'received',
   ).length;
@@ -121,6 +126,8 @@ export function ResultsView({
                       submission={submission}
                       controller={controller}
                       onAnnounce={onAnnounce}
+                      navigationTarget={navigationTarget}
+                      onClearNavigationTarget={onClearNavigationTarget}
                     />
                   ))}
                 </tbody>
@@ -129,7 +136,13 @@ export function ResultsView({
           )}
         </section>
         {state.scheduledGames.some((game) => !game.bye) && (
-          <ScheduledGamesPanel state={state} controller={controller} onAnnounce={onAnnounce} />
+          <ScheduledGamesPanel
+            state={state}
+            controller={controller}
+            onAnnounce={onAnnounce}
+            navigationTarget={navigationTarget}
+            onClearNavigationTarget={onClearNavigationTarget}
+          />
         )}
         {state.protests.length > 0 && (
           <ProtestsPanel state={state} controller={controller} onAnnounce={onAnnounce} />
@@ -143,13 +156,13 @@ function ScheduledGamesPanel({
   state,
   controller,
   onAnnounce,
-  navigationTarget: _navigationTarget,
-  onClearNavigationTarget: _onClearNavigationTarget,
+  navigationTarget,
+  onClearNavigationTarget,
 }: {
   state: DirectorState;
   controller: DirectorController;
   onAnnounce: (message: string) => void;
-  navigationTarget?: any;
+  navigationTarget?: DirectorNavigationTarget | null;
   onClearNavigationTarget?: () => void;
 }) {
   const [confirmCancelId, setConfirmCancelId] = useState<string | null>(null);
@@ -177,62 +190,109 @@ function ScheduledGamesPanel({
             </tr>
           </thead>
           <tbody>
-            {games.map((game) => {
-              const round = state.rounds.find((entry) => entry.id === game.roundId);
-              const room = game.roomId ? state.rooms.find((entry) => entry.id === game.roomId) : undefined;
-              const canCancel = !['accepted', 'cancelled'].includes(game.status);
-              const confirming = confirmCancelId === game.id;
-              return (
-                <tr key={game.id}>
-                  <td>
-                    <strong>
-                      {teamLabel(state, game.leftTeamId)} · {teamLabel(state, game.rightTeamId)}
-                    </strong>
-                    <small className="director-table-subtext">{game.id}</small>
-                  </td>
-                  <td>{round?.name ?? 'Unknown round'}</td>
-                  <td>{room?.name ?? 'Unassigned'}</td>
-                  <td>
-                    <StateLabel state={game.status} label={game.status} />
-                  </td>
-                  <td>
-                    {canCancel && (
-                      <div className="director-row-actions">
-                        {confirming ? (
-                          <>
-                            <Button
-                              variant="danger"
-                              onClick={() => {
-                                const cancelled = controller.cancelScheduledGame(game.id);
-                                if (cancelled) {
-                                  setConfirmCancelId(null);
-                                  onAnnounce('Scheduled game cancelled; the round can now close without it.');
-                                } else {
-                                  onAnnounce('The game was not cancelled; review the Director error.');
-                                }
-                              }}
-                            >
-                              Confirm cancel
-                            </Button>
-                            <Button variant="quiet" onClick={() => setConfirmCancelId(null)}>
-                              Keep game
-                            </Button>
-                          </>
-                        ) : (
-                          <Button variant="quiet" onClick={() => setConfirmCancelId(game.id)}>
-                            Cancel game
-                          </Button>
-                        )}
-                      </div>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
+            {games.map((game) => (
+              <ScheduledGameRow
+                key={game.id}
+                state={state}
+                game={game}
+                controller={controller}
+                onAnnounce={onAnnounce}
+                navigationTarget={navigationTarget}
+                onClearNavigationTarget={onClearNavigationTarget}
+                confirming={confirmCancelId === game.id}
+                onConfirmCancel={() => setConfirmCancelId(null)}
+                onRequestCancel={() => setConfirmCancelId(game.id)}
+              />
+            ))}
           </tbody>
         </table>
       </div>
     </section>
+  );
+}
+
+function ScheduledGameRow({
+  state,
+  game,
+  controller,
+  onAnnounce,
+  navigationTarget,
+  onClearNavigationTarget,
+  confirming,
+  onConfirmCancel,
+  onRequestCancel,
+}: {
+  state: DirectorState;
+  game: DirectorState['scheduledGames'][number];
+  controller: DirectorController;
+  onAnnounce: (message: string) => void;
+  navigationTarget?: DirectorNavigationTarget | null;
+  onClearNavigationTarget?: () => void;
+  confirming: boolean;
+  onConfirmCancel: () => void;
+  onRequestCancel: () => void;
+}) {
+  const round = state.rounds.find((entry) => entry.id === game.roundId);
+  const room = game.roomId ? state.rooms.find((entry) => entry.id === game.roomId) : undefined;
+  const gameNavigation = useNavigationHighlight(
+    navigationTarget,
+    'results',
+    'game',
+    game.id,
+    onClearNavigationTarget,
+  );
+  const canCancel = !['accepted', 'cancelled'].includes(game.status);
+  return (
+    <tr
+      tabIndex={-1}
+      className={gameNavigation ? 'is-navigation-target' : undefined}
+      data-director-navigation-id={game.id}
+    >
+      <td>
+        <span data-director-navigation-focus tabIndex={-1}>
+          <strong>
+            {teamLabel(state, game.leftTeamId)} · {teamLabel(state, game.rightTeamId)}
+          </strong>
+          <small className="director-table-subtext">{game.id}</small>
+        </span>
+      </td>
+      <td>{round?.name ?? 'Unknown round'}</td>
+      <td>{room?.name ?? 'Unassigned'}</td>
+      <td>
+        <StateLabel state={game.status} label={game.status} />
+      </td>
+      <td>
+        {canCancel && (
+          <div className="director-row-actions">
+            {confirming ? (
+              <>
+                <Button
+                  variant="danger"
+                  onClick={() => {
+                    const cancelled = controller.cancelScheduledGame(game.id);
+                    if (cancelled) {
+                      onConfirmCancel();
+                      onAnnounce('Scheduled game cancelled; the round can now close without it.');
+                    } else {
+                      onAnnounce('The game was not cancelled; review the Director error.');
+                    }
+                  }}
+                >
+                  Confirm cancel
+                </Button>
+                <Button variant="quiet" onClick={onConfirmCancel}>
+                  Keep game
+                </Button>
+              </>
+            ) : (
+              <Button variant="quiet" onClick={onRequestCancel}>
+                Cancel game
+              </Button>
+            )}
+          </div>
+        )}
+      </td>
+    </tr>
   );
 }
 
@@ -241,16 +301,23 @@ function ResultRow({
   submission,
   controller,
   onAnnounce,
-  navigationTarget: _navigationTarget,
-  onClearNavigationTarget: _onClearNavigationTarget,
+  navigationTarget,
+  onClearNavigationTarget,
 }: {
   state: DirectorState;
   submission: DirectorState['submissions'][number];
   controller: DirectorController;
   onAnnounce: (message: string) => void;
-  navigationTarget?: any;
+  navigationTarget?: DirectorNavigationTarget | null;
   onClearNavigationTarget?: () => void;
 }) {
+  const submissionNavigation = useNavigationHighlight(
+    navigationTarget,
+    'results',
+    'submission',
+    submission.id,
+    onClearNavigationTarget,
+  );
   const [action, setAction] = useState<'associate' | 'edit' | 'protest' | null>(null);
   const game = state.games.find((entry) => entry.id === submission.gameId);
   const scheduled = game
@@ -272,8 +339,16 @@ function ResultRow({
   const reviewWarnings = submission.warnings ?? [];
   const cancelledGame = scheduled?.status === 'cancelled' || game?.status === 'cancelled';
   return (
-    <tr>
-      <td>{formatTime(submission.receivedAt)}</td>
+    <tr
+      tabIndex={-1}
+      className={submissionNavigation ? 'is-navigation-target' : undefined}
+      data-director-navigation-id={submission.id}
+    >
+      <td>
+        <span data-director-navigation-focus tabIndex={-1}>
+          {formatTime(submission.receivedAt)}
+        </span>
+      </td>
       <td>
         <strong>{scheduled ? `${left} · ${right}` : left}</strong>
         <small className="director-table-subtext">
@@ -423,7 +498,7 @@ function AssociateResult({
   onCancel: () => void;
   onSuccess: () => void;
   onAnnounce: (message: string) => void;
-  navigationTarget?: any;
+  navigationTarget?: DirectorNavigationTarget | null;
   onClearNavigationTarget?: () => void;
 }) {
   const choices = state.scheduledGames.filter(
@@ -504,7 +579,7 @@ function AcceptedResultEditor({
   onCancel: () => void;
   onSuccess: () => void;
   onAnnounce: (message: string) => void;
-  navigationTarget?: any;
+  navigationTarget?: DirectorNavigationTarget | null;
   onClearNavigationTarget?: () => void;
 }) {
   const leftScore = game.scores.find((entry) => entry.teamId === scheduled.leftTeamId);
@@ -584,7 +659,7 @@ function ProtestCreator({
   onCancel: () => void;
   onSuccess: () => void;
   onAnnounce: (message: string) => void;
-  navigationTarget?: any;
+  navigationTarget?: DirectorNavigationTarget | null;
   onClearNavigationTarget?: () => void;
 }) {
   const [category, setCategory] = useState<'tossup' | 'bonus' | 'procedure' | 'other'>('other');
@@ -648,7 +723,7 @@ function ProtestsPanel({
   state: DirectorState;
   controller: DirectorController;
   onAnnounce: (message: string) => void;
-  navigationTarget?: any;
+  navigationTarget?: DirectorNavigationTarget | null;
   onClearNavigationTarget?: () => void;
 }) {
   return (
@@ -718,7 +793,7 @@ function ProtestRuling({
   state: DirectorState;
   controller: DirectorController;
   onAnnounce: (message: string) => void;
-  navigationTarget?: any;
+  navigationTarget?: DirectorNavigationTarget | null;
   onClearNavigationTarget?: () => void;
 }) {
   const game = state.games.find((entry) => entry.id === protest.gameId);
@@ -800,7 +875,7 @@ function ManualResult({
   controller: DirectorController;
   onSuccess: () => void;
   onAnnounce: (message: string) => void;
-  navigationTarget?: any;
+  navigationTarget?: DirectorNavigationTarget | null;
   onClearNavigationTarget?: () => void;
 }) {
   const choices = state.scheduledGames.filter(

@@ -510,6 +510,7 @@ pub enum SessionEvent {
 pub enum HelpEvent {
     Opened(HelpRequest),
     Cancelled(HelpRequest),
+    Resolved(HelpRequest),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Error)]

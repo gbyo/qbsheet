@@ -49,6 +49,7 @@ export function directorFixture(options: FixtureOptions = {}): DirectorState {
       bonusParts: 3,
       bouncebacks: false,
       overtime: true,
+      timed: false,
       lightning: false,
       maximumActivePlayers: 4,
       regulationMinutes: 26,

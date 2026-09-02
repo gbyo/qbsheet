@@ -6,6 +6,7 @@ import {
   fallbackTimeZone,
   normalizeTimeZone,
   normalizeTimelineEvents,
+  rosterAmendmentId,
   type DirectorState,
   type GameRecord,
   type LiveBackendDescriptor,
@@ -57,6 +58,10 @@ export function migrateDirectorState(
       current = migrateV2ToV3(current);
     } else if (currentVersion === 3) {
       current = migrateV3ToV4(current);
+    } else if (currentVersion === 4) {
+      current = migrateV4ToV5(current);
+    } else if (currentVersion === 5) {
+      current = migrateV5ToV6(current);
     } else {
       throw new Error(`No Director migration exists for schema v${currentVersion}.`);
     }
@@ -86,6 +91,38 @@ function migrateV3ToV4(value: Record<string, unknown>): Record<string, unknown> 
           : null,
     startedAt: null,
   }));
+  return next;
+}
+
+/** v5 turns imported QBTCP roster observations into explicit, durable Director decisions. */
+function migrateV4ToV5(value: Record<string, unknown>): Record<string, unknown> {
+  const next = structuredClone(value);
+  next.qbtcpRosterAmendments = normalizeRosterAmendments(next.qbtcpRosterAmendments);
+  return next;
+}
+
+/** v6 makes timed regulation an explicit Director rule instead of an assignment-only default. */
+function migrateV5ToV6(value: Record<string, unknown>): Record<string, unknown> {
+  const next = structuredClone(value);
+  const tournament = asRecord(next.tournament);
+  const rules = tournament ? asRecord(tournament.rules) : null;
+  if (tournament && rules) {
+    const nestedProcedure = ['roomProcedure', 'room_procedure', 'procedure', 'regulation']
+      .map((key) => asRecord(rules[key]))
+      .find((procedure) => procedure && typeof procedure.timed === 'boolean');
+    next.tournament = {
+      ...tournament,
+      rules: {
+        ...rules,
+        timed:
+          typeof rules.timed === 'boolean'
+            ? rules.timed
+            : nestedProcedure && typeof nestedProcedure.timed === 'boolean'
+              ? nestedProcedure.timed
+              : false,
+      },
+    };
+  }
   return next;
 }
 
@@ -184,7 +221,7 @@ function completeState(value: Record<string, unknown>): DirectorState {
     audit: arrayOrEmpty(candidate.audit, 'audit'),
     qbtcpSessions: arrayOrEmpty(candidate.qbtcpSessions, 'qbtcpSessions'),
     qbtcpHelpRequests: arrayOrEmpty(candidate.qbtcpHelpRequests, 'qbtcpHelpRequests'),
-    qbtcpRosterAmendments: arrayOrEmpty(candidate.qbtcpRosterAmendments, 'qbtcpRosterAmendments'),
+    qbtcpRosterAmendments: normalizeRosterAmendments(candidate.qbtcpRosterAmendments),
     timeline: normalizeTimelineEvents(candidate.timeline),
     live: normalizeLivePublication(candidate.live),
     transfers: normalizeTransferState(candidate.transfers),
@@ -192,6 +229,34 @@ function completeState(value: Record<string, unknown>): DirectorState {
   state.submissions = supersedeDuplicateScheduledSubmissions(state);
   state.packets = canonicalizePacketReferences(state);
   return state;
+}
+
+function normalizeRosterAmendments(value: unknown): DirectorState['qbtcpRosterAmendments'] {
+  return arrayOfRecords(value, 'qbtcpRosterAmendments').map((entry, index) => {
+    const sessionId = stringOrNull(entry.sessionId);
+    if (!sessionId)
+      throw new Error(`Director storage contains an invalid qbtcpRosterAmendments[${index}] entry.`);
+    const amendment = asRecord(entry.amendment);
+    if (!amendment)
+      throw new Error(`Director storage contains an invalid qbtcpRosterAmendments[${index}] amendment.`);
+    const status = entry.status;
+    return {
+      ...entry,
+      id: stringOrNull(entry.id) ?? rosterAmendmentId(sessionId, amendment),
+      sessionId,
+      amendment: structuredClone(amendment),
+      status:
+        status === 'approved-new' || status === 'mapped-existing' || status === 'rejected'
+          ? status
+          : 'pending',
+      decidedAt: stringOrNull(entry.decidedAt),
+      decidedBy: stringOrNull(entry.decidedBy),
+      mappedPlayerId: stringOrNull(entry.mappedPlayerId),
+      ...(typeof entry.decisionReason === 'string' && entry.decisionReason.trim()
+        ? { decisionReason: entry.decisionReason.trim() }
+        : {}),
+    };
+  });
 }
 
 function normalizeRounds(value: unknown): DirectorState['rounds'] {
@@ -257,6 +322,11 @@ function normalizeTournamentRules(value: Record<string, unknown>): TournamentRul
   if (isIntegerAtLeast(value.bonusParts, 1)) rules.bonusParts = value.bonusParts;
   if (typeof value.bouncebacks === 'boolean') rules.bouncebacks = value.bouncebacks;
   if (typeof value.overtime === 'boolean') rules.overtime = value.overtime;
+  const nestedProcedure = ['roomProcedure', 'room_procedure', 'procedure', 'regulation']
+    .map((key) => asRecord(value[key]))
+    .find((procedure) => procedure && typeof procedure.timed === 'boolean');
+  if (typeof value.timed === 'boolean') rules.timed = value.timed;
+  else if (nestedProcedure && typeof nestedProcedure.timed === 'boolean') rules.timed = nestedProcedure.timed;
   if (typeof value.lightning === 'boolean') rules.lightning = value.lightning;
   if (isIntegerAtLeast(value.maximumActivePlayers, 1)) {
     rules.maximumActivePlayers = value.maximumActivePlayers;

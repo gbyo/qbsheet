@@ -7,6 +7,7 @@ import { useDirectorController } from '../state/useDirectorController';
 import { OverviewView } from '../overview/OverviewView';
 import { TeamsView } from '../teams/TeamsView';
 import { FormatView } from '../format/FormatView';
+import { ScheduleView } from '../schedule/ScheduleView';
 import { RoomsView } from '../rooms/RoomsView';
 import { PacketsView } from '../packets/PacketsView';
 import { TournamentView } from '../tournament/TournamentView';
@@ -27,7 +28,12 @@ import {
 import type { DirectorTournamentInput } from '@qbsheet/tournament-formats';
 import { localCalendarDate } from './date';
 import { HelpDialog } from '../help/HelpDialog';
-import { loadOperatorProfile, operatorInitials, saveOperatorProfile, type OperatorProfile } from '../operator/operatorProfile';
+import {
+  loadOperatorProfile,
+  operatorInitials,
+  saveOperatorProfile,
+  type OperatorProfile,
+} from '../operator/operatorProfile';
 import type { DirectorNavigationTarget } from './navigationTarget';
 
 export default function DirectorApp() {
@@ -52,6 +58,7 @@ export default function DirectorApp() {
   const [operatorDialogOpen, setOperatorDialogOpen] = useState(false);
   const [navigationTarget, setNavigationTarget] = useState<DirectorNavigationTarget | null>(null);
   const [tournamentMenuOpen, setTournamentMenuOpen] = useState(false);
+  const [newTournamentOpen, setNewTournamentOpen] = useState(false);
   const tournamentButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -105,6 +112,22 @@ export default function DirectorApp() {
       </>
     );
   const tournament = state.tournament;
+  const catalog = [
+    ...(controller.tournaments.some((entry) => entry.id === tournament.id)
+      ? controller.tournaments
+      : [
+          {
+            id: tournament.id,
+            name: tournament.name,
+            date: tournament.date,
+            status: tournament.status,
+            createdAt: tournament.createdAt,
+            updatedAt: tournament.updatedAt,
+          },
+        ]),
+  ];
+  const recentTournaments = catalog.filter((entry) => entry.status !== 'archived');
+  const archivedTournaments = catalog.filter((entry) => entry.status === 'archived');
 
   const navigate = (section: SectionId, target?: DirectorNavigationTarget | null) => {
     setActiveSection(section);
@@ -190,6 +213,8 @@ export default function DirectorApp() {
             onAnnounce={setAnnouncement}
           />
         );
+      case 'schedule':
+        return <ScheduleView state={controller.state} controller={controller} onAnnounce={setAnnouncement} />;
       case 'rooms':
         return (
           <RoomsView
@@ -251,7 +276,19 @@ export default function DirectorApp() {
       case 'live':
         return <LiveView state={controller.state} actions={controller.live} onAnnounce={setAnnouncement} />;
       case 'settings':
-        return <SettingsView state={controller.state} controller={controller} onAnnounce={setAnnouncement} operatorProfile={operatorProfile} onSaveOperator={(p) => { setOperatorProfile(p); saveOperatorProfile(p); setAnnouncement('Operator profile saved.'); }} />;
+        return (
+          <SettingsView
+            state={controller.state}
+            controller={controller}
+            onAnnounce={setAnnouncement}
+            operatorProfile={operatorProfile}
+            onSaveOperator={(p) => {
+              setOperatorProfile(p);
+              saveOperatorProfile(p);
+              setAnnouncement('Operator profile saved.');
+            }}
+          />
+        );
     }
   };
 
@@ -286,28 +323,166 @@ export default function DirectorApp() {
             <div role="menu" className="director-tournament-menu" aria-label="Tournament switcher">
               <div className="director-tournament-menu-header">
                 <strong>{tournament.name}</strong>
-                <small>{tournament.date} · {statusLabel(tournament.status)}</small>
+                <small>
+                  {tournament.date} · {statusLabel(tournament.status)}
+                </small>
                 <small className="director-mono">{tournament.id.slice(0, 8)}</small>
               </div>
               <div role="separator" className="director-menu-separator" />
-              <button role="menuitem" type="button" className="director-menu-item" onClick={() => { setTournamentMenuOpen(false); setHelpOpen(true); }}>
-                View tournament details
-              </button>
-              <button role="menuitem" type="button" className="director-menu-item" onClick={() => {
-                setTournamentMenuOpen(false);
-                if (confirm('Create a new tournament? Current tournament remains saved locally.')) {
-                  // For now, navigate to new-tournament flow via reset: controller will handle create
-                  setAnnouncement('Use the new tournament form after saving current work.');
-                }
-              }}>
+              <p className="director-menu-section-label">Recent tournaments</p>
+              {recentTournaments.map((entry) => (
+                <button
+                  key={entry.id}
+                  role="menuitem"
+                  type="button"
+                  className={`director-menu-item ${entry.id === tournament.id ? 'is-selected' : ''}`}
+                  onClick={() => {
+                    setTournamentMenuOpen(false);
+                    void controller.switchTournament(entry.id).then((switched) => {
+                      if (switched) setAnnouncement(`Opened ${entry.name}.`);
+                    });
+                  }}
+                >
+                  <span>{entry.name}</span>
+                  <small>{entry.date || statusLabel(entry.status)}</small>
+                </button>
+              ))}
+              {archivedTournaments.length > 0 && (
+                <>
+                  <p className="director-menu-section-label">Archived</p>
+                  {archivedTournaments.map((entry) => (
+                    <div className="director-menu-item director-menu-item-with-action" key={entry.id}>
+                      <button
+                        role="menuitem"
+                        type="button"
+                        onClick={() => {
+                          setTournamentMenuOpen(false);
+                          void controller.switchTournament(entry.id).then((switched) => {
+                            if (switched) setAnnouncement(`Opened archived tournament ${entry.name}.`);
+                          });
+                        }}
+                      >
+                        <span>{entry.name}</span>
+                        <small>{entry.date || 'Archived'}</small>
+                      </button>
+                      <button
+                        type="button"
+                        className="director-inline-action"
+                        onClick={() => {
+                          void controller.reopenTournament(entry.id).then((reopened) => {
+                            if (reopened) setAnnouncement(`${entry.name} reopened as a draft.`);
+                          });
+                        }}
+                      >
+                        Reopen
+                      </button>
+                    </div>
+                  ))}
+                </>
+              )}
+              <button
+                role="menuitem"
+                type="button"
+                className="director-menu-item"
+                onClick={() => {
+                  setTournamentMenuOpen(false);
+                  setNewTournamentOpen(true);
+                }}
+              >
                 New tournament…
               </button>
-              <label role="menuitem" className="director-menu-item director-menu-file">
+              <label className="director-menu-item director-menu-file">
                 Open archive…
-                <input type="file" accept=".qbst,.qbj,.json" className="director-visually-hidden-input" onChange={(e) => { setTournamentMenuOpen(false); void (async () => { const f = e.target.files?.[0]; if (!f) return; const text = await f.text(); try { const parsed = JSON.parse(text); const { importDirectorTournament } = await import('../format/interchange'); if (parsed && typeof parsed === 'object' && 'schemaVersion' in parsed) { controller.importSnapshot(parsed); } else if (parsed && typeof parsed === 'object' && 'tournament' in parsed) { controller.importSnapshot(importDirectorTournament(parsed as DirectorTournamentInput)); } setAnnouncement('Archive imported.'); } catch { setAnnouncement('Could not open archive.'); } })(); e.currentTarget.value=''; }} />
+                <input
+                  type="file"
+                  accept=".qbst,.qbj,.json"
+                  className="director-visually-hidden-input"
+                  onChange={(event) => {
+                    setTournamentMenuOpen(false);
+                    const file = event.currentTarget.files?.[0];
+                    void (async () => {
+                      if (!file) return;
+                      try {
+                        const extension = file.name.toLocaleLowerCase().split('.').at(-1);
+                        if (extension === 'qbst') {
+                          const report = importArchiveBytes(new Uint8Array(await file.arrayBuffer()));
+                          if (!report.ok || !report.state)
+                            throw new Error(report.errors.join(' ') || 'That archive is not valid.');
+                          if (!controller.importSnapshot(report.state))
+                            throw new Error('That archive could not be imported.');
+                          setAnnouncement(
+                            importWarningMessage('Portable archive imported.', report.warnings),
+                          );
+                          return;
+                        }
+                        const text = await file.text();
+                        if (extension === 'qbj') {
+                          const report = importQbjText(text);
+                          if (!report.ok || !report.state)
+                            throw new Error(report.errors.join(' ') || 'That QBJ file is not valid.');
+                          if (!controller.importSnapshot(report.state))
+                            throw new Error('That QBJ file could not be imported.');
+                          setAnnouncement(importWarningMessage('QBJ tournament imported.', report.warnings));
+                          return;
+                        }
+                        const parsed: unknown = JSON.parse(text);
+                        if (isDirectorStateLike(parsed)) {
+                          if (!controller.importSnapshot(parsed))
+                            throw new Error('That Director state could not be imported.');
+                        } else if (isDirectorTournamentLike(parsed)) {
+                          if (
+                            !controller.importSnapshot(
+                              importDirectorTournament(parsed as DirectorTournamentInput),
+                            )
+                          )
+                            throw new Error('That tournament data could not be imported.');
+                        } else {
+                          const report = importQbjText(text);
+                          if (!report.ok || !report.state)
+                            throw new Error(
+                              report.errors.join(' ') || 'That file is not a supported archive.',
+                            );
+                          if (!controller.importSnapshot(report.state))
+                            throw new Error('That QBJ tournament could not be imported.');
+                          setAnnouncement(importWarningMessage('QBJ tournament imported.', report.warnings));
+                          return;
+                        }
+                        setAnnouncement('Tournament archive imported and opened.');
+                      } catch (reason: unknown) {
+                        setAnnouncement(
+                          reason instanceof Error ? reason.message : 'That archive could not be opened.',
+                        );
+                      }
+                    })();
+                    event.currentTarget.value = '';
+                  }}
+                />
               </label>
               <div role="separator" className="director-menu-separator" />
-              <div className="director-menu-note">Multi-tournament library persists locally; switch retains current save.</div>
+              <button
+                role="menuitem"
+                type="button"
+                className="director-menu-item"
+                onClick={() => {
+                  if (
+                    !confirm(
+                      `Archive ${tournament.name}? It will leave the recent list but remain reopenable.`,
+                    )
+                  )
+                    return;
+                  setTournamentMenuOpen(false);
+                  void controller.archiveTournament().then((archived) => {
+                    if (archived) setAnnouncement(`${tournament.name} archived.`);
+                  });
+                }}
+                disabled={tournament.status !== 'complete'}
+              >
+                Archive current tournament
+              </button>
+              <div className="director-menu-note">
+                Recent and archived tournament documents persist locally; switching checkpoints the outgoing
+                document first.
+              </div>
             </div>
           )}
         </div>
@@ -370,9 +545,39 @@ export default function DirectorApp() {
             </button>
             {operatorMenuOpen && (
               <div role="menu" className="director-operator-menu" aria-label="Operator menu">
-                <button role="menuitem" type="button" className="director-menu-item" onClick={() => { setOperatorMenuOpen(false); setOperatorDialogOpen(true); }}>Operator profile…</button>
-                <button role="menuitem" type="button" className="director-menu-item" onClick={() => { setOperatorMenuOpen(false); navigate('settings'); }}>Settings</button>
-                <button role="menuitem" type="button" className="director-menu-item" onClick={() => { setOperatorMenuOpen(false); setHelpOpen(true); }}>Keyboard shortcuts / Help</button>
+                <button
+                  role="menuitem"
+                  type="button"
+                  className="director-menu-item"
+                  onClick={() => {
+                    setOperatorMenuOpen(false);
+                    setOperatorDialogOpen(true);
+                  }}
+                >
+                  Operator profile…
+                </button>
+                <button
+                  role="menuitem"
+                  type="button"
+                  className="director-menu-item"
+                  onClick={() => {
+                    setOperatorMenuOpen(false);
+                    navigate('settings');
+                  }}
+                >
+                  Settings
+                </button>
+                <button
+                  role="menuitem"
+                  type="button"
+                  className="director-menu-item"
+                  onClick={() => {
+                    setOperatorMenuOpen(false);
+                    setHelpOpen(true);
+                  }}
+                >
+                  Keyboard shortcuts / Help
+                </button>
               </div>
             )}
           </div>
@@ -400,7 +605,9 @@ export default function DirectorApp() {
                   role="combobox"
                   aria-autocomplete="list"
                   aria-expanded={search.trim().length > 0}
-                  aria-controls={search.trim() && searchResults.length ? 'director-search-results' : undefined}
+                  aria-controls={
+                    search.trim() && searchResults.length ? 'director-search-results' : undefined
+                  }
                   aria-activedescendant={
                     activeSearchIndex >= 0 ? `director-search-result-${activeSearchIndex}` : undefined
                   }
@@ -479,19 +686,124 @@ export default function DirectorApp() {
           </div>
         )}
       </main>
-      <HelpDialog open={helpOpen} onClose={() => { setHelpOpen(false); helpButtonRef.current?.focus(); }} />
+      <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
+      {newTournamentOpen && (
+        <NewTournamentDialog
+          controller={controller}
+          onClose={() => setNewTournamentOpen(false)}
+          onCreated={(name) => {
+            setNewTournamentOpen(false);
+            setAnnouncement(`${name} created.`);
+          }}
+        />
+      )}
       {operatorDialogOpen && (
         <OperatorProfileDialog
           profile={operatorProfile}
           onClose={() => setOperatorDialogOpen(false)}
-          onSave={(p) => { setOperatorProfile(p); saveOperatorProfile(p); setOperatorDialogOpen(false); setAnnouncement('Operator profile saved.'); }}
+          onSave={(p) => {
+            setOperatorProfile(p);
+            saveOperatorProfile(p);
+            setOperatorDialogOpen(false);
+            setAnnouncement('Operator profile saved.');
+          }}
         />
       )}
     </div>
   );
 }
 
-function OperatorProfileDialog({ profile, onClose, onSave }: { profile: OperatorProfile; onClose: () => void; onSave: (p: OperatorProfile) => void; }) {
+function NewTournamentDialog({
+  controller,
+  onClose,
+  onCreated,
+}: {
+  controller: ReturnType<typeof useDirectorController>;
+  onClose: () => void;
+  onCreated: (name: string) => void;
+}) {
+  const [name, setName] = useState('');
+  const [date, setDate] = useState(() => localCalendarDate());
+  const [venue, setVenue] = useState('');
+  const [organizer, setOrganizer] = useState('');
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const firstFieldRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    if (!dialog.open) dialog.showModal();
+    firstFieldRef.current?.focus();
+    const cancel = (event: Event) => {
+      event.preventDefault();
+      onClose();
+    };
+    dialog.addEventListener('cancel', cancel);
+    return () => dialog.removeEventListener('cancel', cancel);
+  }, [onClose]);
+  const create = () => {
+    const trimmedName = name.trim();
+    if (!trimmedName) return;
+    controller.createTournament({ name: trimmedName, date, venue, organizer });
+    onCreated(trimmedName);
+  };
+  return (
+    <dialog
+      ref={dialogRef}
+      className="director-operator-dialog"
+      aria-labelledby="new-tournament-dialog-title"
+    >
+      <div className="director-help-dialog-header">
+        <h2 id="new-tournament-dialog-title">New tournament</h2>
+        <button type="button" className="director-button director-button-secondary" onClick={onClose}>
+          Cancel
+        </button>
+      </div>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          create();
+        }}
+      >
+        <div className="director-form-grid director-form-grid-single" style={{ marginTop: 16 }}>
+          <label className="director-form-field">
+            <span>Tournament name</span>
+            <input ref={firstFieldRef} value={name} onChange={(event) => setName(event.target.value)} />
+          </label>
+          <label className="director-form-field">
+            <span>Date</span>
+            <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+          </label>
+          <label className="director-form-field">
+            <span>Venue</span>
+            <input value={venue} onChange={(event) => setVenue(event.target.value)} />
+          </label>
+          <label className="director-form-field">
+            <span>Organizer</span>
+            <input value={organizer} onChange={(event) => setOrganizer(event.target.value)} />
+          </label>
+        </div>
+        <div className="director-form-actions" style={{ marginTop: 16 }}>
+          <Button variant="primary" type="submit" disabled={!name.trim()}>
+            Create tournament
+          </Button>
+          <Button variant="secondary" type="button" onClick={onClose}>
+            Cancel
+          </Button>
+        </div>
+      </form>
+    </dialog>
+  );
+}
+
+function OperatorProfileDialog({
+  profile,
+  onClose,
+  onSave,
+}: {
+  profile: OperatorProfile;
+  onClose: () => void;
+  onSave: (p: OperatorProfile) => void;
+}) {
   const [name, setName] = useState(profile.displayName);
   const [role, setRole] = useState(profile.role ?? '');
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -499,17 +811,29 @@ function OperatorProfileDialog({ profile, onClose, onSave }: { profile: Operator
     const d = dialogRef.current;
     if (!d) return;
     if (!d.open) d.showModal();
-    const h = (e: Event) => { e.preventDefault(); onClose(); };
+    const h = (e: Event) => {
+      e.preventDefault();
+      onClose();
+    };
     d.addEventListener('cancel', h);
     return () => d.removeEventListener('cancel', h);
   }, [onClose]);
   return (
-    <dialog ref={dialogRef} className="director-operator-dialog" aria-labelledby="operator-dialog-title" onClose={onClose}>
+    <dialog
+      ref={dialogRef}
+      className="director-operator-dialog"
+      aria-labelledby="operator-dialog-title"
+      onClose={onClose}
+    >
       <div className="director-help-dialog-header">
         <h2 id="operator-dialog-title">Operator profile</h2>
-        <button type="button" className="director-button director-button-secondary" onClick={onClose}>Close</button>
+        <button type="button" className="director-button director-button-secondary" onClick={onClose}>
+          Close
+        </button>
       </div>
-      <p className="director-panel-footnote">Local only — not saved to exports or Live. Used for audit events.</p>
+      <p className="director-panel-footnote">
+        Local only — not saved to exports or Live. Used for audit events.
+      </p>
       <div className="director-form-grid director-form-grid-single" style={{ marginTop: 16 }}>
         <label className="director-form-field">
           <span>Display name</span>
@@ -521,8 +845,18 @@ function OperatorProfileDialog({ profile, onClose, onSave }: { profile: Operator
         </label>
       </div>
       <div className="director-form-actions" style={{ marginTop: 16 }}>
-        <Button variant="primary" onClick={() => { if (!name.trim()) return; onSave({ displayName: name.trim(), role: role.trim() || undefined }); }}>Save</Button>
-        <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        <Button
+          variant="primary"
+          onClick={() => {
+            if (!name.trim()) return;
+            onSave({ displayName: name.trim(), role: role.trim() || undefined });
+          }}
+        >
+          Save
+        </Button>
+        <Button variant="secondary" onClick={onClose}>
+          Cancel
+        </Button>
       </div>
     </dialog>
   );
@@ -810,7 +1144,14 @@ function statusLabel(status: string): string {
         : 'Archived';
 }
 
-type SearchResult = { id: string; section: SectionId; label: string; detail: string; entityType?: import('./navigationTarget').EntityType; parentId?: string };
+type SearchResult = {
+  id: string;
+  section: SectionId;
+  label: string;
+  detail: string;
+  entityType?: import('./navigationTarget').EntityType;
+  parentId?: string;
+};
 
 function searchTournament(
   state: ReturnType<typeof useDirectorController>['state'],
@@ -856,7 +1197,13 @@ function searchTournament(
   }
   for (const room of state.rooms) {
     if (matches([room.name, room.building, room.floor, room.status])) {
-      results.push({ id: room.id, section: 'rooms', label: room.name, detail: room.status, entityType: 'room' });
+      results.push({
+        id: room.id,
+        section: 'rooms',
+        label: room.name,
+        detail: room.status,
+        entityType: 'room',
+      });
     }
   }
   for (const packet of state.packets) {
@@ -890,7 +1237,7 @@ function searchTournament(
     if (matches([game.id, left, right, round?.name, game.status])) {
       results.push({
         id: game.id,
-        section: 'tournament',
+        section: 'results',
         label: `${left ?? 'Unknown'} · ${right ?? 'Unknown'}`,
         detail: `${round?.name ?? 'Scheduled game'} · ${game.status}`,
         entityType: 'game',

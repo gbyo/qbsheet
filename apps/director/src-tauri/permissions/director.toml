@@ -3,7 +3,11 @@ identifier = "director-operations"
 description = "Allow the Director window to use its explicitly registered native operations."
 commands.allow = [
   "director_load_state",
+  "director_list_tournaments",
+  "director_read_tournament",
+  "director_open_tournament",
   "director_save_state",
+  "director_save_document",
   "director_checkpoint",
   "director_server_status",
   "director_server_snapshot",

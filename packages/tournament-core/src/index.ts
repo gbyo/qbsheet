@@ -8,3 +8,4 @@ export * from './brackets';
 export * from './divisions';
 export * from './formatPlan';
 export * from './preflight';
+export * from './swiss';

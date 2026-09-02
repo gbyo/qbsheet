@@ -263,6 +263,16 @@ export async function readNativeServerSnapshot(): Promise<NativeSnapshotReadResu
   }
 }
 
+export async function resolveNativeQbtcpHelp(helpId: string): Promise<NativeHelpSnapshot> {
+  const native = bridge();
+  if (!native) throw new Error('Only the Director desktop app can resolve a live QBTCP help request.');
+  const value = await native.invoke('director_resolve_qbtcp_help', { helpId });
+  if (!isRecord(value) || typeof value.id !== 'string' || typeof value.status !== 'string') {
+    throw new Error('The native server returned an invalid help resolution.');
+  }
+  return value as unknown as NativeHelpSnapshot;
+}
+
 export async function openNativeTournamentFile(): Promise<NativeSelectedFile | null> {
   const native = bridge();
   if (!native) return null;

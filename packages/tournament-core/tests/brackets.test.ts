@@ -132,6 +132,7 @@ describe('other division sizes', () => {
     [8, 8, 3, []],
     [9, 16, 4, [1, 2, 3, 4, 5, 6, 7]],
     [12, 16, 4, [1, 2, 3, 4]],
+    [16, 16, 4, []],
   ])('draws %i teams into a bracket of %i over %i rounds', (teams, size, rounds, byeSeeds) => {
     const plan = planSingleEliminationBracket(teams);
     expect(plan.bracketSize).toBe(size);

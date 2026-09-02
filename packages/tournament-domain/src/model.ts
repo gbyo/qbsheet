@@ -11,7 +11,7 @@ import type { IanaTimeZone } from './timezone.js';
 import type { TournamentTimelineEvent } from './timeline.js';
 import type { LivePublication } from './publication.js';
 
-export const directorSchemaVersion = 4;
+export const directorSchemaVersion = 6;
 
 export type {
   ArtifactClassification,
@@ -55,6 +55,8 @@ export interface TournamentRules {
   bonusParts: number;
   bouncebacks: boolean;
   overtime: boolean;
+  /** Whether the scorer should use a moderator-controlled timed regulation period. */
+  timed: boolean;
   lightning: boolean;
   maximumActivePlayers: number;
   regulationMinutes: number;
@@ -90,6 +92,8 @@ export interface Organization {
   name: string;
   shortName?: string;
   notes?: string;
+  /** Retired organization records remain addressable by historical teams and results. */
+  archived?: boolean;
 }
 
 export interface Player {
@@ -149,6 +153,8 @@ export interface Packet {
   id: DirectorId;
   name: string;
   source: 'manual' | 'qbj' | 'imported';
+  /** Retired inventory remains addressable for historical games but cannot be selected for new play. */
+  retired?: boolean;
   assignedRoundIds: DirectorId[];
   assignedGameIds: DirectorId[];
   usedGameIds: DirectorId[];
@@ -167,6 +173,31 @@ export interface FormatDefinition {
   avoidSameOrganization: boolean;
   allowByes: boolean;
   editable: boolean;
+  /** Structural state for formats whose next game depends on an earlier result. */
+  bracket?: BracketState;
+}
+
+export type BracketSlot = { kind: 'seed'; seed: number } | { kind: 'winner' | 'loser'; gameKey: string };
+
+export interface BracketNodeState {
+  key: string;
+  roundIndex: number;
+  sequence: number;
+  label: string;
+  kind: 'elimination' | 'third-place' | 'placement';
+  slotA: BracketSlot;
+  slotB: BracketSlot;
+}
+
+export interface BracketState {
+  teamCount: number;
+  bracketSize: number;
+  roundCount: number;
+  seeding: Array<{ seed: number; teamId: DirectorId }>;
+  nodes: BracketNodeState[];
+  byes: Array<{ seed: number; roundIndex: number; protectedSeed: boolean }>;
+  roundNumbers: number[];
+  roundIds: Record<string, DirectorId>;
 }
 
 export interface Phase {
@@ -180,6 +211,8 @@ export interface Phase {
   advancementRule: AdvancementRule | null;
   carryover: boolean;
   status: 'planned' | 'active' | 'complete';
+  /** Retired phases remain in the document because their rounds are historical. */
+  archived?: boolean;
 }
 
 export interface Pool {
@@ -188,6 +221,8 @@ export interface Pool {
   name: string;
   teamIds: DirectorId[];
   order: number;
+  /** Retired pools retain their prior membership and round references. */
+  archived?: boolean;
 }
 
 export interface Round {
@@ -232,6 +267,8 @@ export interface ScheduledGame {
   assignmentRevision: number;
   movedFromRoomId?: DirectorId | null;
   notes?: string;
+  /** Stable key into FormatDefinition.bracket when this is a dependent bracket game. */
+  bracketKey?: string;
 }
 
 export interface TeamGameScore {
@@ -336,6 +373,7 @@ export interface AuditEvent {
     | 'schedule-repaired'
     | 'schedule-cancelled'
     | 'roster-amendment'
+    | 'qbtcp-help-resolved'
     | 'checkpoint-created'
     | 'imported'
     | 'exported';
@@ -384,8 +422,14 @@ export interface QbtcpHelpRequest {
 }
 
 export interface QbtcpRosterAmendment {
+  id: DirectorId;
   sessionId: DirectorId;
   amendment: Record<string, unknown>;
+  status: 'pending' | 'approved-new' | 'mapped-existing' | 'rejected';
+  decidedAt: string | null;
+  decidedBy: string | null;
+  mappedPlayerId: DirectorId | null;
+  decisionReason?: string;
 }
 
 export interface DirectorState {
@@ -447,6 +491,7 @@ export const defaultRules: TournamentRules = {
   bonusParts: 3,
   bouncebacks: false,
   overtime: true,
+  timed: false,
   lightning: false,
   maximumActivePlayers: 4,
   regulationMinutes: 26,

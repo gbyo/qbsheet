@@ -343,6 +343,130 @@ test('Director supports keyboard search, inline edits, and audited result review
   await expect(page.locator('.director-protest-row').first()).toContainText('ruled');
 });
 
+test('Director opens every indexed search entity at its exact operational target', async ({ page }) => {
+  await createTournament(page);
+  const navigation = page.locator('nav[aria-label="Tournament sections"]');
+
+  await navigation.getByRole('button', { name: 'Teams', exact: true }).click();
+  await page.getByRole('button', { name: 'Add team' }).click();
+  await page.getByLabel('Display name').fill('Northview A');
+  await page.getByLabel('School / organization').fill('Northview High');
+  await page.getByRole('button', { name: 'Save team' }).click();
+  await page.getByRole('button', { name: 'Add team' }).click();
+  await page.getByLabel('Display name').fill('Riverside A');
+  await page.getByRole('button', { name: 'Save team' }).click();
+
+  const northviewRow = page.locator('tr').filter({ hasText: 'Northview A' }).first();
+  await northviewRow.getByText('0 players', { exact: true }).click();
+  await page.getByLabel('Add player to Northview A').fill('Ada Lovelace');
+  await northviewRow.getByRole('button', { name: 'Add', exact: true }).click();
+
+  await navigation.getByRole('button', { name: 'Rooms & staff', exact: true }).click();
+  await page.getByRole('button', { name: 'Add room' }).click();
+  await page.getByLabel('Room name').fill('Room 101');
+  await page.getByRole('button', { name: 'Save room' }).click();
+
+  await navigation.getByRole('button', { name: 'Packets', exact: true }).click();
+  await page.getByRole('button', { name: 'Add packet' }).click();
+  await page.getByLabel('Packet name').fill('Set A');
+  await page.getByRole('button', { name: 'Save packet' }).click();
+
+  const search = page.getByPlaceholder('Search teams, rooms, games');
+  const select = async (query: string, resultText: string | RegExp) => {
+    await search.fill(query);
+    const result = page.getByRole('option').filter({ hasText: resultText }).first();
+    await expect(result).toBeVisible();
+    await result.click();
+    await expect(search).toHaveValue('');
+  };
+
+  await select('Northview A', 'Northview A');
+  const selectedTeam = page
+    .locator('tr[data-director-navigation-id]')
+    .filter({ hasText: 'Northview A' })
+    .first();
+  await expect(selectedTeam).toHaveClass(/is-navigation-target/);
+  await expect(selectedTeam.locator('[data-director-navigation-focus]')).toBeFocused();
+
+  await select('Ada Lovelace', 'Ada Lovelace');
+  const selectedPlayer = page
+    .locator('li[data-director-navigation-id]')
+    .filter({ hasText: 'Ada Lovelace' })
+    .first();
+  await expect(selectedPlayer).toHaveClass(/is-navigation-target/);
+  await expect(selectedPlayer).toBeFocused();
+  await expect(northviewRow.locator('details')).toHaveAttribute('open', '');
+
+  await select('Room 101', 'Room 101');
+  const selectedRoom = page
+    .locator('tr[data-director-navigation-id]')
+    .filter({ hasText: 'Room 101' })
+    .first();
+  await expect(selectedRoom).toHaveClass(/is-navigation-target/);
+  await expect(selectedRoom.locator('[data-director-navigation-focus]')).toBeFocused();
+
+  await select('Set A', 'Set A');
+  const selectedPacket = page.locator('tr[data-director-navigation-id]').filter({ hasText: 'Set A' }).first();
+  await expect(selectedPacket).toHaveClass(/is-navigation-target/);
+  await expect(selectedPacket.locator('[data-director-navigation-focus]')).toBeFocused();
+  await expect(page.getByRole('region', { name: 'Set A details' })).toBeVisible();
+
+  await navigation.getByRole('button', { name: 'Format', exact: true }).click();
+  await page.getByRole('button', { name: 'Generate next round' }).click();
+  await expect(page.getByRole('heading', { level: 1, name: 'Tournament control' })).toBeVisible();
+  await page.getByRole('button', { name: 'Prepare', exact: true }).click();
+  await page.getByRole('button', { name: 'Release', exact: true }).click();
+
+  await navigation.getByRole('button', { name: /Results/ }).click();
+  const gameId = await page
+    .locator('section')
+    .filter({ hasText: 'Scheduled games' })
+    .locator('tbody tr')
+    .first()
+    .locator('small')
+    .innerText();
+  await select(gameId, /Northview A.*Riverside A/);
+  const selectedGame = page.locator(`[data-director-navigation-id="${gameId}"]`);
+  await expect(selectedGame).toHaveClass(/is-navigation-target/);
+  await expect(selectedGame.locator('[data-director-navigation-focus]')).toBeFocused();
+});
+
+test('Director Help opens from both controls, owns focus, and restores the exact invoker', async ({
+  page,
+}) => {
+  await createTournament(page);
+  const sidebarHelp = page.getByRole('button', { name: 'Help & keyboard shortcuts', exact: true });
+  await sidebarHelp.focus();
+  await sidebarHelp.click();
+  const dialog = page.getByRole('dialog', { name: 'Help & keyboard shortcuts' });
+  await expect(dialog).toBeVisible();
+  await expect(page.locator('dialog[open]')).toHaveCount(1);
+  await expect(dialog.getByRole('button', { name: 'Close', exact: true })).toBeFocused();
+  for (const shortcut of [
+    'Focus tournament search',
+    'Move active search result',
+    'Open active search result',
+    'Close search / dialog',
+  ]) {
+    await expect(dialog.getByText(shortcut, { exact: true })).toBeVisible();
+  }
+  await page.keyboard.press('Escape');
+  await expect(dialog).not.toBeVisible();
+  await expect(sidebarHelp).toBeFocused();
+
+  const topbarHelp = page.getByRole('button', { name: 'Help', exact: true });
+  await topbarHelp.click();
+  await expect(dialog).toBeVisible();
+  await expect(page.locator('dialog[open]')).toHaveCount(1);
+  await expect(dialog.getByRole('button', { name: 'Close', exact: true })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(dialog).not.toBeVisible();
+  await expect(topbarHelp).toBeFocused();
+
+  await page.keyboard.press('Control+k');
+  await expect(page.getByPlaceholder('Search teams, rooms, games')).toBeFocused();
+});
+
 test('Director keeps unavailable resources out of new room assignments', async ({ page }) => {
   await createTournament(page);
 

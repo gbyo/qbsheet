@@ -150,3 +150,83 @@ export function zonedIsoOrNull(value: string | null | undefined, timeZone: IanaT
   if (Number.isNaN(instant.getTime())) return null;
   return toZonedIso(instant, timeZone);
 }
+
+/**
+ * Convert the value emitted by a `datetime-local` control in the tournament's zone to an absolute
+ * instant.  A datetime-local value has no offset, so `new Date(value)` would incorrectly interpret
+ * it in the Director laptop's zone.  The small fixed-point adjustment below first guesses the
+ * offset, then rechecks it at the resulting instant so daylight-saving transitions use the offset
+ * that was actually in force.
+ */
+export function zonedDateTimeInputToIso(
+  value: string | null | undefined,
+  timeZone: IanaTimeZone,
+): string | null {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/.test(value)) return null;
+  const [datePart, timePart] = value.split('T');
+  const [year, month, day] = datePart.split('-').map(Number);
+  const [hour, minute, second = 0] = timePart.split(':').map(Number);
+  if (
+    !Number.isInteger(year) ||
+    !Number.isInteger(month) ||
+    !Number.isInteger(day) ||
+    !Number.isInteger(hour) ||
+    !Number.isInteger(minute) ||
+    !Number.isInteger(second) ||
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > 31 ||
+    hour > 23 ||
+    minute > 59 ||
+    second > 59
+  ) {
+    return null;
+  }
+  const naiveUtc = Date.UTC(year, month - 1, day, hour, minute, second);
+  const requested = `${pad(year, 4)}-${pad(month)}-${pad(day)}T${pad(hour)}:${pad(minute)}:${pad(second)}`;
+  let instant = new Date(naiveUtc);
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const offset = utcOffsetMinutes(utcOffsetAt(timeZone, instant));
+    const next = new Date(naiveUtc - offset * 60_000);
+    const fields = zonedFields(normalizeTimeZone(timeZone), next);
+    const actual = `${pad(fields.year, 4)}-${pad(fields.month)}-${pad(fields.day)}T${pad(fields.hour)}:${pad(fields.minute)}:${pad(fields.second)}`;
+    instant = next;
+    if (actual === requested) return instant.toISOString();
+  }
+  // A local clock value inside a spring-forward gap does not exist. Refuse it rather than silently
+  // moving the event to a different wall-clock time.
+  return null;
+}
+
+/** Convert an absolute instant to the value expected by a datetime-local control. */
+export function isoToZonedDateTimeInput(value: string | null | undefined, timeZone: IanaTimeZone): string {
+  if (typeof value !== 'string') return '';
+  const instant = new Date(value);
+  if (Number.isNaN(instant.getTime())) return '';
+  const fields = zonedFields(normalizeTimeZone(timeZone), instant);
+  return `${pad(fields.year, 4)}-${pad(fields.month)}-${pad(fields.day)}T${pad(fields.hour)}:${pad(fields.minute)}`;
+}
+
+function utcOffsetMinutes(value: string): number {
+  const match = /^([+-])(\d{2}):(\d{2})$/.exec(value);
+  if (!match) return 0;
+  const minutes = Number(match[2]) * 60 + Number(match[3]);
+  return match[1] === '-' ? -minutes : minutes;
+}
+
+/** Return the runtime's IANA list, with UTC included even on runtimes that omit it. */
+export function availableTimeZones(): string[] {
+  const supportedValues = (
+    Intl as typeof Intl & { supportedValuesOf?: (key: string) => string[] }
+  ).supportedValuesOf?.('timeZone');
+  return [...new Set(['UTC', ...(supportedValues ?? [])])].sort((left, right) => left.localeCompare(right));
+}
+
+/** A readable label while retaining the exact IANA identifier as the stored value. */
+export function timeZoneLabel(timeZone: IanaTimeZone, at = new Date()): string {
+  const normalized = normalizeTimeZone(timeZone);
+  const city =
+    normalized === 'UTC' ? 'UTC' : (normalized.split('/').at(-1)?.replaceAll('_', ' ') ?? normalized);
+  return `${city} (${utcOffsetAt(normalized, at)}) · ${normalized}`;
+}

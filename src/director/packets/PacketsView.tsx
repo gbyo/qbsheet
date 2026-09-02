@@ -5,18 +5,20 @@ import { Button, EmptyState, FormField, PanelBody, PanelFooter, StateLabel } fro
 import { Icon } from '../components/Icon';
 import { PageHeader } from '../components/PageHeader';
 import { importQbjText } from '../format/interchange';
+import type { DirectorNavigationTarget } from '../app/navigationTarget';
+import { useNavigationHighlight } from '../app/useNavigationHighlight';
 
 export function PacketsView({
   state,
   controller,
   onAnnounce,
-  navigationTarget: _navigationTarget,
-  onClearNavigationTarget: _onClearNavigationTarget,
+  navigationTarget,
+  onClearNavigationTarget,
 }: {
   state: DirectorState;
   controller: DirectorController;
   onAnnounce: (message: string) => void;
-  navigationTarget?: any;
+  navigationTarget?: DirectorNavigationTarget | null;
   onClearNavigationTarget?: () => void;
 }) {
   const [showForm, setShowForm] = useState(false);
@@ -170,7 +172,11 @@ export function PacketsView({
                 </h2>
               </div>
               <span className="director-muted">
-                {state.packets.filter((packet) => packet.usedGameIds.length === 0).length} unused
+                {
+                  state.packets.filter((packet) => packet.retired !== true && packet.usedGameIds.length === 0)
+                    .length
+                }{' '}
+                unused · {state.packets.filter((packet) => packet.retired === true).length} retired
               </span>
             </div>
             <div className="director-table-wrap">
@@ -197,6 +203,17 @@ export function PacketsView({
                       onToggleDetails={() =>
                         setDetailsPacketId((current) => (current === packet.id ? null : packet.id))
                       }
+                      navigationTarget={navigationTarget}
+                      onClearNavigationTarget={() => {
+                        if (
+                          navigationTarget?.section === 'packets' &&
+                          navigationTarget.entityType === 'packet' &&
+                          navigationTarget.entityId === packet.id
+                        ) {
+                          setDetailsPacketId(packet.id);
+                        }
+                        onClearNavigationTarget?.();
+                      }}
                     />
                   ))}
                 </tbody>
@@ -222,6 +239,8 @@ function PacketRow({
   onAnnounce,
   detailsOpen,
   onToggleDetails,
+  navigationTarget,
+  onClearNavigationTarget,
 }: {
   state: DirectorState;
   packet: DirectorState['packets'][number];
@@ -229,7 +248,16 @@ function PacketRow({
   onAnnounce: (message: string) => void;
   detailsOpen: boolean;
   onToggleDetails: () => void;
+  navigationTarget?: DirectorNavigationTarget | null;
+  onClearNavigationTarget?: () => void;
 }) {
+  const packetNavigation = useNavigationHighlight(
+    navigationTarget,
+    'packets',
+    'packet',
+    packet.id,
+    onClearNavigationTarget,
+  );
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(packet.name);
   const [tiebreaker, setTiebreaker] = useState(packet.tiebreaker);
@@ -258,19 +286,25 @@ function PacketRow({
 
   return (
     <>
-      <tr>
+      <tr
+        tabIndex={-1}
+        className={packetNavigation ? 'is-navigation-target' : undefined}
+        data-director-navigation-id={packet.id}
+      >
         <td>
-          <strong>{packet.name}</strong>
-          {packet.tiebreaker && <small className="director-table-subtext">Tiebreaker</small>}
-          {packet.notes && <small className="director-table-subtext">Has notes</small>}
+          <span data-director-navigation-focus tabIndex={-1}>
+            <strong>{packet.name}</strong>
+            {packet.tiebreaker && <small className="director-table-subtext">Tiebreaker</small>}
+            {packet.notes && <small className="director-table-subtext">Has notes</small>}
+          </span>
         </td>
         <td>{packet.source}</td>
         <td>{packet.assignedRoundIds.length || '—'}</td>
         <td>{packet.usedGameIds.length || '—'}</td>
         <td>
           <StateLabel
-            state={packet.usedGameIds.length > 0 ? 'finished' : 'available'}
-            label={packet.usedGameIds.length > 0 ? 'Used' : 'Available'}
+            state={packet.retired ? 'archived' : packet.usedGameIds.length > 0 ? 'finished' : 'available'}
+            label={packet.retired ? 'Retired' : packet.usedGameIds.length > 0 ? 'Used' : 'Available'}
           />
         </td>
         <td>
@@ -287,11 +321,26 @@ function PacketRow({
                   onAnnounce('Create a tournament before selecting a packet.');
                   return;
                 }
+                if (packet.retired) {
+                  onAnnounce('Retired packets cannot be selected; restore it first.');
+                  return;
+                }
                 controller.selectPacket(packet.id);
                 onAnnounce(`${packet.name} selected for the next generated round.`);
               }}
             >
               {packet.id === state.tournament?.currentPacketId ? 'Current' : 'Use next'}
+            </Button>
+            <Button
+              variant="quiet"
+              onClick={() => {
+                if (!packet.retired && !confirm(`Retire ${packet.name}? Its assignment history will remain.`))
+                  return;
+                const changed = controller.setPacketRetired(packet.id, !packet.retired);
+                if (changed) onAnnounce(`${packet.name} ${packet.retired ? 'restored' : 'retired'}.`);
+              }}
+            >
+              {packet.retired ? 'Restore' : 'Retire'}
             </Button>
             <button
               type="button"
@@ -395,8 +444,8 @@ function PacketDetails({
             <h3>{packet.name}</h3>
           </div>
           <StateLabel
-            state={packet.usedGameIds.length > 0 ? 'finished' : 'available'}
-            label={packet.usedGameIds.length > 0 ? 'Used' : 'Available'}
+            state={packet.retired ? 'archived' : packet.usedGameIds.length > 0 ? 'finished' : 'available'}
+            label={packet.retired ? 'Retired' : packet.usedGameIds.length > 0 ? 'Used' : 'Available'}
           />
         </div>
         <dl className="director-packet-metadata">

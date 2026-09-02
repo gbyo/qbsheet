@@ -5,6 +5,7 @@ import {
   deriveTeamStandings,
   directorSchemaVersion,
   emptyDirectorState,
+  emptyLivePublication,
   formatGenerationAvailability,
   generateDirectorRound,
   generateRoundRobinRound,
@@ -23,7 +24,14 @@ import {
   type DirectorRepository,
 } from '../src/director/persistence';
 import { normalizeDirectorState } from '../src/director/persistence/stateMigrations';
-import { exportArchiveBytes, importArchiveBytes, toInterchange } from '../src/director/format/interchange';
+import {
+  exportArchiveBytes,
+  exportQbj,
+  importArchiveBytes,
+  toInterchange,
+} from '../src/director/format/interchange';
+import { derivePublication } from '../src/director/live/publication';
+import { saveOperatorProfile } from '../src/director/operator/operatorProfile';
 
 function score(teamId: string, value: number): TeamGameScore {
   return {
@@ -119,6 +127,7 @@ describe('Director integration hardening', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     delete window.__TAURI_INTERNALS__;
+    window.localStorage.removeItem('qbsheet.operatorProfile.v1');
   });
 
   test('portable archives preserve operational state losslessly', () => {
@@ -182,13 +191,104 @@ describe('Director integration hardening', () => {
       },
     ];
     state.qbtcpRosterAmendments = [
-      { sessionId: 'session-1', amendment: { playerName: 'Ada', teamId: 'team-1', created: true } },
+      {
+        id: 'roster-amendment-1',
+        sessionId: 'session-1',
+        amendment: { playerName: 'Ada', teamId: 'team-1', created: true },
+        status: 'pending',
+        decidedAt: null,
+        decidedBy: null,
+        mappedPlayerId: null,
+      },
     ];
 
     const imported = importArchiveBytes(exportArchiveBytes(state));
     expect(imported.ok).toBe(true);
-    if (!imported.ok) return;
+    if (!imported.ok || !imported.state) return;
     expect(imported.state).toEqual(state);
+  });
+
+  test('canonical QBJ rules and Director extensions round-trip every supported rules decision', () => {
+    const state = emptyDirectorState();
+    state.tournament = {
+      id: 'tournament-rules-round-trip',
+      name: 'Rules round trip',
+      date: '2026-09-01',
+      venue: 'Main hall',
+      organizer: 'QBSheet',
+      status: 'draft',
+      timeZone: 'America/New_York',
+      rules: {
+        ...structuredClone(defaultRules),
+        tossupValue: 12,
+        powerValue: 20,
+        negValue: -10,
+        bonusValue: 15,
+        tossupCount: 24,
+        bonusParts: 4,
+        bouncebacks: true,
+        overtime: false,
+        timed: true,
+        lightning: true,
+        maximumActivePlayers: 3,
+        regulationMinutes: 30,
+        tiebreakers: ['record', 'points'],
+      },
+      formatId: null,
+      currentPhaseId: null,
+      currentPacketId: null,
+      currentRoundId: null,
+      createdAt: '2026-09-01T10:00:00.000Z',
+      updatedAt: '2026-09-01T10:00:00.000Z',
+    };
+
+    const interchange = toInterchange(state);
+    expect(interchange.rules).toMatchObject({
+      maximum_players_per_team: 3,
+      regulation_tossup_count: 24,
+      bonuses_bounce_back: true,
+      overtime_includes_bonuses: false,
+    });
+    expect(interchange.rules).not.toHaveProperty('tossupValue');
+    expect(interchange.tournament.extensions).toMatchObject({
+      timeZone: 'America/New_York',
+      timed: true,
+      regulationMinutes: 30,
+      tiebreakers: ['record', 'points'],
+    });
+
+    const imported = importArchiveBytes(exportArchiveBytes(state));
+    expect(imported.ok).toBe(true);
+    if (!imported.ok || !imported.state) return;
+    expect(imported.state.tournament?.timeZone).toBe('America/New_York');
+    expect(imported.state.tournament?.rules).toEqual(state.tournament.rules);
+  });
+
+  test('schema v5 migration defaults timed scoring safely and preserves legacy procedure intent', () => {
+    const legacy = emptyDirectorState() as unknown as Record<string, unknown>;
+    legacy.schemaVersion = 5;
+    legacy.tournament = {
+      id: 'legacy-timed',
+      name: 'Legacy timed event',
+      date: '',
+      venue: '',
+      organizer: '',
+      status: 'draft',
+      rules: { ...defaultRules, timed: undefined, roomProcedure: { timed: true } },
+      formatId: null,
+      currentPhaseId: null,
+      currentPacketId: null,
+      currentRoundId: null,
+      createdAt: '',
+      updatedAt: '',
+    };
+    const normalized = normalizeDirectorState(legacy);
+    expect(normalized.schemaVersion).toBe(directorSchemaVersion);
+    expect(normalized.tournament?.rules.timed).toBe(true);
+
+    const untimed = structuredClone(legacy);
+    (untimed.tournament as Record<string, unknown>).rules = { ...defaultRules };
+    expect(normalizeDirectorState(untimed).tournament?.rules.timed).toBe(false);
   });
 
   test('tournament detail updates normalize persisted text and reject blank names', async () => {
@@ -217,6 +317,42 @@ describe('Director integration hardening', () => {
     expect(updated).toBe(false);
     expect(hook.result.current.state.tournament?.name).toBe('Renamed event');
     expect(hook.result.current.error).toMatch(/tournament name is required/i);
+  });
+
+  test('operator identity attributes new audit events without exporting the local profile', async () => {
+    const { hook } = await directorWithSetup();
+    saveOperatorProfile({ displayName: 'Archive Boundary Director', role: 'profile-role-sentinel' });
+    act(() => expect(hook.result.current.updateTournament({ venue: 'Updated hall' })).toBe(true));
+    expect(hook.result.current.state.audit.at(-1)).toMatchObject({
+      actor: 'Archive Boundary Director',
+      type: 'tournament-updated',
+    });
+    const historicalImport = structuredClone(hook.result.current.state);
+    historicalImport.audit.push({
+      id: 'historical-imported-event',
+      at: '2025-01-01T00:00:00.000Z',
+      actor: 'Imported Scorekeeper',
+      type: 'result-received',
+      summary: 'Imported historical result.',
+    });
+    act(() => expect(hook.result.current.importSnapshot(historicalImport)).toBe(true));
+    expect(
+      hook.result.current.state.audit.find((event) => event.id === 'historical-imported-event')?.actor,
+    ).toBe('Imported Scorekeeper');
+
+    const interchangeJson = JSON.stringify(toInterchange(hook.result.current.state));
+    expect(interchangeJson).not.toContain('profile-role-sentinel');
+    expect(interchangeJson).not.toContain('operatorProfile');
+    expect(exportQbj(hook.result.current.state)).not.toContain('profile-role-sentinel');
+    const archive = new TextDecoder().decode(exportArchiveBytes(hook.result.current.state));
+    expect(archive).not.toContain('profile-role-sentinel');
+
+    const liveState = structuredClone(hook.result.current.state);
+    liveState.live = emptyLivePublication('bcdfghjkmnpqrstvwxyz', '2026-09-01T12:00:00.000Z');
+    liveState.live.settings.enabled = true;
+    const publication = derivePublication(liveState, null, { now: new Date('2026-09-01T12:00:00.000Z') });
+    expect(JSON.stringify(publication.snapshot)).not.toContain('Archive Boundary Director');
+    expect(JSON.stringify(publication.snapshot)).not.toContain('profile-role-sentinel');
   });
 
   test('Director interchange exports player points from the full stat line', () => {
@@ -271,18 +407,19 @@ describe('Director integration hardening', () => {
     });
   });
 
-  test('unsupported formats never fall back to round-robin generation', async () => {
+  test('Swiss formats use quizbowl power matching instead of a round-robin fallback', async () => {
     const { hook } = await directorWithSetup();
     act(() => hook.result.current.updateFormat({ kind: 'swiss', name: 'Swiss' }));
 
-    let result: { conflicts: string[] } | undefined;
+    let result: { conflicts: string[]; generated: boolean } | undefined;
     act(() => {
       result = hook.result.current.generateSchedule({ seed: 1 });
     });
 
-    expect(result?.conflicts.join(' ')).toMatch(/not implemented/i);
-    expect(hook.result.current.state.rounds).toHaveLength(0);
-    expect(hook.result.current.state.scheduledGames).toHaveLength(0);
+    expect(result?.conflicts.join(' ')).not.toMatch(/not implemented/i);
+    expect(result?.generated).toBe(true);
+    expect(hook.result.current.state.rounds).toHaveLength(1);
+    expect(hook.result.current.state.scheduledGames).toHaveLength(1);
   });
 
   test('pool formats require exclusive complete membership before generation', async () => {
@@ -367,6 +504,43 @@ describe('Director integration hardening', () => {
     expect(
       runPreflight(hook.result.current.state).some((issue) => issue.id === 'format-generation-unavailable'),
     ).toBe(true);
+  });
+
+  test('phases and pools retire without deleting historical membership or references', async () => {
+    const { hook } = await directorWithSetup(4);
+    const phase = hook.result.current.state.phases[0];
+    if (!phase) throw new Error('test setup did not create a phase');
+
+    act(() => {
+      expect(hook.result.current.setPhaseArchived(phase.id, true)).toBe(true);
+    });
+    expect(hook.result.current.state.phases[0]).toMatchObject({ id: phase.id, archived: true });
+    expect(hook.result.current.state.tournament?.currentPhaseId).toBeNull();
+    expect(toInterchange(hook.result.current.state).phases[0]?.extensions).toEqual({ archived: true });
+
+    act(() => {
+      expect(hook.result.current.setPhaseArchived(phase.id, false)).toBe(true);
+    });
+    expect(hook.result.current.state.tournament?.currentPhaseId).toBe(phase.id);
+
+    const teamIds = hook.result.current.state.teams.map((entry) => entry.id);
+    act(() => {
+      expect(hook.result.current.updateFormat({ kind: 'pools', name: 'Retireable pools' })).toBe(true);
+      expect(hook.result.current.addPool({ phaseId: phase.id, name: 'Pool A', teamIds })).toBe(true);
+    });
+    const pool = hook.result.current.state.pools[0];
+    if (!pool) throw new Error('test setup did not create a pool');
+    act(() => {
+      expect(hook.result.current.setPoolArchived(pool.id, true)).toBe(true);
+    });
+    expect(hook.result.current.state.pools[0]).toMatchObject({ id: pool.id, archived: true, teamIds });
+    expect(formatGenerationAvailability(hook.result.current.state).supported).toBe(false);
+    expect(toInterchange(hook.result.current.state).pools[0]?.extensions).toEqual({ archived: true });
+
+    act(() => {
+      expect(hook.result.current.setPoolArchived(pool.id, false)).toBe(true);
+    });
+    expect(hook.result.current.state.pools[0]?.archived).toBeUndefined();
   });
 
   test('pool rounds avoid repeating a matchup while the pool rotation is still available', async () => {
@@ -1090,6 +1264,40 @@ describe('Director integration hardening', () => {
     expect(hook.result.current.state.packets).toEqual(before);
   });
 
+  test('packet retirement preserves historical references and selects only live inventory', async () => {
+    const { hook } = await directorWithSetup();
+    act(() => expect(hook.result.current.addPacket('Packet 2')).toBe(true));
+    const first = hook.result.current.state.packets[0];
+    const second = hook.result.current.state.packets[1];
+    if (!first || !second) throw new Error('test setup did not create two packets');
+
+    act(() => hook.result.current.generateSchedule());
+    const scheduled = hook.result.current.state.scheduledGames[0];
+    if (!scheduled) throw new Error('test setup did not generate a scheduled game');
+    expect(first.assignedGameIds).toHaveLength(0);
+    expect(hook.result.current.state.packets[0]?.assignedGameIds).toContain(scheduled.id);
+
+    act(() => expect(hook.result.current.setPacketRetired(first.id, true)).toBe(true));
+    expect(hook.result.current.state.packets.find((packet) => packet.id === first.id)).toMatchObject({
+      retired: true,
+      assignedGameIds: [scheduled.id],
+    });
+    expect(hook.result.current.state.tournament?.currentPacketId).toBe(second.id);
+
+    act(() => hook.result.current.selectPacket(first.id));
+    expect(hook.result.current.error).toMatch(/retired packets cannot be selected/i);
+    act(() => expect(hook.result.current.setPacketRetired(first.id, false)).toBe(true));
+    expect(
+      hook.result.current.state.packets.find((packet) => packet.id === first.id)?.retired,
+    ).toBeUndefined();
+    expect(hook.result.current.state.audit.at(-1)).toMatchObject({
+      type: 'packet-changed',
+      entityId: first.id,
+      details: { retired: false, retainsHistory: true },
+    });
+    await waitFor(() => expect(hook.result.current.saving).toBe(false));
+  });
+
   test('scoring rule updates keep incomplete numeric edits out of persisted state', async () => {
     const { hook } = await directorWithSetup();
 
@@ -1209,6 +1417,51 @@ describe('Director integration hardening', () => {
     expect(
       hook.result.current.state.teams.find((entry) => entry.id === target.id)?.organizationId,
     ).toBeNull();
+  });
+
+  test('organizations can be edited and archived without removing historical team links', async () => {
+    const { hook } = await directorWithSetup(1);
+    const target = hook.result.current.state.teams[0];
+    if (!target) throw new Error('test setup did not create a team');
+
+    let added = false;
+    act(() => {
+      added = hook.result.current.addOrganization({
+        name: 'Northview High',
+        shortName: 'Northview',
+        notes: 'Archived after the season',
+      });
+    });
+    expect(added).toBe(true);
+    const organization = hook.result.current.state.organizations[0];
+    if (!organization) throw new Error('organization was not created');
+
+    act(() => {
+      expect(hook.result.current.updateTeam(target.id, { organizationName: organization.name })).toBe(true);
+      expect(hook.result.current.updateOrganization(organization.id, { shortName: 'NV' })).toBe(true);
+    });
+    expect(hook.result.current.state.organizations[0]).toMatchObject({ shortName: 'NV' });
+
+    act(() => {
+      expect(hook.result.current.dropTeam(target.id)).toBe(true);
+      expect(hook.result.current.setOrganizationArchived(organization.id, true)).toBe(true);
+    });
+    expect(hook.result.current.state.teams[0]?.organizationId).toBe(organization.id);
+    expect(hook.result.current.state.organizations[0]?.archived).toBe(true);
+    expect(toInterchange(hook.result.current.state).organizations[0]?.extensions).toEqual({ archived: true });
+
+    let addedToArchived = true;
+    act(() => {
+      addedToArchived = hook.result.current.addTeam({
+        displayName: 'New team',
+        organizationName: 'Northview High',
+      });
+    });
+    expect(addedToArchived).toBe(false);
+    act(() => {
+      expect(hook.result.current.setOrganizationArchived(organization.id, false)).toBe(true);
+    });
+    expect(hook.result.current.state.organizations[0]?.archived).toBeUndefined();
   });
 
   test('team mutations reject duplicate names and protect open rounds', async () => {
@@ -1869,6 +2122,174 @@ describe('Director integration hardening', () => {
     expect(hook.result.current.state.rooms[0]?.status).toBe('available');
   });
 
+  test('Director resolves QBTCP help through the trusted native operation and restores derived room state', async () => {
+    const { hook } = await directorWithSetup();
+    const imported = structuredClone(hook.result.current.state);
+    const room = imported.rooms[0];
+    if (!room) throw new Error('test setup did not create a room');
+    room.status = 'help';
+    imported.qbtcpSessions = [
+      {
+        roomId: room.id,
+        sessionId: 'resolve-session',
+        deviceId: 'resolve-device',
+        state: 'live',
+        resumable: false,
+        resultReceived: false,
+        lastSeenAt: '2026-09-01T11:02:00.000Z',
+        progress: null,
+        helpRequestId: 'help-to-resolve',
+      },
+    ];
+    imported.qbtcpHelpRequests = [
+      {
+        id: 'help-to-resolve',
+        roomId: room.id,
+        roomName: room.name,
+        category: 'procedure',
+        message: 'Please confirm the procedure.',
+        status: 'open',
+        createdAt: '2026-09-01T11:01:00.000Z',
+        updatedAt: '2026-09-01T11:01:00.000Z',
+        deviceId: 'resolve-device',
+      },
+    ];
+    act(() => expect(hook.result.current.importSnapshot(imported)).toBe(true));
+    saveOperatorProfile({ displayName: 'Resolution Director', role: 'Tournament control' });
+    const invoke = vi.fn(async (command: string) => {
+      if (command === 'director_resolve_qbtcp_help') {
+        return {
+          ...imported.qbtcpHelpRequests[0],
+          status: 'resolved',
+          updatedAt: '2026-09-01T11:05:00.000Z',
+        };
+      }
+      return undefined;
+    });
+    Object.defineProperty(window, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: { invoke },
+    });
+
+    await act(async () => {
+      expect(await hook.result.current.resolveQbtcpHelp('help-to-resolve')).toBe(true);
+    });
+    expect(invoke).toHaveBeenCalledWith('director_resolve_qbtcp_help', { helpId: 'help-to-resolve' });
+    expect(hook.result.current.state.qbtcpHelpRequests[0]).toMatchObject({
+      id: 'help-to-resolve',
+      status: 'resolved',
+      updatedAt: '2026-09-01T11:05:00.000Z',
+    });
+    expect(hook.result.current.state.qbtcpSessions[0]?.helpRequestId).toBeNull();
+    expect(hook.result.current.state.rooms[0]?.status).toBe('live');
+    expect(hook.result.current.state.audit.at(-1)).toMatchObject({
+      type: 'qbtcp-help-resolved',
+      actor: 'Resolution Director',
+      entityId: 'help-to-resolve',
+    });
+  });
+
+  test('QBTCP roster amendments are idempotent and require an auditable Director decision', async () => {
+    const { hook } = await directorWithSetup();
+    const [teamOne, teamTwo] = hook.result.current.state.teams;
+    if (!teamOne || !teamTwo) throw new Error('test setup did not create two teams');
+    act(() => expect(hook.result.current.addPlayer(teamOne.id, 'Ada Lovelace')).toBe(true));
+    const existing = hook.result.current.state.players[0];
+    if (!existing) throw new Error('test setup did not create an existing player');
+    saveOperatorProfile({ displayName: 'Casey Director', role: 'Head director' });
+
+    const invoke = vi.fn(async () => ({
+      results: [],
+      progress: [],
+      presence: [],
+      sessions: [],
+      help: [],
+      rosterAmendments: [
+        { sessionId: 'session-new', amendment: { playerName: 'Grace Hopper', teamId: teamOne.id } },
+        { sessionId: 'session-map', amendment: { playerName: 'Ada', teamId: teamOne.id } },
+        { sessionId: 'session-reject', amendment: { playerName: 'Mystery', teamId: teamTwo.id } },
+      ],
+    }));
+    Object.defineProperty(window, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: { invoke },
+    });
+    await act(async () => {
+      await hook.result.current.syncQbtcp();
+      await hook.result.current.syncQbtcp();
+    });
+    expect(hook.result.current.state.qbtcpRosterAmendments).toHaveLength(3);
+
+    const bySession = (sessionId: string) =>
+      hook.result.current.state.qbtcpRosterAmendments.find((entry) => entry.sessionId === sessionId)!;
+    const newAmendment = bySession('session-new');
+    const mapAmendment = bySession('session-map');
+    const rejectAmendment = bySession('session-reject');
+
+    act(() => {
+      expect(hook.result.current.approveRosterAmendmentAsNew(newAmendment.id)).toBe(true);
+      expect(hook.result.current.mapRosterAmendment(mapAmendment.id, existing.id)).toBe(true);
+      expect(
+        hook.result.current.rejectRosterAmendment(rejectAmendment.id, 'Not on the submitted roster'),
+      ).toBe(true);
+    });
+
+    expect(hook.result.current.state.qbtcpRosterAmendments).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: newAmendment.id,
+          status: 'approved-new',
+          decidedBy: 'Casey Director',
+          mappedPlayerId: null,
+        }),
+        expect.objectContaining({
+          id: mapAmendment.id,
+          status: 'mapped-existing',
+          decidedBy: 'Casey Director',
+          mappedPlayerId: existing.id,
+        }),
+        expect.objectContaining({
+          id: rejectAmendment.id,
+          status: 'rejected',
+          decidedBy: 'Casey Director',
+          decisionReason: 'Not on the submitted roster',
+        }),
+      ]),
+    );
+    expect(hook.result.current.state.players.some((player) => player.name === 'Grace Hopper')).toBe(true);
+    expect(hook.result.current.state.qbtcpRosterAmendments[0]?.amendment).toEqual({
+      playerName: 'Grace Hopper',
+      teamId: teamOne.id,
+    });
+    expect(
+      hook.result.current.state.audit.filter(
+        (event) => event.type === 'roster-amendment' && event.actor === 'Casey Director',
+      ),
+    ).toHaveLength(3);
+    act(() => {
+      expect(hook.result.current.rejectRosterAmendment(newAmendment.id)).toBe(false);
+    });
+  });
+
+  test('legacy roster observations migrate to deterministic pending decisions', () => {
+    const legacy = emptyDirectorState() as unknown as Record<string, unknown>;
+    legacy.schemaVersion = 4;
+    legacy.qbtcpRosterAmendments = [
+      { sessionId: 'session-legacy', amendment: { teamId: 'team-1', playerName: 'Ada' } },
+    ];
+    const normalized = normalizeDirectorState(legacy);
+    expect(normalized.schemaVersion).toBe(directorSchemaVersion);
+    expect(normalized.qbtcpRosterAmendments[0]).toMatchObject({
+      sessionId: 'session-legacy',
+      status: 'pending',
+      decidedAt: null,
+      decidedBy: null,
+      mappedPlayerId: null,
+    });
+    expect(normalized.qbtcpRosterAmendments[0]?.id).toMatch(/^roster-amendment-/);
+    expect(normalized.qbtcpRosterAmendments[0]?.amendment).toEqual({ teamId: 'team-1', playerName: 'Ada' });
+  });
+
   test('head-to-head ranks a tied pair from their own game, not unrelated wins', () => {
     const state = emptyDirectorState();
     state.tournament = {
@@ -2231,5 +2652,140 @@ describe('Director integration hardening', () => {
     } finally {
       setItem.mockRestore();
     }
+  });
+
+  test('browser storage migrates the legacy current document into the tournament catalog', async () => {
+    const legacy = emptyDirectorState();
+    legacy.schemaVersion = 4;
+    legacy.tournament = {
+      id: 'browser-legacy',
+      name: 'Legacy browser event',
+      date: '2026-09-02',
+      venue: 'Hall',
+      organizer: 'QBSheet',
+      status: 'running',
+      timeZone: 'UTC',
+      rules: structuredClone(defaultRules),
+      formatId: null,
+      currentPhaseId: null,
+      currentPacketId: null,
+      currentRoundId: null,
+      createdAt: '2026-09-02T10:00:00.000Z',
+      updatedAt: '2026-09-02T10:00:00.000Z',
+    };
+    await new Promise<void>((resolve, reject) => {
+      const request = indexedDB.open('qbsheet-director', 1);
+      request.onupgradeneeded = () => request.result.createObjectStore('tournament-state');
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const database = request.result;
+        const transaction = database.transaction('tournament-state', 'readwrite');
+        transaction.objectStore('tournament-state').put(legacy, 'current');
+        transaction.oncomplete = () => {
+          database.close();
+          resolve();
+        };
+        transaction.onerror = () => reject(transaction.error);
+      };
+    });
+
+    const repository = new IndexedDbDirectorRepository();
+    const loaded = await repository.load();
+    expect(loaded.tournament?.id).toBe('browser-legacy');
+    expect(loaded.schemaVersion).toBe(directorSchemaVersion);
+    expect(await repository.listTournaments()).toEqual([
+      expect.objectContaining({ id: 'browser-legacy', name: 'Legacy browser event' }),
+    ]);
+  });
+
+  test('browser catalog keeps A and B independent across switching, archive, reopen, and restart', async () => {
+    const makeState = (id: string, name: string): DirectorState => {
+      const state = emptyDirectorState();
+      state.tournament = {
+        id,
+        name,
+        date: '2026-09-02',
+        venue: 'Hall',
+        organizer: 'QBSheet',
+        status: 'draft',
+        timeZone: 'UTC',
+        rules: structuredClone(defaultRules),
+        formatId: null,
+        currentPhaseId: null,
+        currentPacketId: null,
+        currentRoundId: null,
+        createdAt: `${id}-created`,
+        updatedAt: `${id}-created`,
+      };
+      return state;
+    };
+    const repository = new IndexedDbDirectorRepository();
+    const stateA = makeState('tournament-a', 'Tournament A');
+    const stateB = makeState('tournament-b', 'Tournament B');
+    await repository.saveDocument(stateA, true);
+    await repository.saveDocument(stateB, true);
+    const changedB = structuredClone(stateB);
+    changedB.tournament!.venue = 'B venue';
+    changedB.tournament!.updatedAt = '2026-09-02T11:00:00.000Z';
+    await repository.saveDocument(changedB, true);
+    const changedA = structuredClone(stateA);
+    changedA.tournament!.venue = 'A venue';
+    changedA.tournament!.updatedAt = '2026-09-02T12:00:00.000Z';
+    await repository.saveDocument(changedA, false);
+
+    expect((await repository.openTournament('tournament-b')).tournament?.venue).toBe('B venue');
+    expect((await repository.openTournament('tournament-a')).tournament?.venue).toBe('A venue');
+    expect((await repository.readTournament('tournament-b')).tournament?.venue).toBe('B venue');
+
+    const restarted = new IndexedDbDirectorRepository();
+    expect((await restarted.load()).tournament?.id).toBe('tournament-a');
+    const archived = structuredClone(changedA);
+    archived.tournament!.status = 'archived';
+    await restarted.saveDocument(archived, false);
+    expect((await restarted.listTournaments()).filter((entry) => entry.status !== 'archived')).toHaveLength(
+      1,
+    );
+    const reopened = structuredClone(archived);
+    reopened.tournament!.status = 'draft';
+    await restarted.saveDocument(reopened, false);
+    expect((await restarted.listTournaments()).filter((entry) => entry.status === 'archived')).toHaveLength(
+      0,
+    );
+  });
+
+  test('localStorage catalog fallback is migrated in full when IndexedDB becomes available', async () => {
+    const makeState = (id: string): DirectorState => {
+      const state = emptyDirectorState();
+      state.tournament = {
+        id,
+        name: id,
+        date: '',
+        venue: '',
+        organizer: '',
+        status: 'draft',
+        timeZone: 'UTC',
+        rules: structuredClone(defaultRules),
+        formatId: null,
+        currentPhaseId: null,
+        currentPacketId: null,
+        currentRoundId: null,
+        createdAt: id,
+        updatedAt: id,
+      };
+      return state;
+    };
+    window.localStorage.setItem(
+      'qbsheet.director.library.v1',
+      JSON.stringify({
+        currentId: 'fallback-b',
+        documents: { 'fallback-a': makeState('fallback-a'), 'fallback-b': makeState('fallback-b') },
+      }),
+    );
+    const repository = new IndexedDbDirectorRepository();
+    expect((await repository.load()).tournament?.id).toBe('fallback-b');
+    expect((await repository.listTournaments()).map((entry) => entry.id).sort()).toEqual([
+      'fallback-a',
+      'fallback-b',
+    ]);
   });
 });

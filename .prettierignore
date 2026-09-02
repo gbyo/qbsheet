@@ -11,3 +11,4 @@ package-lock.json
 
 # Wrangler's local dev bundle. Generated, and not ours to format.
 **/.wrangler/
+apps/director/src-tauri/assets/live-web/

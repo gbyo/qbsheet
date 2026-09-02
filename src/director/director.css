@@ -75,6 +75,7 @@ select:focus-visible,
 textarea:focus-visible,
 a:focus-visible,
 summary:focus-visible,
+[data-director-navigation-focus]:focus-visible,
 .director-button:focus-within {
   outline: 3px solid rgb(20 101 156 / 24%);
   outline-offset: 2px;
@@ -1556,6 +1557,22 @@ button:disabled:hover {
   background: var(--director-accent-soft);
 }
 
+.is-navigation-target {
+  outline: 3px solid color-mix(in srgb, var(--director-accent) 72%, transparent);
+  outline-offset: -3px;
+  background: color-mix(in srgb, var(--director-accent) 12%, var(--director-surface));
+  animation: director-navigation-target 1.6s ease-out;
+}
+
+@keyframes director-navigation-target {
+  from {
+    background: color-mix(in srgb, var(--director-accent) 28%, var(--director-surface));
+  }
+  to {
+    background: color-mix(in srgb, var(--director-accent) 12%, var(--director-surface));
+  }
+}
+
 .director-leader-list li,
 .director-plain-list li {
   display: flex;
@@ -2790,11 +2807,11 @@ button:disabled:hover {
   padding: 0;
   border: 1px solid var(--director-border-strong);
   border-radius: 8px;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
 }
 .director-help-dialog::backdrop,
 .director-operator-dialog::backdrop {
-  background: rgba(38,49,59,0.45);
+  background: rgba(38, 49, 59, 0.45);
 }
 .director-help-dialog-header {
   display: flex;
@@ -2842,9 +2859,17 @@ button:disabled:hover {
   font-size: 12px;
   text-decoration: none;
 }
-.director-help-toc a:hover { text-decoration: underline; }
-.director-help-shortcuts { margin-top: 8px; }
-.director-help-footnote { margin-top: 12px; border-top: 1px solid var(--director-border); padding-top: 12px; }
+.director-help-toc a:hover {
+  text-decoration: underline;
+}
+.director-help-shortcuts {
+  margin-top: 8px;
+}
+.director-help-footnote {
+  margin-top: 12px;
+  border-top: 1px solid var(--director-border);
+  padding-top: 12px;
+}
 
 /* Tournament switcher and operator menus – menu-button pattern */
 .director-tournament-switcher-wrap,
@@ -2863,7 +2888,7 @@ button:disabled:hover {
   cursor: pointer;
 }
 .director-tournament-switcher:hover {
-  background: rgba(255,255,255,0.6);
+  background: rgba(255, 255, 255, 0.6);
   border-color: var(--director-border);
 }
 .director-tournament-switcher .director-tournament-overline {
@@ -2886,7 +2911,7 @@ button:disabled:hover {
   background: var(--director-surface);
   border: 1px solid var(--director-border-strong);
   border-radius: 6px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
 }
 .director-operator-menu {
   top: auto;
@@ -2914,18 +2939,135 @@ button:disabled:hover {
   gap: 2px;
   padding: 6px 10px;
 }
-.director-tournament-menu-header strong { font-size: 13px; }
-.director-tournament-menu-header small { color: var(--director-muted); font-size: 11px; }
+.director-tournament-menu-header strong {
+  font-size: 13px;
+}
+.director-tournament-menu-header small {
+  color: var(--director-muted);
+  font-size: 11px;
+}
 .director-menu-note {
   padding: 6px 10px;
   color: var(--director-faint);
   font-size: 11px;
   font-style: italic;
 }
-.director-menu-file { position: relative; cursor: pointer; }
-.director-search-wrap { position: relative; }
-.director-operator { cursor: pointer; border: 0; background: transparent; width: 100%; text-align: left; }
-.director-operator:hover { color: var(--director-accent); }
-.director-avatar-top { border: 0; background: #e5f0f7; cursor: pointer; }
-.director-avatar-top:hover { background: #d6e8f3; }
+.director-menu-file {
+  position: relative;
+  cursor: pointer;
+}
+.director-search-wrap {
+  position: relative;
+}
+.director-operator {
+  cursor: pointer;
+  border: 0;
+  background: transparent;
+  width: 100%;
+  text-align: left;
+}
+.director-operator:hover {
+  color: var(--director-accent);
+}
+.director-avatar-top {
+  border: 0;
+  background: #e5f0f7;
+  cursor: pointer;
+}
+.director-avatar-top:hover {
+  background: #d6e8f3;
+}
 
+@media (max-width: 720px) {
+  /* The compact navigation uses the horizontal section bar; keep the desktop switcher
+     out of the flow as well as visually hidden so its side margins cannot widen the page. */
+  .director-tournament-switcher-wrap {
+    display: none;
+  }
+}
+
+.director-schedule-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 1px;
+  border-left: 2px solid var(--director-border);
+}
+.director-schedule-item {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: var(--director-space-3);
+  padding: var(--director-space-3) 0 var(--director-space-3) var(--director-space-2);
+  margin-left: -16px;
+  background: var(--director-surface);
+}
+.director-schedule-marker {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--director-border-strong);
+  border-radius: 50%;
+  background: var(--director-surface-soft);
+  color: var(--director-accent);
+  font-size: 11px;
+  font-weight: 700;
+}
+.director-schedule-item-main {
+  min-width: 0;
+  display: grid;
+  gap: 7px;
+}
+.director-schedule-item-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--director-space-3);
+}
+.director-schedule-item-heading > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+.director-schedule-item-heading strong {
+  font-size: 14px;
+}
+.director-schedule-item-heading small,
+.director-schedule-round-controls small {
+  color: var(--director-muted);
+  font-size: 11px;
+}
+.director-schedule-item-main p {
+  margin: 0;
+  color: var(--director-muted);
+  font-size: 12px;
+}
+.director-schedule-round-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--director-space-3);
+}
+.director-schedule-round-controls .director-form-field {
+  max-width: 260px;
+}
+.director-schedule-round-controls .director-form-field > span {
+  font-size: 11px;
+}
+.director-schedule-round-controls input {
+  min-width: 210px;
+}
+.director-menu-item-with-action {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+}
+.director-menu-item-with-action > button:first-child {
+  flex: 1;
+  padding: 8px 10px;
+}
+.director-menu-item-with-action .director-inline-action {
+  padding: 5px 7px;
+  margin-right: 4px;
+}

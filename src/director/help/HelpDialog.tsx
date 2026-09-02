@@ -12,40 +12,42 @@ export function HelpDialog({ open, onClose }: { open: boolean; onClose: () => vo
   const dialogRef = useRef<HTMLDialogElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
     if (open) {
-      previousFocusRef.current = document.activeElement as HTMLElement | null;
+      if (!dialog.open) previousFocusRef.current = document.activeElement as HTMLElement | null;
       if (!dialog.open) dialog.showModal();
-      // Focus the close button (inside dialog) per a11y requirements
+      // Focus the close button (inside dialog) per a11y requirements.
       closeButtonRef.current?.focus();
       const handleCancel = (e: Event) => {
         e.preventDefault();
-        onClose();
+        onCloseRef.current();
       };
       dialog.addEventListener('cancel', handleCancel);
       return () => dialog.removeEventListener('cancel', handleCancel);
     } else {
       if (dialog.open) dialog.close();
-      // Restore focus to invoking element
-      previousFocusRef.current?.focus();
+      const previous = previousFocusRef.current;
+      previousFocusRef.current = null;
+      // Restore focus to the exact control that opened the dialog, not a fixed help button.
+      if (previous && document.contains(previous)) previous.focus();
     }
-  }, [open, onClose]);
-
-  // Also handle click on backdrop
-  const handleBackdropClick = (e: React.MouseEvent<HTMLDialogElement>) => {
-    if (e.target === dialogRef.current) onClose();
-  };
+  }, [open]);
 
   return (
     <dialog
       ref={dialogRef}
       aria-labelledby={titleId}
-      onClick={handleBackdropClick}
       className="director-help-dialog"
-      onClose={onClose}
+      onClose={() => onCloseRef.current()}
+      aria-modal="true"
     >
       <div className="director-help-dialog-header">
         <h2 id={titleId}>Help & keyboard shortcuts</h2>
@@ -54,7 +56,6 @@ export function HelpDialog({ open, onClose }: { open: boolean; onClose: () => vo
           type="button"
           className="director-button director-button-secondary"
           onClick={onClose}
-          autoFocus
         >
           Close
         </button>
@@ -75,39 +76,56 @@ export function HelpDialog({ open, onClose }: { open: boolean; onClose: () => vo
         <section id="help-getting-started">
           <h3>Getting started</h3>
           <p>
-            Director is offline-first. Create a tournament with a name and date, add teams and rooms,
-            choose a format, then generate the schedule. No internet or account is required.
+            Director is offline-first. Create a tournament with a name and date, add teams and rooms, choose a
+            format, then generate the schedule. No internet or account is required.
           </p>
         </section>
 
         <section id="help-planning">
           <h3>Planning a tournament</h3>
-          <p>Teams → Format → Rooms & staff → Packets. The preflight checklist on Tournament control shows what is missing.</p>
+          <p>
+            Teams → Format → Rooms & staff → Packets. The preflight checklist on Tournament control shows what
+            is missing.
+          </p>
           <ul>
             <li>Add confirmed teams before generating a schedule.</li>
             <li>Choose packet assignments per round.</li>
-            <li>Set the tournament timezone in Settings; it is the event&apos;s zone, not the laptop&apos;s.</li>
+            <li>
+              Set the tournament timezone in Settings; it is the event&apos;s zone, not the laptop&apos;s.
+            </li>
           </ul>
         </section>
 
         <section id="help-running">
           <h3>Running rounds</h3>
-          <p>Prepare a round to assign rooms/packets, release it to publish the schedule, then close it when scoring is complete. Closing a round does not complete the tournament.</p>
+          <p>
+            Prepare a round to assign rooms/packets, release it to publish the schedule, then close it when
+            scoring is complete. Closing a round does not complete the tournament.
+          </p>
         </section>
 
         <section id="help-results">
           <h3>Results / review</h3>
-          <p>Incoming results appear in Results for review. Accept or reject there; accepted results update standings and the Live projection.</p>
+          <p>
+            Incoming results appear in Results for review. Accept or reject there; accepted results update
+            standings and the Live projection.
+          </p>
         </section>
 
         <section id="help-transfers">
           <h3>Transfers / USB workflow</h3>
-          <p>Use Transfers to import files from USB or watch a folder. Supported: Director .json, QBJ, and portable .qbst archives. Checksum and duplicate handling is automatic.</p>
+          <p>
+            Use Transfers to import files from USB or watch a folder. Supported: Director .json, QBJ, and
+            portable .qbst archives. Checksum and duplicate handling is automatic.
+          </p>
         </section>
 
         <section id="help-qbtcp">
           <h3>QBTCP troubleshooting</h3>
-          <p>QBTCP runs on the local network via the Tauri Director app. Browser preview cannot start the server.</p>
+          <p>
+            QBTCP runs on the local network via the Tauri Director app. Browser preview cannot start the
+            server.
+          </p>
           <ul>
             <li>Ensure Director and scorekeeper devices are on the same LAN.</li>
             <li>Check firewall allows the reported port.</li>
@@ -127,7 +145,10 @@ export function HelpDialog({ open, onClose }: { open: boolean; onClose: () => vo
 
         <section id="help-storage">
           <h3>Recovery & storage</h3>
-          <p>Director saves to SQLite in the desktop app and IndexedDB in the browser. Use Settings → Create checkpoint before major changes. Restarts restore the last saved tournament.</p>
+          <p>
+            Director saves to SQLite in the desktop app and IndexedDB in the browser. Use Settings → Create
+            checkpoint before major changes. Restarts restore the last saved tournament.
+          </p>
         </section>
 
         <section id="help-shortcuts">
@@ -146,7 +167,10 @@ export function HelpDialog({ open, onClose }: { open: boolean; onClose: () => vo
                   <td>
                     <kbd>{s.keys.join(' + ')}</kbd>
                     {(s as unknown as { win?: string[] }).win && (
-                      <span> / <kbd>{(s as unknown as { win: string[] }).win!.join(' + ')}</kbd></span>
+                      <span>
+                        {' '}
+                        / <kbd>{(s as unknown as { win: string[] }).win!.join(' + ')}</kbd>
+                      </span>
                     )}
                   </td>
                   <td>{s.description}</td>
@@ -154,7 +178,10 @@ export function HelpDialog({ open, onClose }: { open: boolean; onClose: () => vo
               ))}
             </tbody>
           </table>
-          <p>Search: type to filter teams, players, rooms, packets, and games. Arrow keys move focus, Enter opens the highlighted result, Escape clears/closes.</p>
+          <p>
+            Search: type to filter teams, players, rooms, packets, and games. Arrow keys move focus, Enter
+            opens the highlighted result, Escape clears/closes.
+          </p>
           <p>Dialogs: Escape closes, focus is trapped while open and returns to the triggering button.</p>
         </section>
 
