@@ -74,6 +74,7 @@ session credential.
 | `src/practice/` | guided practice mode |
 | `docs/` | the QBTCP and QBJ profile specifications, the `.qbg` migration, and the test-file guide |
 | `tests/`, `e2e/` | application and integration tests, and the Playwright torture test |
+| `scripts/ci/` | the change-impact classifier that routes the `CI` workflow |
 
 ## Before you open a pull request
 
@@ -119,6 +120,45 @@ scoring boundary, because a local run is much faster than a CI failure days late
 `npm run test:stress` is the deep state-space run. `QBSHEET_STRESS_SEEDS` and `QBSHEET_STRESS_ACTIONS`
 drive it. A nightly workflow runs it with 5000 seeds. The default suite is enough locally, unless you
 change the state machine.
+
+## What CI runs, and when
+
+`CI` is routed by change impact. Its first job, `changes`, classifies the files a pull request
+touches and every other job runs only if that classification says it could be affected. The rule is
+that a test runs when a changed file could affect what that test protects — so a Rust crate, an iOS
+file, a Cloudflare Worker, or a README does not run the Playwright scorer torture test, and anything
+that can reach the scoresheet does.
+
+| Domain | What it runs | What turns it on |
+| --- | --- | --- |
+| `quality` | formatting, lint, typecheck | any `.ts`, `.tsx`, `.js`, `.mjs`, `.cjs`, or `.css` file, and their configs |
+| `scorer` | the root Vitest suite, and the project-path build | `src/` outside `src/director/`, `tests/`, `index.html`, `about/`, `public/`, `wiki/` |
+| `browser` | `npm run test:browser` | anything that changes scorer runtime behaviour or its browser environment, plus `e2e/` and `playwright.config.ts` |
+| `director-web` | the Director build, its tests, and `e2e/Director.spec.ts` | `src/director/`, `apps/director/` outside `src-tauri/`, and the packages Director imports |
+| `tournament-js` | the tournament-core, -formats, and -domain suites | `packages/tournament-*/` |
+| `qblive-js` | the QBLive package suites and Live Web | only a *shared* change, because `qblive.yml` owns the QBLive paths |
+| `rust-director`, `rust-tournament-store`, `rust-qbtcp` | `cargo fmt`, `clippy`, `test` for one crate | that crate, plus `crates/qbtcp-server/` for the Director crate, which path-depends on it |
+
+`verify` runs last and is the aggregate: it passes when every job that was relevant passed, and a
+job that was skipped because it was irrelevant is a pass. It is the check to read first, because it
+prints which domains were detected and which jobs ran.
+
+The rules live in [`scripts/ci/impact.mjs`](scripts/ci/impact.mjs), with the dependency map they
+were derived from, and [`tests/ci/impact.test.ts`](tests/ci/impact.test.ts) holds them to it. Two
+things to know before editing them:
+
+* **Uncertainty runs more, never less.** A path that matches no rule turns every domain on and says
+  so in the job summary. If you add a directory, add a rule for it — the test that every tracked
+  file is classified will tell you.
+* **`.github/workflows/qblive.yml` is separate on purpose.** It carries the Cloudflare, Swift,
+  Xcode, privacy, and conformance work. `CI` does not duplicate it; what `CI` keeps for the QBLive
+  paths is the repository formatting and lint that `qblive.yml` does not run.
+
+To see how a change would be routed without pushing it:
+
+```sh
+node scripts/ci/classify-impact.mjs --files src/scorer/Scoresheet.tsx ios/project.yml
+```
 
 ## Tests
 
@@ -202,7 +242,9 @@ implement.
   which of the boundaries above it touches. Delete the sections that do not apply.
 * State whether the change affects the core export surface, the contents of a portable file, or the
   wire surface. Those are the three surfaces that a downstream implementation can break on.
-* CI must be green: lint, typecheck, tests, the project-path build, and the Playwright torture test.
+* CI must be green: lint, typecheck, tests, the project-path build, and the Playwright torture test —
+  for whichever of those your change can affect. See "What CI runs, and when". `verify` is the check
+  that says the whole of it passed.
 
 ## Reporting bugs
 

@@ -38,6 +38,8 @@ const nodeTestFiles = [
   'tests/Roster.test.ts',
   'tests/ScoringRulesInput.test.ts',
   'tests/SpreadsheetGame.test.ts',
+  // The CI change-impact classifier. Pure path and lockfile analysis, so it wants no browser.
+  'tests/ci/impact.test.ts',
 ];
 
 export default defineConfig({

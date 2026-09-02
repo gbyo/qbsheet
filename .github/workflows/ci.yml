@@ -1,5 +1,33 @@
 name: CI
 
+# Routed by change impact.
+#
+# Every job here used to run on every change, which meant a Swift file, a Cloudflare Worker, a Rust
+# crate, or a README ran the Playwright scorer torture test. The rule now is the one that was always
+# intended:
+#
+#   A test runs when a changed file could affect what that test protects.
+#
+# The `changes` job classifies the changed files with `scripts/ci/impact.mjs` and every other job
+# conditions on its outputs. The dependency map that decides the routing, and the reasoning behind
+# each rule, is documented in that file; `tests/ci/impact.test.ts` holds it to it.
+#
+# Three properties this workflow has to keep:
+#
+# * **The workflow itself is never path-filtered.** A workflow skipped by `paths-ignore` leaves its
+#   required checks Pending forever, which blocks merging. A *job* skipped by an `if` reports
+#   success. So the filtering lives on the jobs, and `verify` and `browser` — the two contexts the
+#   `main` ruleset requires — always resolve.
+# * **`verify` is the aggregate.** It runs after everything, whatever happened, and fails if any
+#   relevant job failed or was cancelled. A skipped irrelevant job is a pass.
+# * **Uncertainty runs more, never less.** An unrecognised path, an unmapped workspace, or a
+#   lockfile that cannot be compared turns every domain on. See the fail-safes in `impact.mjs`.
+#
+# `.github/workflows/qblive.yml` stays separate, and deliberately: it carries the Cloudflare,
+# Swift, Xcode, privacy, and conformance work, and a scorer typo should not wait on `workerd`. What
+# this workflow keeps for the QBLive paths is the coverage `qblive.yml` does not provide —
+# repository formatting and lint — and nothing else.
+
 on:
   push:
   pull_request:
@@ -8,9 +36,57 @@ permissions:
   contents: read
 
 jobs:
-  verify:
+  # -----------------------------------------------------------------------------------------------
+  # What changed, and therefore what has to run.
+  # -----------------------------------------------------------------------------------------------
+  changes:
+    name: Change impact
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 5
+    outputs:
+      quality: ${{ steps.impact.outputs.quality }}
+      scorer: ${{ steps.impact.outputs.scorer }}
+      scorer-browser: ${{ steps.impact.outputs.scorer-browser }}
+      director-web: ${{ steps.impact.outputs.director-web }}
+      tournament-js: ${{ steps.impact.outputs.tournament-js }}
+      qblive-js: ${{ steps.impact.outputs.qblive-js }}
+      rust-director: ${{ steps.impact.outputs.rust-director }}
+      rust-tournament-store: ${{ steps.impact.outputs.rust-tournament-store }}
+      rust-qbtcp: ${{ steps.impact.outputs.rust-qbtcp }}
+      docs-only: ${{ steps.impact.outputs.docs-only }}
+      affected: ${{ steps.impact.outputs.affected }}
+      file-count: ${{ steps.impact.outputs.file-count }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          # The whole history. A shallow clone cannot see a pull request's base commit, and a diff
+          # that silently reports too few files would skip the tests that protect the scorer. The
+          # classifier fails safe if the base is missing even so, but it should not have to.
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+
+      # No `npm ci`: the classifier is dependency-free so that the job that decides whether to
+      # install anything does not have to install anything.
+      - name: Classify the change
+        id: impact
+        run: node scripts/ci/classify-impact.mjs
+
+  # -----------------------------------------------------------------------------------------------
+  # Repository-wide formatting, lint, and typecheck. Cheap, shared, and the only check the QBLive
+  # paths get from this workflow.
+  # -----------------------------------------------------------------------------------------------
+  quality:
+    name: Quality
+    needs: changes
+    if: needs.changes.outputs.quality == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Check out source
         uses: actions/checkout@v7
@@ -36,39 +112,51 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+  # -----------------------------------------------------------------------------------------------
+  # The scorer: the root Vitest suite and the build that GitHub Pages deploys.
+  # -----------------------------------------------------------------------------------------------
+  scorer:
+    name: Scorer
+    needs: changes
+    if: needs.changes.outputs.scorer == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
       - name: Test
         run: npm test -- --run
 
+      # Vite emits relative asset paths by default, and this form of the build catches a change
+      # that works only at a domain root. Pages deployments live below a repository path.
       - name: Verify project-path build
         run: BASE_PATH=/qbsheet/ npm run build
 
-      - name: Build Director frontend
-        run: npm run director:build
-
-      - name: Test Director
-        run: npm run director:test
-
-      - name: Test tournament-core
-        run: npm run director:core:test
-
-      - name: Test tournament-formats
-        run: npm run director:formats:test
-
-      - name: Test the canonical tournament domain
-        run: npm run director:domain:test
-
-      # The QBSheet Live protocol, projection, and clients are ordinary TypeScript and belong in
-      # the fast gate. Everything that needs `workerd`, Swift, or Xcode is in `qblive.yml`.
-      - name: Test QBSheet Live
-        run: npm run qblive:test
-
-      - name: Test QBSheet Live Web
-        run: npm run live:test
-
-      - name: Build QBSheet Live Web
-        run: npm run live:build
-
-  browser:
+  # -----------------------------------------------------------------------------------------------
+  # The scorer browser torture test. The most expensive job in the repository, and the one this
+  # reorganisation exists for: it now runs only when a change can alter what the scoresheet does in
+  # a browser, or what browser it does it in.
+  #
+  # The job id is `scorer-browser`; the *name* stays `browser` because that is the status-check
+  # context the `main` ruleset requires. Renaming it means editing the ruleset in the same change.
+  # -----------------------------------------------------------------------------------------------
+  scorer-browser:
+    name: browser
+    needs: changes
+    if: needs.changes.outputs.scorer-browser == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -106,23 +194,155 @@ jobs:
             test-results/
           if-no-files-found: ignore
 
-  rust:
-    name: Rust - ${{ matrix.name }}
+  # -----------------------------------------------------------------------------------------------
+  # Director's web frontend. `apps/director` is a thin shell whose entry imports `src/director`, so
+  # its build is the real compile of the Director application. Nothing outside `src/director`
+  # imports `src/director`, which is why a Director change owes the scorer nothing.
+  # -----------------------------------------------------------------------------------------------
+  director-web:
+    name: Director web
+    needs: changes
+    if: needs.changes.outputs.director-web == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Director frontend
+        run: npm run director:build
+
+      - name: Test Director shell
+        run: npm run director:test
+
+      # The Director suites in the root project: `src/director/**` and `tests/DirectorIntegration`.
+      - name: Test Director
+        run: npm run test:director
+
+      - name: Verify runner Chrome
+        run: google-chrome --version
+
+      - name: Install Playwright video helper
+        run: npx playwright install ffmpeg
+
+      # `e2e/Director.spec.ts` drives `/director.html` in a real browser. Director keeps its browser
+      # coverage; what it no longer runs is the scorer's torture suite.
+      - name: Run Director browser test
+        run: npm run test:browser:director
+
+      - name: Upload browser failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report-director
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+
+  # -----------------------------------------------------------------------------------------------
+  # The tournament packages. Consumed by Director and by nothing in the scorer.
+  # -----------------------------------------------------------------------------------------------
+  tournament-js:
+    name: Tournament packages
+    needs: changes
+    if: needs.changes.outputs.tournament-js == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test tournament-core
+        run: npm run director:core:test
+
+      - name: Test tournament-formats
+        run: npm run director:formats:test
+
+      - name: Test the canonical tournament domain
+        run: npm run director:domain:test
+
+  # -----------------------------------------------------------------------------------------------
+  # The QBSheet Live TypeScript packages, as a *backstop* only.
+  #
+  # `qblive.yml` owns these suites and filters on the QBLive paths, so a change inside them does not
+  # reach this job — running it would be a straight duplicate of the privacy sweep and the protocol
+  # suite. What `qblive.yml` does not see is a shared change: the root lockfile and the root
+  # TypeScript config are not in its path filter, and npm hoists, so the `vitest` and `typescript`
+  # the QBLive packages run on are the root's. Those changes land here.
+  # -----------------------------------------------------------------------------------------------
+  qblive-js:
+    name: QBSheet Live packages
+    needs: changes
+    if: needs.changes.outputs.qblive-js == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test QBSheet Live
+        run: npm run qblive:test
+
+      - name: Test QBSheet Live Web
+        run: npm run live:test
+
+      - name: Build QBSheet Live Web
+        run: npm run live:build
+
+  # -----------------------------------------------------------------------------------------------
+  # Rust, one job per crate.
+  #
+  # There is no Cargo workspace: each crate has its own `Cargo.toml` and `Cargo.lock`, so a change
+  # to one is genuinely nothing to do with the others. The exception is recorded in Cargo itself —
+  # `apps/director/src-tauri` path-depends on `crates/qbtcp-server` — so a QBTCP change runs the
+  # Director crate too. `impact.mjs` encodes that.
+  #
+  # The caches are keyed on the crate's own lockfile now rather than on every `Cargo.lock` in the
+  # repository, so a tournament-store bump no longer invalidates the Director crate's cache.
+  # -----------------------------------------------------------------------------------------------
+  rust-director:
+    name: Rust - Director native crate
+    needs: changes
+    if: needs.changes.outputs.rust-director == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: Director native crate
-            crate: director
-            directory: apps/director/src-tauri
-          - name: Tournament store
-            crate: tournament-store
-            directory: crates/tournament-store
-          - name: QBTCP server
-            crate: qbtcp-server
-            directory: crates/qbtcp-server
     steps:
       - name: Check out source
         uses: actions/checkout@v7
@@ -135,7 +355,6 @@ jobs:
           components: rustfmt, clippy
 
       - name: Install Director Linux dependencies
-        if: matrix.crate == 'director'
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y \
@@ -156,19 +375,165 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            ${{ matrix.directory }}/target
-          key: ${{ runner.os }}-cargo-${{ matrix.crate }}-${{ hashFiles('**/Cargo.toml', '**/Cargo.lock') }}
+            apps/director/src-tauri/target
+          key: ${{ runner.os }}-cargo-director-${{ hashFiles('apps/director/src-tauri/Cargo.lock', 'crates/qbtcp-server/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-${{ matrix.crate }}-
+            ${{ runner.os }}-cargo-director-
 
       - name: Check Rust formatting
-        working-directory: ${{ matrix.directory }}
+        working-directory: apps/director/src-tauri
         run: cargo fmt --all -- --check
 
       - name: Run Clippy
-        working-directory: ${{ matrix.directory }}
+        working-directory: apps/director/src-tauri
         run: cargo clippy --all-targets --all-features -- -D warnings
 
       - name: Run Rust tests
-        working-directory: ${{ matrix.directory }}
+        working-directory: apps/director/src-tauri
         run: cargo test --all-targets --all-features
+
+  rust-tournament-store:
+    name: Rust - Tournament store
+    needs: changes
+    if: needs.changes.outputs.rust-tournament-store == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Cargo dependencies and target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            crates/tournament-store/target
+          key: ${{ runner.os }}-cargo-tournament-store-${{ hashFiles('crates/tournament-store/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-tournament-store-
+
+      - name: Check Rust formatting
+        working-directory: crates/tournament-store
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy
+        working-directory: crates/tournament-store
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Run Rust tests
+        working-directory: crates/tournament-store
+        run: cargo test --all-targets --all-features
+
+  rust-qbtcp:
+    name: Rust - QBTCP server
+    needs: changes
+    if: needs.changes.outputs.rust-qbtcp == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Cargo dependencies and target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            crates/qbtcp-server/target
+          key: ${{ runner.os }}-cargo-qbtcp-server-${{ hashFiles('crates/qbtcp-server/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-qbtcp-server-
+
+      - name: Check Rust formatting
+        working-directory: crates/qbtcp-server
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy
+        working-directory: crates/qbtcp-server
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Run Rust tests
+        working-directory: crates/qbtcp-server
+        run: cargo test --all-targets --all-features
+
+  # -----------------------------------------------------------------------------------------------
+  # The aggregate, and the status check the ruleset requires.
+  #
+  # `if: always()` so it runs even when a job above was skipped or failed — without it, one skipped
+  # optional job would leave the required check Pending. It passes only when every job it depends on
+  # either succeeded or was skipped, so a failure or a cancellation cannot be aggregated into green.
+  # -----------------------------------------------------------------------------------------------
+  verify:
+    name: verify
+    if: always()
+    needs:
+      - changes
+      - quality
+      - scorer
+      - scorer-browser
+      - director-web
+      - tournament-js
+      - qblive-js
+      - rust-director
+      - rust-tournament-store
+      - rust-qbtcp
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Report what ran, and require it to have passed
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+          AFFECTED: ${{ needs.changes.outputs.affected }}
+          DOCS_ONLY: ${{ needs.changes.outputs.docs-only }}
+          FILE_COUNT: ${{ needs.changes.outputs.file-count }}
+        run: |
+          set -euo pipefail
+
+          echo "Changed files: ${FILE_COUNT:-unknown}"
+          echo "Affected domains: ${AFFECTED:-none}"
+          echo "Documentation only: ${DOCS_ONLY:-unknown}"
+          echo
+
+          printf '%-24s %s\n' 'JOB' 'RESULT'
+          echo "$RESULTS" | jq -r 'to_entries[] | [.key, .value.result] | @tsv' \
+            | while IFS=$'\t' read -r job result; do printf '%-24s %s\n' "$job" "$result"; done
+          echo
+
+          # Anything that is neither a success nor an intentional skip fails this check. `cancelled`
+          # and `failure` are both caught, and so is any status GitHub adds later.
+          bad=$(echo "$RESULTS" | jq -r \
+            '[to_entries[] | select(.value.result != "success" and .value.result != "skipped") | .key] | join(", ")')
+          if [ -n "$bad" ]; then
+            echo "::error::CI failed. Not successful: ${bad}"
+            exit 1
+          fi
+
+          {
+            echo "## CI verified"
+            echo
+            echo "Changed files: ${FILE_COUNT:-unknown}"
+            echo
+            echo "Affected domains: \`${AFFECTED:-none}\`"
+            echo
+            echo "| Job | Result |"
+            echo "| --- | --- |"
+            echo "$RESULTS" | jq -r 'to_entries[] | "| `\(.key)` | \(.value.result) |"'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "Every relevant job passed."
