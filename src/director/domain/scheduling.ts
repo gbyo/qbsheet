@@ -29,6 +29,7 @@ export interface ScheduleOptions {
   avoidRematches?: boolean;
   avoidSameOrganization?: boolean;
   allowByes?: boolean;
+  formatKind?: 'round-robin' | 'double-round-robin';
   seed?: number;
 }
 
@@ -42,6 +43,7 @@ export interface ScheduleConflict {
     | 'missing-format'
     | 'missing-phase'
     | 'missing-pools'
+    | 'format-complete'
     | 'invalid-generation';
   severity: 'error' | 'warning';
   message: string;
@@ -103,6 +105,17 @@ export function formatGenerationAvailability(state: DirectorState): FormatGenera
       : { supported: true, message: 'Pool round-robin generation is available for this phase.' };
   }
   if (format.kind === 'round-robin' || format.kind === 'double-round-robin') {
+    if (format.kind === 'double-round-robin') {
+      const confirmedCount = state.teams.filter((team) => team.status === 'confirmed').length;
+      const phaseRoundCount = state.rounds.filter((round) => round.phaseId === phase.id).length;
+      const maximumRoundCount = roundRobinCycleLength(confirmedCount) * 2;
+      if (confirmedCount >= 2 && phaseRoundCount >= maximumRoundCount) {
+        return {
+          supported: false,
+          message: 'This double round robin is complete; add a new phase for additional play.',
+        };
+      }
+    }
     return { supported: true, message: 'Round-robin generation is available for this format.' };
   }
   return {
@@ -221,7 +234,30 @@ export function generateRoundRobinRound(
     return buildGenerationResult(roundId, roundNumber, options, [], conflicts);
   }
 
-  const pairings = pairRoundRobinTeams(state, teams, options, roundNumber);
+  const phaseRounds = options.phaseId
+    ? state.rounds
+        .filter((round) => round.phaseId === options.phaseId)
+        .sort((left, right) => left.number - right.number || left.id.localeCompare(right.id))
+    : [];
+  const roundIndex = phaseRounds.length;
+  const cycleLength = roundRobinCycleLength(teams.length);
+  if (options.formatKind === 'double-round-robin' && roundIndex >= cycleLength * 2) {
+    conflicts.push({
+      code: 'format-complete',
+      severity: 'error',
+      message: 'This double round robin already contains both complete rotations.',
+    });
+    return buildGenerationResult(roundId, roundNumber, options, [], conflicts);
+  }
+  const intentionalRematch = options.formatKind === 'double-round-robin' && roundIndex >= cycleLength;
+  const firstCycleOptions =
+    options.formatKind === 'double-round-robin' && !intentionalRematch
+      ? { ...options, avoidRematches: true }
+      : options;
+  const pairings = intentionalRematch
+    ? (repeatRoundPairings(state, teams, phaseRounds[roundIndex - cycleLength]) ??
+      pairRoundRobinTeams(state, teams, options, roundNumber))
+    : pairRoundRobinTeams(state, teams, firstCycleOptions, roundNumber);
   if (!pairings) {
     conflicts.push({
       code: 'invalid-generation',
@@ -237,7 +273,7 @@ export function generateRoundRobinRound(
   if (options.avoidRematches || options.avoidSameOrganization) {
     for (const [left, right] of pairings) {
       if (!left || !right || legalPair(state, left, right, options)) continue;
-      if (options.avoidRematches && hasPlayed(state, left.id, right.id)) {
+      if (options.avoidRematches && hasPlayed(state, left.id, right.id) && !intentionalRematch) {
         conflicts.push({
           code: 'rematch',
           severity: 'warning',
@@ -301,6 +337,31 @@ function pairRoundRobinTeams(
   }
 
   return findCompleteMatching(teams, () => true);
+}
+
+function repeatRoundPairings(
+  state: DirectorState,
+  teams: Team[],
+  round: Round | undefined,
+): Array<[Team | null, Team | null]> | null {
+  if (!round) return null;
+  const teamById = new Map(teams.map((team) => [team.id, team]));
+  const pairings = state.scheduledGames
+    .filter((game) => game.roundId === round.id)
+    .map((game): [Team | null, Team | null] => [
+      teamById.get(game.leftTeamId) ?? null,
+      game.rightTeamId ? (teamById.get(game.rightTeamId) ?? null) : null,
+    ]);
+  if (pairings.length !== Math.ceil(teams.length / 2)) return null;
+  const seen = new Set<DirectorId>();
+  for (const [left, right] of pairings) {
+    if (!left) return null;
+    if (right && (left.id === right.id || seen.has(left.id) || seen.has(right.id))) return null;
+    if (!right && seen.has(left.id)) return null;
+    seen.add(left.id);
+    if (right) seen.add(right.id);
+  }
+  return seen.size === teams.length ? pairings : null;
 }
 
 function legalPair(
@@ -524,6 +585,7 @@ export function generateDirectorRound(
     ...options,
     phaseId: phase.id,
     packetId: packet?.id ?? null,
+    formatKind: format.kind === 'double-round-robin' ? 'double-round-robin' : 'round-robin',
     avoidRematches: options.avoidRematches ?? format.avoidRematches,
     avoidSameOrganization: options.avoidSameOrganization ?? format.avoidSameOrganization,
     allowByes: format.allowByes,
@@ -546,7 +608,13 @@ export function generateDirectorRound(
 function failedGenerationResult(
   state: DirectorState,
   options: ScheduleOptions,
-  code: 'missing-format' | 'missing-phase' | 'missing-pools' | 'unsupported-format' | 'invalid-generation',
+  code:
+    | 'missing-format'
+    | 'missing-phase'
+    | 'missing-pools'
+    | 'format-complete'
+    | 'unsupported-format'
+    | 'invalid-generation',
   message: string,
 ): ScheduleGenerationResult {
   return buildGenerationResult(
@@ -749,6 +817,10 @@ function toCoreRoom(room: DirectorState['rooms'][number]): CoreRoom {
 
 export function scheduleGameCount(games: ScheduledGame[]): number {
   return games.filter((game) => !game.bye && game.status !== 'cancelled').length;
+}
+
+function roundRobinCycleLength(teamCount: number): number {
+  return teamCount % 2 === 0 ? Math.max(0, teamCount - 1) : teamCount;
 }
 
 export function scheduleIsValid(

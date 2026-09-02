@@ -7,7 +7,7 @@ import {
   isoNow,
   newDirectorId,
   roomAssignmentConflicts,
-  scheduleIsValid,
+  roundScheduleIsValid,
   type DirectorId,
   type DirectorState,
   type DetailedStatsStatus,
@@ -233,6 +233,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
   const stateRevisionRef = useRef(0);
   const persistenceQueueRef = useRef(Promise.resolve());
   const persistenceSequenceRef = useRef(0);
+  const qbtcpSyncInFlightRef = useRef<Promise<void> | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -1293,7 +1294,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         return false;
       }
       const games = snapshot.scheduledGames.filter((game) => game.roundId === roundId);
-      if (games.length === 0 || !scheduleIsValid(games)) {
+      if (games.length === 0 || !roundScheduleIsValid(snapshot, roundId)) {
         setError('This round cannot be prepared until every matchup is valid.');
         return false;
       }
@@ -1317,24 +1318,25 @@ export function useDirectorController(repository = createDirectorRepository()): 
 
   const releaseRound = useCallback(
     (roundId: DirectorId): boolean => {
-      const round = stateRef.current.rounds.find((entry) => entry.id === roundId);
+      const snapshot = stateRef.current;
+      const round = snapshot.rounds.find((entry) => entry.id === roundId);
       if (!round || round.status !== 'prepared') {
         setError('Only a prepared round can be released.');
         return false;
       }
-      const games = stateRef.current.scheduledGames.filter((game) => game.roundId === roundId);
+      const games = snapshot.scheduledGames.filter((game) => game.roundId === roundId);
       const roomIds = games.filter((game) => !game.bye).map((game) => game.roomId);
       const duplicateRoom = roomIds.filter((roomId, index) => roomId && roomIds.indexOf(roomId) !== index)[0];
       const invalidRoom = games.find((game) => {
         if (game.bye) return false;
         if (!game.roomId) return true;
-        const room = stateRef.current.rooms.find((entry) => entry.id === game.roomId);
+        const room = snapshot.rooms.find((entry) => entry.id === game.roomId);
         return !room || !room.available || room.status !== 'available';
       });
       const roomIdsForRound = new Set(roomIds.filter((roomId): roomId is DirectorId => roomId !== null));
-      const resourceIssues = roomAssignmentConflicts(stateRef.current, roomIdsForRound);
+      const resourceIssues = roomAssignmentConflicts(snapshot, roomIdsForRound);
       if (
-        !scheduleIsValid(games) ||
+        !roundScheduleIsValid(snapshot, roundId) ||
         games.length === 0 ||
         roomIds.some((roomId) => roomId === null) ||
         duplicateRoom ||
@@ -1353,6 +1355,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         const round = draft.rounds.find((entry) => entry.id === roundId);
         if (!round || round.status !== 'prepared') return;
         round.status = 'released';
+        round.startedAt ??= isoNow();
         const phase = draft.phases.find((entry) => entry.id === round.phaseId);
         if (phase) phase.status = 'active';
         if (draft.tournament) {
@@ -1387,6 +1390,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
       const round = snapshot.rounds.find((entry) => entry.id === roundId);
       if (!round || round.status !== 'released') {
         setError('Only a released round can be closed.');
+        return false;
+      }
+      if (!roundScheduleIsValid(snapshot, roundId)) {
+        setError('This round contains an invalid matchup or round membership and cannot be closed.');
         return false;
       }
       const unresolved = snapshot.scheduledGames.some(
@@ -1957,28 +1964,44 @@ export function useDirectorController(repository = createDirectorRepository()): 
     [commit],
   );
 
-  const syncQbtcp = useCallback(async () => {
-    const read = await readNativeServerSnapshot();
-    if (read.status === 'error') {
-      setQbtcpHealth((previous) => ({ ...previous, error: read.message }));
-      return;
-    }
-    const snapshot = read.snapshot;
-    setQbtcpHealth({ lastSuccessfulAt: isoNow(), error: null });
-    const next = structuredClone(stateRef.current);
-    let changed = applyNativeSessions(next, snapshot.sessions);
-    changed = applyNativePresence(next, snapshot) || changed;
-    changed = applyNativeProgress(next, snapshot.progress) || changed;
-    changed = applyNativeHelp(next, snapshot.help) || changed;
-    changed = applyNativeRosterAmendments(next, snapshot.rosterAmendments) || changed;
-    changed = applyNativeResults(next, snapshot) || changed;
-    changed = expireQbtcpSessions(next) || changed;
-    if (!changed) return;
-    const revision = stateRevisionRef.current + 1;
-    stateRevisionRef.current = revision;
-    stateRef.current = next;
-    setState(next);
-    void persist(next, revision).catch(() => undefined);
+  const syncQbtcp = useCallback(() => {
+    // The app polls every second. Do not allow a slow local-network read to overlap the next poll:
+    // an older response could otherwise arrive after a newer one and reopen a cancelled help
+    // request or apply stale operational metadata.
+    if (qbtcpSyncInFlightRef.current) return qbtcpSyncInFlightRef.current;
+    const task = (async () => {
+      const read = await readNativeServerSnapshot();
+      if (read.status === 'error') {
+        setQbtcpHealth((previous) => ({ ...previous, error: read.message }));
+        return;
+      }
+      const snapshot = read.snapshot;
+      setQbtcpHealth({ lastSuccessfulAt: isoNow(), error: null });
+      const next = structuredClone(stateRef.current);
+      let changed = applyNativeSessions(next, snapshot.sessions);
+      changed = applyNativePresence(next, snapshot) || changed;
+      changed = applyNativeProgress(next, snapshot.progress) || changed;
+      changed = applyNativeHelp(next, snapshot.help) || changed;
+      changed = applyNativeRosterAmendments(next, snapshot.rosterAmendments) || changed;
+      changed = applyNativeResults(next, snapshot) || changed;
+      changed = expireQbtcpSessions(next) || changed;
+      if (!changed) return;
+      const revision = stateRevisionRef.current + 1;
+      stateRevisionRef.current = revision;
+      stateRef.current = next;
+      setState(next);
+      void persist(next, revision).catch(() => undefined);
+    })();
+    qbtcpSyncInFlightRef.current = task;
+    void task.then(
+      () => {
+        if (qbtcpSyncInFlightRef.current === task) qbtcpSyncInFlightRef.current = null;
+      },
+      () => {
+        if (qbtcpSyncInFlightRef.current === task) qbtcpSyncInFlightRef.current = null;
+      },
+    );
+    return task;
   }, [persist]);
 
   const addTransferLocationAction = useCallback(
@@ -2616,9 +2639,26 @@ function applyNativeProgress(state: DirectorState, records: NativeProgressSnapsh
 
 function applyNativeHelp(state: DirectorState, records: NativeHelpSnapshot[]): boolean {
   let changed = false;
+  const snapshotRequestIds = new Set(records.map((record) => record.id));
   const openHelpRooms = new Set(
     records.filter((record) => record.status === 'open').map((record) => record.roomId),
   );
+  // Help state is maintained by the native server and is not durable across a server restart. If
+  // a persisted Director request is absent from the authoritative snapshot, close its local copy
+  // and release the room/session link instead of leaving the operations page stuck on an alert
+  // that the current server can no longer service.
+  for (const request of state.qbtcpHelpRequests) {
+    if (request.status !== 'open' || snapshotRequestIds.has(request.id)) continue;
+    request.status = 'cancelled';
+    request.updatedAt = isoNow();
+    changed = true;
+    const session = state.qbtcpSessions.find((entry) => entry.helpRequestId === request.id);
+    if (session) {
+      session.helpRequestId = null;
+      changed = true;
+    }
+    if (restoreRoomStatusAfterHelp(state, request.roomId)) changed = true;
+  }
   for (const record of records) {
     const current = state.qbtcpHelpRequests.find((request) => request.id === record.id);
     const next = {

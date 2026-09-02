@@ -235,7 +235,7 @@ function ResultRow({
               )}
             </>
           )}
-          {submission.status === 'accepted' && (
+          {submission.status === 'accepted' && game && scheduled && (
             <>
               <Button
                 variant={action === 'edit' ? 'secondary' : 'quiet'}
@@ -244,13 +244,15 @@ function ResultRow({
               >
                 Correct result
               </Button>
-              <Button
-                variant={action === 'protest' ? 'secondary' : 'quiet'}
-                icon="alert"
-                onClick={() => setAction((current) => (current === 'protest' ? null : 'protest'))}
-              >
-                Open protest
-              </Button>
+              {scheduled.rightTeamId && (
+                <Button
+                  variant={action === 'protest' ? 'secondary' : 'quiet'}
+                  icon="alert"
+                  onClick={() => setAction((current) => (current === 'protest' ? null : 'protest'))}
+                >
+                  Open protest
+                </Button>
+              )}
             </>
           )}
         </div>
@@ -308,12 +310,15 @@ function AssociateResult({
     (game) => !game.bye && game.status !== 'accepted' && game.status !== 'cancelled',
   );
   const [scheduledGameId, setScheduledGameId] = useState(choices[0]?.id ?? '');
+  const effectiveScheduledGameId = choices.some((game) => game.id === scheduledGameId)
+    ? scheduledGameId
+    : (choices[0]?.id ?? '');
   const associate = () => {
-    if (!scheduledGameId) {
+    if (!effectiveScheduledGameId) {
       onAnnounce('Choose the scheduled game before associating this result.');
       return;
     }
-    if (!controller.associateSubmission(submission.id, scheduledGameId)) return;
+    if (!controller.associateSubmission(submission.id, effectiveScheduledGameId)) return;
     onSuccess();
     onAnnounce('Result associated with the selected game and kept in review. Verify it before accepting.');
   };
@@ -333,7 +338,10 @@ function AssociateResult({
           label="Scheduled game"
           hint="Association does not accept the result. Review the score and warnings, then accept it separately."
         >
-          <select value={scheduledGameId} onChange={(event) => setScheduledGameId(event.target.value)}>
+          <select
+            value={effectiveScheduledGameId}
+            onChange={(event) => setScheduledGameId(event.target.value)}
+          >
             {choices.map((game) => {
               const round = state.rounds.find((entry) => entry.id === game.roundId);
               return (
@@ -657,7 +665,8 @@ function ManualResult({
     (game) => !game.bye && !['accepted', 'cancelled'].includes(game.status),
   );
   const [gameId, setGameId] = useState(choices[0]?.id ?? '');
-  const selected = choices.find((game) => game.id === gameId);
+  const effectiveGameId = choices.some((game) => game.id === gameId) ? gameId : (choices[0]?.id ?? '');
+  const selected = choices.find((game) => game.id === effectiveGameId);
   const [leftScore, setLeftScore] = useState('');
   const [rightScore, setRightScore] = useState('');
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -725,7 +734,7 @@ function ManualResult({
           <div className="director-panel-body">
             <div className="director-form-grid">
               <FormField label="Scheduled game">
-                <select value={gameId} onChange={(event) => setGameId(event.target.value)}>
+                <select value={effectiveGameId} onChange={(event) => setGameId(event.target.value)}>
                   {choices.map((game) => (
                     <option key={game.id} value={game.id}>
                       {teamLabel(state, game.leftTeamId)} · {teamLabel(state, game.rightTeamId)}

@@ -149,7 +149,7 @@ function normalizeTournament(value: unknown): DirectorState['tournament'] {
     rules = structuredClone(defaultRules);
   } else {
     if (!isRecord(rulesValue)) throw new Error('Director storage contains invalid tournament rules.');
-    rules = rulesValue as unknown as TournamentRules;
+    rules = normalizeTournamentRules(rulesValue);
   }
   const id = stringOrNull(value.id);
   if (!id) throw new Error('Director storage contains a tournament without an id.');
@@ -168,6 +168,32 @@ function normalizeTournament(value: unknown): DirectorState['tournament'] {
     createdAt: stringOrEmpty(value.createdAt),
     updatedAt: stringOrEmpty(value.updatedAt),
   };
+}
+
+function normalizeTournamentRules(value: Record<string, unknown>): TournamentRules {
+  // Browser and native imports can contain an older or hand-edited rules object. Complete it from
+  // the canonical defaults rather than allowing an incomplete object to reach scoring and export
+  // code, while preserving each supplied value that satisfies the Director's field constraints.
+  const rules = structuredClone(defaultRules);
+  if (isFiniteNumber(value.tossupValue) && value.tossupValue > 0) rules.tossupValue = value.tossupValue;
+  if (isFiniteNumber(value.powerValue) && value.powerValue > 0) rules.powerValue = value.powerValue;
+  if (isFiniteNumber(value.negValue) && value.negValue <= 0) rules.negValue = value.negValue;
+  if (isFiniteNumber(value.bonusValue) && value.bonusValue >= 0) rules.bonusValue = value.bonusValue;
+  if (isIntegerAtLeast(value.tossupCount, 1)) rules.tossupCount = value.tossupCount;
+  if (isIntegerAtLeast(value.bonusParts, 1)) rules.bonusParts = value.bonusParts;
+  if (typeof value.bouncebacks === 'boolean') rules.bouncebacks = value.bouncebacks;
+  if (typeof value.overtime === 'boolean') rules.overtime = value.overtime;
+  if (typeof value.lightning === 'boolean') rules.lightning = value.lightning;
+  if (isIntegerAtLeast(value.maximumActivePlayers, 1)) {
+    rules.maximumActivePlayers = value.maximumActivePlayers;
+  }
+  if (isFiniteNumber(value.regulationMinutes) && value.regulationMinutes > 0) {
+    rules.regulationMinutes = value.regulationMinutes;
+  }
+  if (Array.isArray(value.tiebreakers) && value.tiebreakers.every(isTiebreaker)) {
+    rules.tiebreakers = [...value.tiebreakers];
+  }
+  return rules;
 }
 
 function migrateGames(value: unknown): GameRecord[] {
@@ -329,6 +355,26 @@ function stringOrNull(value: unknown): string | null {
 
 function stringOrEmpty(value: unknown): string {
   return typeof value === 'string' ? value : '';
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function isIntegerAtLeast(value: unknown, minimum: number): value is number {
+  return isFiniteNumber(value) && Number.isInteger(value) && value >= minimum;
+}
+
+function isTiebreaker(value: unknown): value is TournamentRules['tiebreakers'][number] {
+  return (
+    value === 'head-to-head' ||
+    value === 'record' ||
+    value === 'points' ||
+    value === 'margin' ||
+    value === 'powers' ||
+    value === 'gets' ||
+    value === 'playoff'
+  );
 }
 
 function isTournamentStatus(value: unknown): value is NonNullable<DirectorState['tournament']>['status'] {

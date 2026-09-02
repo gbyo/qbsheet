@@ -244,7 +244,7 @@ export default function DirectorApp() {
                   onSelect={navigate}
                   count={
                     item.id === 'results'
-                      ? resultReviewCount
+                      ? resultReviewCount || undefined
                       : item.id === 'transfers'
                         ? transferPendingCount || undefined
                         : undefined
@@ -393,6 +393,7 @@ function SectionLink({
     <button
       type="button"
       className={`director-nav-link ${active ? 'is-active' : ''}`}
+      aria-label={count !== undefined ? `${section.label}, ${count} needing attention` : section.label}
       aria-current={active ? 'page' : undefined}
       onClick={() => onSelect(section.id)}
     >

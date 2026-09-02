@@ -8,6 +8,7 @@ import {
   generateRoundRobinRound,
   packetUseConflicts,
   previewAdvancement,
+  roundScheduleIsValid,
   runPreflight,
   scheduleIsValid,
   type DirectorState,
@@ -351,7 +352,41 @@ describe('Director integration hardening', () => {
       released = hook.result.current.releaseRound(roundId);
     });
     expect(released).toBe(true);
+    expect(hook.result.current.state.rounds[0]?.startedAt).not.toBeNull();
     await waitFor(() => expect(hook.result.current.saving).toBe(false));
+  });
+
+  test('round lifecycle actions require complete field and ledger validation', async () => {
+    const { hook } = await directorWithSetup(4);
+    act(() => hook.result.current.generateSchedule());
+    const roundId = hook.result.current.state.rounds[0]?.id;
+    if (!roundId) throw new Error('test setup did not generate a round');
+
+    const malformed = structuredClone(hook.result.current.state);
+    const round = malformed.rounds[0];
+    const removedGameId = round?.scheduledGameIds[0];
+    if (!round || !removedGameId) throw new Error('test setup did not generate a round ledger');
+    malformed.scheduledGames = malformed.scheduledGames.filter((game) => game.id !== removedGameId);
+
+    expect(roundScheduleIsValid(malformed, roundId)).toBe(false);
+    act(() => {
+      expect(hook.result.current.importSnapshot(malformed)).toBe(true);
+    });
+    expect(hook.result.current.prepareRound(roundId)).toBe(false);
+    expect(hook.result.current.state.rounds[0]?.status).toBe('planned');
+  });
+
+  test('preflight reports scheduled games that are detached from every round', async () => {
+    const { hook } = await directorWithSetup(4);
+    act(() => hook.result.current.generateSchedule());
+    const imported = structuredClone(hook.result.current.state);
+    const source = imported.scheduledGames[0];
+    if (!source) throw new Error('test setup did not generate a scheduled game');
+    imported.scheduledGames.push({ ...source, id: 'orphan-game', roundId: 'missing-round' });
+
+    const orphanIssue = runPreflight(imported).find((issue) => issue.id === 'games-without-round');
+    expect(orphanIssue?.severity).toBe('blocker');
+    expect(orphanIssue?.message).toMatch(/1 scheduled game/);
   });
 
   test('format type changes are blocked after schedule generation', async () => {
@@ -361,6 +396,37 @@ describe('Director integration hardening', () => {
 
     expect(hook.result.current.state.formats[0]?.kind).toBe('round-robin');
     expect(hook.result.current.error).toMatch(/locked after schedule generation/i);
+  });
+
+  test('double round robin repeats its first rotation once and then stops', async () => {
+    const { hook } = await directorWithSetup(4);
+    act(() => hook.result.current.updateFormat({ kind: 'double-round-robin', avoidRematches: false }));
+    for (let index = 0; index < 6; index += 1) {
+      let result: ReturnType<typeof hook.result.current.generateSchedule> | undefined;
+      act(() => {
+        result = hook.result.current.generateSchedule({ seed: 11 });
+      });
+      expect(result?.generated).toBe(true);
+    }
+
+    const pairingsByRound = hook.result.current.state.rounds.map((round) =>
+      hook.result.current.state.scheduledGames
+        .filter((game) => game.roundId === round.id && !game.bye)
+        .map((game) => [game.leftTeamId, game.rightTeamId].sort().join('|'))
+        .sort(),
+    );
+    expect(pairingsByRound).toHaveLength(6);
+    expect(pairingsByRound.slice(3)).toEqual(pairingsByRound.slice(0, 3));
+
+    let extraRound: ReturnType<typeof hook.result.current.generateSchedule> | undefined;
+    act(() => {
+      extraRound = hook.result.current.generateSchedule({ seed: 11 });
+    });
+    expect(extraRound).toEqual({
+      generated: false,
+      conflicts: ['This double round robin already contains both complete rotations.'],
+    });
+    expect(formatGenerationAvailability(hook.result.current.state)).toMatchObject({ supported: false });
   });
 
   test('browser preflight omits the native-only QBTCP recommendation', async () => {
@@ -1033,6 +1099,62 @@ describe('Director integration hardening', () => {
     expect(hook.result.current.state.rooms[0]?.status).toBe('available');
   });
 
+  test('a QBTCP restart closes persisted help requests the server no longer knows', async () => {
+    const { hook } = await directorWithSetup();
+    const imported = structuredClone(hook.result.current.state);
+    const room = imported.rooms[0];
+    if (!room) throw new Error('test setup did not create a room');
+    room.status = 'help';
+    imported.qbtcpSessions = [
+      {
+        roomId: room.id,
+        sessionId: 'help-session',
+        deviceId: 'device-1',
+        state: 'live',
+        resumable: false,
+        resultReceived: false,
+        lastSeenAt: '2026-09-01T11:02:00.000Z',
+        progress: null,
+        helpRequestId: 'help-restarted',
+      },
+    ];
+    imported.qbtcpHelpRequests = [
+      {
+        id: 'help-restarted',
+        roomId: room.id,
+        roomName: room.name,
+        category: 'equipment-technical',
+        message: 'Buzzer is not responding',
+        status: 'open',
+        createdAt: '2026-09-01T11:01:00.000Z',
+        updatedAt: '2026-09-01T11:01:00.000Z',
+        deviceId: 'device-1',
+      },
+    ];
+    act(() => {
+      expect(hook.result.current.importSnapshot(imported)).toBe(true);
+    });
+    const invoke = vi.fn(async () => ({
+      results: [],
+      progress: [],
+      presence: [],
+      sessions: [],
+      help: [],
+      rosterAmendments: [],
+    }));
+    Object.defineProperty(window, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: { invoke },
+    });
+    await act(async () => {
+      await hook.result.current.syncQbtcp();
+    });
+
+    expect(hook.result.current.state.qbtcpHelpRequests[0]?.status).toBe('cancelled');
+    expect(hook.result.current.state.qbtcpSessions[0]?.helpRequestId).toBeNull();
+    expect(hook.result.current.state.rooms[0]?.status).toBe('available');
+  });
+
   test('head-to-head ranks a tied pair from their own game, not unrelated wins', () => {
     const state = emptyDirectorState();
     state.tournament = {
@@ -1238,6 +1360,32 @@ describe('Director integration hardening', () => {
     normalized.tournament.rules.tossupValue = 99;
     expect(defaultRules.tossupValue).toBe(10);
     expect(normalizeDirectorState(legacy).tournament?.rules.tossupValue).toBe(10);
+  });
+
+  test('a partial or invalid rules object is completed without preserving unsafe fields', () => {
+    const legacy = emptyDirectorState() as unknown as Record<string, unknown>;
+    legacy.tournament = {
+      id: 'tournament-partial-rules',
+      name: 'Partial rules tournament',
+      status: 'draft',
+      rules: {
+        tossupValue: 20,
+        negValue: -4,
+        bonusParts: 0,
+        bouncebacks: true,
+        tiebreakers: ['record', 'not-a-tiebreaker'],
+      },
+    };
+
+    const normalized = normalizeDirectorState(legacy);
+    expect(normalized.tournament?.rules).toMatchObject({
+      tossupValue: 20,
+      negValue: -4,
+      powerValue: defaultRules.powerValue,
+      bonusParts: defaultRules.bonusParts,
+      bouncebacks: true,
+      tiebreakers: defaultRules.tiebreakers,
+    });
   });
 
   test('malformed required state shapes are rejected instead of erased', () => {
