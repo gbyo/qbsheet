@@ -21,13 +21,15 @@ import {
   backoffMilliseconds,
   composeAnnouncement,
   derivePublication,
+  enqueueDelete,
+  enqueueUnpublish,
   markOutboxItemInFlight,
   maxOutboxItems,
   nextOutboxItem,
   recordOutboxFailure,
   syncSummary,
 } from './publication';
-import { classifyFailure, publishOnce } from './worker';
+import { classifyFailure, publishOnce, recoverStaleInFlight } from './worker';
 
 function liveState(overrides: Partial<LivePublication> = {}): DirectorState {
   const state = privacyFixture();
@@ -435,6 +437,59 @@ describe('announcements', () => {
     const second = derivePublication(next, first.snapshot, { now: at(5) });
     expect(second.changed).toEqual(['announcements']);
     expect(second.snapshot?.announcements[0].title).toBe('Room change');
+  });
+});
+
+describe('lifecycle outbox', () => {
+  test('unpublish enqueues a durable item and does not flip lifecycle until ack', () => {
+    const live = emptyLivePublication('bcdfghjkmnpqrstvwxyz', '2026-09-05T12:00:00.000Z');
+    live.lifecycle = 'live';
+    live.settings.enabled = true;
+    const pending = enqueueUnpublish(live, at(0));
+    expect(pending.outbox).toHaveLength(1);
+    expect(pending.outbox[0].kind).toBe('unpublish');
+    expect(pending.lifecycle).toBe('live');
+    const acked = acknowledgeOutboxItem(pending, pending.outbox[0].id, 1, at(1));
+    expect(acked.lifecycle).toBe('unpublished');
+    expect(acked.outbox).toHaveLength(0);
+  });
+
+  test('delete enqueues and survives until acknowledged', () => {
+    const live = emptyLivePublication('bcdfghjkmnpqrstvwxyz', '2026-09-05T12:00:00.000Z');
+    live.lifecycle = 'live';
+    live.settings.enabled = true;
+    const pending = enqueueDelete(live, at(0));
+    expect(pending.outbox[0].kind).toBe('delete');
+    expect(pending.lifecycle).toBe('live');
+    // Second enqueue is idempotent while one is pending
+    expect(enqueueDelete(pending, at(1)).outbox).toHaveLength(1);
+  });
+
+  test('stale in-flight is recovered after timeout', () => {
+    const live = emptyLivePublication('bcdfghjkmnpqrstvwxyz', '2026-09-05T12:00:00.000Z');
+    live.lifecycle = 'live';
+    live.settings.enabled = true;
+    const withItem: LivePublication = {
+      ...live,
+      outbox: [
+        {
+          id: 'x',
+          revision: 1,
+          kind: 'snapshot',
+          payload: { snapshot: {} },
+          state: 'in-flight',
+          attempts: 0,
+          createdAt: at(0).toISOString(),
+          lastAttemptAt: at(0).toISOString(),
+          nextAttemptAt: at(0).toISOString(),
+        },
+      ],
+    };
+    const recovered = recoverStaleInFlight(withItem, new Date(at(0).getTime() + 60_000));
+    expect(recovered.outbox[0].state).toBe('failed');
+    expect(recovered.outbox[0].nextAttemptAt).not.toBeNull();
+    const stillFresh = recoverStaleInFlight(withItem, new Date(at(0).getTime() + 5_000));
+    expect(stillFresh.outbox[0].state).toBe('in-flight');
   });
 });
 

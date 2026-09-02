@@ -146,27 +146,55 @@ impl CredentialStore for KeychainCredentialStore {
 
 /// Windows and Linux.
 ///
-/// Not yet implemented, and deliberately an error rather than a file. A credential written to disk
-/// in plaintext because the platform's store was inconvenient is worse than a Director being told
-/// to re-enter it: the first is a silent, permanent disclosure and the second is an annoyance.
+/// These platforms have no OS keychain in this build, so the credential is kept
+/// in process memory for the current Director session. It is never written to
+/// disk. The user will need to re-enter or reclaim it after a restart, which is
+/// strictly better than losing a just-consumed one-time setup token.
 #[cfg(not(target_os = "macos"))]
-pub struct KeychainCredentialStore;
+pub struct KeychainCredentialStore {
+    memory: std::sync::Mutex<std::collections::HashMap<String, String>>,
+}
+
+#[cfg(not(target_os = "macos"))]
+impl KeychainCredentialStore {
+    pub fn new() -> Self {
+        Self {
+            memory: std::sync::Mutex::new(std::collections::HashMap::new()),
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+impl Default for KeychainCredentialStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[cfg(not(target_os = "macos"))]
 impl CredentialStore for KeychainCredentialStore {
-    fn store(&self, _account: &str, _secret: &str) -> Result<(), LiveError> {
-        Err(LiveError::CredentialStore(
-            "This build cannot store a QBSheet Live credential securely on this platform. \
-             The credential is kept for this session only and will need re-entering."
-                .to_string(),
-        ))
+    fn store(&self, account: &str, secret: &str) -> Result<(), LiveError> {
+        self.memory
+            .lock()
+            .map_err(|_| LiveError::CredentialStore("poisoned".into()))?
+            .insert(account.to_string(), secret.to_string());
+        Ok(())
     }
 
-    fn read(&self, _account: &str) -> Result<Option<String>, LiveError> {
-        Ok(None)
+    fn read(&self, account: &str) -> Result<Option<String>, LiveError> {
+        Ok(self
+            .memory
+            .lock()
+            .map_err(|_| LiveError::CredentialStore("poisoned".into()))?
+            .get(account)
+            .cloned())
     }
 
-    fn forget(&self, _account: &str) -> Result<(), LiveError> {
+    fn forget(&self, account: &str) -> Result<(), LiveError> {
+        self.memory
+            .lock()
+            .map_err(|_| LiveError::CredentialStore("poisoned".into()))?
+            .remove(account);
         Ok(())
     }
 }
