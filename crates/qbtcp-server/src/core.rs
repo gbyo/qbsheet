@@ -1217,6 +1217,9 @@ impl QbtcpServer {
                 .room_tokens
                 .retain(|_, token| enabled_rooms.get(&token.room_id).copied() == Some(true));
 
+            // Room-wide presence cleanup is reserved for a room being disabled or removed.
+            // Replacing an assignment must not erase presence reported for the new assignment
+            // merely because a retained terminal session still names the old one.
             let mut rooms_to_clear = std::collections::HashSet::new();
             for session in runtime.sessions.values_mut() {
                 let room_enabled = enabled_rooms.get(&session.room_id).copied() == Some(true);
@@ -1234,7 +1237,7 @@ impl QbtcpServer {
                     // authenticated operation or explicit refresh will retry reconciliation.
                     None => true,
                 };
-                if !room_enabled || !assignment_matches {
+                if !room_enabled {
                     rooms_to_clear.insert(session.room_id.clone());
                     if session.status == SessionStatus::Open {
                         let writer_device = session.writer_device.clone();
@@ -1251,6 +1254,24 @@ impl QbtcpServer {
                         if let Some(device_id) = writer_device {
                             clear_presence.push((session.room_id.clone(), device_id));
                         }
+                    }
+                } else if !assignment_matches && session.status == SessionStatus::Open {
+                    // An assignment replacement abandons only the mismatched open session. A
+                    // FinalReceived/Abandoned record is terminal history and must not clear the
+                    // room-wide presence belonging to the replacement assignment.
+                    let writer_device = session.writer_device.clone();
+                    session.status = SessionStatus::Abandoned;
+                    session.writer_token = None;
+                    session.writer_device = None;
+                    session.expires_at = None;
+                    session.updated_at = now_iso();
+                    clear_progress.push(session.session_id.clone());
+                    expired.push(SessionEvent::Expired {
+                        session_id: session.session_id.clone(),
+                        room_id: session.room_id.clone(),
+                    });
+                    if let Some(device_id) = writer_device {
+                        clear_presence.push((session.room_id.clone(), device_id));
                     }
                 }
             }

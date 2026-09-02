@@ -860,6 +860,61 @@ fn replacing_an_assignment_abandons_old_session_and_allows_new_assignment() {
     assert_ne!(new_session.session_id, old_session.session_id);
 }
 
+#[tokio::test]
+async fn replacing_an_assignment_keeps_terminal_history_and_new_room_presence() {
+    let (server, state) = fixture();
+    let (_, room_token) = pair(&server, "replacement-terminal").await;
+    let (session_id, session_token, _) = open_session(&server, &room_token, "device-old").await;
+    let final_qbj = result_qbj(100, false);
+    server
+        .result(
+            &session_id,
+            Some(&session_token),
+            final_qbj.clone(),
+            serde_json::to_vec(&final_qbj).unwrap(),
+        )
+        .expect("the old assignment result is retained");
+
+    let mut replacement_qbj = assignment_qbj();
+    replacement_qbj["objects"][2]["id"] = json!("match-2");
+    state.set_assignment(
+        "room-1",
+        AssignmentState::Assigned(AssignedAssignment {
+            match_id: "match-2".to_owned(),
+            qbj: replacement_qbj,
+            round_number: 2,
+            round_name: Some("Round 2".to_owned()),
+            left_team: Some("Northview A".to_owned()),
+            right_team: Some("Riverside A".to_owned()),
+            label: Some("Round 2".to_owned()),
+            meta: AssignmentMeta {
+                round_revision: Some(2),
+                assignment_revision: Some(2),
+                ..AssignmentMeta::default()
+            },
+        }),
+    );
+    server.refresh();
+
+    assert_eq!(
+        server
+            .recovery(&session_id, Some(&session_token))
+            .expect("terminal history remains recoverable")
+            .status,
+        qbtcp_server::SessionStatus::FinalReceived
+    );
+    server
+        .update_presence(
+            Some(&room_token),
+            Some("device-new"),
+            None,
+            PresenceUpdate::default(),
+        )
+        .expect("the replacement room can report presence");
+    server.refresh();
+    assert!(state.presence("room-1", "device-new").is_some());
+}
+
 fn fixture_with_timeout(timeout: Duration) -> Arc<QbtcpServer> {
     let (_, state) = fixture();
     let config = QbtcpConfig {

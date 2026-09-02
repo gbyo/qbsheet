@@ -538,7 +538,11 @@ impl DirectorQbtcpState {
             .lock()
             .map(|keys| keys.clone())
             .unwrap_or_default();
+        // A disabled/removed room loses all volatile tracking and terminal snapshots. A room
+        // receiving a replacement assignment loses only its operational tracking; retained
+        // terminal results remain available for Director audit and recovery.
         let mut cleanup_rooms = HashSet::new();
+        let mut assignment_changed_rooms = HashSet::new();
 
         for (room_id, was_enabled) in &previous_room_states {
             if *was_enabled && !next_room_states.get(room_id).copied().unwrap_or(false) {
@@ -550,7 +554,7 @@ impl DirectorQbtcpState {
             .chain(next_assignment_keys.keys())
         {
             if previous_assignment_keys.get(room_id) != next_assignment_keys.get(room_id) {
-                cleanup_rooms.insert(room_id.clone());
+                assignment_changed_rooms.insert(room_id.clone());
             }
         }
 
@@ -583,10 +587,22 @@ impl DirectorQbtcpState {
         if let Ok(mut keys) = self.assignment_keys.lock() {
             *keys = next_assignment_keys;
         }
-        self.cleanup_room_tracking(&cleanup_rooms);
+        let tracking_cleanup_rooms = cleanup_rooms
+            .union(&assignment_changed_rooms)
+            .cloned()
+            .collect::<HashSet<_>>();
+        let preserve_terminal_snapshots = assignment_changed_rooms
+            .difference(&cleanup_rooms)
+            .cloned()
+            .collect::<HashSet<_>>();
+        self.cleanup_room_tracking(&tracking_cleanup_rooms, &preserve_terminal_snapshots);
     }
 
-    fn cleanup_room_tracking(&self, room_ids: &HashSet<String>) {
+    fn cleanup_room_tracking(
+        &self,
+        room_ids: &HashSet<String>,
+        preserve_terminal_snapshots: &HashSet<String>,
+    ) {
         if room_ids.is_empty() {
             return;
         }
@@ -610,7 +626,11 @@ impl DirectorQbtcpState {
             sessions.retain(|_, room_id| !room_ids.contains(room_id));
         }
         if let Ok(mut snapshots) = self.session_snapshots.lock() {
-            snapshots.retain(|_, snapshot| !room_ids.contains(&snapshot.room_id));
+            snapshots.retain(|_, snapshot| {
+                !room_ids.contains(&snapshot.room_id)
+                    || (preserve_terminal_snapshots.contains(&snapshot.room_id)
+                        && snapshot.status == qbtcp_server::SessionStatus::FinalReceived)
+            });
         }
         if let Ok(mut paired) = self.paired_rooms.lock() {
             paired.retain(|room_id| !room_ids.contains(room_id));
@@ -1678,6 +1698,59 @@ mod tests {
         state.refresh_from_document(Some(&disabled));
 
         assert!(state.snapshot().expect("snapshot").sessions.is_empty());
+    }
+
+    #[test]
+    fn replacing_an_assignment_keeps_terminal_session_snapshot_for_an_enabled_room() {
+        let document = json!({
+            "tournament": {"id": "t-1", "name": "Local Invitational"},
+            "rooms": [{"id": "room-101", "name": "Room 101", "available": true}],
+            "teams": [
+                {"id": "team-a", "displayName": "North A"},
+                {"id": "team-b", "displayName": "South B"}
+            ],
+            "rounds": [{"id": "round-1", "name": "Round 1", "number": 1, "revision": 1}],
+            "scheduledGames": [{
+                "id": "scheduled-1",
+                "roundId": "round-1",
+                "roomId": "room-101",
+                "leftTeamId": "team-a",
+                "rightTeamId": "team-b",
+                "bye": false,
+                "status": "released",
+                "assignmentRevision": 1
+            }]
+        });
+        let state = DirectorQbtcpState::from_document(Some(&document));
+        <DirectorQbtcpState as QbtcpState>::record_session_event(
+            &state,
+            SessionEvent::Opened {
+                session_id: "session-1".to_owned(),
+                room_id: "room-101".to_owned(),
+                match_id: "scheduled-1".to_owned(),
+            },
+        )
+        .expect("session is recorded");
+        <DirectorQbtcpState as QbtcpState>::record_session_event(
+            &state,
+            SessionEvent::ResultRetained {
+                session_id: "session-1".to_owned(),
+                result_id: "result-1".to_owned(),
+                review_required: true,
+            },
+        )
+        .expect("terminal result is recorded");
+
+        let mut replacement = document.clone();
+        replacement["scheduledGames"][0]["id"] = json!("scheduled-2");
+        state.refresh_from_document(Some(&replacement));
+
+        let sessions = state.snapshot().expect("snapshot").sessions;
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(
+            sessions[0].status,
+            qbtcp_server::SessionStatus::FinalReceived
+        );
     }
 
     #[test]
