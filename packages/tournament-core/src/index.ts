@@ -4,4 +4,7 @@ export * from './scheduling';
 export * from './results';
 export * from './statistics';
 export * from './advancement';
+export * from './brackets';
+export * from './divisions';
+export * from './formatPlan';
 export * from './preflight';
