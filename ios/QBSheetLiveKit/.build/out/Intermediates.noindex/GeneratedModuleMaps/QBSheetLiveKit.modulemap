@@ -1,4 +1,0 @@
-module QBSheetLiveKit {
-header "QBSheetLiveKit-Swift.h"
-export *
-}

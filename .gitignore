@@ -6,3 +6,6 @@ playwright-report/
 test-results/
 .stryker-tmp/
 reports/
+# Generated build/runtime state.
+**/.build/
+**/.wrangler/
