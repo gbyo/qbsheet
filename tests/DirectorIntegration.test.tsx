@@ -270,6 +270,59 @@ describe('Director integration hardening', () => {
     expect(hook.result.current.state.players.filter((player) => player.teamId === teamId)).toHaveLength(1);
   });
 
+  test('unavailable room resources can be restored and block release until they are ready', async () => {
+    const { hook } = await directorWithSetup();
+    act(() => {
+      hook.result.current.addStaff({ name: 'Moderator One', roles: ['moderator'] });
+      hook.result.current.addEquipment({ name: 'Buzzer One', kind: 'buzzer' });
+    });
+    const staffId = hook.result.current.state.staff[0]?.id;
+    const equipmentId = hook.result.current.state.equipment[0]?.id;
+    const roomId = hook.result.current.state.rooms[0]?.id;
+    if (!staffId || !equipmentId || !roomId) throw new Error('test setup did not create room resources');
+
+    act(() => {
+      hook.result.current.updateRoom(roomId, { moderatorId: staffId, equipmentId });
+      expect(hook.result.current.updateStaff(staffId, { available: false })).toBe(true);
+      expect(hook.result.current.updateEquipment(equipmentId, { available: false })).toBe(true);
+    });
+    expect(runPreflight(hook.result.current.state).map((issue) => issue.id)).toEqual(
+      expect.arrayContaining([`staff-unavailable-${staffId}`, `equipment-unavailable-${equipmentId}`]),
+    );
+
+    act(() => hook.result.current.generateSchedule());
+    const roundId = hook.result.current.state.rounds[0]?.id;
+    if (!roundId) throw new Error('test setup did not generate a round');
+    act(() => {
+      expect(hook.result.current.prepareRound(roundId)).toBe(true);
+    });
+    let released = true;
+    act(() => {
+      released = hook.result.current.releaseRound(roundId);
+    });
+    expect(released).toBe(false);
+    expect(hook.result.current.error).toMatch(/unavailable but assigned/i);
+
+    act(() => {
+      expect(hook.result.current.updateStaff(staffId, { available: true })).toBe(true);
+    });
+    released = true;
+    act(() => {
+      released = hook.result.current.releaseRound(roundId);
+    });
+    expect(released).toBe(false);
+    expect(hook.result.current.error).toMatch(/unavailable but assigned/i);
+
+    act(() => {
+      expect(hook.result.current.updateEquipment(equipmentId, { available: true })).toBe(true);
+    });
+    act(() => {
+      released = hook.result.current.releaseRound(roundId);
+    });
+    expect(released).toBe(true);
+    await waitFor(() => expect(hook.result.current.saving).toBe(false));
+  });
+
   test('format type changes are blocked after schedule generation', async () => {
     const { hook } = await directorWithSetup();
     act(() => hook.result.current.generateSchedule());

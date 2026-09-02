@@ -245,6 +245,38 @@ test('Director supports keyboard search, inline edits, and audited result review
   await expect(page.locator('.director-protest-row').first()).toContainText('ruled');
 });
 
+test('Director keeps unavailable resources out of new room assignments', async ({ page }) => {
+  await createTournament(page);
+
+  const navigation = page.locator('nav[aria-label="Tournament sections"]');
+  await navigation.getByRole('button', { name: 'Rooms & staff', exact: true }).click();
+  await page.getByRole('button', { name: 'Add staff' }).click();
+  await page.getByRole('textbox', { name: 'Name', exact: true }).fill('Moderator One');
+  await page.getByRole('button', { name: 'Save staff member' }).click();
+  await page.getByRole('button', { name: 'Add equipment' }).click();
+  await page.getByRole('textbox', { name: 'Name', exact: true }).fill('Buzzer One');
+  await page.getByRole('button', { name: 'Save equipment' }).click();
+
+  await expect(page.getByRole('heading', { level: 2, name: /1 member · 1 available/ })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 2, name: /1 resource · 1 available/ })).toBeVisible();
+  await page.getByRole('button', { name: 'Mark unavailable' }).nth(0).click();
+  await page.getByRole('button', { name: 'Mark unavailable' }).nth(0).click();
+  await expect(page.getByRole('heading', { level: 2, name: /1 member · 0 available/ })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 2, name: /1 resource · 0 available/ })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Add room' }).click();
+  await page.getByLabel('Room name').fill('Room 101');
+  await page.getByRole('button', { name: 'Save room' }).click();
+  await page.getByRole('button', { name: 'Edit' }).click();
+  const editor = page.locator('.director-table-edit-row');
+  await expect(
+    editor.locator('select').nth(0).locator('option').filter({ hasText: 'Moderator One' }),
+  ).toHaveCount(0);
+  await expect(
+    editor.locator('select').nth(2).locator('option').filter({ hasText: 'Buzzer One' }),
+  ).toHaveCount(0);
+});
+
 test('Director configures a pool format before generating its first round', async ({ page }) => {
   await createTournament(page);
 

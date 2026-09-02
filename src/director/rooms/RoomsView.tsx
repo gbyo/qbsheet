@@ -373,7 +373,8 @@ export function RoomsView({
                 <div>
                   <p className="director-eyebrow">Staff</p>
                   <h2>
-                    {state.staff.length} available member{state.staff.length === 1 ? '' : 's'}
+                    {state.staff.length} member{state.staff.length === 1 ? '' : 's'} ·{' '}
+                    {state.staff.filter((member) => member.available).length} available
                   </h2>
                 </div>
               </div>
@@ -381,8 +382,32 @@ export function RoomsView({
                 <ul className="director-plain-list">
                   {state.staff.map((member) => (
                     <li key={member.id}>
-                      <strong>{member.name}</strong>
-                      <span>{member.roles.join(' · ')}</span>
+                      <div>
+                        <strong>{member.name}</strong>
+                        <span>{member.roles.join(' · ')}</span>
+                      </div>
+                      <div className="director-row-actions">
+                        <StateLabel
+                          state={member.available ? 'available' : 'offline'}
+                          label={member.available ? 'Available' : 'Unavailable'}
+                        />
+                        <Button
+                          variant="quiet"
+                          icon={member.available ? 'pause' : 'play'}
+                          onClick={() => {
+                            const updated = controller.updateStaff(member.id, {
+                              available: !member.available,
+                            });
+                            if (updated) {
+                              onAnnounce(
+                                `${member.name} marked ${member.available ? 'unavailable' : 'available'} for future assignment.`,
+                              );
+                            }
+                          }}
+                        >
+                          {member.available ? 'Mark unavailable' : 'Mark available'}
+                        </Button>
+                      </div>
                     </li>
                   ))}
                 </ul>
@@ -393,7 +418,8 @@ export function RoomsView({
                 <div>
                   <p className="director-eyebrow">Equipment</p>
                   <h2>
-                    {state.equipment.length} resource{state.equipment.length === 1 ? '' : 's'}
+                    {state.equipment.length} resource{state.equipment.length === 1 ? '' : 's'} ·{' '}
+                    {state.equipment.filter((item) => item.available).length} available
                   </h2>
                 </div>
               </div>
@@ -401,8 +427,32 @@ export function RoomsView({
                 <ul className="director-plain-list">
                   {state.equipment.map((item) => (
                     <li key={item.id}>
-                      <strong>{item.name}</strong>
-                      <span>{item.kind}</span>
+                      <div>
+                        <strong>{item.name}</strong>
+                        <span>{item.kind}</span>
+                      </div>
+                      <div className="director-row-actions">
+                        <StateLabel
+                          state={item.available ? 'available' : 'offline'}
+                          label={item.available ? 'Available' : 'Unavailable'}
+                        />
+                        <Button
+                          variant="quiet"
+                          icon={item.available ? 'pause' : 'play'}
+                          onClick={() => {
+                            const updated = controller.updateEquipment(item.id, {
+                              available: !item.available,
+                            });
+                            if (updated) {
+                              onAnnounce(
+                                `${item.name} marked ${item.available ? 'unavailable' : 'available'} for future assignment.`,
+                              );
+                            }
+                          }}
+                        >
+                          {item.available ? 'Mark unavailable' : 'Mark available'}
+                        </Button>
+                      </div>
                     </li>
                   ))}
                 </ul>
@@ -556,11 +606,13 @@ function RoomRows({
                 <FormField label="Equipment">
                   <select value={equipmentId} onChange={(event) => setEquipmentId(event.target.value)}>
                     <option value="">Unassigned</option>
-                    {state.equipment.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.name}
-                      </option>
-                    ))}
+                    {state.equipment
+                      .filter((item) => item.available || item.id === equipmentId)
+                      .map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.name}
+                        </option>
+                      ))}
                   </select>
                 </FormField>
               </div>
@@ -593,7 +645,9 @@ function staffForRole(
   role: 'moderator' | 'scorekeeper',
   selectedId: string,
 ): DirectorState['staff'] {
-  return state.staff.filter((member) => member.roles.includes(role) || member.id === selectedId);
+  return state.staff.filter(
+    (member) => (member.roles.includes(role) && member.available) || member.id === selectedId,
+  );
 }
 
 function FilterButton({

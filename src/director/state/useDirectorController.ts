@@ -6,6 +6,7 @@ import {
   generateDirectorRound,
   isoNow,
   newDirectorId,
+  roomAssignmentConflicts,
   scheduleIsValid,
   type DirectorId,
   type DirectorState,
@@ -15,6 +16,7 @@ import {
   type ProtestScoreAdjustment,
   type ResultSubmission,
   type ScheduledGame,
+  type StaffRole,
   type TeamGameScore,
 } from '../domain';
 import { createDirectorRepository, normalizeDirectorState, type DirectorRepository } from '../persistence';
@@ -97,7 +99,7 @@ export interface NewPoolInput {
 
 export interface NewStaffInput {
   name: string;
-  roles?: NonNullable<DirectorState['staff'][number]>['roles'];
+  roles?: StaffRole[];
   notes?: string;
 }
 
@@ -143,7 +145,15 @@ export interface DirectorController {
     },
   ): void;
   addStaff(input: NewStaffInput): void;
+  updateStaff(
+    staffId: DirectorId,
+    changes: Partial<Pick<DirectorState['staff'][number], 'name' | 'roles' | 'available' | 'notes'>>,
+  ): boolean;
   addEquipment(input: NewEquipmentInput): void;
+  updateEquipment(
+    equipmentId: DirectorId,
+    changes: Partial<Pick<DirectorState['equipment'][number], 'name' | 'kind' | 'available' | 'notes'>>,
+  ): boolean;
   addPacket(name: string, source?: 'manual' | 'qbj' | 'imported'): void;
   addPackets(
     packets: Array<{
@@ -738,6 +748,47 @@ export function useDirectorController(repository = createDirectorRepository()): 
     [commit],
   );
 
+  const updateStaff = useCallback(
+    (
+      staffId: DirectorId,
+      changes: Partial<Pick<DirectorState['staff'][number], 'name' | 'roles' | 'available' | 'notes'>>,
+    ): boolean => {
+      const current = stateRef.current.staff.find((member) => member.id === staffId);
+      if (!current) {
+        setError('That staff member is no longer in the tournament workspace.');
+        return false;
+      }
+      const name = changes.name === undefined ? current.name : changes.name.trim();
+      if (!name) {
+        setError('A staff member needs a name.');
+        return false;
+      }
+      const roles = changes.roles === undefined ? current.roles : [...new Set(changes.roles)];
+      if (roles.length === 0) {
+        setError('A staff member needs at least one role.');
+        return false;
+      }
+      commit((draft) => {
+        const member = draft.staff.find((entry) => entry.id === staffId);
+        if (!member) return;
+        member.name = name;
+        member.roles = roles;
+        if (changes.available !== undefined) member.available = changes.available;
+        if (changes.notes !== undefined) member.notes = changes.notes.trim() || undefined;
+        draft.audit.push({
+          id: newDirectorId('audit'),
+          at: isoNow(),
+          actor: 'Director',
+          type: 'room-changed',
+          summary: `Updated ${member.name}.`,
+          entityId: staffId,
+        });
+      });
+      return true;
+    },
+    [commit],
+  );
+
   const addEquipment = useCallback(
     (input: NewEquipmentInput) =>
       commit((draft) => {
@@ -760,6 +811,42 @@ export function useDirectorController(repository = createDirectorRepository()): 
           entityId: equipmentId,
         });
       }),
+    [commit],
+  );
+
+  const updateEquipment = useCallback(
+    (
+      equipmentId: DirectorId,
+      changes: Partial<Pick<DirectorState['equipment'][number], 'name' | 'kind' | 'available' | 'notes'>>,
+    ): boolean => {
+      const current = stateRef.current.equipment.find((item) => item.id === equipmentId);
+      if (!current) {
+        setError('That equipment resource is no longer in the tournament workspace.');
+        return false;
+      }
+      const name = changes.name === undefined ? current.name : changes.name.trim();
+      if (!name) {
+        setError('An equipment resource needs a name.');
+        return false;
+      }
+      commit((draft) => {
+        const item = draft.equipment.find((entry) => entry.id === equipmentId);
+        if (!item) return;
+        item.name = name;
+        if (changes.kind !== undefined) item.kind = changes.kind;
+        if (changes.available !== undefined) item.available = changes.available;
+        if (changes.notes !== undefined) item.notes = changes.notes.trim() || undefined;
+        draft.audit.push({
+          id: newDirectorId('audit'),
+          at: isoNow(),
+          actor: 'Director',
+          type: 'room-changed',
+          summary: `Updated ${item.name}.`,
+          entityId: equipmentId,
+        });
+      });
+      return true;
+    },
     [commit],
   );
 
@@ -1233,17 +1320,21 @@ export function useDirectorController(repository = createDirectorRepository()): 
         const room = stateRef.current.rooms.find((entry) => entry.id === game.roomId);
         return !room || !room.available || room.status !== 'available';
       });
+      const roomIdsForRound = new Set(roomIds.filter((roomId): roomId is DirectorId => roomId !== null));
+      const resourceIssues = roomAssignmentConflicts(stateRef.current, roomIdsForRound);
       if (
         !scheduleIsValid(games) ||
         games.length === 0 ||
         roomIds.some((roomId) => roomId === null) ||
         duplicateRoom ||
-        invalidRoom
+        invalidRoom ||
+        resourceIssues.length > 0
       ) {
         setError(
-          duplicateRoom
-            ? 'A room can only host one game in a round.'
-            : 'This round cannot be released until every game has a valid matchup and available room.',
+          resourceIssues[0]?.message ??
+            (duplicateRoom
+              ? 'A room can only host one game in a round.'
+              : 'This round cannot be released until every game has a valid matchup and available room.'),
         );
         return false;
       }
@@ -2030,7 +2121,9 @@ export function useDirectorController(repository = createDirectorRepository()): 
     addRoom,
     updateRoom,
     addStaff,
+    updateStaff,
     addEquipment,
+    updateEquipment,
     addPacket,
     addPackets,
     addImportedTeams,

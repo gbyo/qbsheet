@@ -1,4 +1,4 @@
-import { type DirectorId, type DirectorState, type Room, type ScheduledGame } from './model';
+import { type DirectorId, type DirectorState, type ScheduledGame } from './model';
 import {
   currentFormat,
   currentPhase,
@@ -154,7 +154,7 @@ export function runPreflight(
       });
     }
   }
-  issues.push(...roomConflicts(state.rooms));
+  issues.push(...roomAssignmentConflicts(state));
   const packetReuse = packetUseConflicts(state);
   if (packetReuse.length > 0) {
     issues.push({
@@ -184,21 +184,93 @@ export function runPreflight(
   return issues;
 }
 
-function roomConflicts(rooms: Room[]): PreflightIssue[] {
+export function roomAssignmentConflicts(
+  state: DirectorState,
+  roomIds?: ReadonlySet<DirectorId>,
+): PreflightIssue[] {
+  const rooms = state.rooms.filter((room) => room.available && (!roomIds || roomIds.has(room.id)));
+  const staffById = new Map(state.staff.map((member) => [member.id, member]));
+  const equipmentById = new Map(state.equipment.map((item) => [item.id, item]));
   const usedStaff = new Map<string, string>();
+  const reportedStaffConflicts = new Set<string>();
+  const usedEquipment = new Map<string, string>();
+  const reportedEquipmentConflicts = new Set<string>();
   const issues: PreflightIssue[] = [];
-  for (const room of rooms.filter((room) => room.available)) {
-    for (const staffId of [room.moderatorId, room.scorekeeperId].filter((id): id is string => id !== null)) {
+  for (const room of rooms) {
+    for (const [role, staffId] of [
+      ['moderator', room.moderatorId],
+      ['scorekeeper', room.scorekeeperId],
+    ] as const) {
+      if (!staffId) continue;
+      const member = staffById.get(staffId);
+      if (!member) {
+        issues.push({
+          id: `staff-missing-${staffId}`,
+          severity: 'blocker',
+          area: 'rooms',
+          message: `${room.name} references a missing ${role}.`,
+        });
+        continue;
+      }
+      if (!member.available) {
+        issues.push({
+          id: `staff-unavailable-${staffId}`,
+          severity: 'blocker',
+          area: 'rooms',
+          message: `${member.name} is unavailable but assigned to ${room.name}.`,
+        });
+      }
+      if (!member.roles.includes(role)) {
+        issues.push({
+          id: `staff-role-${staffId}-${role}`,
+          severity: 'blocker',
+          area: 'rooms',
+          message: `${member.name} is assigned as ${role} in ${room.name} but is not marked for that role.`,
+        });
+      }
       const previous = usedStaff.get(staffId);
-      if (previous) {
+      if (previous && !reportedStaffConflicts.has(staffId)) {
         issues.push({
           id: `staff-conflict-${staffId}`,
           severity: 'blocker',
           area: 'rooms',
-          message: `${staffId} is assigned to both ${previous} and ${room.name}.`,
+          message: `${member.name} is assigned to both ${previous} and ${room.name}.`,
+        });
+        reportedStaffConflicts.add(staffId);
+      } else {
+        if (!previous) usedStaff.set(staffId, `${room.name} (${role})`);
+      }
+    }
+    if (room.equipmentId) {
+      const equipment = equipmentById.get(room.equipmentId);
+      if (!equipment) {
+        issues.push({
+          id: `equipment-missing-${room.equipmentId}`,
+          severity: 'blocker',
+          area: 'rooms',
+          message: `${room.name} references missing equipment.`,
         });
       } else {
-        usedStaff.set(staffId, room.name);
+        if (!equipment.available) {
+          issues.push({
+            id: `equipment-unavailable-${room.equipmentId}`,
+            severity: 'blocker',
+            area: 'rooms',
+            message: `${equipment.name} is unavailable but assigned to ${room.name}.`,
+          });
+        }
+        const previous = usedEquipment.get(room.equipmentId);
+        if (previous && !reportedEquipmentConflicts.has(room.equipmentId)) {
+          issues.push({
+            id: `equipment-conflict-${room.equipmentId}`,
+            severity: 'blocker',
+            area: 'rooms',
+            message: `${equipment.name} is assigned to both ${previous} and ${room.name}.`,
+          });
+          reportedEquipmentConflicts.add(room.equipmentId);
+        } else if (!previous) {
+          usedEquipment.set(room.equipmentId, room.name);
+        }
       }
     }
   }
