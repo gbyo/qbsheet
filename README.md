@@ -10,6 +10,24 @@ The repository also includes the QBSheet Director operational UI preview. It is 
 existing scorer remains the default application: after starting Vite, open `director.html` to explore
 the tournament overview, rooms, results inbox, standings, publishing, and local-control settings.
 
+## The QBSheet family
+
+| | What it is |
+| --- | --- |
+| **QBSheet Web / Scorer** | The browser scoresheet. Offline-first, no account, QBTCP client. |
+| **QBSheet Director** | The desktop tournament-management application. Authoritative tournament state, local SQLite, QBTCP server. |
+| **QBSheet Live** | The participant-facing half: a native iOS app, an App Clip, a responsive web client, and an open protocol for publishing a tournament. |
+
+**Director runs the tournament. Live publishes the tournament.**
+
+QBSheet Live is entirely optional and is never required for scoring, QBTCP, scheduling, result
+acceptance, advancement, statistics, recovery, or persistence. If the internet disappears mid-day,
+the tournament continues normally and Live catches up afterwards. A tournament's public data lives in
+the tournament director's own infrastructure — QBSheet does not host it and does not pay for it.
+
+See [the QBSheet Live architecture](docs/QBLIVE_ARCHITECTURE.md) and
+[the QBLive protocol](docs/QBLIVE.md).
+
 ## Features
 
 * **Offline scoring**: Score games without an internet connection.
@@ -22,6 +40,7 @@ the tournament overview, rooms, results inbox, standings, publishing, and local-
 * **Tournament spreadsheet copy**: Copy one completed game to a new spreadsheet tab; see [the spreadsheet clipboard workflow](docs/SPREADSHEET_CLIPBOARD.md).
 * **Guided practice**: Learn how to use the scorer with a built-in tutorial.
 * **Static hosting**: Host QBSheet without a QBSheet application server.
+* **Publish a tournament**: Give participants schedules, standings, results, and updates with [QBSheet Live](docs/QBLIVE_ARCHITECTURE.md), on a server the tournament controls.
 
 ## Use QBSheet
 
@@ -90,6 +109,15 @@ npm test -- --run
 npm run build
 ```
 
+QBSheet Live has its own suites. The Cloudflare and iOS ones need `workerd` and Xcode, so they run in
+a separate workflow rather than in the main gate:
+
+```sh
+npm run qblive:test     # protocol, public projection privacy, Live Activity payloads, conformance
+npm run live:test       # QBSheet Live Web
+npm run live:dev        # QBSheet Live Web against a running backend
+```
+
 Run the browser end-to-end tests with:
 
 ```sh
@@ -131,6 +159,13 @@ The service worker provides the application shell for offline use.
 | [QBG migration](docs/QBG_MIGRATION.md)                   | Compatibility information for the older QBG and API formats |
 | [Spreadsheet clipboard](docs/SPREADSHEET_CLIPBOARD.md)   | Copy one complete game into a shared tournament spreadsheet |
 | [Test file generation](docs/TEST_FILE_GENERATION.md)     | Information about test files and development fixtures       |
+| [QBSheet Live architecture](docs/QBLIVE_ARCHITECTURE.md) | How Live fits together, and the canonical domain decision   |
+| [QBLive protocol](docs/QBLIVE.md)                        | The normative public protocol for publishing a tournament   |
+| [QBSheet Live for iOS](docs/QBLIVE_IOS.md)               | iOS targets, universal links, App Store Connect checklist   |
+| [Live Activity](docs/QBLIVE_ACTIVITY.md)                 | ActivityKit sharding and measured broadcast payload sizes   |
+| [APNs prototype result](docs/QBLIVE_PUSH_PROTOTYPE.md)   | What was measured about reaching Apple's push endpoints     |
+| [Live load results](docs/QBLIVE_LOAD.md)                 | WebSocket load, and APNs channel-consumption modelling      |
+| [Live verification status](docs/QBLIVE_STATUS.md)        | What is demonstrated, what is tested, and what is not        |
 
 ## Contributing
 
