@@ -311,6 +311,16 @@ describe('locations coming and going', () => {
       availableBytes: 2000,
       connected: true,
     });
+    const quiet = syncRemovableVolumes(state, [
+      {
+        mountPoint: mount,
+        name: 'SanDisk Ultra Renamed',
+        removable: true,
+        readOnly: true,
+        availableBytes: 2000,
+      },
+    ]);
+    expect(quiet.metadataChanged).toBe(false);
 
     const gone = syncRemovableVolumes(state, []);
     expect(gone.disappeared).toHaveLength(1);

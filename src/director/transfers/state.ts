@@ -116,6 +116,7 @@ export function syncRemovableVolumes(
   volumes: TransferVolume[],
 ): { appeared: TransferLocation[]; disappeared: TransferLocation[]; metadataChanged: boolean } {
   const now = isoNow();
+  const nowMs = Date.parse(now);
   const removable = volumes.filter((volume) => volume.removable);
   const byMountPoint = new Map(removable.map((volume) => [volume.mountPoint, volume]));
   const appeared: TransferLocation[] = [];
@@ -127,12 +128,16 @@ export function syncRemovableVolumes(
     const volume = location.mountPoint ? byMountPoint.get(location.mountPoint) : undefined;
     if (volume) {
       const nextLabel = volume.name || location.label;
+      const previousLastSeenMs = location.lastSeenAt ? Date.parse(location.lastSeenAt) : Number.NaN;
+      const heartbeatDue =
+        !Number.isFinite(previousLastSeenMs) ||
+        (Number.isFinite(nowMs) && nowMs - previousLastSeenMs >= 60_000);
       if (
         !location.connected ||
         location.label !== nextLabel ||
         location.readOnly !== volume.readOnly ||
         location.availableBytes !== volume.availableBytes ||
-        location.lastSeenAt !== now ||
+        heartbeatDue ||
         location.message !== undefined
       ) {
         metadataChanged = true;
