@@ -302,9 +302,14 @@ function EnabledPanels({
               <div className="director-live-actions">
                 <Button
                   icon="clipboard"
-                  onClick={() => {
-                    void navigator.clipboard?.writeText(link);
-                    onAnnounce('Public link copied.');
+                  onClick={async () => {
+                    try {
+                      if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable');
+                      await navigator.clipboard.writeText(link);
+                      onAnnounce('Public link copied.');
+                    } catch {
+                      onAnnounce('Copy failed — select the link and copy manually.');
+                    }
                   }}
                 >
                   Copy
@@ -362,7 +367,11 @@ function StatusPanel({ publication }: { publication: LivePublication }) {
           label="Pending updates"
           value={publication.sync.pendingItems === 0 ? 'None' : String(publication.sync.pendingItems)}
         />
-        <Row label="Last successful sync" value={publication.sync.lastSuccessAt ?? 'Never'} />
+        <Row
+          label="Last successful sync"
+          value={formatLiveTimestamp(publication.sync.lastSuccessAt) ?? 'Never'}
+          title={publication.sync.lastSuccessAt ?? undefined}
+        />
         {publication.sync.lastError && (
           <Row label="Last error" value={publication.sync.lastError} tone="warning" />
         )}
@@ -396,11 +405,37 @@ function backendLabel(publication: LivePublication): string {
   return publication.backend.displayName ? `${kind} · ${publication.backend.displayName}` : kind;
 }
 
-function Row({ label, value, tone }: { label: string; value: string; tone?: 'warning' }) {
+function formatLiveTimestamp(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  try {
+    return date.toLocaleString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
+  } catch {
+    return date.toLocaleString();
+  }
+}
+
+function Row({
+  label,
+  value,
+  tone,
+  title,
+}: {
+  label: string;
+  value: string;
+  tone?: 'warning';
+  title?: string;
+}) {
   return (
     <div className={`director-live-row${tone ? ` director-live-row-${tone}` : ''}`}>
       <span className="director-muted">{label}</span>
-      <span>{value}</span>
+      <span title={title}>{value}</span>
     </div>
   );
 }
@@ -672,8 +707,8 @@ function AnnouncementsPanel({
             <div key={announcement.id} className="director-live-row">
               <span>
                 <span>{announcement.title}</span>
-                <small className="director-muted">
-                  {announcement.severity} · {announcement.publishedAt}
+                <small className="director-muted" title={announcement.publishedAt}>
+                  {announcement.severity} · {formatLiveTimestamp(announcement.publishedAt) ?? announcement.publishedAt}
                 </small>
               </span>
               <Button variant="quiet" onClick={() => actions.withdrawAnnouncement(announcement.id)}>

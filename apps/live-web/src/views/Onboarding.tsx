@@ -6,7 +6,7 @@
  * it grants nothing and proves nothing about who is holding the phone.
  */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { QbliveSnapshot } from '@qbsheet/qblive-protocol';
 import { playersOf, publishesPlayers } from '../state/derive';
 
@@ -84,10 +84,13 @@ export function SelectPlayer({
   onSkip: () => void;
 }) {
   const players = playersOf(snapshot, teamId);
-  if (!publishesPlayers(snapshot) || players.length === 0) {
-    onSkip();
-    return null;
-  }
+  const shouldSkip = !publishesPlayers(snapshot) || players.length === 0;
+  // Do not update parent state during render. Push the skip decision to an effect
+  // so StrictMode double-render does not cause a spurious state update.
+  useEffect(() => {
+    if (shouldSkip) onSkip();
+  }, [shouldSkip, onSkip]);
+  if (shouldSkip) return null;
   return (
     <div className="gate">
       <h1>Show my player stats</h1>
