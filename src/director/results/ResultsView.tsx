@@ -277,6 +277,10 @@ function ManualResult({
       scheduledGameId: selected.id,
       scores: [score(selected.leftTeamId, leftScore), score(selected.rightTeamId, rightScore)],
     });
+    if (accepted) {
+      setLeftScore('');
+      setRightScore('');
+    }
     onAnnounce(
       accepted
         ? 'Manual result accepted locally; standings updated and saving now.'

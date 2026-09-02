@@ -46,6 +46,16 @@ WITH invalid AS (
                     WHERE game.id = legacy.scheduled_game_id
                       AND game.round_id = legacy.round_id
                 ) THEN 'round_id and scheduled_game_id do not identify the same round'
+            WHEN EXISTS (
+                SELECT 1 FROM packets AS packet
+                JOIN rounds AS round ON round.id = legacy.round_id
+                WHERE packet.id = legacy.packet_id AND round.tournament_id <> packet.tournament_id
+            ) THEN 'packet and round belong to different tournaments'
+            WHEN EXISTS (
+                SELECT 1 FROM packets AS packet
+                JOIN scheduled_games AS game ON game.id = legacy.scheduled_game_id
+                WHERE packet.id = legacy.packet_id AND game.tournament_id <> packet.tournament_id
+            ) THEN 'packet and scheduled game belong to different tournaments'
             ELSE NULL
         END AS reason
     FROM packet_assignments_legacy AS legacy

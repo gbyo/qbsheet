@@ -170,8 +170,17 @@ export function PacketsView({
                           <Button
                             variant={packet.id === state.tournament?.currentPacketId ? 'secondary' : 'quiet'}
                             onClick={() => {
+                              const exists = state.packets.some((entry) => entry.id === packet.id);
+                              if (!exists) {
+                                onAnnounce('That packet is not in the current inventory.');
+                                return;
+                              }
+                              const before = state.tournament?.currentPacketId;
                               controller.selectPacket(packet.id);
-                              onAnnounce(`${packet.name} selected for the next generated round.`);
+                              // Only announce success; selectPacket validates and will set error if invalid
+                              if (before !== packet.id || state.tournament?.currentPacketId === packet.id) {
+                                onAnnounce(`${packet.name} selected for the next generated round.`);
+                              }
                             }}
                           >
                             {packet.id === state.tournament?.currentPacketId ? 'Current' : 'Use next'}

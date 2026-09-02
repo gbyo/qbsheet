@@ -588,12 +588,13 @@ function generatePoolRound(
     });
   }
 
+  const resolvedRoundNumber = options.roundNumber ?? nextRoundNumber(state);
   const coreGames = schedule.games;
   const games = coreGames.map((entry) => {
     const game =
       entry.kind === 'bye'
-        ? buildGame(0, entry.byeTeamId, null, { ...options, poolId: entry.poolId })
-        : buildGame(0, entry.teamAId, entry.teamBId, { ...options, poolId: entry.poolId });
+        ? buildGame(resolvedRoundNumber, entry.byeTeamId, null, { ...options, poolId: entry.poolId })
+        : buildGame(resolvedRoundNumber, entry.teamAId, entry.teamBId, { ...options, poolId: entry.poolId });
     game.roomId = entry.kind === 'bye' ? null : entry.roomId;
     return game;
   });

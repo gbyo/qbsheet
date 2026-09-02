@@ -341,6 +341,7 @@ export function derivePlayerStandings(
       teamId: player.teamId,
       gamesPlayed: 0,
       tossupsHeard: 0,
+      tossupsHeardKnown: true,
       powers: 0,
       gets: 0,
       negs: 0,

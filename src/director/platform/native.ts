@@ -144,7 +144,17 @@ function normalizeStatus(value: unknown, fallback: string): NativeServerStatus {
     ...(typeof value.protocol === 'string' ? { protocol: value.protocol } : {}),
     ...(typeof value.pairedRooms === 'number' ? { pairedRooms: value.pairedRooms } : {}),
     ...(Array.isArray(invitations)
-      ? { pairingInvitations: invitations as NativeRoomPairingInvitation[] }
+      ? {
+          pairingInvitations: invitations.filter(
+            (entry): entry is NativeRoomPairingInvitation =>
+              typeof entry === 'object' &&
+              entry !== null &&
+              typeof (entry as Record<string, unknown>).roomId === 'string' &&
+              typeof (entry as Record<string, unknown>).roomName === 'string' &&
+              typeof (entry as Record<string, unknown>).pairingCode === 'string' &&
+              typeof (entry as Record<string, unknown>).expiresInSeconds === 'number',
+          ),
+        }
       : {}),
     ...(typeof value.pairingCode === 'string' ? { pairingCode: value.pairingCode } : {}),
     ...(typeof value.pairingUrl === 'string' ? { pairingUrl: value.pairingUrl } : {}),

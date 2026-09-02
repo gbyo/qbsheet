@@ -37,8 +37,8 @@ describe('deterministic tournament scheduling', () => {
     for (const roundId of Array.from(new Set(games.map((game) => game.roundId)))) {
       const round = games.filter((game) => game.roundId === roundId);
       expect(round).toHaveLength(4);
-      expect(new Set(round.flatMap((game) => [game.teamAId, game.teamBId]))).toHaveLength(8);
-      expect(new Set(round.map((game) => game.roomId))).toHaveLength(4);
+      expect(new Set(round.flatMap((game) => [game.teamAId, game.teamBId])).size).toBe(8);
+      expect(new Set(round.map((game) => game.roomId)).size).toBe(4);
     }
   });
 

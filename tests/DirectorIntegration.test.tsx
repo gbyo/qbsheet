@@ -305,7 +305,7 @@ describe('Director integration hardening', () => {
       status: 'review',
       rawSubmission: { source: 'test' },
     });
-    scheduled.status = 'submitted';
+    imported.scheduledGames.find((game) => game.id === scheduled.id)!.status = 'submitted';
     act(() => {
       expect(hook.result.current.importSnapshot(imported)).toBe(true);
       hook.result.current.rejectSubmission(submissionId, 'Bad score sheet');
