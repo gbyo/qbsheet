@@ -247,16 +247,23 @@ function assignResources(
   const packetIds = [...(options.packetIds ?? [])];
   const games: ScheduledGame[] = [];
   const issues: ScheduleIssue[] = [];
-  let globalGameSequence = 0;
-  const byRound = new Map<number, ScheduledGame[]>();
-  const roomsByRound = new Map<number, Set<EntityId>>();
+  // Everything below is keyed by the round *entity*, not by a pool's own index into its rotation.
+  // Several pools can share one tournament round — that is what makes their rounds simultaneous —
+  // and in that round there is one set of rooms, one packet, and one sequence numbering.
+  const byRound = new Map<EntityId, ScheduledGame[]>();
+  const roomsByRound = new Map<EntityId, Set<EntityId>>();
+  const sequenceByRound = new Map<EntityId, number>();
+  const packetIndexByRound = new Map<EntityId, number>();
 
   for (const planned of plannedRounds) {
     const roundGames: ScheduledGame[] = [];
     const roundId = planned.roundDefinition.id;
-    const roundRoomIds = roomsByRound.get(planned.roundIndex) ?? new Set<EntityId>();
-    roomsByRound.set(planned.roundIndex, roundRoomIds);
-    planned.pairings.forEach((pair, sequence) => {
+    const roundRoomIds = roomsByRound.get(roundId) ?? new Set<EntityId>();
+    roomsByRound.set(roundId, roundRoomIds);
+    if (!packetIndexByRound.has(roundId)) packetIndexByRound.set(roundId, packetIndexByRound.size);
+    planned.pairings.forEach((pair) => {
+      const sequence = sequenceByRound.get(roundId) ?? 0;
+      sequenceByRound.set(roundId, sequence + 1);
       const id = makeGameId(
         options.idFactory,
         planned.phaseId,
@@ -312,7 +319,10 @@ function assignResources(
         );
       }
 
-      const packetId = packetIds.length > 0 ? packetIds[globalGameSequence % packetIds.length] : null;
+      // One packet per round, which is how a quiz bowl round is read: every room hears the same
+      // questions at the same time. A per-game override is applied by the caller afterwards.
+      const packetId =
+        packetIds.length > 0 ? packetIds[(packetIndexByRound.get(roundId) ?? 0) % packetIds.length] : null;
       if (!packetId && packetIds.length === 0) {
         issues.push(
           issue(
@@ -340,11 +350,10 @@ function assignResources(
         notes: '',
       };
       roundGames.push(match);
-      globalGameSequence += 1;
     });
-    const allRoundGames = byRound.get(planned.roundIndex) ?? [];
+    const allRoundGames = byRound.get(roundId) ?? [];
     allRoundGames.push(...roundGames);
-    byRound.set(planned.roundIndex, allRoundGames);
+    byRound.set(roundId, allRoundGames);
   }
 
   for (const roundGames of byRound.values()) {
