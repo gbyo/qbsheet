@@ -103,27 +103,72 @@ jobs:
           )
           text = replace_once(text, old_imports, new_imports, 'duplicate repository imports')
           path.write_text(text)
+
+          path = Path('crates/tournament-store/src/db.rs')
+          text = path.read_text()
+          broken_parent = '''        let parent = match destination.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
+            Some(_) => PathBuf::from("."),
+            None => {
+                return Err(StoreError::BackupDestinationHasNoParent(
+                    destination.clone(),
+                ))
+            }
+        let parent = destination
+            .parent()
+            .ok_or_else(|| StoreError::BackupDestinationHasNoParent(destination.clone()))?;
+        let parent = if parent.as_os_str().is_empty() {
+            PathBuf::from(".")
+        } else {
+            parent.to_path_buf()
+        };
+'''
+          clean_parent = '''        let parent = destination
+            .parent()
+            .ok_or_else(|| StoreError::BackupDestinationHasNoParent(destination.clone()))?;
+        let parent = if parent.as_os_str().is_empty() {
+            PathBuf::from(".")
+        } else {
+            parent.to_path_buf()
+        };
+'''
+          text = replace_once(text, broken_parent, clean_parent, 'backup parent merge')
+          text = replace_once(
+              text,
+              '''            commit_backup_no_replace(&temporary, &destination)?;
+            commit_backup_noreplace(&temporary, &destination)?;
+''',
+              '''            commit_backup_noreplace(&temporary, &destination)?;
+''',
+              'duplicate backup publish',
+          )
+          start = text.index('/// Publish a completed backup without replacing a destination')
+          end = text.index('fn configure_connection', start)
+          text = text[:start] + text[end:]
+          text = text.replace('use super::commit_backup_no_replace;', 'use super::commit_backup_noreplace;')
+          text = text.replace('commit_backup_no_replace(&temporary, &destination)', 'commit_backup_noreplace(&temporary, &destination)')
+          path.write_text(text)
+
+          path = Path('crates/tournament-store/src/repositories/competition.rs')
+          text = path.read_text()
+          duplicate_models = '''    NewPacket, NewPhase, NewPhaseTeam, NewPool, NewRound, NewScheduledGame, Packet,
+    PacketAssignment, Phase, PhaseTeam, Pool, Round, ScheduledGame,
+    PacketAssignment, Phase, PhaseTeam, Pool, Round, ScheduledGame, UnixTimestamp,
+'''
+          clean_models = '''    NewPacket, NewPhase, NewPhaseTeam, NewPool, NewRound, NewScheduledGame, Packet,
+    PacketAssignment, Phase, PhaseTeam, Pool, Round, ScheduledGame, UnixTimestamp,
+'''
+          text = replace_once(text, duplicate_models, clean_models, 'competition model imports')
+          path.write_text(text)
           PY
       - name: Install dependencies
         run: npm ci
-      - name: Format controller merge
-        run: npx prettier --write src/director/state/useDirectorController.ts
-      - name: Format model merge
-        run: npx prettier --write src/director/domain/model.ts
-      - name: Format repository merge
-        run: npx prettier --write src/director/persistence/DirectorRepository.ts
-      - name: Format rooms merge
-        run: npx prettier --write src/director/rooms/RoomsView.tsx
-      - name: Format core scheduling merge
-        run: npx prettier --write packages/tournament-core/src/scheduling.ts
-      - name: Format all JS sources
-        run: npm run format
-      - name: Format tournament store
-        run: cargo fmt --manifest-path crates/tournament-store/Cargo.toml --all
-      - name: Format Director native crate
-        run: cargo fmt --manifest-path apps/director/src-tauri/Cargo.toml --all
-      - name: Format QBTCP server
-        run: cargo fmt --manifest-path crates/qbtcp-server/Cargo.toml --all
+      - name: Format merged sources
+        run: |
+          npm run format
+          cargo fmt --manifest-path crates/tournament-store/Cargo.toml --all
+          cargo fmt --manifest-path apps/director/src-tauri/Cargo.toml --all
+          cargo fmt --manifest-path crates/qbtcp-server/Cargo.toml --all
       - name: Validate merge result
         run: |
           npm run format:check
