@@ -1,5 +1,5 @@
 /**
- * The header, the footer, and every URL the marketing pages point at.
+ * The product header, the About footer, and every URL the marketing pages point at.
  *
  * # Why this is a module and not a copy on each page
  *
@@ -28,6 +28,7 @@
 import BrandLogo from '../BrandLogo';
 
 export const githubUrl = 'https://github.com/gbyo/qbsheet';
+export const qbliveUrl = 'https://live.qbsheet.com/';
 export const qbjDocsUrl = `${githubUrl}/blob/main/docs/QBJ_ASSIGNMENT_PROFILE.md`;
 export const qbtcpDocsUrl = `${githubUrl}/blob/main/docs/QBTCP.md`;
 export const licenseUrl = `${githubUrl}/blob/main/LICENSE`;
@@ -62,6 +63,11 @@ export function scorerUrl(slug: PageSlug, nested = false): string {
   return '../'.repeat(depthOf(slug, nested) + 1);
 }
 
+/** The browser Director preview is served beside the scorer at the deployment root. */
+export function directorUrl(slug: PageSlug, nested = false): string {
+  return `${scorerUrl(slug, nested)}director.html`;
+}
+
 /**
  * A link from the page at `slug` to the page at `target`.
  *
@@ -77,7 +83,7 @@ export function pageUrl(slug: PageSlug, target: PageSlug, nested = false): strin
 }
 
 /**
- * The content pages, in the order the header offers them.
+ * The content pages, in the order the footer offers them.
  *
  * The product page leads, because the wordmark goes to the *scorer* rather than here — a deliberate
  * choice the rest of the site is built around — and without this entry a reader three pages deep would
@@ -86,9 +92,8 @@ export function pageUrl(slug: PageSlug, target: PageSlug, nested = false): strin
  * Then scoring and tournaments, which are the two the reader is choosing between: one is written for
  * the person at the table and the other for the person putting sixteen rooms on this.
  *
- * Privacy is not here. It is the one page nobody browses to and everybody arrives at from a link or a
- * search, so it is carried in the footer where a legal-adjacent page is looked for anyway, and the
- * header stays at a length that still wraps to two lines rather than three on a narrow phone.
+ * Privacy is added separately below because it is the one page nobody browses to and everybody
+ * arrives at from a link or a search.
  */
 interface INavPage {
   slug: PageSlug;
@@ -186,12 +191,9 @@ export function PageHeader({ slug, nested = false }: { slug: PageSlug; nested?: 
           <BrandLogo className="about-brand-logo" />
         </a>
         <nav className="about-nav" aria-label="Primary navigation">
-          <a href={scorerUrl(slug, nested)}>Open QBSheet</a>
-          {primaryPages.map((page) => (
-            <a key={page.slug} href={navHref(slug, page, nested)} {...current(slug, page.slug)}>
-              {page.label}
-            </a>
-          ))}
+          <a href={scorerUrl(slug, nested)}>Scorer</a>
+          <a href={directorUrl(slug, nested)}>Director</a>
+          <ExternalLink href={qbliveUrl}>QBLive</ExternalLink>
           <ExternalLink href={githubUrl}>GitHub</ExternalLink>
         </nav>
       </div>

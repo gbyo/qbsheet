@@ -143,18 +143,14 @@ describe('the product page', () => {
     );
   });
 
-  test('offers self-hosting from both navigations', () => {
+  test('keeps self-hosting in the About navigation', () => {
     const { container } = render(<About />);
 
-    // Three ways to the page from here: the header, the footer, and the open-by-design list. The
-    // first two are what make it reachable from anywhere on the page rather than only from the middle.
-    for (const region of ['.about-nav', '.about-footer nav']) {
-      const nav = container.querySelector(region);
-      expect(within(nav as HTMLElement).getByRole('link', { name: 'Self-host' })).toHaveAttribute(
-        'href',
-        './self-host/',
-      );
-    }
+    const footer = container.querySelector('.about-footer nav');
+    expect(within(footer as HTMLElement).getByRole('link', { name: 'Self-host' })).toHaveAttribute(
+      'href',
+      './self-host/',
+    );
   });
 
   test('keeps the closing call to action and both ways into the application', () => {
@@ -162,7 +158,7 @@ describe('the product page', () => {
 
     expect(screen.getByRole('heading', { level: 2, name: 'Ready to score?' })).toBeInTheDocument();
     const open = screen.getAllByRole('link', { name: 'Open QBSheet' });
-    expect(open).toHaveLength(3);
+    expect(open).toHaveLength(2);
     for (const link of open) expect(link).toHaveAttribute('href', '../');
 
     const github = screen.getAllByRole('link', { name: /^View on GitHub/ });

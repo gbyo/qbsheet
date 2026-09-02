@@ -168,12 +168,10 @@ describe('the tournaments page', () => {
     expect(protocol.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
     expect(protocol.textContent).toContain('(opens in a new tab)');
 
-    for (const region of ['.about-nav', '.about-footer nav']) {
-      const nav = container.querySelector(region);
-      const self = within(nav as HTMLElement).getByRole('link', { name: 'Tournaments' });
-      expect(self).toHaveAttribute('href', './');
-      expect(self).toHaveAttribute('aria-current', 'page');
-    }
+    const footer = container.querySelector('.about-footer nav');
+    const self = within(footer as HTMLElement).getByRole('link', { name: 'Tournaments' });
+    expect(self).toHaveAttribute('href', './');
+    expect(self).toHaveAttribute('aria-current', 'page');
   });
 
   /**
@@ -188,6 +186,18 @@ describe('the tournaments page', () => {
 
     // The wordmark is the way back to the front page of the site, not into the application.
     expect(container.querySelector('.about-brand')).toHaveAttribute('href', '../');
+
+    const header = container.querySelector('.about-nav') as HTMLElement;
+    expect(within(header).getAllByRole('link')).toHaveLength(4);
+    expect(within(header).getByRole('link', { name: 'Scorer' })).toHaveAttribute('href', '../../');
+    expect(within(header).getByRole('link', { name: 'Director' })).toHaveAttribute(
+      'href',
+      '../../director.html',
+    );
+    expect(within(header).getByRole('link', { name: /^QBLive/ })).toHaveAttribute(
+      'href',
+      'https://live.qbsheet.com/',
+    );
 
     for (const region of ['.about-nav', '.about-footer nav']) {
       const github = within(container.querySelector(region) as HTMLElement).getByRole('link', {
@@ -204,7 +214,7 @@ describe('the tournaments page', () => {
     }
 
     // A page link is not an external one, and must not have grown either attribute.
-    const selfHost = within(container.querySelector('.about-nav') as HTMLElement).getByRole('link', {
+    const selfHost = within(container.querySelector('.about-footer nav') as HTMLElement).getByRole('link', {
       name: 'Self-host',
     });
     expect(selfHost).not.toHaveAttribute('target');
