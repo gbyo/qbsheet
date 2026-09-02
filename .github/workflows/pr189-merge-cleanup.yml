@@ -28,54 +28,85 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected one match, found {count}')
+              return text.replace(old, new, 1)
+
           path = Path('src/director/state/useDirectorController.ts')
           text = path.read_text()
+          text = replace_once(
+              text,
+              "import { createDirectorRepository, type DirectorRepository } from '../persistence';\n",
+              '',
+              'duplicate controller persistence import',
+          )
+          broken = (
+              "        draft.audit.push({\n"
+              "          id: newDirectorId('audit'),\n"
+              "          at: isoNow(),\n"
+              "          actor: 'Director',\n"
+              "          type: 'assignment-released',\n"
+              "          summary: `Released ${round.name}.`,\n"
+              "          entityId: roundId,\n"
+              "        });\n"
+              "      });\n"
+              "      return true;\n"
+              "    },\n"
+              "        // Releasing a round is QBTCP's delivery. Recording it as a transfer keeps the unified\n"
+              "        // history honest: \"how did this room get its assignment\" has one table with one answer,\n"
+              "        // whether that answer was the network, a stick, or both.\n"
+              "        recordQbtcpDelivery(draft, roundId);\n"
+              "      }),\n"
+              "    [commit],\n"
+              "  );\n"
+          )
+          repaired = (
+              "        draft.audit.push({\n"
+              "          id: newDirectorId('audit'),\n"
+              "          at: isoNow(),\n"
+              "          actor: 'Director',\n"
+              "          type: 'assignment-released',\n"
+              "          summary: `Released ${round.name}.`,\n"
+              "          entityId: roundId,\n"
+              "        });\n"
+              "        // Releasing a round is QBTCP's delivery. Recording it as a transfer keeps the unified\n"
+              "        // history honest: \"how did this room get its assignment\" has one table with one answer,\n"
+              "        // whether that answer was the network, a stick, or both.\n"
+              "        recordQbtcpDelivery(draft, roundId);\n"
+              "      });\n"
+              "      return true;\n"
+              "    },\n"
+              "    [commit],\n"
+              "  );\n"
+          )
+          text = replace_once(text, broken, repaired, 'releaseRound transfer splice')
+          path.write_text(text)
 
-          duplicate = "import { createDirectorRepository, type DirectorRepository } from '../persistence';\n"
-          if text.count(duplicate) != 1:
-              raise SystemExit(f'expected one redundant persistence import, found {text.count(duplicate)}')
-          text = text.replace(duplicate, '', 1)
+          path = Path('src/director/domain/model.ts')
+          text = path.read_text()
+          text = replace_once(
+              text,
+              "\nexport const directorSchemaVersion = 1;\n",
+              '\n',
+              'duplicate Director schema version',
+          )
+          path.write_text(text)
 
-          broken = """        draft.audit.push({
-          id: newDirectorId('audit'),
-          at: isoNow(),
-          actor: 'Director',
-          type: 'assignment-released',
-          summary: `Released ${round.name}.`,
-          entityId: roundId,
-        });
-      });
-      return true;
-    },
-        // Releasing a round is QBTCP's delivery. Recording it as a transfer keeps the unified
-        // history honest: \"how did this room get its assignment\" has one table with one answer,
-        // whether that answer was the network, a stick, or both.
-        recordQbtcpDelivery(draft, roundId);
-      }),
-    [commit],
-  );
-"""
-          repaired = """        draft.audit.push({
-          id: newDirectorId('audit'),
-          at: isoNow(),
-          actor: 'Director',
-          type: 'assignment-released',
-          summary: `Released ${round.name}.`,
-          entityId: roundId,
-        });
-        // Releasing a round is QBTCP's delivery. Recording it as a transfer keeps the unified
-        // history honest: \"how did this room get its assignment\" has one table with one answer,
-        // whether that answer was the network, a stick, or both.
-        recordQbtcpDelivery(draft, roundId);
-      });
-      return true;
-    },
-    [commit],
-  );
-"""
-          if text.count(broken) != 1:
-              raise SystemExit(f'expected one malformed releaseRound splice, found {text.count(broken)}')
-          text = text.replace(broken, repaired, 1)
+          path = Path('src/director/persistence/DirectorRepository.ts')
+          text = path.read_text()
+          old_imports = (
+              "import { emptyDirectorState, type DirectorState } from '../domain';\n"
+              "import { normalizeDirectorState } from './stateMigrations';\n"
+              "import { emptyDirectorState, type DirectorState, directorSchemaVersion } from '../domain';\n"
+          )
+          new_imports = (
+              "import { directorSchemaVersion, emptyDirectorState, type DirectorState } from '../domain';\n"
+              "import { normalizeDirectorState } from './stateMigrations';\n"
+          )
+          text = replace_once(text, old_imports, new_imports, 'duplicate repository imports')
           path.write_text(text)
           PY
       - name: Install dependencies
