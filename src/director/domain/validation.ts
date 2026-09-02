@@ -17,7 +17,11 @@ export interface PreflightIssue {
   action?: string;
 }
 
-export function runPreflight(state: DirectorState, nativeServerReady = false): PreflightIssue[] {
+export function runPreflight(
+  state: DirectorState,
+  nativeServerReady = false,
+  nativeServerAvailable = true,
+): PreflightIssue[] {
   const issues: PreflightIssue[] = [];
   if (!state.tournament) {
     issues.push({
@@ -161,7 +165,7 @@ export function runPreflight(state: DirectorState, nativeServerReady = false): P
     });
   }
   issues.push(...packetReferenceIssues(state));
-  if (!nativeServerReady) {
+  if (nativeServerAvailable && !nativeServerReady) {
     issues.push({
       id: 'qbtcp-offline',
       severity: 'recommendation',

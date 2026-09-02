@@ -200,6 +200,57 @@ describe('Director integration hardening', () => {
     expect(hook.result.current.state.scheduledGames).toHaveLength(0);
   });
 
+  test('pool formats require exclusive complete membership before generation', async () => {
+    const { hook } = await directorWithSetup(4);
+    const phaseId = hook.result.current.state.phases[0]?.id;
+    const teamIds = hook.result.current.state.teams.map((entry) => entry.id);
+    if (!phaseId || teamIds.length !== 4) throw new Error('test setup did not create the pool field');
+    act(() => hook.result.current.updateFormat({ kind: 'pools', name: 'Preliminary pools' }));
+
+    let added = false;
+    act(() => {
+      added = hook.result.current.addPool({ phaseId, name: 'Pool A', teamIds: teamIds.slice(0, 2) });
+    });
+    expect(added).toBe(true);
+
+    let incomplete: { generated: boolean; conflicts: string[] } | undefined;
+    act(() => {
+      incomplete = hook.result.current.generateSchedule();
+    });
+    expect(incomplete?.generated).toBe(false);
+    expect(incomplete?.conflicts.join(' ')).toMatch(/not assigned to a pool/i);
+    expect(hook.result.current.state.rounds).toHaveLength(0);
+
+    act(() => {
+      expect(hook.result.current.addPool({ phaseId, name: 'Pool B', teamIds: teamIds.slice(2) })).toBe(true);
+    });
+    let complete: { generated: boolean; conflicts: string[] } | undefined;
+    act(() => {
+      complete = hook.result.current.generateSchedule();
+    });
+    expect(complete?.generated).toBe(true);
+    expect(hook.result.current.state.scheduledGames).toHaveLength(2);
+    expect(new Set(hook.result.current.state.scheduledGames.map((game) => game.poolId)).size).toBe(2);
+  });
+
+  test('format type changes are blocked after schedule generation', async () => {
+    const { hook } = await directorWithSetup();
+    act(() => hook.result.current.generateSchedule());
+    act(() => hook.result.current.updateFormat({ kind: 'pools' }));
+
+    expect(hook.result.current.state.formats[0]?.kind).toBe('round-robin');
+    expect(hook.result.current.error).toMatch(/locked after schedule generation/i);
+  });
+
+  test('browser preflight omits the native-only QBTCP recommendation', async () => {
+    const { hook } = await directorWithSetup();
+    const browserIssues = runPreflight(hook.result.current.state, false, false);
+    const nativeIssues = runPreflight(hook.result.current.state, false, true);
+
+    expect(browserIssues.some((issue) => issue.id === 'qbtcp-offline')).toBe(false);
+    expect(nativeIssues.some((issue) => issue.id === 'qbtcp-offline')).toBe(true);
+  });
+
   test('forbidden byes reject the generation without mutating state', async () => {
     const { hook } = await directorWithSetup(3);
     act(() => hook.result.current.updateFormat({ allowByes: false }));
@@ -275,6 +326,43 @@ describe('Director integration hardening', () => {
       });
     });
     expect(hook.result.current.state.games).toHaveLength(gameCount);
+  });
+
+  test('editing a team keeps organization data relational', async () => {
+    const { hook } = await directorWithSetup();
+    const target = hook.result.current.state.teams[0];
+    if (!target) throw new Error('test setup did not create a team');
+
+    act(() => {
+      hook.result.current.updateTeam(target.id, {
+        displayName: 'Northview B',
+        organizationName: 'Northview High',
+        teamLetter: 'B',
+        seed: 4,
+        notes: 'late registration',
+      });
+    });
+
+    const edited = hook.result.current.state.teams.find((entry) => entry.id === target.id);
+    const organization = hook.result.current.state.organizations.find(
+      (entry) => entry.name === 'Northview High',
+    );
+    expect(edited).toMatchObject({
+      displayName: 'Northview B',
+      teamLetter: 'B',
+      seed: 4,
+      notes: 'late registration',
+    });
+    expect(organization).toBeTruthy();
+    expect(edited?.organizationId).toBe(organization?.id);
+    expect(edited).not.toHaveProperty('organizationName');
+
+    act(() => {
+      hook.result.current.updateTeam(target.id, { organizationName: ' ' });
+    });
+    expect(
+      hook.result.current.state.teams.find((entry) => entry.id === target.id)?.organizationId,
+    ).toBeNull();
   });
 
   test('rejecting a submission reopens the assignment for a later result', async () => {

@@ -153,7 +153,12 @@ export function TransfersView({
                   : `${state.transfers.locations.filter((location) => location.connected).length} of ${state.transfers.locations.length} available`}
               </h2>
             </div>
-            <Button variant="secondary" icon="plus" onClick={() => void transfers.addFolder()}>
+            <Button
+              variant="secondary"
+              icon="plus"
+              disabled={!transfers.native}
+              onClick={() => void transfers.addFolder()}
+            >
               Add folder
             </Button>
           </div>

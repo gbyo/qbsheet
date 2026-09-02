@@ -522,6 +522,35 @@ function generatePoolRound(
   }
 
   const teamsById = new Map(state.teams.map((team) => [team.id, team]));
+  const confirmedTeamIds = state.teams.filter((team) => team.status === 'confirmed').map((team) => team.id);
+  const poolTeamIds = pools.flatMap((pool) => pool.teamIds);
+  const poolTeamCounts = new Map<DirectorId, number>();
+  for (const teamId of poolTeamIds) poolTeamCounts.set(teamId, (poolTeamCounts.get(teamId) ?? 0) + 1);
+  const missingFromPools = confirmedTeamIds.filter((teamId) => !poolTeamCounts.has(teamId));
+  const duplicatePoolTeams = [...poolTeamCounts.entries()]
+    .filter(([, count]) => count > 1)
+    .map(([teamId]) => teamId);
+  const conflicts: ScheduleConflict[] = [];
+  if (missingFromPools.length > 0) {
+    conflicts.push({
+      code: 'invalid-generation',
+      severity: 'error',
+      message: `Confirmed teams are not assigned to a pool: ${missingFromPools
+        .map((teamId) => teamsById.get(teamId)?.displayName ?? teamId)
+        .join(', ')}.`,
+      teamIds: missingFromPools,
+    });
+  }
+  if (duplicatePoolTeams.length > 0) {
+    conflicts.push({
+      code: 'invalid-generation',
+      severity: 'error',
+      message: `A confirmed team is assigned to more than one pool: ${duplicatePoolTeams
+        .map((teamId) => teamsById.get(teamId)?.displayName ?? teamId)
+        .join(', ')}.`,
+      teamIds: duplicatePoolTeams,
+    });
+  }
   const activeTeamsByPool = pools.map((pool) => ({
     pool,
     teams: pool.teamIds
@@ -530,7 +559,6 @@ function generatePoolRound(
   }));
   const expectedTeams = activeTeamsByPool.flatMap(({ teams }) => teams);
   const expectedByeCount = activeTeamsByPool.reduce((count, { teams }) => count + (teams.length % 2), 0);
-  const conflicts: ScheduleConflict[] = [];
   for (const { pool, teams } of activeTeamsByPool) {
     if (teams.length === 0) {
       conflicts.push({

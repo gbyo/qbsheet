@@ -499,9 +499,16 @@ button:disabled:hover {
 }
 
 .director-search-result:hover,
-.director-search-result:focus-visible {
+.director-search-result:focus-visible,
+.director-search-result.is-active {
   background: var(--director-surface-soft);
   outline: 0;
+}
+
+.director-search-empty {
+  padding: 13px 14px;
+  color: var(--director-muted);
+  font-size: 12px;
 }
 
 .director-search-result span {
@@ -830,6 +837,116 @@ button:disabled:hover {
   color: var(--director-muted);
   text-align: center;
   white-space: normal;
+}
+
+.director-table-edit-row td {
+  padding: 16px;
+  background: var(--director-surface-soft);
+  white-space: normal;
+}
+
+.director-inline-edit {
+  display: grid;
+  gap: 14px;
+}
+
+.director-checkbox-field {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  color: var(--director-ink);
+  font-size: 12px;
+}
+
+.director-result-action-panel {
+  display: grid;
+  gap: 10px;
+  max-width: 420px;
+  padding: 12px;
+  margin-top: 10px;
+  background: var(--director-surface-soft);
+  border: 1px solid var(--director-border);
+  border-radius: 5px;
+  text-align: left;
+}
+
+.director-result-action-panel .director-eyebrow {
+  margin-bottom: 0;
+}
+
+.director-pool-create-form,
+.director-pool-add-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: end;
+}
+
+.director-pool-create-form .director-form-field {
+  width: min(100%, 240px);
+}
+
+.director-pool-add-form {
+  padding-top: 14px;
+  margin-top: 14px;
+  border-top: 1px solid var(--director-border);
+}
+
+.director-pool-add-form .director-form-field {
+  flex: 1 1 240px;
+}
+
+.director-pool-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.director-pool-card {
+  display: grid;
+  gap: 12px;
+  padding: 13px;
+  background: var(--director-surface-soft);
+  border: 1px solid var(--director-border);
+  border-radius: 5px;
+}
+
+.director-pool-card .director-form-grid {
+  align-items: stretch;
+}
+
+.director-pool-team-select {
+  min-height: 128px !important;
+}
+
+.director-protest-list {
+  display: grid;
+  gap: 10px;
+}
+
+.director-protest-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px 14px;
+  align-items: start;
+}
+
+.director-protest-row > div:first-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.director-protest-row span,
+.director-protest-row small {
+  color: var(--director-muted);
+  font-size: 12px;
+}
+
+.director-protest-ruling {
+  grid-column: 1 / -1;
+  width: min(100%, 620px);
+  margin-top: 0;
 }
 
 /* Forms */

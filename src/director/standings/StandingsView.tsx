@@ -179,8 +179,11 @@ function downloadCsv(state: DirectorState, onAnnounce: (message: string) => void
   const anchor = document.createElement('a');
   anchor.href = url;
   anchor.download = `${safeName(state.tournament?.name ?? 'tournament')}-standings.csv`;
+  document.body.append(anchor);
   anchor.click();
-  URL.revokeObjectURL(url);
+  anchor.remove();
+  // Revoking synchronously can cancel the download in some browsers before navigation starts.
+  window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
   onAnnounce('Standings CSV exported.');
 }
 function safeName(value: string): string {

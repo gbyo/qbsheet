@@ -88,31 +88,38 @@ export function PacketsView({
       <div className="director-page-stack">
         {showForm && (
           <section className="director-panel director-form-panel">
-            <div className="director-panel-heading">
-              <div>
-                <p className="director-eyebrow">New packet</p>
-                <h2>Inventory item</h2>
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                save();
+              }}
+            >
+              <div className="director-panel-heading">
+                <div>
+                  <p className="director-eyebrow">New packet</p>
+                  <h2>Inventory item</h2>
+                </div>
+                <Button variant="quiet" icon="x" onClick={() => setShowForm(false)}>
+                  Close
+                </Button>
               </div>
-              <Button variant="quiet" icon="x" onClick={() => setShowForm(false)}>
-                Close
-              </Button>
-            </div>
-            <PanelBody>
-              <div className="director-form-grid director-form-grid-single">
-                <FormField label="Packet name">
-                  <input
-                    value={name}
-                    onChange={(event) => setName(event.target.value)}
-                    placeholder="Round 1 · Set A"
-                  />
-                </FormField>
-              </div>
-            </PanelBody>
-            <PanelFooter className="director-form-actions">
-              <Button variant="primary" onClick={save}>
-                Save packet
-              </Button>
-            </PanelFooter>
+              <PanelBody>
+                <div className="director-form-grid director-form-grid-single">
+                  <FormField label="Packet name">
+                    <input
+                      value={name}
+                      onChange={(event) => setName(event.target.value)}
+                      placeholder="Round 1 · Set A"
+                    />
+                  </FormField>
+                </div>
+              </PanelBody>
+              <PanelFooter className="director-form-actions">
+                <Button variant="primary" type="submit">
+                  Save packet
+                </Button>
+              </PanelFooter>
+            </form>
           </section>
         )}
         {state.packets.length === 0 ? (

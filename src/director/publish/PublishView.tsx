@@ -223,8 +223,11 @@ function downloadBytes(content: Uint8Array, name: string, type: string): void {
   const anchor = document.createElement('a');
   anchor.href = url;
   anchor.download = name;
+  document.body.append(anchor);
   anchor.click();
-  URL.revokeObjectURL(url);
+  anchor.remove();
+  // Revoking synchronously can cancel the download in some browsers before navigation starts.
+  window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }
 function escapeHtml(value: string): string {
   return value

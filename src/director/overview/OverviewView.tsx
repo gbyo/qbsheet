@@ -11,12 +11,14 @@ export function OverviewView({
   onNavigate,
   onAnnounce,
   nativeServerReady = false,
+  nativeServerAvailable = true,
 }: {
   state: DirectorState;
   controller: DirectorController;
   onNavigate: (section: SectionId) => void;
   onAnnounce: (message: string) => void;
   nativeServerReady?: boolean;
+  nativeServerAvailable?: boolean;
 }) {
   const tournament = state.tournament;
   const round =
@@ -28,7 +30,7 @@ export function OverviewView({
   const reviewCount = state.submissions.filter(
     (submission) => submission.status === 'review' || submission.status === 'received',
   ).length;
-  const issues = runPreflight(state, nativeServerReady);
+  const issues = runPreflight(state, nativeServerReady, nativeServerAvailable);
   const standings = deriveTeamStandings(state).slice(0, 5);
 
   return (

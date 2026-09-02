@@ -42,6 +42,7 @@ export function TeamsView({
     }
     controller.addTeam({ displayName, organizationName, teamLetter });
     setDisplayName('');
+    setOrganizationName('');
     setTeamLetter('');
     setShowForm(false);
     onAnnounce(`${displayName.trim()} added locally; saving now.`);
@@ -146,80 +147,94 @@ export function TeamsView({
       <div className="director-page-stack">
         {showForm && (
           <section className="director-panel director-form-panel">
-            <div className="director-panel-heading">
-              <div>
-                <p className="director-eyebrow">New team</p>
-                <h2>Registration</h2>
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                submitTeam();
+              }}
+            >
+              <div className="director-panel-heading">
+                <div>
+                  <p className="director-eyebrow">New team</p>
+                  <h2>Registration</h2>
+                </div>
+                <Button variant="quiet" icon="x" onClick={() => setShowForm(false)}>
+                  Close
+                </Button>
               </div>
-              <Button variant="quiet" icon="x" onClick={() => setShowForm(false)}>
-                Close
-              </Button>
-            </div>
-            <PanelBody>
-              <div className="director-form-grid director-form-grid-three">
-                <FormField label="Display name">
-                  <input
-                    value={displayName}
-                    onChange={(event) => setDisplayName(event.target.value)}
-                    placeholder="Northview A"
-                  />
-                </FormField>
-                <FormField label="School / organization">
-                  <input
-                    value={organizationName}
-                    onChange={(event) => setOrganizationName(event.target.value)}
-                    placeholder="Northview High"
-                  />
-                </FormField>
-                <FormField label="Team letter">
-                  <input
-                    value={teamLetter}
-                    onChange={(event) => setTeamLetter(event.target.value)}
-                    placeholder="A"
-                    maxLength={4}
-                  />
-                </FormField>
-              </div>
-            </PanelBody>
-            <PanelFooter className="director-form-actions">
-              <Button variant="primary" onClick={submitTeam}>
-                Save team
-              </Button>
-            </PanelFooter>
+              <PanelBody>
+                <div className="director-form-grid director-form-grid-three">
+                  <FormField label="Display name">
+                    <input
+                      value={displayName}
+                      onChange={(event) => setDisplayName(event.target.value)}
+                      placeholder="Northview A"
+                    />
+                  </FormField>
+                  <FormField label="School / organization">
+                    <input
+                      value={organizationName}
+                      onChange={(event) => setOrganizationName(event.target.value)}
+                      placeholder="Northview High"
+                    />
+                  </FormField>
+                  <FormField label="Team letter">
+                    <input
+                      value={teamLetter}
+                      onChange={(event) => setTeamLetter(event.target.value)}
+                      placeholder="A"
+                      maxLength={4}
+                    />
+                  </FormField>
+                </div>
+              </PanelBody>
+              <PanelFooter className="director-form-actions">
+                <Button variant="primary" type="submit">
+                  Save team
+                </Button>
+              </PanelFooter>
+            </form>
           </section>
         )}
 
         {showPaste && (
           <section className="director-panel director-form-panel">
-            <div className="director-panel-heading">
-              <div>
-                <p className="director-eyebrow">Bulk entry</p>
-                <h2>Paste teams</h2>
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                importPaste();
+              }}
+            >
+              <div className="director-panel-heading">
+                <div>
+                  <p className="director-eyebrow">Bulk entry</p>
+                  <h2>Paste teams</h2>
+                </div>
+                <Button variant="quiet" icon="x" onClick={() => setShowPaste(false)}>
+                  Close
+                </Button>
               </div>
-              <Button variant="quiet" icon="x" onClick={() => setShowPaste(false)}>
-                Close
-              </Button>
-            </div>
-            <PanelBody>
-              <p className="director-panel-description">
-                Paste RFC 4180 CSV with a header row. Quoted commas and line breaks are supported; use
-                team_name, organization_id, and letter for the basic columns.
-              </p>
-              <textarea
-                className="director-textarea"
-                value={paste}
-                onChange={(event) => setPaste(event.target.value)}
-                placeholder={
-                  'team_name,organization_id,letter\nNorthview A,Northview High,A\nRiverside A,Riverside School,A'
-                }
-                rows={5}
-              />
-            </PanelBody>
-            <PanelFooter className="director-form-actions">
-              <Button variant="primary" onClick={importPaste}>
-                Add pasted teams
-              </Button>
-            </PanelFooter>
+              <PanelBody>
+                <p className="director-panel-description">
+                  Paste RFC 4180 CSV with a header row. Quoted commas and line breaks are supported; use
+                  team_name, organization_id, and letter for the basic columns.
+                </p>
+                <textarea
+                  className="director-textarea"
+                  value={paste}
+                  onChange={(event) => setPaste(event.target.value)}
+                  placeholder={
+                    'team_name,organization_id,letter\nNorthview A,Northview High,A\nRiverside A,Riverside School,A'
+                  }
+                  rows={5}
+                />
+              </PanelBody>
+              <PanelFooter className="director-form-actions">
+                <Button variant="primary" type="submit">
+                  Add pasted teams
+                </Button>
+              </PanelFooter>
+            </form>
           </section>
         )}
 
@@ -296,96 +311,195 @@ function TeamRow({
 }) {
   const team = state.teams.find((entry) => entry.id === teamId);
   const [playerName, setPlayerName] = useState('');
+  const [editing, setEditing] = useState(false);
+  const [editDisplayName, setEditDisplayName] = useState('');
+  const [editOrganizationName, setEditOrganizationName] = useState('');
+  const [editTeamLetter, setEditTeamLetter] = useState('');
+  const [editSeed, setEditSeed] = useState('');
   if (!team) return null;
   const players = state.players.filter((player) => player.teamId === team.id && player.active);
+  const beginEdit = () => {
+    setEditDisplayName(team.displayName);
+    setEditOrganizationName(organizationNameFor(state, team.organizationId));
+    setEditTeamLetter(team.teamLetter);
+    setEditSeed(team.seed === null ? '' : String(team.seed));
+    setEditing(true);
+  };
+  const saveEdit = () => {
+    const displayName = editDisplayName.trim();
+    if (!displayName) {
+      onAnnounce('Enter a team name first.');
+      return;
+    }
+    const seedText = editSeed.trim();
+    const seed = seedText ? Number(seedText) : null;
+    if (seed !== null && (!Number.isInteger(seed) || seed < 1)) {
+      onAnnounce('Seed must be a positive whole number or blank.');
+      return;
+    }
+    controller.updateTeam(team.id, {
+      displayName,
+      organizationName: editOrganizationName,
+      teamLetter: editTeamLetter,
+      seed,
+    });
+    setEditing(false);
+    onAnnounce(`${displayName} updated.`);
+  };
   return (
-    <tr>
-      <td>{team.seed ?? '—'}</td>
-      <td>
-        <strong>{team.displayName}</strong>
-        {team.teamLetter && <small className="director-table-subtext">Team {team.teamLetter}</small>}
-      </td>
-      <td>{organizationNameFor(state, team.organizationId) || '—'}</td>
-      <td>
-        <details className="director-roster-details">
-          <summary className="director-roster-summary">
-            {players.length} player{players.length === 1 ? '' : 's'}
-          </summary>
-          <div className="director-roster-editor">
-            {players.length > 0 && (
-              <ul className="director-list director-roster-list">
-                {players.map((player) => (
-                  <li key={player.id} className="director-list-row director-roster-row">
-                    <span>
-                      {player.name}
-                      {player.captain ? ' · captain' : ''}
-                    </span>
-                    <button
-                      type="button"
-                      className="director-inline-action director-roster-remove-action"
-                      aria-label={`Remove ${player.name} from ${team.displayName}`}
-                      onClick={() => controller.removePlayer(player.id)}
-                    >
-                      Remove
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <div className="director-inline-form director-roster-add-row">
-              <input
-                aria-label={`Add player to ${team.displayName}`}
-                value={playerName}
-                onChange={(event) => setPlayerName(event.target.value)}
-                placeholder="Add player"
-              />
-              <button
-                type="button"
-                className="director-inline-action director-roster-add-action"
-                onClick={() => {
-                  if (!playerName.trim()) {
-                    onAnnounce('Enter a player name first.');
-                    return;
-                  }
-                  controller.addPlayer(team.id, playerName);
-                  setPlayerName('');
-                  onAnnounce(`Player added to ${team.displayName}.`);
-                }}
-              >
-                Add
-              </button>
+    <>
+      <tr>
+        <td>{team.seed ?? '—'}</td>
+        <td>
+          <strong>{team.displayName}</strong>
+          {team.teamLetter && <small className="director-table-subtext">Team {team.teamLetter}</small>}
+        </td>
+        <td>{organizationNameFor(state, team.organizationId) || '—'}</td>
+        <td>
+          <details className="director-roster-details">
+            <summary className="director-roster-summary">
+              {players.length} player{players.length === 1 ? '' : 's'}
+            </summary>
+            <div className="director-roster-editor">
+              {players.length > 0 && (
+                <ul className="director-list director-roster-list">
+                  {players.map((player) => (
+                    <li key={player.id} className="director-list-row director-roster-row">
+                      <span>
+                        {player.name}
+                        {player.captain ? ' · captain' : ''}
+                      </span>
+                      <button
+                        type="button"
+                        className="director-inline-action director-roster-remove-action"
+                        aria-label={`Remove ${player.name} from ${team.displayName}`}
+                        onClick={() => controller.removePlayer(player.id)}
+                      >
+                        Remove
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div className="director-inline-form director-roster-add-row">
+                <input
+                  aria-label={`Add player to ${team.displayName}`}
+                  value={playerName}
+                  onChange={(event) => setPlayerName(event.target.value)}
+                  placeholder="Add player"
+                />
+                <button
+                  type="button"
+                  className="director-inline-action director-roster-add-action"
+                  onClick={() => {
+                    if (!playerName.trim()) {
+                      onAnnounce('Enter a player name first.');
+                      return;
+                    }
+                    controller.addPlayer(team.id, playerName);
+                    setPlayerName('');
+                    onAnnounce(`Player added to ${team.displayName}.`);
+                  }}
+                >
+                  Add
+                </button>
+              </div>
             </div>
+          </details>
+        </td>
+        <td>
+          <StateLabel
+            state={team.status}
+            label={
+              team.status === 'confirmed' ? 'Confirmed' : team.status === 'waitlist' ? 'Waitlist' : 'Dropped'
+            }
+          />
+        </td>
+        <td>
+          <div className="director-row-actions">
+            <button
+              type="button"
+              className="director-button director-button-quiet director-table-action"
+              aria-label={`Edit ${team.displayName}`}
+              onClick={beginEdit}
+            >
+              <Icon name="edit" size={14} />
+              <span>Edit</span>
+            </button>
+            <button
+              type="button"
+              className="director-button director-button-quiet director-table-action"
+              aria-label={`${team.status === 'dropped' ? 'Restore' : 'Drop'} ${team.displayName}`}
+              onClick={() => {
+                if (team.status === 'dropped') controller.restoreTeam(team.id);
+                else controller.dropTeam(team.id);
+                onAnnounce(
+                  team.status === 'dropped'
+                    ? `${team.displayName} restored.`
+                    : `${team.displayName} dropped; schedule repair may be needed.`,
+                );
+              }}
+            >
+              <Icon name={team.status === 'dropped' ? 'refresh' : 'x'} size={15} />
+              <span>{team.status === 'dropped' ? 'Restore' : 'Drop'}</span>
+            </button>
           </div>
-        </details>
-      </td>
-      <td>
-        <StateLabel
-          state={team.status}
-          label={
-            team.status === 'confirmed' ? 'Confirmed' : team.status === 'waitlist' ? 'Waitlist' : 'Dropped'
-          }
-        />
-      </td>
-      <td>
-        <button
-          type="button"
-          className="director-button director-button-quiet director-table-action"
-          aria-label={`${team.status === 'dropped' ? 'Restore' : 'Drop'} ${team.displayName}`}
-          onClick={() => {
-            if (team.status === 'dropped') controller.restoreTeam(team.id);
-            else controller.dropTeam(team.id);
-            onAnnounce(
-              team.status === 'dropped'
-                ? `${team.displayName} restored.`
-                : `${team.displayName} dropped; schedule repair may be needed.`,
-            );
-          }}
-        >
-          <Icon name={team.status === 'dropped' ? 'refresh' : 'x'} size={15} />
-          <span>{team.status === 'dropped' ? 'Restore' : 'Drop'}</span>
-        </button>
-      </td>
-    </tr>
+        </td>
+      </tr>
+      {editing && (
+        <tr className="director-table-edit-row">
+          <td colSpan={6}>
+            <form
+              className="director-inline-edit"
+              onSubmit={(event) => {
+                event.preventDefault();
+                saveEdit();
+              }}
+            >
+              <div className="director-form-grid director-form-grid-three">
+                <FormField label="Display name">
+                  <input
+                    value={editDisplayName}
+                    onChange={(event) => setEditDisplayName(event.target.value)}
+                  />
+                </FormField>
+                <FormField label="School / organization">
+                  <input
+                    value={editOrganizationName}
+                    onChange={(event) => setEditOrganizationName(event.target.value)}
+                  />
+                </FormField>
+                <FormField label="Team letter">
+                  <input
+                    value={editTeamLetter}
+                    onChange={(event) => setEditTeamLetter(event.target.value)}
+                    maxLength={4}
+                  />
+                </FormField>
+                <FormField label="Seed">
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={editSeed}
+                    onChange={(event) => setEditSeed(event.target.value)}
+                    placeholder="Unseeded"
+                  />
+                </FormField>
+              </div>
+              <div className="director-row-actions">
+                <Button variant="primary" type="submit">
+                  Save changes
+                </Button>
+                <Button variant="quiet" onClick={() => setEditing(false)}>
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 

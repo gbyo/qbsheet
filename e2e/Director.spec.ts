@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
+import { assignmentDocument } from '../tests/qbjDocuments';
 
 async function createTournament(page: Page) {
   await page.goto('/director.html');
@@ -21,6 +22,20 @@ test('Director starts with an empty, persisted tournament workspace', async ({ p
   await page.getByRole('button', { name: 'Create tournament' }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'Spring Invitational' })).toBeVisible();
   await expect(page.getByText('No rooms have been added yet.')).toBeVisible();
+});
+
+test('Director accepts a QBJ document even when its upload is named .json', async ({ page }) => {
+  await page.goto('/director.html');
+  await expect(page.getByRole('heading', { level: 2, name: 'Create or open a tournament' })).toBeVisible();
+
+  await page.locator('input[type="file"]').setInputFiles({
+    name: 'tournament.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(assignmentDocument())),
+  });
+
+  await expect(page.getByRole('heading', { level: 1, name: 'Spring Invitational' })).toBeVisible();
+  await expect(page.getByRole('status')).toContainText('QBJ tournament imported');
 });
 
 test('Director layout keeps panel, table, status, and narrow-window contracts', async ({ page }) => {
@@ -161,4 +176,99 @@ test('Director runs a local tournament slice and reopens its result', async ({ p
     .click();
   await expect(page.getByRole('heading', { level: 2, name: '2 teams' })).toBeVisible();
   await expect(page.getByRole('cell', { name: '210', exact: true }).first()).toBeVisible();
+});
+
+test('Director supports keyboard search, inline edits, and audited result review', async ({ page }) => {
+  await createTournament(page);
+
+  const navigation = page.locator('nav[aria-label="Tournament sections"]');
+  await navigation.getByRole('button', { name: 'Teams', exact: true }).click();
+  await page.getByRole('button', { name: 'Add team' }).click();
+  await page.getByLabel('Display name').fill('Northview A');
+  await page.getByLabel('School / organization').fill('Northview High');
+  await page.getByRole('button', { name: 'Save team' }).click();
+  await page.getByRole('button', { name: 'Add team' }).click();
+  await page.getByLabel('Display name').fill('Riverside A');
+  await page.getByLabel('School / organization').fill('Riverside High');
+  await page.getByRole('button', { name: 'Save team' }).click();
+
+  const search = page.getByPlaceholder('Search teams, rooms, games');
+  await search.fill('Northview');
+  await search.press('ArrowDown');
+  await expect(search).toHaveAttribute('aria-activedescendant', 'director-search-result-0');
+  await search.press('Enter');
+  await expect(search).toHaveValue('');
+  await expect(page.getByRole('heading', { level: 1, name: 'Teams' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Edit Northview A' }).click();
+  const teamEditor = page.locator('.director-table-edit-row');
+  await teamEditor.getByLabel('Display name').fill('Northview B');
+  await teamEditor.getByLabel('Team letter').fill('B');
+  await teamEditor.getByRole('button', { name: 'Save changes' }).click();
+  await expect(page.getByText('Northview B', { exact: true })).toBeVisible();
+
+  await navigation.getByRole('button', { name: 'Format', exact: true }).click();
+  await page.getByRole('button', { name: 'Generate next round' }).click();
+  await expect(page.getByRole('heading', { level: 1, name: 'Tournament control' })).toBeVisible();
+  await page.getByRole('button', { name: 'Prepare', exact: true }).click();
+  await page.getByRole('button', { name: 'Release', exact: true }).click();
+
+  await navigation.getByRole('button', { name: /Results/ }).click();
+  await page.getByRole('button', { name: 'Enter result' }).click();
+  const scores = page.locator('input[type="number"]');
+  await scores.nth(0).fill('210');
+  await scores.nth(1).fill('180');
+  await page.getByRole('button', { name: 'Accept manual result' }).click();
+
+  await page.getByRole('button', { name: 'Correct result' }).click();
+  const correction = page.locator('.director-result-action-panel').first();
+  await correction.locator('input[type="number"]').nth(0).fill('');
+  await correction.getByRole('button', { name: 'Save correction' }).click();
+  await expect(correction).toBeVisible();
+  await expect(page.getByRole('status')).toContainText('Corrected scores must be finite whole numbers.');
+  await correction.locator('input[type="number"]').nth(0).fill('215');
+  await correction.getByRole('button', { name: 'Save correction' }).click();
+  await expect(page.locator('.director-score-cell').filter({ hasText: '215–180' }).last()).toBeVisible();
+
+  await page.getByRole('button', { name: 'Open protest' }).click();
+  const protest = page.locator('.director-result-action-panel').first();
+  await protest.getByLabel('Description').fill('Verify the tossup ruling.');
+  await protest.getByRole('button', { name: 'Open protest', exact: true }).click();
+  await expect(page.getByRole('heading', { level: 2, name: 'Protests' })).toBeVisible();
+  const ruling = page.locator('.director-protest-ruling').first();
+  await ruling.getByLabel('Ruling').fill('Ruling confirmed by the director.');
+  await ruling.getByRole('button', { name: 'Rule protest' }).click();
+  await expect(page.locator('.director-protest-row').first()).toContainText('ruled');
+});
+
+test('Director configures a pool format before generating its first round', async ({ page }) => {
+  await createTournament(page);
+
+  const navigation = page.locator('nav[aria-label="Tournament sections"]');
+  await navigation.getByRole('button', { name: 'Teams', exact: true }).click();
+  for (const team of ['Northview A', 'Riverside A', 'Lakeside A', 'Hillcrest A']) {
+    await page.getByRole('button', { name: 'Add team' }).click();
+    await page.getByLabel('Display name').fill(team);
+    await page.getByRole('button', { name: 'Save team' }).click();
+  }
+
+  await navigation.getByRole('button', { name: 'Rooms & staff', exact: true }).click();
+  for (const room of ['Room 101', 'Room 102']) {
+    await page.getByRole('button', { name: 'Add room' }).click();
+    await page.getByLabel('Room name').fill(room);
+    await page.getByRole('button', { name: 'Save room' }).click();
+  }
+
+  await navigation.getByRole('button', { name: 'Format', exact: true }).click();
+  await page.getByRole('combobox', { name: 'Format' }).selectOption('pools');
+  await page.getByLabel('Number of pools').fill('2');
+  await page.getByRole('button', { name: 'Create and distribute pools' }).click();
+  await expect(page.locator('.director-pool-card').nth(0).locator('input')).toHaveValue('Pool A');
+  await expect(page.locator('.director-pool-card').nth(1).locator('input')).toHaveValue('Pool B');
+  await expect(page.getByText('All confirmed teams are assigned exactly once.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Generate next round' })).toBeEnabled();
+
+  await page.getByRole('button', { name: 'Generate next round' }).click();
+  await expect(page.getByRole('heading', { level: 1, name: 'Tournament control' })).toBeVisible();
+  await expect(page.getByText('Round 1', { exact: true })).toBeVisible();
 });

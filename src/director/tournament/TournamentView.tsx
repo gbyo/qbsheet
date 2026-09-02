@@ -28,7 +28,7 @@ export function TournamentView({
   const [serverLoading, setServerLoading] = useState(true);
   const [pairingRoomId, setPairingRoomId] = useState<string | null>(null);
   const nativeDirector = isNativeDirector();
-  const issues = runPreflight(state, server.running);
+  const issues = runPreflight(state, server.running, nativeDirector);
   const round =
     state.rounds.find((entry) => entry.id === state.tournament?.currentRoundId) ?? state.rounds.at(-1);
   useEffect(() => {
@@ -57,8 +57,19 @@ export function TournamentView({
       const next = server.running ? await stopNativeServer() : await startNativeServer();
       setServer(next);
       onAnnounce(next.message ?? (next.running ? 'QBTCP server started.' : 'QBTCP server stopped.'));
+    } catch (reason: unknown) {
+      onAnnounce(reason instanceof Error ? reason.message : 'The QBTCP server could not be changed.');
     } finally {
       setServerLoading(false);
+    }
+  };
+  const copyPairingLink = async (url: string, message: string) => {
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard access is unavailable.');
+      await navigator.clipboard.writeText(url);
+      onAnnounce(message);
+    } catch {
+      onAnnounce('The pairing link could not be copied; use the link shown in the desktop app.');
     }
   };
   const serverHasError = !serverLoading && nativeDirector && !server.running && Boolean(server.message);
@@ -230,23 +241,24 @@ export function TournamentView({
               )}
             </div>
             <div className="director-panel-footer">
-              <Button
-                variant={server.running ? 'secondary' : 'primary'}
-                icon={server.running ? 'pause' : 'play'}
-                disabled={serverLoading}
-                onClick={() => {
-                  void toggleServer();
-                }}
-              >
-                {serverLoading ? 'Checking server' : server.running ? 'Stop server' : 'Start server'}
-              </Button>
+              {nativeDirector ? (
+                <Button
+                  variant={server.running ? 'secondary' : 'primary'}
+                  icon={server.running ? 'pause' : 'play'}
+                  disabled={serverLoading}
+                  onClick={() => {
+                    void toggleServer();
+                  }}
+                >
+                  {serverLoading ? 'Checking server' : server.running ? 'Stop server' : 'Start server'}
+                </Button>
+              ) : (
+                <span className="director-muted">Desktop app required to start the LAN server</span>
+              )}
               {!serverLoading && server.pairingUrl && invitations.length <= 1 && (
                 <Button
                   variant="quiet"
-                  onClick={() => {
-                    void navigator.clipboard?.writeText(server.pairingUrl ?? '');
-                    onAnnounce('Pairing link copied.');
-                  }}
+                  onClick={() => void copyPairingLink(server.pairingUrl ?? '', 'Pairing link copied.')}
                 >
                   Copy pairing link
                 </Button>
@@ -397,10 +409,12 @@ export function TournamentView({
                           {invitation?.pairingUrl && (
                             <Button
                               variant="quiet"
-                              onClick={() => {
-                                void navigator.clipboard?.writeText(invitation.pairingUrl ?? '');
-                                onAnnounce(`${room.name} pairing link copied.`);
-                              }}
+                              onClick={() =>
+                                void copyPairingLink(
+                                  invitation.pairingUrl ?? '',
+                                  `${room.name} pairing link copied.`,
+                                )
+                              }
                             >
                               Copy link
                             </Button>

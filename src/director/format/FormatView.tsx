@@ -4,6 +4,7 @@ import type { DirectorController } from '../state/useDirectorController';
 import { Button, FormField, PanelBody, StateLabel } from '../components/Controls';
 import { PageHeader } from '../components/PageHeader';
 import type { SectionId } from '../app/navigation';
+import { poolName, recommendPoolSizes } from '@qbsheet/tournament-core';
 
 export function FormatView({
   state,
@@ -22,6 +23,7 @@ export function FormatView({
   const phase = currentPhase(state);
   const generation = formatGenerationAvailability(state);
   const scheduleCount = state.rounds.filter((round) => round.phaseId === phase?.id).length;
+  const formatTypeLocked = state.rounds.length > 0;
   if (!format)
     return (
       <>
@@ -98,6 +100,7 @@ export function FormatView({
                 <FormField label="Format">
                   <select
                     value={format.kind}
+                    disabled={formatTypeLocked || !format.editable}
                     onChange={(event) =>
                       controller.updateFormat({
                         kind: event.target.value as typeof format.kind,
@@ -119,6 +122,7 @@ export function FormatView({
                       Custom / manual (not implemented)
                     </option>
                   </select>
+                  {formatTypeLocked && <small>Format type is locked after the first generated round.</small>}
                 </FormField>
                 <FormField
                   label="Rounds per team"
@@ -244,6 +248,9 @@ export function FormatView({
             </PanelBody>
           </section>
         </div>
+        {(format.kind === 'pools' || format.kind === 'playoff-pools') && phase && (
+          <PoolConfiguration state={state} phase={phase} controller={controller} onAnnounce={onAnnounce} />
+        )}
         <section className="director-panel">
           <div className="director-panel-heading">
             <div>
@@ -302,6 +309,227 @@ export function FormatView({
         </section>
       </div>
     </>
+  );
+}
+
+function PoolConfiguration({
+  state,
+  phase,
+  controller,
+  onAnnounce,
+}: {
+  state: DirectorState;
+  phase: DirectorState['phases'][number];
+  controller: DirectorController;
+  onAnnounce: (message: string) => void;
+}) {
+  const pools = state.pools
+    .filter((pool) => phase.poolIds.includes(pool.id))
+    .sort((left, right) => left.order - right.order || left.id.localeCompare(right.id));
+  const confirmedTeams = state.teams
+    .filter((team) => team.status === 'confirmed')
+    .sort(
+      (left, right) =>
+        (left.seed ?? 9999) - (right.seed ?? 9999) || left.displayName.localeCompare(right.displayName),
+    );
+  const [poolCount, setPoolCount] = useState(() =>
+    String(Math.max(1, Math.min(3, Math.ceil(Math.max(1, confirmedTeams.length) / 6)))),
+  );
+  const [newPoolName, setNewPoolName] = useState('');
+  const locked = phase.roundIds.length > 0;
+  const assignedTeamIds = new Set(pools.flatMap((pool) => pool.teamIds));
+  const unassignedCount = confirmedTeams.filter((team) => !assignedTeamIds.has(team.id)).length;
+  const createPools = () => {
+    if (locked) {
+      onAnnounce('Pool membership is locked after a round has been generated; add a new phase instead.');
+      return;
+    }
+    const count = Number(poolCount);
+    if (!Number.isInteger(count) || count < 1 || count > confirmedTeams.length) {
+      onAnnounce(`Choose between 1 and ${confirmedTeams.length || 1} pools.`);
+      return;
+    }
+    const sizes = recommendPoolSizes(confirmedTeams.length, count);
+    let offset = 0;
+    for (let index = 0; index < sizes.length; index += 1) {
+      const teamIds = confirmedTeams.slice(offset, offset + (sizes[index] ?? 0)).map((team) => team.id);
+      const added = controller.addPool({ phaseId: phase.id, name: poolName(index), teamIds });
+      if (!added) {
+        onAnnounce('Pool creation stopped; review the Director error before trying again.');
+        return;
+      }
+      offset += sizes[index] ?? 0;
+    }
+    onAnnounce(`${count} pool${count === 1 ? '' : 's'} created and confirmed teams distributed.`);
+  };
+  const addPool = () => {
+    if (locked) {
+      onAnnounce('Pool membership is locked after a round has been generated; add a new phase instead.');
+      return;
+    }
+    const name = newPoolName.trim() || poolName(pools.length);
+    if (!controller.addPool({ phaseId: phase.id, name })) return;
+    setNewPoolName('');
+    onAnnounce(`${name} added; assign its teams before generating.`);
+  };
+  return (
+    <section className="director-panel">
+      <div className="director-panel-heading">
+        <div>
+          <p className="director-eyebrow">Pool setup</p>
+          <h2>
+            {pools.length
+              ? `${pools.length} pool${pools.length === 1 ? '' : 's'} configured`
+              : 'Assign confirmed teams'}
+          </h2>
+        </div>
+        <StateLabel
+          state={locked ? 'finished' : unassignedCount === 0 && pools.length > 0 ? 'ready' : 'warning'}
+          label={locked ? 'Locked' : unassignedCount === 0 && pools.length > 0 ? 'Complete' : 'Needs setup'}
+        />
+      </div>
+      <PanelBody>
+        <p className="director-panel-description">
+          Every confirmed team must belong to exactly one pool before a pool round can be generated.
+          {locked ? ' Membership is locked because this phase already has generated rounds.' : ''}
+        </p>
+        {pools.length === 0 ? (
+          <form
+            className="director-pool-create-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              createPools();
+            }}
+          >
+            <FormField label="Number of pools" hint="Teams are distributed by seed, with larger pools first.">
+              <input
+                type="number"
+                min="1"
+                max={Math.max(1, confirmedTeams.length)}
+                step="1"
+                value={poolCount}
+                onChange={(event) => setPoolCount(event.target.value)}
+                disabled={locked || confirmedTeams.length === 0}
+              />
+            </FormField>
+            <Button variant="primary" type="submit" disabled={locked || confirmedTeams.length === 0}>
+              Create and distribute pools
+            </Button>
+          </form>
+        ) : (
+          <>
+            <p className="director-panel-footnote">
+              {unassignedCount === 0
+                ? 'All confirmed teams are assigned exactly once.'
+                : `${unassignedCount} confirmed team${unassignedCount === 1 ? '' : 's'} still need${unassignedCount === 1 ? 's' : ''} a pool.`}
+            </p>
+            <div className="director-pool-list">
+              {pools.map((pool) => (
+                <PoolEditor
+                  key={pool.id}
+                  pool={pool}
+                  pools={pools}
+                  teams={confirmedTeams}
+                  locked={locked}
+                  controller={controller}
+                  onAnnounce={onAnnounce}
+                />
+              ))}
+            </div>
+            <form
+              className="director-pool-add-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                addPool();
+              }}
+            >
+              <FormField label="Add another pool">
+                <input
+                  value={newPoolName}
+                  onChange={(event) => setNewPoolName(event.target.value)}
+                  placeholder={poolName(pools.length)}
+                  disabled={locked}
+                />
+              </FormField>
+              <Button variant="secondary" type="submit" disabled={locked}>
+                Add pool
+              </Button>
+            </form>
+          </>
+        )}
+      </PanelBody>
+    </section>
+  );
+}
+
+function PoolEditor({
+  pool,
+  pools,
+  teams,
+  locked,
+  controller,
+  onAnnounce,
+}: {
+  pool: DirectorState['pools'][number];
+  pools: DirectorState['pools'];
+  teams: DirectorState['teams'];
+  locked: boolean;
+  controller: DirectorController;
+  onAnnounce: (message: string) => void;
+}) {
+  const [name, setName] = useState(pool.name);
+  const [teamIds, setTeamIds] = useState(pool.teamIds);
+  const assignedElsewhere = new Set(
+    pools.filter((candidate) => candidate.id !== pool.id).flatMap((candidate) => candidate.teamIds),
+  );
+  const save = () => {
+    if (!controller.updatePool(pool.id, { name, teamIds })) return;
+    onAnnounce(`${name.trim() || pool.name} updated.`);
+  };
+  return (
+    <form
+      className="director-pool-card"
+      onSubmit={(event) => {
+        event.preventDefault();
+        save();
+      }}
+    >
+      <div className="director-form-grid director-form-grid-two">
+        <FormField label="Pool name">
+          <input value={name} onChange={(event) => setName(event.target.value)} />
+        </FormField>
+        <FormField label="Teams" hint="Hold Command/Ctrl to select more than one team.">
+          <select
+            className="director-pool-team-select"
+            multiple
+            size={Math.min(8, Math.max(3, teams.length))}
+            value={teamIds}
+            onChange={(event) =>
+              setTeamIds(Array.from(event.currentTarget.selectedOptions, (option) => option.value))
+            }
+            disabled={locked}
+          >
+            {teams.map((team) => (
+              <option
+                key={team.id}
+                value={team.id}
+                disabled={assignedElsewhere.has(team.id) && !teamIds.includes(team.id)}
+              >
+                {team.displayName}
+              </option>
+            ))}
+          </select>
+        </FormField>
+      </div>
+      <div className="director-row-actions">
+        <Button variant="secondary" type="submit" disabled={locked}>
+          Save {pool.name}
+        </Button>
+        <span className="director-muted">
+          {teamIds.length} team{teamIds.length === 1 ? '' : 's'}
+        </span>
+      </div>
+    </form>
   );
 }
 

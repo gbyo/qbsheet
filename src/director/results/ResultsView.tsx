@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import type { DirectorState, TeamGameScore } from '../domain';
+import type { DirectorState, ProtestScoreAdjustment, TeamGameScore } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
 import { Button, FormField, StateLabel } from '../components/Controls';
 import { PageHeader } from '../components/PageHeader';
@@ -120,6 +120,9 @@ export function ResultsView({
             </div>
           )}
         </section>
+        {state.protests.length > 0 && (
+          <ProtestsPanel state={state} controller={controller} onAnnounce={onAnnounce} />
+        )}
       </div>
     </>
   );
@@ -136,6 +139,7 @@ function ResultRow({
   controller: DirectorController;
   onAnnounce: (message: string) => void;
 }) {
+  const [action, setAction] = useState<'edit' | 'protest' | null>(null);
   const game = state.games.find((entry) => entry.id === submission.gameId);
   const scheduled = game
     ? state.scheduledGames.find((entry) => entry.id === game.scheduledGameId)
@@ -146,7 +150,11 @@ function ResultRow({
   const right = scheduled?.rightTeamId
     ? (state.teams.find((team) => team.id === scheduled.rightTeamId)?.displayName ?? 'Unknown')
     : 'Bye';
-  const score = game?.scores.map((entry) => entry.score).join('–') ?? '—';
+  const score = game
+    ? [scheduled?.leftTeamId, scheduled?.rightTeamId]
+        .map((teamId) => game.scores.find((entry) => entry.teamId === teamId)?.score ?? '—')
+        .join('–')
+    : '—';
   return (
     <tr>
       <td>{formatTime(submission.receivedAt)}</td>
@@ -214,19 +222,332 @@ function ResultRow({
             </>
           )}
           {submission.status === 'accepted' && (
-            <Button
-              variant="quiet"
-              icon="history"
-              onClick={() =>
-                onAnnounce('Accepted result is retained in the audit history for correction workflows.')
-              }
-            >
-              Audit note
-            </Button>
+            <>
+              <Button
+                variant={action === 'edit' ? 'secondary' : 'quiet'}
+                icon="edit"
+                onClick={() => setAction((current) => (current === 'edit' ? null : 'edit'))}
+              >
+                Correct result
+              </Button>
+              <Button
+                variant={action === 'protest' ? 'secondary' : 'quiet'}
+                icon="alert"
+                onClick={() => setAction((current) => (current === 'protest' ? null : 'protest'))}
+              >
+                Open protest
+              </Button>
+            </>
           )}
         </div>
+        {submission.status === 'accepted' && action === 'edit' && game && scheduled && (
+          <AcceptedResultEditor
+            state={state}
+            game={game}
+            scheduled={scheduled}
+            onCancel={() => setAction(null)}
+            onSuccess={() => setAction(null)}
+            onAnnounce={onAnnounce}
+            controller={controller}
+          />
+        )}
+        {submission.status === 'accepted' && action === 'protest' && game && (
+          <ProtestCreator
+            game={game}
+            controller={controller}
+            onCancel={() => setAction(null)}
+            onSuccess={() => setAction(null)}
+            onAnnounce={onAnnounce}
+          />
+        )}
       </td>
     </tr>
+  );
+}
+
+function AcceptedResultEditor({
+  state,
+  game,
+  scheduled,
+  controller,
+  onCancel,
+  onSuccess,
+  onAnnounce,
+}: {
+  state: DirectorState;
+  game: DirectorState['games'][number];
+  scheduled: DirectorState['scheduledGames'][number];
+  controller: DirectorController;
+  onCancel: () => void;
+  onSuccess: () => void;
+  onAnnounce: (message: string) => void;
+}) {
+  const leftScore = game.scores.find((entry) => entry.teamId === scheduled.leftTeamId);
+  const rightScore = scheduled.rightTeamId
+    ? game.scores.find((entry) => entry.teamId === scheduled.rightTeamId)
+    : undefined;
+  const [left, setLeft] = useState(String(leftScore?.score ?? ''));
+  const [right, setRight] = useState(String(rightScore?.score ?? ''));
+  const [note, setNote] = useState('');
+  const save = () => {
+    const nextLeft = Number(left);
+    const nextRight = Number(right);
+    if (!left.trim() || !right.trim() || !Number.isInteger(nextLeft) || !Number.isInteger(nextRight)) {
+      onAnnounce('Corrected scores must be finite whole numbers.');
+      return;
+    }
+    const scores = game.scores.map((entry) =>
+      entry.teamId === scheduled.leftTeamId
+        ? { ...entry, score: nextLeft }
+        : entry.teamId === scheduled.rightTeamId
+          ? { ...entry, score: nextRight }
+          : entry,
+    );
+    if (!controller.editAcceptedResult(game.id, scores, note.trim() || undefined)) return;
+    onSuccess();
+    onAnnounce('Accepted result corrected; the prior result remains in audit history.');
+  };
+  return (
+    <form
+      className="director-result-action-panel"
+      onSubmit={(event) => {
+        event.preventDefault();
+        save();
+      }}
+    >
+      <p className="director-eyebrow">Audited correction</p>
+      <div className="director-form-grid director-form-grid-two">
+        <FormField label={teamLabel(state, scheduled.leftTeamId)}>
+          <input type="number" step="1" value={left} onChange={(event) => setLeft(event.target.value)} />
+        </FormField>
+        <FormField label={teamLabel(state, scheduled.rightTeamId)}>
+          <input type="number" step="1" value={right} onChange={(event) => setRight(event.target.value)} />
+        </FormField>
+      </div>
+      <FormField label="Correction note">
+        <textarea
+          className="director-textarea"
+          rows={2}
+          value={note}
+          onChange={(event) => setNote(event.target.value)}
+          placeholder="Why is the accepted score changing?"
+        />
+      </FormField>
+      <div className="director-row-actions">
+        <Button variant="primary" type="submit">
+          Save correction
+        </Button>
+        <Button variant="quiet" onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+function ProtestCreator({
+  game,
+  controller,
+  onCancel,
+  onSuccess,
+  onAnnounce,
+}: {
+  game: DirectorState['games'][number];
+  controller: DirectorController;
+  onCancel: () => void;
+  onSuccess: () => void;
+  onAnnounce: (message: string) => void;
+}) {
+  const [category, setCategory] = useState<'tossup' | 'bonus' | 'procedure' | 'other'>('other');
+  const [description, setDescription] = useState('');
+  const save = () => {
+    if (!description.trim()) {
+      onAnnounce('Describe the protest before saving it.');
+      return;
+    }
+    if (!controller.addProtest(game.id, description, category)) return;
+    onSuccess();
+    onAnnounce('Protest opened and retained with the accepted result.');
+  };
+  return (
+    <form
+      className="director-result-action-panel"
+      onSubmit={(event) => {
+        event.preventDefault();
+        save();
+      }}
+    >
+      <p className="director-eyebrow">New protest</p>
+      <div className="director-form-grid director-form-grid-two">
+        <FormField label="Category">
+          <select value={category} onChange={(event) => setCategory(event.target.value as typeof category)}>
+            <option value="tossup">Tossup</option>
+            <option value="bonus">Bonus</option>
+            <option value="procedure">Procedure</option>
+            <option value="other">Other</option>
+          </select>
+        </FormField>
+        <FormField label="Description">
+          <textarea
+            className="director-textarea"
+            rows={2}
+            value={description}
+            onChange={(event) => setDescription(event.target.value)}
+            placeholder="What needs review?"
+          />
+        </FormField>
+      </div>
+      <div className="director-row-actions">
+        <Button variant="primary" type="submit">
+          Open protest
+        </Button>
+        <Button variant="quiet" onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+function ProtestsPanel({
+  state,
+  controller,
+  onAnnounce,
+}: {
+  state: DirectorState;
+  controller: DirectorController;
+  onAnnounce: (message: string) => void;
+}) {
+  return (
+    <section className="director-panel">
+      <div className="director-panel-heading">
+        <div>
+          <p className="director-eyebrow">Audit</p>
+          <h2>Protests</h2>
+        </div>
+        <span className="director-muted">
+          {state.protests.filter((protest) => protest.status === 'open').length} open
+        </span>
+      </div>
+      <div className="director-panel-body director-panel-body-list">
+        <ul className="director-list director-protest-list">
+          {state.protests.map((protest) => {
+            const game = state.games.find((entry) => entry.id === protest.gameId);
+            const scheduled = game
+              ? state.scheduledGames.find((entry) => entry.id === game.scheduledGameId)
+              : undefined;
+            return (
+              <li key={protest.id} className="director-protest-row">
+                <div>
+                  <strong>
+                    {scheduled
+                      ? `${teamLabel(state, scheduled.leftTeamId)} · ${teamLabel(state, scheduled.rightTeamId)}`
+                      : 'Unmatched game'}
+                  </strong>
+                  <span>
+                    {categoryLabel(protest.category)} · {protest.description}
+                  </span>
+                  {protest.ruling && <small>Ruling: {protest.ruling}</small>}
+                  {protest.scoreAdjustment && (
+                    <small>
+                      Score correction: {teamLabel(state, protest.scoreAdjustment.teamId)}{' '}
+                      {formatDelta(protest.scoreAdjustment.delta)}
+                    </small>
+                  )}
+                </div>
+                <StateLabel state={protest.status} label={protest.status} />
+                {protest.status === 'open' && game && (
+                  <ProtestRuling
+                    protest={protest}
+                    state={state}
+                    controller={controller}
+                    onAnnounce={onAnnounce}
+                  />
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    </section>
+  );
+}
+
+function ProtestRuling({
+  protest,
+  state,
+  controller,
+  onAnnounce,
+}: {
+  protest: DirectorState['protests'][number];
+  state: DirectorState;
+  controller: DirectorController;
+  onAnnounce: (message: string) => void;
+}) {
+  const game = state.games.find((entry) => entry.id === protest.gameId);
+  const scheduled = game
+    ? state.scheduledGames.find((entry) => entry.id === game.scheduledGameId)
+    : undefined;
+  const [ruling, setRuling] = useState('');
+  const [teamId, setTeamId] = useState('');
+  const [delta, setDelta] = useState('');
+  if (!game || !scheduled || !scheduled.rightTeamId) return null;
+  const save = () => {
+    if (!ruling.trim()) {
+      onAnnounce('Enter the protest ruling first.');
+      return;
+    }
+    let adjustment: ProtestScoreAdjustment | undefined;
+    if (teamId || delta.trim()) {
+      const parsedDelta = Number(delta);
+      if (!teamId || !Number.isInteger(parsedDelta) || parsedDelta === 0) {
+        onAnnounce('A score correction needs a team and a non-zero whole-number adjustment.');
+        return;
+      }
+      adjustment = { teamId, delta: parsedDelta };
+    }
+    if (!controller.ruleProtest(protest.id, ruling, adjustment)) return;
+    onAnnounce('Protest ruled and retained in the audit history.');
+  };
+  return (
+    <form
+      className="director-result-action-panel director-protest-ruling"
+      onSubmit={(event) => {
+        event.preventDefault();
+        save();
+      }}
+    >
+      <FormField label="Ruling">
+        <textarea
+          className="director-textarea"
+          rows={2}
+          value={ruling}
+          onChange={(event) => setRuling(event.target.value)}
+          placeholder="How was the protest resolved?"
+        />
+      </FormField>
+      <div className="director-form-grid director-form-grid-two">
+        <FormField label="Score correction team">
+          <select value={teamId} onChange={(event) => setTeamId(event.target.value)}>
+            <option value="">No score change</option>
+            <option value={scheduled.leftTeamId}>{teamLabel(state, scheduled.leftTeamId)}</option>
+            <option value={scheduled.rightTeamId}>{teamLabel(state, scheduled.rightTeamId)}</option>
+          </select>
+        </FormField>
+        <FormField label="Point adjustment" hint="Use a positive or negative whole number.">
+          <input
+            type="number"
+            step="1"
+            value={delta}
+            onChange={(event) => setDelta(event.target.value)}
+            placeholder="Optional"
+          />
+        </FormField>
+      </div>
+      <Button variant="primary" type="submit">
+        Rule protest
+      </Button>
+    </form>
   );
 }
 
@@ -302,7 +623,12 @@ function ManualResult({
           </p>
         </div>
       ) : (
-        <>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            save();
+          }}
+        >
           <div className="director-panel-body">
             <div className="director-form-grid">
               <FormField label="Scheduled game">
@@ -342,11 +668,11 @@ function ManualResult({
             </div>
           )}
           <div className="director-panel-footer">
-            <Button variant="primary" onClick={save}>
+            <Button variant="primary" type="submit">
               Accept manual result
             </Button>
           </div>
-        </>
+        </form>
       )}
     </section>
   );
@@ -388,6 +714,21 @@ function FilterButton({
 function teamLabel(state: DirectorState, id: string | null): string {
   return id ? (state.teams.find((team) => team.id === id)?.displayName ?? 'Unknown team') : 'Bye';
 }
+
+function categoryLabel(category: DirectorState['protests'][number]['category']): string {
+  return category === 'tossup'
+    ? 'Tossup'
+    : category === 'bonus'
+      ? 'Bonus'
+      : category === 'procedure'
+        ? 'Procedure'
+        : 'Other';
+}
+
+function formatDelta(delta: number): string {
+  return `${delta > 0 ? '+' : ''}${delta}`;
+}
+
 function formatTime(value: string): string {
   const date = new Date(value);
   return Number.isNaN(date.getTime())

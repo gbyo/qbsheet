@@ -83,6 +83,12 @@ export interface NewRoomInput {
   floor?: string;
 }
 
+export interface NewPoolInput {
+  name: string;
+  phaseId?: DirectorId;
+  teamIds?: DirectorId[];
+}
+
 export interface NewStaffInput {
   name: string;
   roles?: NonNullable<DirectorState['staff'][number]>['roles'];
@@ -152,6 +158,8 @@ export interface DirectorController {
     >,
   ): void;
   addPhase(name: string, kind?: NonNullable<DirectorState['phases'][number]>['kind']): void;
+  addPool(input: NewPoolInput): boolean;
+  updatePool(poolId: DirectorId, changes: { name?: string; teamIds?: DirectorId[] }): boolean;
   updateRules(changes: Partial<NonNullable<DirectorState['tournament']>['rules']>): void;
   generateSchedule(options?: { seed?: number; avoidRematches?: boolean; avoidSameOrganization?: boolean }): {
     conflicts: string[];
@@ -504,11 +512,29 @@ export function useDirectorController(repository = createDirectorRepository()): 
       commit((draft) => {
         const team = draft.teams.find((entry) => entry.id === teamId);
         if (!team) return;
-        Object.assign(team, {
-          ...changes,
-          displayName: changes.displayName?.trim() ?? team.displayName,
-          updatedAt: isoNow(),
-        });
+        const displayName = changes.displayName?.trim() || team.displayName;
+        if (changes.organizationName !== undefined) {
+          const organizationName = changes.organizationName.trim();
+          if (!organizationName) team.organizationId = null;
+          else {
+            const existing = draft.organizations.find(
+              (organization) =>
+                organization.id === organizationName ||
+                organization.name.toLocaleLowerCase() === organizationName.toLocaleLowerCase(),
+            );
+            if (existing) team.organizationId = existing.id;
+            else {
+              const organizationId = newDirectorId('organization');
+              draft.organizations.push({ id: organizationId, name: organizationName });
+              team.organizationId = organizationId;
+            }
+          }
+        }
+        team.displayName = displayName;
+        if (changes.teamLetter !== undefined) team.teamLetter = changes.teamLetter.trim();
+        if (changes.seed !== undefined) team.seed = changes.seed;
+        if (changes.notes !== undefined) team.notes = changes.notes.trim() || undefined;
+        team.updatedAt = isoNow();
         draft.audit.push({
           id: newDirectorId('audit'),
           at: isoNow(),
@@ -800,7 +826,15 @@ export function useDirectorController(repository = createDirectorRepository()): 
           'name' | 'kind' | 'avoidRematches' | 'avoidSameOrganization' | 'allowByes' | 'roundsPerTeam'
         >
       >,
-    ) =>
+    ) => {
+      const snapshot = stateRef.current;
+      const formatId = snapshot.tournament?.formatId;
+      const format = formatId ? snapshot.formats.find((entry) => entry.id === formatId) : undefined;
+      if (!format) return;
+      if (changes.kind !== undefined && changes.kind !== format.kind && snapshot.rounds.length > 0) {
+        setError('The format type is locked after schedule generation; add a new phase for future play.');
+        return;
+      }
       commit((draft) => {
         const formatId = draft.tournament?.formatId;
         const format = formatId ? draft.formats.find((entry) => entry.id === formatId) : undefined;
@@ -814,7 +848,8 @@ export function useDirectorController(repository = createDirectorRepository()): 
           summary: `Updated ${format.name}.`,
           entityId: format.id,
         });
-      }),
+      });
+    },
     [commit],
   );
 
@@ -852,6 +887,149 @@ export function useDirectorController(repository = createDirectorRepository()): 
           entityId: phaseId,
         });
       }),
+    [commit],
+  );
+
+  const addPool = useCallback(
+    (input: NewPoolInput): boolean => {
+      const snapshot = stateRef.current;
+      const phaseId = input.phaseId ?? snapshot.tournament?.currentPhaseId;
+      const phase = phaseId ? snapshot.phases.find((entry) => entry.id === phaseId) : undefined;
+      if (!phase || phase.formatId !== snapshot.tournament?.formatId) {
+        setError('Choose a valid current phase before adding a pool.');
+        return false;
+      }
+      if (phase.roundIds.length > 0) {
+        setError('Pool membership is locked after a round has been generated; add a new phase instead.');
+        return false;
+      }
+      const name = input.name.trim();
+      if (!name) {
+        setError('A pool name is required.');
+        return false;
+      }
+      if (
+        snapshot.pools.some(
+          (pool) =>
+            pool.phaseId === phase.id && pool.name.trim().toLocaleLowerCase() === name.toLocaleLowerCase(),
+        )
+      ) {
+        setError(`Pool “${name}” already exists in this phase.`);
+        return false;
+      }
+      const teamIds = [...(input.teamIds ?? [])];
+      if (new Set(teamIds).size !== teamIds.length) {
+        setError('A pool cannot contain the same team twice.');
+        return false;
+      }
+      if (teamIds.some((teamId) => !snapshot.teams.some((team) => team.id === teamId))) {
+        setError('A pool can only contain teams that exist in the tournament.');
+        return false;
+      }
+      const siblingTeamIds = new Set(
+        snapshot.pools.filter((pool) => pool.phaseId === phase.id).flatMap((pool) => pool.teamIds),
+      );
+      const overlap = teamIds.find((teamId) => siblingTeamIds.has(teamId));
+      if (overlap) {
+        setError('Each team can belong to only one pool in a phase.');
+        return false;
+      }
+      commit((draft) => {
+        const poolId = newDirectorId('pool');
+        draft.pools.push({
+          id: poolId,
+          phaseId: phase.id,
+          name,
+          teamIds,
+          order: phase.poolIds.length + 1,
+        });
+        const targetPhase = draft.phases.find((entry) => entry.id === phase.id);
+        if (targetPhase) targetPhase.poolIds.push(poolId);
+        draft.audit.push({
+          id: newDirectorId('audit'),
+          at: isoNow(),
+          actor: 'Director',
+          type: 'format-changed',
+          summary: `Added ${name}.`,
+          entityId: poolId,
+          details: { phaseId: phase.id, teamCount: teamIds.length },
+        });
+      });
+      return true;
+    },
+    [commit],
+  );
+
+  const updatePool = useCallback(
+    (poolId: DirectorId, changes: { name?: string; teamIds?: DirectorId[] }): boolean => {
+      const snapshot = stateRef.current;
+      const pool = snapshot.pools.find((entry) => entry.id === poolId);
+      const phase = pool ? snapshot.phases.find((entry) => entry.id === pool.phaseId) : undefined;
+      if (!pool || !phase) {
+        setError('That pool is not in the current tournament.');
+        return false;
+      }
+      if (phase.formatId !== snapshot.tournament?.formatId) {
+        setError('That pool is not part of the current format.');
+        return false;
+      }
+      const name = changes.name === undefined ? pool.name : changes.name.trim();
+      if (!name) {
+        setError('A pool name is required.');
+        return false;
+      }
+      if (
+        snapshot.pools.some(
+          (candidate) =>
+            candidate.id !== poolId &&
+            candidate.phaseId === phase.id &&
+            candidate.name.trim().toLocaleLowerCase() === name.toLocaleLowerCase(),
+        )
+      ) {
+        setError(`Pool “${name}” already exists in this phase.`);
+        return false;
+      }
+      const teamIds = changes.teamIds === undefined ? pool.teamIds : [...changes.teamIds];
+      if (new Set(teamIds).size !== teamIds.length) {
+        setError('A pool cannot contain the same team twice.');
+        return false;
+      }
+      if (teamIds.some((teamId) => !snapshot.teams.some((team) => team.id === teamId))) {
+        setError('A pool can only contain teams that exist in the tournament.');
+        return false;
+      }
+      if (changes.teamIds !== undefined && phase.roundIds.length > 0) {
+        setError('Pool membership is locked after a round has been generated; add a new phase instead.');
+        return false;
+      }
+      if (changes.teamIds !== undefined) {
+        const siblingTeamIds = new Set(
+          snapshot.pools
+            .filter((candidate) => candidate.phaseId === phase.id && candidate.id !== poolId)
+            .flatMap((candidate) => candidate.teamIds),
+        );
+        if (teamIds.some((teamId) => siblingTeamIds.has(teamId))) {
+          setError('Each team can belong to only one pool in a phase.');
+          return false;
+        }
+      }
+      commit((draft) => {
+        const target = draft.pools.find((entry) => entry.id === poolId);
+        if (!target) return;
+        target.name = name;
+        if (changes.teamIds !== undefined) target.teamIds = teamIds;
+        draft.audit.push({
+          id: newDirectorId('audit'),
+          at: isoNow(),
+          actor: 'Director',
+          type: 'format-changed',
+          summary: `Updated ${name}.`,
+          entityId: poolId,
+          details: { phaseId: phase.id, teamCount: teamIds.length },
+        });
+      });
+      return true;
+    },
     [commit],
   );
 
@@ -1737,6 +1915,8 @@ export function useDirectorController(repository = createDirectorRepository()): 
     selectPacket,
     updateFormat,
     addPhase,
+    addPool,
+    updatePool,
     updateRules,
     generateSchedule,
     prepareRound,

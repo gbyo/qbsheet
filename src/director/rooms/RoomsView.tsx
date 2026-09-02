@@ -87,124 +87,145 @@ export function RoomsView({
       <div className="director-page-stack">
         {showForm === 'room' && (
           <section className="director-panel director-form-panel">
-            <div className="director-panel-heading">
-              <div>
-                <p className="director-eyebrow">New room</p>
-                <h2>Room details</h2>
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                save();
+              }}
+            >
+              <div className="director-panel-heading">
+                <div>
+                  <p className="director-eyebrow">New room</p>
+                  <h2>Room details</h2>
+                </div>
+                <Button variant="quiet" icon="x" onClick={() => setShowForm(null)}>
+                  Close
+                </Button>
               </div>
-              <Button variant="quiet" icon="x" onClick={() => setShowForm(null)}>
-                Close
-              </Button>
-            </div>
-            <PanelBody>
-              <div className="director-form-grid director-form-grid-three">
-                <FormField label="Room name">
-                  <input
-                    value={name}
-                    onChange={(event) => setName(event.target.value)}
-                    placeholder="Room 101"
-                  />
-                </FormField>
-                <FormField label="Building">
-                  <input
-                    value={building}
-                    onChange={(event) => setBuilding(event.target.value)}
-                    placeholder="Main building"
-                  />
-                </FormField>
-                <FormField label="Floor">
-                  <input
-                    value={floor}
-                    onChange={(event) => setFloor(event.target.value)}
-                    placeholder="First"
-                  />
-                </FormField>
-              </div>
-            </PanelBody>
-            <PanelFooter className="director-form-actions">
-              <Button variant="primary" onClick={save}>
-                Save room
-              </Button>
-            </PanelFooter>
+              <PanelBody>
+                <div className="director-form-grid director-form-grid-three">
+                  <FormField label="Room name">
+                    <input
+                      value={name}
+                      onChange={(event) => setName(event.target.value)}
+                      placeholder="Room 101"
+                    />
+                  </FormField>
+                  <FormField label="Building">
+                    <input
+                      value={building}
+                      onChange={(event) => setBuilding(event.target.value)}
+                      placeholder="Main building"
+                    />
+                  </FormField>
+                  <FormField label="Floor">
+                    <input
+                      value={floor}
+                      onChange={(event) => setFloor(event.target.value)}
+                      placeholder="First"
+                    />
+                  </FormField>
+                </div>
+              </PanelBody>
+              <PanelFooter className="director-form-actions">
+                <Button variant="primary" type="submit">
+                  Save room
+                </Button>
+              </PanelFooter>
+            </form>
           </section>
         )}
         {showForm === 'staff' && (
           <section className="director-panel director-form-panel">
-            <div className="director-panel-heading">
-              <div>
-                <p className="director-eyebrow">New staff member</p>
-                <h2>Staff details</h2>
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                saveStaff();
+              }}
+            >
+              <div className="director-panel-heading">
+                <div>
+                  <p className="director-eyebrow">New staff member</p>
+                  <h2>Staff details</h2>
+                </div>
+                <Button variant="quiet" icon="x" onClick={() => setShowForm(null)}>
+                  Close
+                </Button>
               </div>
-              <Button variant="quiet" icon="x" onClick={() => setShowForm(null)}>
-                Close
-              </Button>
-            </div>
-            <PanelBody>
-              <div className="director-form-grid director-form-grid-two">
-                <FormField label="Name">
-                  <input
-                    value={name}
-                    onChange={(event) => setName(event.target.value)}
-                    placeholder="Alex Morgan"
-                  />
-                </FormField>
-                <FormField label="Primary role">
-                  <select
-                    value={staffRole}
-                    onChange={(event) => setStaffRole(event.target.value as typeof staffRole)}
-                  >
-                    <option value="moderator">Moderator</option>
-                    <option value="scorekeeper">Scorekeeper</option>
-                    <option value="runner">Runner</option>
-                    <option value="hq">HQ staff</option>
-                  </select>
-                </FormField>
-              </div>
-            </PanelBody>
-            <PanelFooter className="director-form-actions">
-              <Button variant="primary" onClick={saveStaff}>
-                Save staff member
-              </Button>
-            </PanelFooter>
+              <PanelBody>
+                <div className="director-form-grid director-form-grid-two">
+                  <FormField label="Name">
+                    <input
+                      value={name}
+                      onChange={(event) => setName(event.target.value)}
+                      placeholder="Alex Morgan"
+                    />
+                  </FormField>
+                  <FormField label="Primary role">
+                    <select
+                      value={staffRole}
+                      onChange={(event) => setStaffRole(event.target.value as typeof staffRole)}
+                    >
+                      <option value="moderator">Moderator</option>
+                      <option value="scorekeeper">Scorekeeper</option>
+                      <option value="runner">Runner</option>
+                      <option value="hq">HQ staff</option>
+                    </select>
+                  </FormField>
+                </div>
+              </PanelBody>
+              <PanelFooter className="director-form-actions">
+                <Button variant="primary" type="submit">
+                  Save staff member
+                </Button>
+              </PanelFooter>
+            </form>
           </section>
         )}
         {showForm === 'equipment' && (
           <section className="director-panel director-form-panel">
-            <div className="director-panel-heading">
-              <div>
-                <p className="director-eyebrow">New resource</p>
-                <h2>Equipment details</h2>
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                saveEquipment();
+              }}
+            >
+              <div className="director-panel-heading">
+                <div>
+                  <p className="director-eyebrow">New resource</p>
+                  <h2>Equipment details</h2>
+                </div>
+                <Button variant="quiet" icon="x" onClick={() => setShowForm(null)}>
+                  Close
+                </Button>
               </div>
-              <Button variant="quiet" icon="x" onClick={() => setShowForm(null)}>
-                Close
-              </Button>
-            </div>
-            <PanelBody>
-              <div className="director-form-grid director-form-grid-two">
-                <FormField label="Name">
-                  <input
-                    value={name}
-                    onChange={(event) => setName(event.target.value)}
-                    placeholder="Buzzer set 1"
-                  />
-                </FormField>
-                <FormField label="Type">
-                  <select
-                    value={equipmentKind}
-                    onChange={(event) => setEquipmentKind(event.target.value as typeof equipmentKind)}
-                  >
-                    <option value="buzzer">Buzzer</option>
-                    <option value="device">Laptop / tablet</option>
-                    <option value="other">Other</option>
-                  </select>
-                </FormField>
-              </div>
-            </PanelBody>
-            <PanelFooter className="director-form-actions">
-              <Button variant="primary" onClick={saveEquipment}>
-                Save equipment
-              </Button>
-            </PanelFooter>
+              <PanelBody>
+                <div className="director-form-grid director-form-grid-two">
+                  <FormField label="Name">
+                    <input
+                      value={name}
+                      onChange={(event) => setName(event.target.value)}
+                      placeholder="Buzzer set 1"
+                    />
+                  </FormField>
+                  <FormField label="Type">
+                    <select
+                      value={equipmentKind}
+                      onChange={(event) => setEquipmentKind(event.target.value as typeof equipmentKind)}
+                    >
+                      <option value="buzzer">Buzzer</option>
+                      <option value="device">Laptop / tablet</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </FormField>
+                </div>
+              </PanelBody>
+              <PanelFooter className="director-form-actions">
+                <Button variant="primary" type="submit">
+                  Save equipment
+                </Button>
+              </PanelFooter>
+            </form>
           </section>
         )}
         {state.rooms.length === 0 ? (
@@ -252,55 +273,14 @@ export function RoomsView({
                 </thead>
                 <tbody>
                   {rooms.map((room) => (
-                    <tr key={room.id}>
-                      <td>
-                        <strong>{room.name}</strong>
-                        <small className="director-table-subtext">
-                          {room.accessibility || 'No access notes'}
-                        </small>
-                      </td>
-                      <td>{[room.building, room.floor].filter(Boolean).join(' · ') || '—'}</td>
-                      <td>{staffName(state, room.moderatorId) || 'Unassigned'}</td>
-                      <td>{staffName(state, room.scorekeeperId) || 'Unassigned'}</td>
-                      <td>{equipmentName(state, room.equipmentId) || 'Unassigned'}</td>
-                      <td>
-                        <StateLabel state={room.status} />
-                        <small className="director-table-subtext">
-                          {room.available ? 'Available next round' : 'Unavailable next round'}
-                        </small>
-                      </td>
-                      <td>
-                        <button
-                          type="button"
-                          className="director-button director-button-quiet director-table-action"
-                          aria-label={`${room.available ? 'Mark' : 'Make'} ${room.name} ${room.available ? 'unavailable' : 'available'}`}
-                          onClick={() => {
-                            controller.updateRoom(room.id, { available: !room.available });
-                            onAnnounce(
-                              `${room.name} marked ${room.available ? 'unavailable' : 'available'} for the next round.`,
-                            );
-                          }}
-                        >
-                          <Icon name={room.available ? 'pause' : 'play'} size={14} />
-                          <span>{room.available ? 'Unavailable' : 'Available'}</span>
-                        </button>
-                        <div className="director-row-actions">
-                          {/*
-                          A room-level entry point into Transfers, not a second prepare path. A room
-                          whose device dropped off the network is the case this exists for, and the
-                          director gets there in one click from the row they were already looking at.
-                        */}
-                          {onNavigate &&
-                            state.scheduledGames.some(
-                              (game) => game.roomId === room.id && !game.bye && game.status !== 'accepted',
-                            ) && (
-                              <Button variant="quiet" icon="upload" onClick={() => onNavigate('transfers')}>
-                                Prepare game file
-                              </Button>
-                            )}
-                        </div>
-                      </td>
-                    </tr>
+                    <RoomRows
+                      key={room.id}
+                      state={state}
+                      room={room}
+                      controller={controller}
+                      onNavigate={onNavigate}
+                      onAnnounce={onAnnounce}
+                    />
                   ))}
                 </tbody>
               </table>
@@ -425,6 +405,187 @@ export function RoomsView({
       </div>
     </>
   );
+}
+
+function RoomRows({
+  state,
+  room,
+  controller,
+  onNavigate,
+  onAnnounce,
+}: {
+  state: DirectorState;
+  room: DirectorState['rooms'][number];
+  controller: DirectorController;
+  onNavigate?: (section: SectionId) => void;
+  onAnnounce: (message: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(room.name);
+  const [building, setBuilding] = useState(room.building ?? '');
+  const [floor, setFloor] = useState(room.floor ?? '');
+  const [moderatorId, setModeratorId] = useState(room.moderatorId ?? '');
+  const [scorekeeperId, setScorekeeperId] = useState(room.scorekeeperId ?? '');
+  const [equipmentId, setEquipmentId] = useState(room.equipmentId ?? '');
+  const [available, setAvailable] = useState(room.available);
+  const beginEdit = () => {
+    setName(room.name);
+    setBuilding(room.building ?? '');
+    setFloor(room.floor ?? '');
+    setModeratorId(room.moderatorId ?? '');
+    setScorekeeperId(room.scorekeeperId ?? '');
+    setEquipmentId(room.equipmentId ?? '');
+    setAvailable(room.available);
+    setEditing(true);
+  };
+  const save = () => {
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      onAnnounce('Enter a room name first.');
+      return;
+    }
+    controller.updateRoom(room.id, {
+      name: trimmedName,
+      building: building.trim(),
+      floor: floor.trim(),
+      moderatorId: moderatorId || null,
+      scorekeeperId: scorekeeperId || null,
+      equipmentId: equipmentId || null,
+      available,
+    });
+    setEditing(false);
+    onAnnounce(`${trimmedName} updated.`);
+  };
+  return (
+    <>
+      <tr>
+        <td>
+          <strong>{room.name}</strong>
+          <small className="director-table-subtext">{room.accessibility || 'No access notes'}</small>
+        </td>
+        <td>{[room.building, room.floor].filter(Boolean).join(' · ') || '—'}</td>
+        <td>{staffName(state, room.moderatorId) || 'Unassigned'}</td>
+        <td>{staffName(state, room.scorekeeperId) || 'Unassigned'}</td>
+        <td>{equipmentName(state, room.equipmentId) || 'Unassigned'}</td>
+        <td>
+          <StateLabel state={room.status} />
+          <small className="director-table-subtext">
+            {room.available ? 'Available next round' : 'Unavailable next round'}
+          </small>
+        </td>
+        <td>
+          <div className="director-row-actions">
+            <Button variant="quiet" icon="edit" onClick={beginEdit}>
+              Edit
+            </Button>
+            <button
+              type="button"
+              className="director-button director-button-quiet director-table-action"
+              aria-label={`${room.available ? 'Mark' : 'Make'} ${room.name} ${room.available ? 'unavailable' : 'available'}`}
+              onClick={() => {
+                controller.updateRoom(room.id, { available: !room.available });
+                onAnnounce(
+                  `${room.name} marked ${room.available ? 'unavailable' : 'available'} for the next round.`,
+                );
+              }}
+            >
+              <Icon name={room.available ? 'pause' : 'play'} size={14} />
+              <span>{room.available ? 'Unavailable' : 'Available'}</span>
+            </button>
+            {onNavigate &&
+              state.scheduledGames.some(
+                (game) => game.roomId === room.id && !game.bye && game.status !== 'accepted',
+              ) && (
+                <Button variant="quiet" icon="upload" onClick={() => onNavigate('transfers')}>
+                  Prepare game file
+                </Button>
+              )}
+          </div>
+        </td>
+      </tr>
+      {editing && (
+        <tr className="director-table-edit-row">
+          <td colSpan={7}>
+            <form
+              className="director-inline-edit"
+              onSubmit={(event) => {
+                event.preventDefault();
+                save();
+              }}
+            >
+              <div className="director-form-grid director-form-grid-three">
+                <FormField label="Room name">
+                  <input value={name} onChange={(event) => setName(event.target.value)} />
+                </FormField>
+                <FormField label="Building">
+                  <input value={building} onChange={(event) => setBuilding(event.target.value)} />
+                </FormField>
+                <FormField label="Floor">
+                  <input value={floor} onChange={(event) => setFloor(event.target.value)} />
+                </FormField>
+              </div>
+              <div className="director-form-grid director-form-grid-three">
+                <FormField label="Moderator">
+                  <select value={moderatorId} onChange={(event) => setModeratorId(event.target.value)}>
+                    <option value="">Unassigned</option>
+                    {staffForRole(state, 'moderator', moderatorId).map((member) => (
+                      <option key={member.id} value={member.id}>
+                        {member.name}
+                      </option>
+                    ))}
+                  </select>
+                </FormField>
+                <FormField label="Scorekeeper">
+                  <select value={scorekeeperId} onChange={(event) => setScorekeeperId(event.target.value)}>
+                    <option value="">Unassigned</option>
+                    {staffForRole(state, 'scorekeeper', scorekeeperId).map((member) => (
+                      <option key={member.id} value={member.id}>
+                        {member.name}
+                      </option>
+                    ))}
+                  </select>
+                </FormField>
+                <FormField label="Equipment">
+                  <select value={equipmentId} onChange={(event) => setEquipmentId(event.target.value)}>
+                    <option value="">Unassigned</option>
+                    {state.equipment.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.name}
+                      </option>
+                    ))}
+                  </select>
+                </FormField>
+              </div>
+              <label className="director-checkbox-field">
+                <input
+                  type="checkbox"
+                  checked={available}
+                  onChange={(event) => setAvailable(event.target.checked)}
+                />
+                <span>Available for future assignment</span>
+              </label>
+              <div className="director-row-actions">
+                <Button variant="primary" type="submit">
+                  Save changes
+                </Button>
+                <Button variant="quiet" onClick={() => setEditing(false)}>
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+function staffForRole(
+  state: DirectorState,
+  role: 'moderator' | 'scorekeeper',
+  selectedId: string,
+): DirectorState['staff'] {
+  return state.staff.filter((member) => member.roles.includes(role) || member.id === selectedId);
 }
 
 function FilterButton({

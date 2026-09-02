@@ -28,14 +28,18 @@ import { localCalendarDate } from './date';
 export default function DirectorApp() {
   const controller = useDirectorController();
   const { loading, state, syncQbtcp } = controller;
+  const nativeDirector = isNativeDirector();
   const [activeSection, setActiveSection] = useState<SectionId>('overview');
   const [search, setSearch] = useState('');
+  const [searchActiveIndex, setSearchActiveIndex] = useState(-1);
   const [announcement, setAnnouncement] = useState('');
   const [qbtcpServerStatus, setQbtcpServerStatus] = useState<NativeServerStatus | null>(() =>
-    isNativeDirector() ? null : { running: false },
+    nativeDirector ? null : { running: false },
   );
   const searchRef = useRef<HTMLInputElement>(null);
   const searchResults = useMemo(() => searchTournament(state, search), [search, state]);
+  const activeSearchIndex =
+    searchResults.length > 0 ? Math.min(searchActiveIndex, searchResults.length - 1) : -1;
 
   useEffect(() => {
     const focusSearch = (event: KeyboardEvent) => {
@@ -54,7 +58,7 @@ export default function DirectorApp() {
 
   useEffect(() => {
     if (loading || !state.tournament) return;
-    if (!isNativeDirector()) return;
+    if (!nativeDirector) return;
     let active = true;
     const poll = () => {
       if (!active) return;
@@ -69,7 +73,7 @@ export default function DirectorApp() {
       active = false;
       window.clearInterval(interval);
     };
-  }, [loading, state.tournament, syncQbtcp]);
+  }, [loading, nativeDirector, state.tournament, syncQbtcp]);
 
   if (loading) return <div className="director-loading">Opening local tournament storage…</div>;
   if (!state.tournament)
@@ -93,13 +97,45 @@ export default function DirectorApp() {
     setActiveSection(section);
     setAnnouncement('');
   };
+  const selectSearchResult = (result: SearchResult) => {
+    navigate(result.section);
+    setSearch('');
+    setSearchActiveIndex(-1);
+  };
+  const updateSearch = (value: string) => {
+    setSearch(value);
+    setSearchActiveIndex(-1);
+  };
+  const handleSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      updateSearch('');
+      searchRef.current?.blur();
+      return;
+    }
+    if (!searchResults.length || !search.trim()) return;
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      const direction = event.key === 'ArrowDown' ? 1 : -1;
+      setSearchActiveIndex((current) => {
+        const next = current + direction;
+        return next < 0 ? searchResults.length - 1 : next >= searchResults.length ? 0 : next;
+      });
+      return;
+    }
+    if (event.key === 'Enter' && activeSearchIndex >= 0) {
+      event.preventDefault();
+      const result = searchResults[activeSearchIndex];
+      if (result) selectSearchResult(result);
+    }
+  };
   const resultReviewCount = controller.state.submissions.filter(
     (submission) => submission.status === 'review' || submission.status === 'received',
   ).length;
   const transferPendingCount = controller.state.transfers.artifacts.filter(
     (artifact) => artifact.status === 'staged',
   ).length;
-  const sidebarServer = describeSidebarServer(qbtcpServerStatus, isNativeDirector());
+  const sidebarServer = describeSidebarServer(qbtcpServerStatus, nativeDirector);
   const renderPage = () => {
     switch (activeSection) {
       case 'overview':
@@ -110,6 +146,7 @@ export default function DirectorApp() {
             onNavigate={navigate}
             onAnnounce={setAnnouncement}
             nativeServerReady={qbtcpServerStatus?.running ?? false}
+            nativeServerAvailable={nativeDirector}
           />
         );
       case 'teams':
@@ -264,33 +301,47 @@ export default function DirectorApp() {
                 type="search"
                 placeholder="Search teams, rooms, games"
                 value={search}
-                onChange={(event) => setSearch(event.target.value)}
+                onChange={(event) => updateSearch(event.target.value)}
+                onKeyDown={handleSearchKeyDown}
+                aria-autocomplete="list"
+                aria-controls={search.trim() && searchResults.length ? 'director-search-results' : undefined}
+                aria-activedescendant={
+                  activeSearchIndex >= 0 ? `director-search-result-${activeSearchIndex}` : undefined
+                }
               />
-              <kbd>⌘ K</kbd>
+              <kbd>⌘/Ctrl K</kbd>
             </label>
-            {searchResults.length > 0 && (
-              <div className="director-search-results" role="listbox" aria-label="Search results">
-                {searchResults.map((result) => (
-                  <button
-                    type="button"
-                    className="director-search-result"
-                    key={`${result.section}-${result.id}`}
-                    role="option"
-                    aria-selected={false}
-                    onClick={() => {
-                      navigate(result.section);
-                      setSearch('');
-                    }}
-                  >
-                    <span>
-                      <strong>{result.label}</strong>
-                      <small>{result.detail}</small>
-                    </span>
-                    <Icon name="chevron" size={13} />
-                  </button>
-                ))}
-              </div>
-            )}
+            {search.trim() &&
+              (searchResults.length > 0 ? (
+                <div
+                  id="director-search-results"
+                  className="director-search-results"
+                  role="listbox"
+                  aria-label="Search results"
+                >
+                  {searchResults.map((result, index) => (
+                    <button
+                      type="button"
+                      className={`director-search-result ${index === activeSearchIndex ? 'is-active' : ''}`}
+                      key={`${result.section}-${result.id}`}
+                      id={`director-search-result-${index}`}
+                      role="option"
+                      aria-selected={index === activeSearchIndex}
+                      onClick={() => selectSearchResult(result)}
+                    >
+                      <span>
+                        <strong>{result.label}</strong>
+                        <small>{result.detail}</small>
+                      </span>
+                      <Icon name="chevron" size={13} />
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="director-search-results director-search-empty" role="status">
+                  No matching teams, players, rooms, packets, or games.
+                </div>
+              ))}
             <button
               type="button"
               className="director-icon-button director-topbar-button"
@@ -408,7 +459,13 @@ function NewTournamentScreen({
         onAnnounce('Tournament data imported.');
         return;
       }
-      onAnnounce('That file is not a supported Director archive.');
+      const report = importQbjText(value);
+      if (report.ok && report.state) {
+        controller.importSnapshot(report.state);
+        onAnnounce(importWarningMessage('QBJ tournament imported.', report.warnings));
+        return;
+      }
+      onAnnounce(report.errors.join(' ') || 'That file is not a supported Director archive.');
     } catch (reason: unknown) {
       onAnnounce(reason instanceof Error ? reason.message : 'That file could not be read.');
     }
