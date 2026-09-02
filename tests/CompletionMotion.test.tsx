@@ -54,7 +54,7 @@ describe('accepted-result acknowledgement', () => {
     show(record());
 
     const next = screen.getByRole('button', { name: 'Done' });
-    const copy = screen.getByText('Download or export a copy');
+    const copy = screen.getByText('Files & exports');
     expect(next).toHaveClass('is-primary');
     expect(next.compareDocumentPosition(copy) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(copy.closest('details')).not.toHaveAttribute('open');
@@ -98,7 +98,7 @@ describe('pending-result delivery', () => {
     );
 
     expect(screen.getByRole('button', { name: 'Done' })).toBeDisabled();
-    const back = screen.getByRole('button', { name: 'Back to scorekeeper' });
+    const back = screen.getByRole('button', { name: 'Review score' });
     expect(back).toBeEnabled();
     fireEvent.click(back);
     expect(onBackToScorekeeper).toHaveBeenCalledOnce();
@@ -144,6 +144,8 @@ describe('pending-result delivery', () => {
     );
 
     expect(screen.getByText('Result sent')).toBeTruthy();
+    expect(screen.queryByText(/hasn't received this result yet/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Download QBJ' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Done' })).toBeEnabled();
   });
 });

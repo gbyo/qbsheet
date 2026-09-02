@@ -1539,6 +1539,91 @@ body:has(.welcome-shell .update-notice-hero) {
   padding-top: 4px;
 }
 
+/*
+ * The completion screen answers three questions in order: the final score, whether the result
+ * reached where it needs to go, and the one thing to do next. Delivery state sits directly
+ * under the score inside the same result block, exactly one button at a time carries the
+ * primary treatment, and everything secondary — reviewing the score, a rematch, exports —
+ * waits quietly underneath a single separator.
+ */
+.completion-result {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.completion-result .final-score {
+  margin-top: 12px;
+  border-bottom: none;
+}
+
+.completion-status {
+  margin-top: 12px;
+}
+
+.completion-status .shell-hint {
+  margin-top: 4px;
+}
+
+.completion-status .shell-warning {
+  margin-bottom: 8px;
+}
+
+.completion-saved {
+  margin: 0;
+  color: var(--room-muted);
+  font-weight: 500;
+}
+
+.completion-primary {
+  margin-top: 16px;
+}
+
+.completion-primary > .shell-button.is-primary {
+  min-width: min(100%, 300px);
+}
+
+.completion-locked {
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.completion-locked .shell-hint {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.completion-handoff {
+  padding-top: 4px;
+}
+
+.completion-secondary {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  margin-top: 20px;
+  padding-top: 8px;
+  border-top: 1px solid var(--room-border);
+}
+
+.completion-secondary > .shell-button-quiet {
+  align-self: flex-start;
+  padding-right: 0;
+  padding-left: 0;
+}
+
+.completion-exports {
+  padding: 0;
+  border-bottom: none;
+}
+
+.completion-exports > summary {
+  padding: 8px 0;
+}
+
 .assignment-matchup {
   margin: 0;
   font-size: 1rem;

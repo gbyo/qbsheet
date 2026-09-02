@@ -166,7 +166,7 @@ test.describe('a server that speaks only QBTCP', () => {
     await expect(next).toBeEnabled();
     const copy = page.locator('details.final-copy-details');
     await expect(copy).toBeVisible();
-    await expect(copy.locator('summary')).toHaveText('Download or export a copy');
+    await expect(copy.locator('summary')).toHaveText('Files & exports');
     await expect(copy.getByRole('button', { name: 'Download QBJ backup' })).toBeHidden();
     await copy.locator('summary').click();
     await expect(copy.getByRole('button', { name: 'Download QBJ backup' })).toBeVisible();

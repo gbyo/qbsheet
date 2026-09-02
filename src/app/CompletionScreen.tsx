@@ -37,6 +37,14 @@
  * Not on send, not on download, not on acknowledgement. `Download QBJ again` stays for as long as
  * the record does, because the second most common thing that goes wrong with a downloads folder is
  * that somebody cleared it.
+ *
+ * # One result, one status, one primary action
+ *
+ * The screen answers three questions in order: the final score, whether the result reached where it
+ * needs to go, and the one thing to do next. Delivery state lives directly under the score rather
+ * than in its own section, the handoff reveals only its current step, and exactly one button at a
+ * time carries the primary treatment. Everything else — reviewing the score, a rematch, exports —
+ * sits quietly underneath.
  */
 import { useRef, useState } from 'react';
 import { IStoredGameRecord, gameRequiresHandoff, isDelivered, needsHandoff } from '../game/GameStore';
@@ -51,6 +59,18 @@ function timeOfDay(iso: string | undefined): string {
   if (!Number.isFinite(at.getTime())) return '';
   return at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }
+
+/**
+ * Which step of the completion workflow the room is on.
+ *
+ * This translates the canonical `GameStore` facts into UI only: `needsHandoff` still decides
+ * whether leaving is allowed, `gameRequiresHandoff` still decides whether anybody is owed the
+ * result, and `isDelivered` still decides whether tournament control has it. Deriving one stage
+ * up front keeps the score status, the primary button and the explanatory copy from
+ * contradicting each other further down.
+ */
+type CompletionStage =
+  'delivered' | 'needs-download' | 'needs-handoff-confirmation' | 'handoff-complete' | 'manual-complete';
 
 export default function CompletionScreen(props: {
   record: IStoredGameRecord;
@@ -91,13 +111,29 @@ export default function CompletionScreen(props: {
   const connected = record.serverDelivery !== 'none';
   /** Tournament control has it, and did not ask for anything else. */
   const delivered = isDelivered(record);
+  /** Somebody beyond this device is owed this result. */
+  const requiresHandoff = gameRequiresHandoff(record);
   const requiresHandoffAcknowledgement =
     !delivered && (connected || Boolean(record.package.handoffInstruction));
   /** Nobody is owed this result. The copy stops calling the download a handoff. */
-  const optionalCopy = !gameRequiresHandoff(record);
-  const downloadIsPrimary = !optionalCopy && !delivered;
-  const backupDownloaded = record.qbjDownloadedAt !== undefined;
+  const optionalCopy = !requiresHandoff;
+  const downloaded = record.qbjDownloadedAt !== undefined;
+  const acknowledged = record.handoffAcknowledgedAt !== undefined;
   const canLeave = !needsHandoff(record);
+
+  let stage: CompletionStage;
+  if (delivered) {
+    stage = 'delivered';
+  } else if (!requiresHandoff) {
+    stage = 'manual-complete';
+  } else if (!downloaded) {
+    stage = 'needs-download';
+  } else if (requiresHandoffAcknowledgement && !acknowledged) {
+    stage = 'needs-handoff-confirmation';
+  } else {
+    stage = 'handoff-complete';
+  }
+  const handoffActive = stage === 'needs-download' || stage === 'needs-handoff-confirmation';
 
   const recordQbjDownload = async (at: string) => {
     setQbjRecordPending(true);
@@ -145,74 +181,76 @@ export default function CompletionScreen(props: {
     }
   };
 
-  const qbjButton = (
-    <button
-      type="button"
-      className={`shell-button${downloadIsPrimary ? ' is-primary' : ''}`}
-      onClick={download}
+  const acceptedCopy = record.serverDeliveryLedger?.reviewRequired
+    ? 'Result received for director review'
+    : record.serverDeliveryLedger?.acceptedAsDuplicate
+      ? 'Result already on record'
+      : 'Result sent';
+
+  const acceptedStatus = (
+    <p
+      className={`final-ok final-accepted${acceptedJustNow ? ' is-newly-accepted' : ''}`}
+      data-acceptance-motion={acceptedJustNow ? 'new' : undefined}
     >
-      {record.qbjDownloadedAt
-        ? 'Download QBJ again'
-        : optionalCopy
-          ? 'Download QBJ copy'
-          : delivered
-            ? 'Download QBJ backup'
-            : 'Download QBJ'}
-    </button>
+      <svg className="final-accepted-mark" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+        <path d="m4 10 4 4 8-9" />
+      </svg>
+      {acceptedCopy}
+      <span className="visually-hidden"> ✓</span>
+    </p>
   );
+
+  /** The one concise delivery line that sits directly under the score. */
+  const deliveryStatus = (
+    <>
+      {record.serverDelivery === 'sent' && acceptedStatus}
+      {record.serverDelivery === 'pending' && (
+        <>
+          <p className="final-pending">Tournament control hasn&apos;t received this result yet.</p>
+          <p className="shell-hint">QBSheet will keep trying automatically while it is open.</p>
+        </>
+      )}
+      {record.serverDelivery === 'rejected' && (
+        <>
+          <p className="shell-warning" role="alert">
+            Tournament control did not accept this result.
+          </p>
+          {record.serverDeliveryDetail && <p className="shell-hint">{record.serverDeliveryDetail}</p>}
+        </>
+      )}
+      {record.serverDelivery === 'none' &&
+        (requiresHandoff ? (
+          <p className="final-pending">This result needs to be handed over.</p>
+        ) : (
+          <p className="completion-saved">Saved on this device</p>
+        ))}
+    </>
+  );
+
+  const qbjContextLabel = downloaded
+    ? 'Download QBJ again'
+    : optionalCopy
+      ? 'Download QBJ copy'
+      : delivered
+        ? 'Download QBJ backup'
+        : 'Download QBJ';
+
   const excelButton = (
     <button type="button" className="shell-button" onClick={downloadExcel}>
       {excelDownloaded ? 'Download Excel again' : 'Download Excel scoresheet'}
     </button>
   );
 
-  const copyStatus = (
+  /**
+   * Recovery for the file the handoff step just tried to write. This lives with the handoff
+   * rather than at the bottom of the page so a failure reads next to the action that failed.
+   */
+  const handoffRecovery = (
     <>
-      {excelDownloaded && (
-        <p className="final-ok" role="status">
-          Excel scoresheet downloaded.
-        </p>
-      )}
       {writeFailed && (
         <p className="shell-warning" role="alert">
           This browser would not save the file. Try again, or use the browser&apos;s own download settings.
         </p>
-      )}
-      {record.qbjDownloadedAt && (
-        <div className="final-handoff">
-          <p className="shell-hint">Downloaded at {timeOfDay(record.qbjDownloadedAt)}</p>
-          {optionalCopy || delivered ? (
-            <p className="final-ok" role="status">
-              A copy of this result is in your downloads.
-            </p>
-          ) : !requiresHandoffAcknowledgement ? (
-            <p className="final-ok" role="status">
-              The QBJ is ready to hand over.
-            </p>
-          ) : record.handoffAcknowledgedAt ? (
-            <p className="final-ok" role="status">
-              Handoff confirmed at {timeOfDay(record.handoffAcknowledgedAt)}
-            </p>
-          ) : (
-            <>
-              <p>After you upload the file:</p>
-              <button
-                type="button"
-                className="shell-button"
-                disabled={handoffPending}
-                onClick={() => void acknowledgeHandoff()}
-              >
-                {handoffPending ? 'Saving…' : 'I uploaded the result'}
-              </button>
-              {handoffFailed && (
-                <p className="shell-warning" role="alert">
-                  QBSheet could not save that confirmation. Try again; finishing remains locked until it is
-                  recorded.
-                </p>
-              )}
-            </>
-          )}
-        </div>
       )}
       {qbjRecordPending && (
         <p className="shell-hint" role="status">
@@ -233,148 +271,197 @@ export default function CompletionScreen(props: {
           )}
         </div>
       )}
+      {handoffFailed && (
+        <p className="shell-warning" role="alert">
+          QBSheet could not save that confirmation. Try again; finishing remains locked until it is recorded.
+        </p>
+      )}
     </>
+  );
+
+  /**
+   * The single visually primary action for the current stage. Whether leaving is allowed comes
+   * from `needsHandoff` alone; the stage only decides which handoff step is primary while the
+   * gate is locked.
+   */
+  const primaryAction = !canLeave ? (
+    !downloaded ? (
+      <button type="button" className="shell-button is-primary" onClick={download}>
+        Download QBJ
+      </button>
+    ) : (
+      <button
+        type="button"
+        className="shell-button is-primary"
+        disabled={handoffPending}
+        onClick={() => void acknowledgeHandoff()}
+      >
+        {handoffPending ? 'Saving…' : 'I uploaded the result'}
+      </button>
+    )
+  ) : (
+    <button type="button" className="shell-button is-primary" onClick={() => void onHome()}>
+      {continueLabel}
+    </button>
+  );
+
+  const lockedContinuation = !canLeave ? (
+    <div className="completion-locked">
+      <p className="shell-hint">
+        {stage === 'needs-download'
+          ? `Download the QBJ${requiresHandoffAcknowledgement ? ' and confirm the handoff' : ''} before finishing.`
+          : 'Confirm the handoff before finishing.'}
+      </p>
+      <button type="button" className="shell-button" disabled onClick={() => void onHome()}>
+        {continueLabel}
+      </button>
+    </div>
+  ) : null;
+
+  const handoffStep =
+    stage === 'needs-download' ? (
+      <section className="shell-section completion-handoff" aria-label="Result handoff">
+        {record.package.handoffInstruction ? (
+          <p className="final-instruction">{record.package.handoffInstruction}</p>
+        ) : (
+          connected && (
+            <p className="shell-hint">Upload the QBJ using the instructions provided for this room.</p>
+          )
+        )}
+        {handoffRecovery}
+      </section>
+    ) : stage === 'needs-handoff-confirmation' ? (
+      <section className="shell-section completion-handoff" aria-label="Result handoff">
+        <p className="final-pending">Waiting for handoff</p>
+        <p className="final-ok" role="status">
+          ✓ QBJ downloaded · {timeOfDay(record.qbjDownloadedAt)}
+        </p>
+        {record.package.handoffInstruction && (
+          <p className="final-instruction">{record.package.handoffInstruction}</p>
+        )}
+        {handoffRecovery}
+      </section>
+    ) : stage === 'handoff-complete' ? (
+      <section className="shell-section completion-handoff" aria-label="Result handoff">
+        {acknowledged ? (
+          <p className="final-ok" role="status">
+            ✓ Result handoff confirmed
+            {record.handoffAcknowledgedAt ? ` · ${timeOfDay(record.handoffAcknowledgedAt)}` : ''}
+          </p>
+        ) : (
+          <p className="final-ok" role="status">
+            ✓ QBJ downloaded · {timeOfDay(record.qbjDownloadedAt)}
+          </p>
+        )}
+      </section>
+    ) : null;
+
+  /**
+   * Everything exportable stays in one disclosure, closed by default. While a handoff is owed,
+   * the QBJ the handoff needs is the primary action above instead of hiding in here; once the
+   * requirement is satisfied, re-downloads live here with Excel.
+   */
+  const exportsDisclosure = (
+    <details className="shell-section final-copy-details completion-exports">
+      <summary className="shell-heading">Files &amp; exports</summary>
+      <div className="final-copy-content">
+        <p className="shell-hint">
+          {optionalCopy
+            ? 'This result is saved on this device. Download a QBJ if you want to keep or share a portable copy.'
+            : 'Tournament control has this game. A copy stays on this device, and downloading one is available whenever there is a moment for it.'}
+        </p>
+        <div className="shell-actions">
+          {(!handoffActive || downloaded) && (
+            <button type="button" className="shell-button" onClick={download}>
+              {qbjContextLabel}
+            </button>
+          )}
+          {excelButton}
+        </div>
+        {(stage === 'delivered' || stage === 'manual-complete') && downloaded && (
+          <p className="final-ok" role="status">
+            ✓ QBJ downloaded · {timeOfDay(record.qbjDownloadedAt)}
+          </p>
+        )}
+        <p className="shell-hint">
+          Excel is a readable scoresheet for review. QBJ remains the portable result used for tournament
+          handoff and recovery.
+        </p>
+        {excelDownloaded && (
+          <p className="final-ok" role="status">
+            ✓ Excel downloaded
+          </p>
+        )}
+        {!handoffActive && (
+          <>
+            {writeFailed && (
+              <p className="shell-warning" role="alert">
+                This browser would not save the file. Try again, or use the browser&apos;s own download
+                settings.
+              </p>
+            )}
+            {qbjRecordPending && (
+              <p className="shell-hint" role="status">
+                Recording the QBJ download…
+              </p>
+            )}
+            {qbjRecordFailed && (
+              <div className="shell-warning" role="alert">
+                <p>The QBJ was downloaded, but QBSheet could not record that durable backup.</p>
+                {qbjAttemptAt && (
+                  <button
+                    type="button"
+                    className="shell-button"
+                    onClick={() => void recordQbjDownload(qbjAttemptAt)}
+                  >
+                    Retry recording the download
+                  </button>
+                )}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </details>
   );
 
   return (
     <main className="shell">
-      <header className="shell-header">
+      <section className="shell-section completion-result" aria-label="Final result">
         <h1 className="shell-title">Final</h1>
         <p className="shell-subtitle">{gamePackageLabel(record.package)}</p>
-      </header>
-
-      <section className="shell-section final-score">
-        <div className="final-row">
-          <span className="final-team">{record.package.left.name}</span>
-          <span className="final-points">{score ? score.left : '—'}</span>
+        <div className="final-score">
+          <div className="final-row">
+            <span className="final-team">{record.package.left.name}</span>
+            <span className="final-points">{score ? score.left : '—'}</span>
+          </div>
+          <div className="final-row">
+            <span className="final-team">{record.package.right.name}</span>
+            <span className="final-points">{score ? score.right : '—'}</span>
+          </div>
         </div>
-        <div className="final-row">
-          <span className="final-team">{record.package.right.name}</span>
-          <span className="final-points">{score ? score.right : '—'}</span>
-        </div>
+        <div className="completion-status">{deliveryStatus}</div>
       </section>
 
-      {connected && (
-        <section className="shell-section">
-          <h2 className="shell-heading">Tournament control</h2>
-          {record.serverDelivery === 'sent' && (
-            <p
-              className={`final-ok final-accepted${acceptedJustNow ? ' is-newly-accepted' : ''}`}
-              data-acceptance-motion={acceptedJustNow ? 'new' : undefined}
-            >
-              <svg className="final-accepted-mark" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
-                <path d="m4 10 4 4 8-9" />
-              </svg>
-              {record.serverDeliveryLedger?.reviewRequired
-                ? 'Result received for director review'
-                : record.serverDeliveryLedger?.acceptedAsDuplicate
-                  ? 'Result already on record'
-                  : 'Result sent'}
-              <span className="visually-hidden"> ✓</span>
-            </p>
-          )}
-          {record.serverDelivery === 'pending' && (
-            <p className="final-pending">
-              Tournament control has not received the result yet. It is saved on this device, and QBSheet will
-              keep trying automatically while it is open. You can also retry from Recent Games or hand over
-              the QBJ file.
-            </p>
-          )}
-          {record.serverDelivery === 'rejected' && (
-            <p className="shell-warning">
-              Tournament control did not accept the result. {record.serverDeliveryDetail ?? ''} The result is
-              saved on this device — hand the file over and speak to tournament control.
-            </p>
-          )}
-        </section>
-      )}
+      <div className="shell-actions completion-primary">
+        {primaryAction}
+        {lockedContinuation}
+      </div>
 
-      {delivered && (
-        <div className="shell-actions completion-next-action">
-          <button type="button" className="shell-button is-primary" onClick={() => void onHome()}>
-            {continueLabel}
-          </button>
-        </div>
-      )}
+      {handoffStep}
 
-      {optionalCopy || delivered ? (
-        <details className="shell-section final-copy-details">
-          <summary className="shell-heading">Download or export a copy</summary>
-          <div className="final-copy-content">
-            <p className="shell-hint">
-              {optionalCopy
-                ? 'This result is saved on this device. Download a QBJ if you want to keep or share a portable copy.'
-                : 'Tournament control has this game. A copy stays on this device, and downloading one is available whenever there is a moment for it.'}
-            </p>
-            <div className="shell-actions">
-              {qbjButton}
-              {excelButton}
-            </div>
-            <p className="shell-hint">
-              Excel is a readable scoresheet for review. QBJ remains the portable result used for tournament
-              handoff and recovery.
-            </p>
-            {copyStatus}
-          </div>
-        </details>
-      ) : (
-        <section className="shell-section">
-          <h2 className="shell-heading">Hand this result over</h2>
-          {connected && (
-            <ol className="final-steps">
-              <li>Download the QBJ.</li>
-              <li>Upload it using the instructions provided for this room.</li>
-            </ol>
-          )}
-          {record.package.handoffInstruction && (
-            <p className="final-instruction">{record.package.handoffInstruction}</p>
-          )}
-          <div className="shell-actions">
-            {qbjButton}
-            <details className="final-more-formats">
-              <summary>More formats</summary>
-              <div className="final-more-formats-content">
-                {excelButton}
-                <p className="shell-hint">
-                  Excel is a readable scoresheet for review. QBJ remains the portable result used for
-                  tournament handoff and recovery.
-                </p>
-              </div>
-            </details>
-          </div>
-          {copyStatus}
-        </section>
-      )}
-
-      <div className="shell-actions">
-        {!canLeave && (
-          <p className="shell-hint">
-            {backupDownloaded
-              ? 'Confirm the handoff before finishing.'
-              : `Download the QBJ${requiresHandoffAcknowledgement ? ' and confirm the handoff' : ''} before finishing.`}
-          </p>
-        )}
+      <div className="completion-secondary">
         <button
           type="button"
           className="shell-button shell-button-quiet"
           onClick={() => void onBackToScorekeeper()}
         >
-          Back to scorekeeper
+          Review score
         </button>
-        {!delivered && (
-          <button
-            type="button"
-            className={`shell-button${canLeave ? ' is-primary' : ''}`}
-            disabled={!canLeave}
-            onClick={() => void onHome()}
-          >
-            {continueLabel}
-          </button>
-        )}
         {onRematch && isManualGame(record.package) && (
           <button
             type="button"
-            className="shell-button"
+            className="shell-button shell-button-quiet"
             disabled={rematching}
             onClick={() => {
               if (rematchInFlight.current) return;
@@ -392,6 +479,7 @@ export default function CompletionScreen(props: {
             {rematching ? 'Starting…' : 'Rematch'}
           </button>
         )}
+        {exportsDisclosure}
       </div>
       {rematchFailed && (
         <p className="shell-warning" role="alert">

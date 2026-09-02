@@ -492,14 +492,14 @@ describe('finishing a practice', () => {
     await bonus('20');
     await finishGame();
 
-    expect(screen.getByText('Download or export a copy')).toBeInTheDocument();
+    expect(screen.getByText('Files & exports')).toBeInTheDocument();
     expect(
       screen.getByText(
         'This result is saved on this device. Download a QBJ if you want to keep or share a portable copy.',
       ),
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Download QBJ copy' })).toBeInTheDocument();
-    expect(screen.queryByText('Hand this result over')).toBeNull();
+    expect(screen.queryByText('This result needs to be handed over')).toBeNull();
   });
 
   test('Done is enabled without downloading anything', async () => {
@@ -527,8 +527,8 @@ describe('finishing a practice', () => {
     await press('Download QBJ copy');
 
     expect(downloads.files).toHaveLength(1);
-    expect(await screen.findByText(/Downloaded at/)).toBeInTheDocument();
-    expect(screen.getByText('A copy of this result is in your downloads.')).toBeInTheDocument();
+    expect(await screen.findByText(/QBJ downloaded/)).toBeInTheDocument();
+    expect(screen.queryByText('A copy of this result is in your downloads.')).toBeNull();
     expect(screen.queryByRole('button', { name: 'I uploaded the result' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Done' })).not.toBeDisabled();
   });
@@ -541,7 +541,7 @@ describe('finishing a practice', () => {
     await bonus('20');
     await finishGame();
 
-    expect(screen.getByText('Hand this result over')).toBeInTheDocument();
+    expect(screen.getByText('This result needs to be handed over.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Done' })).toBeDisabled();
     expect(screen.getByText(/Download the QBJ before finishing/)).toBeInTheDocument();
   });

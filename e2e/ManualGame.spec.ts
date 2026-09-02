@@ -107,7 +107,7 @@ test('a practice game is created, scored, reloaded, finished and kept', async ({
   // optional exports stay out of the way until somebody asks for them.
   const copy = page.locator('details.final-copy-details');
   await expect(copy).toBeVisible();
-  await expect(copy.locator('summary')).toHaveText('Download or export a copy');
+  await expect(copy.locator('summary')).toHaveText('Files & exports');
   await expect(copy).not.toHaveAttribute('open', '');
   await expect(copy.getByRole('button', { name: 'Download QBJ copy' })).toBeHidden();
   await copy.locator('summary').click();
@@ -120,7 +120,7 @@ test('a practice game is created, scored, reloaded, finished and kept', async ({
 
   // A finished result must remain editable. Return to the scorer, verify the completed review is
   // still the active presentation, then submit it again so the original exit path remains covered.
-  await page.getByRole('button', { name: 'Back to scorekeeper' }).click();
+  await page.getByRole('button', { name: 'Review score' }).click();
   await expect(page.locator('.scorer-completion')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Full scoresheet review' })).toBeVisible();
   await page.getByLabel('Final score confirmed with both teams').check();
