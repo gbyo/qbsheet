@@ -1911,6 +1911,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         const round = draft.rounds.find((entry) => entry.id === roundId);
         if (!round || round.status !== 'prepared') return;
         round.status = 'released';
+        round.startedAt = isoNow();
         const phase = draft.phases.find((entry) => entry.id === round.phaseId);
         if (phase) phase.status = 'active';
         if (draft.tournament) {
