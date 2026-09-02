@@ -96,55 +96,6 @@ export function SettingsView({
           <section className="director-panel">
             <div className="director-panel-heading">
               <div>
-                <p className="director-eyebrow">Operator</p>
-                <h2>Local identity</h2>
-              </div>
-              <StateLabel state="info" label="App setting" />
-            </div>
-            <PanelBody>
-              <p className="director-panel-footnote">
-                Used to attribute new Director decisions. It is not authentication and is never copied into
-                QBJ, tournament archives, or QBSheet Live.
-              </p>
-              <div className="director-form-grid director-form-grid-two">
-                <FormField label="Display name">
-                  <input
-                    value={operator.name}
-                    onChange={(event) =>
-                      setOperatorDraft({ ...operator, key: operatorDraftKey, name: event.target.value })
-                    }
-                  />
-                </FormField>
-                <FormField label="Role">
-                  <input
-                    value={operator.role}
-                    onChange={(event) =>
-                      setOperatorDraft({ ...operator, key: operatorDraftKey, role: event.target.value })
-                    }
-                    placeholder="Tournament director"
-                  />
-                </FormField>
-              </div>
-            </PanelBody>
-            <PanelFooter>
-              <Button
-                variant="secondary"
-                disabled={!onSaveOperator || !operator.name.trim()}
-                onClick={() => {
-                  onSaveOperator?.({
-                    displayName: operator.name.trim(),
-                    role: operator.role.trim() || undefined,
-                  });
-                  onAnnounce('Operator identity saved locally.');
-                }}
-              >
-                Save operator
-              </Button>
-            </PanelFooter>
-          </section>
-          <section className="director-panel">
-            <div className="director-panel-heading">
-              <div>
                 <p className="director-eyebrow">Tournament</p>
                 <h2>Details</h2>
               </div>
@@ -215,65 +166,118 @@ export function SettingsView({
               </PanelBody>
             )}
           </section>
-          <section className="director-panel">
-            <div className="director-panel-heading">
-              <div>
-                <p className="director-eyebrow">Storage</p>
-                <h2>
-                  {controller.repositoryKind === 'tauri-sqlite'
-                    ? 'SQLite'
-                    : controller.repositoryKind === 'indexeddb'
-                      ? 'IndexedDB'
-                      : 'Memory'}
-                </h2>
+          <div className="director-page-stack">
+            <section className="director-panel">
+              <div className="director-panel-heading">
+                <div>
+                  <p className="director-eyebrow">Operator</p>
+                  <h2>Local identity</h2>
+                </div>
+                <StateLabel state="info" label="App setting" />
               </div>
-              <StateLabel
-                state={controller.error ? 'help' : 'finished'}
-                label={controller.error ? 'Needs attention' : controller.saving ? 'Saving' : 'Healthy'}
-              />
-            </div>
-            <PanelBody>
-              <dl className="director-detail-list director-detail-list-large">
-                <div>
-                  <dt>Last saved</dt>
-                  <dd>
-                    {state.metadata.lastSavedAt
-                      ? new Date(state.metadata.lastSavedAt).toLocaleString()
-                      : 'Not yet'}
-                  </dd>
+              <PanelBody>
+                <p className="director-panel-footnote">
+                  Used to attribute new Director decisions. It is not authentication and is never copied into
+                  QBJ, tournament archives, or QBSheet Live.
+                </p>
+                <div className="director-form-grid director-form-grid-two">
+                  <FormField label="Display name">
+                    <input
+                      value={operator.name}
+                      onChange={(event) =>
+                        setOperatorDraft({ ...operator, key: operatorDraftKey, name: event.target.value })
+                      }
+                    />
+                  </FormField>
+                  <FormField label="Role">
+                    <input
+                      value={operator.role}
+                      onChange={(event) =>
+                        setOperatorDraft({ ...operator, key: operatorDraftKey, role: event.target.value })
+                      }
+                      placeholder="Tournament director"
+                    />
+                  </FormField>
                 </div>
+              </PanelBody>
+              <PanelFooter>
+                <Button
+                  variant="secondary"
+                  disabled={!onSaveOperator || !operator.name.trim()}
+                  onClick={() => {
+                    onSaveOperator?.({
+                      displayName: operator.name.trim(),
+                      role: operator.role.trim() || undefined,
+                    });
+                    onAnnounce('Operator identity saved locally.');
+                  }}
+                >
+                  Save operator
+                </Button>
+              </PanelFooter>
+            </section>
+            <section className="director-panel">
+              <div className="director-panel-heading">
                 <div>
-                  <dt>Last checkpoint</dt>
-                  <dd>
-                    {state.metadata.lastCheckpointAt
-                      ? new Date(state.metadata.lastCheckpointAt).toLocaleString()
-                      : 'Not yet'}
-                  </dd>
+                  <p className="director-eyebrow">Storage</p>
+                  <h2>
+                    {controller.repositoryKind === 'tauri-sqlite'
+                      ? 'SQLite'
+                      : controller.repositoryKind === 'indexeddb'
+                        ? 'IndexedDB'
+                        : 'Memory'}
+                  </h2>
                 </div>
-                <div>
-                  <dt>Schema</dt>
-                  <dd>Director v{state.schemaVersion}</dd>
-                </div>
-              </dl>
-              {controller.error && <p className="director-error-copy">{controller.error}</p>}
-            </PanelBody>
-            <PanelFooter>
-              <Button
-                variant="secondary"
-                icon="clipboard"
-                onClick={() => {
-                  void controller
-                    .checkpoint('manual settings checkpoint')
-                    .then(() => onAnnounce('Checkpoint created.'))
-                    .catch((reason: unknown) =>
-                      onAnnounce(reason instanceof Error ? reason.message : 'Checkpoint could not be saved.'),
-                    );
-                }}
-              >
-                Create checkpoint
-              </Button>
-            </PanelFooter>
-          </section>
+                <StateLabel
+                  state={controller.error ? 'help' : 'finished'}
+                  label={controller.error ? 'Needs attention' : controller.saving ? 'Saving' : 'Healthy'}
+                />
+              </div>
+              <PanelBody>
+                <dl className="director-detail-list director-detail-list-large">
+                  <div>
+                    <dt>Last saved</dt>
+                    <dd>
+                      {state.metadata.lastSavedAt
+                        ? new Date(state.metadata.lastSavedAt).toLocaleString()
+                        : 'Not yet'}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Last checkpoint</dt>
+                    <dd>
+                      {state.metadata.lastCheckpointAt
+                        ? new Date(state.metadata.lastCheckpointAt).toLocaleString()
+                        : 'Not yet'}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Schema</dt>
+                    <dd>Director v{state.schemaVersion}</dd>
+                  </div>
+                </dl>
+                {controller.error && <p className="director-error-copy">{controller.error}</p>}
+              </PanelBody>
+              <PanelFooter>
+                <Button
+                  variant="secondary"
+                  icon="clipboard"
+                  onClick={() => {
+                    void controller
+                      .checkpoint('manual settings checkpoint')
+                      .then(() => onAnnounce('Checkpoint created.'))
+                      .catch((reason: unknown) =>
+                        onAnnounce(
+                          reason instanceof Error ? reason.message : 'Checkpoint could not be saved.',
+                        ),
+                      );
+                  }}
+                >
+                  Create checkpoint
+                </Button>
+              </PanelFooter>
+            </section>
+          </div>
         </div>
         <section className="director-panel">
           <div className="director-panel-heading">
