@@ -66,12 +66,14 @@ describe('standalone Recovery Mode', () => {
     const loaded = snapshot();
     render(<RecoveryMode loadSources={() => Promise.resolve(loaded)} onResume={onResume} now={() => now} />);
 
-    expect(await screen.findByRole('heading', { name: 'Recovery Mode' })).toBeInTheDocument();
+    // The title and the shell chrome are painted before the sources are read, so waiting on them
+    // would let every assertion below race the asynchronous inspection. Anchor on a source row,
+    // which only exists once `loadSources` has resolved.
+    expect(await screen.findByText('Instant scoring journal')).toBeInTheDocument();
     const recoveryMain = screen.getByRole('main', { name: 'Recovery Mode' });
     expect(recoveryMain).toHaveClass('shell', 'recovery-screen');
     expect(recoveryMain.querySelector('.shell-brand-logo')).not.toBeNull();
     expect(screen.getByRole('heading', { name: 'Recovery Mode' })).toHaveClass('shell-title');
-    expect(screen.getByText('Instant scoring journal')).toBeInTheDocument();
     expect(screen.getAllByText(/Valid · saved just now · 1 event · through TU 14/)).toHaveLength(2);
     expect(screen.getByText(/does not open the scorer/i)).toBeInTheDocument();
 
