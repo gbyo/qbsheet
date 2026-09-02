@@ -54,6 +54,20 @@ jobs:
       - name: Test tournament-formats
         run: npm run director:formats:test
 
+      - name: Test the canonical tournament domain
+        run: npm run director:domain:test
+
+      # The QBSheet Live protocol, projection, and clients are ordinary TypeScript and belong in
+      # the fast gate. Everything that needs `workerd`, Swift, or Xcode is in `qblive.yml`.
+      - name: Test QBSheet Live
+        run: npm run qblive:test
+
+      - name: Test QBSheet Live Web
+        run: npm run live:test
+
+      - name: Build QBSheet Live Web
+        run: npm run live:build
+
   browser:
     runs-on: ubuntu-latest
     timeout-minutes: 15

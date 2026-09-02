@@ -1,0 +1,88 @@
+name: QBSheet Live load
+
+# On demand and weekly, never on a push.
+#
+# Hundreds of concurrent WebSockets is a useful measurement and a poor unit test: slow,
+# machine-sensitive, and a flake would train everybody to ignore a red build. Keeping it out of the
+# ordinary path is what lets it be honest about what it measures. See docs/QBLIVE_LOAD.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      viewers:
+        description: Concurrent WebSocket spectators
+        default: '300'
+      seconds:
+        description: How long to hold the connections
+        default: '45'
+  schedule:
+    # Sunday 06:00 UTC: after a weekend of real tournaments, before anybody looks on Monday.
+    - cron: '0 6 * * 0'
+
+permissions:
+  contents: read
+
+jobs:
+  load:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - name: Install the backend
+        working-directory: apps/qblive-backend-cloudflare
+        run: npm install
+      - name: Start the backend in workerd
+        working-directory: apps/qblive-backend-cloudflare
+        run: |
+          npx wrangler dev --port 8788 --var QBLIVE_SETUP_TOKEN:ci-setup-token > /tmp/backend.log 2>&1 &
+          for _ in $(seq 1 40); do
+            if curl -sf http://127.0.0.1:8788/health > /dev/null; then break; fi
+            sleep 2
+          done
+          curl -sf http://127.0.0.1:8788/health || { cat /tmp/backend.log; exit 1; }
+      - name: Publish a fixture tournament
+        id: publish
+        run: |
+          PUBLICATION=bcdfghjkmnpqrstvwxyz
+          TOKEN=$(curl -sf -X POST http://127.0.0.1:8788/qblive/v1/manage/claim \
+            -H 'content-type: application/json' \
+            -d "{\"setupToken\":\"ci-setup-token\",\"publicationId\":\"$PUBLICATION\"}" \
+            | node -e 'process.stdin.on("data",d=>process.stdout.write(JSON.parse(d).managementToken))')
+          node -e '
+            const fs = require("node:fs");
+            const snapshot = JSON.parse(fs.readFileSync("packages/qblive-protocol/fixtures/snapshot-maximal.json","utf8"));
+            fs.writeFileSync("/tmp/publish.json", JSON.stringify({ snapshot: { ...snapshot, revision: 1 } }));
+          '
+          curl -sf -X PUT "http://127.0.0.1:8788/qblive/v1/manage/tournaments/$PUBLICATION/snapshot" \
+            -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+            --data-binary @/tmp/publish.json > /dev/null
+          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+          echo "publication=$PUBLICATION" >> "$GITHUB_OUTPUT"
+      - name: APNs channel model
+        # Pure arithmetic over the sharding rules, so it runs regardless of anything else.
+        run: |
+          npm run build --workspace=@qbsheet/qblive-conformance
+          node packages/qblive-conformance/dist/load/cli.js --channels
+      - name: WebSocket spectators
+        # `--update-ms 5000` deliberately: `wrangler dev`'s local persistence flushes writes on a
+        # ~4-second timer, and a shorter interval measures that timer rather than the backend.
+        # See docs/QBLIVE_LOAD.md#2.
+        run: |
+          node packages/qblive-conformance/dist/load/cli.js \
+            --origin http://127.0.0.1:8788 \
+            --publication ${{ steps.publish.outputs.publication }} \
+            --management-token ${{ steps.publish.outputs.token }} \
+            --viewers ${{ github.event.inputs.viewers || '300' }} \
+            --seconds ${{ github.event.inputs.seconds || '45' }} \
+            --update-ms 5000
+      - name: Backend log on failure
+        if: failure()
+        run: cat /tmp/backend.log

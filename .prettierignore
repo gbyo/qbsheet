@@ -8,3 +8,6 @@ playwright-report/
 test-results/
 .stryker-tmp/
 package-lock.json
+
+# Wrangler's local dev bundle. Generated, and not ours to format.
+**/.wrangler/
