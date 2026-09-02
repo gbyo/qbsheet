@@ -267,7 +267,9 @@ export function SettingsView({
                       .checkpoint('manual settings checkpoint')
                       .then(() => onAnnounce('Checkpoint created.'))
                       .catch((reason: unknown) =>
-                        onAnnounce(reason instanceof Error ? reason.message : 'Checkpoint could not be saved.'),
+                        onAnnounce(
+                          reason instanceof Error ? reason.message : 'Checkpoint could not be saved.',
+                        ),
                       );
                   }}
                 >
