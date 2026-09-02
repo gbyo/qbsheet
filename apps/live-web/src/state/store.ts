@@ -190,6 +190,7 @@ export class LiveConnection {
   private removed = false;
   private snapshot: QbliveSnapshot | null = null;
   private generation = 0;
+  private requestEpoch = 0;
 
   constructor(
     private readonly client: QbliveClient,
@@ -204,6 +205,7 @@ export class LiveConnection {
 
   stop(): void {
     this.stopped = true;
+    this.requestEpoch += 1;
     this.generation += 1;
     this.socket?.close();
     this.socket = null;
@@ -221,12 +223,15 @@ export class LiveConnection {
 
   private async loadSnapshot(): Promise<void> {
     if (this.stopped || this.removed) return;
+    const requestEpoch = this.requestEpoch;
     try {
       const manifest = await this.client.manifest();
+      if (!this.isCurrentRequest(requestEpoch)) return;
       const snapshot =
         this.snapshot && this.snapshot.revision === manifest.revision
           ? this.snapshot
           : await this.client.snapshot();
+      if (!this.isCurrentRequest(requestEpoch)) return;
       this.snapshot = snapshot;
       this.attempts = 0;
       this.hooks.onSnapshot(snapshot);
@@ -236,8 +241,13 @@ export class LiveConnection {
         this.hooks.onConnection('polling');
       }
     } catch (reason) {
+      if (!this.isCurrentRequest(requestEpoch)) return;
       this.handleFailure(reason);
     }
+  }
+
+  private isCurrentRequest(requestEpoch: number): boolean {
+    return requestEpoch === this.requestEpoch && !this.stopped && !this.removed;
   }
 
   private openStream(manifest: QbliveManifest): void {
@@ -321,8 +331,10 @@ export class LiveConnection {
   }
 
   private async catchUp(after: number): Promise<void> {
+    const requestEpoch = this.requestEpoch;
     try {
       const page = await this.client.events(after);
+      if (!this.isCurrentRequest(requestEpoch)) return;
       if (page.resyncRequired) {
         await this.loadSnapshot();
         return;
@@ -333,9 +345,11 @@ export class LiveConnection {
         return;
       }
       for (const event of page.events) snapshot = applyEvent(snapshot, event);
+      if (!this.isCurrentRequest(requestEpoch)) return;
       this.snapshot = parseSnapshot(snapshot);
       this.hooks.onSnapshot(this.snapshot);
     } catch {
+      if (!this.isCurrentRequest(requestEpoch)) return;
       await this.loadSnapshot();
     }
   }
@@ -359,9 +373,11 @@ export class LiveConnection {
   }
 
   private async poll(): Promise<void> {
-    if (this.removed) return;
+    if (this.stopped || this.removed) return;
+    const requestEpoch = this.requestEpoch;
     try {
       const manifest = await this.client.manifest();
+      if (!this.isCurrentRequest(requestEpoch)) return;
       if (this.snapshot && manifest.revision === this.snapshot.revision) {
         // Reached the backend and there is nothing new. Say so, which also clears an earlier
         // `offline` once connectivity comes back without the revision having moved.
@@ -370,11 +386,13 @@ export class LiveConnection {
         return;
       }
       const snapshot = await this.client.snapshot();
+      if (!this.isCurrentRequest(requestEpoch)) return;
       this.snapshot = snapshot;
       this.attempts = 0;
       this.hooks.onSnapshot(snapshot);
       this.hooks.onConnection('polling');
     } catch (reason) {
+      if (!this.isCurrentRequest(requestEpoch)) return;
       this.handleFailure(reason);
     }
   }
@@ -399,6 +417,7 @@ export class LiveConnection {
     if (fatal) {
       // A permanent 404/410 is not an outage. Stop every automatic retry and make the removed
       // state explicit even when a cached snapshot remains available.
+      this.requestEpoch += 1;
       this.generation += 1;
       this.socket?.close();
       this.socket = null;

@@ -268,7 +268,16 @@ describe('specific disclosures', () => {
   });
 
   test('release before the scheduled time and a different actual start do not change the plan', () => {
-    const snapshot = project({ ...defaultLivePublicationSettings(), enabled: true });
+    const state = privacyFixture();
+    state.rounds.find((round) => round.id === 'round-2')!.startedAt = '2026-09-05T14:17:00.000Z';
+    const snapshot = projectLiveSnapshot({
+      state,
+      settings: { ...defaultLivePublicationSettings(), enabled: true },
+      publicationId: 'bcdfghjkmnpqrstvwxyz',
+      revision: 42,
+      generatedAt,
+      capabilities,
+    });
     expect(snapshot.schedule.find((entry) => entry.id === 'game-3')?.scheduledStart).toBe(
       '2026-09-05T10:00:00-04:00',
     );

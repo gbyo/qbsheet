@@ -144,6 +144,14 @@ describe('following a team', () => {
 });
 
 describe('what the page must not invent', () => {
+  test('labels schedule sections with their round and pool', async () => {
+    vi.stubGlobal('fetch', stubBackend(defaultSnapshot));
+    const user = await openFollowing();
+    await user.click(screen.getByRole('button', { name: /Schedule/ }));
+    await user.click(screen.getByRole('button', { name: 'All games' }));
+    expect(screen.getByRole('region', { name: 'Round 1 · Pool A' })).toBeInTheDocument();
+  });
+
   test('a game with no scheduled time shows no time at all', async () => {
     const snapshot = structuredClone(defaultSnapshot) as unknown as QbliveSnapshot;
     for (const game of snapshot.schedule) game.scheduledStart = null;
