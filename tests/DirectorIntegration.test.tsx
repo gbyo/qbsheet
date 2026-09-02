@@ -687,6 +687,39 @@ describe('Director integration hardening', () => {
     );
   });
 
+  test('protests cannot target an accepted bye or unmatched scheduled game', async () => {
+    const { hook } = await directorWithSetup();
+    act(() => hook.result.current.generateSchedule());
+    const scheduled = hook.result.current.state.scheduledGames[0];
+    if (!scheduled || !scheduled.rightTeamId) throw new Error('test setup did not generate a game');
+    const rightTeamId = scheduled.rightTeamId;
+    act(() => {
+      hook.result.current.addManualResult({
+        scheduledGameId: scheduled.id,
+        scores: [score(scheduled.leftTeamId, 20), score(rightTeamId, 10)],
+      });
+    });
+    const game = hook.result.current.state.games[0];
+    if (!game) throw new Error('test setup did not accept a result');
+
+    const imported = structuredClone(hook.result.current.state);
+    const importedScheduled = imported.scheduledGames.find((entry) => entry.id === scheduled.id);
+    if (!importedScheduled) throw new Error('test setup lost the scheduled game');
+    importedScheduled.rightTeamId = null;
+    importedScheduled.bye = true;
+    act(() => {
+      expect(hook.result.current.importSnapshot(imported)).toBe(true);
+    });
+
+    let added = true;
+    act(() => {
+      added = hook.result.current.addProtest(game.id, 'This bye should not be protestable.');
+    });
+    expect(added).toBe(false);
+    expect(hook.result.current.state.protests).toHaveLength(0);
+    expect(hook.result.current.error).toMatch(/two-team game/i);
+  });
+
   test('packet-use validation reports reuse by scheduled-game identity', async () => {
     const { hook } = await directorWithSetup(4);
     act(() => hook.result.current.generateSchedule());

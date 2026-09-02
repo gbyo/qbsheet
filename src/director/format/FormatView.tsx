@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { currentPhase, formatGenerationAvailability, type DirectorState } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
 import { Button, FormField, PanelBody, StateLabel } from '../components/Controls';
@@ -21,18 +21,23 @@ export function FormatView({
   const format = formatId ? state.formats.find((entry) => entry.id === formatId) : undefined;
   const [roundsPerTeam, setRoundsPerTeam] = useState(format?.roundsPerTeam?.toString() ?? '');
   const rules = state.tournament?.rules;
-  const [scoringRuleDrafts, setScoringRuleDrafts] = useState(() => scoringRuleDraftsFor(rules));
-  useEffect(() => {
-    setScoringRuleDrafts(scoringRuleDraftsFor(rules));
-  }, [
-    state.tournament?.id,
-    rules?.tossupValue,
-    rules?.powerValue,
-    rules?.negValue,
-    rules?.bonusValue,
-    rules?.tossupCount,
-    rules?.bonusParts,
-  ]);
+  const scoringRuleDraftKey = scoringRuleKey(state.tournament?.id, rules);
+  const [scoringRuleDraftState, setScoringRuleDraftState] = useState(() => ({
+    key: scoringRuleDraftKey,
+    values: scoringRuleDraftsFor(rules),
+  }));
+  const scoringRuleDrafts =
+    scoringRuleDraftState.key === scoringRuleDraftKey
+      ? scoringRuleDraftState.values
+      : scoringRuleDraftsFor(rules);
+  const updateScoringRuleDrafts = (
+    update: (current: ReturnType<typeof scoringRuleDraftsFor>) => ReturnType<typeof scoringRuleDraftsFor>,
+  ) => {
+    setScoringRuleDraftState({
+      key: scoringRuleDraftKey,
+      values: update(scoringRuleDrafts),
+    });
+  };
   const commitScoringRule = (key: ScoringRuleKey, label: string): void => {
     const raw = scoringRuleDrafts[key].trim();
     if (!raw) {
@@ -225,7 +230,7 @@ export function FormatView({
                     step="1"
                     value={scoringRuleDrafts.tossupValue}
                     onChange={(event) =>
-                      setScoringRuleDrafts((current) => ({
+                      updateScoringRuleDrafts((current) => ({
                         ...current,
                         tossupValue: event.target.value,
                       }))
@@ -240,7 +245,7 @@ export function FormatView({
                     step="1"
                     value={scoringRuleDrafts.powerValue}
                     onChange={(event) =>
-                      setScoringRuleDrafts((current) => ({
+                      updateScoringRuleDrafts((current) => ({
                         ...current,
                         powerValue: event.target.value,
                       }))
@@ -255,7 +260,7 @@ export function FormatView({
                     step="1"
                     value={scoringRuleDrafts.negValue}
                     onChange={(event) =>
-                      setScoringRuleDrafts((current) => ({
+                      updateScoringRuleDrafts((current) => ({
                         ...current,
                         negValue: event.target.value,
                       }))
@@ -270,7 +275,7 @@ export function FormatView({
                     step="1"
                     value={scoringRuleDrafts.bonusValue}
                     onChange={(event) =>
-                      setScoringRuleDrafts((current) => ({
+                      updateScoringRuleDrafts((current) => ({
                         ...current,
                         bonusValue: event.target.value,
                       }))
@@ -285,7 +290,7 @@ export function FormatView({
                     step="1"
                     value={scoringRuleDrafts.tossupCount}
                     onChange={(event) =>
-                      setScoringRuleDrafts((current) => ({
+                      updateScoringRuleDrafts((current) => ({
                         ...current,
                         tossupCount: event.target.value,
                       }))
@@ -300,7 +305,7 @@ export function FormatView({
                     step="1"
                     value={scoringRuleDrafts.bonusParts}
                     onChange={(event) =>
-                      setScoringRuleDrafts((current) => ({
+                      updateScoringRuleDrafts((current) => ({
                         ...current,
                         bonusParts: event.target.value,
                       }))
@@ -419,8 +424,13 @@ function PoolConfiguration({
   );
   const [newPoolName, setNewPoolName] = useState('');
   const locked = phase.roundIds.length > 0;
+  const playoffPools = formatForPhase(state, phase)?.kind === 'playoff-pools';
   const assignedTeamIds = new Set(pools.flatMap((pool) => pool.teamIds));
-  const unassignedCount = confirmedTeams.filter((team) => !assignedTeamIds.has(team.id)).length;
+  const unassignedCount = playoffPools
+    ? 0
+    : confirmedTeams.filter((team) => !assignedTeamIds.has(team.id)).length;
+  const poolGeneration = formatGenerationAvailability(state);
+  const poolSetupComplete = pools.length > 0 && poolGeneration.supported;
   const createPools = () => {
     if (locked) {
       onAnnounce('Pool membership is locked after a round has been generated; add a new phase instead.');
@@ -466,13 +476,15 @@ function PoolConfiguration({
           </h2>
         </div>
         <StateLabel
-          state={locked ? 'finished' : unassignedCount === 0 && pools.length > 0 ? 'ready' : 'warning'}
-          label={locked ? 'Locked' : unassignedCount === 0 && pools.length > 0 ? 'Complete' : 'Needs setup'}
+          state={locked ? 'finished' : poolSetupComplete ? 'ready' : 'warning'}
+          label={locked ? 'Locked' : poolSetupComplete ? 'Complete' : 'Needs setup'}
         />
       </div>
       <PanelBody>
         <p className="director-panel-description">
-          Every confirmed team must belong to exactly one pool before a pool round can be generated.
+          {playoffPools
+            ? 'Each advancing team in this phase must belong to exactly one playoff pool; confirmed teams outside the phase are valid.'
+            : 'Every confirmed team must belong to exactly one pool before a pool round can be generated.'}
           {locked ? ' Membership is locked because this phase already has generated rounds.' : ''}
         </p>
         {pools.length === 0 ? (
@@ -501,9 +513,13 @@ function PoolConfiguration({
         ) : (
           <>
             <p className="director-panel-footnote">
-              {unassignedCount === 0
-                ? 'All confirmed teams are assigned exactly once.'
-                : `${unassignedCount} confirmed team${unassignedCount === 1 ? '' : 's'} still need${unassignedCount === 1 ? 's' : ''} a pool.`}
+              {playoffPools
+                ? pools.length > 0
+                  ? 'Advancing teams are assigned to the playoff pools; other confirmed teams remain outside this phase.'
+                  : 'Assign the advancing teams to playoff pools before generating.'
+                : unassignedCount === 0
+                  ? 'All confirmed teams are assigned exactly once.'
+                  : `${unassignedCount} confirmed team${unassignedCount === 1 ? '' : 's'} still need${unassignedCount === 1 ? 's' : ''} a pool.`}
             </p>
             <div className="director-pool-list">
               {pools.map((pool) => (
@@ -559,8 +575,14 @@ function PoolEditor({
   controller: DirectorController;
   onAnnounce: (message: string) => void;
 }) {
-  const [name, setName] = useState(pool.name);
-  const [teamIds, setTeamIds] = useState(pool.teamIds);
+  const [draft, setDraft] = useState(() => ({
+    name: pool.name,
+    teamIds: pool.teamIds,
+    nameDirty: false,
+    teamIdsDirty: false,
+  }));
+  const name = !locked && draft.nameDirty ? draft.name : pool.name;
+  const teamIds = !locked && draft.teamIdsDirty ? draft.teamIds : pool.teamIds;
   const assignedElsewhere = new Set(
     pools.filter((candidate) => candidate.id !== pool.id).flatMap((candidate) => candidate.teamIds),
   );
@@ -571,6 +593,7 @@ function PoolEditor({
       return;
     }
     if (!controller.updatePool(pool.id, { name: trimmedName, teamIds })) return;
+    setDraft({ name: trimmedName, teamIds, nameDirty: false, teamIdsDirty: false });
     onAnnounce(`${trimmedName} updated.`);
   };
   return (
@@ -583,7 +606,17 @@ function PoolEditor({
     >
       <div className="director-form-grid director-form-grid-two">
         <FormField label="Pool name">
-          <input value={name} onChange={(event) => setName(event.target.value)} />
+          <input
+            value={name}
+            onChange={(event) => {
+              setDraft((current) => ({
+                ...current,
+                name: event.target.value,
+                nameDirty: true,
+              }));
+            }}
+            disabled={locked}
+          />
         </FormField>
         <FormField label="Teams" hint="Hold Command/Ctrl to select more than one team.">
           <select
@@ -591,9 +624,13 @@ function PoolEditor({
             multiple
             size={Math.min(8, Math.max(3, teams.length))}
             value={teamIds}
-            onChange={(event) =>
-              setTeamIds(Array.from(event.currentTarget.selectedOptions, (option) => option.value))
-            }
+            onChange={(event) => {
+              setDraft((current) => ({
+                ...current,
+                teamIds: Array.from(event.currentTarget.selectedOptions, (option) => option.value),
+                teamIdsDirty: true,
+              }));
+            }}
             disabled={locked}
           >
             {teams.map((team) => (
@@ -620,6 +657,13 @@ function PoolEditor({
   );
 }
 
+function formatForPhase(
+  state: DirectorState,
+  phase: DirectorState['phases'][number],
+): DirectorState['formats'][number] | undefined {
+  return state.formats.find((format) => format.id === phase.formatId);
+}
+
 function formatDescription(kind: string): string {
   return (
     (
@@ -639,6 +683,21 @@ function formatDescription(kind: string): string {
 type ScoringRuleKey = 'tossupValue' | 'powerValue' | 'negValue' | 'bonusValue' | 'tossupCount' | 'bonusParts';
 
 type ScoringRuleDrafts = Record<ScoringRuleKey, string>;
+
+function scoringRuleKey(
+  tournamentId: string | undefined,
+  rules: NonNullable<DirectorState['tournament']>['rules'] | undefined,
+): string {
+  return [
+    tournamentId ?? '',
+    rules?.tossupValue ?? '',
+    rules?.powerValue ?? '',
+    rules?.negValue ?? '',
+    rules?.bonusValue ?? '',
+    rules?.tossupCount ?? '',
+    rules?.bonusParts ?? '',
+  ].join('|');
+}
 
 function scoringRuleDraftsFor(
   rules: NonNullable<DirectorState['tournament']>['rules'] | undefined,

@@ -1834,9 +1834,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
         !game ||
         game.status !== 'accepted' ||
         !scheduled ||
+        !scheduled.rightTeamId ||
         canonicalAcceptedGame(snapshot, scheduled.id)?.id !== gameId
       ) {
-        setError('A protest must target the current canonical accepted result.');
+        setError('A protest must target the current canonical accepted result for a two-team game.');
         return false;
       }
       if (!description.trim()) {
