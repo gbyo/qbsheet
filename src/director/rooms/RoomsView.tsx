@@ -264,7 +264,10 @@ export function RoomsView({
                       <td>{staffName(state, room.scorekeeperId) || 'Unassigned'}</td>
                       <td>{equipmentName(state, room.equipmentId) || 'Unassigned'}</td>
                       <td>
-                        <StateLabel state={room.status} label={room.status} />
+                        <StateLabel
+                          state={room.status}
+                          label={room.available ? room.status : 'Unavailable'}
+                        />
                         <small className="director-table-subtext">
                           {room.available ? 'Available next round' : 'Unavailable next round'}
                         </small>
@@ -298,20 +301,6 @@ export function RoomsView({
                                 Prepare game file
                               </Button>
                             )}
-                          <button
-                            type="button"
-                            className="director-button director-button-quiet director-table-action"
-                            aria-label={`${room.available ? 'Mark' : 'Make'} ${room.name} ${room.available ? 'unavailable' : 'available'}`}
-                            onClick={() => {
-                              controller.updateRoom(room.id, { available: !room.available });
-                              onAnnounce(
-                                `${room.name} marked ${room.available ? 'unavailable' : 'available'}.`,
-                              );
-                            }}
-                          >
-                            <Icon name={room.available ? 'pause' : 'play'} size={14} />
-                            <span>{room.available ? 'Unavailable' : 'Available'}</span>
-                          </button>
                         </div>
                       </td>
                     </tr>

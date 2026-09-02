@@ -54,6 +54,8 @@ export function directorFixture(options: FixtureOptions = {}): DirectorState {
       tiebreakers: ['head-to-head', 'record', 'points', 'margin', 'powers', 'gets', 'playoff'],
     },
     formatId: 'format-1',
+    currentPhaseId: 'phase-1',
+    currentPacketId: 'packet-5',
     currentRoundId: 'round-5',
     createdAt: now,
     updatedAt: now,

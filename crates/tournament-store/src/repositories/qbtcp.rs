@@ -198,9 +198,9 @@ impl<'a> QbtcpSessionRepository<'a> {
                     Some((status, _)) if status == "closed" => Err(StoreError::Conflict(format!(
                         "QBTCP session {id} is closed"
                     ))),
-                    Some((_, Some(expires_at))) if expires_at <= timestamp => {
-                        Err(StoreError::Conflict(format!("QBTCP session {id} has expired")))
-                    }
+                    Some((_, Some(expires_at))) if expires_at <= timestamp => Err(
+                        StoreError::Conflict(format!("QBTCP session {id} has expired")),
+                    ),
                     Some(_) => Err(StoreError::Conflict(format!(
                         "QBTCP session {id} cannot be marked seen"
                     ))),

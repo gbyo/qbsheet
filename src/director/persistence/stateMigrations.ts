@@ -8,6 +8,7 @@ import {
   type ResultSubmission,
   type TournamentRules,
 } from '../domain';
+import { normalizeTransferState } from '../transfers/model';
 
 export class DirectorStateVersionError extends Error {
   readonly version: number;
@@ -128,6 +129,7 @@ function completeState(value: Record<string, unknown>): DirectorState {
     qbtcpSessions: arrayOrEmpty(candidate.qbtcpSessions, 'qbtcpSessions'),
     qbtcpHelpRequests: arrayOrEmpty(candidate.qbtcpHelpRequests, 'qbtcpHelpRequests'),
     qbtcpRosterAmendments: arrayOrEmpty(candidate.qbtcpRosterAmendments, 'qbtcpRosterAmendments'),
+    transfers: normalizeTransferState(candidate.transfers),
   };
   state.submissions = supersedeDuplicateScheduledSubmissions(state);
   state.packets = canonicalizePacketReferences(state);

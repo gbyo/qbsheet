@@ -18,7 +18,6 @@ import {
   type TeamGameScore,
 } from '../domain';
 import { createDirectorRepository, normalizeDirectorState, type DirectorRepository } from '../persistence';
-import { createDirectorRepository, type DirectorRepository } from '../persistence';
 import { assessIncomingDocument, stageIncomingDocument, type IncomingDocument } from '../transfers/ingest';
 import {
   addTransferLocation,
@@ -1053,14 +1052,13 @@ export function useDirectorController(repository = createDirectorRepository()): 
           summary: `Released ${round.name}.`,
           entityId: roundId,
         });
-      });
-      return true;
-    },
         // Releasing a round is QBTCP's delivery. Recording it as a transfer keeps the unified
         // history honest: "how did this room get its assignment" has one table with one answer,
         // whether that answer was the network, a stick, or both.
         recordQbtcpDelivery(draft, roundId);
-      }),
+      });
+      return true;
+    },
     [commit],
   );
 
@@ -1572,17 +1570,18 @@ export function useDirectorController(repository = createDirectorRepository()): 
   );
 
   const syncTransferVolumesAction = useCallback(
-    (volumes: TransferVolume[]) =>
-      setState((previous) => {
-        // Volume polling runs on a timer, so it must not write state on a tick where nothing moved:
-        // a save per poll would rewrite the tournament document every few seconds all day.
-        const next = structuredClone(previous);
-        const changes = syncRemovableVolumes(next, volumes);
-        if (changes.appeared.length === 0 && changes.disappeared.length === 0) return previous;
-        next.metadata.lastSavedAt = isoNow();
-        persist(next);
-        return next;
-      }),
+    (volumes: TransferVolume[]) => {
+      // Volume polling runs on a timer, so it must not write state on a tick where nothing moved:
+      // a save per poll would rewrite the tournament document every few seconds all day.
+      const next = structuredClone(stateRef.current);
+      const changes = syncRemovableVolumes(next, volumes);
+      if (changes.appeared.length === 0 && changes.disappeared.length === 0) return;
+      const revision = stateRevisionRef.current + 1;
+      stateRevisionRef.current = revision;
+      stateRef.current = next;
+      setState(next);
+      void persist(next, revision).catch(() => undefined);
+    },
     [persist],
   );
 
@@ -2284,32 +2283,6 @@ function stringValue(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
-interface DuplicateResultReference {
-  gameId: DirectorId;
-  submissionId: DirectorId;
-}
-
-function findDuplicateResult(
-  state: DirectorState,
-  scheduledGameId: DirectorId | undefined,
-  fingerprint: string,
-  scoreFingerprint: string | undefined,
-): DuplicateResultReference | undefined {
-  if (!scheduledGameId) return undefined;
-  for (const submission of state.submissions) {
-    if (submission.status === 'rejected') continue;
-    const game = state.games.find((entry) => entry.id === submission.gameId);
-    if (!game || game.scheduledGameId !== scheduledGameId) continue;
-    if (
-      submission.fingerprint === fingerprint ||
-      (scoreFingerprint && submission.fingerprint === scoreFingerprint)
-    ) {
-      return { gameId: game.id, submissionId: submission.id };
-    }
-  }
-  return undefined;
-}
-
 function markNativeSessionResult(
   state: DirectorState,
   snapshot: NativeServerSnapshot,
@@ -2369,138 +2342,9 @@ function applyNativeResults(state: DirectorState, snapshot: NativeServerSnapshot
   for (const result of snapshot.results) {
     if (state.submissions.some((submission) => submission.transportResultId === result.id)) continue;
     const qbj = result.qbj ?? decodeRawQbj(result.rawBase64);
-    const matchId = result.matchId ?? matchIdentity(qbj);
-    const belongsToTournament =
-      result.tournamentId === undefined || result.tournamentId === state.tournament?.id;
-    // A native result may carry the assignment identity established when the room was issued.
-    // Once present, an invalid assignment is deliberately not rescued by a room or match-name
-    // fallback: associating a result with the wrong reused room is worse than review-only state.
-    const scheduled = !belongsToTournament
-      ? undefined
-      : result.scheduledGameId !== undefined
-        ? state.scheduledGames.find((game) => game.id === result.scheduledGameId)
-        : findScheduledByMatchId(state, matchId);
-    const parsed = resultScores(qbj, state, scheduled);
-    const scoreFingerprint = parsed.scores.length === 2 ? fingerprintForScores(parsed.scores) : undefined;
-    const fingerprint = result.fingerprint || scoreFingerprint || result.id;
-    const now = isoNow();
-    const warnings = [
-      ...(belongsToTournament
-        ? []
-        : ['The QBTCP result belongs to a different tournament; it remains in review.']),
-      ...result.warnings,
-      ...parsed.warnings,
-    ];
-    const rawSubmission = {
-      protocol: 'QBTCP v1',
-      association: scheduled ? 'matched' : 'unmatched',
-      resultId: result.id,
-      matchId,
-      scheduledGameId: result.scheduledGameId,
-      fingerprint,
-      reviewRequired: result.reviewRequired,
-      qbj,
-      rawBase64: result.rawBase64,
-    };
-    const duplicate = findDuplicateResult(state, scheduled?.id, fingerprint, scoreFingerprint);
-    if (duplicate) {
-      state.submissions.push({
-        id: newDirectorId('submission'),
-        gameId: duplicate.gameId,
-        transportResultId: result.id,
-        sessionId: result.sessionId,
-        receivedAt: now,
-        fingerprint,
-        status: 'duplicate',
-        rawSubmission,
-        warnings,
-        conflictWith: duplicate.submissionId,
-        reason: 'The same result was already retained for this scheduled game.',
-      });
-      markNativeSessionResult(state, snapshot, result.sessionId, scheduled, now);
-      state.audit.push({
-        id: newDirectorId('audit'),
-        at: now,
-        actor: 'QBTCP',
-        type: 'result-received',
-        summary: `Ignored a duplicate result for ${scheduled ? gameLabel(state, scheduled.id) : (matchId ?? 'an unmatched game')}.`,
-        entityId: duplicate.gameId,
-        details: {
-          transportResultId: result.id,
-          duplicateOf: duplicate.submissionId,
-          scheduledGameId: scheduled?.id,
-        },
-      });
-      changed = true;
-      continue;
-    }
-    const canonical = scheduled ? canonicalAcceptedGame(state, scheduled.id) : undefined;
-    const canonicalSubmission = canonical ? currentAcceptedSubmission(state, canonical.id) : undefined;
-    const pendingCandidate = scheduled
-      ? state.games.find(
-          (game) =>
-            game.scheduledGameId === scheduled.id &&
-            game.status !== 'accepted' &&
-            game.status !== 'rejected' &&
-            game.status !== 'cancelled' &&
-            game.source === 'qbtcp',
-        )
-      : undefined;
-    const existingCandidate = canonical ?? pendingCandidate;
-    const gameId = existingCandidate?.id ?? newDirectorId('game-record');
-    const reviewRequired =
-      result.reviewRequired ||
-      !scheduled ||
-      parsed.scores.length !== 2 ||
-      warnings.length > 0 ||
-      Boolean(canonical);
-    if (!existingCandidate) {
-      const game: GameRecord = {
-        id: gameId,
-        scheduledGameId: scheduled?.id ?? matchId ?? `unmatched-${result.id}`,
-        roundId: scheduled?.roundId ?? 'unmatched-round',
-        packetId: scheduled ? effectivePacketId(state, scheduled) : null,
-        status: 'submitted',
-        scores: parsed.scores,
-        playerStats: parsed.playerStats,
-        source: 'qbtcp',
-        detailedStats: parsed.detailedStats,
-        transportResultId: result.id,
-        rawQbj: qbj,
-        finishedAt: now,
-      };
-      state.games.push(game);
-    }
-    state.submissions.push({
-      id: newDirectorId('submission'),
-      gameId,
-      transportResultId: result.id,
-      sessionId: result.sessionId,
-      receivedAt: now,
-      fingerprint,
-      status: reviewRequired ? 'review' : 'received',
-      rawSubmission,
-      warnings,
-      conflictWith: result.conflictWith ?? canonicalSubmission?.id,
-    });
-    if (scheduled && !canonical) scheduled.status = 'submitted';
-    markNativeSessionResult(state, snapshot, result.sessionId, scheduled, now);
-    state.audit.push({
-      id: newDirectorId('audit'),
-      at: now,
-      actor: 'QBTCP',
-      type: 'result-received',
-      summary: `Received a result for ${scheduled ? gameLabel(state, scheduled.id) : (matchId ?? 'an unmatched game')}.`,
-      entityId: gameId,
-      details: {
-        transportResultId: result.id,
-        warnings,
-        conflictWith: result.conflictWith ?? canonicalSubmission?.id,
-        scheduledGameId: scheduled?.id,
-      },
-    });
     const progress = snapshot.progress.find((entry) => entry.sessionId === result.sessionId);
-    const roomId = progress?.roomId ?? '';
+    const nativeSession = snapshot.sessions.find((entry) => entry.sessionId === result.sessionId);
+    const roomId = progress?.roomId ?? nativeSession?.roomId ?? '';
     const roomName = state.rooms.find((entry) => entry.id === roomId)?.name;
     const document: IncomingDocument = {
       sourceKind: 'qbtcp',
@@ -2512,58 +2356,22 @@ function applyNativeResults(state: DirectorState, snapshot: NativeServerSnapshot
       transportResultId: result.id,
       sessionId: result.sessionId,
       transportWarnings: result.warnings,
+      // Older native servers did not repeat the authenticated tournament id in each result. The
+      // server snapshot is already scoped to this Director, so retain the pre-Transfers behavior
+      // for that case while still honoring an explicit mismatch below the shared pipeline.
+      transportTournamentId: result.tournamentId ?? state.tournament?.id,
+      transportMatchId: result.matchId,
+      scheduledGameId: result.scheduledGameId,
+      transportReviewRequired: result.reviewRequired,
     };
     const assessment = assessIncomingDocument(state, document);
-    const outcome = stageIncomingDocument(state, document, assessment);
     const scheduled = state.scheduledGames.find((entry) => entry.id === assessment.scheduledGameId);
-
-    const session = state.qbtcpSessions.find((entry) => entry.sessionId === result.sessionId);
     const now = isoNow();
-    if (session) {
-      session.state = 'result-received';
-      session.lastSeenAt = now;
-    } else {
-      state.qbtcpSessions.push({
-        roomId: roomId || (scheduled?.roomId ?? ''),
-        sessionId: result.sessionId,
-        deviceId: '',
-        state: 'result-received',
-        lastSeenAt: now,
-        progress: progress ? progressSummary(progress.matchState, state, progress.roomId) : null,
-        helpRequestId: null,
-      });
-    }
-    if (scheduled?.roomId && outcome.submissionId) {
-      const room = state.rooms.find((entry) => entry.id === scheduled.roomId);
-      if (room && room.status !== 'finished') room.status = 'finished';
-    }
+    stageIncomingDocument(state, document, assessment);
+    markNativeSessionResult(state, snapshot, result.sessionId, scheduled, now);
     changed = true;
   }
   return changed;
-}
-
-function findScheduledByMatchId(state: DirectorState, matchId: string | undefined) {
-  if (!matchId) return undefined;
-  const direct = state.scheduledGames.find((game) => game.id === matchId);
-  if (direct) return direct;
-  const candidates = state.scheduledGames.filter((game) => {
-    const record = state.games.find((entry) => entry.scheduledGameId === game.id && entry.rawQbj);
-    return matchIdentity(record?.rawQbj) === matchId;
-  });
-  return candidates.length === 1 ? candidates[0] : undefined;
-}
-
-function matchIdentity(value: unknown): string | undefined {
-  if (!value || typeof value !== 'object') return undefined;
-  const root = value as { id?: unknown; type?: unknown; objects?: unknown };
-  if (root.type === 'Match' && typeof root.id === 'string') return root.id;
-  if (Array.isArray(root.objects)) {
-    const match = root.objects.find((entry): entry is { type?: unknown; id?: unknown } =>
-      Boolean(entry && typeof entry === 'object' && (entry as { type?: unknown }).type === 'Match'),
-    );
-    return match && typeof match.id === 'string' ? match.id : undefined;
-  }
-  return undefined;
 }
 
 function decodeRawQbj(value: string | undefined): unknown {
@@ -2575,138 +2383,6 @@ function decodeRawQbj(value: string | undefined): unknown {
   }
 }
 
-function resultScores(
-  value: unknown,
-  state: DirectorState,
-  scheduled: DirectorState['scheduledGames'][number] | undefined,
-): {
-  scores: TeamGameScore[];
-  playerStats: PlayerGameStat[];
-  detailedStats: 'complete' | 'incomplete' | 'unknown';
-  warnings: string[];
-} {
-  const warnings: string[] = [];
-  const match = matchObject(value);
-  const entries = Array.isArray(match?.match_teams) ? match.match_teams : [];
-  const scores = entries
-    .map((entry) => {
-      if (!entry || typeof entry !== 'object') return null;
-      const record = entry as Record<string, unknown>;
-      const teamId = resultTeamId(record.team, state, scheduled, warnings);
-      const score = finiteNumber(record.points);
-      if (!teamId) {
-        warnings.push('A QBTCP team reference could not be matched to one scheduled team.');
-        return null;
-      }
-      if (score === undefined) {
-        warnings.push(`The QBTCP result for team ${teamId} has no finite final score.`);
-        return null;
-      }
-      const stats = teamAggregate(record, state);
-      return { teamId, score, ...stats };
-    })
-    .filter((entry): entry is TeamGameScore => entry !== null);
-  const playerStats = entries.flatMap((entry) => {
-    if (!entry || typeof entry !== 'object') return [];
-    const record = entry as Record<string, unknown>;
-    const teamId = resultTeamId(record.team, state, scheduled, warnings);
-    if (!teamId || !Array.isArray(record.match_players)) return [];
-    return record.match_players.flatMap((candidate): PlayerGameStat[] => {
-      if (!candidate || typeof candidate !== 'object') return [];
-      const playerRecord = candidate as Record<string, unknown>;
-      const player = resultPlayer(playerRecord.player, state, teamId, warnings);
-      if (!player) return [];
-      const counts = Array.isArray(playerRecord.answer_counts) ? playerRecord.answer_counts : [];
-      let powers = 0;
-      let gets = 0;
-      let negs = 0;
-      for (const count of counts) {
-        if (!count || typeof count !== 'object') continue;
-        const answer = (count as Record<string, unknown>).answer_type;
-        const value =
-          answer && typeof answer === 'object'
-            ? finiteNumber((answer as Record<string, unknown>).value)
-            : undefined;
-        const number = finiteNumber((count as Record<string, unknown>).number)
-          ? Number((count as Record<string, unknown>).number)
-          : 0;
-        if (value === undefined) continue;
-        if (value === (state.tournament?.rules.powerValue ?? 15)) powers += number;
-        else if (value === (state.tournament?.rules.tossupValue ?? 10)) gets += number;
-        else if (value < 0) negs += number;
-      }
-      return [
-        {
-          playerId: player.id,
-          teamId,
-          powers,
-          gets,
-          negs,
-          bonusPoints: 0,
-          tossupsHeard: finiteNumber(playerRecord.tossups_heard) ? Number(playerRecord.tossups_heard) : null,
-        },
-      ];
-    });
-  });
-  const hasPlayerPayload = entries.some((entry) =>
-    Boolean(
-      entry && typeof entry === 'object' && Array.isArray((entry as Record<string, unknown>).match_players),
-    ),
-  );
-  const detailedStats = !hasPlayerPayload
-    ? 'unknown'
-    : playerStats.length === 0 || playerStats.some((stat) => stat.tossupsHeard === null)
-      ? 'incomplete'
-      : 'complete';
-  return { scores, playerStats, detailedStats, warnings };
-}
-
-function teamAggregate(
-  entry: Record<string, unknown>,
-  state: DirectorState,
-): Omit<TeamGameScore, 'teamId' | 'score'> {
-  let powers = 0;
-  let gets = 0;
-  let negs = 0;
-  if (Array.isArray(entry.match_players)) {
-    for (const candidate of entry.match_players) {
-      if (!candidate || typeof candidate !== 'object') continue;
-      const counts = (candidate as Record<string, unknown>).answer_counts;
-      if (!Array.isArray(counts)) continue;
-      for (const count of counts) {
-        if (!count || typeof count !== 'object') continue;
-        const answer = (count as Record<string, unknown>).answer_type;
-        const value =
-          answer && typeof answer === 'object'
-            ? finiteNumber((answer as Record<string, unknown>).value)
-            : undefined;
-        const number = finiteNumber((count as Record<string, unknown>).number)
-          ? Number((count as Record<string, unknown>).number)
-          : 0;
-        if (value === undefined) continue;
-        if (value === (state.tournament?.rules.powerValue ?? 15)) powers += number;
-        else if (value === (state.tournament?.rules.tossupValue ?? 10)) gets += number;
-        else if (value < 0) negs += number;
-      }
-    }
-  }
-  const bouncebacks = finiteNumber(entry.bonus_bounceback_points) ? Number(entry.bonus_bounceback_points) : 0;
-  const lightning = finiteNumber(entry.lightning_points) ? Number(entry.lightning_points) : 0;
-  const tossupPoints =
-    powers * (state.tournament?.rules.powerValue ?? 15) +
-    gets * (state.tournament?.rules.tossupValue ?? 10) +
-    negs * (state.tournament?.rules.negValue ?? -5);
-  const points = finiteNumber(entry.points) ? Number(entry.points) : tossupPoints;
-  return {
-    powers,
-    gets,
-    negs,
-    bonuses: finiteNumber(entry.bonuses) ? Number(entry.bonuses) : 0,
-    bonusPoints: points - tossupPoints - bouncebacks - lightning,
-    bouncebacks,
-  };
-}
-
 function matchObject(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== 'object') return undefined;
   const root = value as Record<string, unknown>;
@@ -2716,131 +2392,6 @@ function matchObject(value: unknown): Record<string, unknown> | undefined {
         Boolean(entry && typeof entry === 'object' && (entry as Record<string, unknown>).type === 'Match'),
       ) ?? undefined)
     : undefined;
-}
-
-function resultTeamId(
-  value: unknown,
-  state: DirectorState,
-  scheduled: DirectorState['scheduledGames'][number] | undefined,
-  warnings: string[] = [],
-): string | undefined {
-  const candidates = [scheduled?.leftTeamId, scheduled?.rightTeamId].filter((entry): entry is string =>
-    Boolean(entry),
-  );
-  const identities = stableIdentities(value);
-  if (identities.length > 1) {
-    warnings.push('QBTCP team references disagree; the result remains in review.');
-    return undefined;
-  }
-  const knownTeamIds = [
-    ...new Set(identities.filter((identity) => state.teams.some((team) => team.id === identity))),
-  ];
-  const candidateIds = [...new Set(identities.filter((identity) => candidates.includes(identity)))];
-  if (knownTeamIds.length > 1 || candidateIds.length > 1) {
-    warnings.push('QBTCP team references disagree; the result remains in review.');
-    return undefined;
-  }
-  if (knownTeamIds.length === 1) {
-    const [teamId] = knownTeamIds;
-    if (candidates.length > 0 && !candidates.includes(teamId)) {
-      warnings.push(`QBTCP team reference ${teamId} does not match the scheduled assignment.`);
-      return undefined;
-    }
-    return teamId;
-  }
-  if (candidateIds.length === 1) return candidateIds[0];
-  if (identities.length > 0) {
-    warnings.push(
-      `QBTCP team reference ${identities.join(' / ')} is not registered in this tournament; the result remains in review.`,
-    );
-    return undefined;
-  }
-  const name = namedValue(value);
-  if (!name) return undefined;
-  const matches = state.teams.filter(
-    (entry) =>
-      (!candidates.length || candidates.includes(entry.id)) &&
-      entry.displayName.toLocaleLowerCase() === name.toLocaleLowerCase(),
-  );
-  if (matches.length === 1) {
-    warnings.push(`Matched team “${name}” by display name because no stable team reference was available.`);
-    return matches[0].id;
-  }
-  if (matches.length > 1) warnings.push(`Team name “${name}” is ambiguous; the result remains in review.`);
-  return undefined;
-}
-
-function resultPlayer(
-  value: unknown,
-  state: DirectorState,
-  teamId: string,
-  warnings: string[],
-): DirectorState['players'][number] | undefined {
-  const candidates = state.players.filter((player) => player.teamId === teamId);
-  const identities = stableIdentities(value);
-  if (identities.length > 1) {
-    warnings.push('QBTCP player references disagree; that player stat was ignored.');
-    return undefined;
-  }
-  const knownPlayers = [
-    ...new Set(
-      identities
-        .map((identity) => state.players.find((player) => player.id === identity))
-        .filter((player): player is DirectorState['players'][number] => Boolean(player)),
-    ),
-  ];
-  const candidateIds = [
-    ...new Set(identities.filter((identity) => candidates.some((player) => player.id === identity))),
-  ];
-  if (knownPlayers.length > 1 || candidateIds.length > 1) {
-    warnings.push('QBTCP player references disagree; that player stat was ignored.');
-    return undefined;
-  }
-  if (knownPlayers.length === 1) {
-    const [player] = knownPlayers;
-    if (player.teamId !== teamId) {
-      warnings.push(`QBTCP player reference ${player.id} is registered to a different team.`);
-      return undefined;
-    }
-    return player;
-  }
-  if (candidateIds.length === 1) {
-    return candidates.find((candidate) => candidate.id === candidateIds[0]);
-  }
-  if (identities.length > 0) {
-    warnings.push(
-      `QBTCP player reference ${identities.join(' / ')} is not registered for this team; that player stat was ignored.`,
-    );
-    return undefined;
-  }
-  const name = namedValue(value);
-  if (!name) return undefined;
-  const matches = candidates.filter((player) => player.name.toLocaleLowerCase() === name.toLocaleLowerCase());
-  if (matches.length === 1) {
-    warnings.push(`Matched player “${name}” by name because no stable player reference was available.`);
-    return matches[0];
-  }
-  if (matches.length > 1) warnings.push(`Player name “${name}” is ambiguous; that player stat was ignored.`);
-  return undefined;
-}
-
-function stableIdentities(value: unknown): string[] {
-  if (!value || typeof value !== 'object') return [];
-  const record = value as Record<string, unknown>;
-  return [
-    ...new Set(
-      [record.$ref, record.id].filter(
-        (identity): identity is string => typeof identity === 'string' && identity.length > 0,
-      ),
-    ),
-  ];
-}
-
-function namedValue(value: unknown): string | undefined {
-  if (typeof value === 'string') return value;
-  if (!value || typeof value !== 'object') return undefined;
-  const record = value as Record<string, unknown>;
-  return typeof record.name === 'string' ? record.name : undefined;
 }
 
 function finiteNumber(value: unknown): number | undefined {

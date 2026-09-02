@@ -6,10 +6,9 @@
  * tables and returns this shape at the application boundary. React never receives database rows.
  */
 
-export const directorSchemaVersion = 2;
 import { emptyTransferState, type TransferState } from '../transfers/model';
 
-export const directorSchemaVersion = 1;
+export const directorSchemaVersion = 2;
 
 export type {
   ArtifactClassification,

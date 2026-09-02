@@ -136,14 +136,6 @@ impl Store {
         if destination.exists() {
             return Err(StoreError::BackupDestinationExists(destination));
         }
-        let parent = match destination.parent() {
-            Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
-            Some(_) => PathBuf::from("."),
-            None => {
-                return Err(StoreError::BackupDestinationHasNoParent(
-                    destination.clone(),
-                ))
-            }
         let parent = destination
             .parent()
             .ok_or_else(|| StoreError::BackupDestinationHasNoParent(destination.clone()))?;
@@ -177,7 +169,6 @@ impl Store {
                 .map_err(|(_, error)| StoreError::Database(error))?;
 
             sync_file(&temporary)?;
-            commit_backup_no_replace(&temporary, &destination)?;
             commit_backup_noreplace(&temporary, &destination)?;
             sync_directory(&parent)?;
             Ok(BackupReport {
@@ -204,24 +195,6 @@ impl Store {
         let result = operation(&transaction)?;
         transaction.commit()?;
         Ok(result)
-    }
-}
-
-/// Publish a completed backup without replacing a destination that may have
-/// appeared after the initial existence check. The temporary file is created
-/// in the destination directory, so a hard link is an atomic no-replace
-/// directory operation on the supported platforms/filesystems. Removing the
-/// temporary name leaves the newly published destination in place.
-fn commit_backup_no_replace(temporary: &Path, destination: &Path) -> StoreResult<()> {
-    match fs::hard_link(temporary, destination) {
-        Ok(()) => {
-            fs::remove_file(temporary)?;
-            Ok(())
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Err(
-            StoreError::BackupDestinationExists(destination.to_path_buf()),
-        ),
-        Err(error) => Err(StoreError::Filesystem(error)),
     }
 }
 
@@ -269,7 +242,7 @@ mod tests {
 
     use tempfile::tempdir;
 
-    use super::commit_backup_no_replace;
+    use super::commit_backup_noreplace;
     use crate::error::StoreError;
 
     #[test]
@@ -280,7 +253,7 @@ mod tests {
         fs::write(&temporary, b"new backup").expect("write temporary backup");
         fs::write(&destination, b"original backup").expect("create destination");
 
-        let error = commit_backup_no_replace(&temporary, &destination).unwrap_err();
+        let error = commit_backup_noreplace(&temporary, &destination).unwrap_err();
         assert!(matches!(error, StoreError::BackupDestinationExists(path) if path == destination));
         assert_eq!(
             fs::read(&destination).expect("read destination"),

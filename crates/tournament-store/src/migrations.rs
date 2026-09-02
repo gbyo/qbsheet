@@ -160,7 +160,15 @@ mod tests {
         seed_assignment_graph(&connection);
         connection
             .execute_batch(
-                "CREATE TABLE schema_migrations (
+                "DROP TABLE packet_assignments;
+                 CREATE TABLE packet_assignments (
+                     packet_id TEXT NOT NULL REFERENCES packets(id) ON DELETE CASCADE,
+                     round_id TEXT,
+                     scheduled_game_id TEXT,
+                     assigned_at INTEGER NOT NULL,
+                     PRIMARY KEY (packet_id, round_id, scheduled_game_id)
+                 );
+                 CREATE TABLE schema_migrations (
                      version INTEGER PRIMARY KEY NOT NULL,
                      name TEXT NOT NULL,
                      applied_at INTEGER NOT NULL
