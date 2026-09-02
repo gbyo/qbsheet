@@ -604,7 +604,11 @@ describe('Director integration hardening', () => {
     await waitFor(async () => {
       const saved = await repository.load();
       expect(saved.staff[0]).toMatchObject({ name: 'Moderator Two', notes: 'Also covers room checks.' });
-      expect(saved.equipment[0]).toMatchObject({ name: 'Buzzer Two', kind: 'device', notes: 'Fully charged.' });
+      expect(saved.equipment[0]).toMatchObject({
+        name: 'Buzzer Two',
+        kind: 'device',
+        notes: 'Fully charged.',
+      });
     });
   });
 
@@ -950,7 +954,9 @@ describe('Director integration hardening', () => {
       tiebreaker: true,
       notes: 'Keep sealed until needed.',
     });
-    await waitFor(async () => expect((await repository.load()).packets[0]?.notes).toBe('Keep sealed until needed.'));
+    await waitFor(async () =>
+      expect((await repository.load()).packets[0]?.notes).toBe('Keep sealed until needed.'),
+    );
 
     act(() => {
       expect(hook.result.current.updatePacket(packet.id, { notes: '  ' })).toBe(true);
@@ -1151,9 +1157,9 @@ describe('Director integration hardening', () => {
       expect(hook.result.current.addTeam({ displayName: 'Replacement Team' })).toBe(true);
     });
     expect(roundScheduleIsValid(hook.result.current.state, round.id)).toBe(true);
-    expect(runPreflight(hook.result.current.state).some((issue) => issue.id === `round-invalid-${round.id}`)).toBe(
-      false,
-    );
+    expect(
+      runPreflight(hook.result.current.state).some((issue) => issue.id === `round-invalid-${round.id}`),
+    ).toBe(false);
   });
 
   test('rejecting a submission reopens the assignment for a later result', async () => {

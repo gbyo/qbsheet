@@ -935,10 +935,7 @@ function EquipmentResourceRow({
               <input value={name} onChange={(event) => setName(event.target.value)} />
             </FormField>
             <FormField label="Type">
-              <select
-                value={kind}
-                onChange={(event) => setKind(event.target.value as typeof kind)}
-              >
+              <select value={kind} onChange={(event) => setKind(event.target.value as typeof kind)}>
                 <option value="buzzer">Buzzer</option>
                 <option value="device">Laptop / tablet</option>
                 <option value="other">Other</option>

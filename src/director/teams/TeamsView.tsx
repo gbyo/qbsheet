@@ -189,7 +189,10 @@ export function TeamsView({
                     />
                   </FormField>
                 </div>
-                <FormField label="Notes" hint="Optional registration or operations notes for the director team.">
+                <FormField
+                  label="Notes"
+                  hint="Optional registration or operations notes for the director team."
+                >
                   <textarea
                     className="director-textarea"
                     rows={2}
@@ -513,7 +516,10 @@ function TeamRow({
                   />
                 </FormField>
               </div>
-              <FormField label="Notes" hint="Optional registration or operations notes for the director team.">
+              <FormField
+                label="Notes"
+                hint="Optional registration or operations notes for the director team."
+              >
                 <textarea
                   className="director-textarea"
                   rows={2}
