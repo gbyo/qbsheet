@@ -1,0 +1,9 @@
+Target dependency graph (4 targets)
+Target 'AllExcludingTests' in project 'Aggregate'
+➜ Explicit dependency on target 'QBSheetLiveKit_QBSheetLiveKitTests' in project 'QBSheetLiveKit'
+➜ Explicit dependency on target 'QBSheetLiveKit-product' in project 'QBSheetLiveKit'
+➜ Explicit dependency on target 'QBSheetLiveKit' in project 'QBSheetLiveKit'
+Target 'QBSheetLiveKit-product' in project 'QBSheetLiveKit'
+➜ Explicit dependency on target 'QBSheetLiveKit' in project 'QBSheetLiveKit'
+Target 'QBSheetLiveKit' in project 'QBSheetLiveKit' (no dependencies)
+Target 'QBSheetLiveKit_QBSheetLiveKitTests' in project 'QBSheetLiveKit' (no dependencies)

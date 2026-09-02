@@ -3,6 +3,7 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
   defaultRules,
   deriveTeamStandings,
+  directorSchemaVersion,
   emptyDirectorState,
   formatGenerationAvailability,
   generateDirectorRound,
@@ -129,6 +130,7 @@ describe('Director integration hardening', () => {
       venue: 'Main hall',
       organizer: 'Director',
       status: 'running',
+      timeZone: 'America/New_York',
       rules: structuredClone(defaultRules),
       formatId: null,
       currentPhaseId: null,
@@ -226,6 +228,7 @@ describe('Director integration hardening', () => {
       venue: '',
       organizer: '',
       status: 'running',
+      timeZone: 'America/New_York',
       rules: structuredClone(defaultRules),
       formatId: null,
       currentPhaseId: null,
@@ -1870,6 +1873,7 @@ describe('Director integration hardening', () => {
       venue: '',
       organizer: '',
       status: 'running',
+      timeZone: 'America/New_York',
       rules: { ...defaultRules, tiebreakers: ['head-to-head'] },
       formatId: null,
       currentPhaseId: null,
@@ -1922,6 +1926,7 @@ describe('Director integration hardening', () => {
       venue: '',
       organizer: '',
       status: 'running',
+      timeZone: 'America/New_York',
       rules: structuredClone(defaultRules),
       formatId: 'format-prelim',
       currentPhaseId: 'phase-prelim',
@@ -2052,9 +2057,14 @@ describe('Director integration hardening', () => {
       },
     ];
     const migrated = normalizeDirectorState(old);
-    expect(migrated.schemaVersion).toBe(2);
+    expect(migrated.schemaVersion).toBe(directorSchemaVersion);
     expect(migrated.tournament?.currentPhaseId).toBe('phase-old');
     expect(migrated.tournament?.currentPacketId).toBeNull();
+    // v3 adds the tournament zone. A document that never recorded one gets UTC rather than this
+    // machine's zone, so a migration cannot silently move a tournament's schedule by an hour.
+    expect(migrated.tournament?.timeZone).toBe('UTC');
+    expect(migrated.timeline).toEqual([]);
+    expect(migrated.live).toBeNull();
     expect(() => normalizeDirectorState({ ...current, schemaVersion: 99 })).toThrow(
       /newest supported schema/i,
     );

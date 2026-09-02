@@ -50,12 +50,14 @@
     "test:browser:yellowfruit": "playwright test e2e/YellowFruitInterop.spec.ts",
     "test:mutation": "stryker run",
     "test:mutation:dry": "stryker run --dryRunOnly",
-    "prepare": "npm run build:core && npm run build --workspace=@qbsheet/tournament-core && npm run build --workspace=@qbsheet/tournament-formats"
+    "prepare": "npm run build --workspace=@qbsheet/tournament-domain && npm run build --workspace=@qbsheet/qblive-protocol && npm run build --workspace=@qbsheet/qblive-projection && npm run build --workspace=@qbsheet/qblive-activity && npm run build:core && npm run build --workspace=@qbsheet/tournament-core && npm run build --workspace=@qbsheet/tournament-formats",
+    "director:domain:test": "npm run test --workspace=@qbsheet/tournament-domain"
   },
   "dependencies": {
-    "@qbsheet/tournament-core": "0.1.0",
-    "@qbsheet/tournament-formats": "0.1.0",
     "@fontsource/ibm-plex-sans": "^5.2.5",
+    "@qbsheet/tournament-core": "0.1.0",
+    "@qbsheet/tournament-domain": "0.1.0",
+    "@qbsheet/tournament-formats": "0.1.0",
     "fflate": "^0.8.3",
     "jsqr": "^1.4.0",
     "react": "^18.3.1",
