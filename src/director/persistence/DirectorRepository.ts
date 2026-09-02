@@ -1,5 +1,7 @@
 import { emptyDirectorState, type DirectorState } from '../domain';
 import { normalizeDirectorState } from './stateMigrations';
+import { emptyDirectorState, type DirectorState, directorSchemaVersion } from '../domain';
+import { normalizeTransferState } from '../transfers/model';
 
 const databaseName = 'qbsheet-director';
 const databaseVersion = 1;
@@ -34,6 +36,39 @@ declare global {
 function tauri(): TauriInternals | null {
   if (typeof window === 'undefined') return null;
   return window.__TAURI_INTERNALS__ ?? null;
+}
+
+function normalizeState(value: unknown): DirectorState {
+  if (!value || typeof value !== 'object') return emptyDirectorState();
+  const candidate = value as Partial<DirectorState>;
+  const empty = emptyDirectorState();
+  return {
+    ...empty,
+    ...candidate,
+    schemaVersion: directorSchemaVersion,
+    metadata: { ...empty.metadata, ...(candidate.metadata ?? {}) },
+    tournament: candidate.tournament ?? null,
+    organizations: candidate.organizations ?? [],
+    teams: candidate.teams ?? [],
+    players: candidate.players ?? [],
+    staff: candidate.staff ?? [],
+    equipment: candidate.equipment ?? [],
+    rooms: candidate.rooms ?? [],
+    packets: candidate.packets ?? [],
+    formats: candidate.formats ?? [],
+    phases: candidate.phases ?? [],
+    pools: candidate.pools ?? [],
+    rounds: candidate.rounds ?? [],
+    scheduledGames: candidate.scheduledGames ?? [],
+    games: candidate.games ?? [],
+    submissions: candidate.submissions ?? [],
+    protests: candidate.protests ?? [],
+    audit: candidate.audit ?? [],
+    qbtcpSessions: candidate.qbtcpSessions ?? [],
+    // A document written before Transfers existed has no `transfers` block at all, and every caller
+    // downstream reads its arrays without checking. Repairing it here keeps that assumption true.
+    transfers: normalizeTransferState(candidate.transfers),
+  };
 }
 
 export class TauriDirectorRepository implements DirectorRepository {

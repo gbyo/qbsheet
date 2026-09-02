@@ -25,42 +25,42 @@ pub struct CommandError {
 }
 
 impl CommandError {
-    fn io(error: std::io::Error) -> Self {
+    pub(crate) fn io(error: std::io::Error) -> Self {
         Self {
             code: "io",
             message: error.to_string(),
         }
     }
 
-    fn store(error: StoreError) -> Self {
+    pub(crate) fn store(error: StoreError) -> Self {
         Self {
             code: "store",
             message: error.to_string(),
         }
     }
 
-    fn dialog(message: impl Into<String>) -> Self {
+    pub(crate) fn dialog(message: impl Into<String>) -> Self {
         Self {
             code: "dialog",
             message: message.into(),
         }
     }
 
-    fn encoding(error: base64::DecodeError) -> Self {
+    pub(crate) fn encoding(error: base64::DecodeError) -> Self {
         Self {
             code: "encoding",
             message: error.to_string(),
         }
     }
 
-    fn serialization(error: serde_json::Error) -> Self {
+    pub(crate) fn serialization(error: serde_json::Error) -> Self {
         Self {
             code: "serialization",
             message: error.to_string(),
         }
     }
 
-    fn server(error: ServerError) -> Self {
+    pub(crate) fn server(error: ServerError) -> Self {
         Self {
             code: "server",
             message: error.to_string(),

@@ -6,6 +6,7 @@ use crate::error::{StoreError, StoreResult};
 use crate::models::{
     NewPacket, NewPhase, NewPhaseTeam, NewPool, NewRound, NewScheduledGame, Packet,
     PacketAssignment, Phase, PhaseTeam, Pool, Round, ScheduledGame,
+    PacketAssignment, Phase, PhaseTeam, Pool, Round, ScheduledGame, UnixTimestamp,
 };
 use crate::util::{json_from_row, json_text, new_id, now};
 
@@ -89,19 +90,27 @@ impl<'a> PacketRepository<'a> {
                     "packet and round belong to different tournaments".to_owned(),
                 ));
             }
-            let existing: Option<(String, Option<String>)> = transaction
+            let existing: Option<(Option<String>, Option<String>, UnixTimestamp)> = transaction
                 .query_row(
-                    "SELECT packet_id, scheduled_game_id FROM packet_assignments
+                    "SELECT round_id, scheduled_game_id, assigned_at FROM packet_assignments
                      WHERE packet_id = ?1",
                     params![packet_id],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                 )
                 .optional()?;
-            if let Some((_, scheduled_game_id)) = existing {
+            if let Some((existing_round_id, scheduled_game_id, assigned_at)) = existing {
                 if scheduled_game_id.is_some() {
                     return Err(StoreError::Conflict(
                         "packet is already assigned to a scheduled game".to_owned(),
                     ));
+                }
+                if existing_round_id.as_deref() == Some(round_id) {
+                    return Ok(PacketAssignment {
+                        packet_id: packet_id.to_owned(),
+                        round_id: existing_round_id,
+                        scheduled_game_id: None,
+                        assigned_at,
+                    });
                 }
                 return Err(StoreError::Conflict(
                     "packet is already assigned to a round".to_owned(),
@@ -142,15 +151,15 @@ impl<'a> PacketRepository<'a> {
                     "packet and scheduled game belong to different tournaments".to_owned(),
                 ));
             }
-            let existing: Option<(Option<String>, Option<String>)> = transaction
+            let existing: Option<(Option<String>, Option<String>, UnixTimestamp)> = transaction
                 .query_row(
-                    "SELECT round_id, scheduled_game_id FROM packet_assignments
+                    "SELECT round_id, scheduled_game_id, assigned_at FROM packet_assignments
                      WHERE packet_id = ?1",
                     params![packet_id],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                 )
                 .optional()?;
-            if let Some((round_id, existing_game_id)) = existing {
+            if let Some((round_id, existing_game_id, assigned_at)) = existing {
                 if existing_game_id.as_deref() != Some(scheduled_game_id) {
                     return Err(StoreError::Conflict(format!(
                         "packet is already assigned to {}",
@@ -163,7 +172,7 @@ impl<'a> PacketRepository<'a> {
                     packet_id: packet_id.to_owned(),
                     round_id,
                     scheduled_game_id: existing_game_id,
-                    assigned_at: now(),
+                    assigned_at,
                 });
             }
             let assigned_at = now();

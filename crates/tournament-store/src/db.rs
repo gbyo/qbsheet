@@ -1,4 +1,5 @@
 use std::fs::{self, File, OpenOptions};
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -143,6 +144,13 @@ impl Store {
                     destination.clone(),
                 ))
             }
+        let parent = destination
+            .parent()
+            .ok_or_else(|| StoreError::BackupDestinationHasNoParent(destination.clone()))?;
+        let parent = if parent.as_os_str().is_empty() {
+            PathBuf::from(".")
+        } else {
+            parent.to_path_buf()
         };
         if !parent.exists() {
             return Err(StoreError::BackupDestinationHasNoParent(
@@ -170,6 +178,7 @@ impl Store {
 
             sync_file(&temporary)?;
             commit_backup_no_replace(&temporary, &destination)?;
+            commit_backup_noreplace(&temporary, &destination)?;
             sync_directory(&parent)?;
             Ok(BackupReport {
                 destination: destination.clone(),
@@ -225,6 +234,19 @@ fn configure_connection(connection: &Connection, enable_wal: bool) -> StoreResul
         connection.pragma_update(None, "journal_mode", "WAL")?;
     }
     Ok(())
+}
+
+fn commit_backup_noreplace(temporary: &Path, destination: &Path) -> StoreResult<()> {
+    match fs::hard_link(temporary, destination) {
+        Ok(()) => {
+            fs::remove_file(temporary)?;
+            Ok(())
+        }
+        Err(error) if error.kind() == ErrorKind::AlreadyExists => Err(
+            StoreError::BackupDestinationExists(destination.to_path_buf()),
+        ),
+        Err(error) => Err(StoreError::Filesystem(error)),
+    }
 }
 
 fn sync_file(path: &Path) -> StoreResult<()> {

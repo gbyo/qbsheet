@@ -336,6 +336,10 @@ fn schedule_repository_rejects_team_and_room_conflicts() {
         .teams()
         .create(NewTeam::new(&tournament.id, "C"))
         .unwrap();
+    let team_d = store
+        .teams()
+        .create(NewTeam::new(&tournament.id, "D"))
+        .unwrap();
     let phase = store
         .phases()
         .create(NewPhase {
@@ -372,6 +376,19 @@ fn schedule_repository_rejects_team_and_room_conflicts() {
             status: "available".to_owned(),
         })
         .unwrap();
+    let second_room = store
+        .rooms()
+        .create(NewRoom {
+            tournament_id: tournament.id.clone(),
+            name: "102".to_owned(),
+            building: None,
+            floor: None,
+            accessible: false,
+            directions: None,
+            notes: None,
+            status: "available".to_owned(),
+        })
+        .unwrap();
     store
         .schedule()
         .create(NewScheduledGame {
@@ -388,17 +405,31 @@ fn schedule_repository_rejects_team_and_room_conflicts() {
         })
         .unwrap();
 
-    let conflict = store.schedule().create(NewScheduledGame {
-        tournament_id: tournament.id,
-        round_id: round.id,
+    let room_conflict = store.schedule().create(NewScheduledGame {
+        tournament_id: tournament.id.clone(),
+        round_id: round.id.clone(),
         room_id: Some(room.id),
         packet_id: None,
-        team_a_id: Some(team_a.id),
-        team_b_id: Some(team_c.id),
+        team_a_id: Some(team_c.id.clone()),
+        team_b_id: Some(team_d.id),
         game_number: 2,
         status: "scheduled".to_owned(),
         scheduled_at: None,
         notes: None,
     });
-    assert!(matches!(conflict, Err(StoreError::Conflict(_))));
+    assert!(matches!(room_conflict, Err(StoreError::Conflict(_))));
+
+    let team_conflict = store.schedule().create(NewScheduledGame {
+        tournament_id: tournament.id,
+        round_id: round.id,
+        room_id: Some(second_room.id),
+        packet_id: None,
+        team_a_id: Some(team_a.id),
+        team_b_id: Some(team_c.id),
+        game_number: 3,
+        status: "scheduled".to_owned(),
+        scheduled_at: None,
+        notes: None,
+    });
+    assert!(matches!(team_conflict, Err(StoreError::Conflict(_))));
 }

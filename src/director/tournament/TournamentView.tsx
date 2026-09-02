@@ -343,6 +343,16 @@ export function TournamentView({
                             Close
                           </Button>
                         )}
+                        {/*
+                          A shortcut, not a second implementation. Preparing files is one subsystem
+                          with one page; this navigates to it rather than growing a parallel
+                          prepare-and-write path inside round control.
+                        */}
+                        {entry.status !== 'planned' && (
+                          <Button variant="quiet" icon="upload" onClick={() => onNavigate('transfers')}>
+                            Prepare assignment files
+                          </Button>
+                        )}
                       </div>
                     </li>
                   );

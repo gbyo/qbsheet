@@ -2,16 +2,19 @@ import { useState } from 'react';
 import type { DirectorState } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
 import { Button, EmptyState, FormField, PanelBody, PanelFooter, StateLabel } from '../components/Controls';
+import type { SectionId } from '../app/navigation';
 import { Icon } from '../components/Icon';
 import { PageHeader } from '../components/PageHeader';
 
 export function RoomsView({
   state,
   controller,
+  onNavigate,
   onAnnounce,
 }: {
   state: DirectorState;
   controller: DirectorController;
+  onNavigate?: (section: SectionId) => void;
   onAnnounce: (message: string) => void;
 }) {
   const [showForm, setShowForm] = useState<'room' | 'staff' | 'equipment' | null>(null);
@@ -281,6 +284,35 @@ export function RoomsView({
                           <Icon name={room.available ? 'pause' : 'play'} size={14} />
                           <span>{room.available ? 'Unavailable' : 'Available'}</span>
                         </button>
+                        <div className="director-row-actions">
+                          {/*
+                          A room-level entry point into Transfers, not a second prepare path. A room
+                          whose device dropped off the network is the case this exists for, and the
+                          director gets there in one click from the row they were already looking at.
+                        */}
+                          {onNavigate &&
+                            state.scheduledGames.some(
+                              (game) => game.roomId === room.id && !game.bye && game.status !== 'accepted',
+                            ) && (
+                              <Button variant="quiet" icon="upload" onClick={() => onNavigate('transfers')}>
+                                Prepare game file
+                              </Button>
+                            )}
+                          <button
+                            type="button"
+                            className="director-button director-button-quiet director-table-action"
+                            aria-label={`${room.available ? 'Mark' : 'Make'} ${room.name} ${room.available ? 'unavailable' : 'available'}`}
+                            onClick={() => {
+                              controller.updateRoom(room.id, { available: !room.available });
+                              onAnnounce(
+                                `${room.name} marked ${room.available ? 'unavailable' : 'available'}.`,
+                              );
+                            }}
+                          >
+                            <Icon name={room.available ? 'pause' : 'play'} size={14} />
+                            <span>{room.available ? 'Unavailable' : 'Available'}</span>
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}

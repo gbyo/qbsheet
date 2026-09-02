@@ -18,6 +18,24 @@ import {
   type TeamGameScore,
 } from '../domain';
 import { createDirectorRepository, normalizeDirectorState, type DirectorRepository } from '../persistence';
+import { createDirectorRepository, type DirectorRepository } from '../persistence';
+import { assessIncomingDocument, stageIncomingDocument, type IncomingDocument } from '../transfers/ingest';
+import {
+  addTransferLocation,
+  dismissTransferArtifact,
+  importTransferDocuments,
+  noteTransferScan,
+  recordPreparedAssignments,
+  recordQbtcpDelivery,
+  removeTransferLocation,
+  setTransferWatching,
+  syncRemovableVolumes,
+  type AddLocationInput,
+  type ImportInput,
+  type ImportSummary,
+  type RecordPreparedInput,
+} from '../transfers/state';
+import type { TransferVolume } from '../transfers/ports';
 import {
   readNativeServerSnapshot,
   type NativeHelpSnapshot,
@@ -155,6 +173,22 @@ export interface DirectorController {
   ruleProtest(protestId: DirectorId, ruling: string, scoreAdjustment?: ProtestScoreAdjustment): boolean;
   syncQbtcp(): Promise<void>;
   qbtcpHealth: { lastSuccessfulAt: string | null; error: string | null };
+  /** Add or re-adopt a place assignments can be written to and results read from. */
+  addTransferLocation(input: AddLocationInput): void;
+  removeTransferLocation(locationId: DirectorId): void;
+  setTransferWatching(locationId: DirectorId, watching: boolean): void;
+  /** Reconcile known removable locations against what the platform currently sees. */
+  syncTransferVolumes(volumes: TransferVolume[]): void;
+  noteTransferScan(locationId: DirectorId, outcome: { at: string; message?: string; found?: number }): void;
+  recordPreparedAssignments(input: RecordPreparedInput): void;
+  /**
+   * Import a batch of documents through the shared result pipeline.
+   *
+   * Returns what happened so the caller can say it in one line. Nothing here accepts a result: the
+   * batch lands in the results inbox and a director accepts it there, the same as a QBTCP arrival.
+   */
+  importTransferDocuments(inputs: ImportInput[]): ImportSummary;
+  dismissTransferArtifact(artifactId: DirectorId): void;
   checkpoint(reason: string): Promise<void>;
   exportSnapshot(): string;
   importSnapshot(value: unknown): boolean;
@@ -1022,6 +1056,11 @@ export function useDirectorController(repository = createDirectorRepository()): 
       });
       return true;
     },
+        // Releasing a round is QBTCP's delivery. Recording it as a transfer keeps the unified
+        // history honest: "how did this room get its assignment" has one table with one answer,
+        // whether that answer was the network, a stick, or both.
+        recordQbtcpDelivery(draft, roundId);
+      }),
     [commit],
   );
 
@@ -1516,6 +1555,73 @@ export function useDirectorController(repository = createDirectorRepository()): 
     void persist(next, revision).catch(() => undefined);
   }, [persist]);
 
+  const addTransferLocationAction = useCallback(
+    (input: AddLocationInput) => commit((draft) => void addTransferLocation(draft, input)),
+    [commit],
+  );
+
+  const removeTransferLocationAction = useCallback(
+    (locationId: DirectorId) => commit((draft) => removeTransferLocation(draft, locationId)),
+    [commit],
+  );
+
+  const setTransferWatchingAction = useCallback(
+    (locationId: DirectorId, watching: boolean) =>
+      commit((draft) => setTransferWatching(draft, locationId, watching)),
+    [commit],
+  );
+
+  const syncTransferVolumesAction = useCallback(
+    (volumes: TransferVolume[]) =>
+      setState((previous) => {
+        // Volume polling runs on a timer, so it must not write state on a tick where nothing moved:
+        // a save per poll would rewrite the tournament document every few seconds all day.
+        const next = structuredClone(previous);
+        const changes = syncRemovableVolumes(next, volumes);
+        if (changes.appeared.length === 0 && changes.disappeared.length === 0) return previous;
+        next.metadata.lastSavedAt = isoNow();
+        persist(next);
+        return next;
+      }),
+    [persist],
+  );
+
+  const noteTransferScanAction = useCallback(
+    (locationId: DirectorId, outcome: { at: string; message?: string; found?: number }) =>
+      commit((draft) => noteTransferScan(draft, locationId, outcome)),
+    [commit],
+  );
+
+  const recordPreparedAssignmentsAction = useCallback(
+    (input: RecordPreparedInput) => commit((draft) => recordPreparedAssignments(draft, input)),
+    [commit],
+  );
+
+  const importTransferDocumentsAction = useCallback(
+    (inputs: ImportInput[]) => {
+      let summary: ImportSummary = {
+        imported: 0,
+        duplicates: 0,
+        needsReview: 0,
+        assignments: 0,
+        invalid: 0,
+        skipped: 0,
+        classifications: [],
+        messages: [],
+      };
+      commit((draft) => {
+        summary = importTransferDocuments(draft, inputs);
+      });
+      return summary;
+    },
+    [commit],
+  );
+
+  const dismissTransferArtifactAction = useCallback(
+    (artifactId: DirectorId) => commit((draft) => dismissTransferArtifact(draft, artifactId)),
+    [commit],
+  );
+
   const checkpoint = useCallback(
     async (reason: string) => {
       const next = structuredClone(stateRef.current);
@@ -1616,6 +1722,14 @@ export function useDirectorController(repository = createDirectorRepository()): 
     ruleProtest,
     syncQbtcp,
     qbtcpHealth,
+    addTransferLocation: addTransferLocationAction,
+    removeTransferLocation: removeTransferLocationAction,
+    setTransferWatching: setTransferWatchingAction,
+    syncTransferVolumes: syncTransferVolumesAction,
+    noteTransferScan: noteTransferScanAction,
+    recordPreparedAssignments: recordPreparedAssignmentsAction,
+    importTransferDocuments: importTransferDocumentsAction,
+    dismissTransferArtifact: dismissTransferArtifactAction,
     checkpoint,
     exportSnapshot,
     importSnapshot,
@@ -2238,6 +2352,18 @@ function markNativeSessionResult(
   }
 }
 
+/**
+ * Fold QBTCP arrivals into the same pipeline every other transport uses.
+ *
+ * This function used to do its own matching, its own score extraction and its own duplicate check.
+ * It does none of those now: it turns a `NativeResultSnapshot` into an `IncomingDocument` and hands
+ * it to `assessIncomingDocument`, which is the same call a USB scan and a dropped file make. A
+ * QBTCP result and its later USB backup therefore compare on the same fingerprint, computed the
+ * same way, and the duplicate is recognised rather than accepted twice.
+ *
+ * The transport's own result id and warnings ride along for correlation with the server's log. They
+ * do not decide anything; the assessment does.
+ */
 function applyNativeResults(state: DirectorState, snapshot: NativeServerSnapshot): boolean {
   let changed = false;
   for (const result of snapshot.results) {
@@ -2373,6 +2499,44 @@ function applyNativeResults(state: DirectorState, snapshot: NativeServerSnapshot
         scheduledGameId: scheduled?.id,
       },
     });
+    const progress = snapshot.progress.find((entry) => entry.sessionId === result.sessionId);
+    const roomId = progress?.roomId ?? '';
+    const roomName = state.rooms.find((entry) => entry.id === roomId)?.name;
+    const document: IncomingDocument = {
+      sourceKind: 'qbtcp',
+      sourceLabel: roomName ? `${roomName} (QBTCP)` : 'QBTCP',
+      fileName: `${result.id}.qbj`,
+      byteLength: result.rawBase64 ? Math.ceil((result.rawBase64.length * 3) / 4) : 0,
+      digest: `qbtcp-${result.id}`,
+      qbj,
+      transportResultId: result.id,
+      sessionId: result.sessionId,
+      transportWarnings: result.warnings,
+    };
+    const assessment = assessIncomingDocument(state, document);
+    const outcome = stageIncomingDocument(state, document, assessment);
+    const scheduled = state.scheduledGames.find((entry) => entry.id === assessment.scheduledGameId);
+
+    const session = state.qbtcpSessions.find((entry) => entry.sessionId === result.sessionId);
+    const now = isoNow();
+    if (session) {
+      session.state = 'result-received';
+      session.lastSeenAt = now;
+    } else {
+      state.qbtcpSessions.push({
+        roomId: roomId || (scheduled?.roomId ?? ''),
+        sessionId: result.sessionId,
+        deviceId: '',
+        state: 'result-received',
+        lastSeenAt: now,
+        progress: progress ? progressSummary(progress.matchState, state, progress.roomId) : null,
+        helpRequestId: null,
+      });
+    }
+    if (scheduled?.roomId && outcome.submissionId) {
+      const room = state.rooms.find((entry) => entry.id === scheduled.roomId);
+      if (room && room.status !== 'finished') room.status = 'finished';
+    }
     changed = true;
   }
   return changed;
@@ -2702,14 +2866,4 @@ function progressSummary(value: unknown): NonNullable<DirectorState['qbtcpSessio
     leftScore: points[0] ?? 0,
     rightScore: points[1] ?? 0,
   };
-}
-
-function gameLabel(state: DirectorState, scheduledId: string): string {
-  const scheduled = state.scheduledGames.find((game) => game.id === scheduledId);
-  if (!scheduled) return scheduledId;
-  const left = state.teams.find((team) => team.id === scheduled.leftTeamId)?.displayName ?? 'Team';
-  const right = scheduled.rightTeamId
-    ? (state.teams.find((team) => team.id === scheduled.rightTeamId)?.displayName ?? 'Team')
-    : 'Bye';
-  return `${left} vs ${right}`;
 }

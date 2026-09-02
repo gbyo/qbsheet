@@ -63,19 +63,21 @@ impl<'a> MetadataRepository<'a> {
             .connection()
             .prepare("SELECT key, value_json, updated_at FROM application_metadata ORDER BY key")?;
         let rows = statement.query_map([], |row| {
-            let value_json: String = row.get(1)?;
-            Ok(MetadataEntry {
-                key: row.get(0)?,
-                value: serde_json::from_str(&value_json).map_err(|error| {
-                    rusqlite::Error::FromSqlConversionFailure(
-                        1,
-                        rusqlite::types::Type::Text,
-                        Box::new(error),
-                    )
-                })?,
-                updated_at: row.get(2)?,
-            })
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
         })?;
-        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        let rows = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        rows.into_iter()
+            .map(|(key, value_json, updated_at)| {
+                Ok(MetadataEntry {
+                    key,
+                    value: serde_json::from_str(&value_json)?,
+                    updated_at,
+                })
+            })
+            .collect()
     }
 }

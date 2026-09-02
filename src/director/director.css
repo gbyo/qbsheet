@@ -2118,3 +2118,98 @@ button:disabled:hover {
     animation-iteration-count: 1 !important;
   }
 }
+
+/*
+ * Transfers.
+ *
+ * Reuses the panel, table, list and state-label vocabulary the rest of Director already uses. What
+ * is new is only what has no existing equivalent: a drop target, a drive notice, and a location row
+ * whose actions wrap without pushing the label around.
+ */
+.director-transfer-list li {
+  border-bottom: 1px solid var(--director-border);
+}
+
+.director-transfer-list li:last-child {
+  border-bottom: 0;
+}
+
+.director-transfer-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 12px;
+  align-items: start;
+  padding: 12px 0;
+}
+
+.director-transfer-row > div:first-child {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.director-transfer-row small {
+  overflow: hidden;
+  color: var(--director-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.director-transfer-notice {
+  border-color: var(--director-accent);
+  background: var(--director-accent-soft);
+}
+
+.director-transfer-notice-body {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.director-transfer-notice-body > div:nth-child(2) {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.director-transfer-notice-body small {
+  color: var(--director-muted);
+}
+
+/*
+ * The drop target is a dashed region rather than a whole-window overlay: the director is reading
+ * the incoming table while they drop, and an overlay would hide the thing they are checking against.
+ */
+.director-dropzone {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  padding: 22px var(--director-panel-inset);
+  border: 1px dashed var(--director-border-strong);
+  border-radius: var(--director-radius);
+  margin: var(--director-panel-inset);
+  color: var(--director-muted);
+  text-align: center;
+}
+
+.director-dropzone p {
+  margin: 0;
+}
+
+.director-dropzone-panel.is-active {
+  border-color: var(--director-accent);
+}
+
+.director-dropzone-panel.is-active .director-dropzone {
+  border-color: var(--director-accent);
+  background: var(--director-accent-soft);
+}
+
+@media (max-width: 900px) {
+  .director-transfer-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

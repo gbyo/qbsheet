@@ -230,12 +230,17 @@ impl<'a> ResultRepository<'a> {
         note: Option<&str>,
     ) -> StoreResult<Game> {
         self.store.write_transaction(|transaction| {
-            let submission: ResultSubmission = transaction.query_row(
-                submission_select(),
-                params![submission_id],
-                submission_from_row,
-            )?;
-            let game: Game = transaction.query_row(game_select(), params![submission.game_id], game_from_row)?;
+            let submission: ResultSubmission = transaction
+                .query_row(
+                    submission_select(),
+                    params![submission_id],
+                    submission_from_row,
+                )
+                .map_err(|error| map_query_not_found(error, "result submission", submission_id))?;
+            let game_id = submission.game_id.clone();
+            let game: Game = transaction
+                .query_row(game_select(), params![game_id], game_from_row)
+                .map_err(|error| map_query_not_found(error, "game", &game_id))?;
             if submission.status == "accepted" {
                 return Ok(game);
             }
@@ -325,7 +330,8 @@ impl<'a> ResultRepository<'a> {
                     accepted_at,
                 ],
             )?;
-            transaction.query_row(game_select(), params![game.id], game_from_row)
+            transaction
+                .query_row(game_select(), params![game.id], game_from_row)
                 .map_err(StoreError::from)
         })
     }
@@ -517,6 +523,13 @@ fn protest_from_row(row: &Row<'_>) -> rusqlite::Result<Protest> {
     })
 }
 
+fn map_query_not_found(error: rusqlite::Error, entity: &'static str, id: &str) -> StoreError {
+    match error {
+        rusqlite::Error::QueryReturnedNoRows => StoreError::not_found(entity, id),
+        error => StoreError::from(error),
+    }
+}
+
 fn validate_result(
     submitted: &SubmittedGameResult,
     transaction: &Transaction<'_>,
@@ -527,20 +540,46 @@ fn validate_result(
             "accepted game scores cannot be negative".to_owned(),
         ));
     }
-    if game.scheduled_game_id.is_some() {
-        if let Some(winner_team_id) = &submitted.winner_team_id {
-            let expected: bool = transaction.query_row(
-                "SELECT EXISTS(
-                    SELECT 1 FROM scheduled_games
-                    WHERE id = (SELECT scheduled_game_id FROM games WHERE id = ?1)
-                      AND (team_a_id = ?2 OR team_b_id = ?2)
-                )",
-                params![game.id, winner_team_id],
-                |row| row.get(0),
+
+    if let Some(winner_team_id) = &submitted.winner_team_id {
+        if submitted.team_a_score == submitted.team_b_score {
+            return Err(StoreError::InvalidInput(
+                "tied games cannot name a winner".to_owned(),
+            ));
+        }
+
+        if let Some(scheduled_game_id) = &game.scheduled_game_id {
+            let (team_a_id, team_b_id): (Option<String>, Option<String>) = transaction.query_row(
+                "SELECT team_a_id, team_b_id FROM scheduled_games WHERE id = ?1",
+                params![scheduled_game_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )?;
-            if !expected {
+            if team_a_id.as_deref() != Some(winner_team_id.as_str())
+                && team_b_id.as_deref() != Some(winner_team_id.as_str())
+            {
                 return Err(StoreError::InvalidInput(
                     "winner is not one of the scheduled teams".to_owned(),
+                ));
+            }
+            let expected_winner = if submitted.team_a_score > submitted.team_b_score {
+                team_a_id.as_deref()
+            } else {
+                team_b_id.as_deref()
+            };
+            if expected_winner != Some(winner_team_id.as_str()) {
+                return Err(StoreError::InvalidInput(
+                    "winner does not match the higher score".to_owned(),
+                ));
+            }
+        } else {
+            let winner_in_tournament: bool = transaction.query_row(
+                "SELECT EXISTS(SELECT 1 FROM teams WHERE id = ?1 AND tournament_id = ?2)",
+                params![winner_team_id, game.tournament_id],
+                |row| row.get(0),
+            )?;
+            if !winner_in_tournament {
+                return Err(StoreError::InvalidInput(
+                    "winner does not belong to the game tournament".to_owned(),
                 ));
             }
         }

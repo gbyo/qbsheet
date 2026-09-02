@@ -7,6 +7,24 @@
  */
 
 export const directorSchemaVersion = 2;
+import { emptyTransferState, type TransferState } from '../transfers/model';
+
+export const directorSchemaVersion = 1;
+
+export type {
+  ArtifactClassification,
+  ArtifactSourceKind,
+  ArtifactStatus,
+  AssignmentTransfer,
+  AssignmentTransferStatus,
+  IncomingArtifact,
+  TransferEvent,
+  TransferEventKind,
+  TransferLocation,
+  TransferLocationKind,
+  TransferState,
+  TransportKind,
+} from '../transfers/model';
 
 export type DirectorId = string;
 export type TournamentStatus = 'draft' | 'running' | 'complete' | 'archived';
@@ -282,6 +300,7 @@ export interface AuditEvent {
     | 'format-changed'
     | 'schedule-generated'
     | 'assignment-released'
+    | 'assignment-prepared'
     | 'result-received'
     | 'result-accepted'
     | 'result-edited'
@@ -364,6 +383,13 @@ export interface DirectorState {
   qbtcpSessions: QbtcpRoomSession[];
   qbtcpHelpRequests: QbtcpHelpRequest[];
   qbtcpRosterAmendments: QbtcpRosterAmendment[];
+  /**
+   * Transport-agnostic transfers.
+   *
+   * A separate block rather than fields on `ScheduledGame`, because delivery and return are events
+   * that happen around a game rather than properties of it. See `../transfers/model.ts`.
+   */
+  transfers: TransferState;
   metadata: {
     lastSavedAt: string | null;
     lastCheckpointAt: string | null;
@@ -409,6 +435,7 @@ export function emptyDirectorState(): DirectorState {
     qbtcpSessions: [],
     qbtcpHelpRequests: [],
     qbtcpRosterAmendments: [],
+    transfers: emptyTransferState(),
     metadata: { lastSavedAt: null, lastCheckpointAt: null },
   };
 }
