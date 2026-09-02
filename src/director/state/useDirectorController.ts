@@ -2910,7 +2910,22 @@ export function useDirectorController(repository = createDirectorRepository()): 
       updateSettings: (changes) => {
         commit((draft) => {
           if (!draft.live) return;
-          draft.live = { ...draft.live, settings: { ...draft.live.settings, ...changes } };
+          const next = { ...draft.live.settings, ...changes };
+          // Enforce dependent visibility settings. A switch that requires a parent
+          // cannot stay on while the parent is off, and turning a child on
+          // implicitly enables its parent so the UI never shows "On" while the
+          // projection silently cannot publish it (see docs/QBLIVE.md visibility matrix).
+          if ('playerNames' in changes && changes.playerNames === false) next.playerStatistics = false;
+          if ('playerStatistics' in changes && changes.playerStatistics === true) next.playerNames = true;
+          if ('liveGameStatus' in changes && changes.liveGameStatus === false) {
+            next.liveScores = false;
+            next.liveProgress = false;
+          }
+          if ('liveScores' in changes && changes.liveScores === true) next.liveGameStatus = true;
+          if ('liveProgress' in changes && changes.liveProgress === true) next.liveGameStatus = true;
+          if ('roomLocations' in changes && changes.roomLocations === false) next.roomDirections = false;
+          if ('roomDirections' in changes && changes.roomDirections === true) next.roomLocations = true;
+          draft.live = { ...draft.live, settings: next };
         });
       },
 

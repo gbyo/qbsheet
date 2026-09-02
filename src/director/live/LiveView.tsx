@@ -489,6 +489,13 @@ const visibilityGroups: {
   },
 ];
 
+const visibilityDependencies: Partial<Record<keyof LivePublicationSettings, { parent: keyof LivePublicationSettings; label: string }>> = {
+  playerStatistics: { parent: 'playerNames', label: 'Player names' },
+  liveScores: { parent: 'liveGameStatus', label: 'Live game status' },
+  liveProgress: { parent: 'liveGameStatus', label: 'Live game status' },
+  roomDirections: { parent: 'roomLocations', label: 'Room locations' },
+};
+
 function VisibilityPanel({
   publication,
   actions,
@@ -520,22 +527,30 @@ function VisibilityPanel({
         {visibilityGroups.map((group) => (
           <div key={group.heading} className="director-live-group">
             <p className="director-eyebrow">{group.heading}</p>
-            {group.rows.map((row) => (
-              <div key={row.key} className="director-live-row">
-                <span>
-                  <span>{row.label}</span>
-                  <small className="director-muted">{row.description}</small>
-                </span>
-                <label className="director-live-toggle">
-                  <input
-                    type="checkbox"
-                    checked={Boolean(publication.settings[row.key])}
-                    onChange={() => toggle(row.key, row.warning)}
-                  />
-                  <span>{publication.settings[row.key] ? 'On' : 'Off'}</span>
-                </label>
-              </div>
-            ))}
+            {group.rows.map((row) => {
+              const dependency = visibilityDependencies[row.key];
+              const parentEnabled = dependency ? Boolean(publication.settings[dependency.parent]) : true;
+              const disabled = Boolean(dependency && !parentEnabled);
+              const description = disabled ? `Requires ${dependency?.label}` : row.description;
+              return (
+                <div key={row.key} className="director-live-row">
+                  <span>
+                    <span>{row.label}</span>
+                    <small className="director-muted">{description}</small>
+                  </span>
+                  <label className="director-live-toggle">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(publication.settings[row.key])}
+                      disabled={disabled}
+                      aria-disabled={disabled}
+                      onChange={() => toggle(row.key, row.warning)}
+                    />
+                    <span>{publication.settings[row.key] ? 'On' : 'Off'}</span>
+                  </label>
+                </div>
+              );
+            })}
           </div>
         ))}
       </div>
