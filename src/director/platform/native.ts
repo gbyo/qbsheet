@@ -14,7 +14,7 @@ export interface NativeRoomPairingInvitation {
   roomId: string;
   roomName: string;
   pairingCode: string;
-  pairingUrl: string;
+  pairingUrl?: string;
   expiresInSeconds: number;
 }
 

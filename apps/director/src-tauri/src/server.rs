@@ -49,7 +49,7 @@ pub struct RoomPairingInvitation {
     pub room_id: String,
     pub room_name: String,
     pub pairing_code: String,
-    pub pairing_url: String,
+    pub pairing_url: Option<String>,
     pub expires_in_seconds: u64,
 }
 
@@ -256,7 +256,7 @@ impl ServerRuntime {
             .map(|room| {
                 server
                     .issue_pairing(&room.id)
-                    .map(|invitation| pairing_invitation(&address, port, invitation))
+                    .map(|invitation| pairing_invitation(address.as_deref(), port, invitation))
             })
             .collect::<Result<Vec<_>, _>>()
             .map_err(|error| ServerError::Pairing(format!("{error:?}")))?;
@@ -282,14 +282,17 @@ impl ServerRuntime {
 
         inner.status = ServerStatus {
             running: true,
-            address: Some(address),
+            address: address.clone(),
             port: Some(port),
             protocol: Some("QBTCP v1".to_owned()),
             paired_rooms: state.paired_room_count(),
             pairing_invitations,
             pairing_code,
             pairing_url,
-            message: Some("QBTCP server started.".to_owned()),
+            message: Some(match address {
+                Some(_) => "QBTCP server started.".to_owned(),
+                None => "QBTCP server started, but no non-loopback LAN address was found; pairing links are unavailable.".to_owned(),
+            }),
         };
         inner.task = Some(task);
         inner.server = Some(server);
@@ -346,18 +349,14 @@ impl ServerRuntime {
         let (server, address, port) = {
             let inner = self.inner.lock().map_err(|_| ServerError::Unavailable)?;
             let server = inner.server.clone().ok_or(ServerError::NotRunning)?;
-            let address = inner
-                .status
-                .address
-                .clone()
-                .ok_or(ServerError::Unavailable)?;
+            let address = inner.status.address.clone();
             let port = inner.status.port.ok_or(ServerError::Unavailable)?;
             (server, address, port)
         };
         let invitation = server
             .issue_pairing(room_id)
             .map_err(|error| ServerError::Pairing(format!("{error:?}")))?;
-        let invitation = pairing_invitation(&address, port, invitation);
+        let invitation = pairing_invitation(address.as_deref(), port, invitation);
         let mut inner = self.inner.lock().map_err(|_| ServerError::Unavailable)?;
         inner
             .status
@@ -793,7 +792,10 @@ impl QbtcpState for DirectorQbtcpState {
                 })
                 .map(|session| session.session_id.clone())
                 .collect::<Vec<_>>();
-            if let Some(session_id) = open_session_ids.first().filter(|_| open_session_ids.len() == 1) {
+            if let Some(session_id) = open_session_ids
+                .first()
+                .filter(|_| open_session_ids.len() == 1)
+            {
                 if let Some(session) = sessions.get_mut(session_id) {
                     session.device_id = Some(record.device_id);
                     session.operator_name = record.operator_name;
@@ -891,6 +893,27 @@ impl QbtcpState for DirectorQbtcpState {
     fn record_session_event(&self, event: SessionEvent) -> Result<(), StateError> {
         <MemoryState as QbtcpState>::record_session_event(&self.memory, event.clone())?;
         let now = qbtcp_server::now_iso();
+        let opened_presence = match &event {
+            SessionEvent::Opened { room_id, .. } => {
+                self.presence.lock().ok().and_then(|presence| {
+                    let candidates = presence
+                        .values()
+                        .filter(|record| record.room_id == *room_id)
+                        .collect::<Vec<_>>();
+                    (candidates.len() == 1).then(|| {
+                        let record = candidates[0];
+                        (
+                            record.device_id.clone(),
+                            record.operator_name.clone(),
+                            record.observed_at.clone(),
+                        )
+                    })
+                })
+            }
+            SessionEvent::Expired { .. }
+            | SessionEvent::ResultRetained { .. }
+            | SessionEvent::WriterTaken { .. } => None,
+        };
         let mut sessions = self
             .session_snapshots
             .lock()
@@ -908,13 +931,18 @@ impl QbtcpState for DirectorQbtcpState {
                         session_id: session_id.clone(),
                         room_id: room_id.clone(),
                         match_id: Some(match_id.clone()),
-                        device_id: None,
-                        operator_name: None,
+                        device_id: opened_presence.as_ref().map(|presence| presence.0.clone()),
+                        operator_name: opened_presence
+                            .as_ref()
+                            .and_then(|presence| presence.1.clone()),
                         status: qbtcp_server::SessionStatus::Open,
                         resumable: true,
                         result_received: false,
                         progress_sequence: None,
-                        updated_at: now.clone(),
+                        updated_at: opened_presence
+                            .as_ref()
+                            .map(|presence| presence.2.clone())
+                            .unwrap_or_else(|| now.clone()),
                     },
                 );
                 self.session_rooms
@@ -1055,7 +1083,10 @@ fn rooms_from_document(document: Option<&Value>) -> Vec<RoomInfo> {
                 .and_then(Value::as_bool)
                 .unwrap_or(true);
             let status = string_field(Some(room), "status");
-            let enabled = available && status.as_deref() != Some("offline");
+            // `available` controls future assignment. Keep a live/help room enabled so changing
+            // next-round availability cannot tear down an active scorer session.
+            let enabled = status.as_deref() != Some("offline")
+                && (available || matches!(status.as_deref(), Some("live" | "help")));
             let accessibility = string_field(Some(room), "accessibility").or_else(|| {
                 room.get("accessible")
                     .and_then(Value::as_bool)
@@ -1492,37 +1523,48 @@ fn u32_field(object: Option<&serde_json::Map<String, Value>>, key: &str) -> Opti
     u64_field(object, key).and_then(|value| u32::try_from(value).ok())
 }
 
-fn detect_lan_address() -> String {
-    let mut fallback = None;
-    if let Ok(interfaces) = get_if_addrs::get_if_addrs() {
-        for interface in interfaces {
-            let IpAddr::V4(address) = interface.ip() else {
-                continue;
-            };
-            if address.is_unspecified() || address.is_loopback() {
-                continue;
-            }
-            if address.is_private() {
-                return address.to_string();
-            }
-            fallback.get_or_insert(address.to_string());
-        }
-    }
-    fallback.unwrap_or_else(|| "127.0.0.1".to_owned())
+fn detect_lan_address() -> Option<String> {
+    get_if_addrs::get_if_addrs()
+        .ok()
+        .and_then(|interfaces| {
+            select_lan_address(interfaces.into_iter().map(|interface| interface.ip()))
+        })
+        .map(|address| address.to_string())
 }
 
-fn pairing_url(address: &str, port: u16, code: &str, room_id: &str) -> String {
+fn select_lan_address<I>(addresses: I) -> Option<Ipv4Addr>
+where
+    I: IntoIterator<Item = IpAddr>,
+{
+    let mut fallback = None;
+    for address in addresses {
+        let IpAddr::V4(address) = address else {
+            continue;
+        };
+        if address.is_unspecified() || address.is_loopback() {
+            continue;
+        }
+        if address.is_private() {
+            return Some(address);
+        }
+        fallback.get_or_insert(address);
+    }
+    fallback
+}
+
+fn pairing_url(address: Option<&str>, port: u16, code: &str, room_id: &str) -> Option<String> {
+    let address = address?;
     let server = format!("http://{address}:{port}");
-    format!(
+    Some(format!(
         "{SCORE_SHEET_URL}#qbtcp-pair?v=1&server={}&code={}&room={}",
         percent_encode(&server),
         percent_encode(code),
         percent_encode(room_id)
-    )
+    ))
 }
 
 fn pairing_invitation(
-    address: &str,
+    address: Option<&str>,
     port: u16,
     invitation: qbtcp_server::PairingInvitation,
 ) -> RoomPairingInvitation {
@@ -1541,7 +1583,7 @@ fn legacy_pairing_fields(
     match invitations {
         [invitation] => (
             Some(invitation.pairing_code.clone()),
-            Some(invitation.pairing_url.clone()),
+            invitation.pairing_url.clone(),
         ),
         _ => (None, None),
     }
@@ -1780,12 +1822,26 @@ mod tests {
 
     #[test]
     fn pairing_url_keeps_the_code_in_the_fragment() {
-        let url = pairing_url("192.168.1.20", 8787, "12345678", "room/101");
+        let url = pairing_url(Some("192.168.1.20"), 8787, "12345678", "room/101")
+            .expect("a LAN address produces a pairing URL");
 
         assert!(url.starts_with("https://qbsheet.com/#qbtcp-pair?"));
         assert!(url.contains("code=12345678"));
         assert!(url.contains("room=room%2F101"));
         assert!(!url[..url.find('#').expect("fragment")].contains("12345678"));
+    }
+
+    #[test]
+    fn lan_address_selection_prefers_private_non_loopback_and_has_no_loopback_fallback() {
+        let selected = select_lan_address([
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            IpAddr::V6(std::net::Ipv6Addr::LOCALHOST),
+            IpAddr::V4(Ipv4Addr::new(203, 0, 113, 10)),
+            IpAddr::V4(Ipv4Addr::new(192, 168, 1, 20)),
+        ]);
+        assert_eq!(selected, Some(Ipv4Addr::new(192, 168, 1, 20)));
+        assert_eq!(select_lan_address([IpAddr::V4(Ipv4Addr::LOCALHOST)]), None);
+        assert!(pairing_url(None, 8787, "12345678", "room/101").is_none());
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -1806,7 +1862,10 @@ mod tests {
         assert_eq!(status.protocol.as_deref(), Some("QBTCP v1"));
         assert!(status.port.is_some_and(|port| port > 0));
         assert!(status.pairing_code.is_some());
-        assert!(status.pairing_url.is_some());
+        assert_eq!(status.pairing_url.is_some(), status.address.is_some());
+        if let Some(address) = status.address.as_deref() {
+            assert_ne!(address, "127.0.0.1");
+        }
 
         let stopped = runtime.stop();
         assert!(!stopped.running);
@@ -1841,10 +1900,12 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["room-101", "room-102"]
         );
-        assert!(status
-            .pairing_invitations
-            .iter()
-            .all(|invitation| invitation.pairing_url.contains("room=")));
+        assert!(status.pairing_invitations.iter().all(|invitation| {
+            invitation
+                .pairing_url
+                .as_deref()
+                .is_none_or(|url| url.contains("room="))
+        }));
 
         let mut disabled = json!({
             "tournament": {"id": "t-1", "name": "Multi-room test"},

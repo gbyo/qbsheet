@@ -384,16 +384,19 @@ export function TournamentView({
                           )}
                         </div>
                         <div className="director-row-actions">
-                          {invitation && (
+                          {invitation?.pairingUrl && (
                             <Button
                               variant="quiet"
                               onClick={() => {
-                                void navigator.clipboard?.writeText(invitation.pairingUrl);
+                                void navigator.clipboard?.writeText(invitation.pairingUrl ?? '');
                                 onAnnounce(`${room.name} pairing link copied.`);
                               }}
                             >
                               Copy link
                             </Button>
+                          )}
+                          {invitation && !invitation.pairingUrl && (
+                            <small className="director-muted">Code only; no LAN address found</small>
                           )}
                           <Button
                             variant={invitation ? 'quiet' : 'primary'}

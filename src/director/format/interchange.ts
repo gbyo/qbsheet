@@ -22,7 +22,7 @@ import {
   type GameRecord,
   type TeamGameScore,
 } from '../domain';
-import { DirectorStateVersionError, normalizeDirectorState } from '../persistence/stateMigrations';
+import { normalizeDirectorState } from '../persistence/stateMigrations';
 
 /**
  * Director-only state lives in a namespaced top-level extension. The QBJ writer intentionally

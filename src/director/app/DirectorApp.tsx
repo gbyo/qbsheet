@@ -200,7 +200,9 @@ export default function DirectorApp() {
           <button
             type="button"
             className="director-help-link"
-            onClick={() => setAnnouncement('Use ⌘ K or Ctrl K to search teams, rooms, and games.')}
+            onClick={() =>
+              setAnnouncement('Use ⌘ K or Ctrl K to search teams, players, rooms, packets, and games.')
+            }
           >
             <Icon name="help" size={15} /> Help & keyboard shortcuts
           </button>

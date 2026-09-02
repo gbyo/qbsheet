@@ -261,10 +261,10 @@ export function RoomsView({
                       <td>{staffName(state, room.scorekeeperId) || 'Unassigned'}</td>
                       <td>{equipmentName(state, room.equipmentId) || 'Unassigned'}</td>
                       <td>
-                        <StateLabel
-                          state={room.status}
-                          label={room.available ? room.status : 'Unavailable'}
-                        />
+                        <StateLabel state={room.status} label={room.status} />
+                        <small className="director-table-subtext">
+                          {room.available ? 'Available next round' : 'Unavailable next round'}
+                        </small>
                       </td>
                       <td>
                         <button
@@ -274,7 +274,7 @@ export function RoomsView({
                           onClick={() => {
                             controller.updateRoom(room.id, { available: !room.available });
                             onAnnounce(
-                              `${room.name} marked ${room.available ? 'unavailable' : 'available'}.`,
+                              `${room.name} marked ${room.available ? 'unavailable' : 'available'} for the next round.`,
                             );
                           }}
                         >

@@ -608,25 +608,8 @@ export function useDirectorController(repository = createDirectorRepository()): 
         const room = draft.rooms.find((entry) => entry.id === roomId);
         if (!room) return;
         Object.assign(room, changes);
-        if (changes.available === false) {
-          room.status = 'offline';
-          for (const session of draft.qbtcpSessions.filter((entry) => entry.roomId === roomId)) {
-            if (session.state !== 'result-received') {
-              session.state = 'abandoned';
-              session.progress = null;
-              session.resumable = true;
-            }
-            session.helpRequestId = null;
-          }
-          for (const request of draft.qbtcpHelpRequests.filter(
-            (entry) => entry.roomId === roomId && entry.status === 'open',
-          )) {
-            request.status = 'cancelled';
-            request.updatedAt = isoNow();
-          }
-        } else if (changes.available === true && room.status === 'offline') {
-          room.status = 'available';
-        }
+        // Availability controls future assignment only. The operational status belongs to the
+        // room/session lifecycle and must not abandon a live scorer or cancel an open help request.
         draft.audit.push({
           id: newDirectorId('audit'),
           at: isoNow(),
@@ -2072,7 +2055,7 @@ function applyNativeProgress(state: DirectorState, records: NativeProgressSnapsh
       changed = true;
     }
     const room = state.rooms.find((entry) => entry.id === record.roomId);
-    if (room && room.status !== 'live') {
+    if (room && room.status !== 'live' && room.status !== 'help') {
       room.status = 'live';
       changed = true;
     }
