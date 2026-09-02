@@ -97,9 +97,19 @@ test('Director layout keeps panel, table, status, and narrow-window contracts', 
   await expect(roomForm.locator('.director-panel-body')).toBeVisible();
   await expect(roomForm.locator('.director-panel-footer')).toBeVisible();
   await page.getByLabel('Room name').fill('Room 101');
+  await page.getByLabel('Accessibility notes').fill('Step-free entrance');
+  await page.getByLabel('Directions').fill('East stairwell');
+  await page.getByLabel('Room notes').fill('Bring the spare buzzer.');
   await page.getByRole('button', { name: 'Save room' }).click();
+  await expect(page.getByText('Step-free entrance', { exact: true })).toBeVisible();
+  await expect(page.getByText('East stairwell', { exact: true })).toBeVisible();
+  await expect(page.getByText('Bring the spare buzzer.', { exact: true })).toBeVisible();
   await expect(page.locator('.director-filter-tabs')).toBeVisible();
   await expect(page.locator('.director-server-status')).toHaveAttribute('data-status', 'unavailable');
+  await page.getByRole('tab', { name: /Offline/ }).click();
+  await expect(page.getByText('No rooms match this filter.', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Show all rooms' }).click();
+  await expect(page.getByText('Room 101', { exact: true })).toBeVisible();
 
   await page.setViewportSize({ width: 520, height: 720 });
   await navigation.getByRole('button', { name: 'Settings', exact: true }).click();

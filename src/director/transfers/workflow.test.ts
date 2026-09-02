@@ -373,8 +373,9 @@ describe('a tournament day, from an empty drive to updated standings', () => {
       // happened and where, and carries no file contents.
       const history = JSON.stringify(state.transfers.events);
       expect(history).toContain('Prepared 4 assignments on SanDisk Ultra');
-      expect(history).not.toContain('match_teams');
-      expect(history).not.toContain('325');
+      const eventPayloads = state.transfers.events.map(({ id: _id, at: _at, ...event }) => event);
+      expect(JSON.stringify(eventPayloads)).not.toContain('match_teams');
+      expect(JSON.stringify(eventPayloads)).not.toContain('325');
       expect(maxScanFileBytes).toBeGreaterThan(0);
     } finally {
       globalThis.fetch = originalFetch;

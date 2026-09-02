@@ -229,7 +229,11 @@ function toInterchangeGame(state: DirectorState, game: GameRecord): InterchangeG
         powers: player.powers,
         gets: player.gets,
         negs: player.negs,
-        points: player.bonusPoints,
+        points:
+          player.powers * (state.tournament?.rules.powerValue ?? 15) +
+          player.gets * (state.tournament?.rules.tossupValue ?? 10) +
+          player.negs * (state.tournament?.rules.negValue ?? -5) +
+          player.bonusPoints,
         ...(player.tossupsHeard === null || player.tossupsHeard === undefined
           ? {}
           : { tossupsHeard: player.tossupsHeard }),

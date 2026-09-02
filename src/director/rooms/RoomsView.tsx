@@ -21,6 +21,9 @@ export function RoomsView({
   const [name, setName] = useState('');
   const [building, setBuilding] = useState('');
   const [floor, setFloor] = useState('');
+  const [accessibility, setAccessibility] = useState('');
+  const [directions, setDirections] = useState('');
+  const [notes, setNotes] = useState('');
   const [staffRole, setStaffRole] = useState<'moderator' | 'scorekeeper' | 'runner' | 'hq'>('moderator');
   const [equipmentKind, setEquipmentKind] = useState<'buzzer' | 'device' | 'other'>('buzzer');
   const [filter, setFilter] = useState<'all' | 'available' | 'live' | 'help' | 'offline'>('all');
@@ -29,6 +32,9 @@ export function RoomsView({
     setName('');
     setBuilding('');
     setFloor('');
+    setAccessibility('');
+    setDirections('');
+    setNotes('');
     if (kind === 'staff') setStaffRole('moderator');
     if (kind === 'equipment') setEquipmentKind('buzzer');
   };
@@ -45,11 +51,14 @@ export function RoomsView({
       onAnnounce('Enter a room name first.');
       return;
     }
-    controller.addRoom({ name, building, floor });
+    controller.addRoom({ name, building, floor, accessibility, directions, notes });
     onAnnounce(`${name.trim()} added.`);
     setName('');
     setBuilding('');
     setFloor('');
+    setAccessibility('');
+    setDirections('');
+    setNotes('');
     setShowForm(null);
   };
   const saveStaff = () => {
@@ -134,6 +143,34 @@ export function RoomsView({
                     />
                   </FormField>
                 </div>
+                <div className="director-form-grid director-form-grid-two">
+                  <FormField
+                    label="Accessibility notes"
+                    hint="For example: step-free entrance or hearing loop."
+                  >
+                    <input
+                      value={accessibility}
+                      onChange={(event) => setAccessibility(event.target.value)}
+                      placeholder="Step-free entrance"
+                    />
+                  </FormField>
+                  <FormField label="Directions" hint="Give staff a short wayfinding note.">
+                    <input
+                      value={directions}
+                      onChange={(event) => setDirections(event.target.value)}
+                      placeholder="East stairwell, first door on the left"
+                    />
+                  </FormField>
+                </div>
+                <FormField label="Room notes">
+                  <textarea
+                    className="director-textarea"
+                    rows={2}
+                    value={notes}
+                    onChange={(event) => setNotes(event.target.value)}
+                    placeholder="Anything the director or runners should know"
+                  />
+                </FormField>
               </PanelBody>
               <PanelFooter className="director-form-actions">
                 <Button variant="primary" type="submit">
@@ -280,16 +317,31 @@ export function RoomsView({
                   </tr>
                 </thead>
                 <tbody>
-                  {rooms.map((room) => (
-                    <RoomRows
-                      key={room.id}
-                      state={state}
-                      room={room}
-                      controller={controller}
-                      onNavigate={onNavigate}
-                      onAnnounce={onAnnounce}
-                    />
-                  ))}
+                  {rooms.length > 0 ? (
+                    rooms.map((room) => (
+                      <RoomRows
+                        key={room.id}
+                        state={state}
+                        room={room}
+                        controller={controller}
+                        onNavigate={onNavigate}
+                        onAnnounce={onAnnounce}
+                      />
+                    ))
+                  ) : (
+                    <tr className="director-table-empty-row">
+                      <td colSpan={7}>
+                        <p className="director-empty-copy">No rooms match this filter.</p>
+                        <button
+                          type="button"
+                          className="director-inline-action"
+                          onClick={() => setFilter('all')}
+                        >
+                          Show all rooms
+                        </button>
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -482,6 +534,9 @@ function RoomRows({
   const [name, setName] = useState(room.name);
   const [building, setBuilding] = useState(room.building ?? '');
   const [floor, setFloor] = useState(room.floor ?? '');
+  const [accessibility, setAccessibility] = useState(room.accessibility ?? '');
+  const [directions, setDirections] = useState(room.directions ?? '');
+  const [notes, setNotes] = useState(room.notes ?? '');
   const [moderatorId, setModeratorId] = useState(room.moderatorId ?? '');
   const [scorekeeperId, setScorekeeperId] = useState(room.scorekeeperId ?? '');
   const [equipmentId, setEquipmentId] = useState(room.equipmentId ?? '');
@@ -490,6 +545,9 @@ function RoomRows({
     setName(room.name);
     setBuilding(room.building ?? '');
     setFloor(room.floor ?? '');
+    setAccessibility(room.accessibility ?? '');
+    setDirections(room.directions ?? '');
+    setNotes(room.notes ?? '');
     setModeratorId(room.moderatorId ?? '');
     setScorekeeperId(room.scorekeeperId ?? '');
     setEquipmentId(room.equipmentId ?? '');
@@ -506,6 +564,9 @@ function RoomRows({
       name: trimmedName,
       building: building.trim(),
       floor: floor.trim(),
+      accessibility,
+      directions,
+      notes,
       moderatorId: moderatorId || null,
       scorekeeperId: scorekeeperId || null,
       equipmentId: equipmentId || null,
@@ -520,6 +581,8 @@ function RoomRows({
         <td>
           <strong>{room.name}</strong>
           <small className="director-table-subtext">{room.accessibility || 'No access notes'}</small>
+          {room.directions && <small className="director-table-subtext">{room.directions}</small>}
+          {room.notes && <small className="director-table-subtext">{room.notes}</small>}
         </td>
         <td>{[room.building, room.floor].filter(Boolean).join(' · ') || '—'}</td>
         <td>{staffName(state, room.moderatorId) || 'Unassigned'}</td>
@@ -582,6 +645,34 @@ function RoomRows({
                   <input value={floor} onChange={(event) => setFloor(event.target.value)} />
                 </FormField>
               </div>
+              <div className="director-form-grid director-form-grid-two">
+                <FormField
+                  label="Accessibility notes"
+                  hint="For example: step-free entrance or hearing loop."
+                >
+                  <input
+                    value={accessibility}
+                    onChange={(event) => setAccessibility(event.target.value)}
+                    placeholder="Step-free entrance"
+                  />
+                </FormField>
+                <FormField label="Directions" hint="Give staff a short wayfinding note.">
+                  <input
+                    value={directions}
+                    onChange={(event) => setDirections(event.target.value)}
+                    placeholder="East stairwell, first door on the left"
+                  />
+                </FormField>
+              </div>
+              <FormField label="Room notes">
+                <textarea
+                  className="director-textarea"
+                  rows={2}
+                  value={notes}
+                  onChange={(event) => setNotes(event.target.value)}
+                  placeholder="Anything the director or runners should know"
+                />
+              </FormField>
               <div className="director-form-grid director-form-grid-three">
                 <FormField label="Moderator">
                   <select value={moderatorId} onChange={(event) => setModeratorId(event.target.value)}>

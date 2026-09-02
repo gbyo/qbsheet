@@ -21,7 +21,7 @@ import {
   type DirectorRepository,
 } from '../src/director/persistence';
 import { normalizeDirectorState } from '../src/director/persistence/stateMigrations';
-import { exportArchiveBytes, importArchiveBytes } from '../src/director/format/interchange';
+import { exportArchiveBytes, importArchiveBytes, toInterchange } from '../src/director/format/interchange';
 
 function score(teamId: string, value: number): TeamGameScore {
   return {
@@ -186,6 +186,57 @@ describe('Director integration hardening', () => {
     expect(imported.ok).toBe(true);
     if (!imported.ok) return;
     expect(imported.state).toEqual(state);
+  });
+
+  test('Director interchange exports player points from the full stat line', () => {
+    const state = emptyDirectorState();
+    state.tournament = {
+      id: 'tournament-player-export',
+      name: 'Player export',
+      date: '',
+      venue: '',
+      organizer: '',
+      status: 'running',
+      rules: structuredClone(defaultRules),
+      formatId: null,
+      currentPhaseId: null,
+      currentPacketId: null,
+      currentRoundId: null,
+      createdAt: '',
+      updatedAt: '',
+    };
+    state.games = [
+      {
+        id: 'game-player-export',
+        scheduledGameId: 'scheduled-player-export',
+        roundId: 'round-player-export',
+        packetId: null,
+        status: 'accepted',
+        scores: [],
+        playerStats: [
+          {
+            playerId: 'player-1',
+            teamId: 'team-1',
+            powers: 2,
+            gets: 3,
+            negs: 1,
+            bonusPoints: 20,
+            tossupsHeard: 8,
+          },
+        ],
+        source: 'manual',
+        detailedStats: 'complete',
+      },
+    ];
+
+    const exportedPlayer = toInterchange(state).games[0]?.result?.players?.[0];
+    expect(exportedPlayer).toMatchObject({
+      powers: 2,
+      gets: 3,
+      negs: 1,
+      bonusPoints: 20,
+      points: 75,
+    });
   });
 
   test('unsupported formats never fall back to round-robin generation', async () => {
@@ -354,6 +405,42 @@ describe('Director integration hardening', () => {
     expect(released).toBe(true);
     expect(hook.result.current.state.rounds[0]?.startedAt).not.toBeNull();
     await waitFor(() => expect(hook.result.current.saving).toBe(false));
+  });
+
+  test('room operational notes are trimmed and persisted with the room', async () => {
+    const { hook, repository } = await directorWithSetup();
+    const roomId = hook.result.current.state.rooms[0]?.id;
+    if (!roomId) throw new Error('test setup did not create a room');
+
+    act(() => {
+      hook.result.current.updateRoom(roomId, {
+        name: '  Room 101  ',
+        building: '  Main building ',
+        floor: ' First ',
+        accessibility: '  Step-free entrance ',
+        directions: ' East stairwell ',
+        notes: '  Bring the spare buzzer. ',
+      });
+    });
+
+    expect(hook.result.current.state.rooms[0]).toMatchObject({
+      id: roomId,
+      name: 'Room 101',
+      building: 'Main building',
+      floor: 'First',
+      accessibility: 'Step-free entrance',
+      directions: 'East stairwell',
+      notes: 'Bring the spare buzzer.',
+    });
+    await waitFor(async () => {
+      const saved = await repository.load();
+      expect(saved.rooms[0]).toMatchObject({
+        name: 'Room 101',
+        accessibility: 'Step-free entrance',
+        directions: 'East stairwell',
+        notes: 'Bring the spare buzzer.',
+      });
+    });
   });
 
   test('round lifecycle actions require complete field and ledger validation', async () => {

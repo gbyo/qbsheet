@@ -89,6 +89,9 @@ export interface NewRoomInput {
   name: string;
   building?: string;
   floor?: string;
+  accessibility?: string;
+  directions?: string;
+  notes?: string;
 }
 
 export interface NewPoolInput {
@@ -678,6 +681,9 @@ export function useDirectorController(repository = createDirectorRepository()): 
           name: input.name.trim() || `Room ${draft.rooms.length + 1}`,
           building: input.building?.trim(),
           floor: input.floor?.trim(),
+          accessibility: input.accessibility?.trim() || undefined,
+          directions: input.directions?.trim() || undefined,
+          notes: input.notes?.trim() || undefined,
           status: 'available',
           moderatorId: null,
           scorekeeperId: null,
@@ -710,6 +716,14 @@ export function useDirectorController(repository = createDirectorRepository()): 
         const room = draft.rooms.find((entry) => entry.id === roomId);
         if (!room) return;
         Object.assign(room, changes);
+        if (changes.name !== undefined) room.name = changes.name.trim() || room.name;
+        if (changes.building !== undefined) room.building = changes.building.trim() || undefined;
+        if (changes.floor !== undefined) room.floor = changes.floor.trim() || undefined;
+        if (changes.accessibility !== undefined) {
+          room.accessibility = changes.accessibility.trim() || undefined;
+        }
+        if (changes.directions !== undefined) room.directions = changes.directions.trim() || undefined;
+        if (changes.notes !== undefined) room.notes = changes.notes.trim() || undefined;
         // Availability controls future assignment only. The operational status belongs to the
         // room/session lifecycle and must not abandon a live scorer or cancel an open help request.
         draft.audit.push({
