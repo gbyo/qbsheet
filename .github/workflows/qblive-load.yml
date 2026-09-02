@@ -32,21 +32,32 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: package-lock.json
       - run: npm ci
       - name: Install the backend
         working-directory: apps/qblive-backend-cloudflare
-        run: npm install
+        run: npm ci
       - name: Start the backend in workerd
         working-directory: apps/qblive-backend-cloudflare
         run: |
-          npx wrangler dev --port 8788 --var QBLIVE_SETUP_TOKEN:ci-setup-token > /tmp/backend.log 2>&1 &
+          npx wrangler dev --port 8788 --ip 127.0.0.1 --var QBLIVE_SETUP_TOKEN:ci-setup-token > /tmp/backend.log 2>&1 &
+          WRANGLER_PID=$!
           for _ in $(seq 1 40); do
+            if ! kill -0 "$WRANGLER_PID" 2>/dev/null; then
+              echo "Wrangler exited early"
+              cat /tmp/backend.log
+              exit 1
+            fi
             if curl -sf http://127.0.0.1:8788/health > /dev/null; then break; fi
             sleep 2
           done
+          if ! kill -0 "$WRANGLER_PID" 2>/dev/null; then
+            echo "Wrangler exited before health check succeeded"
+            cat /tmp/backend.log
+            exit 1
+          fi
           curl -sf http://127.0.0.1:8788/health || { cat /tmp/backend.log; exit 1; }
       - name: Publish a fixture tournament
         id: publish
