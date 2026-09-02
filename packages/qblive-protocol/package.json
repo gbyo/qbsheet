@@ -1,0 +1,33 @@
+{
+  "name": "@qbsheet/qblive-protocol",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "QBLive v1 wire types, validators, bootstrap URL format, and cross-language fixtures",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./fixtures/*": "./fixtures/*",
+    "./schemas/*": "./schemas/*"
+  },
+  "files": [
+    "dist",
+    "fixtures",
+    "schemas"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest --run tests",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "fixtures": "node scripts/generate-fixtures.mjs"
+  },
+  "devDependencies": {
+    "@qbsheet/qblive-projection": "0.1.0",
+    "@qbsheet/tournament-domain": "0.1.0",
+    "ajv": "^8.18.0"
+  }
+}

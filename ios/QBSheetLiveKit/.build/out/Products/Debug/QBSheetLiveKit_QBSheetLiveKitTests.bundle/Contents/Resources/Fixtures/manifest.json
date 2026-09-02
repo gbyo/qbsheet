@@ -1,0 +1,27 @@
+{
+  "protocolVersion": 1,
+  "publicationId": "bcdfghjkmnpqrstvwxyz",
+  "revision": 41,
+  "generatedAt": "2026-09-05T14:30:00.000Z",
+  "tournament": {
+    "id": "tournament-1",
+    "name": "Saturday Invitational",
+    "date": "2026-09-05",
+    "venue": "Greenwood High School",
+    "organizer": "Greenwood Quiz Bowl",
+    "timeZone": "America/New_York",
+    "status": "in-progress"
+  },
+  "capabilities": {
+    "snapshot": true,
+    "events": true,
+    "stream": true,
+    "applePush": false
+  },
+  "endpoints": {
+    "snapshot": "/qblive/v1/tournaments/bcdfghjkmnpqrstvwxyz/snapshot",
+    "events": "/qblive/v1/tournaments/bcdfghjkmnpqrstvwxyz/events",
+    "stream": "/qblive/v1/tournaments/bcdfghjkmnpqrstvwxyz/stream"
+  },
+  "final": false
+}

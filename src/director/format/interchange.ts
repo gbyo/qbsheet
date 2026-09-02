@@ -19,6 +19,7 @@ import {
   isoNow,
   latestRound,
   newDirectorId,
+  normalizeTimeZone,
   type DirectorState,
   type GameRecord,
   type TeamGameScore,
@@ -449,6 +450,9 @@ function fromInterchange(data: DirectorTournament): DirectorState {
     venue: data.tournament.location ?? '',
     organizer: text(data.tournament.notes)?.replace(/^Organizer:\s*/, '') ?? '',
     status,
+    // An interchange document that never carried a zone gets the unambiguous one rather than this
+    // machine's, so an imported tournament does not silently adopt the importer's local time.
+    timeZone: normalizeTimeZone(tournamentExtensions.timeZone),
     rules: {
       ...defaultRules,
       ...rulesFromInterchange(data.rules),

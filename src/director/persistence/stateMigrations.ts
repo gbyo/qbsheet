@@ -2,8 +2,13 @@ import {
   defaultRules,
   directorSchemaVersion,
   emptyDirectorState,
+  emptyLivePublication,
+  fallbackTimeZone,
+  normalizeTimeZone,
+  normalizeTimelineEvents,
   type DirectorState,
   type GameRecord,
+  type LiveBackendDescriptor,
   type Packet,
   type Protest,
   type ResultSubmission,
@@ -48,6 +53,8 @@ export function migrateDirectorState(
       current = migrateV0ToV1(current);
     } else if (currentVersion === 1) {
       current = migrateV1ToV2(current);
+    } else if (currentVersion === 2) {
+      current = migrateV2ToV3(current);
     } else {
       throw new Error(`No Director migration exists for schema v${currentVersion}.`);
     }
@@ -99,6 +106,29 @@ function migrateV1ToV2(value: Record<string, unknown>): Record<string, unknown> 
   return next;
 }
 
+/**
+ * v3 adds the tournament timezone, the public timeline, and QBSheet Live publication state.
+ *
+ * A v2 tournament has no recorded zone, and there is no way to recover which one it was run in.
+ * Adopting the host's current zone would be a guess that reads as fact on a spectator's phone, so
+ * the migration writes UTC and leaves the Director to correct it — a visibly wrong offset is
+ * recoverable, a plausibly wrong one is not. Live starts absent rather than disabled: a tournament
+ * that never opens the Live section should carry no publication identity at all.
+ */
+function migrateV2ToV3(value: Record<string, unknown>): Record<string, unknown> {
+  const next = structuredClone(value);
+  const tournament = asRecord(next.tournament);
+  if (tournament) {
+    next.tournament = {
+      ...tournament,
+      timeZone: typeof tournament.timeZone === 'string' ? tournament.timeZone : fallbackTimeZone,
+    };
+  }
+  if (!Array.isArray(next.timeline)) next.timeline = [];
+  if (next.live === undefined) next.live = null;
+  return next;
+}
+
 function completeState(value: Record<string, unknown>): DirectorState {
   const empty = emptyDirectorState();
   const candidate = value as Partial<DirectorState>;
@@ -130,6 +160,8 @@ function completeState(value: Record<string, unknown>): DirectorState {
     qbtcpSessions: arrayOrEmpty(candidate.qbtcpSessions, 'qbtcpSessions'),
     qbtcpHelpRequests: arrayOrEmpty(candidate.qbtcpHelpRequests, 'qbtcpHelpRequests'),
     qbtcpRosterAmendments: arrayOrEmpty(candidate.qbtcpRosterAmendments, 'qbtcpRosterAmendments'),
+    timeline: normalizeTimelineEvents(candidate.timeline),
+    live: normalizeLivePublication(candidate.live),
     transfers: normalizeTransferState(candidate.transfers),
   };
   state.submissions = supersedeDuplicateScheduledSubmissions(state);
@@ -165,6 +197,7 @@ function normalizeTournament(value: unknown): DirectorState['tournament'] {
     currentPhaseId: stringOrNull(value.currentPhaseId),
     currentPacketId: stringOrNull(value.currentPacketId),
     currentRoundId: stringOrNull(value.currentRoundId),
+    timeZone: normalizeTimeZone(value.timeZone),
     createdAt: stringOrEmpty(value.createdAt),
     updatedAt: stringOrEmpty(value.updatedAt),
   };
@@ -200,6 +233,64 @@ function normalizeTournamentRules(value: Record<string, unknown>): TournamentRul
     rules.tiebreakers = [...tiebreakers];
   }
   return rules;
+}
+
+/**
+ * Restore a Live publication, dropping anything a stored document should never have carried.
+ *
+ * Read defensively rather than trusted, because a Director document can arrive from a portable
+ * archive that another machine wrote. The one rule that matters is the last line: a management
+ * credential is never read back out of a document, whatever the document claims to contain.
+ */
+function normalizeLivePublication(value: unknown): DirectorState['live'] {
+  if (value === null || value === undefined) return null;
+  if (!isRecord(value)) throw new Error('Director storage contains an invalid QBSheet Live publication.');
+  const publicationId = stringOrNull(value.publicationId);
+  if (!publicationId) return null;
+  const at = stringOrEmpty(value.createdAt) || new Date(0).toISOString();
+  const base = emptyLivePublication(publicationId, at);
+  const settings = isRecord(value.settings)
+    ? { ...base.settings, ...(value.settings as Partial<typeof base.settings>) }
+    : base.settings;
+  const backendRecord = isRecord(value.backend) ? value.backend : null;
+  const backend: LiveBackendDescriptor | null = backendRecord
+    ? {
+        kind: isLiveBackendKind(backendRecord.kind) ? backendRecord.kind : 'custom',
+        origin: stringOrEmpty(backendRecord.origin),
+        displayName: typeof backendRecord.displayName === 'string' ? backendRecord.displayName : undefined,
+      }
+    : null;
+  return {
+    ...base,
+    lifecycle: isLiveLifecycle(value.lifecycle) ? value.lifecycle : base.lifecycle,
+    settings,
+    backend: backend && backend.origin ? backend : null,
+    // A credential reference is a keychain pointer, not a secret, but a document from another
+    // machine points at a keychain this machine does not have. Re-pairing is the only correct
+    // recovery, so the reference is dropped rather than carried forward.
+    credential: null,
+    push: isRecord(value.push) ? { ...base.push, ...(value.push as object), credential: null } : base.push,
+    sync: isRecord(value.sync) ? { ...base.sync, ...(value.sync as object) } : base.sync,
+    outbox: arrayOrEmpty(value.outbox, 'live.outbox'),
+    announcements: arrayOrEmpty(value.announcements, 'live.announcements'),
+    publicUrl: stringOrNull(value.publicUrl),
+    createdAt: at,
+    updatedAt: stringOrEmpty(value.updatedAt) || at,
+  };
+}
+
+function isLiveBackendKind(value: unknown): value is LiveBackendDescriptor['kind'] {
+  return value === 'cloudflare' || value === 'custom' || value === 'local';
+}
+
+function isLiveLifecycle(value: unknown): value is NonNullable<DirectorState['live']>['lifecycle'] {
+  return (
+    value === 'disabled' ||
+    value === 'configuring' ||
+    value === 'live' ||
+    value === 'final' ||
+    value === 'unpublished'
+  );
 }
 
 function migrateGames(value: unknown): GameRecord[] {

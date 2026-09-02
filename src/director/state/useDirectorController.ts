@@ -6,6 +6,8 @@ import {
   generateDirectorRound,
   isoNow,
   newDirectorId,
+  hostTimeZone,
+  normalizeTimeZone,
   roomAssignmentConflicts,
   roundScheduleIsValid,
   type DirectorId,
@@ -13,6 +15,7 @@ import {
   type AdvancementRule,
   type DetailedStatsStatus,
   type GameRecord,
+  type IanaTimeZone,
   type PlayerGameStat,
   type ProtestScoreAdjustment,
   type ResultSubmission,
@@ -58,6 +61,13 @@ export interface NewTournamentInput {
   date: string;
   venue: string;
   organizer: string;
+  /**
+   * The zone the tournament is run in. Defaults to the host's zone at creation and is then fixed.
+   *
+   * See `packages/tournament-domain/src/timezone.ts`: the host is asked once, because a Director
+   * who later opens the file on a laptop in another state must not move the schedule.
+   */
+  timeZone?: IanaTimeZone;
 }
 
 export interface NewTeamInput {
@@ -129,7 +139,9 @@ export interface DirectorController {
   repositoryKind: DirectorRepository['kind'];
   createTournament(input: NewTournamentInput): void;
   updateTournament(
-    changes: Partial<Pick<NonNullable<DirectorState['tournament']>, 'name' | 'date' | 'venue' | 'organizer'>>,
+    changes: Partial<
+      Pick<NonNullable<DirectorState['tournament']>, 'name' | 'date' | 'venue' | 'organizer' | 'timeZone'>
+    >,
   ): boolean;
   addTeam(input: NewTeamInput): boolean;
   addImportedTeams(teams: ImportedTeamInput[]): { inserted: number; skipped: number };
@@ -361,6 +373,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
           venue: input.venue.trim(),
           organizer: input.organizer.trim(),
           status: 'draft',
+          timeZone: normalizeTimeZone(input.timeZone ?? hostTimeZone()),
           rules: structuredClone(defaultRules),
           formatId,
           currentPhaseId: phaseId,
