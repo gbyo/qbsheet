@@ -26,8 +26,19 @@ test('the about page introduces QBSheet and links to the real product', async ({
   await expect(page.getByRole('heading', { name: 'Ready to score?' })).toBeVisible();
 
   const openLinks = page.getByRole('link', { name: 'Open QBSheet' });
-  await expect(openLinks).toHaveCount(3);
+  await expect(openLinks).toHaveCount(2);
   await expect(openLinks.first()).toHaveAttribute('href', '../');
+  const primaryNavigation = page.getByRole('navigation', { name: 'Primary navigation' });
+  await expect(primaryNavigation.getByRole('link')).toHaveCount(4);
+  await expect(primaryNavigation.getByRole('link', { name: 'Scorer' })).toHaveAttribute('href', '../');
+  await expect(primaryNavigation.getByRole('link', { name: 'Director' })).toHaveAttribute(
+    'href',
+    '../director.html',
+  );
+  await expect(primaryNavigation.getByRole('link', { name: /^QBLive/ })).toHaveAttribute(
+    'href',
+    'https://live.qbsheet.com/',
+  );
   await expect(page.getByRole('link', { name: 'View on GitHub' }).first()).toHaveAttribute(
     'href',
     'https://github.com/gbyo/qbsheet',

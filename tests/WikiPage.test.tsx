@@ -61,17 +61,20 @@ describe('a wiki article', () => {
 
     // `about/wiki/start-here/` is three levels below the scorer and two below the product page. This
     // is the assertion that fails if a wiki article is ever treated as an ordinary section page.
-    for (const link of screen.getAllByRole('link', { name: 'Open QBSheet' })) {
-      expect(link).toHaveAttribute('href', '../../../');
-    }
     expect(container.querySelector('.about-brand')).toHaveAttribute('href', '../../');
     const nav = container.querySelector('.about-nav') as HTMLElement;
-    expect(within(nav).getByRole('link', { name: 'About' })).toHaveAttribute('href', '../../');
-    expect(within(nav).getByRole('link', { name: 'FAQ' })).toHaveAttribute('href', '../../faq/');
+    expect(within(nav).getByRole('link', { name: 'Scorer' })).toHaveAttribute('href', '../../../');
+    expect(within(nav).getByRole('link', { name: 'Director' })).toHaveAttribute(
+      'href',
+      '../../../director.html',
+    );
 
     // The wiki has no index page: its own `Home` is the front page, so that is where the navigation
     // entry goes. It must not be written as `./`, the shortcut every other page takes for itself.
-    const wikiLink = within(nav).getByRole('link', { name: 'Wiki' });
+    const footer = container.querySelector('.about-footer nav') as HTMLElement;
+    expect(within(footer).getByRole('link', { name: 'About' })).toHaveAttribute('href', '../../');
+    expect(within(footer).getByRole('link', { name: 'FAQ' })).toHaveAttribute('href', '../../faq/');
+    const wikiLink = within(footer).getByRole('link', { name: 'Wiki' });
     expect(wikiLink).toHaveAttribute('href', '../../wiki/home/');
     expect(wikiLink).toHaveAttribute('aria-current', 'page');
   });

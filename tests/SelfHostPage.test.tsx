@@ -138,14 +138,12 @@ describe('the self-hosting page', () => {
       expect(link.textContent).toContain('(opens in a new tab)');
     }
 
-    // Both navigations mark this page as the current one, and both point at the directory it is
-    // served from rather than at a name, because the deployment chooses that name.
-    for (const region of ['.about-nav', '.about-footer nav']) {
-      const nav = container.querySelector(region);
-      const self = within(nav as HTMLElement).getByRole('link', { name: 'Self-host' });
-      expect(self).toHaveAttribute('href', './');
-      expect(self).toHaveAttribute('aria-current', 'page');
-    }
+    // The About navigation points at the directory it is served from rather than at a name, because
+    // the deployment chooses that name.
+    const footer = container.querySelector('.about-footer nav');
+    const self = within(footer as HTMLElement).getByRole('link', { name: 'Self-host' });
+    expect(self).toHaveAttribute('href', './');
+    expect(self).toHaveAttribute('aria-current', 'page');
   });
 
   test('closes on the call to action and assumes no quiz bowl format', () => {

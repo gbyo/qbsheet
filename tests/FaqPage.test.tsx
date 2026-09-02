@@ -116,12 +116,10 @@ describe('the questions page', () => {
     );
     expect(screen.getByRole('link', { name: 'Self-hosting guide' })).toHaveAttribute('href', '../self-host/');
 
-    for (const region of ['.about-nav', '.about-footer nav']) {
-      const nav = container.querySelector(region);
-      const self = within(nav as HTMLElement).getByRole('link', { name: 'FAQ' });
-      expect(self).toHaveAttribute('href', './');
-      expect(self).toHaveAttribute('aria-current', 'page');
-    }
+    const footer = container.querySelector('.about-footer nav');
+    const self = within(footer as HTMLElement).getByRole('link', { name: 'FAQ' });
+    expect(self).toHaveAttribute('href', './');
+    expect(self).toHaveAttribute('aria-current', 'page');
   });
 
   test('assumes no quiz bowl format', () => {
