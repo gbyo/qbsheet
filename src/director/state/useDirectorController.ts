@@ -136,7 +136,19 @@ export interface DirectorController {
   updateTeam(teamId: DirectorId, changes: Partial<NewTeamInput>): boolean;
   dropTeam(teamId: DirectorId, reason?: string): boolean;
   restoreTeam(teamId: DirectorId): boolean;
-  addPlayer(teamId: DirectorId, name: string, captain?: boolean): boolean;
+  addPlayer(
+    teamId: DirectorId,
+    name: string,
+    captain?: boolean,
+    rosterNumber?: string | number,
+    notes?: string,
+  ): boolean;
+  updatePlayer(
+    playerId: DirectorId,
+    changes: Partial<
+      Pick<DirectorState['players'][number], 'name' | 'captain' | 'active' | 'rosterNumber' | 'notes'>
+    >,
+  ): boolean;
   removePlayer(playerId: DirectorId): void;
   addRoom(input: NewRoomInput): void;
   updateRoom(
@@ -158,7 +170,11 @@ export interface DirectorController {
     equipmentId: DirectorId,
     changes: Partial<Pick<DirectorState['equipment'][number], 'name' | 'kind' | 'available' | 'notes'>>,
   ): boolean;
-  addPacket(name: string, source?: 'manual' | 'qbj' | 'imported'): void;
+  addPacket(
+    name: string,
+    source?: 'manual' | 'qbj' | 'imported',
+    options?: { tiebreaker?: boolean; notes?: string },
+  ): boolean;
   addPackets(
     packets: Array<{
       name: string;
@@ -167,6 +183,10 @@ export interface DirectorController {
       notes?: string;
     }>,
   ): { inserted: number; skipped: number };
+  updatePacket(
+    packetId: DirectorId,
+    changes: Partial<Pick<DirectorState['packets'][number], 'name' | 'tiebreaker' | 'notes'>>,
+  ): boolean;
   selectPhase(phaseId: DirectorId): void;
   selectPacket(packetId: DirectorId): void;
   updateFormat(
@@ -721,7 +741,13 @@ export function useDirectorController(repository = createDirectorRepository()): 
   );
 
   const addPlayer = useCallback(
-    (teamId: DirectorId, name: string, captain = false): boolean => {
+    (
+      teamId: DirectorId,
+      name: string,
+      captain = false,
+      rosterNumber?: string | number,
+      notes?: string,
+    ): boolean => {
       const normalizedName = name.trim();
       const snapshot = stateRef.current;
       if (!normalizedName) {
@@ -749,13 +775,87 @@ export function useDirectorController(repository = createDirectorRepository()): 
           draft.players
             .filter((player) => player.teamId === teamId)
             .forEach((player) => (player.captain = false));
-        draft.players.push({ id: playerId, teamId, name: normalizedName, captain, active: true });
+        draft.players.push({
+          id: playerId,
+          teamId,
+          name: normalizedName,
+          captain,
+          active: true,
+          rosterNumber: normalizeRosterNumber(rosterNumber),
+          notes: notes?.trim() || undefined,
+        });
         draft.audit.push({
           id: newDirectorId('audit'),
           at: isoNow(),
           actor: 'Director',
           type: 'team-changed',
           summary: `Added ${normalizedName} to a roster.`,
+          entityId: playerId,
+        });
+      });
+      return true;
+    },
+    [commit],
+  );
+
+  const updatePlayer = useCallback(
+    (
+      playerId: DirectorId,
+      changes: Partial<
+        Pick<DirectorState['players'][number], 'name' | 'captain' | 'active' | 'rosterNumber' | 'notes'>
+      >,
+    ): boolean => {
+      const snapshot = stateRef.current;
+      const current = snapshot.players.find((player) => player.id === playerId);
+      if (!current) {
+        setError('That player is no longer on the tournament roster.');
+        return false;
+      }
+      const name = changes.name === undefined ? current.name : changes.name.trim();
+      if (!name) {
+        setError('A player name is required.');
+        return false;
+      }
+      if (
+        current.active &&
+        snapshot.players.some(
+          (player) =>
+            player.id !== playerId &&
+            player.teamId === current.teamId &&
+            player.active &&
+            player.name.trim().toLocaleLowerCase() === name.toLocaleLowerCase(),
+        )
+      ) {
+        setError(`“${name}” is already on this active roster.`);
+        return false;
+      }
+      commit((draft) => {
+        const player = draft.players.find((entry) => entry.id === playerId);
+        if (!player) return;
+        if (changes.captain) {
+          draft.players
+            .filter((entry) => entry.teamId === player.teamId && entry.id !== playerId)
+            .forEach((entry) => (entry.captain = false));
+        }
+        player.name = name;
+        if (changes.captain !== undefined) player.captain = changes.captain;
+        if (changes.active !== undefined) player.active = changes.active;
+        if (changes.rosterNumber !== undefined) {
+          const normalizedRosterNumber = normalizeRosterNumber(changes.rosterNumber);
+          if (normalizedRosterNumber === undefined) delete player.rosterNumber;
+          else player.rosterNumber = normalizedRosterNumber;
+        }
+        if (changes.notes !== undefined) {
+          const normalizedNotes = changes.notes.trim();
+          if (normalizedNotes) player.notes = normalizedNotes;
+          else delete player.notes;
+        }
+        draft.audit.push({
+          id: newDirectorId('audit'),
+          at: isoNow(),
+          actor: 'Director',
+          type: 'team-changed',
+          summary: `Updated ${player.name} on a roster.`,
           entityId: playerId,
         });
       });
@@ -987,18 +1087,37 @@ export function useDirectorController(repository = createDirectorRepository()): 
   );
 
   const addPacket = useCallback(
-    (name: string, source: 'manual' | 'qbj' | 'imported' = 'manual') =>
+    (
+      name: string,
+      source: 'manual' | 'qbj' | 'imported' = 'manual',
+      options: { tiebreaker?: boolean; notes?: string } = {},
+    ): boolean => {
+      const snapshot = stateRef.current;
+      const normalizedName = name.trim();
+      if (!normalizedName) {
+        setError('A packet name is required.');
+        return false;
+      }
+      if (
+        snapshot.packets.some(
+          (packet) => packet.name.trim().toLocaleLowerCase() === normalizedName.toLocaleLowerCase(),
+        )
+      ) {
+        setError(`Packet “${normalizedName}” already exists.`);
+        return false;
+      }
       commit((draft) => {
         const packetId = newDirectorId('packet');
         draft.packets.push({
           id: packetId,
-          name: name.trim() || `Packet ${draft.packets.length + 1}`,
+          name: normalizedName,
           source,
           assignedRoundIds: [],
           assignedGameIds: [],
           usedGameIds: [],
           replacementForPacketId: null,
-          tiebreaker: false,
+          tiebreaker: options.tiebreaker ?? false,
+          notes: options.notes?.trim() || undefined,
         });
         if (draft.tournament && draft.tournament.currentPacketId === null) {
           draft.tournament.currentPacketId = packetId;
@@ -1009,10 +1128,12 @@ export function useDirectorController(repository = createDirectorRepository()): 
           at: isoNow(),
           actor: 'Director',
           type: 'packet-changed',
-          summary: `Added ${name.trim() || `Packet ${draft.packets.length}`}.`,
+          summary: `Added ${normalizedName}.`,
           entityId: packetId,
         });
-      }),
+      });
+      return true;
+    },
     [commit],
   );
 
@@ -1065,6 +1186,55 @@ export function useDirectorController(repository = createDirectorRepository()): 
         }
       });
       return { inserted, skipped };
+    },
+    [commit],
+  );
+
+  const updatePacket = useCallback(
+    (
+      packetId: DirectorId,
+      changes: Partial<Pick<DirectorState['packets'][number], 'name' | 'tiebreaker' | 'notes'>>,
+    ): boolean => {
+      const snapshot = stateRef.current;
+      const current = snapshot.packets.find((packet) => packet.id === packetId);
+      if (!current) {
+        setError('That packet is no longer in the tournament inventory.');
+        return false;
+      }
+      const name = changes.name === undefined ? current.name : changes.name.trim();
+      if (!name) {
+        setError('A packet name is required.');
+        return false;
+      }
+      if (
+        snapshot.packets.some(
+          (packet) =>
+            packet.id !== packetId && packet.name.trim().toLocaleLowerCase() === name.toLocaleLowerCase(),
+        )
+      ) {
+        setError(`Packet “${name}” already exists.`);
+        return false;
+      }
+      commit((draft) => {
+        const packet = draft.packets.find((entry) => entry.id === packetId);
+        if (!packet) return;
+        packet.name = name;
+        if (changes.tiebreaker !== undefined) packet.tiebreaker = changes.tiebreaker;
+        if (changes.notes !== undefined) {
+          const normalizedNotes = changes.notes.trim();
+          if (normalizedNotes) packet.notes = normalizedNotes;
+          else delete packet.notes;
+        }
+        draft.audit.push({
+          id: newDirectorId('audit'),
+          at: isoNow(),
+          actor: 'Director',
+          type: 'packet-changed',
+          summary: `Updated ${packet.name}.`,
+          entityId: packetId,
+        });
+      });
+      return true;
     },
     [commit],
   );
@@ -2426,6 +2596,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
     dropTeam,
     restoreTeam,
     addPlayer,
+    updatePlayer,
     removePlayer,
     addRoom,
     updateRoom,
@@ -2435,6 +2606,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
     updateEquipment,
     addPacket,
     addPackets,
+    updatePacket,
     addImportedTeams,
     selectPhase,
     selectPacket,
@@ -2494,6 +2666,12 @@ function fingerprintForScores(scores: TeamGameScore[]): string {
 
 function isRecordLike(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function normalizeRosterNumber(value: string | number | undefined): string | number | undefined {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
+  const trimmed = value?.trim();
+  return trimmed || undefined;
 }
 
 function validateResultForScheduledGame(

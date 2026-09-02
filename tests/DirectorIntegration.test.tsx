@@ -395,13 +395,38 @@ describe('Director integration hardening', () => {
     const teamId = hook.result.current.state.teams[0]?.id;
     if (!teamId) throw new Error('test setup did not create a team');
     act(() => {
-      expect(hook.result.current.addPlayer(teamId, 'Ada', true)).toBe(true);
+      expect(hook.result.current.addPlayer(teamId, 'Ada', true, '07', '  Late arrival ')).toBe(true);
     });
     expect(hook.result.current.state.players).toContainEqual(
-      expect.objectContaining({ teamId, name: 'Ada', captain: true, active: true }),
+      expect.objectContaining({
+        teamId,
+        name: 'Ada',
+        captain: true,
+        active: true,
+        rosterNumber: '07',
+        notes: 'Late arrival',
+      }),
     );
+    const playerId = hook.result.current.state.players[0]?.id;
+    if (!playerId) throw new Error('test setup did not create a player');
     act(() => {
-      expect(hook.result.current.addPlayer(teamId, ' ada ')).toBe(false);
+      expect(
+        hook.result.current.updatePlayer(playerId, {
+          name: '  Ada Lovelace ',
+          captain: false,
+          rosterNumber: '',
+          notes: '  Updated roster note ',
+        }),
+      ).toBe(true);
+    });
+    expect(hook.result.current.state.players[0]).toMatchObject({
+      name: 'Ada Lovelace',
+      captain: false,
+      notes: 'Updated roster note',
+    });
+    expect(hook.result.current.state.players[0]).not.toHaveProperty('rosterNumber');
+    act(() => {
+      expect(hook.result.current.addPlayer(teamId, ' ada lovelace ')).toBe(false);
     });
     expect(hook.result.current.state.players.filter((player) => player.teamId === teamId)).toHaveLength(1);
   });
@@ -902,6 +927,53 @@ describe('Director integration hardening', () => {
       });
     });
     expect(hook.result.current.state.games).toHaveLength(gameCount);
+  });
+
+  test('packet metadata can be edited and persists through the repository', async () => {
+    const { hook, repository } = await directorWithSetup();
+    const packet = hook.result.current.state.packets[0];
+    if (!packet) throw new Error('test setup did not create a packet');
+
+    act(() => {
+      expect(
+        hook.result.current.updatePacket(packet.id, {
+          name: '  Championship tiebreaker  ',
+          tiebreaker: true,
+          notes: '  Keep sealed until needed.  ',
+        }),
+      ).toBe(true);
+    });
+
+    expect(hook.result.current.state.packets[0]).toMatchObject({
+      id: packet.id,
+      name: 'Championship tiebreaker',
+      tiebreaker: true,
+      notes: 'Keep sealed until needed.',
+    });
+    await waitFor(async () => expect((await repository.load()).packets[0]?.notes).toBe('Keep sealed until needed.'));
+
+    act(() => {
+      expect(hook.result.current.updatePacket(packet.id, { notes: '  ' })).toBe(true);
+    });
+    expect(hook.result.current.state.packets[0]?.notes).toBeUndefined();
+    await waitFor(async () => expect((await repository.load()).packets[0]?.notes).toBeUndefined());
+  });
+
+  test('packet edits reject duplicate names without mutating the inventory', async () => {
+    const { hook } = await directorWithSetup();
+    act(() => expect(hook.result.current.addPacket('Packet 2')).toBe(true));
+    const before = structuredClone(hook.result.current.state.packets);
+    const packet = hook.result.current.state.packets[1];
+    if (!packet) throw new Error('test setup did not create a second packet');
+
+    act(() => {
+      expect(hook.result.current.updatePacket(packet.id, { name: ' packet 1 ' })).toBe(false);
+    });
+    expect(hook.result.current.state.packets).toEqual(before);
+    expect(hook.result.current.error).toMatch(/already exists/i);
+
+    act(() => expect(hook.result.current.addPacket(' packet 1 ')).toBe(false));
+    expect(hook.result.current.state.packets).toEqual(before);
   });
 
   test('scoring rule updates keep incomplete numeric edits out of persisted state', async () => {

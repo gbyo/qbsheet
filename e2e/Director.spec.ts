@@ -150,7 +150,18 @@ test('Director runs a local tournament slice and reopens its result', async ({ p
     .click();
   await page.getByRole('button', { name: 'Add packet' }).click();
   await page.getByLabel('Packet name').fill('Set A');
+  await page.getByLabel('Tiebreaker packet').check();
+  await page.getByLabel('Notes').fill('Keep sealed until needed.');
   await page.getByRole('button', { name: 'Save packet' }).click();
+  await expect(page.getByText('Tiebreaker', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Edit Set A' }).click();
+  const packetEditor = page.locator('.director-table-edit-row');
+  await packetEditor.getByLabel('Packet name').fill('Set A final');
+  await packetEditor.getByLabel('Notes').fill('Ready for the final round.');
+  await packetEditor.getByRole('button', { name: 'Save changes' }).click();
+  await expect(page.getByText('Set A final', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'View details for Set A final' }).click();
+  await expect(page.getByText('Ready for the final round.', { exact: true })).toBeVisible();
 
   await page
     .locator('nav[aria-label="Tournament sections"]')
@@ -257,6 +268,7 @@ test('Director supports keyboard search, inline edits, and audited result review
   await page.getByRole('button', { name: 'Add team' }).click();
   await page.getByLabel('Display name').fill('Northview A');
   await page.getByLabel('School / organization').fill('Northview High');
+  await page.getByLabel('Notes').fill('Late check-in requested.');
   await page.getByRole('button', { name: 'Save team' }).click();
   await page.getByRole('button', { name: 'Add team' }).click();
   await page.getByLabel('Display name').fill('Riverside A');
@@ -275,8 +287,23 @@ test('Director supports keyboard search, inline edits, and audited result review
   const teamEditor = page.locator('.director-table-edit-row');
   await teamEditor.getByLabel('Display name').fill('Northview B');
   await teamEditor.getByLabel('Team letter').fill('B');
+  await teamEditor.getByLabel('Notes').fill('Seeded from the registration desk.');
   await teamEditor.getByRole('button', { name: 'Save changes' }).click();
   await expect(page.getByText('Northview B', { exact: true })).toBeVisible();
+  await expect(page.getByText('Seeded from the registration desk.', { exact: true })).toBeVisible();
+
+  const northviewRow = page.locator('tr').filter({ hasText: 'Northview B' }).first();
+  await northviewRow.getByText('0 players', { exact: true }).click();
+  await page.getByLabel('Add player to Northview B').fill('Ada Lovelace');
+  await northviewRow.getByLabel('Captain').check();
+  await page.getByRole('button', { name: 'Add', exact: true }).click();
+  await northviewRow.getByRole('button', { name: 'Edit Ada Lovelace' }).click();
+  const playerEditor = page.locator('.director-roster-player-edit');
+  await playerEditor.getByLabel('Roster number').fill('07');
+  await playerEditor.getByLabel('Notes').fill('Late arrival.');
+  await playerEditor.getByRole('button', { name: 'Save player' }).click();
+  await expect(northviewRow).toContainText('Roster 07');
+  await expect(northviewRow).toContainText('Late arrival.');
 
   await navigation.getByRole('button', { name: 'Format', exact: true }).click();
   await page.getByRole('button', { name: 'Generate next round' }).click();

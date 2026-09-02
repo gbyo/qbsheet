@@ -1712,6 +1712,21 @@ button:disabled:hover {
   text-overflow: ellipsis;
 }
 
+.director-roster-player-summary {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.director-roster-player-summary > span {
+  white-space: nowrap;
+}
+
+.director-roster-player-edit {
+  padding: 8px 0 10px;
+  border-bottom: 1px solid var(--director-border);
+}
+
 .director-roster-row {
   padding-bottom: 6px;
   border-bottom: 1px solid var(--director-border);

@@ -18,14 +18,21 @@ export function PacketsView({
   const [showForm, setShowForm] = useState(false);
   const [detailsPacketId, setDetailsPacketId] = useState<string | null>(null);
   const [name, setName] = useState('');
+  const [tiebreaker, setTiebreaker] = useState(false);
+  const [notes, setNotes] = useState('');
   const save = () => {
     if (!name.trim()) {
       onAnnounce('Enter a packet name first.');
       return;
     }
-    controller.addPacket(name);
+    if (!controller.addPacket(name, 'manual', { tiebreaker, notes })) {
+      onAnnounce('Packet was not added; review the Director error.');
+      return;
+    }
     onAnnounce(`${name.trim()} added to inventory.`);
     setName('');
+    setTiebreaker(false);
+    setNotes('');
     setShowForm(false);
   };
   const importQbj = async (file: File | undefined) => {
@@ -105,7 +112,7 @@ export function PacketsView({
                 </Button>
               </div>
               <PanelBody>
-                <div className="director-form-grid director-form-grid-single">
+                <div className="director-form-grid director-form-grid-two">
                   <FormField label="Packet name">
                     <input
                       value={name}
@@ -113,7 +120,24 @@ export function PacketsView({
                       placeholder="Round 1 · Set A"
                     />
                   </FormField>
+                  <label className="director-checkbox-field">
+                    <input
+                      type="checkbox"
+                      checked={tiebreaker}
+                      onChange={(event) => setTiebreaker(event.target.checked)}
+                    />
+                    <span>Tiebreaker packet</span>
+                  </label>
                 </div>
+                <FormField label="Notes" hint="Optional handling or assignment notes for this packet.">
+                  <textarea
+                    className="director-textarea"
+                    rows={2}
+                    value={notes}
+                    onChange={(event) => setNotes(event.target.value)}
+                    placeholder="Keep sealed until the final tiebreaker"
+                  />
+                </FormField>
               </PanelBody>
               <PanelFooter className="director-form-actions">
                 <Button variant="primary" type="submit">
@@ -159,55 +183,17 @@ export function PacketsView({
                 </thead>
                 <tbody>
                   {state.packets.map((packet) => (
-                    <tr key={packet.id}>
-                      <td>
-                        <strong>{packet.name}</strong>
-                        {packet.tiebreaker && <small className="director-table-subtext">Tiebreaker</small>}
-                      </td>
-                      <td>{packet.source}</td>
-                      <td>{packet.assignedRoundIds.length || '—'}</td>
-                      <td>{packet.usedGameIds.length || '—'}</td>
-                      <td>
-                        <StateLabel
-                          state={packet.usedGameIds.length > 0 ? 'finished' : 'available'}
-                          label={packet.usedGameIds.length > 0 ? 'Used' : 'Available'}
-                        />
-                      </td>
-                      <td>
-                        <div className="director-row-actions">
-                          <Button
-                            variant={packet.id === state.tournament?.currentPacketId ? 'secondary' : 'quiet'}
-                            onClick={() => {
-                              const exists = state.packets.some((entry) => entry.id === packet.id);
-                              if (!exists) {
-                                onAnnounce('That packet is not in the current inventory.');
-                                return;
-                              }
-                              if (!state.tournament) {
-                                onAnnounce('Create a tournament before selecting a packet.');
-                                return;
-                              }
-                              controller.selectPacket(packet.id);
-                              onAnnounce(`${packet.name} selected for the next generated round.`);
-                            }}
-                          >
-                            {packet.id === state.tournament?.currentPacketId ? 'Current' : 'Use next'}
-                          </Button>
-                          <button
-                            type="button"
-                            className="director-button director-button-quiet director-table-action"
-                            aria-label={`View details for ${packet.name}`}
-                            aria-expanded={detailsPacketId === packet.id}
-                            onClick={() =>
-                              setDetailsPacketId((current) => (current === packet.id ? null : packet.id))
-                            }
-                          >
-                            <Icon name="file" size={14} />
-                            <span>{detailsPacketId === packet.id ? 'Hide details' : 'Details'}</span>
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
+                    <PacketRow
+                      key={packet.id}
+                      state={state}
+                      packet={packet}
+                      controller={controller}
+                      onAnnounce={onAnnounce}
+                      detailsOpen={detailsPacketId === packet.id}
+                      onToggleDetails={() =>
+                        setDetailsPacketId((current) => (current === packet.id ? null : packet.id))
+                      }
+                    />
                   ))}
                 </tbody>
               </table>
@@ -221,6 +207,153 @@ export function PacketsView({
           </section>
         )}
       </div>
+    </>
+  );
+}
+
+function PacketRow({
+  state,
+  packet,
+  controller,
+  onAnnounce,
+  detailsOpen,
+  onToggleDetails,
+}: {
+  state: DirectorState;
+  packet: DirectorState['packets'][number];
+  controller: DirectorController;
+  onAnnounce: (message: string) => void;
+  detailsOpen: boolean;
+  onToggleDetails: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(packet.name);
+  const [tiebreaker, setTiebreaker] = useState(packet.tiebreaker);
+  const [notes, setNotes] = useState(packet.notes ?? '');
+
+  const beginEdit = () => {
+    setName(packet.name);
+    setTiebreaker(packet.tiebreaker);
+    setNotes(packet.notes ?? '');
+    setEditing(true);
+  };
+
+  const save = () => {
+    const normalizedName = name.trim();
+    if (!normalizedName) {
+      onAnnounce('Enter a packet name first.');
+      return;
+    }
+    if (!controller.updatePacket(packet.id, { name: normalizedName, tiebreaker, notes })) {
+      onAnnounce('Packet was not changed; review the Director error.');
+      return;
+    }
+    setEditing(false);
+    onAnnounce(`${normalizedName} updated.`);
+  };
+
+  return (
+    <>
+      <tr>
+        <td>
+          <strong>{packet.name}</strong>
+          {packet.tiebreaker && <small className="director-table-subtext">Tiebreaker</small>}
+          {packet.notes && <small className="director-table-subtext">Has notes</small>}
+        </td>
+        <td>{packet.source}</td>
+        <td>{packet.assignedRoundIds.length || '—'}</td>
+        <td>{packet.usedGameIds.length || '—'}</td>
+        <td>
+          <StateLabel
+            state={packet.usedGameIds.length > 0 ? 'finished' : 'available'}
+            label={packet.usedGameIds.length > 0 ? 'Used' : 'Available'}
+          />
+        </td>
+        <td>
+          <div className="director-row-actions">
+            <Button
+              variant={packet.id === state.tournament?.currentPacketId ? 'secondary' : 'quiet'}
+              onClick={() => {
+                const exists = state.packets.some((entry) => entry.id === packet.id);
+                if (!exists) {
+                  onAnnounce('That packet is not in the current inventory.');
+                  return;
+                }
+                if (!state.tournament) {
+                  onAnnounce('Create a tournament before selecting a packet.');
+                  return;
+                }
+                controller.selectPacket(packet.id);
+                onAnnounce(`${packet.name} selected for the next generated round.`);
+              }}
+            >
+              {packet.id === state.tournament?.currentPacketId ? 'Current' : 'Use next'}
+            </Button>
+            <button
+              type="button"
+              className="director-button director-button-quiet director-table-action"
+              aria-label={`Edit ${packet.name}`}
+              onClick={beginEdit}
+            >
+              <Icon name="edit" size={14} />
+              <span>Edit</span>
+            </button>
+            <button
+              type="button"
+              className="director-button director-button-quiet director-table-action"
+              aria-label={`View details for ${packet.name}`}
+              aria-expanded={detailsOpen}
+              onClick={onToggleDetails}
+            >
+              <Icon name="file" size={14} />
+              <span>{detailsOpen ? 'Hide details' : 'Details'}</span>
+            </button>
+          </div>
+        </td>
+      </tr>
+      {editing && (
+        <tr className="director-table-edit-row">
+          <td colSpan={6}>
+            <form
+              className="director-inline-edit"
+              onSubmit={(event) => {
+                event.preventDefault();
+                save();
+              }}
+            >
+              <div className="director-form-grid director-form-grid-two">
+                <FormField label="Packet name">
+                  <input value={name} onChange={(event) => setName(event.target.value)} />
+                </FormField>
+                <label className="director-checkbox-field">
+                  <input
+                    type="checkbox"
+                    checked={tiebreaker}
+                    onChange={(event) => setTiebreaker(event.target.checked)}
+                  />
+                  <span>Tiebreaker packet</span>
+                </label>
+              </div>
+              <FormField label="Notes" hint="Optional handling or assignment notes for this packet.">
+                <textarea
+                  className="director-textarea"
+                  rows={2}
+                  value={notes}
+                  onChange={(event) => setNotes(event.target.value)}
+                />
+              </FormField>
+              <div className="director-row-actions">
+                <Button variant="primary" type="submit">
+                  Save changes
+                </Button>
+                <Button variant="quiet" onClick={() => setEditing(false)}>
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          </td>
+        </tr>
+      )}
     </>
   );
 }
