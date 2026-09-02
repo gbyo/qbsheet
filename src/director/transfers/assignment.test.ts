@@ -6,7 +6,7 @@
  * are not code-review questions — they are properties that have to be asserted about the bytes.
  */
 import { describe, expect, it } from 'vitest';
-import { buildAssignment, selectScheduledGames } from './assignment';
+import { buildAssignment, currentOperationalRound, selectScheduledGames } from './assignment';
 import { findSecretKeys } from './canonical';
 import { assignmentFileName, sanitizeFileSegment, uniqueFileName } from './filenames';
 import { buildManifest, exchangePaths, parseManifest, readmeText } from './layout';
@@ -167,6 +167,15 @@ describe('selecting which games to prepare', () => {
     expect(selectScheduledGames(state, { kind: 'current-round' }).map((game) => game.id)).toEqual([
       'game-5-2',
     ]);
+  });
+
+  it('does not offer a closed current round as an outgoing assignment set', () => {
+    const state = directorFixture();
+    state.rounds = [state.rounds[0]!];
+    state.rounds[0].status = 'closed';
+    state.scheduledGames = state.scheduledGames.filter((game) => game.roundId === state.rounds[0].id);
+    expect(currentOperationalRound(state)).toBeUndefined();
+    expect(selectScheduledGames(state, { kind: 'current-round' })).toHaveLength(0);
   });
 });
 

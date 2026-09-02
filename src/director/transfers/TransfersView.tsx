@@ -18,13 +18,13 @@
  * mid-round is looking for one row, and cards make ten rows into a scroll.
  */
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { latestRound, type DirectorState } from '../domain';
+import type { DirectorState } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
 import { Button, StateLabel } from '../components/Controls';
 import { Icon } from '../components/Icon';
 import { PageHeader } from '../components/PageHeader';
 import type { SectionId } from '../app/navigation';
-import type { AssignmentSelection } from './assignment';
+import { currentOperationalRound, type AssignmentSelection } from './assignment';
 import { describeWarning } from './ingest';
 import { transportLabel, type IncomingArtifact, type TransferLocation } from './model';
 import { planAssignments } from './prepare';
@@ -59,8 +59,7 @@ export function TransfersView({
   );
   const plan = useMemo(() => planAssignments(state, selection), [selection, state]);
 
-  const currentRound =
-    state.rounds.find((round) => round.id === state.tournament?.currentRoundId) ?? latestRound(state.rounds);
+  const currentRound = currentOperationalRound(state);
   const connectedRoomIds = new Set(
     state.qbtcpSessions.filter((session) => session.state !== 'abandoned').map((session) => session.roomId),
   );

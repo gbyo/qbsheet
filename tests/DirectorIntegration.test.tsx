@@ -504,6 +504,46 @@ describe('Director integration hardening', () => {
     await waitFor(() => expect(hook.result.current.saving).toBe(false));
   });
 
+  test('restoring an inactive captain keeps one active captain per roster', async () => {
+    const { hook } = await directorWithSetup();
+    const teamId = hook.result.current.state.teams[0]?.id;
+    if (!teamId) throw new Error('test setup did not create a team');
+    act(() => expect(hook.result.current.addPlayer(teamId, 'Captain One', true)).toBe(true));
+    const firstPlayerId = hook.result.current.state.players[0]?.id;
+    if (!firstPlayerId) throw new Error('test setup did not create the first player');
+    act(() => {
+      expect(hook.result.current.addPlayer(teamId, 'Captain Two', true)).toBe(true);
+      expect(hook.result.current.updatePlayer(firstPlayerId, { active: false, captain: true })).toBe(true);
+    });
+    const secondPlayerId = hook.result.current.state.players.find(
+      (player) => player.name === 'Captain Two',
+    )?.id;
+    if (!secondPlayerId) throw new Error('test setup did not create the second player');
+    act(() => expect(hook.result.current.updatePlayer(firstPlayerId, { active: true })).toBe(true));
+    expect(hook.result.current.state.players.find((player) => player.id === firstPlayerId)).toMatchObject({
+      active: true,
+      captain: true,
+    });
+    expect(hook.result.current.state.players.find((player) => player.id === secondPlayerId)).toMatchObject({
+      active: true,
+      captain: false,
+    });
+    await waitFor(() => expect(hook.result.current.saving).toBe(false));
+  });
+
+  test('dropping a team is allowed after its only open slot is cancelled', async () => {
+    const { hook } = await directorWithSetup();
+    act(() => hook.result.current.generateSchedule());
+    const scheduled = hook.result.current.state.scheduledGames[0];
+    if (!scheduled) throw new Error('test setup did not generate a scheduled game');
+    act(() => expect(hook.result.current.cancelScheduledGame(scheduled.id, 'Room closed')).toBe(true));
+    act(() => expect(hook.result.current.dropTeam(scheduled.leftTeamId, 'Unable to attend')).toBe(true));
+    expect(hook.result.current.state.teams.find((team) => team.id === scheduled.leftTeamId)?.status).toBe(
+      'dropped',
+    );
+    await waitFor(() => expect(hook.result.current.saving).toBe(false));
+  });
+
   test('preflight blocks a prepared game assigned to an unavailable room', async () => {
     const { hook } = await directorWithSetup();
     act(() => hook.result.current.generateSchedule());
@@ -539,6 +579,35 @@ describe('Director integration hardening', () => {
       expect(hook.result.current.updateRoom(room.id, { available: true })).toBe(true);
     });
     expect(hook.result.current.state.rooms[0]).toMatchObject({ available: true, status: 'available' });
+  });
+
+  test('room, staff, and equipment names stay unique when edited through the controller', async () => {
+    const { hook } = await directorWithSetup();
+    act(() => {
+      expect(hook.result.current.addRoom({ name: '  room 1 ' })).toBe(false);
+      expect(hook.result.current.addRoom({ name: 'Room 2' })).toBe(true);
+    });
+    const firstRoom = hook.result.current.state.rooms[0];
+    const secondRoom = hook.result.current.state.rooms[1];
+    if (!firstRoom || !secondRoom) throw new Error('test setup did not create both rooms');
+    act(() => {
+      expect(hook.result.current.updateRoom(firstRoom.id, { name: ` ${secondRoom.name} ` })).toBe(false);
+      expect(hook.result.current.addStaff({ name: 'Moderator One' })).toBe(true);
+      expect(hook.result.current.addStaff({ name: ' moderator one ' })).toBe(false);
+      expect(hook.result.current.addEquipment({ name: 'Buzzer One', kind: 'buzzer' })).toBe(true);
+      expect(hook.result.current.addEquipment({ name: ' buzzer one ', kind: 'buzzer' })).toBe(false);
+    });
+    const staff = hook.result.current.state.staff[0];
+    const equipment = hook.result.current.state.equipment[0];
+    if (!staff || !equipment) throw new Error('test setup did not create resources');
+    act(() => {
+      expect(hook.result.current.updateStaff(staff.id, { name: ' moderator one ' })).toBe(true);
+      expect(hook.result.current.updateEquipment(equipment.id, { name: ' buzzer one ' })).toBe(true);
+    });
+    expect(hook.result.current.state.rooms).toHaveLength(2);
+    expect(hook.result.current.state.staff).toHaveLength(1);
+    expect(hook.result.current.state.equipment).toHaveLength(1);
+    await waitFor(() => expect(hook.result.current.saving).toBe(false));
   });
 
   test('completed tournaments do not show next-round setup blockers', async () => {

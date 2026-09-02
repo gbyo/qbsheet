@@ -150,7 +150,7 @@ export interface DirectorController {
     >,
   ): boolean;
   removePlayer(playerId: DirectorId): boolean;
-  addRoom(input: NewRoomInput): void;
+  addRoom(input: NewRoomInput): boolean;
   updateRoom(
     roomId: DirectorId,
     changes: Partial<NewRoomInput> & {
@@ -160,12 +160,12 @@ export interface DirectorController {
       equipmentId?: DirectorId | null;
     },
   ): boolean;
-  addStaff(input: NewStaffInput): void;
+  addStaff(input: NewStaffInput): boolean;
   updateStaff(
     staffId: DirectorId,
     changes: Partial<Pick<DirectorState['staff'][number], 'name' | 'roles' | 'available' | 'notes'>>,
   ): boolean;
-  addEquipment(input: NewEquipmentInput): void;
+  addEquipment(input: NewEquipmentInput): boolean;
   updateEquipment(
     equipmentId: DirectorId,
     changes: Partial<Pick<DirectorState['equipment'][number], 'name' | 'kind' | 'available' | 'notes'>>,
@@ -681,7 +681,9 @@ export function useDirectorController(repository = createDirectorRepository()): 
           round.status !== 'closed' &&
           snapshot.scheduledGames.some(
             (game) =>
-              game.roundId === round.id && (game.leftTeamId === teamId || game.rightTeamId === teamId),
+              game.roundId === round.id &&
+              game.status !== 'cancelled' &&
+              (game.leftTeamId === teamId || game.rightTeamId === teamId),
           ),
       );
       if (openRound) {
@@ -843,9 +845,11 @@ export function useDirectorController(repository = createDirectorRepository()): 
       commit((draft) => {
         const player = draft.players.find((entry) => entry.id === playerId);
         if (!player) return;
-        if (changes.captain) {
+        const shouldBeActive = changes.active ?? player.active;
+        const shouldBeCaptain = changes.captain ?? player.captain;
+        if (shouldBeActive && shouldBeCaptain) {
           draft.players
-            .filter((entry) => entry.teamId === player.teamId && entry.id !== playerId)
+            .filter((entry) => entry.teamId === player.teamId && entry.id !== playerId && entry.active)
             .forEach((entry) => (entry.captain = false));
         }
         player.name = name;
@@ -905,12 +909,21 @@ export function useDirectorController(repository = createDirectorRepository()): 
   );
 
   const addRoom = useCallback(
-    (input: NewRoomInput) =>
+    (input: NewRoomInput): boolean => {
+      const name = input.name.trim() || `Room ${stateRef.current.rooms.length + 1}`;
+      if (
+        stateRef.current.rooms.some(
+          (room) => room.name.trim().toLocaleLowerCase() === name.toLocaleLowerCase(),
+        )
+      ) {
+        setError(`Room “${name}” already exists.`);
+        return false;
+      }
       commit((draft) => {
         const roomId = newDirectorId('room');
         draft.rooms.push({
           id: roomId,
-          name: input.name.trim() || `Room ${draft.rooms.length + 1}`,
+          name,
           building: input.building?.trim(),
           floor: input.floor?.trim(),
           accessibility: input.accessibility?.trim() || undefined,
@@ -927,10 +940,12 @@ export function useDirectorController(repository = createDirectorRepository()): 
           at: isoNow(),
           actor: 'Director',
           type: 'room-changed',
-          summary: `Added ${input.name.trim() || `Room ${draft.rooms.length}`}.`,
+          summary: `Added ${name}.`,
           entityId: roomId,
         });
-      }),
+      });
+      return true;
+    },
     [commit],
   );
 
@@ -951,6 +966,15 @@ export function useDirectorController(repository = createDirectorRepository()): 
       }
       if (changes.name !== undefined && !changes.name.trim()) {
         setError('A room name is required.');
+        return false;
+      }
+      const name = changes.name === undefined ? current.name : changes.name.trim();
+      if (
+        stateRef.current.rooms.some(
+          (room) => room.id !== roomId && room.name.trim().toLocaleLowerCase() === name.toLocaleLowerCase(),
+        )
+      ) {
+        setError(`Room “${name}” already exists.`);
         return false;
       }
       commit((draft) => {
@@ -984,10 +1008,21 @@ export function useDirectorController(repository = createDirectorRepository()): 
   );
 
   const addStaff = useCallback(
-    (input: NewStaffInput) =>
+    (input: NewStaffInput): boolean => {
+      const name = input.name.trim();
+      if (!name) {
+        setError('A staff member needs a name.');
+        return false;
+      }
+      if (
+        stateRef.current.staff.some(
+          (member) => member.name.trim().toLocaleLowerCase() === name.toLocaleLowerCase(),
+        )
+      ) {
+        setError(`Staff member “${name}” already exists.`);
+        return false;
+      }
       commit((draft) => {
-        const name = input.name.trim();
-        if (!name) return;
         const staffId = newDirectorId('staff');
         draft.staff.push({
           id: staffId,
@@ -1004,7 +1039,9 @@ export function useDirectorController(repository = createDirectorRepository()): 
           summary: `Added ${name} to staff.`,
           entityId: staffId,
         });
-      }),
+      });
+      return true;
+    },
     [commit],
   );
 
@@ -1026,6 +1063,15 @@ export function useDirectorController(repository = createDirectorRepository()): 
       const roles = changes.roles === undefined ? current.roles : [...new Set(changes.roles)];
       if (roles.length === 0) {
         setError('A staff member needs at least one role.');
+        return false;
+      }
+      if (
+        stateRef.current.staff.some(
+          (member) =>
+            member.id !== staffId && member.name.trim().toLocaleLowerCase() === name.toLocaleLowerCase(),
+        )
+      ) {
+        setError(`Staff member “${name}” already exists.`);
         return false;
       }
       commit((draft) => {
@@ -1050,10 +1096,21 @@ export function useDirectorController(repository = createDirectorRepository()): 
   );
 
   const addEquipment = useCallback(
-    (input: NewEquipmentInput) =>
+    (input: NewEquipmentInput): boolean => {
+      const name = input.name.trim();
+      if (!name) {
+        setError('An equipment resource needs a name.');
+        return false;
+      }
+      if (
+        stateRef.current.equipment.some(
+          (item) => item.name.trim().toLocaleLowerCase() === name.toLocaleLowerCase(),
+        )
+      ) {
+        setError(`Equipment resource “${name}” already exists.`);
+        return false;
+      }
       commit((draft) => {
-        const name = input.name.trim();
-        if (!name) return;
         const equipmentId = newDirectorId('equipment');
         draft.equipment.push({
           id: equipmentId,
@@ -1070,7 +1127,9 @@ export function useDirectorController(repository = createDirectorRepository()): 
           summary: `Added ${name} to equipment.`,
           entityId: equipmentId,
         });
-      }),
+      });
+      return true;
+    },
     [commit],
   );
 
@@ -1087,6 +1146,15 @@ export function useDirectorController(repository = createDirectorRepository()): 
       const name = changes.name === undefined ? current.name : changes.name.trim();
       if (!name) {
         setError('An equipment resource needs a name.');
+        return false;
+      }
+      if (
+        stateRef.current.equipment.some(
+          (item) =>
+            item.id !== equipmentId && item.name.trim().toLocaleLowerCase() === name.toLocaleLowerCase(),
+        )
+      ) {
+        setError(`Equipment resource “${name}” already exists.`);
         return false;
       }
       commit((draft) => {

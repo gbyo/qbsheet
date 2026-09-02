@@ -51,7 +51,10 @@ export function RoomsView({
       onAnnounce('Enter a room name first.');
       return;
     }
-    controller.addRoom({ name, building, floor, accessibility, directions, notes });
+    if (!controller.addRoom({ name, building, floor, accessibility, directions, notes })) {
+      onAnnounce('The room could not be added; review the Director error.');
+      return;
+    }
     onAnnounce(`${name.trim()} added.`);
     setName('');
     setBuilding('');
@@ -66,7 +69,10 @@ export function RoomsView({
       onAnnounce('Enter a staff name first.');
       return;
     }
-    controller.addStaff({ name, roles: [staffRole], notes });
+    if (!controller.addStaff({ name, roles: [staffRole], notes })) {
+      onAnnounce('The staff member could not be added; review the Director error.');
+      return;
+    }
     onAnnounce(`${name.trim()} added to staff.`);
     setName('');
     setNotes('');
@@ -77,7 +83,10 @@ export function RoomsView({
       onAnnounce('Enter an equipment name first.');
       return;
     }
-    controller.addEquipment({ name, kind: equipmentKind, notes });
+    if (!controller.addEquipment({ name, kind: equipmentKind, notes })) {
+      onAnnounce('The equipment resource could not be added; review the Director error.');
+      return;
+    }
     onAnnounce(`${name.trim()} added to equipment.`);
     setName('');
     setNotes('');
@@ -571,7 +580,13 @@ function RoomRows({
         <td>
           <StateLabel state={room.status} />
           <small className="director-table-subtext">
-            {room.available ? 'Available next round' : 'Unavailable next round'}
+            {room.available
+              ? room.status === 'available'
+                ? 'Ready for assignment'
+                : room.status === 'finished'
+                  ? 'Marked available after round closes'
+                  : 'Marked available after current session'
+              : 'Unavailable for future rounds'}
           </small>
         </td>
         <td>

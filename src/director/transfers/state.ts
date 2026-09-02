@@ -41,6 +41,16 @@ export interface AddLocationInput {
   watching?: boolean;
 }
 
+function normalizeTransferPath(path: string): string {
+  const trimmed = path.trim();
+  if (!trimmed) return '';
+  // Stripping trailing separators from a filesystem root turns `/` into an empty path and `C:\`
+  // into `C:`. Preserve the root while still making repeated separators compare consistently.
+  if (/^[\\/]+$/.test(trimmed)) return trimmed[0] ?? trimmed;
+  if (/^[A-Za-z]:[\\/]+$/.test(trimmed)) return `${trimmed.slice(0, 2)}${trimmed[2]}`;
+  return trimmed.replace(/[\\/]+$/, '');
+}
+
 /**
  * Add a place, or re-adopt one already known.
  *
@@ -50,9 +60,9 @@ export interface AddLocationInput {
  * rather than a second copy of it.
  */
 export function addTransferLocation(draft: DirectorState, input: AddLocationInput): TransferLocation {
-  const normalized = input.path.replace(/[\\/]+$/, '');
+  const normalized = normalizeTransferPath(input.path);
   const existing = draft.transfers.locations.find(
-    (location) => location.path.replace(/[\\/]+$/, '') === normalized,
+    (location) => normalizeTransferPath(location.path) === normalized,
   );
   const cloudProvider = detectCloudProvider(normalized);
   if (existing) {

@@ -357,6 +357,19 @@ describe('locations coming and going', () => {
     addTransferLocation(state, { kind: 'folder', label: 'Exchange', path: '/Users/td/Exchange/' });
     expect(state.transfers.locations).toHaveLength(1);
   });
+
+  it('keeps filesystem roots usable as transfer locations', () => {
+    const state = directorFixture();
+    const posixRoot = addTransferLocation(state, { kind: 'folder', label: 'Root', path: '/' });
+    expect(posixRoot.path).toBe('/');
+    expect(exchangePaths(posixRoot.path).root).toBe('/QBSheet');
+    addTransferLocation(state, { kind: 'folder', label: 'Root', path: '////' });
+    expect(state.transfers.locations).toHaveLength(1);
+
+    const windowsRoot = addTransferLocation(state, { kind: 'folder', label: 'Windows root', path: 'C:\\' });
+    expect(windowsRoot.path).toBe('C:\\');
+    expect(exchangePaths(windowsRoot.path).root).toBe('C:\\QBSheet');
+  });
 });
 
 describe('a watched folder end to end', () => {
