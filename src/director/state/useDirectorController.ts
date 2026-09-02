@@ -608,6 +608,16 @@ export function useDirectorController(repository = createDirectorRepository()): 
         return false;
       }
       if (
+        snapshot.teams.some(
+          (team) =>
+            team.id !== teamId &&
+            team.displayName.trim().toLocaleLowerCase() === displayName.toLocaleLowerCase(),
+        )
+      ) {
+        setError(`Team “${displayName}” already exists.`);
+        return false;
+      }
+      if (
         changes.seed !== undefined &&
         changes.seed !== null &&
         (!Number.isInteger(changes.seed) || changes.seed < 1)
@@ -816,8 +826,9 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError('A player name is required.');
         return false;
       }
+      const active = changes.active ?? current.active;
       if (
-        current.active &&
+        active &&
         snapshot.players.some(
           (player) =>
             player.id !== playerId &&
@@ -943,8 +954,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
         }
         if (changes.directions !== undefined) room.directions = changes.directions.trim() || undefined;
         if (changes.notes !== undefined) room.notes = changes.notes.trim() || undefined;
-        // Availability controls future assignment only. The operational status belongs to the
-        // room/session lifecycle and must not abandon a live scorer or cancel an open help request.
+        // Availability controls future assignment. Do not overwrite a live scorer, open help
+        // request, or finished room; only mirror the explicit choice for an otherwise idle room.
+        if (changes.available === true && room.status === 'offline') room.status = 'available';
+        if (changes.available === false && room.status === 'available') room.status = 'offline';
         draft.audit.push({
           id: newDirectorId('audit'),
           at: isoNow(),

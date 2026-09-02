@@ -429,6 +429,18 @@ describe('Director integration hardening', () => {
       expect(hook.result.current.addPlayer(teamId, ' ada lovelace ')).toBe(false);
     });
     expect(hook.result.current.state.players.filter((player) => player.teamId === teamId)).toHaveLength(1);
+
+    act(() => expect(hook.result.current.addPlayer(teamId, 'Grace Hopper')).toBe(true));
+    const secondPlayerId = hook.result.current.state.players.find(
+      (player) => player.name === 'Grace Hopper',
+    )?.id;
+    if (!secondPlayerId) throw new Error('test setup did not create the second player');
+    act(() => {
+      expect(hook.result.current.updatePlayer(playerId, { active: false })).toBe(true);
+      expect(hook.result.current.updatePlayer(secondPlayerId, { name: 'Ada Lovelace' })).toBe(true);
+      expect(hook.result.current.updatePlayer(playerId, { active: true })).toBe(false);
+    });
+    expect(hook.result.current.state.players.find((player) => player.id === playerId)?.active).toBe(false);
   });
 
   test('unavailable room resources can be restored and block release until they are ready', async () => {
@@ -504,6 +516,22 @@ describe('Director integration hardening', () => {
         }),
       ]),
     );
+  });
+
+  test('room availability toggles restore the schedulable idle status', async () => {
+    const { hook } = await directorWithSetup();
+    const room = hook.result.current.state.rooms[0];
+    if (!room) throw new Error('test setup did not create a room');
+
+    act(() => {
+      expect(hook.result.current.updateRoom(room.id, { available: false })).toBe(true);
+    });
+    expect(hook.result.current.state.rooms[0]).toMatchObject({ available: false, status: 'offline' });
+
+    act(() => {
+      expect(hook.result.current.updateRoom(room.id, { available: true })).toBe(true);
+    });
+    expect(hook.result.current.state.rooms[0]).toMatchObject({ available: true, status: 'available' });
   });
 
   test('completed tournaments do not show next-round setup blockers', async () => {
@@ -1115,6 +1143,13 @@ describe('Director integration hardening', () => {
     expect(added).toBe(false);
     expect(hook.result.current.state.teams).toHaveLength(2);
 
+    let renamed = true;
+    act(() => {
+      renamed = hook.result.current.updateTeam(firstTeam.id, { displayName: ' team 2 ' });
+    });
+    expect(renamed).toBe(false);
+    expect(hook.result.current.state.teams[0]?.displayName).toBe(firstTeam.displayName);
+
     let edited = true;
     act(() => {
       edited = hook.result.current.updateTeam(firstTeam.id, { displayName: '   ' });
@@ -1615,10 +1650,10 @@ describe('Director integration hardening', () => {
       hook.result.current.state.submissions.find((entry) => entry.transportResultId === 'transport-stable')
         ?.status,
     ).toBe('received');
-    act(() => {
-      hook.result.current.updateTeam(leftTeamId, { displayName: 'Same name' });
-      hook.result.current.updateTeam(rightTeamId, { displayName: 'Same name' });
-    });
+    const ambiguousState = structuredClone(hook.result.current.state);
+    ambiguousState.teams.find((team) => team.id === leftTeamId)!.displayName = 'Same name';
+    ambiguousState.teams.find((team) => team.id === rightTeamId)!.displayName = 'Same name';
+    act(() => expect(hook.result.current.importSnapshot(ambiguousState)).toBe(true));
     const ambiguousInvoke = vi.fn(async () => ({
       results: [
         {
