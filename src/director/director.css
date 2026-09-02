@@ -1722,6 +1722,15 @@ button:disabled:hover {
   white-space: nowrap;
 }
 
+.director-roster-row.is-inactive {
+  opacity: 0.68;
+}
+
+.director-roster-status {
+  color: var(--director-muted);
+  font-style: normal;
+}
+
 .director-roster-player-edit {
   padding: 8px 0 10px;
   border-bottom: 1px solid var(--director-border);

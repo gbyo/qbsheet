@@ -333,7 +333,9 @@ function TeamRow({
   const [editSeed, setEditSeed] = useState('');
   const [editNotes, setEditNotes] = useState('');
   if (!team) return null;
-  const players = state.players.filter((player) => player.teamId === team.id && player.active);
+  const players = state.players.filter((player) => player.teamId === team.id);
+  const activePlayerCount = players.filter((player) => player.active).length;
+  const inactivePlayerCount = players.length - activePlayerCount;
   const beginEdit = () => {
     setEditDisplayName(team.displayName);
     setEditOrganizationName(organizationNameFor(state, team.organizationId));
@@ -381,7 +383,9 @@ function TeamRow({
         <td>
           <details className="director-roster-details">
             <summary className="director-roster-summary">
-              {players.length} player{players.length === 1 ? '' : 's'}
+              {inactivePlayerCount > 0
+                ? `${activePlayerCount} active · ${inactivePlayerCount} inactive`
+                : `${activePlayerCount} player${activePlayerCount === 1 ? '' : 's'}`}
             </summary>
             <div className="director-roster-editor">
               {players.length > 0 && (
@@ -591,11 +595,12 @@ function PlayerRow({
   };
   return (
     <>
-      <li className="director-list-row director-roster-row">
+      <li className={`director-list-row director-roster-row${player.active ? '' : ' is-inactive'}`}>
         <div className="director-roster-player-summary">
           <span>
             {player.name}
             {player.captain ? ' · captain' : ''}
+            {!player.active && <em className="director-roster-status"> · inactive</em>}
           </span>
           {(player.rosterNumber !== undefined || player.notes) && (
             <small className="director-table-subtext">
@@ -615,14 +620,38 @@ function PlayerRow({
             <Icon name="edit" size={13} />
             <span>Edit</span>
           </button>
-          <button
-            type="button"
-            className="director-inline-action director-roster-remove-action"
-            aria-label={`Remove ${player.name} from ${teamName}`}
-            onClick={() => controller.removePlayer(player.id)}
-          >
-            Remove
-          </button>
+          {player.active ? (
+            <button
+              type="button"
+              className="director-inline-action director-roster-remove-action"
+              aria-label={`Remove ${player.name} from ${teamName}`}
+              onClick={() => {
+                if (!controller.removePlayer(player.id)) {
+                  onAnnounce('Player status was not changed; review the Director error.');
+                  return;
+                }
+                setEditing(false);
+                onAnnounce(`${player.name} removed from the active roster.`);
+              }}
+            >
+              Remove
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="director-inline-action"
+              aria-label={`Restore ${player.name} to ${teamName}`}
+              onClick={() => {
+                if (!controller.updatePlayer(player.id, { active: true })) {
+                  onAnnounce('Player could not be restored; review the Director error.');
+                  return;
+                }
+                onAnnounce(`${player.name} restored to the active roster.`);
+              }}
+            >
+              Restore
+            </button>
+          )}
         </div>
       </li>
       {editing && (

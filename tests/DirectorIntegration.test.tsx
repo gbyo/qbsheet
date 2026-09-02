@@ -439,8 +439,15 @@ describe('Director integration hardening', () => {
       expect(hook.result.current.updatePlayer(playerId, { active: false })).toBe(true);
       expect(hook.result.current.updatePlayer(secondPlayerId, { name: 'Ada Lovelace' })).toBe(true);
       expect(hook.result.current.updatePlayer(playerId, { active: true })).toBe(false);
+      expect(hook.result.current.updatePlayer(secondPlayerId, { name: 'Grace Hopper' })).toBe(true);
+      expect(hook.result.current.removePlayer(secondPlayerId)).toBe(true);
     });
     expect(hook.result.current.state.players.find((player) => player.id === playerId)?.active).toBe(false);
+    expect(hook.result.current.state.players.find((player) => player.id === secondPlayerId)?.active).toBe(
+      false,
+    );
+    act(() => expect(hook.result.current.updatePlayer(playerId, { active: true })).toBe(true));
+    expect(hook.result.current.state.players.find((player) => player.id === playerId)?.active).toBe(true);
   });
 
   test('unavailable room resources can be restored and block release until they are ready', async () => {

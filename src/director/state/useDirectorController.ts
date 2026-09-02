@@ -149,7 +149,7 @@ export interface DirectorController {
       Pick<DirectorState['players'][number], 'name' | 'captain' | 'active' | 'rosterNumber' | 'notes'>
     >,
   ): boolean;
-  removePlayer(playerId: DirectorId): void;
+  removePlayer(playerId: DirectorId): boolean;
   addRoom(input: NewRoomInput): void;
   updateRoom(
     roomId: DirectorId,
@@ -876,7 +876,16 @@ export function useDirectorController(repository = createDirectorRepository()): 
   );
 
   const removePlayer = useCallback(
-    (playerId: DirectorId) =>
+    (playerId: DirectorId): boolean => {
+      const current = stateRef.current.players.find((entry) => entry.id === playerId);
+      if (!current) {
+        setError('That player is no longer on the tournament roster.');
+        return false;
+      }
+      if (!current.active) {
+        setError(`${current.name} is already inactive.`);
+        return false;
+      }
       commit((draft) => {
         const player = draft.players.find((entry) => entry.id === playerId);
         if (!player) return;
@@ -889,7 +898,9 @@ export function useDirectorController(repository = createDirectorRepository()): 
           summary: `Removed ${player.name} from the active roster.`,
           entityId: playerId,
         });
-      }),
+      });
+      return true;
+    },
     [commit],
   );
 

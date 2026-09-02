@@ -304,6 +304,10 @@ test('Director supports keyboard search, inline edits, and audited result review
   await playerEditor.getByRole('button', { name: 'Save player' }).click();
   await expect(northviewRow).toContainText('Roster 07');
   await expect(northviewRow).toContainText('Late arrival.');
+  await northviewRow.getByRole('button', { name: 'Remove Ada Lovelace from Northview B' }).click();
+  await expect(northviewRow).toContainText('0 active · 1 inactive');
+  await northviewRow.getByRole('button', { name: 'Restore Ada Lovelace to Northview B' }).click();
+  await expect(northviewRow).toContainText('1 player');
 
   await navigation.getByRole('button', { name: 'Format', exact: true }).click();
   await page.getByRole('button', { name: 'Generate next round' }).click();
