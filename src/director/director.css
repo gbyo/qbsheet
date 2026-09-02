@@ -2781,3 +2781,151 @@ button:disabled:hover {
   background: var(--director-surface);
   color: inherit;
 }
+
+/* Help dialog and accessible menus – W3C APG dialog/menu-button patterns */
+.director-help-dialog[open],
+.director-operator-dialog[open] {
+  width: min(720px, 90vw);
+  max-height: 85vh;
+  padding: 0;
+  border: 1px solid var(--director-border-strong);
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+}
+.director-help-dialog::backdrop,
+.director-operator-dialog::backdrop {
+  background: rgba(38,49,59,0.45);
+}
+.director-help-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--director-border);
+  position: sticky;
+  top: 0;
+  background: var(--director-surface);
+}
+.director-help-dialog-header h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.director-help-dialog-body {
+  padding: 18px 20px;
+  overflow: auto;
+  display: grid;
+  gap: 22px;
+}
+.director-help-dialog-body h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.director-help-dialog-body p,
+.director-help-dialog-body li {
+  color: var(--director-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.director-help-toc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  padding: 10px 12px;
+  background: var(--director-surface-soft);
+  border: 1px solid var(--director-border);
+  border-radius: 6px;
+}
+.director-help-toc a {
+  color: var(--director-accent);
+  font-size: 12px;
+  text-decoration: none;
+}
+.director-help-toc a:hover { text-decoration: underline; }
+.director-help-shortcuts { margin-top: 8px; }
+.director-help-footnote { margin-top: 12px; border-top: 1px solid var(--director-border); padding-top: 12px; }
+
+/* Tournament switcher and operator menus – menu-button pattern */
+.director-tournament-switcher-wrap,
+.director-operator-wrap {
+  position: relative;
+}
+.director-tournament-switcher {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 10px 12px;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.director-tournament-switcher:hover {
+  background: rgba(255,255,255,0.6);
+  border-color: var(--director-border);
+}
+.director-tournament-switcher .director-tournament-overline {
+  color: var(--director-faint);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.director-tournament-menu,
+.director-operator-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 20;
+  display: grid;
+  gap: 2px;
+  padding: 8px;
+  background: var(--director-surface);
+  border: 1px solid var(--director-border-strong);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+}
+.director-operator-menu {
+  top: auto;
+  bottom: calc(100% + 6px);
+}
+.director-menu-item {
+  padding: 8px 10px;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  font-size: 12px;
+}
+.director-menu-item:hover {
+  background: var(--director-accent-soft);
+  color: var(--director-accent);
+}
+.director-menu-separator {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--director-border);
+}
+.director-tournament-menu-header {
+  display: grid;
+  gap: 2px;
+  padding: 6px 10px;
+}
+.director-tournament-menu-header strong { font-size: 13px; }
+.director-tournament-menu-header small { color: var(--director-muted); font-size: 11px; }
+.director-menu-note {
+  padding: 6px 10px;
+  color: var(--director-faint);
+  font-size: 11px;
+  font-style: italic;
+}
+.director-menu-file { position: relative; cursor: pointer; }
+.director-search-wrap { position: relative; }
+.director-operator { cursor: pointer; border: 0; background: transparent; width: 100%; text-align: left; }
+.director-operator:hover { color: var(--director-accent); }
+.director-avatar-top { border: 0; background: #e5f0f7; cursor: pointer; }
+.director-avatar-top:hover { background: #d6e8f3; }
+
