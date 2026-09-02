@@ -49,7 +49,10 @@ const emptyState: LiveWebState = {
 };
 
 /**
- * Resolve the bootstrap from the address bar, falling back to the last tournament this device saw.
+ * Resolve the bootstrap from the address bar, falling back to the last tournament this device saw
+ * only for a bare visit (no tournament bootstrap attempt). A URL that clearly tries to name a
+ * tournament but is malformed must show an error for that link, not silently open another
+ * tournament.
  *
  * The fallback matters for the notification case: a tap that reopens the app does not always carry
  * the original invocation URL, and reopening on a blank screen would be the wrong answer.
@@ -57,12 +60,21 @@ const emptyState: LiveWebState = {
 function resolveBootstrap(
   href: string,
 ): { publicationId: string; backendOrigin: string } | { error: string } {
+  let hasBootstrapAttempt = false;
+  try {
+    hasBootstrapAttempt = hasBootstrapAttemptInUrl(href);
+  } catch {
+    // If href is not parseable, treat it as an attempt - do not fallback.
+    hasBootstrapAttempt = true;
+  }
   try {
     const bootstrap = parseBootstrapUrl(href);
     return { publicationId: bootstrap.publicationId, backendOrigin: bootstrap.backendOrigin };
   } catch (reason) {
-    const last = readLastPublication();
-    if (last) return last;
+    if (!hasBootstrapAttempt) {
+      const last = readLastPublication();
+      if (last) return last;
+    }
     return {
       error:
         reason instanceof QbliveBootstrapError
@@ -70,6 +82,13 @@ function resolveBootstrap(
           : 'That link does not name a QBSheet Live tournament.',
     };
   }
+}
+
+function hasBootstrapAttemptInUrl(href: string): boolean {
+  const url = new URL(href, window.location.origin);
+  if (/^\/t(\/|$)/.test(url.pathname)) return true;
+  if (url.searchParams.has('b') || url.searchParams.has('v')) return true;
+  return false;
 }
 
 export default function App() {

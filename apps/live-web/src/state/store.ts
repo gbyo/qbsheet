@@ -186,6 +186,7 @@ export class LiveConnection {
   private attempts = 0;
   private stopped = false;
   private snapshot: QbliveSnapshot | null = null;
+  private generation = 0;
 
   constructor(
     private readonly client: QbliveClient,
@@ -200,10 +201,13 @@ export class LiveConnection {
 
   stop(): void {
     this.stopped = true;
+    this.generation += 1;
     this.socket?.close();
     this.socket = null;
     if (this.pollTimer) clearInterval(this.pollTimer);
     if (this.retryTimer) clearTimeout(this.retryTimer);
+    this.pollTimer = null;
+    this.retryTimer = null;
   }
 
   /** Called on pull-to-refresh, on the Refresh button, and when the tab becomes visible again. */
@@ -242,15 +246,27 @@ export class LiveConnection {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
     }
+    // Close any existing socket before opening a new one – a manual refresh,
+    // visibility refresh, or reconnect must not leak another socket.
+    if (this.socket) {
+      this.socket.close();
+      this.socket = null;
+    }
+    this.generation += 1;
+    const generation = this.generation;
     const socket = new WebSocket(url);
     this.socket = socket;
     socket.addEventListener('open', () => {
+      if (this.stopped || generation !== this.generation) return;
       this.attempts = 0;
       this.hooks.onConnection('live');
     });
-    socket.addEventListener('message', (event) => void this.onFrame(String(event.data)));
+    socket.addEventListener('message', (event) => {
+      if (generation !== this.generation) return;
+      void this.onFrame(String(event.data));
+    });
     socket.addEventListener('close', () => {
-      if (this.stopped || this.socket !== socket) return;
+      if (this.stopped || this.socket !== socket || generation !== this.generation) return;
       this.socket = null;
       // Fall back to polling immediately so the page keeps updating, and try the socket again with
       // backoff. A reconnect storm after a WiFi blip is the failure mode to avoid here.
