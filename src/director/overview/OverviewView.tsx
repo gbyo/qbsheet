@@ -86,29 +86,44 @@ export function OverviewView({
               </span>
             </div>
             <div className="director-round-actions">
-              <Button
-                variant="quiet"
-                icon={round.status === 'released' ? 'pause' : 'play'}
-                onClick={() => {
-                  if (round.status === 'released') {
-                    const closed = controller.closeRound(round.id);
-                    onAnnounce(
-                      closed
-                        ? `${round.name} closed.`
-                        : `${round.name} could not close; accept or cancel every game first.`,
-                    );
-                  } else {
-                    const released = controller.releaseRound(round.id);
-                    onAnnounce(
-                      released
-                        ? `${round.name} released.`
-                        : 'The round is not ready to release; review the Director error and room assignments.',
-                    );
+              {round.status !== 'closed' && (
+                <Button
+                  variant="quiet"
+                  icon={
+                    round.status === 'released' ? 'pause' : round.status === 'planned' ? 'clipboard' : 'play'
                   }
-                }}
-              >
-                {round.status === 'released' ? 'Close round' : 'Release assignments'}
-              </Button>
+                  onClick={() => {
+                    if (round.status === 'planned') {
+                      const prepared = controller.prepareRound(round.id);
+                      onAnnounce(
+                        prepared
+                          ? `${round.name} prepared.`
+                          : `${round.name} could not be prepared; review the schedule first.`,
+                      );
+                    } else if (round.status === 'prepared') {
+                      const released = controller.releaseRound(round.id);
+                      onAnnounce(
+                        released
+                          ? `${round.name} released.`
+                          : 'The round is not ready to release; review the Director error and room assignments.',
+                      );
+                    } else {
+                      const closed = controller.closeRound(round.id);
+                      onAnnounce(
+                        closed
+                          ? `${round.name} closed.`
+                          : `${round.name} could not close; accept or cancel every game first.`,
+                      );
+                    }
+                  }}
+                >
+                  {round.status === 'planned'
+                    ? 'Prepare round'
+                    : round.status === 'prepared'
+                      ? 'Release assignments'
+                      : 'Close round'}
+                </Button>
+              )}
               <Button variant="quiet" icon="chevron" onClick={() => onNavigate('tournament')}>
                 Open control
               </Button>
