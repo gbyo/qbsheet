@@ -190,15 +190,12 @@ function interchangeTeam(state: DirectorState, team: DirectorState['teams'][numb
 
 function preservedDirectorState(data: DirectorTournament): DirectorState | undefined {
   const candidate = data.extensions?.[directorStateArchiveExtension];
-  if (!candidate) return undefined;
-  try {
-    const restored = normalizeDirectorState(candidate);
-    return restored.tournament?.id === data.tournament.id ? restored : undefined;
-  } catch (reason: unknown) {
-    if (reason instanceof DirectorStateVersionError) throw reason;
-    // A foreign or stale extension must not make an otherwise valid interchange document unreadable.
-    return undefined;
+  if (candidate === undefined) return undefined;
+  const restored = normalizeDirectorState(candidate);
+  if (restored.tournament?.id !== data.tournament.id) {
+    throw new Error('The Director archive state belongs to a different tournament.');
   }
+  return restored;
 }
 
 function toInterchangeGame(state: DirectorState, game: GameRecord): InterchangeGameRecord {
@@ -749,12 +746,20 @@ export function importArchiveBytes(bytes: Uint8Array): DirectorImportReport {
       errors: report.errors.map((entry) => entry.message),
       warnings: report.warnings.map((entry) => entry.message),
     };
-  return {
-    ok: true,
-    state: fromInterchange(report.value.tournament),
-    errors: [],
-    warnings: report.warnings.map((entry) => entry.message),
-  };
+  try {
+    return {
+      ok: true,
+      state: fromInterchange(report.value.tournament),
+      errors: [],
+      warnings: report.warnings.map((entry) => entry.message),
+    };
+  } catch (reason: unknown) {
+    return {
+      ok: false,
+      errors: [reason instanceof Error ? reason.message : 'The Director archive state is not valid.'],
+      warnings: report.warnings.map((entry) => entry.message),
+    };
+  }
 }
 
 export function importQbjText(value: string): DirectorImportReport {
@@ -765,12 +770,20 @@ export function importQbjText(value: string): DirectorImportReport {
       errors: report.errors.map((entry) => entry.message),
       warnings: report.warnings.map((entry) => entry.message),
     };
-  return {
-    ok: true,
-    state: fromInterchange(report.value.tournament),
-    errors: [],
-    warnings: report.warnings.map((entry) => entry.message),
-  };
+  try {
+    return {
+      ok: true,
+      state: fromInterchange(report.value.tournament),
+      errors: [],
+      warnings: report.warnings.map((entry) => entry.message),
+    };
+  } catch (reason: unknown) {
+    return {
+      ok: false,
+      errors: [reason instanceof Error ? reason.message : 'The Director tournament is not valid.'],
+      warnings: report.warnings.map((entry) => entry.message),
+    };
+  }
 }
 
 export function importDirectorTournament(value: DirectorTournamentInput): DirectorState {

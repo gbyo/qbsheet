@@ -24,6 +24,11 @@ export function RoomsView({
   const rooms = state.rooms.filter(
     (room) => filter === 'all' || (filter === 'available' ? room.available : room.status === filter),
   );
+  const helpRequests = [...state.qbtcpHelpRequests].sort((left, right) =>
+    right.updatedAt.localeCompare(left.updatedAt),
+  );
+  const rosterAmendments = [...state.qbtcpRosterAmendments].reverse();
+  const openHelpCount = helpRequests.filter((request) => request.status === 'open').length;
   const save = () => {
     if (!name.trim()) {
       onAnnounce('Enter a room name first.');
@@ -284,6 +289,77 @@ export function RoomsView({
             </div>
           </section>
         )}
+        {(helpRequests.length > 0 || rosterAmendments.length > 0) && (
+          <section className="director-panel">
+            <div className="director-panel-heading">
+              <div>
+                <p className="director-eyebrow">QBTCP operations</p>
+                <h2>Requests & roster amendments</h2>
+              </div>
+              <span className="director-muted">
+                {openHelpCount
+                  ? `${openHelpCount} help request${openHelpCount === 1 ? '' : 's'} open`
+                  : 'No help requests open'}
+              </span>
+            </div>
+            <PanelBody>
+              {helpRequests.length > 0 && (
+                <>
+                  <p className="director-eyebrow">Scorekeeper help</p>
+                  <ul className="director-activity-list">
+                    {helpRequests.map((request) => (
+                      <li key={request.id}>
+                        <div>
+                          <strong>
+                            {request.roomName} · {request.category}
+                          </strong>
+                          <span>{request.message}</span>
+                          <small className="director-table-subtext">
+                            {request.deviceId}
+                            {request.operatorName ? ` · ${request.operatorName}` : ''} ·{' '}
+                            {formatTime(request.createdAt)}
+                          </small>
+                        </div>
+                        <StateLabel
+                          state={request.status === 'open' ? 'help' : 'finished'}
+                          label={request.status === 'open' ? 'Open' : request.status}
+                        />
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+              {rosterAmendments.length > 0 && (
+                <>
+                  <p className="director-eyebrow director-operations-subheading">Roster amendments</p>
+                  <ul className="director-activity-list">
+                    {rosterAmendments.map((entry, index) => {
+                      const playerName = stringField(entry.amendment.playerName) ?? 'Unrecognized player';
+                      const team =
+                        stringField(entry.amendment.teamName) ??
+                        stringField(entry.amendment.teamId) ??
+                        'Team unresolved';
+                      return (
+                        <li key={`${entry.sessionId}-${index}`}>
+                          <div>
+                            <strong>{playerName}</strong>
+                            <span>
+                              {team} · session {entry.sessionId}
+                            </span>
+                            <small className="director-table-subtext">
+                              Review only; the canonical roster was not changed.
+                            </small>
+                          </div>
+                          <StateLabel state="review" label="Review" />
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </>
+              )}
+            </PanelBody>
+          </section>
+        )}
         {(state.staff.length > 0 || state.equipment.length > 0) && (
           <div className="director-two-column">
             <section className="director-panel">
@@ -359,4 +435,15 @@ function staffName(state: DirectorState, id: string | null): string {
 }
 function equipmentName(state: DirectorState, id: string | null): string {
   return id ? (state.equipment.find((item) => item.id === id)?.name ?? '') : '';
+}
+
+function stringField(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function formatTime(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? '—'
+    : date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }

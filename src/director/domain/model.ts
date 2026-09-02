@@ -289,6 +289,7 @@ export interface AuditEvent {
     | 'protest-ruled'
     | 'team-dropped'
     | 'schedule-repaired'
+    | 'roster-amendment'
     | 'checkpoint-created'
     | 'imported'
     | 'exported';

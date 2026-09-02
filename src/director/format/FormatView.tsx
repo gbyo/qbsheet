@@ -173,7 +173,15 @@ export function FormatView({
                 <p className="director-eyebrow">Scoring rules</p>
                 <h2>QBSheet rules</h2>
               </div>
-              <span className="director-muted">Saved with tournament</span>
+              <span className="director-muted">
+                {controller.error
+                  ? 'Save needs attention'
+                  : controller.saving
+                    ? 'Saving changes…'
+                    : state.metadata.lastSavedAt
+                      ? 'Saved locally'
+                      : 'Not saved yet'}
+              </span>
             </div>
             <PanelBody>
               <div className="director-form-grid">

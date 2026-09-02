@@ -4,7 +4,7 @@ import type { DirectorState } from '../domain';
 import { Button, EmptyState, FormField, PanelBody, PanelFooter, StateLabel } from '../components/Controls';
 import { Icon } from '../components/Icon';
 import { PageHeader } from '../components/PageHeader';
-import { importTeamsCsv } from '@qbsheet/tournament-formats';
+import { importTeamsCsv, type TeamRecord } from '@qbsheet/tournament-formats';
 
 export function TeamsView({
   state,
@@ -44,26 +44,53 @@ export function TeamsView({
     setDisplayName('');
     setTeamLetter('');
     setShowForm(false);
-    onAnnounce(`${displayName.trim()} added.`);
+    onAnnounce(`${displayName.trim()} added locally; saving now.`);
+  };
+
+  const addImportedRows = (teams: TeamRecord[], warningCount: number) => {
+    const result = controller.addImportedTeams(
+      teams.map((team) => ({
+        id: team.id,
+        displayName: team.displayName ?? team.name,
+        organizationId: team.organizationId,
+        teamLetter: team.letter,
+        seed: team.seed ?? null,
+        status: importedTeamStatus(team.status),
+        notes: team.notes,
+        players: team.players?.map((player) => ({
+          id: player.id,
+          name: player.name,
+          captain: player.captain,
+          rosterNumber: player.rosterNumber,
+          notes: player.notes,
+        })),
+      })),
+    );
+    const importedLabel = `${result.inserted} team${result.inserted === 1 ? '' : 's'}`;
+    const duplicateLabel = result.skipped
+      ? `; ${result.skipped} duplicate${result.skipped === 1 ? '' : 's'} skipped`
+      : '';
+    const warningLabel = warningCount
+      ? ` ${warningCount} warning${warningCount === 1 ? '' : 's'} retained.`
+      : result.inserted
+        ? ' Saving now.'
+        : '';
+    onAnnounce(`${importedLabel} imported locally${duplicateLabel}.${warningLabel}`);
   };
 
   const importPaste = () => {
-    const rows = paste
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean);
-    let added = 0;
-    for (const row of rows) {
-      const [name, school = '', letter = ''] = row.split(/\t|,/).map((part) => part.trim());
-      if (!name) continue;
-      controller.addTeam({ displayName: name, organizationName: school, teamLetter: letter });
-      added += 1;
+    const report = importTeamsCsv(paste);
+    if (!report.ok) {
+      onAnnounce(report.errors.map((entry) => entry.message).join(' ') || 'That CSV is not valid.');
+      return;
     }
+    if (report.value.length === 0) {
+      onAnnounce('No team rows found.');
+      return;
+    }
+    addImportedRows(report.value, report.warnings.length);
     setPaste('');
     setShowPaste(false);
-    onAnnounce(
-      added ? `${added} team${added === 1 ? '' : 's'} added from pasted rows.` : 'No team rows found.',
-    );
   };
 
   const importCsv = async (file: File | undefined) => {
@@ -74,33 +101,11 @@ export function TeamsView({
         onAnnounce(report.errors.map((entry) => entry.message).join(' ') || 'That CSV is not valid.');
         return;
       }
-      const result = controller.addImportedTeams(
-        report.value.map((team) => ({
-          id: team.id,
-          displayName: team.displayName ?? team.name,
-          organizationId: team.organizationId,
-          teamLetter: team.letter,
-          seed: team.seed ?? null,
-          status: importedTeamStatus(team.status),
-          notes: team.notes,
-          players: team.players?.map((player) => ({
-            id: player.id,
-            name: player.name,
-            captain: player.captain,
-            rosterNumber: player.rosterNumber,
-            notes: player.notes,
-          })),
-        })),
-      );
-      onAnnounce(
-        `${result.inserted} team${result.inserted === 1 ? '' : 's'} imported${
-          result.skipped ? `; ${result.skipped} duplicate${result.skipped === 1 ? '' : 's'} skipped` : ''
-        }.${
-          report.warnings.length
-            ? ` ${report.warnings.length} warning${report.warnings.length === 1 ? '' : 's'} retained.`
-            : ''
-        }`,
-      );
+      if (report.value.length === 0) {
+        onAnnounce('No team rows found.');
+        return;
+      }
+      addImportedRows(report.value, report.warnings.length);
     } catch (reason: unknown) {
       onAnnounce(reason instanceof Error ? reason.message : 'That CSV could not be read.');
     }
@@ -111,7 +116,7 @@ export function TeamsView({
       <PageHeader
         eyebrow="Plan"
         title="Teams"
-        description={`${state.teams.length} team record${state.teams.length === 1 ? '' : 's'} · changes save immediately`}
+        description={`${state.teams.length} team record${state.teams.length === 1 ? '' : 's'} · changes persist locally as you work`}
         actions={
           <>
             <label className="director-button director-button-secondary">
@@ -197,13 +202,16 @@ export function TeamsView({
             </div>
             <PanelBody>
               <p className="director-panel-description">
-                One team per line. Use columns for team name, school, and team letter.
+                Paste RFC 4180 CSV with a header row. Quoted commas and line breaks are supported; use
+                team_name, organization_id, and letter for the basic columns.
               </p>
               <textarea
                 className="director-textarea"
                 value={paste}
                 onChange={(event) => setPaste(event.target.value)}
-                placeholder={'Northview A\tNorthview High\tA\nRiverside A\tRiverside School\tA'}
+                placeholder={
+                  'team_name,organization_id,letter\nNorthview A,Northview High,A\nRiverside A,Riverside School,A'
+                }
                 rows={5}
               />
             </PanelBody>

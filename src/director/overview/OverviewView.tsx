@@ -150,7 +150,15 @@ export function OverviewView({
           />
           <StatusStat
             label="Saved locally"
-            value={controller.saving ? 'Saving' : state.metadata.lastSavedAt ? 'Yes' : 'Not yet'}
+            value={
+              controller.error
+                ? 'Needs attention'
+                : controller.saving
+                  ? 'Saving'
+                  : state.metadata.lastSavedAt
+                    ? 'Yes'
+                    : 'Not yet'
+            }
             detail={
               controller.repositoryKind === 'tauri-sqlite'
                 ? 'SQLite'

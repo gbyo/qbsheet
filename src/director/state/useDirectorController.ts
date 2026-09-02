@@ -208,10 +208,12 @@ export function useDirectorController(repository = createDirectorRepository()): 
       const task = persistenceQueueRef.current.then(async () => {
         const persisted = structuredClone(snapshot);
         await operation(persisted);
+        // A successful queued write clears a previous failure even when this revision is no
+        // longer current. A newer queued write will set the error again if it fails.
+        setError(null);
         if (stateRevisionRef.current === revision) {
           stateRef.current = persisted;
           setState(persisted);
-          setError(null);
         }
       });
       persistenceQueueRef.current = task.then(
@@ -375,6 +377,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
 
   const addImportedTeams = useCallback(
     (inputs: ImportedTeamInput[]): { inserted: number; skipped: number } => {
+      if (inputs.length === 0) return { inserted: 0, skipped: 0 };
       let inserted = 0;
       let skipped = 0;
       commit((draft) => {
@@ -383,12 +386,17 @@ export function useDirectorController(repository = createDirectorRepository()): 
         const playerIds = new Set(draft.players.map((player) => player.id));
         for (const input of inputs) {
           const name = input.displayName.trim();
-          if (!name || (input.id && teamIds.has(input.id)) || teamNames.has(name.toLocaleLowerCase())) {
+          const requestedTeamId = input.id?.trim();
+          if (
+            !name ||
+            (requestedTeamId && teamIds.has(requestedTeamId)) ||
+            teamNames.has(name.toLocaleLowerCase())
+          ) {
             skipped += 1;
             continue;
           }
           const now = isoNow();
-          const teamId = input.id?.trim() || newDirectorId('team');
+          const teamId = requestedTeamId || newDirectorId('team');
           if (teamIds.has(teamId)) {
             skipped += 1;
             continue;
@@ -608,6 +616,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
               session.progress = null;
               session.resumable = true;
             }
+            session.helpRequestId = null;
           }
           for (const request of draft.qbtcpHelpRequests.filter(
             (entry) => entry.roomId === roomId && entry.status === 'open',
@@ -1914,8 +1923,9 @@ function applyNativeSessions(state: DirectorState, records: NativeSessionSnapsho
         deviceId: record.deviceId ?? '',
         operatorName: record.operatorName,
         state: nextState,
-        resumable: record.resumable,
-        resultReceived: record.resultReceived,
+        resumable:
+          nextState === 'abandoned' ? true : nextState === 'result-received' ? false : record.resumable,
+        resultReceived: record.resultReceived || nextState === 'result-received',
         progressSequence: record.progressSequence,
         lastSeenAt: record.updatedAt,
         progress: null,
@@ -1936,7 +1946,8 @@ function applyNativeSessions(state: DirectorState, records: NativeSessionSnapsho
       session.deviceId !== (record.deviceId ?? session.deviceId) ||
       session.operatorName !== (record.operatorName ?? session.operatorName) ||
       session.state !== nextState ||
-      session.resumable !== record.resumable ||
+      session.resumable !==
+        (nextState === 'abandoned' ? true : nextState === 'result-received' ? false : record.resumable) ||
       session.resultReceived !== nextResultReceived ||
       session.progressSequence !== (nextProgressSequence < 0 ? undefined : nextProgressSequence) ||
       session.lastSeenAt !== lastSeenAt
@@ -1946,13 +1957,14 @@ function applyNativeSessions(state: DirectorState, records: NativeSessionSnapsho
       session.deviceId = record.deviceId ?? session.deviceId;
       session.operatorName = record.operatorName ?? session.operatorName;
       session.state = nextState;
-      session.resumable = record.resumable;
+      session.resumable =
+        nextState === 'abandoned' ? true : nextState === 'result-received' ? false : record.resumable;
       session.resultReceived = nextResultReceived;
       session.progressSequence = nextProgressSequence < 0 ? undefined : nextProgressSequence;
       session.lastSeenAt = lastSeenAt;
       changed = true;
     }
-    if (nextState === 'abandoned' && session.progress !== null) {
+    if ((nextState === 'abandoned' || nextState === 'result-received') && session.progress !== null) {
       session.progress = null;
       changed = true;
     }
@@ -1976,9 +1988,18 @@ function applyNativePresence(state: DirectorState, snapshot: NativeServerSnapsho
   for (const presence of snapshot.presence) {
     const existing = presence.sessionId
       ? state.qbtcpSessions.find((session) => session.sessionId === presence.sessionId)
-      : state.qbtcpSessions.find(
+      : (state.qbtcpSessions.find(
           (session) => session.roomId === presence.roomId && session.deviceId === presence.deviceId,
-        );
+        ) ??
+        (() => {
+          // Older native snapshots may emit presence before the session snapshot is visible. A
+          // single unnamed session in the room is safe to reconcile; multiple candidates must
+          // remain unresolved rather than assigning one device to another session.
+          const candidates = state.qbtcpSessions.filter(
+            (session) => session.roomId === presence.roomId && !session.deviceId,
+          );
+          return candidates.length === 1 ? candidates[0] : undefined;
+        })());
     // Presence without a server-issued session id cannot be safely joined to a session. Do not
     // invent an identity that would later duplicate the real session.
     if (!existing && !presence.sessionId) continue;
@@ -2051,7 +2072,7 @@ function applyNativeProgress(state: DirectorState, records: NativeProgressSnapsh
       changed = true;
     }
     const room = state.rooms.find((entry) => entry.id === record.roomId);
-    if (room && room.available && room.status !== 'live') {
+    if (room && room.status !== 'live') {
       room.status = 'live';
       changed = true;
     }
@@ -2061,6 +2082,9 @@ function applyNativeProgress(state: DirectorState, records: NativeProgressSnapsh
 
 function applyNativeHelp(state: DirectorState, records: NativeHelpSnapshot[]): boolean {
   let changed = false;
+  const openHelpRooms = new Set(
+    records.filter((record) => record.status === 'open').map((record) => record.roomId),
+  );
   for (const record of records) {
     const current = state.qbtcpHelpRequests.find((request) => request.id === record.id);
     const next = {
@@ -2089,6 +2113,8 @@ function applyNativeHelp(state: DirectorState, records: NativeHelpSnapshot[]): b
         room.status = 'help';
         changed = true;
       }
+    } else if (!openHelpRooms.has(record.roomId) && restoreRoomStatusAfterHelp(state, record.roomId)) {
+      changed = true;
     }
     const session = state.qbtcpSessions.find(
       (entry) => entry.roomId === record.roomId && entry.deviceId === record.deviceId,
@@ -2117,10 +2143,48 @@ function applyNativeRosterAmendments(
         sessionId: record.sessionId,
         amendment: structuredClone(record.amendment),
       });
+      const playerId = stringValue(record.amendment.playerId);
+      const teamId = stringValue(record.amendment.teamId);
+      const knownPlayer = playerId ? state.players.find((player) => player.id === playerId) : undefined;
+      const knownTeam = teamId ? state.teams.find((team) => team.id === teamId) : undefined;
+      state.audit.push({
+        id: newDirectorId('audit'),
+        at: isoNow(),
+        actor: 'QBTCP',
+        type: 'roster-amendment',
+        summary: `Received a roster amendment for ${stringValue(record.amendment.playerName) ?? 'an unrecognized player'}.`,
+        entityId: knownPlayer?.id ?? knownTeam?.id ?? record.sessionId,
+        details: {
+          sessionId: record.sessionId,
+          amendment: structuredClone(record.amendment),
+          reviewRequired: true,
+          matchedPlayerId: knownPlayer?.id,
+          matchedTeamId: knownTeam?.id,
+        },
+      });
       changed = true;
     }
   }
   return changed;
+}
+
+function restoreRoomStatusAfterHelp(state: DirectorState, roomId: DirectorId): boolean {
+  const room = state.rooms.find((entry) => entry.id === roomId);
+  if (!room || room.status !== 'help') return false;
+  const liveSession = state.qbtcpSessions.some(
+    (session) => session.roomId === roomId && session.state === 'live',
+  );
+  const liveGame = state.scheduledGames.some((game) => game.roomId === roomId && game.status === 'live');
+  const finishedGame = state.scheduledGames.some(
+    (game) => game.roomId === roomId && ['accepted', 'cancelled'].includes(game.status),
+  );
+  room.status =
+    liveSession || liveGame ? 'live' : finishedGame ? 'finished' : room.available ? 'available' : 'offline';
+  return true;
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
 interface DuplicateResultReference {
@@ -2167,22 +2231,22 @@ function markNativeSessionResult(
       deviceId: nativeSession?.deviceId ?? '',
       operatorName: nativeSession?.operatorName,
       state: 'result-received',
-      resumable: nativeSession?.resumable,
+      resumable: false,
       resultReceived: true,
       progressSequence: nativeSession?.progressSequence ?? progress?.sequence,
       lastSeenAt: now,
-      progress: progress ? progressSummary(progress.matchState) : null,
+      progress: null,
       helpRequestId: null,
     });
   } else {
     session.state = 'result-received';
     session.resultReceived = true;
-    session.resumable = nativeSession?.resumable ?? session.resumable;
+    session.resumable = false;
+    session.progress = null;
     session.matchId = nativeSession?.matchId ?? session.matchId;
     session.lastSeenAt = now;
     if (progress && progress.sequence > (session.progressSequence ?? -1)) {
       session.progressSequence = progress.sequence;
-      session.progress = progressSummary(progress.matchState);
     }
   }
   if (scheduled?.roomId) {

@@ -784,14 +784,21 @@ impl QbtcpState for DirectorQbtcpState {
             rooms.insert(record.room_id.clone());
         }
         if let Ok(mut sessions) = self.session_snapshots.lock() {
-            if let Some(session) = sessions.values_mut().find(|session| {
-                session.room_id == record.room_id
-                    && session.device_id.is_none()
-                    && session.status == qbtcp_server::SessionStatus::Open
-            }) {
-                session.device_id = Some(record.device_id);
-                session.operator_name = record.operator_name;
-                session.updated_at = record.observed_at;
+            let open_session_ids = sessions
+                .values()
+                .filter(|session| {
+                    session.room_id == record.room_id
+                        && session.device_id.is_none()
+                        && session.status == qbtcp_server::SessionStatus::Open
+                })
+                .map(|session| session.session_id.clone())
+                .collect::<Vec<_>>();
+            if let Some(session_id) = open_session_ids.first().filter(|_| open_session_ids.len() == 1) {
+                if let Some(session) = sessions.get_mut(session_id) {
+                    session.device_id = Some(record.device_id);
+                    session.operator_name = record.operator_name;
+                    session.updated_at = record.observed_at;
+                }
             }
         }
         Ok(())
