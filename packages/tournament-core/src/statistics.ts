@@ -17,6 +17,12 @@ export interface StatisticsInput {
   readonly acceptedResults: readonly GameResult[];
   readonly phaseId?: EntityId;
   readonly poolId?: EntityId | null;
+  /** Restrict the calculation to these scheduled-game identities in addition to phase/pool filters. */
+  readonly gameIds?: readonly EntityId[];
+  /** Explicitly identify the teams that belong in the report's display scope. */
+  readonly teamIds?: readonly EntityId[];
+  /** Keep dropped/withdrawn teams in the displayed rows; their games always remain in aggregation. */
+  readonly includeDroppedTeams?: boolean;
   readonly tiebreakers?: readonly Tiebreaker[];
   readonly scoring?: Pick<TournamentRules, 'tossupPoints' | 'powerPoints' | 'negPoints'>;
 }
@@ -82,6 +88,11 @@ export interface StandingsReport {
   readonly unresolvedTies: readonly UnresolvedTie[];
   readonly includedResultIds: readonly EntityId[];
   readonly ignoredResultIds: readonly EntityId[];
+  /** Scope metadata lets advancement verify that it received phase/pool-specific standings. */
+  readonly phaseId?: EntityId | null;
+  readonly poolId?: EntityId | null;
+  readonly includedGameIds?: readonly EntityId[];
+  readonly tiebreakers?: readonly Tiebreaker[];
 }
 
 interface TeamAccumulator {
@@ -179,13 +190,22 @@ function toPlayerStatistics(
 
 function acceptedResultForGame(results: readonly GameResult[]): Map<EntityId, GameResult> {
   const selected = new Map<EntityId, GameResult>();
+  const supersededIds = new Set(
+    results
+      .filter((result) => result.reviewStatus === 'accepted')
+      .map((result) => result.supersedesResultId)
+      .filter((resultId): resultId is EntityId => Boolean(resultId)),
+  );
   for (const result of results) {
-    if (result.reviewStatus !== 'accepted') continue;
+    if (result.reviewStatus !== 'accepted' || supersededIds.has(result.id)) continue;
     const previous = selected.get(result.scheduledGameId);
     if (
       !previous ||
       result.revision > previous.revision ||
-      (result.acceptedAt ?? '') > (previous.acceptedAt ?? '')
+      (result.revision === previous.revision && (result.acceptedAt ?? '') > (previous.acceptedAt ?? '')) ||
+      (result.revision === previous.revision &&
+        (result.acceptedAt ?? '') === (previous.acceptedAt ?? '') &&
+        result.id.localeCompare(previous.id) > 0)
     ) {
       selected.set(result.scheduledGameId, result);
     }
@@ -208,16 +228,21 @@ function headToHeadValue(
   gamesById: ReadonlyMap<EntityId, ScheduledGame>,
 ): number {
   const groupIds = new Set(group.map((row) => row.teamId));
-  let value = 0;
+  let points = 0;
+  let games = 0;
   for (const [gameId, result] of resultByGame) {
     const game = gamesById.get(gameId);
     if (!game || game.kind === 'bye' || !groupIds.has(game.teamAId) || !groupIds.has(game.teamBId)) continue;
+    if (game.teamAId !== teamId && game.teamBId !== teamId) continue;
+    const opponentId = game.teamAId === teamId ? game.teamBId : game.teamAId;
+    if (!groupIds.has(opponentId)) continue;
     const own = result.teamScores.find((score) => score.teamId === teamId);
-    const opponent = result.teamScores.find((score) => score.teamId !== teamId && groupIds.has(score.teamId));
+    const opponent = result.teamScores.find((score) => score.teamId === opponentId);
     if (!own || !opponent) continue;
-    value += own.score > opponent.score ? 2 : own.score === opponent.score ? 1 : 0;
+    games += 1;
+    points += own.score > opponent.score ? 1 : own.score === opponent.score ? 0.5 : 0;
   }
-  return value;
+  return ratio(points, games);
 }
 
 function comparisonValue(
@@ -310,11 +335,13 @@ function rankGroups(
  */
 export function deriveStandings(input: StatisticsInput): StandingsReport {
   const teamById = new Map(input.teams.map((team) => [team.id, team]));
+  const requestedGameIds = input.gameIds ? new Set(input.gameIds) : null;
   const games = input.scheduledGames.filter(
     (game): game is ScheduledMatch =>
       game.kind !== 'bye' &&
       (input.phaseId === undefined || game.phaseId === input.phaseId) &&
-      (input.poolId === undefined || game.poolId === input.poolId),
+      (input.poolId === undefined || game.poolId === input.poolId) &&
+      (requestedGameIds === null || requestedGameIds.has(game.id)),
   );
   const gamesById = new Map<EntityId, ScheduledGame>(games.map((game) => [game.id, game]));
   const selectedResults = acceptedResultForGame(input.acceptedResults);
@@ -323,29 +350,34 @@ export function deriveStandings(input: StatisticsInput): StandingsReport {
   const selectedResultIds = new Set<EntityId>();
   const accumulators = new Map<EntityId, TeamAccumulator>();
   const includedTeamIds = new Set(games.flatMap((game) => [game.teamAId, game.teamBId]));
-  const selectedTeams = input.teams.filter(
-    (team) => input.poolId === undefined || includedTeamIds.has(team.id),
-  );
-  for (const team of selectedTeams) {
-    accumulators.set(team.id, {
-      teamId: team.id,
-      poolId: input.poolId ?? null,
-      gamesPlayed: 0,
-      wins: 0,
-      losses: 0,
-      ties: 0,
-      pointsFor: 0,
-      pointsAgainst: 0,
-      powers: 0,
-      gets: 0,
-      negs: 0,
-      tossupsHeard: 0,
-      bonusPoints: 0,
-      bonusesHeard: 0,
-      bouncebacks: 0,
-      lightningPoints: 0,
-      overtimePoints: 0,
-    });
+  const requestedTeamIds = input.teamIds ? new Set(input.teamIds) : null;
+  const reportTeamIds = requestedTeamIds
+    ? new Set(requestedTeamIds)
+    : input.poolId !== undefined
+      ? new Set(includedTeamIds)
+      : new Set(input.teams.map((team) => team.id));
+  const calculationTeamIds = new Set([...reportTeamIds, ...includedTeamIds]);
+  const makeAccumulator = (teamId: EntityId): TeamAccumulator => ({
+    teamId,
+    poolId: input.poolId ?? null,
+    gamesPlayed: 0,
+    wins: 0,
+    losses: 0,
+    ties: 0,
+    pointsFor: 0,
+    pointsAgainst: 0,
+    powers: 0,
+    gets: 0,
+    negs: 0,
+    tossupsHeard: 0,
+    bonusPoints: 0,
+    bonusesHeard: 0,
+    bouncebacks: 0,
+    lightningPoints: 0,
+    overtimePoints: 0,
+  });
+  for (const teamId of calculationTeamIds) {
+    accumulators.set(teamId, makeAccumulator(teamId));
   }
   const acceptedByGame = new Map<EntityId, GameResult>();
   for (const game of games) {
@@ -407,9 +439,14 @@ export function deriveStandings(input: StatisticsInput): StandingsReport {
     if (!selectedResultIds.has(result.id)) ignoredResultIds.push(result.id);
   }
 
-  const teamRows = [...accumulators.values()].map((accumulator) =>
-    toTeamStatistics(accumulator, teamById.get(accumulator.teamId)?.seed ?? null),
-  );
+  const teamRows = [...accumulators.values()]
+    .map((accumulator) => toTeamStatistics(accumulator, teamById.get(accumulator.teamId)?.seed ?? null))
+    .filter((row) => {
+      if (!reportTeamIds.has(row.teamId)) return false;
+      if (input.includeDroppedTeams ?? true) return true;
+      const status = teamById.get(row.teamId)?.status;
+      return status !== 'dropped' && status !== 'withdrawn';
+    });
   const tiebreakers = input.tiebreakers ?? [
     'wins',
     'head-to-head',
@@ -436,7 +473,11 @@ export function deriveStandings(input: StatisticsInput): StandingsReport {
 
   const playerAccumulators = new Map<EntityId, PlayerAccumulator>();
   for (const player of input.players ?? []) {
-    if (!accumulators.has(player.teamId ?? '')) continue;
+    if (!player.teamId || !accumulators.has(player.teamId) || !reportTeamIds.has(player.teamId)) continue;
+    if (!(input.includeDroppedTeams ?? true)) {
+      const status = teamById.get(player.teamId)?.status;
+      if (status === 'dropped' || status === 'withdrawn') continue;
+    }
     playerAccumulators.set(player.id, {
       playerId: player.id,
       teamId: player.teamId as EntityId,
@@ -454,7 +495,13 @@ export function deriveStandings(input: StatisticsInput): StandingsReport {
   for (const result of acceptedByGame.values()) {
     for (const stat of result.playerStats) {
       const player = input.players?.find((candidate) => candidate.id === stat.playerId);
-      if (player && !accumulators.has(player.teamId ?? '')) continue;
+      if (player && (!player.teamId || !accumulators.has(player.teamId) || !reportTeamIds.has(player.teamId)))
+        continue;
+      if (player && !(input.includeDroppedTeams ?? true)) {
+        const status = teamById.get(player.teamId as EntityId)?.status;
+        if (status === 'dropped' || status === 'withdrawn') continue;
+      }
+      if (!accumulators.has(stat.teamId) || !reportTeamIds.has(stat.teamId)) continue;
       const accumulator = playerAccumulators.get(stat.playerId) ?? {
         playerId: stat.playerId,
         teamId: stat.teamId,
@@ -485,7 +532,17 @@ export function deriveStandings(input: StatisticsInput): StandingsReport {
       toPlayerStatistics(accumulator, input.scoring ?? { tossupPoints: 10, powerPoints: 15, negPoints: -5 }),
     )
     .sort((left, right) => right.points - left.points || left.playerId.localeCompare(right.playerId));
-  return { rows, playerRows, unresolvedTies, includedResultIds, ignoredResultIds };
+  return {
+    rows,
+    playerRows,
+    unresolvedTies,
+    includedResultIds,
+    ignoredResultIds,
+    phaseId: input.phaseId ?? null,
+    poolId: input.poolId ?? null,
+    includedGameIds: games.map((game) => game.id),
+    tiebreakers,
+  };
 }
 
 /** Convenience helper for hosts that already have a snapshot-like object. */

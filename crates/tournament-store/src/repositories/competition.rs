@@ -4,7 +4,7 @@ use super::tournaments::ensure_tournament_exists;
 use crate::db::Store;
 use crate::error::{StoreError, StoreResult};
 use crate::models::{
-    Id, NewPacket, NewPhase, NewPhaseTeam, NewPool, NewRound, NewScheduledGame, Packet,
+    NewPacket, NewPhase, NewPhaseTeam, NewPool, NewRound, NewScheduledGame, Packet,
     PacketAssignment, Phase, PhaseTeam, Pool, Round, ScheduledGame,
 };
 use crate::util::{json_from_row, json_text, new_id, now};
@@ -170,7 +170,7 @@ impl<'a> PacketRepository<'a> {
             transaction.execute(
                 "INSERT INTO packet_assignments
                     (packet_id, round_id, scheduled_game_id, assigned_at)
-                 SELECT ?1, round_id, ?2, ?3 FROM scheduled_games WHERE id = ?2",
+                 VALUES (?1, NULL, ?2, ?3)",
                 params![packet_id, scheduled_game_id, assigned_at],
             )?;
             transaction.execute(
@@ -183,7 +183,7 @@ impl<'a> PacketRepository<'a> {
             )?;
             Ok(PacketAssignment {
                 packet_id: packet_id.to_owned(),
-                round_id: scheduled_game_round(transaction, scheduled_game_id)?,
+                round_id: None,
                 scheduled_game_id: Some(scheduled_game_id.to_owned()),
                 assigned_at,
             })
@@ -594,8 +594,8 @@ impl<'a> ScheduleRepository<'a> {
                 transaction.execute(
                     "INSERT INTO packet_assignments
                         (packet_id, round_id, scheduled_game_id, assigned_at)
-                     VALUES (?1, ?2, ?3, ?4)",
-                    params![packet_id, input.round_id, id, timestamp],
+                     VALUES (?1, NULL, ?2, ?3)",
+                    params![packet_id, id, timestamp],
                 )?;
                 transaction.execute(
                     "UPDATE packets SET status = 'assigned', updated_at = ?1 WHERE id = ?2",
@@ -808,17 +808,4 @@ fn scheduled_game_tournament(
             |row| row.get(0),
         )
         .optional()
-}
-
-fn scheduled_game_round(
-    transaction: &rusqlite::Transaction<'_>,
-    scheduled_game_id: &str,
-) -> StoreResult<Option<Id>> {
-    Ok(transaction
-        .query_row(
-            "SELECT round_id FROM scheduled_games WHERE id = ?1",
-            params![scheduled_game_id],
-            |row| row.get(0),
-        )
-        .optional()?)
 }

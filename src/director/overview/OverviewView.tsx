@@ -10,11 +10,13 @@ export function OverviewView({
   controller,
   onNavigate,
   onAnnounce,
+  nativeServerReady = false,
 }: {
   state: DirectorState;
   controller: DirectorController;
   onNavigate: (section: SectionId) => void;
   onAnnounce: (message: string) => void;
+  nativeServerReady?: boolean;
 }) {
   const tournament = state.tournament;
   const round =
@@ -26,7 +28,7 @@ export function OverviewView({
   const reviewCount = state.submissions.filter(
     (submission) => submission.status === 'review' || submission.status === 'received',
   ).length;
-  const issues = runPreflight(state, false);
+  const issues = runPreflight(state, nativeServerReady);
   const standings = deriveTeamStandings(state).slice(0, 5);
 
   return (
@@ -86,13 +88,21 @@ export function OverviewView({
                 variant="quiet"
                 icon={round.status === 'released' ? 'pause' : 'play'}
                 onClick={() => {
-                  if (round.status === 'released') controller.closeRound(round.id);
-                  else controller.releaseRound(round.id);
-                  onAnnounce(
-                    round.status === 'released'
-                      ? `${round.name} close requested.`
-                      : `${round.name} released.`,
-                  );
+                  if (round.status === 'released') {
+                    const closed = controller.closeRound(round.id);
+                    onAnnounce(
+                      closed
+                        ? `${round.name} closed.`
+                        : `${round.name} could not close; accept or cancel every game first.`,
+                    );
+                  } else {
+                    const released = controller.releaseRound(round.id);
+                    onAnnounce(
+                      released
+                        ? `${round.name} released.`
+                        : 'The round is not ready to release; review the Director error and room assignments.',
+                    );
+                  }
                 }}
               >
                 {round.status === 'released' ? 'Close round' : 'Release assignments'}

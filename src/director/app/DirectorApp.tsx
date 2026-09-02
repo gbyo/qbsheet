@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import BrandLogo from '../../BrandLogo';
 import { Button, EmptyState, PanelBody, PanelFooter } from '../components/Controls';
 import { Icon } from '../components/Icon';
@@ -22,6 +22,7 @@ import {
   type NativeServerStatus,
 } from '../platform/native';
 import type { DirectorTournamentInput } from '@qbsheet/tournament-formats';
+import { localCalendarDate } from './date';
 
 export default function DirectorApp() {
   const controller = useDirectorController();
@@ -33,6 +34,7 @@ export default function DirectorApp() {
     isNativeDirector() ? null : { running: false },
   );
   const searchRef = useRef<HTMLInputElement>(null);
+  const searchResults = useMemo(() => searchTournament(state, search), [search, state]);
 
   useEffect(() => {
     const focusSearch = (event: KeyboardEvent) => {
@@ -71,7 +73,18 @@ export default function DirectorApp() {
   if (loading) return <div className="director-loading">Opening local tournament storage…</div>;
   if (!state.tournament)
     return (
-      <NewTournamentScreen controller={controller} onAnnounce={setAnnouncement} announcement={announcement} />
+      <>
+        {controller.error && (
+          <p className="director-error-copy" role="alert">
+            {controller.error}
+          </p>
+        )}
+        <NewTournamentScreen
+          controller={controller}
+          onAnnounce={setAnnouncement}
+          announcement={announcement}
+        />
+      </>
     );
   const tournament = state.tournament;
 
@@ -92,6 +105,7 @@ export default function DirectorApp() {
             controller={controller}
             onNavigate={navigate}
             onAnnounce={setAnnouncement}
+            nativeServerReady={qbtcpServerStatus?.running ?? false}
           />
         );
       case 'teams':
@@ -219,6 +233,29 @@ export default function DirectorApp() {
               />
               <kbd>⌘ K</kbd>
             </label>
+            {searchResults.length > 0 && (
+              <div className="director-search-results" role="listbox" aria-label="Search results">
+                {searchResults.map((result) => (
+                  <button
+                    type="button"
+                    className="director-search-result"
+                    key={`${result.section}-${result.id}`}
+                    role="option"
+                    aria-selected={false}
+                    onClick={() => {
+                      navigate(result.section);
+                      setSearch('');
+                    }}
+                  >
+                    <span>
+                      <strong>{result.label}</strong>
+                      <small>{result.detail}</small>
+                    </span>
+                    <Icon name="chevron" size={13} />
+                  </button>
+                ))}
+              </div>
+            )}
             <button
               type="button"
               className="director-icon-button director-topbar-button"
@@ -233,7 +270,14 @@ export default function DirectorApp() {
             </span>
           </div>
         </header>
-        <div className="director-content">{renderPage()}</div>
+        <div className="director-content">
+          {controller.error && (
+            <p className="director-error-copy" role="alert">
+              {controller.error}
+            </p>
+          )}
+          {renderPage()}
+        </div>
         {announcement && (
           <div className="director-toast" role="status">
             <Icon name="check" size={16} />
@@ -283,7 +327,7 @@ function NewTournamentScreen({
   announcement: string;
 }) {
   const [name, setName] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(() => localCalendarDate());
   const [venue, setVenue] = useState('');
   const [organizer, setOrganizer] = useState('');
   const create = () => {
@@ -319,11 +363,12 @@ function NewTournamentScreen({
         return;
       }
       const parsed: unknown = JSON.parse(value);
-      if (controller.importSnapshot(parsed)) {
+      if (isDirectorStateLike(parsed)) {
+        if (!controller.importSnapshot(parsed)) return;
         onAnnounce('Director tournament imported.');
         return;
       }
-      if (parsed && typeof parsed === 'object' && 'tournament' in parsed) {
+      if (isDirectorTournamentLike(parsed)) {
         controller.importSnapshot(importDirectorTournament(parsed as DirectorTournamentInput));
         onAnnounce('Tournament data imported.');
         return;
@@ -346,12 +391,14 @@ function NewTournamentScreen({
           throw new Error(report.errors.join(' ') || 'That archive is not valid.');
         controller.importSnapshot(report.state);
         onAnnounce(importWarningMessage('Portable archive imported.', report.warnings));
-      } else {
+      } else if (extension === 'qbj' || extension === 'json') {
         const report = importQbjText(new TextDecoder().decode(bytes));
         if (!report.ok || !report.state)
           throw new Error(report.errors.join(' ') || 'That file is not a supported QBJ archive.');
         controller.importSnapshot(report.state);
         onAnnounce(importWarningMessage('QBJ tournament imported.', report.warnings));
+      } else {
+        throw new Error('That file type is not supported. Choose a .qbst, .qbj, or .json file.');
       }
     } catch (reason: unknown) {
       onAnnounce(reason instanceof Error ? reason.message : 'That file could not be opened.');
@@ -418,7 +465,7 @@ function NewTournamentScreen({
                   <input
                     className="director-visually-hidden-input"
                     type="file"
-                    accept=".qbst,.qbj,.json,.qbsheet"
+                    accept=".qbst,.qbj,.json"
                     onChange={(event) => {
                       void importArchive(event.target.files?.[0]);
                       event.currentTarget.value = '';
@@ -485,4 +532,114 @@ function statusLabel(status: string): string {
       : status === 'complete'
         ? 'Complete'
         : 'Archived';
+}
+
+type SearchResult = { id: string; section: SectionId; label: string; detail: string };
+
+function searchTournament(
+  state: ReturnType<typeof useDirectorController>['state'],
+  query: string,
+): SearchResult[] {
+  const needle = query.trim().toLocaleLowerCase();
+  if (!needle) return [];
+  const results: SearchResult[] = [];
+  const matches = (values: unknown[]) =>
+    values.some((value) =>
+      String(value ?? '')
+        .toLocaleLowerCase()
+        .includes(needle),
+    );
+  for (const team of state.teams) {
+    const organization = team.organizationId
+      ? state.organizations.find((entry) => entry.id === team.organizationId)?.name
+      : undefined;
+    if (matches([team.displayName, team.teamLetter, team.status, organization])) {
+      results.push({
+        id: team.id,
+        section: 'teams',
+        label: team.displayName,
+        detail: [organization, team.teamLetter && `Team ${team.teamLetter}`, team.status]
+          .filter(Boolean)
+          .join(' · '),
+      });
+    }
+  }
+  for (const player of state.players) {
+    const team = state.teams.find((entry) => entry.id === player.teamId);
+    if (matches([player.name, team?.displayName, player.rosterNumber])) {
+      results.push({
+        id: player.id,
+        section: 'teams',
+        label: player.name,
+        detail: team?.displayName ?? 'Roster player',
+      });
+    }
+  }
+  for (const room of state.rooms) {
+    if (matches([room.name, room.building, room.floor, room.status])) {
+      results.push({ id: room.id, section: 'rooms', label: room.name, detail: room.status });
+    }
+  }
+  for (const packet of state.packets) {
+    if (matches([packet.name, packet.source])) {
+      results.push({
+        id: packet.id,
+        section: 'packets',
+        label: packet.name,
+        detail: `${packet.source} packet`,
+      });
+    }
+  }
+  for (const round of state.rounds) {
+    if (matches([round.name, round.number, round.status])) {
+      results.push({
+        id: round.id,
+        section: 'tournament',
+        label: round.name,
+        detail: `Round ${round.number} · ${round.status}`,
+      });
+    }
+  }
+  for (const game of state.scheduledGames) {
+    const left = state.teams.find((team) => team.id === game.leftTeamId)?.displayName;
+    const right = game.rightTeamId
+      ? state.teams.find((team) => team.id === game.rightTeamId)?.displayName
+      : 'Bye';
+    const round = state.rounds.find((entry) => entry.id === game.roundId);
+    if (matches([game.id, left, right, round?.name, game.status])) {
+      results.push({
+        id: game.id,
+        section: 'tournament',
+        label: `${left ?? 'Unknown'} · ${right ?? 'Unknown'}`,
+        detail: `${round?.name ?? 'Scheduled game'} · ${game.status}`,
+      });
+    }
+  }
+  for (const submission of state.submissions) {
+    const game = state.games.find((entry) => entry.id === submission.gameId);
+    if (matches([submission.id, submission.transportResultId, submission.status, game?.scheduledGameId])) {
+      results.push({
+        id: submission.id,
+        section: 'results',
+        label: `Result ${submission.transportResultId ?? submission.id}`,
+        detail: submission.status,
+      });
+    }
+  }
+  return results.slice(0, 12);
+}
+
+function isDirectorStateLike(value: unknown): value is Record<string, unknown> {
+  return Boolean(
+    value &&
+    typeof value === 'object' &&
+    'schemaVersion' in value &&
+    'tournament' in value &&
+    'teams' in value &&
+    'scheduledGames' in value,
+  );
+}
+
+function isDirectorTournamentLike(value: unknown): value is DirectorTournamentInput {
+  return Boolean(value && typeof value === 'object' && 'tournament' in value && !('schemaVersion' in value));
 }

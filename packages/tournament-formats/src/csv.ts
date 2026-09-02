@@ -130,7 +130,10 @@ export function parseCsvTable(text: string): FormatReport<CsvTable> {
 export type CsvCell = string | number | boolean | null | undefined;
 
 export function csvCell(value: CsvCell): string {
-  const text = value === null || value === undefined ? '' : String(value);
+  const rawText = value === null || value === undefined ? '' : String(value);
+  // Spreadsheet applications may evaluate cells beginning with these characters as formulas.
+  // Prefix only string data: a numeric -5 is a legitimate score and must remain numeric on export.
+  const text = typeof value === 'string' && /^[\t\r\n ]*[=+\-@]/.test(rawText) ? `'${rawText}` : rawText;
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 

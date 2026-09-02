@@ -157,7 +157,18 @@ export function stableJson(value: JsonValue): string {
 export function safeRelativePath(path: string): boolean {
   if (path === '' || path.startsWith('/') || path.includes('\\') || path.includes('\u0000')) return false;
   const parts = path.split('/');
-  return parts.every((part) => part !== '' && part !== '.' && part !== '..');
+  return (
+    !/^[A-Za-z]:/.test(parts[0] ?? '') &&
+    parts.every(
+      (part) =>
+        part !== '' &&
+        part !== '.' &&
+        part !== '..' &&
+        part !== '__proto__' &&
+        part !== 'prototype' &&
+        part !== 'constructor',
+    )
+  );
 }
 
 export function textBytes(text: string): Uint8Array {

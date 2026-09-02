@@ -446,6 +446,7 @@ pub struct PresenceRecord {
 ///
 /// `raw` is kept separately from the parsed JSON so a durable implementation can preserve the
 /// original submission bytes for audit and later reconciliation.
+#[derive(Clone)]
 pub struct ResultSubmission {
     pub session_id: String,
     pub room_id: String,
@@ -661,6 +662,20 @@ pub fn qbtcp_round_revision(value: &Value) -> Option<u64> {
             .get("_qbtcp")
             .and_then(Value::as_object)
             .and_then(|extension| extension.get("round_revision"))
+            .and_then(Value::as_u64)
+    })
+}
+
+/// Return the optional assignment revision carried by a QBJ Match's QBTCP extension.
+pub fn qbtcp_assignment_revision(value: &Value) -> Option<u64> {
+    top_level_objects(value).into_iter().find_map(|object| {
+        if object.get("type").and_then(Value::as_str) != Some("Match") {
+            return None;
+        }
+        object
+            .get("_qbtcp")
+            .and_then(Value::as_object)
+            .and_then(|extension| extension.get("assignment_revision"))
             .and_then(Value::as_u64)
     })
 }

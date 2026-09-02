@@ -135,11 +135,15 @@ impl Store {
         if destination.exists() {
             return Err(StoreError::BackupDestinationExists(destination));
         }
-        let parent = destination
-            .parent()
-            .filter(|parent| !parent.as_os_str().is_empty())
-            .ok_or_else(|| StoreError::BackupDestinationHasNoParent(destination.clone()))?;
-        let parent = parent.to_path_buf();
+        let parent = match destination.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
+            Some(_) => PathBuf::from("."),
+            None => {
+                return Err(StoreError::BackupDestinationHasNoParent(
+                    destination.clone(),
+                ))
+            }
+        };
         if !parent.exists() {
             return Err(StoreError::BackupDestinationHasNoParent(
                 parent.to_path_buf(),
@@ -165,7 +169,7 @@ impl Store {
                 .map_err(|(_, error)| StoreError::Database(error))?;
 
             sync_file(&temporary)?;
-            fs::rename(&temporary, &destination)?;
+            commit_backup_no_replace(&temporary, &destination)?;
             sync_directory(&parent)?;
             Ok(BackupReport {
                 destination: destination.clone(),
@@ -194,6 +198,24 @@ impl Store {
     }
 }
 
+/// Publish a completed backup without replacing a destination that may have
+/// appeared after the initial existence check. The temporary file is created
+/// in the destination directory, so a hard link is an atomic no-replace
+/// directory operation on the supported platforms/filesystems. Removing the
+/// temporary name leaves the newly published destination in place.
+fn commit_backup_no_replace(temporary: &Path, destination: &Path) -> StoreResult<()> {
+    match fs::hard_link(temporary, destination) {
+        Ok(()) => {
+            fs::remove_file(temporary)?;
+            Ok(())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Err(
+            StoreError::BackupDestinationExists(destination.to_path_buf()),
+        ),
+        Err(error) => Err(StoreError::Filesystem(error)),
+    }
+}
+
 fn configure_connection(connection: &Connection, enable_wal: bool) -> StoreResult<()> {
     connection.pragma_update(None, "foreign_keys", "ON")?;
     connection.busy_timeout(Duration::from_secs(5))?;
@@ -217,4 +239,34 @@ fn sync_directory(path: &Path) -> StoreResult<()> {
         File::open(path)?.sync_all()?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use tempfile::tempdir;
+
+    use super::commit_backup_no_replace;
+    use crate::error::StoreError;
+
+    #[test]
+    fn backup_commit_does_not_replace_a_destination_created_after_precheck() {
+        let directory = tempdir().expect("temporary directory");
+        let temporary = directory.path().join(".backup.tmp");
+        let destination = directory.path().join("backup.sqlite3");
+        fs::write(&temporary, b"new backup").expect("write temporary backup");
+        fs::write(&destination, b"original backup").expect("create destination");
+
+        let error = commit_backup_no_replace(&temporary, &destination).unwrap_err();
+        assert!(matches!(error, StoreError::BackupDestinationExists(path) if path == destination));
+        assert_eq!(
+            fs::read(&destination).expect("read destination"),
+            b"original backup"
+        );
+        assert!(
+            temporary.exists(),
+            "failed commit should leave cleanup to caller"
+        );
+    }
 }

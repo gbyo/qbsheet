@@ -151,9 +151,21 @@ async function downloadArchive(state: DirectorState, onAnnounce: (message: strin
   try {
     const bytes = exportArchiveBytes(state);
     const name = `${safeName(state.tournament?.name ?? 'tournament')}.qbst`;
-    const path = isNativeDirector() ? await saveNativeFile(name, bytes) : null;
-    if (!path) downloadBytes(bytes, name, 'application/vnd.qbsheet.director+zip');
-    onAnnounce(path ? `Portable archive saved to ${path}.` : 'Portable tournament archive exported.');
+    if (isNativeDirector()) {
+      const result = await saveNativeFile(name, bytes);
+      if (result.status === 'cancelled') {
+        onAnnounce('Portable archive save cancelled.');
+        return;
+      }
+      if (result.status === 'unavailable') {
+        onAnnounce('The native file-save dialog is unavailable.');
+        return;
+      }
+      onAnnounce(`Portable archive saved to ${result.path}.`);
+      return;
+    }
+    downloadBytes(bytes, name, 'application/vnd.qbsheet.director+zip');
+    onAnnounce('Portable tournament archive exported.');
   } catch (reason: unknown) {
     onAnnounce(
       reason instanceof Error ? reason.message : 'Portable tournament archive could not be exported.',

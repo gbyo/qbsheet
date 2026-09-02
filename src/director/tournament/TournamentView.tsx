@@ -2,11 +2,11 @@ import { useEffect, useState } from 'react';
 import { runPreflight, type DirectorState } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
 import { Button, StateLabel } from '../components/Controls';
-import { Icon } from '../components/Icon';
 import { PageHeader } from '../components/PageHeader';
 import {
   isNativeDirector,
   readNativeServerStatus,
+  issueNativeRoomPairing,
   startNativeServer,
   stopNativeServer,
   type NativeServerStatus,
@@ -26,6 +26,7 @@ export function TournamentView({
 }) {
   const [server, setServer] = useState<NativeServerStatus>({ running: false });
   const [serverLoading, setServerLoading] = useState(true);
+  const [pairingRoomId, setPairingRoomId] = useState<string | null>(null);
   const nativeDirector = isNativeDirector();
   const issues = runPreflight(state, server.running);
   const round =
@@ -75,6 +76,31 @@ export function TournamentView({
       : server.running
         ? 'Running'
         : 'Stopped';
+  const pairingRooms = state.rooms.filter((room) => room.available);
+  const invitations = server.pairingInvitations ?? [];
+  const issuePairing = async (roomId: string) => {
+    setPairingRoomId(roomId);
+    try {
+      const invitation = await issueNativeRoomPairing(roomId);
+      setServer((previous) => {
+        const current = (previous.pairingInvitations ?? []).filter((entry) => entry.roomId !== roomId);
+        const nextInvitations = [...current, invitation].sort((left, right) =>
+          left.roomId.localeCompare(right.roomId),
+        );
+        return {
+          ...previous,
+          pairingInvitations: nextInvitations,
+          pairingCode: nextInvitations.length === 1 ? nextInvitations[0].pairingCode : undefined,
+          pairingUrl: nextInvitations.length === 1 ? nextInvitations[0].pairingUrl : undefined,
+        };
+      });
+      onAnnounce(`Pairing invitation issued for ${invitation.roomName}.`);
+    } catch (reason: unknown) {
+      onAnnounce(reason instanceof Error ? reason.message : 'A room pairing invitation could not be issued.');
+    } finally {
+      setPairingRoomId(null);
+    }
+  };
   return (
     <>
       <PageHeader
@@ -88,7 +114,10 @@ export function TournamentView({
             onClick={() => {
               void controller
                 .checkpoint('running the tournament')
-                .then(() => onAnnounce('Checkpoint created.'));
+                .then(() => onAnnounce('Checkpoint created.'))
+                .catch((reason: unknown) =>
+                  onAnnounce(reason instanceof Error ? reason.message : 'Checkpoint could not be saved.'),
+                );
             }}
           >
             Create checkpoint
@@ -188,6 +217,11 @@ export function TournamentView({
                   {server.message}
                 </p>
               )}
+              {controller.qbtcpHealth.error && (
+                <p className="director-error-copy" role="alert">
+                  {controller.qbtcpHealth.error}
+                </p>
+              )}
               {!nativeDirector && (
                 <p className="director-panel-footnote">
                   The browser preview can plan and score manual games. Start the Tauri Director app for the
@@ -206,7 +240,7 @@ export function TournamentView({
               >
                 {serverLoading ? 'Checking server' : server.running ? 'Stop server' : 'Start server'}
               </Button>
-              {!serverLoading && server.pairingUrl && (
+              {!serverLoading && server.pairingUrl && invitations.length <= 1 && (
                 <Button
                   variant="quiet"
                   onClick={() => {
@@ -268,8 +302,12 @@ export function TournamentView({
                           <Button
                             variant="quiet"
                             onClick={() => {
-                              controller.prepareRound(entry.id);
-                              onAnnounce(`${entry.name} prepared.`);
+                              const prepared = controller.prepareRound(entry.id);
+                              onAnnounce(
+                                prepared
+                                  ? `${entry.name} prepared.`
+                                  : `${entry.name} could not be prepared; review the schedule first.`,
+                              );
                             }}
                           >
                             Prepare
@@ -279,8 +317,12 @@ export function TournamentView({
                           <Button
                             variant="primary"
                             onClick={() => {
-                              controller.releaseRound(entry.id);
-                              onAnnounce(`${entry.name} released.`);
+                              const released = controller.releaseRound(entry.id);
+                              onAnnounce(
+                                released
+                                  ? `${entry.name} released.`
+                                  : 'The round is not ready to release; review the Director error and room assignments.',
+                              );
                             }}
                           >
                             Release
@@ -290,8 +332,12 @@ export function TournamentView({
                           <Button
                             variant="secondary"
                             onClick={() => {
-                              controller.closeRound(entry.id);
-                              onAnnounce(`${entry.name} closed if all results are accepted.`);
+                              const closed = controller.closeRound(entry.id);
+                              onAnnounce(
+                                closed
+                                  ? `${entry.name} closed.`
+                                  : `${entry.name} could not close; accept or cancel every game first.`,
+                              );
                             }}
                           >
                             Close
@@ -305,20 +351,67 @@ export function TournamentView({
             </div>
           )}
         </section>
-        {server.pairingCode && (
+        {nativeDirector && server.running && (
           <section className="director-panel director-pairing-panel">
-            <div className="director-panel-body director-pairing-panel-body">
+            <div className="director-panel-heading">
               <div>
                 <p className="director-eyebrow">Pairing</p>
-                <h2>Room pairing is ready</h2>
-                <p>
-                  Give a scorekeeper the link or code. The code is shown only in this operational panel and is
-                  not persisted in QBJ.
-                </p>
+                <h2>Room invitations</h2>
               </div>
-              <StateLabel state="paired" label="Ready to pair" />
-              <div className="director-pairing-code director-mono">{server.pairingCode}</div>
-              <Icon name="server" size={28} />
+              <StateLabel state="paired" label="Room-specific" />
+            </div>
+            <div className="director-panel-body director-panel-body-list">
+              <p className="director-panel-footnote">
+                Each invitation is scoped to one room. Codes expire after{' '}
+                {invitations[0]?.expiresInSeconds ?? 900} seconds and are not persisted in QBJ.
+              </p>
+              <ul className="director-list">
+                {pairingRooms.length === 0 ? (
+                  <li>
+                    <span>No available rooms are configured.</span>
+                  </li>
+                ) : (
+                  pairingRooms.map((room) => {
+                    const invitation = invitations.find((entry) => entry.roomId === room.id);
+                    return (
+                      <li key={room.id}>
+                        <div>
+                          <strong>{room.name}</strong>
+                          {invitation ? (
+                            <small className="director-mono">{invitation.pairingCode}</small>
+                          ) : (
+                            <small>No active invitation</small>
+                          )}
+                        </div>
+                        <div className="director-row-actions">
+                          {invitation && (
+                            <Button
+                              variant="quiet"
+                              onClick={() => {
+                                void navigator.clipboard?.writeText(invitation.pairingUrl);
+                                onAnnounce(`${room.name} pairing link copied.`);
+                              }}
+                            >
+                              Copy link
+                            </Button>
+                          )}
+                          <Button
+                            variant={invitation ? 'quiet' : 'primary'}
+                            disabled={pairingRoomId !== null}
+                            onClick={() => void issuePairing(room.id)}
+                          >
+                            {pairingRoomId === room.id
+                              ? 'Issuing…'
+                              : invitation
+                                ? 'Issue new'
+                                : 'Issue pairing'}
+                          </Button>
+                        </div>
+                      </li>
+                    );
+                  })
+                )}
+              </ul>
             </div>
           </section>
         )}

@@ -1,8 +1,8 @@
 use axum::body::{to_bytes, Body};
 use axum::http::{HeaderMap, Method, Request, StatusCode};
 use qbtcp_server::{
-    AssignedAssignment, AssignmentMeta, AssignmentState, MemoryState, QbtcpConfig, QbtcpServer,
-    RoomInfo, TournamentInfo, DEVICE_ID_HEADER, OPERATOR_NAME_HEADER, QBTCP_PREFIX,
+    AssignedAssignment, AssignmentMeta, AssignmentState, MemoryState, PresenceUpdate, QbtcpConfig,
+    QbtcpServer, RoomInfo, TournamentInfo, DEVICE_ID_HEADER, OPERATOR_NAME_HEADER, QBTCP_PREFIX,
     ROOM_TOKEN_HEADER, SESSION_TOKEN_HEADER,
 };
 use serde_json::{json, Value};
@@ -676,6 +676,190 @@ async fn advertised_capabilities_gate_requests() {
         .any(|value| value == "progress"));
 }
 
+#[test]
+fn multiple_rooms_receive_independent_pairing_invitations() {
+    let state = Arc::new(MemoryState::new(
+        TournamentInfo {
+            id: "tournament-rooms".to_owned(),
+            name: "Two room tournament".to_owned(),
+            qbj_version: "2.1.1".to_owned(),
+        },
+        vec![
+            RoomInfo {
+                id: "room-1".to_owned(),
+                name: "Room 1".to_owned(),
+                description: None,
+                enabled: true,
+            },
+            RoomInfo {
+                id: "room-2".to_owned(),
+                name: "Room 2".to_owned(),
+                description: None,
+                enabled: true,
+            },
+        ],
+    ));
+    let server = Arc::new(QbtcpServer::new(state, QbtcpConfig::default()).unwrap());
+    let first = server.issue_pairing("room-1").unwrap();
+    let second = server.issue_pairing("room-2").unwrap();
+
+    assert_ne!(first.code, second.code);
+    assert_eq!(
+        server
+            .pair(&first.code, Some("room-1"), "room-1-client")
+            .unwrap()
+            .room_id,
+        "room-1"
+    );
+    assert_eq!(
+        server
+            .pair(&second.code, Some("room-2"), "room-2-client")
+            .unwrap()
+            .room_id,
+        "room-2"
+    );
+}
+
+#[test]
+fn expired_sessions_clear_progress_and_presence_but_keep_recovery() {
+    let (server, state) = fixture_with_timeout_and_state(Duration::from_millis(5));
+    let invitation = server.issue_pairing("room-1").unwrap();
+    let paired = server
+        .pair(&invitation.code, Some("room-1"), "expiry-direct")
+        .unwrap();
+    let session = server
+        .open_session(Some(&paired.token), "match-1", Some("device-expiry"))
+        .unwrap();
+    server
+        .update_presence(
+            Some(&paired.token),
+            Some("device-expiry"),
+            None,
+            PresenceUpdate {
+                ready: Some(true),
+                ..PresenceUpdate::default()
+            },
+        )
+        .unwrap();
+    server
+        .progress(
+            &session.session_id,
+            Some(&session.token),
+            1,
+            json!({"type": "Match", "id": "match-1"}),
+        )
+        .unwrap();
+    thread::sleep(Duration::from_millis(20));
+
+    let recovery = server
+        .recovery(&session.session_id, Some(&session.token))
+        .unwrap();
+    assert_eq!(recovery.status, qbtcp_server::SessionStatus::Abandoned);
+    assert!(state.progress(&session.session_id).is_none());
+    assert!(state.presence("room-1", "device-expiry").is_none());
+}
+
+#[test]
+fn disabling_or_removing_a_room_abandons_live_sessions_and_revokes_room_tokens() {
+    let (server, state) = fixture();
+    let invitation = server.issue_pairing("room-1").unwrap();
+    let paired = server
+        .pair(&invitation.code, Some("room-1"), "disable-direct")
+        .unwrap();
+    let session = server
+        .open_session(Some(&paired.token), "match-1", Some("device-disable"))
+        .unwrap();
+    state.set_room(RoomInfo {
+        id: "room-1".to_owned(),
+        name: "Room 1".to_owned(),
+        description: None,
+        enabled: false,
+    });
+    server.refresh();
+    assert_eq!(
+        server
+            .recovery(&session.session_id, Some(&session.token))
+            .unwrap()
+            .status,
+        qbtcp_server::SessionStatus::Abandoned
+    );
+    assert!(server.assignment(Some(&paired.token)).is_err());
+    assert!(state.progress(&session.session_id).is_none());
+
+    let (server, state) = fixture();
+    let invitation = server.issue_pairing("room-1").unwrap();
+    let paired = server
+        .pair(&invitation.code, Some("room-1"), "remove-direct")
+        .unwrap();
+    let session = server
+        .open_session(Some(&paired.token), "match-1", Some("device-remove"))
+        .unwrap();
+    state.remove_room("room-1");
+    server.refresh();
+    assert_eq!(
+        server
+            .recovery(&session.session_id, Some(&session.token))
+            .unwrap()
+            .status,
+        qbtcp_server::SessionStatus::Abandoned
+    );
+    assert!(server.assignment(Some(&paired.token)).is_err());
+}
+
+#[test]
+fn replacing_an_assignment_abandons_old_session_and_allows_new_assignment() {
+    let (server, state) = fixture();
+    let invitation = server.issue_pairing("room-1").unwrap();
+    let paired = server
+        .pair(&invitation.code, Some("room-1"), "replacement-direct")
+        .unwrap();
+    let old_session = server
+        .open_session(Some(&paired.token), "match-1", Some("device-old"))
+        .unwrap();
+    server
+        .update_presence(
+            Some(&paired.token),
+            Some("device-old"),
+            None,
+            PresenceUpdate::default(),
+        )
+        .unwrap();
+
+    let mut replacement_qbj = assignment_qbj();
+    replacement_qbj["objects"][2]["id"] = json!("match-2");
+    state.set_assignment(
+        "room-1",
+        AssignmentState::Assigned(AssignedAssignment {
+            match_id: "match-2".to_owned(),
+            qbj: replacement_qbj,
+            round_number: 2,
+            round_name: Some("Round 2".to_owned()),
+            left_team: Some("Northview A".to_owned()),
+            right_team: Some("Riverside A".to_owned()),
+            label: Some("Round 2".to_owned()),
+            meta: AssignmentMeta {
+                round_revision: Some(2),
+                assignment_revision: Some(2),
+                ..AssignmentMeta::default()
+            },
+        }),
+    );
+    server.refresh();
+
+    assert_eq!(
+        server
+            .recovery(&old_session.session_id, Some(&old_session.token))
+            .unwrap()
+            .status,
+        qbtcp_server::SessionStatus::Abandoned
+    );
+    assert!(state.presence("room-1", "device-old").is_none());
+    let new_session = server
+        .open_session(Some(&paired.token), "match-2", Some("device-new"))
+        .unwrap();
+    assert_ne!(new_session.session_id, old_session.session_id);
+}
+
 fn fixture_with_timeout(timeout: Duration) -> Arc<QbtcpServer> {
     let (_, state) = fixture();
     let config = QbtcpConfig {
@@ -683,4 +867,16 @@ fn fixture_with_timeout(timeout: Duration) -> Arc<QbtcpServer> {
         ..QbtcpConfig::default()
     };
     Arc::new(QbtcpServer::new(state, config).unwrap())
+}
+
+fn fixture_with_timeout_and_state(timeout: Duration) -> (Arc<QbtcpServer>, Arc<MemoryState>) {
+    let (_, state) = fixture();
+    let config = QbtcpConfig {
+        session_idle_timeout: timeout,
+        ..QbtcpConfig::default()
+    };
+    (
+        Arc::new(QbtcpServer::new(state.clone(), config).unwrap()),
+        state,
+    )
 }

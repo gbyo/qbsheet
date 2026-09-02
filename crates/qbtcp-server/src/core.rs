@@ -143,6 +143,7 @@ struct SessionRecord {
     right_team: Option<String>,
     round_revision: Option<u64>,
     assignment_revision: Option<u64>,
+    assignment_fingerprint: String,
     status: SessionStatus,
     updated_at: String,
     last_activity: Instant,
@@ -274,11 +275,11 @@ impl QbtcpServer {
     /// Issue a fresh, short-lived code for a known enabled room.
     pub fn issue_pairing(&self, room_id: &str) -> Result<PairingInvitation, QbtcpError> {
         self.require_capability("pairing")?;
+        self.reconcile_runtime();
         let room = self
             .room_info(room_id)?
             .filter(|room| room.enabled)
             .ok_or(QbtcpError::NotFound("The requested room is not available."))?;
-        self.sweep_expired();
 
         let mut runtime = self.lock_runtime()?;
         let mut code = pairing_code();
@@ -310,7 +311,7 @@ impl QbtcpServer {
         source: &str,
     ) -> Result<PairingResponse, QbtcpError> {
         self.require_capability("pairing")?;
-        self.sweep_expired();
+        self.reconcile_runtime();
 
         let source = clean_advisory(source, 128).unwrap_or_else(|| "unknown".to_owned());
         let now = Instant::now();
@@ -392,15 +393,11 @@ impl QbtcpServer {
         self.require_capability("assignment")?;
         let room_id = self.authenticate_room(room_token)?;
         let assignment = self.assignment_state(&room_id)?;
-        let (state, meta, blocked_reason, blocked_message, match_id) = match &assignment {
-            AssignmentState::Assigned(assignment) => (
-                "assigned",
-                assignment.meta.clone(),
-                None,
-                None,
-                Some(assignment.match_id.clone()),
-            ),
-            AssignmentState::None(meta) => ("none", meta.clone(), None, None, None),
+        let (state, meta, blocked_reason, blocked_message) = match &assignment {
+            AssignmentState::Assigned(assignment) => {
+                ("assigned", assignment.meta.clone(), None, None)
+            }
+            AssignmentState::None(meta) => ("none", meta.clone(), None, None),
             AssignmentState::Blocked {
                 reason,
                 message,
@@ -410,7 +407,6 @@ impl QbtcpServer {
                 meta.clone(),
                 Some(reason.clone()),
                 Some(message.clone()),
-                None,
             ),
             AssignmentState::Held {
                 reason,
@@ -421,12 +417,14 @@ impl QbtcpServer {
                 meta.clone(),
                 Some(reason.clone()),
                 Some(message.clone()),
-                None,
             ),
         };
-        let session = match_id
-            .as_deref()
-            .and_then(|match_id| self.session_status_for(&room_id, match_id));
+        let session = match &assignment {
+            AssignmentState::Assigned(assignment) => self.session_status_for(&room_id, assignment),
+            AssignmentState::None(_)
+            | AssignmentState::Blocked { .. }
+            | AssignmentState::Held { .. } => None,
+        };
         Ok(AssignmentStatusResponse {
             state: state.to_owned(),
             blocked_reason,
@@ -464,7 +462,6 @@ impl QbtcpServer {
             ));
         }
 
-        self.sweep_expired();
         let now = Instant::now();
         let mut opened_event = None;
         let mut runtime = self.lock_runtime()?;
@@ -474,6 +471,7 @@ impl QbtcpServer {
             .find(|session| {
                 session.room_id == room_id
                     && session.match_id == match_id
+                    && session_matches_assignment(session, &assignment)
                     && session.status != SessionStatus::Abandoned
             })
             .map(|session| session.session_id.clone());
@@ -493,6 +491,7 @@ impl QbtcpServer {
                 right_team: assignment.right_team.clone(),
                 round_revision: assignment.meta.round_revision,
                 assignment_revision: assignment.meta.assignment_revision,
+                assignment_fingerprint: result_fingerprint(&assignment.qbj),
                 status: SessionStatus::Open,
                 updated_at: now_iso(),
                 last_activity: now,
@@ -585,7 +584,7 @@ impl QbtcpServer {
         let device_key = normalize_identity(device_id)?;
         let auth = self.authenticate_session(session_id, session_token)?;
         let mut runtime = self.lock_runtime()?;
-        let (session_id, status) = {
+        let (session_id, room_id, previous_writer, status) = {
             let session = runtime
                 .sessions
                 .get_mut(&auth.session_id)
@@ -597,20 +596,31 @@ impl QbtcpServer {
                     can_take_over: false,
                 });
             }
+            let previous_writer = session.writer_device.clone();
             session.writer_token = Some(auth.token_hash);
             session.writer_device = Some(device_key.clone());
             session.updated_at = now_iso();
             session.last_activity = Instant::now();
             session.expires_at = Some(session.last_activity + self.config.session_idle_timeout);
-            (session.session_id.clone(), session.status)
+            (
+                session.session_id.clone(),
+                session.room_id.clone(),
+                previous_writer,
+                session.status,
+            )
         };
         let credential = runtime
             .session_tokens
             .get_mut(&auth.token_hash)
             .ok_or(QbtcpError::Unauthorized)?;
-        credential.device_id = device_key;
+        credential.device_id = device_key.clone();
         let token = credential.token.clone();
         drop(runtime);
+        if previous_writer.as_deref() != Some(device_key.as_str()) {
+            if let Some(previous_writer) = previous_writer {
+                let _ = self.state.clear_presence(&room_id, Some(&previous_writer));
+            }
+        }
         let _ = self.state.record_session_event(SessionEvent::WriterTaken {
             session_id: session_id.clone(),
         });
@@ -781,6 +791,7 @@ impl QbtcpServer {
         let expected_tournament_id = self.tournament_info()?.id;
 
         let mut runtime = self.lock_runtime()?;
+        let mut completed_presence: Option<(String, String)> = None;
         let session = runtime
             .sessions
             .get_mut(&auth.session_id)
@@ -812,6 +823,10 @@ impl QbtcpServer {
             .record_result(submission)
             .map_err(|_| QbtcpError::Internal)?;
         if session.status == SessionStatus::Open {
+            completed_presence = session
+                .writer_device
+                .clone()
+                .map(|device_id| (session.room_id.clone(), device_id));
             session.status = SessionStatus::FinalReceived;
             session.writer_token = None;
             session.writer_device = None;
@@ -830,6 +845,9 @@ impl QbtcpServer {
             review_required: disposition.review_required,
         };
         drop(runtime);
+        if let Some((room_id, device_id)) = completed_presence {
+            let _ = self.state.clear_presence(&room_id, Some(&device_id));
+        }
         let _ = self.state.record_session_event(event);
 
         Ok(ResultReceipt {
@@ -1028,23 +1046,33 @@ impl QbtcpServer {
         Ok(request)
     }
 
-    /// Explicit native-host lifecycle action. It preserves progress/results and only revokes the
-    /// writer, so a later final is retained as `late-after-abandon` rather than reopening the game.
+    /// Explicit native-host lifecycle action. It preserves recovery/results and revokes the
+    /// writer and volatile progress, so a later final is retained as `late-after-abandon` rather
+    /// than reopening the game.
     pub fn abandon_session(&self, session_id: &str) -> Result<(), QbtcpError> {
-        self.sweep_expired();
+        self.reconcile_runtime();
         let mut runtime = self.lock_runtime()?;
         let session = runtime
             .sessions
             .get_mut(session_id)
             .ok_or(QbtcpError::NotFound("The session is not available."))?;
-        if session.status == SessionStatus::Open {
+        let closed = if session.status == SessionStatus::Open {
+            let writer_device = session.writer_device.clone();
             session.status = SessionStatus::Abandoned;
             session.writer_token = None;
             session.writer_device = None;
             session.expires_at = None;
             session.updated_at = now_iso();
-            let room_id = session.room_id.clone();
-            drop(runtime);
+            Some((session.room_id.clone(), writer_device))
+        } else {
+            None
+        };
+        drop(runtime);
+        if let Some((room_id, writer_device)) = closed {
+            let _ = self.state.clear_progress(session_id);
+            let _ = self
+                .state
+                .clear_presence(&room_id, writer_device.as_deref());
             let _ = self.state.record_session_event(SessionEvent::Expired {
                 session_id: session_id.to_owned(),
                 room_id,
@@ -1083,6 +1111,7 @@ impl QbtcpServer {
     }
 
     fn authenticate_room(&self, token: Option<&str>) -> Result<String, QbtcpError> {
+        self.reconcile_runtime();
         let token = token
             .filter(|token| !token.is_empty())
             .ok_or(QbtcpError::Unauthorized)?;
@@ -1105,7 +1134,7 @@ impl QbtcpServer {
         session_id: &str,
         token: Option<&str>,
     ) -> Result<SessionAuth, QbtcpError> {
-        self.sweep_expired();
+        self.reconcile_runtime();
         let token = token
             .filter(|token| !token.is_empty())
             .ok_or(QbtcpError::Unauthorized)?;
@@ -1122,41 +1151,171 @@ impl QbtcpServer {
         })
     }
 
-    fn session_status_for(&self, room_id: &str, match_id: &str) -> Option<SessionStatusView> {
+    fn session_status_for(
+        &self,
+        room_id: &str,
+        assignment: &AssignedAssignment,
+    ) -> Option<SessionStatusView> {
         self.runtime.lock().ok().and_then(|runtime| {
             runtime
                 .sessions
                 .values()
-                .find(|session| session.room_id == room_id && session.match_id == match_id)
+                .find(|session| {
+                    session.room_id == room_id
+                        && session.match_id == assignment.match_id
+                        && session_matches_assignment(session, assignment)
+                })
                 .map(|session| SessionStatusView {
                     session_id: session.session_id.clone(),
                     status: session.status,
-                    resumable: session.status == SessionStatus::Open,
+                    // An abandoned session keeps its recovery document and may still accept a
+                    // late authenticated final. Only a completed final is terminal.
+                    resumable: session.status != SessionStatus::FinalReceived,
                     final_received: Some(session.final_result_id.is_some()),
                 })
         })
     }
 
+    /// Reconcile volatile protocol state with the host's current room and assignment projection.
+    ///
+    /// Room tokens and pairing tickets are capabilities for enabled rooms only. Sessions and
+    /// results are kept for recovery/audit, but an open session is abandoned when its room goes
+    /// away or its assignment identity changes. Hosts should call this after refreshing their
+    /// document; authenticated requests also call it so a missed refresh cannot leave an old room
+    /// live indefinitely.
+    pub fn refresh(&self) {
+        self.reconcile_runtime();
+    }
+
+    fn reconcile_runtime(&self) {
+        self.sweep_expired();
+
+        let Ok(rooms) = self.state.rooms() else {
+            return;
+        };
+        let enabled_rooms: HashMap<String, bool> = rooms
+            .into_iter()
+            .map(|room| (room.id, room.enabled))
+            .collect();
+        let mut assignments = HashMap::new();
+        for (room_id, enabled) in &enabled_rooms {
+            if *enabled {
+                if let Ok(assignment) = self.state.assignment(room_id) {
+                    assignments.insert(room_id.clone(), assignment);
+                }
+            }
+        }
+
+        let mut expired = Vec::new();
+        let mut clear_presence = Vec::new();
+        let mut clear_progress = Vec::new();
+        if let Ok(mut runtime) = self.runtime.lock() {
+            runtime
+                .pairings
+                .retain(|_, ticket| enabled_rooms.get(&ticket.room_id).copied() == Some(true));
+            runtime
+                .room_tokens
+                .retain(|_, token| enabled_rooms.get(&token.room_id).copied() == Some(true));
+
+            let mut rooms_to_clear = std::collections::HashSet::new();
+            for session in runtime.sessions.values_mut() {
+                let room_enabled = enabled_rooms.get(&session.room_id).copied() == Some(true);
+                let assignment_is_known = assignments.get(&session.room_id);
+                let assignment_matches = match assignment_is_known {
+                    Some(AssignmentState::Assigned(assignment)) => {
+                        session.match_id == assignment.match_id
+                            && session.round_revision == assignment.meta.round_revision
+                            && session.assignment_revision == assignment.meta.assignment_revision
+                            && session.assignment_fingerprint == result_fingerprint(&assignment.qbj)
+                    }
+                    Some(
+                        AssignmentState::None(_)
+                        | AssignmentState::Blocked { .. }
+                        | AssignmentState::Held { .. },
+                    ) => false,
+                    // A transient host-state failure must not tear down a live session. The next
+                    // authenticated operation or explicit refresh will retry reconciliation.
+                    None => true,
+                };
+                if !room_enabled || !assignment_matches {
+                    rooms_to_clear.insert(session.room_id.clone());
+                    if session.status == SessionStatus::Open {
+                        let writer_device = session.writer_device.clone();
+                        session.status = SessionStatus::Abandoned;
+                        session.writer_token = None;
+                        session.writer_device = None;
+                        session.expires_at = None;
+                        session.updated_at = now_iso();
+                        clear_progress.push(session.session_id.clone());
+                        expired.push(SessionEvent::Expired {
+                            session_id: session.session_id.clone(),
+                            room_id: session.room_id.clone(),
+                        });
+                        if let Some(device_id) = writer_device {
+                            clear_presence.push((session.room_id.clone(), device_id));
+                        }
+                    }
+                }
+            }
+
+            let stale_presence = runtime
+                .presences
+                .keys()
+                .filter(|(room_id, _)| rooms_to_clear.contains(room_id))
+                .cloned()
+                .collect::<Vec<_>>();
+            for key in stale_presence {
+                runtime.presences.remove(&key);
+                clear_presence.push(key);
+            }
+        }
+
+        for (room_id, device_id) in clear_presence {
+            let _ = self.state.clear_presence(&room_id, Some(&device_id));
+        }
+        for session_id in clear_progress {
+            let _ = self.state.clear_progress(&session_id);
+        }
+        for event in expired {
+            let _ = self.state.record_session_event(event);
+        }
+    }
+
     fn sweep_expired(&self) {
         let now = Instant::now();
         let mut expired = Vec::new();
+        let mut stale_presence = Vec::new();
+        let mut clear_progress = Vec::new();
         if let Ok(mut runtime) = self.runtime.lock() {
             runtime.pairings.retain(|_, ticket| ticket.expires_at > now);
+            runtime.presences.retain(|(room_id, device_id), presence| {
+                let keep = now.saturating_duration_since(presence.observed_at)
+                    < self.config.session_idle_timeout;
+                if !keep {
+                    stale_presence.push((room_id.clone(), device_id.clone()));
+                }
+                keep
+            });
             for session in runtime.sessions.values_mut() {
                 if session.status == SessionStatus::Open
                     && session
                         .expires_at
                         .is_some_and(|expires_at| expires_at <= now)
                 {
+                    let writer_device = session.writer_device.clone();
                     session.status = SessionStatus::Abandoned;
                     session.writer_token = None;
                     session.writer_device = None;
                     session.expires_at = None;
                     session.updated_at = now_iso();
+                    clear_progress.push(session.session_id.clone());
                     expired.push(SessionEvent::Expired {
                         session_id: session.session_id.clone(),
                         room_id: session.room_id.clone(),
                     });
+                    if let Some(device_id) = writer_device {
+                        stale_presence.push((session.room_id.clone(), device_id));
+                    }
                 }
             }
             runtime.pair_attempts.retain(|_, attempts| {
@@ -1165,10 +1324,23 @@ impl QbtcpServer {
                 !attempts.is_empty()
             });
         }
+        for (room_id, device_id) in stale_presence {
+            let _ = self.state.clear_presence(&room_id, Some(&device_id));
+        }
+        for session_id in clear_progress {
+            let _ = self.state.clear_progress(&session_id);
+        }
         for event in expired {
             let _ = self.state.record_session_event(event);
         }
     }
+}
+
+fn session_matches_assignment(session: &SessionRecord, assignment: &AssignedAssignment) -> bool {
+    session.match_id == assignment.match_id
+        && session.round_revision == assignment.meta.round_revision
+        && session.assignment_revision == assignment.meta.assignment_revision
+        && session.assignment_fingerprint == result_fingerprint(&assignment.qbj)
 }
 
 fn writer_conflict() -> QbtcpError {

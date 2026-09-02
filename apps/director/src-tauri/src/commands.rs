@@ -1,5 +1,6 @@
 use std::fs;
-use std::io::Write;
+use std::fs::OpenOptions;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -10,8 +11,12 @@ use serde_json::Value;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::{DialogExt, FilePath};
 
-use crate::server::{ServerError, ServerRuntime, ServerSnapshot, ServerStatus};
+use crate::server::{
+    RoomPairingInvitation, ServerError, ServerRuntime, ServerSnapshot, ServerStatus,
+};
 use crate::store::{DirectorStore, StoreError, StoreStatus};
+
+const MAX_NATIVE_FILE_BYTES: u64 = 64 * 1024 * 1024;
 
 #[derive(Debug, Serialize)]
 pub struct CommandError {
@@ -59,6 +64,15 @@ impl CommandError {
         Self {
             code: "server",
             message: error.to_string(),
+        }
+    }
+
+    fn file_too_large(size: u64, maximum: u64) -> Self {
+        Self {
+            code: "file_too_large",
+            message: format!(
+                "The selected file is {size} bytes; the maximum supported size is {maximum} bytes."
+            ),
         }
     }
 }
@@ -197,7 +211,17 @@ pub fn director_server_status(
 pub fn director_server_snapshot(
     server: State<'_, ServerRuntime>,
 ) -> Result<ServerSnapshot, CommandError> {
-    Ok(server.snapshot())
+    server.snapshot().map_err(CommandError::server)
+}
+
+#[tauri::command]
+pub fn director_issue_qbtcp_pairing(
+    room_id: String,
+    server: State<'_, ServerRuntime>,
+) -> Result<RoomPairingInvitation, CommandError> {
+    server
+        .issue_pairing(room_id.trim())
+        .map_err(CommandError::server)
 }
 
 #[tauri::command]
@@ -206,7 +230,10 @@ pub async fn director_start_qbtcp_server(
     server: State<'_, ServerRuntime>,
 ) -> Result<ServerStatus, CommandError> {
     let state = store.load_state().map_err(CommandError::store)?;
-    server.start(state).await.map_err(CommandError::server)
+    server
+        .start_with_store(state, std::sync::Arc::new((*store).clone()))
+        .await
+        .map_err(CommandError::server)
 }
 
 #[tauri::command]
@@ -234,11 +261,8 @@ pub async fn open_tournament_file(app: AppHandle) -> Result<Option<SelectedFile>
         .dialog()
         .file()
         .set_title("Open QBSheet tournament")
-        .add_filter(
-            "QBSheet, QBJ, and portable archive",
-            &["qbst", "qbj", "qbsheet", "qbs"],
-        )
-        .add_filter("JSON and SQBS", &["json", "sqbs"])
+        .add_filter("QBSheet, QBJ, and portable archive", &["qbst", "qbj"])
+        .add_filter("JSON", &["json"])
         .add_filter("All files", &["*"]);
     if let Some(window) = app.get_webview_window("main") {
         dialog = dialog.set_parent(&window);
@@ -248,7 +272,7 @@ pub async fn open_tournament_file(app: AppHandle) -> Result<Option<SelectedFile>
         return Ok(None);
     };
     let path = file_path(file)?;
-    let bytes = fs::read(&path).map_err(CommandError::io)?;
+    let bytes = read_bounded_file(&path)?;
     Ok(Some(SelectedFile {
         path: path_string(&path),
         file_name: file_name(&path),
@@ -262,17 +286,31 @@ pub async fn save_tournament_file(
     app: AppHandle,
     request: SaveFileRequest,
 ) -> Result<Option<SavedFile>, CommandError> {
+    let maximum_encoded_bytes = MAX_NATIVE_FILE_BYTES
+        .saturating_add(2)
+        .checked_div(3)
+        .unwrap_or_default()
+        .saturating_mul(4);
+    if request.content_base64.len() as u64 > maximum_encoded_bytes {
+        return Err(CommandError::file_too_large(
+            MAX_NATIVE_FILE_BYTES.saturating_add(1),
+            MAX_NATIVE_FILE_BYTES,
+        ));
+    }
     let bytes = BASE64
         .decode(request.content_base64)
         .map_err(CommandError::encoding)?;
+    if bytes.len() as u64 > MAX_NATIVE_FILE_BYTES {
+        return Err(CommandError::file_too_large(
+            bytes.len() as u64,
+            MAX_NATIVE_FILE_BYTES,
+        ));
+    }
     let mut dialog = app
         .dialog()
         .file()
         .set_title("Save QBSheet tournament")
-        .add_filter(
-            "QBSheet, QBJ, and portable archive",
-            &["qbst", "qbj", "qbsheet", "qbs"],
-        )
+        .add_filter("QBSheet, QBJ, and portable archive", &["qbst", "qbj"])
         .add_filter("JSON", &["json"])
         .set_can_create_directories(true);
     if let Some(default_name) = request.default_name.as_deref() {
@@ -363,41 +401,114 @@ fn path_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
+fn read_bounded_file(path: &Path) -> Result<Vec<u8>, CommandError> {
+    let file = fs::File::open(path).map_err(CommandError::io)?;
+    let size = file.metadata().map_err(CommandError::io)?.len();
+    if size > MAX_NATIVE_FILE_BYTES {
+        return Err(CommandError::file_too_large(size, MAX_NATIVE_FILE_BYTES));
+    }
+    let mut bytes = Vec::new();
+    file.take(MAX_NATIVE_FILE_BYTES.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(CommandError::io)?;
+    if bytes.len() as u64 > MAX_NATIVE_FILE_BYTES {
+        return Err(CommandError::file_too_large(
+            bytes.len() as u64,
+            MAX_NATIVE_FILE_BYTES,
+        ));
+    }
+    Ok(bytes)
+}
+
 fn atomic_write(path: &Path, contents: &[u8]) -> Result<(), std::io::Error> {
-    let parent = path.parent().ok_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::InvalidInput, "file path has no parent")
-    })?;
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent)?;
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_nanos())
         .unwrap_or_default();
-    let temporary_path = parent.join(format!(
-        ".{}.{}.{}.tmp",
-        file_name(path),
-        std::process::id(),
-        timestamp
-    ));
-    let mut temporary_file = fs::File::create(&temporary_path)?;
-    temporary_file.write_all(contents)?;
-    temporary_file.sync_all()?;
-    drop(temporary_file);
+    let temporary_stem = format!(".{}.{}.{}", file_name(path), std::process::id(), timestamp);
+    let (temporary_path, mut temporary_file) = (0..16)
+        .map(|attempt| {
+            let temporary_path = parent.join(format!("{temporary_stem}.{attempt}.tmp"));
+            let temporary_file = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temporary_path);
+            (temporary_path, temporary_file)
+        })
+        .find_map(|(temporary_path, result)| match result {
+            Ok(file) => Some(Ok((temporary_path, file))),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => None,
+            Err(error) => Some(Err(error)),
+        })
+        .unwrap_or_else(|| {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "could not allocate a unique temporary file",
+            ))
+        })?;
 
-    match fs::rename(&temporary_path, path) {
-        Ok(()) => Ok(()),
-        Err(error) => {
-            #[cfg(windows)]
-            if error.kind() == std::io::ErrorKind::AlreadyExists {
-                fs::remove_file(path)?;
-                return fs::rename(&temporary_path, path).or_else(|rename_error| {
-                    let _ = fs::remove_file(&temporary_path);
-                    Err(rename_error)
-                });
-            }
-            let _ = fs::remove_file(&temporary_path);
-            Err(error)
-        }
+    let result = (|| {
+        temporary_file.write_all(contents)?;
+        temporary_file.sync_all()?;
+        drop(temporary_file);
+        replace_path(&temporary_path, path)?;
+        sync_parent_directory(parent)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary_path);
     }
+    result
+}
+
+#[cfg(not(windows))]
+fn replace_path(source: &Path, destination: &Path) -> Result<(), std::io::Error> {
+    fs::rename(source, destination)
+}
+
+#[cfg(windows)]
+fn replace_path(source: &Path, destination: &Path) -> Result<(), std::io::Error> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+
+    let source = source
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let destination = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let replaced = unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if replaced == 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(unix)]
+fn sync_parent_directory(parent: &Path) -> Result<(), std::io::Error> {
+    fs::File::open(parent)?.sync_all()
+}
+
+#[cfg(not(unix))]
+fn sync_parent_directory(_parent: &Path) -> Result<(), std::io::Error> {
+    Ok(())
 }
 
 #[cfg(test)]
@@ -419,6 +530,43 @@ mod tests {
         let _ = fs::remove_file(
             directory.join(format!(".diagnostics.json.{}.tmp", std::process::id())),
         );
+        let _ = fs::remove_dir(directory);
+    }
+
+    #[test]
+    fn bounded_file_read_rejects_oversized_input_before_loading_it() {
+        let directory =
+            std::env::temp_dir().join(format!("qbsheet-director-size-test-{}", std::process::id()));
+        fs::create_dir_all(&directory).expect("test directory");
+        let path = directory.join("oversized.qbj");
+        let file = fs::File::create(&path).expect("oversized file");
+        file.set_len(MAX_NATIVE_FILE_BYTES + 1)
+            .expect("sparse oversized file");
+
+        let error = read_bounded_file(&path).expect_err("oversized input must be rejected");
+        assert_eq!(error.code, "file_too_large");
+        let _ = fs::remove_file(path);
+        let _ = fs::remove_dir(directory);
+    }
+
+    #[test]
+    fn atomic_write_keeps_destination_and_cleans_temp_on_replace_failure() {
+        let directory = std::env::temp_dir().join(format!(
+            "qbsheet-director-atomic-failure-test-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&directory).expect("test directory");
+        let destination = directory.join("diagnostics.json");
+        fs::create_dir(&destination).expect("destination directory");
+
+        assert!(atomic_write(&destination, b"new contents").is_err());
+        assert!(destination.is_dir());
+        assert!(fs::read_dir(&directory)
+            .expect("directory entries")
+            .filter_map(Result::ok)
+            .all(|entry| !entry.file_name().to_string_lossy().ends_with(".tmp")));
+
+        let _ = fs::remove_dir(destination);
         let _ = fs::remove_dir(directory);
     }
 }

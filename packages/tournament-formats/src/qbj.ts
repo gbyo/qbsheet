@@ -193,19 +193,25 @@ const matchPlayerKeys = new Set([
 ]);
 
 function resolveRef(value: unknown, byId: ReadonlyMap<string, QbjObject>): QbjObject | null {
+  if (typeof value === 'string') return byId.get(value) ?? null;
   if (!isJsonObject(value)) return null;
   const ref = asString(value.$ref);
   return ref ? (byId.get(ref) ?? null) : value;
 }
 
 function valueId(value: unknown, byId: ReadonlyMap<string, QbjObject>): string | undefined {
+  if (typeof value === 'string') return asString(value);
+  if (isJsonObject(value)) {
+    const explicit = asString(value.$ref) ?? asString(value.id);
+    if (explicit) return explicit;
+  }
   const resolved = resolveRef(value, byId);
   return resolved ? asString(resolved.id) : asString(value);
 }
 
 function valueName(value: unknown, byId: ReadonlyMap<string, QbjObject>): string | undefined {
   const resolved = resolveRef(value, byId);
-  return resolved ? asString(resolved.name) : undefined;
+  return asString(resolved?.name) ?? (isJsonObject(value) ? asString(value.name) : undefined);
 }
 
 function objectType(value: JsonObject): string | undefined {
@@ -352,6 +358,146 @@ function playerFromRaw(
   };
 }
 
+function identityNameKey(name: string): string {
+  return name.trim().normalize('NFKC').toLocaleLowerCase();
+}
+
+function addNamedIdentity<T extends { name: string }>(index: Map<string, T[]>, value: T): void {
+  const key = identityNameKey(value.name);
+  const values = index.get(key);
+  const valueId = (value as T & { id?: string }).id;
+  if (values) {
+    if (!values.some((entry) => entry === value || (entry as T & { id?: string }).id === valueId))
+      values.push(value);
+  } else index.set(key, [value]);
+}
+
+function fallbackIdentityId(prefix: string, name: string, path: string): string {
+  return slugId(prefix, name, path);
+}
+
+function registerPlayer(
+  raw: QbjObject,
+  fallbackId: string,
+  path: string,
+  byId: Map<string, PlayerRecord>,
+  byName: Map<string, PlayerRecord[]>,
+  players: PlayerRecord[],
+  warnings: FormatWarning[],
+): PlayerRecord {
+  const parsed = playerFromRaw(raw, path, warnings, fallbackId);
+  const existing = byId.get(parsed.id);
+  if (existing) return existing;
+  byId.set(parsed.id, parsed);
+  players.push(parsed);
+  addNamedIdentity(byName, parsed);
+  return parsed;
+}
+
+function playerForReference(
+  value: unknown,
+  teamName: string,
+  path: string,
+  byId: ReadonlyMap<string, QbjObject>,
+  playerById: Map<string, PlayerRecord>,
+  playerByName: Map<string, PlayerRecord[]>,
+  players: PlayerRecord[],
+  warnings: FormatWarning[],
+): PlayerRecord {
+  const explicitId = valueId(value, byId);
+  const resolved = resolveRef(value, byId);
+  const rawObject = isJsonObject(value) ? value : undefined;
+  const name = asString(resolved?.name) ?? asString(rawObject?.name) ?? explicitId ?? 'Unnamed player';
+
+  if (explicitId) {
+    const existing = playerById.get(explicitId);
+    if (existing) return existing;
+    if (!resolved && (typeof value === 'string' || rawObject?.$ref !== undefined)) {
+      warnings.push(
+        warning(
+          'unresolved-player-reference',
+          `${path}.player`,
+          `The stable player reference ${explicitId} was not defined; its identity was retained with incomplete roster data.`,
+        ),
+      );
+    }
+    const raw = resolved ?? { ...(rawObject ?? {}), id: explicitId, name };
+    return registerPlayer(raw, explicitId, `${path}.player`, playerById, playerByName, players, warnings);
+  }
+
+  const candidates = playerByName.get(identityNameKey(name)) ?? [];
+  if (candidates.length === 1) {
+    warnings.push(
+      warning(
+        'name-fallback',
+        `${path}.player`,
+        `The player was matched by the unique display name ${JSON.stringify(name)} because no stable id was provided.`,
+      ),
+    );
+    return candidates[0];
+  }
+  if (candidates.length > 1) {
+    warnings.push(
+      warning(
+        'ambiguous-player-name',
+        `${path}.player`,
+        `The display name ${JSON.stringify(name)} matches multiple players; no existing player was selected.`,
+      ),
+    );
+  } else {
+    warnings.push(
+      warning(
+        'name-fallback',
+        `${path}.player`,
+        `No stable player id was provided for ${JSON.stringify(name)}; a match-scoped identity was generated.`,
+      ),
+    );
+  }
+  const id = fallbackIdentityId('player', teamName, path);
+  return registerPlayer(
+    { ...(rawObject ?? {}), id, name },
+    id,
+    `${path}.player`,
+    playerById,
+    playerByName,
+    players,
+    warnings,
+  );
+}
+
+function teamIdForReference(
+  value: unknown,
+  path: string,
+  byId: ReadonlyMap<string, QbjObject>,
+  teamByName: ReadonlyMap<string, TeamRecord[]>,
+  warnings: FormatWarning[],
+): string | undefined {
+  const explicitId = valueId(value, byId);
+  if (explicitId) return explicitId;
+  const name = valueName(value, byId);
+  if (!name) return undefined;
+  const candidates = teamByName.get(identityNameKey(name)) ?? [];
+  if (candidates.length === 1) {
+    warnings.push(
+      warning(
+        'name-fallback',
+        path,
+        `The team was matched by the unique display name ${JSON.stringify(name)} because no stable id was provided.`,
+      ),
+    );
+    return candidates[0].id;
+  }
+  if (candidates.length > 1)
+    warnings.push(
+      warning(
+        'ambiguous-team-name',
+        path,
+        `The display name ${JSON.stringify(name)} matches multiple teams; no existing team was selected.`,
+      ),
+    );
+  return undefined;
+}
+
 function organizationFromRaw(
   raw: QbjObject,
   path: string,
@@ -376,6 +522,7 @@ function teamFromRaw(
   byId: ReadonlyMap<string, QbjObject>,
   players: PlayerRecord[],
   playerById: Map<string, PlayerRecord>,
+  playerByName: Map<string, PlayerRecord[]>,
   warnings: FormatWarning[],
   fallbackId: string,
 ): TeamRecord {
@@ -383,28 +530,18 @@ function teamFromRaw(
   const name = asString(raw.name) ?? 'Unnamed team';
   const embedded: PlayerRecord[] = [];
   for (const [index, value] of asJsonArray(raw.players).entries()) {
-    const resolved = resolveRef(value, byId);
-    if (!resolved) {
-      warnings.push(
-        warning(
-          'invalid-player-reference',
-          `${path}.players[${index}]`,
-          'The team player entry could not be resolved and was retained on the source team object.',
-        ),
-      );
-      continue;
-    }
-    const player = playerFromRaw(
-      resolved,
-      `${path}.players[${index}]`,
-      warnings,
-      slugId('player', id, asString(resolved.name) ?? String(index + 1)),
+    embedded.push(
+      playerForReference(
+        value,
+        name,
+        `${path}.players[${index}]`,
+        byId,
+        playerById,
+        playerByName,
+        players,
+        warnings,
+      ),
     );
-    if (!playerById.has(player.id)) {
-      playerById.set(player.id, player);
-      players.push(player);
-    }
-    embedded.push(playerById.get(player.id) as PlayerRecord);
   }
   const organizationId = valueId(raw.organization ?? raw.school, byId);
   const source = rawWithExtensions(raw, teamKeys, path, warnings);
@@ -476,17 +613,24 @@ function roundContext(
   return contexts;
 }
 
-function inferAnswerCounts(value: unknown): { powers: number; gets: number; negs: number } {
+function inferAnswerCounts(
+  value: unknown,
+  byId: ReadonlyMap<string, QbjObject>,
+): { powers: number; gets: number; negs: number } | undefined {
+  if (!Array.isArray(value) || !value.every(isJsonObject)) return undefined;
   let powers = 0;
   let gets = 0;
   let negs = 0;
-  for (const entry of asJsonArray(value)) {
-    if (!isJsonObject(entry)) continue;
-    const count = asFiniteNumber(entry.number) ?? 0;
-    const answerType = isJsonObject(entry.answer_type) ? entry.answer_type : {};
+  for (const entry of value) {
+    const count = asFiniteNumber(entry.number);
+    if (count === undefined || !Number.isInteger(count) || count < 0) return undefined;
+    const answerType =
+      resolveRef(entry.answer_type, byId) ?? (isJsonObject(entry.answer_type) ? entry.answer_type : null);
+    if (!answerType) return undefined;
     const label =
-      `${asString(answerType.label) ?? ''} ${asString(answerType.short_label) ?? ''}`.toLocaleLowerCase();
+      `${asString(answerType.label) ?? ''} ${asString(answerType.short_label) ?? ''} ${asString(answerType.name) ?? ''}`.toLocaleLowerCase();
     const answerValue = asFiniteNumber(answerType.value);
+    if (!label.trim() && answerValue === undefined) return undefined;
     if (label.includes('neg') || (answerValue !== undefined && answerValue < 0)) negs += count;
     else if (
       label.includes('power') ||
@@ -494,7 +638,9 @@ function inferAnswerCounts(value: unknown): { powers: number; gets: number; negs
       (answerValue !== undefined && answerValue > 10)
     )
       powers += count;
-    else gets += count;
+    else if (label.includes('correct') || label.includes('get') || label.trim() === 'c' || answerValue === 10)
+      gets += count;
+    else return undefined;
   }
   return { powers, gets, negs };
 }
@@ -503,39 +649,41 @@ function playerResultFromRaw(
   raw: QbjObject,
   teamId: string,
   teamName: string,
+  byId: ReadonlyMap<string, QbjObject>,
   playerById: Map<string, PlayerRecord>,
+  playerByName: Map<string, PlayerRecord[]>,
   players: PlayerRecord[],
   path: string,
   warnings: FormatWarning[],
 ): GamePlayerResult {
-  const playerRaw = resolveRef(
+  const player = playerForReference(
     raw.player,
-    new Map(
-      [...playerById.values()].map((player) => [
-        player.id,
-        player.source ?? { id: player.id, name: player.name },
-      ]),
-    ),
+    teamName,
+    path,
+    byId,
+    playerById,
+    playerByName,
+    players,
+    warnings,
   );
-  const name =
-    asString(playerRaw?.name) ?? asString((raw.player as JsonObject | undefined)?.name) ?? 'Unnamed player';
-  const id = asString(playerRaw?.id) ?? slugId('player', teamName, name);
-  if (!playerById.has(id)) {
-    const player = playerFromRaw(playerRaw ?? { id, name }, `${path}.player`, warnings, id);
-    playerById.set(id, player);
-    players.push(player);
+  const counts = inferAnswerCounts(raw.answer_counts, byId);
+  if (raw.answer_counts !== undefined && !counts) {
+    warnings.push(
+      warning(
+        'incomplete-answer-counts',
+        `${path}.answer_counts`,
+        'Answer counts were present but could not be safely classified; derived buzz statistics remain unknown.',
+      ),
+    );
   }
-  const counts = inferAnswerCounts(raw.answer_counts);
   const source = rawWithExtensions(raw, matchPlayerKeys, path, warnings);
   return {
-    playerId: id,
+    playerId: player.id,
     teamId,
     ...(asFiniteNumber(raw.tossups_heard) !== undefined
       ? { tossupsHeard: asFiniteNumber(raw.tossups_heard) }
       : {}),
-    powers: counts.powers,
-    gets: counts.gets,
-    negs: counts.negs,
+    ...(counts ? { powers: counts.powers, gets: counts.gets, negs: counts.negs } : {}),
     ...(asFiniteNumber(raw.points) !== undefined ? { points: asFiniteNumber(raw.points) } : {}),
     ...(asFiniteNumber(raw.bonuses_heard) !== undefined
       ? { bonusesHeard: asFiniteNumber(raw.bonuses_heard) }
@@ -554,12 +702,15 @@ function resultFromMatch(
   match: QbjObject,
   teamIds: [string | null, string | null],
   teamNames: [string, string],
+  byId: ReadonlyMap<string, QbjObject>,
   playerById: Map<string, PlayerRecord>,
+  playerByName: Map<string, PlayerRecord[]>,
   players: PlayerRecord[],
   warnings: FormatWarning[],
 ): GameResult {
   const teamResults: GameTeamResult[] = [];
   const playerResults: GamePlayerResult[] = [];
+  let statisticsIncomplete = false;
   const matchTeams = asJsonArray(match.match_teams).filter(isJsonObject);
   matchTeams.forEach((raw, index) => {
     const teamId = teamIds[index] ?? slugId('team', teamNames[index] ?? `side-${index + 1}`);
@@ -571,7 +722,9 @@ function resultFromMatch(
           player,
           teamId,
           teamName,
+          byId,
           playerById,
+          playerByName,
           players,
           `match.match_teams[${index}].match_players[${playerIndex}]`,
           warnings,
@@ -581,13 +734,36 @@ function resultFromMatch(
       });
     const summed = teamPlayers.reduce(
       (total, player) => ({
-        tossupsHeard: total.tossupsHeard + (player.tossupsHeard ?? 0),
-        powers: total.powers + (player.powers ?? 0),
-        gets: total.gets + (player.gets ?? 0),
-        negs: total.negs + (player.negs ?? 0),
+        tossupsHeard:
+          total.tossupsHeard !== undefined && player.tossupsHeard !== undefined
+            ? total.tossupsHeard + player.tossupsHeard
+            : undefined,
+        powers:
+          total.powers !== undefined && player.powers !== undefined
+            ? total.powers + player.powers
+            : undefined,
+        gets: total.gets !== undefined && player.gets !== undefined ? total.gets + player.gets : undefined,
+        negs: total.negs !== undefined && player.negs !== undefined ? total.negs + player.negs : undefined,
       }),
-      { tossupsHeard: 0, powers: 0, gets: 0, negs: 0 },
+      {
+        tossupsHeard: teamPlayers.length > 0 ? 0 : undefined,
+        powers: teamPlayers.length > 0 ? 0 : undefined,
+        gets: teamPlayers.length > 0 ? 0 : undefined,
+        negs: teamPlayers.length > 0 ? 0 : undefined,
+      },
     );
+    if (summed.tossupsHeard === undefined) {
+      statisticsIncomplete = true;
+      warnings.push(
+        warning(
+          'missing-tossups-heard',
+          `match.match_teams[${index}]`,
+          'Tossups heard was not available for every player; the team total remains unknown.',
+        ),
+      );
+    }
+    if (summed.powers === undefined || summed.gets === undefined || summed.negs === undefined)
+      statisticsIncomplete = true;
     const source = rawWithExtensions(raw, matchTeamKeys, `match.match_teams[${index}]`, warnings);
     teamResults.push({
       teamId,
@@ -608,10 +784,10 @@ function resultFromMatch(
       ...(asFiniteNumber(raw.bonus_points) !== undefined
         ? { bonusPoints: asFiniteNumber(raw.bonus_points) }
         : {}),
-      tossupsHeard: summed.tossupsHeard,
-      powers: summed.powers,
-      gets: summed.gets,
-      negs: summed.negs,
+      ...(summed.tossupsHeard !== undefined ? { tossupsHeard: summed.tossupsHeard } : {}),
+      ...(summed.powers !== undefined ? { powers: summed.powers } : {}),
+      ...(summed.gets !== undefined ? { gets: summed.gets } : {}),
+      ...(summed.negs !== undefined ? { negs: summed.negs } : {}),
       ...(raw.match_players !== undefined ? { answerCounts: cloneJson(raw.match_players) } : {}),
       ...source,
     });
@@ -633,6 +809,7 @@ function resultFromMatch(
     ...(asString(match.moderator) ? { moderator: asString(match.moderator) } : {}),
     ...(asString(match.scorekeeper) ? { scorekeeper: asString(match.scorekeeper) } : {}),
     forfeit: teamResults.some((team) => team.forfeitLoss === true),
+    ...(statisticsIncomplete ? { statisticsIncomplete: true } : {}),
     rawSubmission: cloneJson(match),
     ...matchSource,
   };
@@ -688,6 +865,7 @@ function importQbjValue(
     });
   const players: PlayerRecord[] = [];
   const playerById = new Map<string, PlayerRecord>();
+  const playerByName = new Map<string, PlayerRecord[]>();
   document.objects
     .filter((entry) => entry.type === 'Player')
     .forEach((raw, index) => {
@@ -695,6 +873,7 @@ function importQbjValue(
       if (!playerById.has(player.id)) {
         playerById.set(player.id, player);
         players.push(player);
+        addNamedIdentity(playerByName, player);
       }
     });
   const teams: TeamRecord[] = [];
@@ -708,6 +887,7 @@ function importQbjValue(
         byId,
         players,
         playerById,
+        playerByName,
         warnings,
         `team_${index + 1}`,
       );
@@ -718,14 +898,27 @@ function importQbjValue(
         teams.push(team);
       }
     });
+  const teamByName = new Map<string, TeamRecord[]>();
+  teams.forEach((team) => addNamedIdentity(teamByName, team));
   const registrations: RegistrationRecord[] = [];
   document.objects
     .filter((entry) => entry.type === 'Registration')
     .forEach((raw, index) => {
       const registrationTeams = asJsonArray(raw.teams)
-        .map((value) => valueId(value, byId))
+        .map((value, teamIndex) =>
+          teamIdForReference(
+            value,
+            `registrations[${index}].teams[${teamIndex}]`,
+            byId,
+            teamByName,
+            warnings,
+          ),
+        )
         .filter((id): id is string => Boolean(id));
-      const teamId = registrationTeams[0] ?? valueId(raw.team, byId) ?? '';
+      const teamId =
+        registrationTeams[0] ??
+        teamIdForReference(raw.team, `registrations[${index}].team`, byId, teamByName, warnings) ??
+        '';
       if (registrationTeams.length > 1)
         warnings.push(
           warning(
@@ -870,6 +1063,7 @@ function importQbjValue(
   const games: GameRecord[] = [];
   const matchObjects = document.objects.filter((entry) => entry.type === 'Match');
   matchObjects.forEach((match, index) => {
+    const id = asString(match.id) ?? `game_${index + 1}`;
     const matchTeams = asJsonArray(match.match_teams).filter(isJsonObject);
     const teamIds: [string | null, string | null] = [null, null];
     const teamNames: [string, string] = ['Side 1', 'Side 2'];
@@ -877,21 +1071,66 @@ function importQbjValue(
       const teamRaw = resolveRef(matchTeam.team, byId);
       const name = asString(teamRaw?.name) ?? valueName(matchTeam.team, byId) ?? `Side ${side + 1}`;
       teamNames[side] = name;
-      let teamId = valueId(matchTeam.team, byId);
-      if (!teamId) teamId = slugId('team', name);
+      const referencedTeamId = valueId(matchTeam.team, byId);
+      let teamId = referencedTeamId;
+      if (!teamId) {
+        const candidates = teamByName.get(identityNameKey(name)) ?? [];
+        if (candidates.length === 1) {
+          teamId = candidates[0].id;
+          warnings.push(
+            warning(
+              'name-fallback',
+              `objects[${index}].match_teams[${side}].team`,
+              `The team was matched by the unique display name ${JSON.stringify(name)} because no stable id was provided.`,
+            ),
+          );
+        } else {
+          if (candidates.length > 1)
+            warnings.push(
+              warning(
+                'ambiguous-team-name',
+                `objects[${index}].match_teams[${side}].team`,
+                `The display name ${JSON.stringify(name)} matches multiple teams; no existing team was selected.`,
+              ),
+            );
+          else
+            warnings.push(
+              warning(
+                'name-fallback',
+                `objects[${index}].match_teams[${side}].team`,
+                `No stable team id was provided for ${JSON.stringify(name)}; a match-scoped identity was generated.`,
+              ),
+            );
+          teamId = fallbackIdentityId('team', name, `matches.${id}.match_teams.${side}`);
+        }
+      } else if (
+        !teamRaw &&
+        (typeof matchTeam.team === 'string' ||
+          (isJsonObject(matchTeam.team) && matchTeam.team.$ref !== undefined))
+      ) {
+        warnings.push(
+          warning(
+            'unresolved-team-reference',
+            `objects[${index}].match_teams[${side}].team`,
+            `The stable team reference ${teamId} was not defined; its identity was retained with incomplete roster data.`,
+          ),
+        );
+      }
       teamIds[side] = teamId;
       if (!teamById.has(teamId)) {
         const team = teamFromRaw(
-          teamRaw ?? { id: teamId, name },
+          teamRaw ?? { ...(isJsonObject(matchTeam.team) ? matchTeam.team : {}), id: teamId, name },
           `teams.from-match[${index}].${side}`,
           byId,
           players,
           playerById,
+          playerByName,
           warnings,
           teamId,
         );
         teamById.set(team.id, team);
         teams.push(team);
+        addNamedIdentity(teamByName, team);
       }
     });
     if (matchTeams.length !== 2)
@@ -902,7 +1141,6 @@ function importQbjValue(
           'The Match does not contain exactly two teams; missing sides were retained as null.',
         ),
       );
-    const id = asString(match.id) ?? `game_${index + 1}`;
     const context = contexts.get(id);
     const qbtcp = asJsonObject(match._qbtcp);
     const roomId = asString(qbtcp?.room_id);
@@ -914,7 +1152,7 @@ function importQbjValue(
           team.points !== undefined || team.match_players !== undefined || team.forfeit_loss !== undefined,
       );
     const result = hasScoring
-      ? resultFromMatch(match, teamIds, teamNames, playerById, players, warnings)
+      ? resultFromMatch(match, teamIds, teamNames, byId, playerById, playerByName, players, warnings)
       : undefined;
     const source = rawWithExtensions(match, matchKeys, `games[${index}]`, warnings);
     const game: GameRecord = {

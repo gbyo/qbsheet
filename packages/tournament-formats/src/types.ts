@@ -207,6 +207,8 @@ export interface GamePlayerResult extends ExtensibleRecord {
 export interface GameResult extends ExtensibleRecord {
   teams: GameTeamResult[];
   players?: GamePlayerResult[];
+  /** True when one or more imported detailed statistics were unavailable or not classifiable. */
+  statisticsIncomplete?: boolean;
   tossupsRead?: number;
   overtimeTossupsRead?: number;
   questions?: JsonValue[];

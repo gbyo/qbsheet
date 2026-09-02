@@ -1,7 +1,13 @@
-import { derivePlayerStandings, deriveTeamStandings, type DirectorState } from '../domain';
+import {
+  derivePlayerStandings,
+  deriveTeamStandings,
+  totalAcceptedResults,
+  type DirectorState,
+} from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
 import { Button, EmptyState } from '../components/Controls';
 import { PageHeader } from '../components/PageHeader';
+import { csvCell } from '@qbsheet/tournament-formats';
 
 export function StandingsView({
   state,
@@ -41,9 +47,7 @@ export function StandingsView({
                   <p className="director-eyebrow">Team standings</p>
                   <h2>{teamStandings.length} teams</h2>
                 </div>
-                <span className="director-muted">
-                  {state.games.filter((game) => game.status === 'accepted').length} accepted games
-                </span>
+                <span className="director-muted">{totalAcceptedResults(state)} accepted games</span>
               </div>
               <div className="director-table-wrap">
                 <table className="director-table director-standings-table">
@@ -162,7 +166,7 @@ function downloadCsv(state: DirectorState, onAnnounce: (message: string) => void
       String(standing.wins),
       String(standing.losses),
       String(standing.ties),
-      String(standing.winPercentage),
+      `${(standing.winPercentage * 100).toFixed(1)}%`,
       String(standing.pointsFor),
       String(standing.pointsAgainst),
       String(standing.margin),
@@ -178,9 +182,6 @@ function downloadCsv(state: DirectorState, onAnnounce: (message: string) => void
   anchor.click();
   URL.revokeObjectURL(url);
   onAnnounce('Standings CSV exported.');
-}
-function csvCell(value: string): string {
-  return /[",\n]/.test(value) ? `"${value.replaceAll('"', '""')}"` : value;
 }
 function safeName(value: string): string {
   return (

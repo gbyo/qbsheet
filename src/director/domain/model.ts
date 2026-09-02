@@ -6,14 +6,15 @@
  * tables and returns this shape at the application boundary. React never receives database rows.
  */
 
-export const directorSchemaVersion = 1;
+export const directorSchemaVersion = 2;
 
 export type DirectorId = string;
 export type TournamentStatus = 'draft' | 'running' | 'complete' | 'archived';
 export type TeamStatus = 'confirmed' | 'waitlist' | 'dropped';
 export type RoomStatus = 'available' | 'live' | 'finished' | 'help' | 'offline';
 export type GameStatus = 'scheduled' | 'live' | 'submitted' | 'accepted' | 'rejected' | 'cancelled';
-export type SubmissionStatus = 'received' | 'accepted' | 'review' | 'rejected' | 'duplicate';
+export type SubmissionStatus = 'received' | 'accepted' | 'review' | 'rejected' | 'duplicate' | 'superseded';
+export type DetailedStatsStatus = 'complete' | 'incomplete' | 'unknown';
 export type StaffRole = 'moderator' | 'scorekeeper' | 'runner' | 'hq';
 export type PhaseKind = 'preliminary' | 'playoff' | 'final' | 'placement' | 'custom';
 export type FormatKind =
@@ -49,6 +50,8 @@ export interface Tournament {
   status: TournamentStatus;
   rules: TournamentRules;
   formatId: DirectorId | null;
+  currentPhaseId: DirectorId | null;
+  currentPacketId: DirectorId | null;
   currentRoundId: DirectorId | null;
   createdAt: string;
   updatedAt: string;
@@ -67,6 +70,7 @@ export interface Player {
   name: string;
   captain: boolean;
   active: boolean;
+  rosterNumber?: string | number;
   notes?: string;
 }
 
@@ -174,6 +178,7 @@ export interface Round {
 export interface ScheduledGame {
   id: DirectorId;
   roundId: DirectorId;
+  poolId?: DirectorId | null;
   roomId: DirectorId | null;
   packetId: DirectorId | null;
   leftTeamId: DirectorId;
@@ -203,7 +208,8 @@ export interface PlayerGameStat {
   gets: number;
   negs: number;
   bonusPoints: number;
-  tossupsHeard: number;
+  /** Null means the source did not provide a tossups-heard count. */
+  tossupsHeard: number | null;
 }
 
 export interface GameRecord {
@@ -215,6 +221,8 @@ export interface GameRecord {
   scores: TeamGameScore[];
   playerStats: PlayerGameStat[];
   source: 'qbtcp' | 'manual' | 'qbj' | 'paper';
+  /** Manual/paper results may have a known final score without detailed scoresheet stats. */
+  detailedStats?: DetailedStatsStatus;
   transportResultId?: string;
   rawQbj?: unknown;
   startedAt?: string;
@@ -236,8 +244,14 @@ export interface ResultSubmission {
   conflictWith?: string;
   reason?: string;
   supersedesSubmissionId?: DirectorId;
+  supersededBySubmissionId?: DirectorId;
   acceptedBy?: string;
   acceptedAt?: string;
+}
+
+export interface ProtestScoreAdjustment {
+  teamId: DirectorId;
+  delta: number;
 }
 
 export interface Protest {
@@ -247,7 +261,10 @@ export interface Protest {
   description: string;
   status: 'open' | 'ruled' | 'withdrawn';
   ruling?: string;
-  scoreAdjustment?: number;
+  scoreAdjustment?: ProtestScoreAdjustment;
+  correctionSubmissionId?: DirectorId;
+  /** Retained only when importing a pre-v2 ambiguous numeric adjustment. */
+  legacyScoreAdjustment?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -289,16 +306,39 @@ export interface AdvancementRule {
 export interface QbtcpRoomSession {
   roomId: DirectorId;
   sessionId: DirectorId;
+  matchId?: string;
   deviceId: string;
   operatorName?: string;
   state: 'paired' | 'assigned' | 'live' | 'result-received' | 'abandoned';
+  resumable?: boolean;
+  resultReceived?: boolean;
   lastSeenAt: string;
+  progressSequence?: number;
   progress: {
     tossupsRead: number;
     leftScore: number;
     rightScore: number;
   } | null;
   helpRequestId: DirectorId | null;
+}
+
+export interface QbtcpHelpRequest {
+  id: DirectorId;
+  roomId: DirectorId;
+  roomName: string;
+  category: string;
+  message: string;
+  status: 'open' | 'cancelled' | 'resolved' | string;
+  createdAt: string;
+  updatedAt: string;
+  deviceId: string;
+  operatorName?: string;
+  currentMatchup?: Record<string, unknown>;
+}
+
+export interface QbtcpRosterAmendment {
+  sessionId: DirectorId;
+  amendment: Record<string, unknown>;
 }
 
 export interface DirectorState {
@@ -321,6 +361,8 @@ export interface DirectorState {
   protests: Protest[];
   audit: AuditEvent[];
   qbtcpSessions: QbtcpRoomSession[];
+  qbtcpHelpRequests: QbtcpHelpRequest[];
+  qbtcpRosterAmendments: QbtcpRosterAmendment[];
   metadata: {
     lastSavedAt: string | null;
     lastCheckpointAt: string | null;
@@ -364,6 +406,8 @@ export function emptyDirectorState(): DirectorState {
     protests: [],
     audit: [],
     qbtcpSessions: [],
+    qbtcpHelpRequests: [],
+    qbtcpRosterAmendments: [],
     metadata: { lastSavedAt: null, lastCheckpointAt: null },
   };
 }

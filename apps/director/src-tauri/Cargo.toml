@@ -17,6 +17,7 @@ tauri-build = { version = "2.6.3", features = [] }
 
 [dependencies]
 base64 = "0.23.1"
+get_if_addrs = "0.5.3"
 qbtcp-server = { path = "../../../crates/qbtcp-server" }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }
@@ -28,3 +29,6 @@ tauri-plugin-updater = "2.11.0"
 tauri-plugin-window-state = "2.4.1"
 thiserror = "2.0.20"
 tokio = { version = "1", features = ["net", "rt", "macros"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem"] }

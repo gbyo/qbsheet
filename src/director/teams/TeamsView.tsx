@@ -4,6 +4,7 @@ import type { DirectorState } from '../domain';
 import { Button, EmptyState, FormField, PanelBody, PanelFooter, StateLabel } from '../components/Controls';
 import { Icon } from '../components/Icon';
 import { PageHeader } from '../components/PageHeader';
+import { importTeamsCsv } from '@qbsheet/tournament-formats';
 
 export function TeamsView({
   state,
@@ -67,21 +68,42 @@ export function TeamsView({
 
   const importCsv = async (file: File | undefined) => {
     if (!file) return;
-    const text = await file.text();
-    const rows = text
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean);
-    let added = 0;
-    for (const row of rows.slice(rowLooksLikeHeader(rows[0]) ? 1 : 0)) {
-      const columns = parseCsvLine(row);
-      if (!columns[0]) continue;
-      controller.addTeam({ displayName: columns[0], organizationName: columns[1], teamLetter: columns[2] });
-      added += 1;
+    try {
+      const report = importTeamsCsv(await file.text());
+      if (!report.ok) {
+        onAnnounce(report.errors.map((entry) => entry.message).join(' ') || 'That CSV is not valid.');
+        return;
+      }
+      const result = controller.addImportedTeams(
+        report.value.map((team) => ({
+          id: team.id,
+          displayName: team.displayName ?? team.name,
+          organizationId: team.organizationId,
+          teamLetter: team.letter,
+          seed: team.seed ?? null,
+          status: importedTeamStatus(team.status),
+          notes: team.notes,
+          players: team.players?.map((player) => ({
+            id: player.id,
+            name: player.name,
+            captain: player.captain,
+            rosterNumber: player.rosterNumber,
+            notes: player.notes,
+          })),
+        })),
+      );
+      onAnnounce(
+        `${result.inserted} team${result.inserted === 1 ? '' : 's'} imported${
+          result.skipped ? `; ${result.skipped} duplicate${result.skipped === 1 ? '' : 's'} skipped` : ''
+        }.${
+          report.warnings.length
+            ? ` ${report.warnings.length} warning${report.warnings.length === 1 ? '' : 's'} retained.`
+            : ''
+        }`,
+      );
+    } catch (reason: unknown) {
+      onAnnounce(reason instanceof Error ? reason.message : 'That CSV could not be read.');
     }
-    onAnnounce(
-      added ? `${added} team${added === 1 ? '' : 's'} imported.` : 'No team rows found in that file.',
-    );
   };
 
   return (
@@ -313,6 +335,10 @@ function TeamRow({
                 type="button"
                 className="director-inline-action director-roster-add-action"
                 onClick={() => {
+                  if (!playerName.trim()) {
+                    onAnnounce('Enter a player name first.');
+                    return;
+                  }
                   controller.addPlayer(team.id, playerName);
                   setPlayerName('');
                   onAnnounce(`Player added to ${team.displayName}.`);
@@ -361,32 +387,10 @@ function organizationNameFor(state: DirectorState, organizationId: string | null
     : '';
 }
 
-function rowLooksLikeHeader(row: string | undefined): boolean {
-  return Boolean(row && /team|school|organization/i.test(row));
-}
-
-function parseCsvLine(line: string): string[] {
-  const values: string[] = [];
-  let current = '';
-  let quoted = false;
-  for (let index = 0; index < line.length; index += 1) {
-    const character = line[index];
-    if (character === '"' && line[index + 1] === '"' && quoted) {
-      current += '"';
-      index += 1;
-      continue;
-    }
-    if (character === '"') {
-      quoted = !quoted;
-      continue;
-    }
-    if (character === ',' && !quoted) {
-      values.push(current.trim());
-      current = '';
-      continue;
-    }
-    current += character;
+function importedTeamStatus(status: string | undefined): 'confirmed' | 'waitlist' | 'dropped' {
+  if (status === 'dropped' || status === 'withdrawn' || status === 'no-show' || status === 'forfeit') {
+    return 'dropped';
   }
-  values.push(current.trim());
-  return values;
+  if (status === 'late' || status === 'waitlist') return 'waitlist';
+  return 'confirmed';
 }

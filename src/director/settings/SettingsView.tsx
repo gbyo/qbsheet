@@ -18,7 +18,7 @@ export function SettingsView({
   const [organizer, setOrganizer] = useState(state.tournament?.organizer ?? '');
   const save = () => {
     controller.updateTournament({ name, venue, organizer });
-    onAnnounce('Tournament details saved.');
+    onAnnounce('Tournament details updated locally; saving now.');
   };
   return (
     <>
@@ -119,7 +119,10 @@ export function SettingsView({
                 onClick={() => {
                   void controller
                     .checkpoint('manual settings checkpoint')
-                    .then(() => onAnnounce('Checkpoint created.'));
+                    .then(() => onAnnounce('Checkpoint created.'))
+                    .catch((reason: unknown) =>
+                      onAnnounce(reason instanceof Error ? reason.message : 'Checkpoint could not be saved.'),
+                    );
                 }}
               >
                 Create checkpoint

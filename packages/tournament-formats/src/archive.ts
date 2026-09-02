@@ -39,6 +39,10 @@ export const directorArchiveManifestPath = 'manifest.json';
 export const directorArchiveDataPath = 'data/tournament.json';
 export const maxDirectorArchiveBytes = 128 * 1024 * 1024;
 export const maxDirectorArchiveEntryBytes = 64 * 1024 * 1024;
+/** The sum of ZIP entry sizes permitted before extraction begins. */
+export const maxDirectorArchiveTotalUncompressedBytes = 128 * 1024 * 1024;
+/** Keep central-directory processing bounded even when entries are tiny. */
+export const maxDirectorArchiveEntryCount = 4096;
 
 export interface DirectorArchiveAsset {
   /** Must be a relative path below `assets/`. */
@@ -101,7 +105,7 @@ const manifestKeys = new Set([
 ]);
 
 function asBytes(value: Uint8Array | ArrayBuffer): Uint8Array {
-  return value instanceof Uint8Array ? new Uint8Array(value) : new Uint8Array(value);
+  return value instanceof Uint8Array ? value : new Uint8Array(value);
 }
 
 function validateAssetPath(path: string, index: number, errors: FormatError[]): void {
@@ -188,6 +192,40 @@ function validateManifest(
             'invalid-file-path',
             `manifest.files[${index}].path`,
             'File paths must be safe relative paths.',
+          ),
+        );
+      if (path === directorArchiveManifestPath) {
+        errors.push(
+          error(
+            'reserved-archive-path',
+            `manifest.files[${index}].path`,
+            `${path} is reserved for the archive manifest and cannot be declared as a data or asset file.`,
+          ),
+        );
+      }
+      if (path === directorArchiveDataPath && kind !== 'data') {
+        errors.push(
+          error(
+            'reserved-archive-path',
+            `manifest.files[${index}].path`,
+            `${path} is reserved for the structured tournament data entry.`,
+          ),
+        );
+      }
+      if (kind === 'asset' && path && !path.startsWith('assets/'))
+        errors.push(
+          error(
+            'invalid-file-path',
+            `manifest.files[${index}].path`,
+            'Asset entries must use an assets/ relative path.',
+          ),
+        );
+      if (kind === 'data' && path && path !== directorArchiveDataPath)
+        errors.push(
+          error(
+            'invalid-file-path',
+            `manifest.files[${index}].path`,
+            `Data entries must use ${directorArchiveDataPath}.`,
           ),
         );
       if (!kind)
@@ -280,12 +318,99 @@ function ensureArchiveLimit(bytes: Uint8Array, errors: FormatError[]): void {
   }
 }
 
+class ArchiveSafetyError extends Error {
+  constructor(
+    readonly code: string,
+    readonly path: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'ArchiveSafetyError';
+  }
+}
+
+/**
+ * Ask fflate to inspect each central-directory entry before it allocates an output buffer.
+ *
+ * `unzipSync` supports a metadata filter, so the filter is deliberately the only place where an
+ * entry is admitted to extraction. The checks below are duplicated after extraction as a defense in
+ * depth against malformed archives, but the central-directory values are what prevent a small,
+ * highly-compressible entry from reaching the inflater in the first place.
+ */
+function extractArchive(bytes: Uint8Array): Record<string, Uint8Array> {
+  const paths = new Set<string>();
+  let entryCount = 0;
+  let totalUncompressedBytes = 0;
+  // First walk only the central directory. Returning false from the filter means fflate does not
+  // slice or inflate any entry, so aggregate limits are known before the second pass can allocate an
+  // output buffer for even the first entry.
+  unzipSync(bytes, {
+    filter: (entry) => {
+      entryCount += 1;
+      if (entryCount > maxDirectorArchiveEntryCount) {
+        throw new ArchiveSafetyError(
+          'archive-too-many-entries',
+          '',
+          `The archive contains more than the ${maxDirectorArchiveEntryCount}-entry safety limit.`,
+        );
+      }
+      if (!safeRelativePath(entry.name)) {
+        throw new ArchiveSafetyError(
+          'unsafe-entry-path',
+          entry.name,
+          'The archive contains an unsafe file path.',
+        );
+      }
+      if (paths.has(entry.name)) {
+        throw new ArchiveSafetyError(
+          'duplicate-entry',
+          entry.name,
+          `The archive contains the file ${entry.name} more than once.`,
+        );
+      }
+      paths.add(entry.name);
+      if (!Number.isSafeInteger(entry.originalSize) || entry.originalSize < 0) {
+        throw new ArchiveSafetyError(
+          'invalid-entry-size',
+          entry.name,
+          'The archive entry declares an invalid uncompressed size.',
+        );
+      }
+      if (entry.originalSize > maxDirectorArchiveEntryBytes) {
+        throw new ArchiveSafetyError(
+          'entry-too-large',
+          entry.name,
+          `The archive entry exceeds the ${maxDirectorArchiveEntryBytes}-byte safety limit.`,
+        );
+      }
+      if (entry.originalSize > maxDirectorArchiveTotalUncompressedBytes - totalUncompressedBytes) {
+        throw new ArchiveSafetyError(
+          'archive-uncompressed-too-large',
+          entry.name,
+          `The archive entries exceed the ${maxDirectorArchiveTotalUncompressedBytes}-byte uncompressed safety limit.`,
+        );
+      }
+      totalUncompressedBytes += entry.originalSize;
+      return false;
+    },
+  });
+
+  // The metadata pass has admitted every entry, so this pass is bounded by the limits above. Keep a
+  // filter here as well because fflate invokes it immediately before each individual allocation.
+  return unzipSync(bytes, {
+    filter: () => true,
+  }) as Record<string, Uint8Array>;
+}
+
 function checkEntryLimit(
   entries: Record<string, Uint8Array>,
   warnings: FormatWarning[],
   errors: FormatError[],
 ): void {
+  let totalUncompressedBytes = 0;
+  let entryCount = 0;
   for (const [path, bytes] of Object.entries(entries)) {
+    entryCount += 1;
     if (!safeRelativePath(path))
       errors.push(error('unsafe-entry-path', path, 'The archive contains an unsafe file path.'));
     if (bytes.byteLength > maxDirectorArchiveEntryBytes)
@@ -296,6 +421,7 @@ function checkEntryLimit(
           `The archive entry exceeds the ${maxDirectorArchiveEntryBytes}-byte safety limit.`,
         ),
       );
+    totalUncompressedBytes += bytes.byteLength;
     if (
       path !== directorArchiveManifestPath &&
       path !== directorArchiveDataPath &&
@@ -310,6 +436,22 @@ function checkEntryLimit(
       );
     }
   }
+  if (entryCount > maxDirectorArchiveEntryCount)
+    errors.push(
+      error(
+        'archive-too-many-entries',
+        '',
+        `The archive contains more than the ${maxDirectorArchiveEntryCount}-entry safety limit.`,
+      ),
+    );
+  if (totalUncompressedBytes > maxDirectorArchiveTotalUncompressedBytes)
+    errors.push(
+      error(
+        'archive-uncompressed-too-large',
+        '',
+        `The archive entries exceed the ${maxDirectorArchiveTotalUncompressedBytes}-byte uncompressed safety limit.`,
+      ),
+    );
 }
 
 function requiredEntry(
@@ -417,8 +559,11 @@ export function importDirectorArchive(
   if (errors.length > 0) return fail(errors, warnings);
   let entries: Record<string, Uint8Array>;
   try {
-    entries = unzipSync(bytes) as Record<string, Uint8Array>;
-  } catch {
+    // The filter in extractArchive runs from ZIP metadata before fflate inflates any admitted entry.
+    entries = extractArchive(bytes);
+  } catch (caught) {
+    if (caught instanceof ArchiveSafetyError)
+      return fail([error(caught.code, caught.path, caught.message)], warnings);
     return fail([error('invalid-zip', '', 'The input is not a readable ZIP archive.')], warnings);
   }
   checkEntryLimit(entries, warnings, errors);

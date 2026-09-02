@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { DirectorState } from '../domain';
+import { currentPhase, formatGenerationAvailability, type DirectorState } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
 import { Button, FormField, PanelBody, StateLabel } from '../components/Controls';
 import { PageHeader } from '../components/PageHeader';
@@ -16,9 +16,11 @@ export function FormatView({
   onNavigate: (section: SectionId) => void;
   onAnnounce: (message: string) => void;
 }) {
-  const format = state.formats.find((entry) => entry.id === state.tournament?.formatId) ?? state.formats[0];
+  const formatId = state.tournament?.formatId;
+  const format = formatId ? state.formats.find((entry) => entry.id === formatId) : undefined;
   const [roundsPerTeam, setRoundsPerTeam] = useState(format?.roundsPerTeam?.toString() ?? '');
-  const phase = state.phases.find((entry) => entry.id === format?.phaseIds[0]);
+  const phase = currentPhase(state);
+  const generation = formatGenerationAvailability(state);
   const scheduleCount = state.rounds.filter((round) => round.phaseId === phase?.id).length;
   if (!format)
     return (
@@ -45,10 +47,22 @@ export function FormatView({
           <Button
             variant="primary"
             icon="play"
+            disabled={!generation.supported}
             onClick={() => {
               const result = controller.generateSchedule();
-              onAnnounce(result.conflicts.length ? result.conflicts.join(' ') : 'Round generated and saved.');
-              onNavigate('tournament');
+              if (result.generated) {
+                onAnnounce(
+                  result.conflicts.length
+                    ? `Round generated with warnings: ${result.conflicts.join(' ')}`
+                    : 'Round generated locally; saving now.',
+                );
+                onNavigate('tournament');
+              } else {
+                onAnnounce(
+                  result.conflicts.join(' ') ||
+                    'No round was generated; review the format and confirmed teams first.',
+                );
+              }
             }}
           >
             Generate next round
@@ -95,26 +109,28 @@ export function FormatView({
                     <option value="double-round-robin">Double round robin</option>
                     <option value="pools">Preliminary pools</option>
                     <option value="playoff-pools">Playoff pools</option>
-                    <option value="single-elimination">Single elimination</option>
-                    <option value="swiss">Swiss / power matching</option>
-                    <option value="custom">Custom / manual</option>
+                    <option value="single-elimination" disabled>
+                      Single elimination (not implemented)
+                    </option>
+                    <option value="swiss" disabled>
+                      Swiss / power matching (not implemented)
+                    </option>
+                    <option value="custom" disabled>
+                      Custom / manual (not implemented)
+                    </option>
                   </select>
                 </FormField>
                 <FormField
                   label="Rounds per team"
-                  hint="Leave blank for the natural count of the selected format."
+                  hint="Director generates one validated round at a time; this setting is reserved for future format support."
                 >
                   <input
                     type="number"
                     min="1"
                     max="99"
+                    disabled
                     value={roundsPerTeam}
-                    onChange={(event) => {
-                      setRoundsPerTeam(event.target.value);
-                      controller.updateFormat({
-                        roundsPerTeam: event.target.value ? Number(event.target.value) : null,
-                      });
-                    }}
+                    onChange={(event) => setRoundsPerTeam(event.target.value)}
                   />
                 </FormField>
               </div>
@@ -146,6 +162,9 @@ export function FormatView({
                   <span>Allow explicit byes for odd fields</span>
                 </label>
               </div>
+              <p className="director-panel-footnote" role={generation.supported ? undefined : 'alert'}>
+                {generation.message}
+              </p>
             </PanelBody>
           </section>
           <section className="director-panel">
@@ -227,7 +246,7 @@ export function FormatView({
               variant="quiet"
               onClick={() => {
                 controller.addPhase(`Phase ${state.phases.length + 1}`, 'preliminary');
-                onAnnounce('Phase added and saved.');
+                onAnnounce('Phase added locally; saving now.');
               }}
             >
               Add phase
@@ -253,6 +272,15 @@ export function FormatView({
                       </small>
                     </div>
                     <StateLabel state={entry.status} label={entry.status} />
+                    <Button
+                      variant={entry.id === state.tournament?.currentPhaseId ? 'secondary' : 'quiet'}
+                      onClick={() => {
+                        controller.selectPhase(entry.id);
+                        onAnnounce(`${entry.name} selected for the next generated round.`);
+                      }}
+                    >
+                      {entry.id === state.tournament?.currentPhaseId ? 'Current' : 'Use'}
+                    </Button>
                   </li>
                 ))}
               </ol>

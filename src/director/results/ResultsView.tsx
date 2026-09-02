@@ -150,12 +150,25 @@ function ResultRow({
             : 'Unmatched game'}
         </small>
       </td>
-      <td className="director-score-cell">{score}</td>
+      <td className="director-score-cell">
+        {score}
+        {game?.detailedStats && game.detailedStats !== 'complete' && (
+          <small className="director-table-subtext">
+            {game.detailedStats === 'unknown' ? 'Detailed stats not recorded' : 'Detailed stats incomplete'}
+          </small>
+        )}
+      </td>
       <td>{game?.source ?? 'QBTCP'}</td>
       <td>
         <StateLabel
           state={submissionState(submission.status)}
-          label={submission.status === 'received' ? 'Review' : submission.status}
+          label={
+            submission.status === 'received'
+              ? 'Review'
+              : submission.status === 'superseded'
+                ? 'Superseded'
+                : submission.status
+          }
         />
       </td>
       <td>
@@ -165,8 +178,12 @@ function ResultRow({
               <Button
                 variant="primary"
                 onClick={() => {
-                  controller.acceptSubmission(submission.id);
-                  onAnnounce(`${left} result accepted.`);
+                  const accepted = controller.acceptSubmission(submission.id);
+                  onAnnounce(
+                    accepted
+                      ? `${left} result accepted.`
+                      : `${left} result remains in review; it was not accepted.`,
+                  );
                 }}
               >
                 Accept
@@ -174,8 +191,12 @@ function ResultRow({
               <Button
                 variant="quiet"
                 onClick={() => {
-                  controller.rejectSubmission(submission.id);
-                  onAnnounce(`${left} result rejected.`);
+                  const rejected = controller.rejectSubmission(submission.id);
+                  onAnnounce(
+                    rejected
+                      ? `${left} result rejected.`
+                      : `${left} result could not be rejected; review the current state.`,
+                  );
                 }}
               >
                 Reject
@@ -213,16 +234,28 @@ function ManualResult({
   );
   const [gameId, setGameId] = useState(choices[0]?.id ?? '');
   const selected = choices.find((game) => game.id === gameId);
-  const [leftScore, setLeftScore] = useState('0');
-  const [rightScore, setRightScore] = useState('0');
+  const [leftScore, setLeftScore] = useState('');
+  const [rightScore, setRightScore] = useState('');
+  const [validationError, setValidationError] = useState<string | null>(null);
   const save = () => {
     if (!selected || !selected.rightTeamId) {
-      onAnnounce('Generate a non-bye scheduled game first.');
+      setValidationError('Generate a non-bye scheduled game first.');
       return;
     }
+    if (!leftScore.trim() || !rightScore.trim()) {
+      setValidationError('Enter both final team scores.');
+      return;
+    }
+    const parsedLeft = Number(leftScore);
+    const parsedRight = Number(rightScore);
+    if (!Number.isInteger(parsedLeft) || !Number.isInteger(parsedRight)) {
+      setValidationError('Final team scores must be finite whole numbers; negative totals are allowed.');
+      return;
+    }
+    setValidationError(null);
     const score = (teamId: string, value: string): TeamGameScore => ({
       teamId,
-      score: Number(value) || 0,
+      score: Number(value),
       powers: 0,
       gets: 0,
       negs: 0,
@@ -230,11 +263,15 @@ function ManualResult({
       bonusPoints: 0,
       bouncebacks: 0,
     });
-    controller.addManualResult({
+    const accepted = controller.addManualResult({
       scheduledGameId: selected.id,
       scores: [score(selected.leftTeamId, leftScore), score(selected.rightTeamId, rightScore)],
     });
-    onAnnounce('Manual result saved and standings updated.');
+    onAnnounce(
+      accepted
+        ? 'Manual result accepted locally; standings updated and saving now.'
+        : 'Manual result was not accepted; review the Director error and current game state.',
+    );
   };
   return (
     <section className="director-panel director-form-panel">
@@ -266,7 +303,8 @@ function ManualResult({
               <FormField label={selected ? teamLabel(state, selected.leftTeamId) : 'Left score'}>
                 <input
                   type="number"
-                  min="0"
+                  step="1"
+                  aria-invalid={validationError ? true : undefined}
                   value={leftScore}
                   onChange={(event) => setLeftScore(event.target.value)}
                 />
@@ -274,13 +312,21 @@ function ManualResult({
               <FormField label={selected ? teamLabel(state, selected.rightTeamId) : 'Right score'}>
                 <input
                   type="number"
-                  min="0"
+                  step="1"
+                  aria-invalid={validationError ? true : undefined}
                   value={rightScore}
                   onChange={(event) => setRightScore(event.target.value)}
                 />
               </FormField>
             </div>
           </div>
+          {validationError && (
+            <div className="director-panel-body">
+              <p className="director-error-copy" role="alert">
+                {validationError}
+              </p>
+            </div>
+          )}
           <div className="director-panel-footer">
             <Button variant="primary" onClick={save}>
               Accept manual result
@@ -299,7 +345,9 @@ function submissionState(status: DirectorState['submissions'][number]['status'])
       ? 'rejected'
       : status === 'duplicate'
         ? 'warning'
-        : 'review';
+        : status === 'superseded'
+          ? 'warning'
+          : 'review';
 }
 
 function FilterButton({

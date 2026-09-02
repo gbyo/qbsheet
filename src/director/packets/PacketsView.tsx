@@ -39,7 +39,7 @@ export function PacketsView({
         onAnnounce('That QBJ file does not contain packet inventory.');
         return;
       }
-      controller.addPackets(
+      const result = controller.addPackets(
         report.state.packets.map((packet) => ({
           name: packet.name,
           source: 'qbj' as const,
@@ -48,7 +48,9 @@ export function PacketsView({
         })),
       );
       onAnnounce(
-        `${report.state.packets.length} packet${report.state.packets.length === 1 ? '' : 's'} imported.`,
+        `${result.inserted} packet${result.inserted === 1 ? '' : 's'} imported${
+          result.skipped ? `; ${result.skipped} duplicate${result.skipped === 1 ? '' : 's'} skipped` : ''
+        }.${report.warnings.length ? ` ${report.warnings.length} warning${report.warnings.length === 1 ? '' : 's'} retained.` : ''}`,
       );
     } catch (reason: unknown) {
       onAnnounce(reason instanceof Error ? reason.message : 'That QBJ file could not be read.');
@@ -164,19 +166,30 @@ export function PacketsView({
                         />
                       </td>
                       <td>
-                        <button
-                          type="button"
-                          className="director-button director-button-quiet director-table-action"
-                          aria-label={`View details for ${packet.name}`}
-                          onClick={() =>
-                            onAnnounce(
-                              `${packet.name}: ${packet.assignedGameIds.length} game assignment${packet.assignedGameIds.length === 1 ? '' : 's'}.`,
-                            )
-                          }
-                        >
-                          <Icon name="file" size={14} />
-                          <span>Details</span>
-                        </button>
+                        <div className="director-row-actions">
+                          <Button
+                            variant={packet.id === state.tournament?.currentPacketId ? 'secondary' : 'quiet'}
+                            onClick={() => {
+                              controller.selectPacket(packet.id);
+                              onAnnounce(`${packet.name} selected for the next generated round.`);
+                            }}
+                          >
+                            {packet.id === state.tournament?.currentPacketId ? 'Current' : 'Use next'}
+                          </Button>
+                          <button
+                            type="button"
+                            className="director-button director-button-quiet director-table-action"
+                            aria-label={`View details for ${packet.name}`}
+                            onClick={() =>
+                              onAnnounce(
+                                `${packet.name}: ${packet.assignedGameIds.length} game assignment${packet.assignedGameIds.length === 1 ? '' : 's'}.`,
+                              )
+                            }
+                          >
+                            <Icon name="file" size={14} />
+                            <span>Details</span>
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}

@@ -419,6 +419,7 @@ button:disabled:hover {
 }
 
 .director-topbar-actions {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 11px;
@@ -464,6 +465,66 @@ button:disabled:hover {
   font-size: 10px;
   border: 1px solid var(--director-border);
   border-radius: 3px;
+}
+
+.director-search-results {
+  position: absolute;
+  z-index: 20;
+  top: 40px;
+  right: 41px;
+  width: 330px;
+  overflow: hidden;
+  background: var(--director-surface);
+  border: 1px solid var(--director-border);
+  border-radius: 6px;
+  box-shadow: 0 12px 30px rgb(21 35 42 / 14%);
+}
+
+.director-search-result {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 12px;
+  padding: 10px 12px;
+  color: var(--director-ink);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--director-border);
+}
+
+.director-search-result:last-child {
+  border-bottom: 0;
+}
+
+.director-search-result:hover,
+.director-search-result:focus-visible {
+  background: var(--director-surface-soft);
+  outline: 0;
+}
+
+.director-search-result span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.director-search-result strong,
+.director-search-result small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.director-search-result strong {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.director-search-result small {
+  color: var(--director-muted);
+  font-size: 11px;
 }
 
 .director-icon-button {
