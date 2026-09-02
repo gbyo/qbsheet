@@ -26,6 +26,10 @@ use serde::Serialize;
 use serde_json::Value;
 
 /// The keychain service every QBSheet Live credential is filed under.
+///
+/// Only used on macOS where the system keychain is available; on other
+/// platforms the credential store is explicitly unavailable.
+#[cfg(target_os = "macos")]
 pub const CREDENTIAL_SERVICE: &str = "com.qbsheet.director.qblive";
 
 #[derive(Debug, thiserror::Error)]
