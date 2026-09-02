@@ -101,6 +101,8 @@ async function send(client: QbliveClient, item: LiveOutboxItem): Promise<number>
       return (await client.finalize(item.revision, payload.snapshot as QbliveSnapshot)).revision;
     case 'delete':
       return (await client.destroy()).revision;
+    case 'unpublish':
+      return (await client.unpublish()).revision;
   }
 }
 
@@ -120,6 +122,33 @@ export interface WorkerHooks {
  * lookup — it is how quickly the worker notices a new item. The *publication* cadence comes from
  * how often Director's projection changes, and from the transient coalescing in `collapseOutbox`.
  */
+/**
+ * How long an `in-flight` item may stay stranded before it is recovered.
+ * A crash, a tab close, or a setup-token race can leave an item in-flight
+ * with no worker to finish it. On restart the next tick recovers it.
+ */
+export const staleInFlightMs = 30_000;
+
+export function recoverStaleInFlight(
+  publication: LivePublication,
+  at = new Date(),
+): LivePublication {
+  let changed = false;
+  const outbox = publication.outbox.map((item) => {
+    if (item.state !== 'in-flight') return item;
+    const last = item.lastAttemptAt ? Date.parse(item.lastAttemptAt) : 0;
+    if (Number.isFinite(last) && at.getTime() - last < staleInFlightMs) return item;
+    changed = true;
+    return {
+      ...item,
+      state: 'failed' as const,
+      lastError: item.lastError ?? 'Publish was interrupted before it could finish.',
+      nextAttemptAt: at.toISOString(),
+    };
+  });
+  return changed ? { ...publication, outbox } : publication;
+}
+
 export function startPublicationWorker(hooks: WorkerHooks, intervalMs = 1000): () => void {
   let stopped = false;
   let running = false;
@@ -128,14 +157,20 @@ export function startPublicationWorker(hooks: WorkerHooks, intervalMs = 1000): (
     if (stopped || running) return;
     running = true;
     try {
-      const { publication, snapshot } = hooks.read();
+      let { publication, snapshot } = hooks.read();
       if (!publication || !publication.settings.enabled) return;
+      // Recover any work that was left in-flight by a previous crash or tab close.
+      const recovered = recoverStaleInFlight(publication);
+      if (recovered !== publication) {
+        publication = recovered;
+        await hooks.write(publication);
+      }
       const next = nextOutboxItem(publication);
       if (!next) return;
+      const client = hooks.client(publication);
+      if (!client) return;
       const inFlight = markOutboxItemInFlight(publication, next.id);
       await hooks.write(inFlight);
-      const client = hooks.client(inFlight);
-      if (!client) return;
       const attempt = await publishOnce(inFlight, client, snapshot);
       if (attempt) await hooks.write(attempt.publication);
     } catch {

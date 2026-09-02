@@ -18,6 +18,7 @@ import {
   type IanaTimeZone,
   type LiveAnnouncement,
   type LiveBackendDescriptor,
+  type LiveOutboxItem,
   type LivePublicationSettings,
   type PlayerGameStat,
   type ProtestScoreAdjustment,
@@ -30,6 +31,8 @@ import { createDirectorRepository, normalizeDirectorState, type DirectorReposito
 import {
   composeAnnouncement,
   derivePublication,
+  enqueueDelete,
+  enqueueUnpublish,
   markOutboxItemInFlight,
   nextOutboxItem,
 } from '../live/publication';
@@ -2961,30 +2964,73 @@ export function useDirectorController(repository = createDirectorRepository()): 
       unpublish: () => {
         commit((draft) => {
           if (!draft.live) return;
-          draft.live = { ...draft.live, lifecycle: 'unpublished' };
+          if (draft.live.lifecycle === 'unpublished') return;
+          // Enqueue a durable unpublish request. The worker will send it and
+          // only move the lifecycle to `unpublished` after the backend acks.
+          draft.live = enqueueUnpublish(draft.live);
         });
-        void (async () => {
-          const client = await liveClientFor(stateRef.current.live);
-          await client?.unpublish().catch(() => undefined);
-        })();
       },
 
       destroy: () => {
         const publication = stateRef.current.live;
-        void (async () => {
-          const client = await liveClientFor(publication);
-          await client?.destroy().catch(() => undefined);
-          if (publication) await forgetLiveCredential(publication.publicationId);
-        })();
+        if (!publication) return;
+        if (publication.backend?.kind === 'local') {
+          commit((draft) => {
+            draft.live = null;
+          });
+          publishedSnapshotRef.current = null;
+          liveClientRef.current = null;
+          return;
+        }
+        // Enqueue a durable delete. The worker will drive it to completion
+        // and only then will we clear local state and the credential.
+        // Keep the publication visible until the remote is gone so a retry
+        // is possible and we never lose the credential while the tournament
+        // is still public.
         commit((draft) => {
-          draft.live = null;
+          if (!draft.live) return;
+          // Avoid enqueuing twice if a delete is already pending.
+          if (draft.live.outbox.some((item) => item.kind === 'delete')) return;
+          draft.live = enqueueDelete(draft.live);
         });
-        publishedSnapshotRef.current = null;
-        liveClientRef.current = null;
+        // Do not clear publishedSnapshotRef or liveClientRef yet – the worker
+        // needs them to finish the delete. They will be cleared after the
+        // outbox reports the delete as acknowledged (see effect below).
+        void (async () => {
+          // If the publication was already deleted locally (should not happen),
+          // ensure we don't leak a credential.
+          const current = stateRef.current.live;
+          if (!current && publication) {
+            await forgetLiveCredential(publication.publicationId).catch(() => undefined);
+          }
+        })();
       },
     }),
     [commit, liveClientFor],
   );
+
+  const prevOutboxRef = useRef<LiveOutboxItem[]>([]);
+
+  useEffect(() => {
+    const publication = state.live;
+    if (!publication) {
+      prevOutboxRef.current = [];
+      return;
+    }
+    const prevHadDelete = prevOutboxRef.current.some((item) => item.kind === 'delete');
+    const nowHasDelete = publication.outbox.some((item) => item.kind === 'delete');
+    const hadDeleteAndNowGone = prevHadDelete && !nowHasDelete && publication.outbox.length === 0;
+    if (hadDeleteAndNowGone) {
+      const publicationId = publication.publicationId;
+      commit((draft) => {
+        draft.live = null;
+      });
+      publishedSnapshotRef.current = null;
+      liveClientRef.current = null;
+      void forgetLiveCredential(publicationId).catch(() => undefined);
+    }
+    prevOutboxRef.current = [...publication.outbox];
+  }, [state.live, commit]);
 
   return {
     state,

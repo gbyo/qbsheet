@@ -233,6 +233,57 @@ function basePayloadRevision(item: LiveOutboxItem): number {
   return payload?.baseRevision ?? 0;
 }
 
+export function enqueueUnpublish(
+  publication: LivePublication,
+  at = new Date(),
+): LivePublication {
+  if (publication.lifecycle === 'unpublished') return publication;
+  if (publication.outbox.some((item) => item.kind === 'unpublish' && item.state !== 'done')) {
+    return publication;
+  }
+  const item: LiveOutboxItem = {
+    id: newDirectorId('liveout'),
+    revision: publication.sync.localRevision,
+    kind: 'unpublish',
+    payload: {},
+    state: 'pending',
+    attempts: 0,
+    createdAt: at.toISOString(),
+    nextAttemptAt: at.toISOString(),
+  };
+  return {
+    ...publication,
+    outbox: [...publication.outbox, item],
+    sync: { ...publication.sync, pendingItems: publication.outbox.length + 1 },
+    updatedAt: at.toISOString(),
+  };
+}
+
+export function enqueueDelete(
+  publication: LivePublication,
+  at = new Date(),
+): LivePublication {
+  if (publication.outbox.some((item) => item.kind === 'delete' && item.state !== 'done')) {
+    return publication;
+  }
+  const item: LiveOutboxItem = {
+    id: newDirectorId('liveout'),
+    revision: publication.sync.localRevision,
+    kind: 'delete',
+    payload: {},
+    state: 'pending',
+    attempts: 0,
+    createdAt: at.toISOString(),
+    nextAttemptAt: at.toISOString(),
+  };
+  return {
+    ...publication,
+    outbox: [...publication.outbox, item],
+    sync: { ...publication.sync, pendingItems: publication.outbox.length + 1 },
+    updatedAt: at.toISOString(),
+  };
+}
+
 /**
  * Record a successful publish.
  *
@@ -246,14 +297,15 @@ export function acknowledgeOutboxItem(
   acknowledgedRevision: number,
   at = new Date(),
 ): LivePublication {
-  const outbox = publication.outbox.filter((item) => item.id !== itemId);
-  return {
+  const item = publication.outbox.find((entry) => entry.id === itemId);
+  const outbox = publication.outbox.filter((entry) => entry.id !== itemId);
+  const base: LivePublication = {
     ...publication,
     outbox,
     sync: {
       ...publication.sync,
       acknowledgedRevision,
-      pendingItems: outbox.filter((item) => item.state !== 'done').length,
+      pendingItems: outbox.filter((entry) => entry.state !== 'done').length,
       lastSuccessAt: at.toISOString(),
       lastAttemptAt: at.toISOString(),
       lastError: null,
@@ -261,6 +313,10 @@ export function acknowledgeOutboxItem(
     },
     updatedAt: at.toISOString(),
   };
+  if (item?.kind === 'unpublish') {
+    return { ...base, lifecycle: 'unpublished' as const };
+  }
+  return base;
 }
 
 /** The retry schedule: exponential with jitter, capped so a long outage still retries every minute. */
