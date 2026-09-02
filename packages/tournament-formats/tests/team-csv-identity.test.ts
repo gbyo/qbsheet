@@ -30,6 +30,43 @@ describe('team CSV fallback identity', () => {
     expect(imported.value[0].players?.map((player) => player.name)).toEqual(['Alice', 'Bob']);
   });
 
+  test('gives distinct ids to identities that slug to the same generated id', () => {
+    const imported = importTeamsCsv(['team_name,organization_id,letter', 'Wren,,A-B', 'Wren,A,B'].join('\n'));
+
+    expect(imported.ok).toBe(true);
+    if (!imported.ok) return;
+    expect(imported.value).toHaveLength(2);
+    expect(
+      imported.value.map((team) => ({
+        id: team.id,
+        organizationId: team.organizationId,
+        letter: team.letter,
+      })),
+    ).toEqual([
+      { id: 'team_wren-a-b', organizationId: undefined, letter: 'A-B' },
+      { id: 'team_wren-a-b-2', organizationId: 'A', letter: 'B' },
+    ]);
+  });
+
+  test('never renames an explicit team id to resolve a generated collision', () => {
+    const imported = importTeamsCsv(
+      [
+        'team_name,organization_id,letter,team_id',
+        'Wren,,A-B,',
+        'Wren,A,B,team_wren-a-b-2',
+        'Wren,C,D,team_wren-a-b',
+      ].join('\n'),
+    );
+
+    expect(imported.ok).toBe(true);
+    if (!imported.ok) return;
+    expect(imported.value.map((team) => team.id)).toEqual([
+      'team_wren-a-b-3',
+      'team_wren-a-b-2',
+      'team_wren-a-b',
+    ]);
+  });
+
   test('keeps the legacy generated id when no organization or letter is present', () => {
     const imported = importTeamsCsv('team_name,organization_id,letter\nAiken,,');
 
