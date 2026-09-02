@@ -692,31 +692,42 @@ function rulesFromInterchange(
     }
     return undefined;
   };
-  return {
-    tossupValue: firstNumber(rules.tossupValue, rules.tossupPoints),
-    powerValue: firstNumber(rules.powerValue, rules.powerPoints),
-    negValue: firstNumber(rules.negValue, rules.negPoints),
-    bonusValue: firstNumber(rules.bonusValue, rules.bonusPoints),
-    tossupCount: firstNumber(rules.tossupCount, rules.tossupsPerGame),
-    bonusParts: firstNumber(rules.bonusParts),
-    bouncebacks: typeof rules.bouncebacks === 'boolean' ? rules.bouncebacks : undefined,
-    overtime: typeof rules.overtime === 'boolean' ? rules.overtime : undefined,
-    lightning: typeof rules.lightning === 'boolean' ? rules.lightning : undefined,
-    maximumActivePlayers: firstNumber(rules.maximumActivePlayers, rules.maximumPlayersPerTeam),
-    regulationMinutes: firstNumber(rules.regulationMinutes),
-    tiebreakers: Array.isArray(rules.tiebreakers)
-      ? rules.tiebreakers.filter(
-          (value): value is NonNullable<DirectorState['tournament']>['rules']['tiebreakers'][number] =>
-            value === 'head-to-head' ||
-            value === 'record' ||
-            value === 'points' ||
-            value === 'margin' ||
-            value === 'powers' ||
-            value === 'gets' ||
-            value === 'playoff',
-        )
-      : undefined,
-  };
+  const result: Partial<
+    DirectorState['tournament'] extends infer T ? (T extends { rules: infer R } ? R : never) : never
+  > = {};
+  const tossupValue = firstNumber(rules.tossupValue, rules.tossupPoints);
+  if (tossupValue !== undefined) result.tossupValue = tossupValue;
+  const powerValue = firstNumber(rules.powerValue, rules.powerPoints);
+  if (powerValue !== undefined) result.powerValue = powerValue;
+  const negValue = firstNumber(rules.negValue, rules.negPoints);
+  if (negValue !== undefined) result.negValue = negValue;
+  const bonusValue = firstNumber(rules.bonusValue, rules.bonusPoints);
+  if (bonusValue !== undefined) result.bonusValue = bonusValue;
+  const tossupCount = firstNumber(rules.tossupCount, rules.tossupsPerGame);
+  if (tossupCount !== undefined) result.tossupCount = tossupCount;
+  const bonusParts = firstNumber(rules.bonusParts);
+  if (bonusParts !== undefined) result.bonusParts = bonusParts;
+  if (typeof rules.bouncebacks === 'boolean') result.bouncebacks = rules.bouncebacks;
+  if (typeof rules.overtime === 'boolean') result.overtime = rules.overtime;
+  if (typeof rules.lightning === 'boolean') result.lightning = rules.lightning;
+  const maximumActivePlayers = firstNumber(rules.maximumActivePlayers, rules.maximumPlayersPerTeam);
+  if (maximumActivePlayers !== undefined) result.maximumActivePlayers = maximumActivePlayers;
+  const regulationMinutes = firstNumber(rules.regulationMinutes);
+  if (regulationMinutes !== undefined) result.regulationMinutes = regulationMinutes;
+  if (Array.isArray(rules.tiebreakers)) {
+    const filtered = rules.tiebreakers.filter(
+      (value): value is NonNullable<DirectorState['tournament']>['rules']['tiebreakers'][number] =>
+        value === 'head-to-head' ||
+        value === 'record' ||
+        value === 'points' ||
+        value === 'margin' ||
+        value === 'powers' ||
+        value === 'gets' ||
+        value === 'playoff',
+    );
+    if (filtered.length > 0 || rules.tiebreakers.length === 0) result.tiebreakers = filtered;
+  }
+  return result;
 }
 
 export function exportArchiveBytes(state: DirectorState): Uint8Array {

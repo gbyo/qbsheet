@@ -703,6 +703,12 @@ fn sync_normalized_state(
         }
     }
 
+    // Build a set of known player IDs so stale references from imported/QBJ data do not
+    // violate the player_statistics.player_id foreign key and roll back the entire save.
+    let valid_player_ids: HashSet<String> = objects(state, "players")
+        .iter()
+        .filter_map(|player| text(player, "id"))
+        .collect();
     for game in objects(state, "games") {
         let Some(game_id) = text(game, "id") else {
             continue;
@@ -777,6 +783,9 @@ fn sync_normalized_state(
                 let Some(player_id) = text(player_stat, "playerId") else {
                     continue;
                 };
+                if !valid_player_ids.contains(&player_id) {
+                    continue;
+                }
                 transaction.execute(
                     "INSERT INTO player_statistics
                         (id, game_result_id, player_id, statistics_json)
@@ -1471,7 +1480,13 @@ fn migrate(connection: &mut Connection) -> Result<(), StoreError> {
             ALTER TABLE qbtcp_sessions ADD COLUMN progress_sequence INTEGER;
             ALTER TABLE qbtcp_sessions ADD COLUMN progress_json TEXT;
 
-            ALTER TABLE protests ADD COLUMN updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP;
+            -- SQLite does not allow a non-constant DEFAULT such as CURRENT_TIMESTAMP on
+            -- ALTER TABLE ... ADD COLUMN when the table already has rows. Add the column without
+            -- the NOT NULL constraint, backfill existing rows, and rely on the application to
+            -- supply CURRENT_TIMESTAMP for new protests; the column remains nullable at the schema
+            -- level but the projection always writes a timestamp.
+            ALTER TABLE protests ADD COLUMN updated_at TEXT;
+            UPDATE protests SET updated_at = COALESCE(updated_at, CURRENT_TIMESTAMP) WHERE updated_at IS NULL;
             ALTER TABLE protests ADD COLUMN score_adjustment_json TEXT;
             ALTER TABLE protests ADD COLUMN correction_submission_id TEXT;
 

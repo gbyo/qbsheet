@@ -61,29 +61,55 @@ export class IndexedDbDirectorRepository implements DirectorRepository {
   async load(): Promise<DirectorState> {
     const database = await this.database();
     if (!database) return this.loadLocalStorage();
-    return new Promise((resolve, reject) => {
-      const transaction = database.transaction(stateStoreName, 'readonly');
-      const request = transaction.objectStore(stateStoreName).get(stateKey);
-      request.onsuccess = () => {
-        try {
-          resolve(normalizeDirectorState(request.result));
-        } catch (reason: unknown) {
-          reject(reason);
-        }
-      };
-      request.onerror = () =>
-        reject(
-          new DirectorPersistenceError('Director browser storage could not be read.', {
-            cause: request.error,
-          }),
-        );
-      transaction.onabort = () =>
-        reject(
-          new DirectorPersistenceError('Director browser storage read was aborted.', {
-            cause: transaction.error,
-          }),
-        );
-    });
+    try {
+      return await new Promise<DirectorState>((resolve, reject) => {
+        const transaction = database.transaction(stateStoreName, 'readonly');
+        const request = transaction.objectStore(stateStoreName).get(stateKey);
+        request.onsuccess = () => {
+          try {
+            resolve(normalizeDirectorState(request.result));
+          } catch (reason: unknown) {
+            if (reason instanceof Error && reason.name === 'DirectorStateVersionError') reject(reason);
+            else
+              reject(
+                new DirectorPersistenceError('Director browser storage could not be read.', {
+                  cause: reason,
+                }),
+              );
+          }
+        };
+        request.onerror = () =>
+          reject(
+            new DirectorPersistenceError('Director browser storage could not be read.', {
+              cause: request.error,
+            }),
+          );
+        transaction.onabort = () =>
+          reject(
+            new DirectorPersistenceError('Director browser storage read was aborted.', {
+              cause: transaction.error,
+            }),
+          );
+        transaction.onerror = () =>
+          reject(
+            new DirectorPersistenceError('Director browser storage could not be read.', {
+              cause: transaction.error,
+            }),
+          );
+      });
+    } catch (reason: unknown) {
+      if (reason instanceof Error && reason.name === 'DirectorStateVersionError') throw reason;
+      // IndexedDB is present but the request/transaction failed (quota, private mode, disabled
+      // origin). Try the same localStorage fallback that save() uses so a previous fallback write
+      // can still be recovered.
+      try {
+        return this.loadLocalStorage();
+      } catch {
+        throw reason instanceof DirectorPersistenceError
+          ? reason
+          : new DirectorPersistenceError('Director browser storage could not be read.', { cause: reason });
+      }
+    }
   }
 
   async save(state: DirectorState): Promise<void> {

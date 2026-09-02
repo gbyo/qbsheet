@@ -139,8 +139,18 @@ function completeState(value: Record<string, unknown>): DirectorState {
 function normalizeTournament(value: unknown): DirectorState['tournament'] {
   if (value === null || value === undefined) return null;
   if (!isRecord(value)) throw new Error('Director storage contains an invalid tournament.');
-  const rules = value.rules;
-  if (!isRecord(rules)) throw new Error('Director storage contains invalid tournament rules.');
+  const rulesValue = value.rules;
+  let rules: TournamentRules;
+  if (rulesValue === undefined || rulesValue === null) {
+    rules = structuredClone(emptyDirectorState().tournament?.rules ?? ({} as TournamentRules));
+    // Provide a fresh default copy; do not reuse a shared mutable default object.
+    if (!rules || typeof rules !== 'object') {
+      throw new Error('Director storage contains invalid tournament rules.');
+    }
+  } else {
+    if (!isRecord(rulesValue)) throw new Error('Director storage contains invalid tournament rules.');
+    rules = rulesValue as unknown as TournamentRules;
+  }
   const id = stringOrNull(value.id);
   if (!id) throw new Error('Director storage contains a tournament without an id.');
   return {
@@ -150,7 +160,7 @@ function normalizeTournament(value: unknown): DirectorState['tournament'] {
     venue: stringOrEmpty(value.venue),
     organizer: stringOrEmpty(value.organizer),
     status: isTournamentStatus(value.status) ? value.status : 'draft',
-    rules: rules as unknown as TournamentRules,
+    rules,
     formatId: stringOrNull(value.formatId),
     currentPhaseId: stringOrNull(value.currentPhaseId),
     currentPacketId: stringOrNull(value.currentPacketId),
@@ -203,16 +213,20 @@ function supersedeDuplicateAcceptedSubmissions(value: unknown): ResultSubmission
   }
   for (const entries of byGame.values()) {
     if (entries.length < 2) continue;
-    entries.sort((left, right) =>
-      (left.acceptedAt ?? left.receivedAt).localeCompare(right.acceptedAt ?? right.receivedAt),
+    entries.sort(
+      (left, right) =>
+        (left.acceptedAt ?? left.receivedAt).localeCompare(right.acceptedAt ?? right.receivedAt) ||
+        left.id.localeCompare(right.id),
     );
     const current = entries.at(-1);
     if (!current) continue;
     for (const previous of entries.slice(0, -1)) {
       previous.status = 'superseded';
       previous.supersededBySubmissionId = current.id;
-      current.supersedesSubmissionId ??= previous.id;
     }
+    // Point to the immediately preceding accepted submission, not the oldest.
+    const predecessor = entries.at(-2);
+    if (predecessor) current.supersedesSubmissionId = predecessor.id;
   }
   return submissions;
 }
@@ -240,8 +254,9 @@ function supersedeDuplicateScheduledSubmissions(state: DirectorState): ResultSub
     for (const previous of entries.slice(0, -1)) {
       previous.status = 'superseded';
       previous.supersededBySubmissionId = current.id;
-      current.supersedesSubmissionId ??= previous.id;
     }
+    const predecessor = entries.at(-2);
+    if (predecessor) current.supersedesSubmissionId = predecessor.id;
   }
   return state.submissions;
 }

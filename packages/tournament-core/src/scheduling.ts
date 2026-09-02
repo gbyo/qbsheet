@@ -762,6 +762,7 @@ export function generateRoundRobinSchedule(options: RoundRobinScheduleOptions): 
       : options.teams.length % 2 === 0
         ? planned.rounds.length
         : null);
+  const effectiveRounds = planned.rounds.map((round) => round.roundDefinition);
   const validation = validateSchedule(assigned.games, options.teams, {
     rooms: options.rooms,
     roomIds: options.roomIds,
@@ -773,7 +774,7 @@ export function generateRoundRobinSchedule(options: RoundRobinScheduleOptions): 
     requireCompleteRounds: true,
     phaseId: options.phaseId,
     poolId: options.poolId ?? null,
-    rounds: options.rounds,
+    rounds: effectiveRounds,
   });
   issues.push(...validation);
   const games = hasStructuralScheduleError(issues) ? [] : assigned.games;
@@ -1011,6 +1012,7 @@ export function generatePoolSchedule(options: PoolScheduleOptions): GeneratedSch
   });
   issues.push(...validation);
   for (const [poolId, plan] of poolPlans) {
+    const effectivePoolRounds = plan.rounds.map((round) => round.roundDefinition);
     issues.push(
       ...validateSchedule(
         assigned.games.filter((game) => game.poolId === poolId),
@@ -1026,7 +1028,7 @@ export function generatePoolSchedule(options: PoolScheduleOptions): GeneratedSch
           requireCompleteRounds: true,
           phaseId: options.phaseId,
           poolId,
-          rounds: options.roundDefinitionsByPool?.[poolId] ?? options.rounds,
+          rounds: effectivePoolRounds,
         },
       ),
     );

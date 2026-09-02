@@ -935,6 +935,13 @@ export function useDirectorController(repository = createDirectorRepository()): 
 
       const generatedRound = structuredClone(generated.round);
       const generatedGames = structuredClone(generated.games);
+      const snapshotPhase = snapshot.phases.find((entry) => entry.id === generatedRound.phaseId);
+      if (!snapshotPhase || snapshot.tournament?.currentPhaseId !== snapshotPhase.id) {
+        return {
+          conflicts: [...conflicts, 'The current phase changed before the generated round could be saved.'],
+          generated: false,
+        };
+      }
       commit((draft) => {
         const phase = draft.phases.find((entry) => entry.id === generatedRound.phaseId);
         if (!phase || draft.tournament?.currentPhaseId !== phase.id) return;
@@ -1095,6 +1102,19 @@ export function useDirectorController(repository = createDirectorRepository()): 
         ) {
           draft.tournament.status = 'complete';
           draft.tournament.updatedAt = isoNow();
+        }
+        // Finished rooms are room-session state, not just a one-way flag after a live game.
+        // Resetting finished rooms that remain marked available lets the next round reuse them
+        // without loosening releaseRound's status === 'available' gate.
+        const closingGameRoomIds = new Set(
+          draft.scheduledGames
+            .filter((game) => game.roundId === roundId && game.roomId)
+            .map((game) => game.roomId as DirectorId),
+        );
+        for (const room of draft.rooms) {
+          if (room.status === 'finished' && closingGameRoomIds.has(room.id)) {
+            room.status = room.available ? 'available' : 'offline';
+          }
         }
         draft.audit.push({
           id: newDirectorId('audit'),

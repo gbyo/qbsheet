@@ -111,6 +111,7 @@ export function runPreflight(state: DirectorState, nativeServerReady = false): P
       : undefined;
     const expectedTeams = expectedRoundTeams(state, roundPhase);
     const expectedByeCount = expectedRoundByeCount(state, roundPhase, expectedTeams.length);
+    const isHistoricalClosed = round.status === 'closed';
     const poolValid = roundPhase?.poolIds.length
       ? roundPhase.poolIds.every((poolId) => {
           const pool = state.pools.find((candidate) => candidate.id === poolId);
@@ -119,21 +120,26 @@ export function runPreflight(state: DirectorState, nativeServerReady = false): P
             (team) => team.status === 'confirmed' && pool.teamIds.includes(team.id),
           );
           const poolGames = games.filter((game) => game.poolId === pool.id);
+          // Historical closed pools should not be revalidated against the current confirmed-team set.
+          if (isHistoricalClosed) return poolGames.every((game) => typeof game.poolId === 'string');
           return scheduleIsValid(poolGames, poolTeams, {
             expectedByeCount: poolTeams.length % 2,
             allowByes: roundFormat?.allowByes,
           });
         }) && games.every((game) => roundPhase.poolIds.includes(game.poolId ?? ''))
       : true;
+    const scheduleValidForRound = isHistoricalClosed
+      ? true
+      : scheduleIsValid(games, expectedTeams, {
+          expectedByeCount,
+          allowByes: roundFormat?.allowByes,
+        });
     if (
       !membershipValid ||
       !roundPhase ||
       (roundPhase.roundIds.length > 0 && !roundPhase.roundIds.includes(round.id)) ||
       games.some((game) => game.roundId !== round.id) ||
-      !scheduleIsValid(games, expectedTeams, {
-        expectedByeCount,
-        allowByes: roundFormat?.allowByes,
-      }) ||
+      !scheduleValidForRound ||
       !poolValid
     ) {
       issues.push({
