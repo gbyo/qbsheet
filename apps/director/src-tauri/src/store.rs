@@ -9,7 +9,7 @@ use serde::Serialize;
 use serde_json::{json, Map, Value};
 use thiserror::Error;
 
-const SCHEMA_VERSION: i64 = 4;
+const SCHEMA_VERSION: i64 = 5;
 const MAX_STATE_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Debug, Error)]
@@ -221,6 +221,12 @@ impl DirectorStore {
         Ok(())
     }
 
+    /// The QBSheet Live publication, read from the normalized tables.
+    pub fn live_status(&self) -> Result<Option<crate::live::LivePublicationRow>, StoreError> {
+        let connection = self.connection.lock().map_err(|_| StoreError::Poisoned)?;
+        Ok(crate::live::read_publication(&connection)?)
+    }
+
     /// Save state and record the operation checkpoint atomically before flushing the WAL.
     pub fn checkpoint_state(&self, state: &Value, reason: &str) -> Result<StoreStatus, StoreError> {
         let state_json = encode_state(state)?;
@@ -279,6 +285,10 @@ fn sync_normalized_state(
     transaction: &rusqlite::Transaction<'_>,
     state: &Value,
 ) -> Result<(), StoreError> {
+    // In the same transaction as the document write, which is what makes the QBSheet Live outbox
+    // durable: Director cannot save an accepted result and lose the knowledge that it needs
+    // publishing. See `docs/QBLIVE.md#8-the-durable-outbox`.
+    crate::live::sync_publication(transaction, state)?;
     transaction.execute_batch(
         "DELETE FROM player_statistics;
          DELETE FROM game_results;
@@ -1517,6 +1527,17 @@ fn migrate(connection: &mut Connection) -> Result<(), StoreError> {
         )?;
     }
 
+    if current < 5 {
+        // QBSheet Live publication state. Its own module because the credential rule — that a
+        // management credential never enters this database — is easier to keep true when the
+        // schema that would have held one is written and tested in one place.
+        crate::live::create_tables(&transaction)?;
+        transaction.execute(
+            "INSERT INTO schema_migrations (version) VALUES (?1)",
+            params![5_i64],
+        )?;
+    }
+
     transaction.commit()?;
     Ok(())
 }
@@ -1576,7 +1597,7 @@ mod tests {
         let status = store.status().expect("status reads");
 
         assert_eq!(status.schema_version, SCHEMA_VERSION);
-        assert_eq!(status.migration_count, 4);
+        assert_eq!(status.migration_count, SCHEMA_VERSION);
         assert_eq!(status.journal_mode.to_lowercase(), "wal");
         assert!(status.foreign_keys);
 
@@ -1614,7 +1635,10 @@ mod tests {
         let store = DirectorStore::open(path.clone()).expect("database opens");
         let second = DirectorStore::open(path.clone()).expect("database reopens");
 
-        assert_eq!(second.status().expect("status reads").migration_count, 4);
+        assert_eq!(
+            second.status().expect("status reads").migration_count,
+            SCHEMA_VERSION
+        );
         store
             .checkpoint("before phase transition")
             .expect("checkpoint writes");

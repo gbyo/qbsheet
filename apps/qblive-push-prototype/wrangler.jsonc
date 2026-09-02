@@ -1,0 +1,11 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "qblive-push-prototype",
+  "main": "src/index.ts",
+  // The probe depends on `fetch` reaching `api-manage-broadcast.push.apple.com:2196` — a
+  // non-standard port. That is the `allow_custom_ports` behaviour, on by default as of 2024-09-02
+  // and therefore implied by this compatibility date; naming the flag explicitly is now rejected.
+  "compatibility_date": "2026-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true }
+}

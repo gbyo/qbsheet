@@ -39,6 +39,7 @@ export function directorFixture(options: FixtureOptions = {}): DirectorState {
     venue: 'Greenwood High School',
     organizer: 'Greenwood Quiz Bowl',
     status: 'running',
+    timeZone: 'America/New_York',
     rules: {
       tossupValue: 10,
       powerValue: 15,

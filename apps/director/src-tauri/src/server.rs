@@ -1556,7 +1556,7 @@ fn u32_field(object: Option<&serde_json::Map<String, Value>>, key: &str) -> Opti
     u64_field(object, key).and_then(|value| u32::try_from(value).ok())
 }
 
-fn detect_lan_address() -> Option<String> {
+pub(crate) fn detect_lan_address() -> Option<String> {
     if_addrs::get_if_addrs()
         .ok()
         .and_then(|interfaces| {

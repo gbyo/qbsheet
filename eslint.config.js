@@ -21,6 +21,8 @@ export default tseslint.config(
       'test-results/**',
       '.claude/worktrees/**',
       '.stryker-tmp/**',
+      // Wrangler's local dev bundle. Generated, and not ours to lint.
+      '**/.wrangler/**',
     ],
   },
   js.configs.recommended,
@@ -60,8 +62,27 @@ export default tseslint.config(
       // `.mjs` as well as `.ts`: the scripts here are run by `node` directly rather than compiled,
       // and one that reports what it wrote needs `console` to exist.
       'scripts/**/*.{ts,mjs}',
+      '**/scripts/**/*.{ts,mjs}',
+      'packages/*/tests/**/*.ts',
+      'packages/*/vitest.config.ts',
+      'apps/*/vitest.config.ts',
+      'apps/*/test/**/*.ts',
     ],
     languageOptions: { globals: { ...globals.node } },
+  },
+  {
+    // Cloudflare Workers. Not Node and not a browser: `workerd` supplies the web platform globals
+    // and its own `crypto`, and the runtime types come from `@cloudflare/workers-types`.
+    files: ['apps/qblive-backend-cloudflare/src/**/*.ts', 'apps/qblive-push*/src/**/*.ts'],
+    languageOptions: { globals: { ...globals.serviceworker, ...globals.browser } },
+    rules: {
+      // The vendored protocol copy is generated; its lint status is the original's.
+      '@typescript-eslint/no-empty-object-type': 'off',
+    },
+  },
+  {
+    files: ['apps/qblive-backend-cloudflare/src/env.d.ts'],
+    rules: { '@typescript-eslint/no-empty-object-type': 'off' },
   },
   {
     // The generated service worker source is a template string, not a module this config can parse.

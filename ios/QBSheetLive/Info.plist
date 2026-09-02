@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  QBSheet Live, the full App Store application.
+
+  `NSUserActivityTypes` declares the universal-link activity so the app is offered as the handler
+  for a live.qbsheet.com/t/... link. `NSSupportsLiveActivities` is what allows ActivityKit to start
+  a team Activity at all.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>$(DEVELOPMENT_LANGUAGE)</string>
+  <key>CFBundleExecutable</key>
+  <string>$(EXECUTABLE_NAME)</string>
+  <key>CFBundleIdentifier</key>
+  <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundleName</key>
+  <string>$(PRODUCT_NAME)</string>
+  <key>CFBundlePackageType</key>
+  <string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
+  <key>CFBundleDisplayName</key>
+  <string>QBSheet Live</string>
+  <key>CFBundleShortVersionString</key>
+  <string>$(MARKETING_VERSION)</string>
+  <key>CFBundleVersion</key>
+  <string>$(CURRENT_PROJECT_VERSION)</string>
+  <key>LSRequiresIPhoneOS</key>
+  <true/>
+  <key>UIRequiredDeviceCapabilities</key>
+  <array>
+    <string>arm64</string>
+  </array>
+  <key>UISupportedInterfaceOrientations</key>
+  <array>
+    <string>UIInterfaceOrientationPortrait</string>
+    <string>UIInterfaceOrientationLandscapeLeft</string>
+    <string>UIInterfaceOrientationLandscapeRight</string>
+  </array>
+  <!--
+    A Debug-only URL scheme. A universal link needs live.qbsheet.com to serve the AASA file and the
+    app to be signed with the matching Team ID; neither holds in a simulator or on CI, and without
+    this the app could not be exercised end to end before the domain exists. Stripped from Release
+    by the `#if DEBUG` in Shared/AppEntry.swift, which is the only code that reads it.
+  -->
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>com.qbsheet.live.debug</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>qbsheetlive</string>
+      </array>
+    </dict>
+  </array>
+  <key>NSUserActivityTypes</key>
+  <array>
+    <string>NSUserActivityTypeBrowsingWeb</string>
+  </array>
+  <key>NSSupportsLiveActivities</key>
+  <true/>
+  <!--
+    Frequent updates are enabled because a live score legitimately changes several times a minute
+    while a game is being played. The cadence that actually reaches APNs is coalesced to roughly one
+    update every fifteen seconds; see docs/QBLIVE.md#133-cadence.
+  -->
+  <key>NSSupportsLiveActivitiesFrequentUpdates</key>
+  <true/>
+  <key>ITSAppUsesNonExemptEncryption</key>
+  <false/>
+</dict>
+</plist>

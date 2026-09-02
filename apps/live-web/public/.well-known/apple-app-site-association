@@ -1,0 +1,21 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["TEAMID.com.qbsheet.live"],
+        "components": [
+          {
+            "/": "/t/*",
+            "comment": "A tournament. The only path QBSheet Live handles. Claiming the whole domain would take over pages that are meant to open in a browser."
+          }
+        ]
+      }
+    ]
+  },
+  "appclips": {
+    "apps": ["TEAMID.com.qbsheet.live.Clip"]
+  },
+  "webcredentials": {
+    "apps": []
+  }
+}

@@ -1,0 +1,68 @@
+{
+  "protocolVersion": 1,
+  "publicationId": "bcdfghjkmnpqrstvwxyz",
+  "revision": 43,
+  "generatedAt": "2026-09-05T14:30:00.000Z",
+  "capabilities": {
+    "snapshot": true,
+    "events": false,
+    "stream": false,
+    "applePush": false
+  },
+  "final": false,
+  "tournament": {
+    "id": "tournament-1",
+    "name": "Saturday Invitational",
+    "date": "2026-09-05",
+    "venue": "Greenwood High School",
+    "organizer": "Greenwood Quiz Bowl",
+    "timeZone": "America/New_York",
+    "status": "in-progress"
+  },
+  "teams": [
+    {
+      "id": "team-a",
+      "name": "Ninety Six A",
+      "organization": "Ninety Six",
+      "seed": 1
+    },
+    {
+      "id": "team-b",
+      "name": "Ninety Six B",
+      "organization": "Ninety Six",
+      "seed": 2
+    },
+    {
+      "id": "team-c",
+      "name": "Greenwood A",
+      "organization": "Greenwood",
+      "seed": 3
+    },
+    {
+      "id": "team-d",
+      "name": "Greenwood B",
+      "organization": "Greenwood",
+      "seed": 4
+    }
+  ],
+  "rooms": [],
+  "timeline": [
+    {
+      "id": "timeline-lunch",
+      "type": "lunch",
+      "title": "Lunch",
+      "description": "Cafeteria, first floor.",
+      "scheduledStart": "2026-09-05T12:00:00-04:00",
+      "scheduledEnd": "2026-09-05T12:45:00-04:00",
+      "teamIds": [],
+      "roomId": null,
+      "location": "Cafeteria"
+    }
+  ],
+  "schedule": [],
+  "results": [],
+  "liveGames": [],
+  "standings": [],
+  "statistics": [],
+  "announcements": []
+}

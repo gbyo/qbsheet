@@ -1,0 +1,26 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "qblive-backend",
+  "main": "src/index.ts",
+  // Custom outbound ports are not needed by this Worker, but the flag date also brings the current
+  // runtime defaults; pinning it keeps a "Deploy to Cloudflare" of this template reproducible.
+  "compatibility_date": "2026-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "QBLIVE_PUBLICATION",
+        "class_name": "QblivePublication"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      // SQLite-backed. A tournament's public state is relational and queried by revision, and the
+      // key-value backend would mean reading whole sections to answer a replay request.
+      "new_sqlite_classes": ["QblivePublication"]
+    }
+  ]
+}

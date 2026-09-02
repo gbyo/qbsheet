@@ -5,6 +5,7 @@
   "description": "QBSheet, an offline-first electronic quiz bowl scoresheet that runs entirely in the browser",
   "workspaces": [
     "apps/director",
+    "apps/live-web",
     "packages/*"
   ],
   "repository": {
@@ -50,12 +51,21 @@
     "test:browser:yellowfruit": "playwright test e2e/YellowFruitInterop.spec.ts",
     "test:mutation": "stryker run",
     "test:mutation:dry": "stryker run --dryRunOnly",
-    "prepare": "npm run build:core && npm run build --workspace=@qbsheet/tournament-core && npm run build --workspace=@qbsheet/tournament-formats"
+    "prepare": "npm run build --workspace=@qbsheet/tournament-domain && npm run build --workspace=@qbsheet/qblive-protocol && npm run build --workspace=@qbsheet/qblive-projection && npm run build --workspace=@qbsheet/qblive-activity && npm run build --workspace=@qbsheet/qblive-conformance && npm run build:core && npm run build --workspace=@qbsheet/tournament-core && npm run build --workspace=@qbsheet/tournament-formats",
+    "director:domain:test": "npm run test --workspace=@qbsheet/tournament-domain",
+    "live:dev": "npm run dev --workspace=@qbsheet/live-web",
+    "live:build": "npm run build --workspace=@qbsheet/live-web",
+    "live:test": "npm run test --workspace=@qbsheet/live-web",
+    "qblive:test": "npm run test --workspace=@qbsheet/qblive-protocol && npm run test --workspace=@qbsheet/qblive-projection && npm run test --workspace=@qbsheet/qblive-activity && npm run test --workspace=@qbsheet/qblive-conformance",
+    "qblive:fixtures": "npm run fixtures --workspace=@qbsheet/qblive-protocol",
+    "qblive:conformance": "npm run conformance --workspace=@qbsheet/qblive-conformance --",
+    "qblive:load": "npm run load --workspace=@qbsheet/qblive-conformance --"
   },
   "dependencies": {
-    "@qbsheet/tournament-core": "0.1.0",
-    "@qbsheet/tournament-formats": "0.1.0",
     "@fontsource/ibm-plex-sans": "^5.2.5",
+    "@qbsheet/tournament-core": "0.1.0",
+    "@qbsheet/tournament-domain": "0.1.0",
+    "@qbsheet/tournament-formats": "0.1.0",
     "fflate": "^0.8.3",
     "jsqr": "^1.4.0",
     "react": "^18.3.1",

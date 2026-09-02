@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The App Clip.
+
+  `parent-application-identifiers` is what makes this a Clip of QBSheet Live rather than a separate
+  app, and it is also what causes iOS to migrate the App Group container when somebody installs the
+  full app afterwards — so a spectator who followed a team in the Clip finds it already followed.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>com.apple.developer.parent-application-identifiers</key>
+  <array>
+    <string>$(AppIdentifierPrefix)com.qbsheet.live</string>
+  </array>
+  <key>com.apple.developer.associated-domains</key>
+  <array>
+    <string>appclips:live.qbsheet.com</string>
+  </array>
+  <key>com.apple.security.application-groups</key>
+  <array>
+    <string>group.com.qbsheet.live</string>
+  </array>
+  <key>aps-environment</key>
+  <string>development</string>
+</dict>
+</plist>

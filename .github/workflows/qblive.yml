@@ -1,0 +1,311 @@
+name: QBSheet Live
+
+# Separate from `ci.yml` on purpose.
+#
+# The existing scorer and Director jobs are the ones that must stay fast and must never be flaky:
+# they gate every change to the software that runs a tournament. QBSheet Live adds a Cloudflare
+# runtime, a Swift toolchain and an Xcode build, and putting those in the same workflow would make
+# a scorer typo wait on `workerd` downloading.
+#
+# What each job protects is named in its own comment. The privacy job is the one to look at first
+# if any of this is ever reorganised.
+
+on:
+  push:
+    paths:
+      - 'packages/qblive-*/**'
+      - 'packages/tournament-domain/**'
+      - 'packages/qblive-activity/**'
+      - 'apps/qblive-*/**'
+      - 'apps/live-web/**'
+      - 'src/director/live/**'
+      - 'apps/director/src-tauri/src/live*.rs'
+      - 'ios/**'
+      - 'docs/QBLIVE*.md'
+      - '.github/workflows/qblive.yml'
+  pull_request:
+    paths:
+      - 'packages/qblive-*/**'
+      - 'packages/tournament-domain/**'
+      - 'packages/qblive-activity/**'
+      - 'apps/qblive-*/**'
+      - 'apps/live-web/**'
+      - 'src/director/live/**'
+      - 'apps/director/src-tauri/src/live*.rs'
+      - 'ios/**'
+      - 'docs/QBLIVE*.md'
+      - '.github/workflows/qblive.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # The load-bearing job. A failure here means private tournament data would have been published to
+  # the internet, so it runs first, alone, and on its own.
+  privacy:
+    name: Public projection privacy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - name: Exhaustive privacy sweep over every combination of publication settings
+        run: npm run test --workspace=@qbsheet/qblive-projection
+
+  protocol:
+    name: QBLive protocol
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - name: Protocol types, JSON Schema, and the shared fixtures
+        run: npm run test --workspace=@qbsheet/qblive-protocol
+      - name: ActivityKit shard payload measurements
+        run: npm run test --workspace=@qbsheet/qblive-activity
+      - name: Conformance suite, against deliberately broken servers
+        run: npm run test --workspace=@qbsheet/qblive-conformance
+      - name: The fixtures are current
+        # The fixtures are generated from the real projection. A change to the projection that is
+        # not reflected in them would leave the Swift and Worker suites testing yesterday's shapes.
+        run: |
+          npm run fixtures --workspace=@qbsheet/qblive-protocol
+          git diff --exit-code packages/qblive-protocol/fixtures \
+            || { echo '::error::QBLive fixtures are out of date. Run: npm run fixtures --workspace=@qbsheet/qblive-protocol'; exit 1; }
+
+  live-web:
+    name: Live Web
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - run: npm run test --workspace=@qbsheet/live-web
+      - run: npm run build --workspace=@qbsheet/live-web
+      - name: The spectator bundle stays small
+        # Live Web is loaded by a few hundred phones on one school's WiFi within a minute of each
+        # other. A dependency that quietly doubles it is a room full of people waiting.
+        run: |
+          bytes=$(gzip -c apps/live-web/dist/assets/*.js | wc -c | tr -d ' ')
+          echo "Live Web JavaScript: ${bytes} bytes gzipped"
+          if [ "$bytes" -gt 120000 ]; then
+            echo "::error::Live Web's JavaScript is ${bytes} bytes gzipped, over the 120 kB budget."
+            exit 1
+          fi
+
+  cloudflare:
+    name: Cloudflare backend and push gateway
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: QBLive backend
+            directory: apps/qblive-backend-cloudflare
+          - name: Push gateway
+            directory: apps/qblive-push
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Install
+        working-directory: ${{ matrix.directory }}
+        run: npm ci
+      - name: Typecheck
+        working-directory: ${{ matrix.directory }}
+        run: npm run typecheck
+      - name: Test in workerd
+        working-directory: ${{ matrix.directory }}
+        run: npm test
+
+  vendored-protocol:
+    name: Vendored protocol is in sync
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+      # The Cloudflare backend vendors the protocol so "Deploy to Cloudflare" can build it without
+      # resolving monorepo workspace packages. A copy risks drift, so the copy is checked.
+      - name: Check the vendored copy
+        working-directory: apps/qblive-backend-cloudflare
+        run: node scripts/sync-protocol.mjs --check
+
+  conformance:
+    name: Conformance against the real backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - name: Install the backend
+        working-directory: apps/qblive-backend-cloudflare
+        run: npm ci
+      - name: Start the backend in workerd
+        working-directory: apps/qblive-backend-cloudflare
+        run: |
+          npx wrangler dev --port 8788 --ip 127.0.0.1 --var QBLIVE_SETUP_TOKEN:ci-setup-token > /tmp/backend.log 2>&1 &
+          WRANGLER_PID=$!
+          for _ in $(seq 1 40); do
+            if ! kill -0 "$WRANGLER_PID" 2>/dev/null; then
+              echo "Wrangler exited early"
+              cat /tmp/backend.log
+              exit 1
+            fi
+            if curl -sf http://127.0.0.1:8788/health > /dev/null; then break; fi
+            sleep 2
+          done
+          if ! kill -0 "$WRANGLER_PID" 2>/dev/null; then
+            echo "Wrangler exited before health check succeeded"
+            cat /tmp/backend.log
+            exit 1
+          fi
+          curl -sf http://127.0.0.1:8788/health || { cat /tmp/backend.log; exit 1; }
+      - name: Publish a fixture tournament
+        id: publish
+        run: |
+          PUBLICATION=bcdfghjkmnpqrstvwxyz
+          TOKEN=$(curl -sf -X POST http://127.0.0.1:8788/qblive/v1/manage/claim \
+            -H 'content-type: application/json' \
+            -d "{\"setupToken\":\"ci-setup-token\",\"publicationId\":\"$PUBLICATION\"}" \
+            | node -e 'process.stdin.on("data",d=>process.stdout.write(JSON.parse(d).managementToken))')
+          node -e '
+            const fs = require("node:fs");
+            const snapshot = JSON.parse(fs.readFileSync("packages/qblive-protocol/fixtures/snapshot-maximal.json","utf8"));
+            fs.writeFileSync("/tmp/publish.json", JSON.stringify({ snapshot: { ...snapshot, revision: 1 } }));
+          '
+          curl -sf -X PUT "http://127.0.0.1:8788/qblive/v1/manage/tournaments/$PUBLICATION/snapshot" \
+            -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+            --data-binary @/tmp/publish.json > /dev/null
+          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+          echo "publication=$PUBLICATION" >> "$GITHUB_OUTPUT"
+      - name: Run the conformance suite
+        run: |
+          npm run build --workspace=@qbsheet/qblive-conformance
+          node packages/qblive-conformance/dist/cli.js \
+            --origin http://127.0.0.1:8788 \
+            --publication ${{ steps.publish.outputs.publication }} \
+            --management-token ${{ steps.publish.outputs.token }}
+      - name: Backend log on failure
+        if: failure()
+        run: cat /tmp/backend.log
+
+  # macOS minutes are expensive, so the Swift work is one job and it does the two things that
+  # actually protect the product: the cross-language protocol contract, and the App Clip size gate.
+  ios:
+    name: iOS
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          xcodebuild -showsdks | grep -i ios || true
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate the project
+        working-directory: ios
+        run: xcodegen generate
+      - name: The generated project is current
+        # project.yml is the source of truth. A target added in Xcode and not in project.yml is
+        # lost on the next regeneration, and this is where that is noticed.
+        run: git diff --exit-code ios/QBSheetLive.xcodeproj || echo '::warning::ios/QBSheetLive.xcodeproj differs from project.yml'
+      - name: Shared kit tests
+        # These read the same packages/qblive-protocol/fixtures the TypeScript suite reads, so a
+        # protocol change made on one side and not the other fails here.
+        working-directory: ios/QBSheetLiveKit
+        run: |
+          xcodebuild test -scheme QBSheetLiveKit \
+            -destination 'platform=iOS Simulator,name=iPhone 16 Pro' \
+            | xcbeautify || xcodebuild test -scheme QBSheetLiveKit \
+            -destination 'platform=iOS Simulator,name=iPhone 16 Pro'
+      - name: Build the app and the App Clip
+        working-directory: ios
+        run: |
+          for scheme in QBSheetLive QBSheetLiveClip; do
+            xcodebuild -project QBSheetLive.xcodeproj -scheme "$scheme" \
+              -destination 'generic/platform=iOS Simulator' \
+              -derivedDataPath /tmp/dd CODE_SIGNING_ALLOWED=NO build
+          done
+      - name: App Clip size gate
+        # A release blocker. An App Clip over Apple's 15 MB physical-invocation limit does not
+        # launch from a printed QR code, which is this product's primary entry point, and the
+        # failure is silent. See docs/QBLIVE.md#12-app-clip-size.
+        run: ./ios/scripts/measure-app-clip.sh
+
+  rust:
+    name: Director native Live
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Install Director Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            build-essential curl file libayatana-appindicator3-dev libgtk-3-dev \
+            libssl-dev librsvg2-dev libwebkit2gtk-4.1-dev libxdo-dev wget
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            apps/director/src-tauri/target
+          key: ${{ runner.os }}-cargo-live-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-live-
+      - name: Format
+        working-directory: apps/director/src-tauri
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        working-directory: apps/director/src-tauri
+        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Test
+        working-directory: apps/director/src-tauri
+        run: cargo test --all-targets --all-features

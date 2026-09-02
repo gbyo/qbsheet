@@ -1,0 +1,1422 @@
+{
+  "protocolVersion": 1,
+  "publicationId": "bcdfghjkmnpqrstvwxyz",
+  "revision": 41,
+  "generatedAt": "2026-09-05T14:30:00.000Z",
+  "capabilities": {
+    "snapshot": true,
+    "events": true,
+    "stream": true,
+    "applePush": false
+  },
+  "final": false,
+  "tournament": {
+    "id": "tournament-1",
+    "name": "Saturday Invitational",
+    "date": "2026-09-05",
+    "venue": "Greenwood High School",
+    "organizer": "Greenwood Quiz Bowl",
+    "timeZone": "America/New_York",
+    "status": "in-progress"
+  },
+  "teams": [
+    {
+      "id": "team-a",
+      "name": "Ninety Six A",
+      "organization": "Ninety Six",
+      "seed": 1
+    },
+    {
+      "id": "team-b",
+      "name": "Ninety Six B",
+      "organization": "Ninety Six",
+      "seed": 2
+    },
+    {
+      "id": "team-c",
+      "name": "Greenwood A",
+      "organization": "Greenwood",
+      "seed": 3
+    },
+    {
+      "id": "team-d",
+      "name": "Greenwood B",
+      "organization": "Greenwood",
+      "seed": 4
+    }
+  ],
+  "rooms": [
+    {
+      "id": "room-1",
+      "name": "Room 104",
+      "building": "Main",
+      "directions": "Left past the trophy case."
+    },
+    {
+      "id": "room-2",
+      "name": "Room 212",
+      "building": "Main",
+      "directions": "Up the north stairs."
+    }
+  ],
+  "timeline": [
+    {
+      "id": "timeline-lunch",
+      "type": "lunch",
+      "title": "Lunch",
+      "description": "Cafeteria, first floor.",
+      "scheduledStart": "2026-09-05T12:00:00-04:00",
+      "scheduledEnd": "2026-09-05T12:45:00-04:00",
+      "teamIds": [],
+      "roomId": null,
+      "location": "Cafeteria"
+    }
+  ],
+  "schedule": [
+    {
+      "id": "game-1",
+      "roundId": "round-1",
+      "roundName": "Round 1",
+      "roundNumber": 1,
+      "phaseId": "phase-prelim",
+      "phaseName": "Preliminary",
+      "poolId": "pool-1",
+      "poolName": "Pool A",
+      "teamIds": [
+        "team-a",
+        "team-b"
+      ],
+      "roomId": "room-1",
+      "scheduledStart": "2026-09-05T09:00:00-04:00",
+      "state": "final"
+    },
+    {
+      "id": "game-2",
+      "roundId": "round-1",
+      "roundName": "Round 1",
+      "roundNumber": 1,
+      "phaseId": "phase-prelim",
+      "phaseName": "Preliminary",
+      "poolId": "pool-1",
+      "poolName": "Pool A",
+      "teamIds": [
+        "team-c",
+        "team-d"
+      ],
+      "roomId": "room-2",
+      "scheduledStart": "2026-09-05T09:00:00-04:00",
+      "state": "final"
+    },
+    {
+      "id": "game-3",
+      "roundId": "round-2",
+      "roundName": "Round 2",
+      "roundNumber": 2,
+      "phaseId": "phase-prelim",
+      "phaseName": "Preliminary",
+      "poolId": "pool-1",
+      "poolName": "Pool A",
+      "teamIds": [
+        "team-a",
+        "team-c"
+      ],
+      "roomId": "room-1",
+      "scheduledStart": "2026-09-05T10:00:00-04:00",
+      "state": "live"
+    }
+  ],
+  "results": [
+    {
+      "gameId": "game-1",
+      "roundId": "round-1",
+      "scores": [
+        {
+          "teamId": "team-a",
+          "score": 285
+        },
+        {
+          "teamId": "team-b",
+          "score": 190
+        }
+      ],
+      "outcome": "played",
+      "acceptedAt": "2026-09-05T09:45:00-04:00"
+    },
+    {
+      "gameId": "game-2",
+      "roundId": "round-1",
+      "scores": [
+        {
+          "teamId": "team-c",
+          "score": 240
+        },
+        {
+          "teamId": "team-d",
+          "score": 205
+        }
+      ],
+      "outcome": "played",
+      "acceptedAt": "2026-09-05T09:50:00-04:00"
+    }
+  ],
+  "liveGames": [
+    {
+      "gameId": "game-3",
+      "roundId": "round-2",
+      "teamIds": [
+        "team-a",
+        "team-c"
+      ],
+      "roomId": "room-1"
+    }
+  ],
+  "standings": [
+    {
+      "id": "standings:overall",
+      "title": "Standings",
+      "scope": "overall",
+      "scopeLabel": "Overall",
+      "columns": [
+        {
+          "id": "rank",
+          "label": "#",
+          "kind": "rank",
+          "alignment": "trailing"
+        },
+        {
+          "id": "team",
+          "label": "Team",
+          "kind": "team",
+          "alignment": "leading"
+        },
+        {
+          "id": "record",
+          "label": "W–L",
+          "kind": "record",
+          "alignment": "trailing"
+        },
+        {
+          "id": "pct",
+          "label": "Pct",
+          "kind": "decimal",
+          "precision": 3,
+          "alignment": "trailing"
+        },
+        {
+          "id": "pf",
+          "label": "PF",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Points for"
+        },
+        {
+          "id": "pa",
+          "label": "PA",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Points against"
+        },
+        {
+          "id": "ppg",
+          "label": "PPG",
+          "kind": "decimal",
+          "precision": 1,
+          "alignment": "trailing",
+          "description": "Points per game"
+        },
+        {
+          "id": "margin",
+          "label": "Marg",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Point differential"
+        }
+      ],
+      "rows": [
+        {
+          "id": "team-a",
+          "teamId": "team-a",
+          "cells": [
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": "Ninety Six A",
+              "entityId": "team-a"
+            },
+            {
+              "value": "1-0",
+              "display": "1-0"
+            },
+            {
+              "value": 1,
+              "display": "1.000"
+            },
+            {
+              "value": 285,
+              "display": "285"
+            },
+            {
+              "value": 190,
+              "display": "190"
+            },
+            {
+              "value": 285,
+              "display": "285.0"
+            },
+            {
+              "value": 95,
+              "display": "95"
+            }
+          ]
+        },
+        {
+          "id": "team-c",
+          "teamId": "team-c",
+          "cells": [
+            {
+              "value": 2,
+              "display": "2"
+            },
+            {
+              "value": "Greenwood A",
+              "entityId": "team-c"
+            },
+            {
+              "value": "1-0",
+              "display": "1-0"
+            },
+            {
+              "value": 1,
+              "display": "1.000"
+            },
+            {
+              "value": 240,
+              "display": "240"
+            },
+            {
+              "value": 205,
+              "display": "205"
+            },
+            {
+              "value": 240,
+              "display": "240.0"
+            },
+            {
+              "value": 35,
+              "display": "35"
+            }
+          ]
+        },
+        {
+          "id": "team-d",
+          "teamId": "team-d",
+          "cells": [
+            {
+              "value": 3,
+              "display": "3"
+            },
+            {
+              "value": "Greenwood B",
+              "entityId": "team-d"
+            },
+            {
+              "value": "0-1",
+              "display": "0-1"
+            },
+            {
+              "value": 0,
+              "display": "0.000"
+            },
+            {
+              "value": 205,
+              "display": "205"
+            },
+            {
+              "value": 240,
+              "display": "240"
+            },
+            {
+              "value": 205,
+              "display": "205.0"
+            },
+            {
+              "value": -35,
+              "display": "-35"
+            }
+          ]
+        },
+        {
+          "id": "team-b",
+          "teamId": "team-b",
+          "cells": [
+            {
+              "value": 4,
+              "display": "4"
+            },
+            {
+              "value": "Ninety Six B",
+              "entityId": "team-b"
+            },
+            {
+              "value": "0-1",
+              "display": "0-1"
+            },
+            {
+              "value": 0,
+              "display": "0.000"
+            },
+            {
+              "value": 190,
+              "display": "190"
+            },
+            {
+              "value": 285,
+              "display": "285"
+            },
+            {
+              "value": 190,
+              "display": "190.0"
+            },
+            {
+              "value": -95,
+              "display": "-95"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "standings:phase:phase-prelim",
+      "title": "Standings",
+      "scope": "phase:phase-prelim",
+      "scopeLabel": "Preliminary",
+      "columns": [
+        {
+          "id": "rank",
+          "label": "#",
+          "kind": "rank",
+          "alignment": "trailing"
+        },
+        {
+          "id": "team",
+          "label": "Team",
+          "kind": "team",
+          "alignment": "leading"
+        },
+        {
+          "id": "record",
+          "label": "W–L",
+          "kind": "record",
+          "alignment": "trailing"
+        },
+        {
+          "id": "pct",
+          "label": "Pct",
+          "kind": "decimal",
+          "precision": 3,
+          "alignment": "trailing"
+        },
+        {
+          "id": "pf",
+          "label": "PF",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Points for"
+        },
+        {
+          "id": "pa",
+          "label": "PA",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Points against"
+        },
+        {
+          "id": "ppg",
+          "label": "PPG",
+          "kind": "decimal",
+          "precision": 1,
+          "alignment": "trailing",
+          "description": "Points per game"
+        },
+        {
+          "id": "margin",
+          "label": "Marg",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Point differential"
+        }
+      ],
+      "rows": [
+        {
+          "id": "team-a",
+          "teamId": "team-a",
+          "cells": [
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": "Ninety Six A",
+              "entityId": "team-a"
+            },
+            {
+              "value": "1-0",
+              "display": "1-0"
+            },
+            {
+              "value": 1,
+              "display": "1.000"
+            },
+            {
+              "value": 285,
+              "display": "285"
+            },
+            {
+              "value": 190,
+              "display": "190"
+            },
+            {
+              "value": 285,
+              "display": "285.0"
+            },
+            {
+              "value": 95,
+              "display": "95"
+            }
+          ]
+        },
+        {
+          "id": "team-c",
+          "teamId": "team-c",
+          "cells": [
+            {
+              "value": 2,
+              "display": "2"
+            },
+            {
+              "value": "Greenwood A",
+              "entityId": "team-c"
+            },
+            {
+              "value": "1-0",
+              "display": "1-0"
+            },
+            {
+              "value": 1,
+              "display": "1.000"
+            },
+            {
+              "value": 240,
+              "display": "240"
+            },
+            {
+              "value": 205,
+              "display": "205"
+            },
+            {
+              "value": 240,
+              "display": "240.0"
+            },
+            {
+              "value": 35,
+              "display": "35"
+            }
+          ]
+        },
+        {
+          "id": "team-d",
+          "teamId": "team-d",
+          "cells": [
+            {
+              "value": 3,
+              "display": "3"
+            },
+            {
+              "value": "Greenwood B",
+              "entityId": "team-d"
+            },
+            {
+              "value": "0-1",
+              "display": "0-1"
+            },
+            {
+              "value": 0,
+              "display": "0.000"
+            },
+            {
+              "value": 205,
+              "display": "205"
+            },
+            {
+              "value": 240,
+              "display": "240"
+            },
+            {
+              "value": 205,
+              "display": "205.0"
+            },
+            {
+              "value": -35,
+              "display": "-35"
+            }
+          ]
+        },
+        {
+          "id": "team-b",
+          "teamId": "team-b",
+          "cells": [
+            {
+              "value": 4,
+              "display": "4"
+            },
+            {
+              "value": "Ninety Six B",
+              "entityId": "team-b"
+            },
+            {
+              "value": "0-1",
+              "display": "0-1"
+            },
+            {
+              "value": 0,
+              "display": "0.000"
+            },
+            {
+              "value": 190,
+              "display": "190"
+            },
+            {
+              "value": 285,
+              "display": "285"
+            },
+            {
+              "value": 190,
+              "display": "190.0"
+            },
+            {
+              "value": -95,
+              "display": "-95"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "standings:pool:pool-1",
+      "title": "Standings",
+      "scope": "pool:pool-1",
+      "scopeLabel": "Preliminary · Pool A",
+      "columns": [
+        {
+          "id": "rank",
+          "label": "#",
+          "kind": "rank",
+          "alignment": "trailing"
+        },
+        {
+          "id": "team",
+          "label": "Team",
+          "kind": "team",
+          "alignment": "leading"
+        },
+        {
+          "id": "record",
+          "label": "W–L",
+          "kind": "record",
+          "alignment": "trailing"
+        },
+        {
+          "id": "pct",
+          "label": "Pct",
+          "kind": "decimal",
+          "precision": 3,
+          "alignment": "trailing"
+        },
+        {
+          "id": "pf",
+          "label": "PF",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Points for"
+        },
+        {
+          "id": "pa",
+          "label": "PA",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Points against"
+        },
+        {
+          "id": "ppg",
+          "label": "PPG",
+          "kind": "decimal",
+          "precision": 1,
+          "alignment": "trailing",
+          "description": "Points per game"
+        },
+        {
+          "id": "margin",
+          "label": "Marg",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Point differential"
+        }
+      ],
+      "rows": [
+        {
+          "id": "team-a",
+          "teamId": "team-a",
+          "cells": [
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": "Ninety Six A",
+              "entityId": "team-a"
+            },
+            {
+              "value": "1-0",
+              "display": "1-0"
+            },
+            {
+              "value": 1,
+              "display": "1.000"
+            },
+            {
+              "value": 285,
+              "display": "285"
+            },
+            {
+              "value": 190,
+              "display": "190"
+            },
+            {
+              "value": 285,
+              "display": "285.0"
+            },
+            {
+              "value": 95,
+              "display": "95"
+            }
+          ]
+        },
+        {
+          "id": "team-c",
+          "teamId": "team-c",
+          "cells": [
+            {
+              "value": 2,
+              "display": "2"
+            },
+            {
+              "value": "Greenwood A",
+              "entityId": "team-c"
+            },
+            {
+              "value": "1-0",
+              "display": "1-0"
+            },
+            {
+              "value": 1,
+              "display": "1.000"
+            },
+            {
+              "value": 240,
+              "display": "240"
+            },
+            {
+              "value": 205,
+              "display": "205"
+            },
+            {
+              "value": 240,
+              "display": "240.0"
+            },
+            {
+              "value": 35,
+              "display": "35"
+            }
+          ]
+        },
+        {
+          "id": "team-d",
+          "teamId": "team-d",
+          "cells": [
+            {
+              "value": 3,
+              "display": "3"
+            },
+            {
+              "value": "Greenwood B",
+              "entityId": "team-d"
+            },
+            {
+              "value": "0-1",
+              "display": "0-1"
+            },
+            {
+              "value": 0,
+              "display": "0.000"
+            },
+            {
+              "value": 205,
+              "display": "205"
+            },
+            {
+              "value": 240,
+              "display": "240"
+            },
+            {
+              "value": 205,
+              "display": "205.0"
+            },
+            {
+              "value": -35,
+              "display": "-35"
+            }
+          ]
+        },
+        {
+          "id": "team-b",
+          "teamId": "team-b",
+          "cells": [
+            {
+              "value": 4,
+              "display": "4"
+            },
+            {
+              "value": "Ninety Six B",
+              "entityId": "team-b"
+            },
+            {
+              "value": "0-1",
+              "display": "0-1"
+            },
+            {
+              "value": 0,
+              "display": "0.000"
+            },
+            {
+              "value": 190,
+              "display": "190"
+            },
+            {
+              "value": 285,
+              "display": "285"
+            },
+            {
+              "value": 190,
+              "display": "190.0"
+            },
+            {
+              "value": -95,
+              "display": "-95"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "statistics": [
+    {
+      "id": "team-statistics:overall",
+      "title": "Team statistics",
+      "scope": "overall",
+      "scopeLabel": "Overall",
+      "columns": [
+        {
+          "id": "team",
+          "label": "Team",
+          "kind": "team",
+          "alignment": "leading"
+        },
+        {
+          "id": "games",
+          "label": "G",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Games played"
+        },
+        {
+          "id": "powers",
+          "label": "15",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Powers"
+        },
+        {
+          "id": "gets",
+          "label": "10",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Regular tossups"
+        },
+        {
+          "id": "negs",
+          "label": "−5",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Negs"
+        },
+        {
+          "id": "ppb",
+          "label": "PPB",
+          "kind": "decimal",
+          "precision": 2,
+          "alignment": "trailing",
+          "description": "Points per bonus"
+        },
+        {
+          "id": "ppg",
+          "label": "PPG",
+          "kind": "decimal",
+          "precision": 1,
+          "alignment": "trailing"
+        }
+      ],
+      "rows": [
+        {
+          "id": "team-a",
+          "teamId": "team-a",
+          "cells": [
+            {
+              "value": "Ninety Six A",
+              "entityId": "team-a"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": 4,
+              "display": "4"
+            },
+            {
+              "value": 9,
+              "display": "9"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": 11.538461538461538,
+              "display": "11.54"
+            },
+            {
+              "value": 285,
+              "display": "285.0"
+            }
+          ]
+        },
+        {
+          "id": "team-c",
+          "teamId": "team-c",
+          "cells": [
+            {
+              "value": "Greenwood A",
+              "entityId": "team-c"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": 2,
+              "display": "2"
+            },
+            {
+              "value": 10,
+              "display": "10"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 10,
+              "display": "10.00"
+            },
+            {
+              "value": 240,
+              "display": "240.0"
+            }
+          ]
+        },
+        {
+          "id": "team-d",
+          "teamId": "team-d",
+          "cells": [
+            {
+              "value": "Greenwood B",
+              "entityId": "team-d"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": 2,
+              "display": "2"
+            },
+            {
+              "value": 8,
+              "display": "8"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": 10,
+              "display": "10.00"
+            },
+            {
+              "value": 205,
+              "display": "205.0"
+            }
+          ]
+        },
+        {
+          "id": "team-b",
+          "teamId": "team-b",
+          "cells": [
+            {
+              "value": "Ninety Six B",
+              "entityId": "team-b"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": 7,
+              "display": "7"
+            },
+            {
+              "value": 2,
+              "display": "2"
+            },
+            {
+              "value": 11.25,
+              "display": "11.25"
+            },
+            {
+              "value": 190,
+              "display": "190.0"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "team-statistics:phase:phase-prelim",
+      "title": "Team statistics",
+      "scope": "phase:phase-prelim",
+      "scopeLabel": "Preliminary",
+      "columns": [
+        {
+          "id": "team",
+          "label": "Team",
+          "kind": "team",
+          "alignment": "leading"
+        },
+        {
+          "id": "games",
+          "label": "G",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Games played"
+        },
+        {
+          "id": "powers",
+          "label": "15",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Powers"
+        },
+        {
+          "id": "gets",
+          "label": "10",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Regular tossups"
+        },
+        {
+          "id": "negs",
+          "label": "−5",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Negs"
+        },
+        {
+          "id": "ppb",
+          "label": "PPB",
+          "kind": "decimal",
+          "precision": 2,
+          "alignment": "trailing",
+          "description": "Points per bonus"
+        },
+        {
+          "id": "ppg",
+          "label": "PPG",
+          "kind": "decimal",
+          "precision": 1,
+          "alignment": "trailing"
+        }
+      ],
+      "rows": [
+        {
+          "id": "team-a",
+          "teamId": "team-a",
+          "cells": [
+            {
+              "value": "Ninety Six A",
+              "entityId": "team-a"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": 4,
+              "display": "4"
+            },
+            {
+              "value": 9,
+              "display": "9"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": 11.538461538461538,
+              "display": "11.54"
+            },
+            {
+              "value": 285,
+              "display": "285.0"
+            }
+          ]
+        },
+        {
+          "id": "team-c",
+          "teamId": "team-c",
+          "cells": [
+            {
+              "value": "Greenwood A",
+              "entityId": "team-c"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": 2,
+              "display": "2"
+            },
+            {
+              "value": 10,
+              "display": "10"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 10,
+              "display": "10.00"
+            },
+            {
+              "value": 240,
+              "display": "240.0"
+            }
+          ]
+        },
+        {
+          "id": "team-d",
+          "teamId": "team-d",
+          "cells": [
+            {
+              "value": "Greenwood B",
+              "entityId": "team-d"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": 2,
+              "display": "2"
+            },
+            {
+              "value": 8,
+              "display": "8"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": 10,
+              "display": "10.00"
+            },
+            {
+              "value": 205,
+              "display": "205.0"
+            }
+          ]
+        },
+        {
+          "id": "team-b",
+          "teamId": "team-b",
+          "cells": [
+            {
+              "value": "Ninety Six B",
+              "entityId": "team-b"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": 7,
+              "display": "7"
+            },
+            {
+              "value": 2,
+              "display": "2"
+            },
+            {
+              "value": 11.25,
+              "display": "11.25"
+            },
+            {
+              "value": 190,
+              "display": "190.0"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "team-statistics:pool:pool-1",
+      "title": "Team statistics",
+      "scope": "pool:pool-1",
+      "scopeLabel": "Preliminary · Pool A",
+      "columns": [
+        {
+          "id": "team",
+          "label": "Team",
+          "kind": "team",
+          "alignment": "leading"
+        },
+        {
+          "id": "games",
+          "label": "G",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Games played"
+        },
+        {
+          "id": "powers",
+          "label": "15",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Powers"
+        },
+        {
+          "id": "gets",
+          "label": "10",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Regular tossups"
+        },
+        {
+          "id": "negs",
+          "label": "−5",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Negs"
+        },
+        {
+          "id": "ppb",
+          "label": "PPB",
+          "kind": "decimal",
+          "precision": 2,
+          "alignment": "trailing",
+          "description": "Points per bonus"
+        },
+        {
+          "id": "ppg",
+          "label": "PPG",
+          "kind": "decimal",
+          "precision": 1,
+          "alignment": "trailing"
+        }
+      ],
+      "rows": [
+        {
+          "id": "team-a",
+          "teamId": "team-a",
+          "cells": [
+            {
+              "value": "Ninety Six A",
+              "entityId": "team-a"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": 4,
+              "display": "4"
+            },
+            {
+              "value": 9,
+              "display": "9"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": 11.538461538461538,
+              "display": "11.54"
+            },
+            {
+              "value": 285,
+              "display": "285.0"
+            }
+          ]
+        },
+        {
+          "id": "team-c",
+          "teamId": "team-c",
+          "cells": [
+            {
+              "value": "Greenwood A",
+              "entityId": "team-c"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": 2,
+              "display": "2"
+            },
+            {
+              "value": 10,
+              "display": "10"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 10,
+              "display": "10.00"
+            },
+            {
+              "value": 240,
+              "display": "240.0"
+            }
+          ]
+        },
+        {
+          "id": "team-d",
+          "teamId": "team-d",
+          "cells": [
+            {
+              "value": "Greenwood B",
+              "entityId": "team-d"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": 2,
+              "display": "2"
+            },
+            {
+              "value": 8,
+              "display": "8"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": 10,
+              "display": "10.00"
+            },
+            {
+              "value": 205,
+              "display": "205.0"
+            }
+          ]
+        },
+        {
+          "id": "team-b",
+          "teamId": "team-b",
+          "cells": [
+            {
+              "value": "Ninety Six B",
+              "entityId": "team-b"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": 7,
+              "display": "7"
+            },
+            {
+              "value": 2,
+              "display": "2"
+            },
+            {
+              "value": 11.25,
+              "display": "11.25"
+            },
+            {
+              "value": 190,
+              "display": "190.0"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "announcements": [
+    {
+      "id": "announcement-1",
+      "title": "Round 2 begins at 2:00",
+      "body": "Please be in your rooms by 1:55.",
+      "severity": "important",
+      "publishedAt": "2026-09-05T09:50:00-04:00",
+      "updatedAt": null,
+      "expiresAt": null,
+      "audienceTeamIds": []
+    }
+  ]
+}

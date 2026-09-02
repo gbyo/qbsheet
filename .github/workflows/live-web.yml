@@ -1,0 +1,97 @@
+name: Deploy QBSheet Live Web
+
+# `live.qbsheet.com` is a separate deployment from the scorer, and that separation is the point.
+#
+# The scorer sits on GitHub Pages at `qbsheet.com` with a service worker whose precache list is
+# coordinated around an in-progress game. Live Web is a different bundle, a different origin, and no
+# service worker at all. Sharing a deployment would put a spectator asset in a scorekeeper's offline
+# shell — see `vite.config.ts` and `tests/ServiceWorkerIsolation.test.ts`.
+#
+# `live.qbsheet.com` serves only: this bundle, the Apple association files, and a fallback page. It
+# never proxies tournament data; every byte of that comes from the tournament's own backend.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/live-web/**'
+      - 'packages/qblive-protocol/**'
+      - '.github/workflows/live-web.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - run: npm run test --workspace=@qbsheet/live-web
+      - run: npm run build --workspace=@qbsheet/live-web
+
+      - name: The Apple association files are present and well formed
+        # A missing or malformed AASA is the failure that looks like "the QR opens Safari instead of
+        # the app", with no error anywhere. Checking it at build time is much cheaper than
+        # discovering it at a tournament.
+        run: |
+          aasa=apps/live-web/dist/.well-known/apple-app-site-association
+          test -f "$aasa" || { echo "::error::$aasa is missing from the build"; exit 1; }
+          node -e '
+            const file = ".well-known/apple-app-site-association";
+            const data = JSON.parse(require("node:fs").readFileSync("apps/live-web/dist/" + file, "utf8"));
+            const appIDs = data?.applinks?.details?.[0]?.appIDs ?? [];
+            const clips = data?.appclips?.apps ?? [];
+            if (appIDs.length === 0 || clips.length === 0) {
+              console.error("::error::the AASA declares no app or no App Clip");
+              process.exit(1);
+            }
+            const paths = data.applinks.details[0].components.map((c) => c["/"]);
+            if (!paths.includes("/t/*")) {
+              console.error("::error::the AASA does not authorize /t/*");
+              process.exit(1);
+            }
+            if (paths.includes("*")) {
+              // Claiming the whole domain would route every page on live.qbsheet.com into the app,
+              // including ones meant to open in a browser.
+              console.error("::error::the AASA claims the whole domain; it must authorize /t/* only");
+              process.exit(1);
+            }
+            if (appIDs.concat(clips).some((id) => id.startsWith("TEAMID."))) {
+              console.error("::warning::the AASA still has the TEAMID placeholder; universal links will not work");
+            }
+          '
+
+      - name: The spectator bundle stays small
+        run: |
+          bytes=$(gzip -c apps/live-web/dist/assets/*.js | wc -c | tr -d ' ')
+          echo "Live Web JavaScript: ${bytes} bytes gzipped"
+          if [ "$bytes" -gt 120000 ]; then
+            echo "::error::Live Web's JavaScript is ${bytes} bytes gzipped, over the 120 kB budget."
+            exit 1
+          fi
+
+      - name: Upload the built site
+        uses: actions/upload-artifact@v7
+        with:
+          name: live-web
+          path: apps/live-web/dist
+          if-no-files-found: error
+
+      # The deploy step is deliberately not wired up here.
+      #
+      # `live.qbsheet.com` needs a hosting account and a token that this repository does not have,
+      # and inventing one would produce a workflow that fails on every push. Whoever owns the
+      # domain adds one step — Cloudflare Pages, Netlify, S3, another GitHub Pages site — pointing
+      # at the `live-web` artifact above. The requirements it has to satisfy are in
+      # `apps/live-web/public/.well-known/README.md`: the association file must be served as
+      # `application/json`, over HTTPS, with no redirect and no file extension.

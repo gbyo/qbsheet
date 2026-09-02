@@ -1,0 +1,32 @@
+{
+  "name": "@qbsheet/qblive-conformance",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A reusable conformance suite for QBLive v1 servers, first-party or otherwise",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "qblive-conformance": "./dist/cli.js",
+    "qblive-load": "./dist/load/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "conformance": "npm run build && node dist/cli.js",
+    "test": "vitest --run tests",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "load": "npm run build && node dist/load/cli.js"
+  },
+  "dependencies": {
+    "@qbsheet/qblive-protocol": "0.1.0"
+  }
+}

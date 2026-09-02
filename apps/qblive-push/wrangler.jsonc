@@ -1,0 +1,48 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "qblive-push",
+  "main": "src/index.ts",
+  // This Worker depends on `fetch` reaching Apple's channel-management endpoint on port 2196 — a
+  // non-standard port. That is the `allow_custom_ports` behaviour, which became the default as of
+  // 2024-09-02 and is therefore implied by this compatibility date; naming the flag explicitly is
+  // now an error rather than documentation. See docs/QBLIVE_PUSH_PROTOTYPE.md.
+  "compatibility_date": "2026-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "durable_objects": {
+    "bindings": [
+      { "name": "PUSH_PUBLICATION", "class_name": "PushPublication" },
+      { "name": "APNS_CREDENTIAL", "class_name": "ApnsCredential" }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      // PushPublication is SQLite-backed: channels and device tokens are relational and queried by
+      // audience. ApnsCredential holds one cached token in memory and needs no storage at all.
+      "new_sqlite_classes": ["PushPublication"],
+      "new_classes": ["ApnsCredential"]
+    }
+  ],
+  "queues": {
+    "producers": [{ "binding": "PUSH_QUEUE", "queue": "qblive-push" }],
+    "consumers": [
+      {
+        "queue": "qblive-push",
+        // Small batches with a short wait: a Live Activity update is worth sending within a second
+        // or two of being queued, and the coalescing that actually protects APNs already happened
+        // in the publication object before the job was enqueued.
+        "max_batch_size": 10,
+        "max_batch_timeout": 2,
+        "max_concurrency": 4,
+        "max_retries": 3,
+        "dead_letter_queue": "qblive-push-dlq"
+      }
+    ]
+  },
+  "vars": {
+    "APNS_ENVIRONMENT": "sandbox",
+    "APNS_BUNDLE_ID": "com.qbsheet.live",
+    "APNS_CLIP_BUNDLE_ID": "com.qbsheet.live.Clip"
+  }
+}
