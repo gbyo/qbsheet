@@ -27,9 +27,6 @@ use serde_json::Value;
 
 /// The keychain service every QBSheet Live credential is filed under.
 ///
-/// Only used on macOS where the system keychain is available; on other
-/// platforms the credential store is explicitly unavailable.
-#[cfg(target_os = "macos")]
 pub const CREDENTIAL_SERVICE: &str = "com.qbsheet.director.qblive";
 
 #[derive(Debug, thiserror::Error)]
@@ -65,6 +62,7 @@ pub fn is_publication_id(value: &str) -> bool {
 /// boundary explicit means the SQLite and outbox logic below is testable without a keychain, and
 /// means a platform without one degrades to a clear error rather than to a silent plaintext file.
 pub trait CredentialStore: Send + Sync {
+    fn probe(&self) -> Result<(), LiveError>;
     fn store(&self, account: &str, secret: &str) -> Result<(), LiveError>;
     fn read(&self, account: &str) -> Result<Option<String>, LiveError>;
     fn forget(&self, account: &str) -> Result<(), LiveError>;
@@ -79,10 +77,25 @@ pub trait CredentialStore: Send + Sync {
 /// tradeoff noted here rather than hidden, and the reason a future move to the Security framework
 /// would be an improvement rather than a rewrite.
 #[cfg(target_os = "macos")]
+#[derive(Default)]
 pub struct KeychainCredentialStore;
 
 #[cfg(target_os = "macos")]
 impl CredentialStore for KeychainCredentialStore {
+    fn probe(&self) -> Result<(), LiveError> {
+        const ACCOUNT: &str = "credential-store-probe";
+        self.store(ACCOUNT, "qbsheet-probe")?;
+        let read = self.read(ACCOUNT)?;
+        self.forget(ACCOUNT)?;
+        if read.as_deref() == Some("qbsheet-probe") {
+            Ok(())
+        } else {
+            Err(LiveError::CredentialStore(
+                "the operating system keychain did not retain a test credential".into(),
+            ))
+        }
+    }
+
     fn store(&self, account: &str, secret: &str) -> Result<(), LiveError> {
         let output = std::process::Command::new("security")
             .args([
@@ -144,30 +157,54 @@ impl CredentialStore for KeychainCredentialStore {
     }
 }
 
-/// Windows and Linux.
+/// Windows Credential Manager and Linux Secret Service.
 ///
-/// Not yet implemented, and deliberately an error rather than a file. A credential written to disk
-/// in plaintext because the platform's store was inconvenient is worse than a Director being told
-/// to re-enter it: the first is a silent, permanent disclosure and the second is an annoyance.
+/// `keyring` selects the native credential backend at compile time. There is deliberately no
+/// plaintext or in-memory runtime fallback: Director probes this store before consuming a one-time
+/// backend setup token, so an unavailable desktop keyring fails safely before the claim.
 #[cfg(not(target_os = "macos"))]
+#[derive(Default)]
 pub struct KeychainCredentialStore;
 
 #[cfg(not(target_os = "macos"))]
 impl CredentialStore for KeychainCredentialStore {
-    fn store(&self, _account: &str, _secret: &str) -> Result<(), LiveError> {
-        Err(LiveError::CredentialStore(
-            "This build cannot store a QBSheet Live credential securely on this platform. \
-             The credential is kept for this session only and will need re-entering."
-                .to_string(),
-        ))
+    fn probe(&self) -> Result<(), LiveError> {
+        const ACCOUNT: &str = "credential-store-probe";
+        self.store(ACCOUNT, "qbsheet-probe")?;
+        let read = self.read(ACCOUNT)?;
+        self.forget(ACCOUNT)?;
+        if read.as_deref() == Some("qbsheet-probe") {
+            Ok(())
+        } else {
+            Err(LiveError::CredentialStore(
+                "the operating system credential store did not retain a test credential".into(),
+            ))
+        }
     }
 
-    fn read(&self, _account: &str) -> Result<Option<String>, LiveError> {
-        Ok(None)
+    fn store(&self, account: &str, secret: &str) -> Result<(), LiveError> {
+        keyring::Entry::new(CREDENTIAL_SERVICE, account)
+            .and_then(|entry| entry.set_password(secret))
+            .map_err(|error| LiveError::CredentialStore(error.to_string()))
     }
 
-    fn forget(&self, _account: &str) -> Result<(), LiveError> {
-        Ok(())
+    fn read(&self, account: &str) -> Result<Option<String>, LiveError> {
+        match keyring::Entry::new(CREDENTIAL_SERVICE, account)
+            .and_then(|entry| entry.get_password())
+        {
+            Ok(secret) => Ok(Some(secret)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(error) => Err(LiveError::CredentialStore(error.to_string())),
+        }
+    }
+
+    fn forget(&self, account: &str) -> Result<(), LiveError> {
+        match keyring::Entry::new(CREDENTIAL_SERVICE, account)
+            .and_then(|entry| entry.delete_credential())
+        {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(error) => Err(LiveError::CredentialStore(error.to_string())),
+        }
     }
 }
 
@@ -177,13 +214,17 @@ impl CredentialStore for KeychainCredentialStore {
 /// platform where the Director expected it to persist, is a confusing failure. The platform without
 /// a keychain gets an explicit error instead.
 #[cfg(test)]
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct MemoryCredentialStore {
-    entries: std::sync::Mutex<std::collections::HashMap<String, String>>,
+    entries: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, String>>>,
 }
 
 #[cfg(test)]
 impl CredentialStore for MemoryCredentialStore {
+    fn probe(&self) -> Result<(), LiveError> {
+        Ok(())
+    }
+
     fn store(&self, account: &str, secret: &str) -> Result<(), LiveError> {
         self.entries
             .lock()

@@ -176,9 +176,12 @@ function publicGameState(game: ScheduledGame, hasResult: boolean): QbliveSchedul
  * game was scheduled to begin. QBSheet Live only ever states a scheduled time, so a round that has
  * a start recorded contributes it and a round that does not contributes nothing. See
  * `docs/QBLIVE.md#no-estimated-times`: an absent time is rendered as absent, never estimated.
+ *
+ * A round's actual start is not a scheduled start. Until the tournament records an explicit
+ * scheduled time for the round, `scheduledStart` is `null`.
  */
-function scheduledStartFor(round: Round | undefined, timeZone: string): string | null {
-  return zonedIsoOrNull(round?.startedAt ?? null, timeZone);
+function scheduledStartFor(game: ScheduledGame, round: Round | undefined, timeZone: string): string | null {
+  return zonedIsoOrNull(game.scheduledStart ?? round?.scheduledStart ?? null, timeZone);
 }
 
 function projectTournament(state: DirectorState, timeZone: string): QblivePublicTournament {
@@ -294,7 +297,7 @@ function projectSchedule(
       poolName: pool?.name ?? null,
       teamIds,
       roomId: settings.roomLocations ? game.roomId : null,
-      scheduledStart: scheduledStartFor(round, timeZone),
+      scheduledStart: scheduledStartFor(game, round, timeZone),
       state: publicGameState(game, resultsByGame.has(game.id)),
     });
   }

@@ -57,6 +57,7 @@
     "director:domain:test": "npm run test --workspace=@qbsheet/tournament-domain",
     "live:dev": "npm run dev --workspace=@qbsheet/live-web",
     "live:build": "npm run build --workspace=@qbsheet/live-web",
+    "live:bundle-local": "npm run build --workspace=@qbsheet/live-web && node scripts/bundle-local-live-web.mjs",
     "live:test": "npm run test --workspace=@qbsheet/live-web",
     "qblive:test": "npm run test --workspace=@qbsheet/qblive-protocol && npm run test --workspace=@qbsheet/qblive-projection && npm run test --workspace=@qbsheet/qblive-activity && npm run test --workspace=@qbsheet/qblive-conformance",
     "qblive:fixtures": "npm run fixtures --workspace=@qbsheet/qblive-protocol",

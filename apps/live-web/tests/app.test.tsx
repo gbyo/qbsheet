@@ -22,10 +22,22 @@ function bootstrapUrl(): string {
 }
 
 /** A backend that answers manifest and snapshot, and never advertises a stream. */
-function stubBackend(snapshot: unknown, options: { stream?: boolean; fail?: boolean } = {}) {
+function stubBackend(
+  snapshot: unknown,
+  options: { stream?: boolean; fail?: boolean; removed?: 404 | 410 } = {},
+) {
   return vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
     if (options.fail) throw new TypeError('Failed to fetch');
+    if (options.removed) {
+      return Response.json(
+        {
+          error: options.removed === 410 ? 'gone' : 'not-found',
+          message: 'This tournament is no longer published.',
+        },
+        { status: options.removed },
+      );
+    }
     if (url.endsWith('/manifest')) {
       return Response.json({
         ...manifestFixture,
@@ -56,6 +68,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  delete window.__QBSHEET_LIVE_LOCAL__;
   vi.restoreAllMocks();
   vi.useRealTimers();
 });
@@ -72,6 +85,24 @@ async function openFollowing(teamName = 'Ninety Six A') {
 }
 
 describe('bootstrapping', () => {
+  test('the embedded local page bootstraps every API request to its local server origin', async () => {
+    window.__QBSHEET_LIVE_LOCAL__ = {
+      publicationId,
+      backendOrigin: 'http://192.168.1.20:49152',
+    };
+    navigateTo(`https://live.qbsheet.com/live/${publicationId}`);
+    const fetchStub = stubBackend(defaultSnapshot);
+    vi.stubGlobal('fetch', fetchStub);
+    render(<App />);
+    await screen.findByText('Saturday Invitational');
+    expect(fetchStub.mock.calls.map((call) => String(call[0]))).toEqual(
+      expect.arrayContaining([
+        `http://192.168.1.20:49152/qblive/v1/tournaments/${publicationId}/manifest`,
+        `http://192.168.1.20:49152/qblive/v1/tournaments/${publicationId}/snapshot`,
+      ]),
+    );
+  });
+
   test('loads the tournament from its own backend, not from live.qbsheet.com', async () => {
     const fetchStub = stubBackend(defaultSnapshot);
     vi.stubGlobal('fetch', fetchStub);
@@ -172,6 +203,37 @@ describe('what the page must not invent', () => {
 });
 
 describe('staleness', () => {
+  test('a first-load outage shows the useful error and Retry instead of loading forever', async () => {
+    vi.stubGlobal('fetch', stubBackend(defaultSnapshot, { fail: true }));
+    render(<App />);
+    await screen.findByText('The tournament server is offline');
+    expect(screen.getByText('The tournament server could not be reached.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
+    expect(screen.queryByText('Loading…')).toBeNull();
+  });
+
+  test('a cached tournament that returns 410 is explicitly removed and never says Updated', async () => {
+    vi.stubGlobal('fetch', stubBackend(defaultSnapshot));
+    const { unmount } = render(<App />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: /Ninety Six A/ }));
+    unmount();
+
+    const gone = stubBackend(defaultSnapshot, { removed: 410 });
+    vi.stubGlobal('fetch', gone);
+    render(<App />);
+    await screen.findByText('This tournament is no longer available');
+    expect(screen.queryByText('Updated')).toBeNull();
+    const requestsAtRemoval = gone.mock.calls.length;
+    document.dispatchEvent(new Event('visibilitychange'));
+    await Promise.resolve();
+    expect(gone).toHaveBeenCalledTimes(requestsAtRemoval);
+    await user.click(screen.getByRole('button', { name: 'View saved copy' }));
+    expect(await screen.findByText('Removed')).toBeTruthy();
+    expect(screen.getByRole('status').textContent).toMatch(/Removed · saved copy/i);
+    expect(screen.queryByText('Updated')).toBeNull();
+  });
+
   test('cached data is shown with its age, never as current', async () => {
     vi.stubGlobal('fetch', stubBackend(defaultSnapshot));
     const { unmount } = render(<App />);

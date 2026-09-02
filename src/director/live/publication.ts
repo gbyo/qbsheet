@@ -40,7 +40,12 @@ import {
   projectLiveSnapshot,
   type ProjectionInput,
 } from '@qbsheet/qblive-projection';
-import type { QbliveCapabilities, QbliveSectionName, QbliveSnapshot } from '@qbsheet/qblive-protocol';
+import {
+  QBLIVE_LOCAL_CAPABILITIES,
+  type QbliveCapabilities,
+  type QbliveSectionName,
+  type QbliveSnapshot,
+} from '@qbsheet/qblive-protocol';
 
 /**
  * The capability set Director claims on behalf of its backend.
@@ -51,9 +56,10 @@ import type { QbliveCapabilities, QbliveSectionName, QbliveSnapshot } from '@qbs
  */
 export function directorCapabilities(publication: LivePublication | null): QbliveCapabilities {
   const local = publication?.backend?.kind === 'local';
+  if (local) return { ...QBLIVE_LOCAL_CAPABILITIES };
   return {
     snapshot: true,
-    events: !local,
+    events: true,
     stream: true,
     applePush: publication?.push.status === 'enabled',
   };
@@ -100,7 +106,11 @@ export function derivePublication(
   options: DeriveOptions = {},
 ): DerivedPublication {
   const publication = state.live;
-  if (!publication || !publication.settings.enabled || publication.lifecycle === 'unpublished') {
+  if (
+    !publication ||
+    !publication.settings.enabled ||
+    (publication.lifecycle !== 'live' && publication.lifecycle !== 'final')
+  ) {
     return { live: null, snapshot: null, changed: [] };
   }
   const now = options.now ?? new Date();
@@ -233,6 +243,64 @@ function basePayloadRevision(item: LiveOutboxItem): number {
   return payload?.baseRevision ?? 0;
 }
 
+export function enqueueUnpublish(publication: LivePublication, at = new Date()): LivePublication {
+  if (publication.lifecycle === 'unpublished') return publication;
+  if (publication.outbox.some((item) => item.kind === 'unpublish' && item.state !== 'done')) {
+    return publication;
+  }
+  const item: LiveOutboxItem = {
+    id: newDirectorId('liveout'),
+    revision: publication.sync.localRevision,
+    kind: 'unpublish',
+    payload: {},
+    state: 'pending',
+    attempts: 0,
+    createdAt: at.toISOString(),
+    nextAttemptAt: at.toISOString(),
+  };
+  // Unpublish supersedes projection work that has not started. A request already in flight must
+  // settle so Director never has two management requests active at once; after that, the barrier
+  // is the only request allowed through. This avoids publishing a stale queued update immediately
+  // before taking the tournament down, and derivation is disabled by the lifecycle below so
+  // nothing can appear behind the barrier.
+  const inFlight = publication.outbox.filter((entry) => entry.state === 'in-flight');
+  const outbox = [...inFlight, item];
+  return {
+    ...publication,
+    lifecycle: 'unpublishing',
+    outbox,
+    sync: { ...publication.sync, pendingItems: outbox.length },
+    updatedAt: at.toISOString(),
+  };
+}
+
+export function enqueueDelete(publication: LivePublication, at = new Date()): LivePublication {
+  if (publication.lifecycle === 'deleting') {
+    return publication;
+  }
+  const item: LiveOutboxItem = {
+    id: newDirectorId('liveout'),
+    revision: publication.sync.localRevision,
+    kind: 'delete',
+    payload: {},
+    state: 'pending',
+    attempts: 0,
+    createdAt: at.toISOString(),
+    nextAttemptAt: at.toISOString(),
+  };
+  // A delete is a terminal barrier. Work already in flight must be allowed to settle, but pending
+  // projection updates are superseded by deletion and must never be sent ahead of or behind it.
+  const inFlight = publication.outbox.filter((entry) => entry.state === 'in-flight');
+  const outbox = [...inFlight, item];
+  return {
+    ...publication,
+    lifecycle: 'deleting',
+    outbox,
+    sync: { ...publication.sync, pendingItems: outbox.length },
+    updatedAt: at.toISOString(),
+  };
+}
+
 /**
  * Record a successful publish.
  *
@@ -246,14 +314,15 @@ export function acknowledgeOutboxItem(
   acknowledgedRevision: number,
   at = new Date(),
 ): LivePublication {
-  const outbox = publication.outbox.filter((item) => item.id !== itemId);
-  return {
+  const item = publication.outbox.find((entry) => entry.id === itemId);
+  const outbox = publication.outbox.filter((entry) => entry.id !== itemId);
+  const base: LivePublication = {
     ...publication,
     outbox,
     sync: {
       ...publication.sync,
       acknowledgedRevision,
-      pendingItems: outbox.filter((item) => item.state !== 'done').length,
+      pendingItems: outbox.filter((entry) => entry.state !== 'done').length,
       lastSuccessAt: at.toISOString(),
       lastAttemptAt: at.toISOString(),
       lastError: null,
@@ -261,6 +330,10 @@ export function acknowledgeOutboxItem(
     },
     updatedAt: at.toISOString(),
   };
+  if (item?.kind === 'unpublish') {
+    return { ...base, lifecycle: 'unpublished' as const };
+  }
+  return base;
 }
 
 /** The retry schedule: exponential with jitter, capped so a long outage still retries every minute. */
@@ -363,10 +436,16 @@ export function recordOutboxFailure(
 
 /** The next item the worker should attempt, or null when nothing is due. */
 export function nextOutboxItem(publication: LivePublication, at = new Date()): LiveOutboxItem | null {
+  // Preserve request order even when a network request lasts longer than the worker interval. In
+  // particular, nothing may overtake an in-flight Unpublish or Delete lifecycle barrier.
+  if (publication.outbox.some((item) => item.state === 'in-flight')) return null;
   for (const item of publication.outbox) {
-    if (item.state === 'in-flight' || item.state === 'done') continue;
-    if (item.nextAttemptAt === null) continue;
-    if (item.nextAttemptAt && Date.parse(item.nextAttemptAt) > at.getTime()) continue;
+    if (item.state === 'done') continue;
+    // A queue is ordered work, not a bag of independently due requests. If its head is backing off
+    // or needs human attention, a newer revision must not overtake it. Lifecycle barriers discard
+    // superseded pending work when they are enqueued, so Delete/Unpublish are never trapped here.
+    if (item.nextAttemptAt === null) return null;
+    if (item.nextAttemptAt && Date.parse(item.nextAttemptAt) > at.getTime()) return null;
     return item;
   }
   return null;
@@ -416,6 +495,20 @@ export function composeAnnouncement(input: NewAnnouncementInput, at = new Date()
 export function syncSummary(publication: LivePublication | null): string {
   if (!publication || !publication.settings.enabled) return 'QBSheet Live is off.';
   if (publication.lifecycle === 'unpublished') return 'This tournament has been unpublished.';
+  if (publication.lifecycle === 'deleting') {
+    return publication.sync.lastError
+      ? publication.sync.retrying
+        ? 'Delete failed; retrying automatically.'
+        : 'Delete needs attention.'
+      : 'Deleting from backend…';
+  }
+  if (publication.lifecycle === 'unpublishing') {
+    return publication.sync.lastError
+      ? publication.sync.retrying
+        ? 'Unpublish failed; retrying automatically.'
+        : 'Unpublish needs attention.'
+      : 'Unpublishing…';
+  }
   const pending = publication.sync.pendingItems;
   if (publication.sync.lastError && pending > 0) {
     return `Live backend unreachable. ${pending} ${pending === 1 ? 'update is' : 'updates are'} queued locally. Tournament operation is unaffected.`;

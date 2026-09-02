@@ -55,6 +55,8 @@ export function migrateDirectorState(
       current = migrateV1ToV2(current);
     } else if (currentVersion === 2) {
       current = migrateV2ToV3(current);
+    } else if (currentVersion === 3) {
+      current = migrateV3ToV4(current);
     } else {
       throw new Error(`No Director migration exists for schema v${currentVersion}.`);
     }
@@ -62,6 +64,29 @@ export function migrateDirectorState(
     current.schemaVersion = currentVersion;
   }
   return current;
+}
+
+/**
+ * v4 separates the schedule, assignment release, and actual start clocks.
+ *
+ * Before v4 `Round.startedAt` was written by `releaseRound`, so every legacy value is a release
+ * timestamp, not evidence that play began. Preserve it as `releasedAt` and leave actual start
+ * unknown rather than relabelling it.
+ */
+function migrateV3ToV4(value: Record<string, unknown>): Record<string, unknown> {
+  const next = structuredClone(value);
+  next.rounds = arrayOfRecords(next.rounds, 'rounds').map((round) => ({
+    ...round,
+    scheduledStart: typeof round.scheduledStart === 'string' ? round.scheduledStart : null,
+    releasedAt:
+      typeof round.releasedAt === 'string'
+        ? round.releasedAt
+        : typeof round.startedAt === 'string'
+          ? round.startedAt
+          : null,
+    startedAt: null,
+  }));
+  return next;
 }
 
 function readVersion(value: Record<string, unknown>): number {
@@ -151,8 +176,8 @@ function completeState(value: Record<string, unknown>): DirectorState {
     formats: arrayOrEmpty(candidate.formats, 'formats'),
     phases: arrayOrEmpty(candidate.phases, 'phases'),
     pools: arrayOrEmpty(candidate.pools, 'pools'),
-    rounds: arrayOrEmpty(candidate.rounds, 'rounds'),
-    scheduledGames: arrayOrEmpty(candidate.scheduledGames, 'scheduledGames'),
+    rounds: normalizeRounds(candidate.rounds),
+    scheduledGames: normalizeScheduledGames(candidate.scheduledGames),
     games: migrateGames(candidate.games),
     submissions: supersedeDuplicateAcceptedSubmissions(candidate.submissions),
     protests: migrateProtests(candidate.protests),
@@ -167,6 +192,22 @@ function completeState(value: Record<string, unknown>): DirectorState {
   state.submissions = supersedeDuplicateScheduledSubmissions(state);
   state.packets = canonicalizePacketReferences(state);
   return state;
+}
+
+function normalizeRounds(value: unknown): DirectorState['rounds'] {
+  return arrayOrEmpty<DirectorState['rounds'][number]>(value, 'rounds').map((round) => ({
+    ...round,
+    scheduledStart: typeof round.scheduledStart === 'string' ? round.scheduledStart : null,
+    releasedAt: typeof round.releasedAt === 'string' ? round.releasedAt : null,
+    startedAt: typeof round.startedAt === 'string' ? round.startedAt : null,
+  }));
+}
+
+function normalizeScheduledGames(value: unknown): DirectorState['scheduledGames'] {
+  return arrayOrEmpty<DirectorState['scheduledGames'][number]>(value, 'scheduledGames').map((game) => ({
+    ...game,
+    scheduledStart: typeof game.scheduledStart === 'string' ? game.scheduledStart : null,
+  }));
 }
 
 function normalizeTournament(value: unknown): DirectorState['tournament'] {
@@ -289,7 +330,9 @@ function isLiveLifecycle(value: unknown): value is NonNullable<DirectorState['li
     value === 'configuring' ||
     value === 'live' ||
     value === 'final' ||
-    value === 'unpublished'
+    value === 'unpublishing' ||
+    value === 'unpublished' ||
+    value === 'deleting'
   );
 }
 

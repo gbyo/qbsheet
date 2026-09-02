@@ -30,7 +30,7 @@ import { qrSvg } from './qr';
 import { syncSummary } from './publication';
 
 export interface LiveViewActions {
-  enable(backend: LiveBackendDescriptor, setupToken: string | null): void;
+  enable(backend: LiveBackendDescriptor, setupToken: string | null): Promise<void>;
   disable(): void;
   updateSettings(changes: Partial<LivePublicationSettings>): void;
   publishAnnouncement(input: {
@@ -108,27 +108,41 @@ function SetupPanel({
   const [setupToken, setSetupToken] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
-  const submit = (): void => {
+  const submit = async (): Promise<void> => {
+    if (submitting) return;
     setError(null);
     const trimmed = origin.trim().replace(/\/+$/, '');
-    if (!trimmed) {
+    if (kind !== 'local' && !trimmed) {
       setError('Enter the address of the tournament server.');
       return;
     }
     try {
       // Validated here rather than after the round trip, so a typo is a sentence rather than a
       // failed request. The same validator the clients use.
-      buildBootstrapUrl({ publicationId: newPublicationId(), backendOrigin: trimmed });
+      if (kind !== 'local') {
+        buildBootstrapUrl({ publicationId: newPublicationId(), backendOrigin: trimmed });
+      }
     } catch (reason) {
       setError(reason instanceof QbliveBootstrapError ? reason.message : 'That address is not valid.');
       return;
     }
-    actions.enable(
-      { kind, origin: trimmed, displayName: displayName.trim() || undefined },
-      kind === 'local' ? null : setupToken.trim() || null,
-    );
+    setSubmitting(true);
     onAnnounce('Connecting to the QBSheet Live backend.');
+    try {
+      await actions.enable(
+        { kind, origin: kind === 'local' ? '' : trimmed, displayName: displayName.trim() || undefined },
+        kind === 'local' ? null : setupToken.trim() || null,
+      );
+      onAnnounce('QBSheet Live setup completed. The initial snapshot is queued for publication.');
+    } catch (reason) {
+      setError(
+        reason instanceof Error ? reason.message : 'The QBSheet Live backend could not be configured.',
+      );
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -150,7 +164,11 @@ function SetupPanel({
           <BackendChoice
             id="cloudflare"
             selected={kind}
-            onSelect={setKind}
+            onSelect={(next) => {
+              setKind(next);
+              setError(null);
+            }}
+            disabled={submitting}
             title="Set up with Cloudflare"
             badge="Recommended"
             description="A Worker and a Durable Object in your own Cloudflare account. Deploy the template, paste the address and the one-time setup token."
@@ -158,40 +176,52 @@ function SetupPanel({
           <BackendChoice
             id="custom"
             selected={kind}
-            onSelect={setKind}
+            onSelect={(next) => {
+              setKind(next);
+              setError(null);
+            }}
+            disabled={submitting}
             title="Connect a custom server"
             badge="Advanced"
-            description="Any server that implements QBLive v1. Director runs conformance checks before publishing."
+            description="Any server that implements QBLive v1. Director checks the address and protocol version before publishing; full conformance is available via the QBLive conformance suite."
           />
           <BackendChoice
             id="local"
             selected={kind}
-            onSelect={setKind}
+            onSelect={(next) => {
+              setKind(next);
+              setError(null);
+            }}
+            disabled={submitting}
             title="Local network only"
             badge="No internet"
             description="Director serves QBSheet Live on this network. Participants use the web client; the App Clip needs the internet and will not be offered."
           />
         </div>
 
-        <FormField
-          label={kind === 'local' ? 'Local address' : 'Server address'}
-          hint={
-            kind === 'cloudflare'
-              ? 'The Worker URL Cloudflare gave you, for example https://qblive-backend.your-name.workers.dev'
-              : kind === 'local'
-                ? 'Filled in automatically when Director starts the local server.'
+        {kind !== 'local' && (
+          <FormField
+            label="Server address"
+            hint={
+              kind === 'cloudflare'
+                ? 'The Worker URL Cloudflare gave you, for example https://qblive-backend.your-name.workers.dev'
                 : 'The HTTPS origin of your QBLive server, with no path.'
-          }
-        >
-          <input
-            type="url"
-            value={origin}
-            onChange={(event) => setOrigin(event.target.value)}
-            placeholder={kind === 'local' ? 'http://192.168.1.20:8790' : 'https://…'}
-            autoComplete="off"
-            spellCheck={false}
-          />
-        </FormField>
+            }
+          >
+            <input
+              type="url"
+              value={origin}
+              onChange={(event) => {
+                setOrigin(event.target.value);
+                setError(null);
+              }}
+              placeholder="https://…"
+              disabled={submitting}
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </FormField>
+        )}
 
         {kind !== 'local' && (
           <FormField
@@ -201,7 +231,11 @@ function SetupPanel({
             <input
               type="password"
               value={setupToken}
-              onChange={(event) => setSetupToken(event.target.value)}
+              onChange={(event) => {
+                setSetupToken(event.target.value);
+                setError(null);
+              }}
+              disabled={submitting}
               autoComplete="off"
               spellCheck={false}
             />
@@ -213,6 +247,7 @@ function SetupPanel({
             type="text"
             value={displayName}
             onChange={(event) => setDisplayName(event.target.value)}
+            disabled={submitting}
             placeholder="Optional"
           />
         </FormField>
@@ -224,8 +259,8 @@ function SetupPanel({
         )}
       </div>
       <div className="director-panel-footer">
-        <Button variant="primary" icon="server" onClick={submit}>
-          Connect and test
+        <Button variant="primary" icon="server" onClick={submit} disabled={submitting}>
+          {submitting ? 'Connecting…' : 'Connect and test'}
         </Button>
       </div>
     </section>
@@ -239,6 +274,7 @@ function BackendChoice({
   title,
   badge,
   description,
+  disabled,
 }: {
   id: LiveBackendDescriptor['kind'];
   selected: LiveBackendDescriptor['kind'];
@@ -246,12 +282,14 @@ function BackendChoice({
   title: string;
   badge: string;
   description: string;
+  disabled: boolean;
 }) {
   return (
     <button
       type="button"
       role="radio"
       aria-checked={selected === id}
+      disabled={disabled}
       className="director-live-choice"
       onClick={() => onSelect(id)}
     >
@@ -302,9 +340,14 @@ function EnabledPanels({
               <div className="director-live-actions">
                 <Button
                   icon="clipboard"
-                  onClick={() => {
-                    void navigator.clipboard?.writeText(link);
-                    onAnnounce('Public link copied.');
+                  onClick={async () => {
+                    try {
+                      if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable');
+                      await navigator.clipboard.writeText(link);
+                      onAnnounce('Public link copied.');
+                    } catch {
+                      onAnnounce('Copy failed — select the link and copy manually.');
+                    }
                   }}
                 >
                   Copy
@@ -362,7 +405,11 @@ function StatusPanel({ publication }: { publication: LivePublication }) {
           label="Pending updates"
           value={publication.sync.pendingItems === 0 ? 'None' : String(publication.sync.pendingItems)}
         />
-        <Row label="Last successful sync" value={publication.sync.lastSuccessAt ?? 'Never'} />
+        <Row
+          label="Last successful sync"
+          value={formatLiveTimestamp(publication.sync.lastSuccessAt) ?? 'Never'}
+          title={publication.sync.lastSuccessAt ?? undefined}
+        />
         {publication.sync.lastError && (
           <Row label="Last error" value={publication.sync.lastError} tone="warning" />
         )}
@@ -396,11 +443,37 @@ function backendLabel(publication: LivePublication): string {
   return publication.backend.displayName ? `${kind} · ${publication.backend.displayName}` : kind;
 }
 
-function Row({ label, value, tone }: { label: string; value: string; tone?: 'warning' }) {
+function formatLiveTimestamp(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  try {
+    return date.toLocaleString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
+  } catch {
+    return date.toLocaleString();
+  }
+}
+
+function Row({
+  label,
+  value,
+  tone,
+  title,
+}: {
+  label: string;
+  value: string;
+  tone?: 'warning';
+  title?: string;
+}) {
   return (
     <div className={`director-live-row${tone ? ` director-live-row-${tone}` : ''}`}>
       <span className="director-muted">{label}</span>
-      <span>{value}</span>
+      <span title={title}>{value}</span>
     </div>
   );
 }
@@ -489,6 +562,15 @@ const visibilityGroups: {
   },
 ];
 
+const visibilityDependencies: Partial<
+  Record<keyof LivePublicationSettings, { parent: keyof LivePublicationSettings; label: string }>
+> = {
+  playerStatistics: { parent: 'playerNames', label: 'Player names' },
+  liveScores: { parent: 'liveGameStatus', label: 'Live game status' },
+  liveProgress: { parent: 'liveGameStatus', label: 'Live game status' },
+  roomDirections: { parent: 'roomLocations', label: 'Room locations' },
+};
+
 function VisibilityPanel({
   publication,
   actions,
@@ -520,22 +602,30 @@ function VisibilityPanel({
         {visibilityGroups.map((group) => (
           <div key={group.heading} className="director-live-group">
             <p className="director-eyebrow">{group.heading}</p>
-            {group.rows.map((row) => (
-              <div key={row.key} className="director-live-row">
-                <span>
-                  <span>{row.label}</span>
-                  <small className="director-muted">{row.description}</small>
-                </span>
-                <label className="director-live-toggle">
-                  <input
-                    type="checkbox"
-                    checked={Boolean(publication.settings[row.key])}
-                    onChange={() => toggle(row.key, row.warning)}
-                  />
-                  <span>{publication.settings[row.key] ? 'On' : 'Off'}</span>
-                </label>
-              </div>
-            ))}
+            {group.rows.map((row) => {
+              const dependency = visibilityDependencies[row.key];
+              const parentEnabled = dependency ? Boolean(publication.settings[dependency.parent]) : true;
+              const disabled = Boolean(dependency && !parentEnabled);
+              const description = disabled ? `Requires ${dependency?.label}` : row.description;
+              return (
+                <div key={row.key} className="director-live-row">
+                  <span>
+                    <span>{row.label}</span>
+                    <small className="director-muted">{description}</small>
+                  </span>
+                  <label className="director-live-toggle">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(publication.settings[row.key])}
+                      disabled={disabled}
+                      aria-disabled={disabled}
+                      onChange={() => toggle(row.key, row.warning)}
+                    />
+                    <span>{publication.settings[row.key] ? 'On' : 'Off'}</span>
+                  </label>
+                </div>
+              );
+            })}
           </div>
         ))}
       </div>
@@ -657,8 +747,9 @@ function AnnouncementsPanel({
             <div key={announcement.id} className="director-live-row">
               <span>
                 <span>{announcement.title}</span>
-                <small className="director-muted">
-                  {announcement.severity} · {announcement.publishedAt}
+                <small className="director-muted" title={announcement.publishedAt}>
+                  {announcement.severity} ·{' '}
+                  {formatLiveTimestamp(announcement.publishedAt) ?? announcement.publishedAt}
                 </small>
               </span>
               <Button variant="quiet" onClick={() => actions.withdrawAnnouncement(announcement.id)}>
@@ -708,7 +799,7 @@ function LifecyclePanel({
               actions.finalize();
               onAnnounce('Final results queued for publication.');
             }}
-            disabled={publication.lifecycle === 'final'}
+            disabled={publication.lifecycle !== 'live'}
           >
             {publication.lifecycle === 'final' ? 'Published' : 'Publish final'}
           </Button>
@@ -723,11 +814,17 @@ function LifecyclePanel({
           <Button
             onClick={() => {
               actions.unpublish();
-              onAnnounce('Tournament unpublished.');
+              onAnnounce(
+                'Unpublish queued. The public page remains available until the backend confirms it.',
+              );
             }}
-            disabled={publication.lifecycle === 'unpublished'}
+            disabled={
+              publication.lifecycle === 'unpublishing' ||
+              publication.lifecycle === 'unpublished' ||
+              publication.lifecycle === 'deleting'
+            }
           >
-            Unpublish
+            {publication.lifecycle === 'unpublishing' ? 'Unpublishing…' : 'Unpublish'}
           </Button>
         </div>
         <div className="director-live-row">
@@ -746,15 +843,22 @@ function LifecyclePanel({
                 onClick={() => {
                   actions.destroy();
                   setConfirmingDelete(false);
-                  onAnnounce('QBSheet Live publication deleted.');
+                  onAnnounce(
+                    'Delete queued. Director will clear the publication after backend confirmation.',
+                  );
                 }}
+                disabled={publication.lifecycle === 'deleting'}
               >
-                Delete permanently
+                {publication.lifecycle === 'deleting' ? 'Deleting…' : 'Delete permanently'}
               </Button>
             </span>
           ) : (
-            <Button variant="danger" onClick={() => setConfirmingDelete(true)}>
-              Delete
+            <Button
+              variant="danger"
+              onClick={() => setConfirmingDelete(true)}
+              disabled={publication.lifecycle === 'deleting'}
+            >
+              {publication.lifecycle === 'deleting' ? 'Deleting…' : 'Delete'}
             </Button>
           )}
         </div>
@@ -762,10 +866,19 @@ function LifecyclePanel({
           <span>
             <span>Turn QBSheet Live off</span>
             <small className="director-muted">
-              Stops publishing from this Director. Nothing already published changes.
+              {publication.backend?.kind === 'local'
+                ? 'Clears the local public page and stops the separate QBSheet Live listener.'
+                : 'Stops publishing from this Director. Nothing already published changes.'}
             </small>
           </span>
-          <Button onClick={actions.disable}>Turn off</Button>
+          <Button
+            onClick={actions.disable}
+            disabled={publication.lifecycle === 'unpublishing' || publication.lifecycle === 'deleting'}
+          >
+            {publication.backend?.kind === 'local' && publication.lifecycle === 'deleting'
+              ? 'Turning off…'
+              : 'Turn off'}
+          </Button>
         </div>
       </div>
     </section>

@@ -8,10 +8,10 @@
  * The document carries only a *pointer* — which keychain service and account — and the secret goes
  * to the operating system's credential store through Tauri.
  *
- * The browser preview has no OS keychain. There, the credential is held in memory for the session
- * and the Director is told it will need re-entering: a `localStorage` fallback would put a
- * publisher credential in a place any script on the origin can read, which is worse than asking
- * again. See `docs/QBLIVE.md#11-management-api`.
+ * The browser preview has no OS keychain, so it refuses a remote one-time claim. A `localStorage`
+ * fallback would put a publisher credential in a place any script on the origin can read, and an
+ * in-memory credential would disappear after the setup token had already been consumed. See
+ * `docs/QBLIVE.md#11-management-api`.
  */
 
 import type { LivePublicationCredentialRef } from '../domain';
@@ -50,6 +50,17 @@ export async function storeLiveCredential(
     sessionCredentials.set(publicationId, token);
   }
   return { ...credentialRefFor(publicationId), verifiedAt: new Date().toISOString() };
+}
+
+/** Refuse a one-time backend claim until the native secure store proves it can persist secrets. */
+export async function ensureLiveCredentialStore(): Promise<void> {
+  const bridge = native();
+  if (!bridge) {
+    throw new LiveClaimError(
+      'Remote QBSheet Live setup requires the Director desktop app and its operating-system credential store.',
+    );
+  }
+  await bridge.invoke('director_probe_live_credential_store');
 }
 
 export async function readLiveCredential(publicationId: string): Promise<string | null> {

@@ -556,6 +556,8 @@ function buildGenerationResult(
     status: 'planned',
     packetId: options.packetId ?? null,
     scheduledGameIds: games.map((game) => game.id),
+    scheduledStart: null,
+    releasedAt: null,
     startedAt: null,
     closedAt: null,
   };

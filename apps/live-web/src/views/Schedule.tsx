@@ -31,24 +31,48 @@ export function Schedule({
   );
 
   const grouped = useMemo(() => {
-    const byRound = new Map<string, QbliveScheduledGame[]>();
+    // Group by round+pool so simultaneous pools do not collapse under one label.
+    const bySection = new Map<string, QbliveScheduledGame[]>();
     for (const game of games) {
-      const list = byRound.get(game.roundId) ?? [];
+      const key = `${game.roundId}::${game.poolId ?? ''}`;
+      const list = bySection.get(key) ?? [];
       list.push(game);
-      byRound.set(game.roundId, list);
+      bySection.set(key, list);
     }
-    return [...byRound.entries()].sort((left, right) => {
-      const leftNumber =
-        games.find((game) => game.roundId === left[0])?.roundNumber ?? Number.MAX_SAFE_INTEGER;
-      const rightNumber =
-        games.find((game) => game.roundId === right[0])?.roundNumber ?? Number.MAX_SAFE_INTEGER;
-      return leftNumber - rightNumber;
+    return [...bySection.entries()].sort((left, right) => {
+      const leftGame = left[1][0];
+      const rightGame = right[1][0];
+      const leftNumber = leftGame.roundNumber ?? Number.MAX_SAFE_INTEGER;
+      const rightNumber = rightGame.roundNumber ?? Number.MAX_SAFE_INTEGER;
+      if (leftNumber !== rightNumber) return leftNumber - rightNumber;
+      return (leftGame.poolName ?? '').localeCompare(rightGame.poolName ?? '');
     });
   }, [games]);
 
-  const upcomingEvents = snapshot.timeline.filter(
-    (event) => !event.scheduledEnd || Date.parse(event.scheduledEnd) >= now.getTime(),
-  );
+  function calendarDateInZone(date: Date, timeZone: string): string {
+    try {
+      const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).formatToParts(date);
+      const y = parts.find((p) => p.type === 'year')?.value ?? '0000';
+      const m = parts.find((p) => p.type === 'month')?.value ?? '00';
+      const d = parts.find((p) => p.type === 'day')?.value ?? '00';
+      return `${y}-${m}-${d}`;
+    } catch {
+      return date.toISOString().slice(0, 10);
+    }
+  }
+
+  const todayKey = calendarDateInZone(now, zone);
+  const upcomingEvents = snapshot.timeline.filter((event) => {
+    if (!event.scheduledStart) return false;
+    const instant = new Date(event.scheduledStart);
+    if (Number.isNaN(instant.getTime())) return false;
+    return calendarDateInZone(instant, zone) === todayKey;
+  });
 
   return (
     <>
@@ -86,8 +110,8 @@ export function Schedule({
       {grouped.length === 0 ? (
         <p className="empty">No games have been released yet.</p>
       ) : (
-        grouped.map(([roundId, roundGames]) => (
-          <section key={roundId} aria-label={roundGames[0].roundName}>
+        grouped.map(([sectionKey, roundGames]) => (
+          <section key={sectionKey} aria-label={roundGames[0].roundName}>
             <h2>
               {roundGames[0].roundName}
               {roundGames[0].poolName && scope === 'all' ? ` · ${roundGames[0].poolName}` : ''}
@@ -176,11 +200,7 @@ function ScheduleRow({
     <div className="row">
       <div className="row-main">
         <div className="row-title">{title}</div>
-        <div className="row-sub">
-          {[game.roundName, room, game.state === 'upcoming' && time ? time : null]
-            .filter(Boolean)
-            .join(' · ')}
-        </div>
+        <div className="row-sub">{[game.roundName, room].filter(Boolean).join(' · ')}</div>
       </div>
       <div className="row-trailing">{trailing}</div>
     </div>

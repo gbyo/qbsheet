@@ -8,7 +8,12 @@
  */
 
 import { describe, expect, test, vi } from 'vitest';
-import { QbliveClient, QbliveClientError, type QbliveSnapshot } from '@qbsheet/qblive-protocol';
+import {
+  QBLIVE_LOCAL_CAPABILITIES,
+  QbliveClient,
+  QbliveClientError,
+  type QbliveSnapshot,
+} from '@qbsheet/qblive-protocol';
 import {
   defaultLivePublicationSettings,
   emptyLivePublication,
@@ -21,13 +26,16 @@ import {
   backoffMilliseconds,
   composeAnnouncement,
   derivePublication,
+  directorCapabilities,
+  enqueueDelete,
+  enqueueUnpublish,
   markOutboxItemInFlight,
   maxOutboxItems,
   nextOutboxItem,
   recordOutboxFailure,
   syncSummary,
 } from './publication';
-import { classifyFailure, publishOnce } from './worker';
+import { classifyFailure, publishOnce, recoverStaleInFlight } from './worker';
 
 function liveState(overrides: Partial<LivePublication> = {}): DirectorState {
   const state = privacyFixture();
@@ -42,6 +50,15 @@ function liveState(overrides: Partial<LivePublication> = {}): DirectorState {
 const at = (seconds: number) => new Date(Date.UTC(2026, 8, 5, 14, 30, seconds));
 
 describe('deriving a publication', () => {
+  test('local projection capabilities are the shared native-server contract', () => {
+    const state = liveState();
+    state.live!.backend = { kind: 'local', origin: 'http://192.168.1.20:8790' };
+    expect(directorCapabilities(state.live)).toEqual(QBLIVE_LOCAL_CAPABILITIES);
+    expect(derivePublication(state, null, { now: at(0) }).snapshot?.capabilities).toEqual(
+      QBLIVE_LOCAL_CAPABILITIES,
+    );
+  });
+
   test('the first derivation queues a full snapshot', () => {
     const derived = derivePublication(liveState(), null, { now: at(0) });
     expect(derived.live?.outbox).toHaveLength(1);
@@ -435,6 +452,139 @@ describe('announcements', () => {
     const second = derivePublication(next, first.snapshot, { now: at(5) });
     expect(second.changed).toEqual(['announcements']);
     expect(second.snapshot?.announcements[0].title).toBe('Room change');
+  });
+});
+
+describe('lifecycle outbox', () => {
+  test('unpublish enqueues a durable item and does not flip lifecycle until ack', () => {
+    const live = emptyLivePublication('bcdfghjkmnpqrstvwxyz', '2026-09-05T12:00:00.000Z');
+    live.lifecycle = 'live';
+    live.settings.enabled = true;
+    const pending = enqueueUnpublish(live, at(0));
+    expect(pending.outbox).toHaveLength(1);
+    expect(pending.outbox[0].kind).toBe('unpublish');
+    expect(pending.lifecycle).toBe('unpublishing');
+    const acked = acknowledgeOutboxItem(pending, pending.outbox[0].id, 1, at(1));
+    expect(acked.lifecycle).toBe('unpublished');
+    expect(acked.outbox).toHaveLength(0);
+  });
+
+  test('Unpublish supersedes ordinary work that has not started', () => {
+    const state = liveState();
+    const initial = derivePublication(state, null, { now: at(0) });
+    const pending = enqueueUnpublish(initial.live!, at(1));
+    expect(pending.outbox.map((item) => item.kind)).toEqual(['unpublish']);
+    expect(pending.lifecycle).toBe('unpublishing');
+  });
+
+  test('delete enqueues and survives until acknowledged', () => {
+    const live = emptyLivePublication('bcdfghjkmnpqrstvwxyz', '2026-09-05T12:00:00.000Z');
+    live.lifecycle = 'live';
+    live.settings.enabled = true;
+    const pending = enqueueDelete(live, at(0));
+    expect(pending.outbox[0].kind).toBe('delete');
+    expect(pending.lifecycle).toBe('deleting');
+    // Second enqueue is idempotent while one is pending
+    expect(enqueueDelete(pending, at(1)).outbox).toHaveLength(1);
+  });
+
+  test('Unpublish is a lifecycle barrier while a suspended update settles', () => {
+    const state = liveState();
+    const initial = derivePublication(state, null, { now: at(0) });
+    const publication = markOutboxItemInFlight(initial.live!, initial.live!.outbox[0].id, at(1));
+    const barrier = enqueueUnpublish(publication, at(2));
+    expect(barrier.outbox.map((item) => item.kind)).toEqual(['snapshot', 'unpublish']);
+    expect(nextOutboxItem(barrier, at(10))).toBeNull();
+
+    const changed = structuredClone(state);
+    changed.live = barrier;
+    changed.tournament!.name = 'Mutation during suspended unpublish';
+    expect(derivePublication(changed, initial.snapshot, { now: at(3) }).live).toBeNull();
+
+    const settled = acknowledgeOutboxItem(barrier, publication.outbox[0].id, 1, at(4));
+    expect(nextOutboxItem(settled, at(4))?.kind).toBe('unpublish');
+    const suspendedUnpublish = markOutboxItemInFlight(settled, settled.outbox[0].id, at(5));
+    changed.live = suspendedUnpublish;
+    changed.tournament!.name = 'Mutation while the Unpublish request itself is suspended';
+    expect(derivePublication(changed, initial.snapshot, { now: at(6) }).live).toBeNull();
+    expect(nextOutboxItem(suspendedUnpublish, at(10))).toBeNull();
+
+    const unpublished = acknowledgeOutboxItem(suspendedUnpublish, suspendedUnpublish.outbox[0].id, 1, at(7));
+    expect(unpublished.lifecycle).toBe('unpublished');
+    expect(unpublished.outbox).toHaveLength(0);
+  });
+
+  test('Delete supersedes queued updates and no mutation can append behind it', () => {
+    const state = liveState();
+    const initial = derivePublication(state, null, { now: at(0) });
+    const deleting = enqueueDelete(initial.live!, at(1));
+    expect(deleting.lifecycle).toBe('deleting');
+    expect(deleting.outbox.map((item) => item.kind)).toEqual(['delete']);
+
+    const suspendedDelete = markOutboxItemInFlight(deleting, deleting.outbox[0].id, at(2));
+    const changed = structuredClone(state);
+    changed.live = suspendedDelete;
+    changed.tournament!.name = 'Mutation while the Delete request is suspended';
+    expect(derivePublication(changed, initial.snapshot, { now: at(2) }).live).toBeNull();
+    expect(suspendedDelete.outbox).toHaveLength(1);
+    expect(suspendedDelete.outbox[0]).toMatchObject({ kind: 'delete', state: 'in-flight' });
+
+    const acknowledged = acknowledgeOutboxItem(
+      suspendedDelete,
+      suspendedDelete.outbox[0].id,
+      suspendedDelete.sync.acknowledgedRevision,
+      at(3),
+    );
+    expect(acknowledged.outbox).toHaveLength(0);
+    expect(nextOutboxItem(acknowledged, at(10))).toBeNull();
+  });
+
+  test('Delete waits for an already in-flight request, then remains terminal', () => {
+    const state = liveState();
+    const initial = derivePublication(state, null, { now: at(0) });
+    const inFlight = markOutboxItemInFlight(initial.live!, initial.live!.outbox[0].id, at(1));
+    const deleting = enqueueDelete(inFlight, at(2));
+    expect(deleting.outbox.map((item) => item.kind)).toEqual(['snapshot', 'delete']);
+    expect(nextOutboxItem(deleting, at(10))).toBeNull();
+    const settled = acknowledgeOutboxItem(deleting, inFlight.outbox[0].id, 1, at(3));
+    expect(nextOutboxItem(settled, at(3))?.kind).toBe('delete');
+  });
+
+  test('a restart never retries superseded projection work ahead of a lifecycle barrier', () => {
+    const state = liveState();
+    const initial = derivePublication(state, null, { now: at(0) });
+    const inFlight = markOutboxItemInFlight(initial.live!, initial.live!.outbox[0].id, at(1));
+    const deleting = enqueueDelete(inFlight, at(2));
+    const recovered = recoverStaleInFlight(deleting, new Date(at(2).getTime() + 60_000));
+    expect(recovered.outbox.map((item) => item.kind)).toEqual(['delete']);
+    expect(nextOutboxItem(recovered, new Date(at(2).getTime() + 60_000))?.kind).toBe('delete');
+  });
+
+  test('stale in-flight is recovered after timeout', () => {
+    const live = emptyLivePublication('bcdfghjkmnpqrstvwxyz', '2026-09-05T12:00:00.000Z');
+    live.lifecycle = 'live';
+    live.settings.enabled = true;
+    const withItem: LivePublication = {
+      ...live,
+      outbox: [
+        {
+          id: 'x',
+          revision: 1,
+          kind: 'snapshot',
+          payload: { snapshot: {} },
+          state: 'in-flight',
+          attempts: 0,
+          createdAt: at(0).toISOString(),
+          lastAttemptAt: at(0).toISOString(),
+          nextAttemptAt: at(0).toISOString(),
+        },
+      ],
+    };
+    const recovered = recoverStaleInFlight(withItem, new Date(at(0).getTime() + 60_000));
+    expect(recovered.outbox[0].state).toBe('failed');
+    expect(recovered.outbox[0].nextAttemptAt).not.toBeNull();
+    const stillFresh = recoverStaleInFlight(withItem, new Date(at(0).getTime() + 5_000));
+    expect(stillFresh.outbox[0].state).toBe('in-flight');
   });
 });
 

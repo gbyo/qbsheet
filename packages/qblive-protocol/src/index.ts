@@ -14,3 +14,4 @@ export * from './management.js';
 export * from './validate.js';
 export * from './bootstrap.js';
 export * from './client.js';
+export * from './capabilities.js';

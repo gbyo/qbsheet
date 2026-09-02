@@ -157,7 +157,9 @@ export function directorFixture(options: FixtureOptions = {}): DirectorState {
     status: released ? 'released' : 'prepared',
     packetId: 'packet-5',
     scheduledGameIds: [],
-    startedAt: released ? now : null,
+    scheduledStart: null,
+    releasedAt: released ? now : null,
+    startedAt: null,
     closedAt: null,
   });
   // A second round exists and is deliberately not released. Every "no future pairings" assertion
@@ -171,6 +173,8 @@ export function directorFixture(options: FixtureOptions = {}): DirectorState {
     status: 'planned',
     packetId: null,
     scheduledGameIds: [],
+    scheduledStart: null,
+    releasedAt: null,
     startedAt: null,
     closedAt: null,
   });

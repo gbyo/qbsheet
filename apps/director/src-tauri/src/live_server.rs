@@ -24,7 +24,7 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderValue, StatusCode};
-use axum::response::{IntoResponse, Response};
+use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
@@ -37,6 +37,16 @@ use tokio::net::TcpListener;
 /// client that falls behind can simply refetch the snapshot over a fast local link, and Director's
 /// memory is a tournament laptop's rather than a data centre's.
 const REPLAY_WINDOW: usize = 64;
+
+/// A production-built, self-contained Live Web application.
+///
+/// The bundle is checked in so native-only builds never need Node, and regenerated with
+/// `npm run live:bundle-local` whenever Live Web changes. It contains no remote assets or URLs.
+const LIVE_WEB_HTML: &str = include_str!("../assets/live-web.html");
+
+/// Shared verbatim with Director's TypeScript projection.
+const LOCAL_CAPABILITIES_JSON: &str =
+    include_str!("../../../../packages/qblive-protocol/src/local-capabilities.json");
 
 #[derive(Debug, thiserror::Error)]
 pub enum LiveServerError {
@@ -68,6 +78,7 @@ pub struct LiveServerStatus {
 #[derive(Default)]
 struct Published {
     publication_id: Option<String>,
+    gone_publication_id: Option<String>,
     revision: i64,
     snapshot: Option<Value>,
     events: VecDeque<Value>,
@@ -142,10 +153,34 @@ impl LiveServerRuntime {
         }
         published.revision = revision;
         published.publication_id = publication_id;
+        published.gone_publication_id = None;
         published.snapshot = Some(snapshot);
     }
 
+    /// Remove the current public document without crossing into QBTCP state.
+    pub fn clear(&self, remember_as_gone: bool) -> Result<LiveServerStatus, LiveServerError> {
+        let mut published = self
+            .published
+            .write()
+            .map_err(|_| LiveServerError::Unavailable)?;
+        let previous = published.publication_id.take();
+        published.gone_publication_id = remember_as_gone.then_some(previous).flatten();
+        published.revision = 0;
+        published.snapshot = None;
+        published.events.clear();
+        drop(published);
+        Ok(self.status())
+    }
+
     pub async fn start(&self, requested_port: u16) -> Result<LiveServerStatus, LiveServerError> {
+        self.start_with_address(requested_port, None).await
+    }
+
+    async fn start_with_address(
+        &self,
+        requested_port: u16,
+        address_override: Option<String>,
+    ) -> Result<LiveServerStatus, LiveServerError> {
         if self.status().running {
             return Err(LiveServerError::AlreadyRunning);
         }
@@ -161,7 +196,7 @@ impl LiveServerRuntime {
             task_running.store(false, Ordering::Release);
         });
 
-        let address = crate::server::detect_lan_address();
+        let address = address_override.or_else(crate::server::detect_lan_address);
         let mut inner = self
             .inner
             .lock()
@@ -216,6 +251,7 @@ type Shared = Arc<RwLock<Published>>;
 
 fn router(published: Shared) -> Router {
     Router::new()
+        .route("/live/{publication_id}", get(live_web))
         .route(
             "/qblive/v1/tournaments/{publication_id}/manifest",
             get(manifest),
@@ -230,6 +266,22 @@ fn router(published: Shared) -> Router {
         )
         .route("/health", get(health))
         .with_state(published)
+}
+
+async fn live_web(State(published): State<Shared>, Path(id): Path<String>) -> Response {
+    if let Err(response) = require(&published, &id) {
+        return *response;
+    }
+    let publication_id = serde_json::to_string(&id).unwrap_or_else(|_| "null".to_owned());
+    let bootstrap = format!(
+        "<script>window.__QBSHEET_LIVE_LOCAL__={{publicationId:{publication_id},backendOrigin:window.location.origin}};</script>"
+    );
+    let html = LIVE_WEB_HTML.replace("<!--QBSHEET_LOCAL_BOOTSTRAP-->", &bootstrap);
+    let mut response = Html(html).into_response();
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    response
 }
 
 /// CORS for every response.
@@ -286,6 +338,13 @@ fn require(published: &Shared, publication_id: &str) -> Result<Value, Box<Respon
         )
     })?;
     if guard.publication_id.as_deref() != Some(publication_id) {
+        if guard.gone_publication_id.as_deref() == Some(publication_id) {
+            return Err(refuse(
+                StatusCode::GONE,
+                "gone",
+                "This tournament is no longer published.",
+            ));
+        }
         return Err(refuse(
             StatusCode::NOT_FOUND,
             "not-found",
@@ -307,21 +366,15 @@ async fn manifest(State(published): State<Shared>, Path(id): Path<String>) -> Re
         Err(response) => return *response,
     };
     let base = format!("/qblive/v1/tournaments/{id}");
+    let capabilities: Value = serde_json::from_str(LOCAL_CAPABILITIES_JSON)
+        .expect("local QBLive capabilities must be valid JSON");
     ok_json(json!({
         "protocolVersion": 1,
         "publicationId": id,
         "revision": snapshot.get("revision").cloned().unwrap_or(json!(0)),
         "generatedAt": snapshot.get("generatedAt").cloned().unwrap_or(Value::Null),
         "tournament": snapshot.get("tournament").cloned().unwrap_or(Value::Null),
-        "capabilities": {
-            "snapshot": true,
-            "events": true,
-            // Local mode is deliberately Basic-plus-replay rather than Realtime. A WebSocket here
-            // would mean Director's laptop holding a socket per spectator phone while it is also
-            // running the tournament, and refresh over a fast local link is enough.
-            "stream": false,
-            "applePush": false
-        },
+        "capabilities": capabilities,
         "endpoints": {
             "snapshot": format!("{base}/snapshot"),
             "events": format!("{base}/events")
@@ -452,6 +505,10 @@ mod tests {
         // Local mode advertises no stream: Director's laptop is running a tournament, not a
         // socket server.
         assert_eq!(manifest["capabilities"]["stream"], false);
+        assert_eq!(
+            manifest["capabilities"],
+            serde_json::from_str::<Value>(LOCAL_CAPABILITIES_JSON).unwrap()
+        );
 
         let (status, snapshot) = get(
             &runtime,
@@ -460,6 +517,58 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(snapshot["tournament"]["name"], "Saturday Invitational");
+    }
+
+    #[tokio::test]
+    async fn returned_public_url_serves_offline_live_web_and_local_api() {
+        let runtime = LiveServerRuntime::default();
+        let started = runtime
+            .start_with_address(0, Some("127.0.0.1".to_owned()))
+            .await
+            .expect("start local QBLive server");
+        assert!(started.running);
+        runtime.publish(snapshot_at(1));
+        let status = runtime.status();
+        let public_url = status.public_url.expect("exact Director public URL");
+
+        let page = reqwest::get(&public_url).await.expect("GET public URL");
+        assert_eq!(page.status(), reqwest::StatusCode::OK);
+        let html = page.text().await.expect("Live Web HTML");
+        assert!(html.contains("qbsheet-live-local-bundle"));
+        assert!(html.contains("__QBSHEET_LIVE_LOCAL__"));
+        assert!(html.contains(PUBLICATION));
+        assert!(html.contains("backendOrigin:window.location.origin"));
+        assert!(!html.contains("<script type=\"module\" crossorigin src=\"/assets/"));
+        assert!(!html.contains("<link rel=\"stylesheet\" crossorigin href=\"/assets/"));
+
+        let origin = format!(
+            "http://{}:{}",
+            status.address.expect("address"),
+            status.port.expect("port")
+        );
+        for path in ["manifest", "snapshot", "events?after=0"] {
+            let response = reqwest::get(format!(
+                "{origin}/qblive/v1/tournaments/{PUBLICATION}/{path}"
+            ))
+            .await
+            .expect("local API request");
+            assert_eq!(response.status(), reqwest::StatusCode::OK, "{path}");
+        }
+        runtime.stop().expect("stop server");
+    }
+
+    #[tokio::test]
+    async fn clearing_a_publication_returns_gone_without_stopping_qbtcp_or_live_listener() {
+        let runtime = LiveServerRuntime::default();
+        runtime.publish(snapshot_at(1));
+        runtime.clear(true).expect("clear");
+        let (status, body) = get(
+            &runtime,
+            &format!("/qblive/v1/tournaments/{PUBLICATION}/snapshot"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::GONE);
+        assert_eq!(body["error"], "gone");
     }
 
     #[tokio::test]

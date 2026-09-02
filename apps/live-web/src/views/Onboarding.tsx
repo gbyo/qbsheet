@@ -6,7 +6,7 @@
  * it grants nothing and proves nothing about who is holding the phone.
  */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { QbliveSnapshot } from '@qbsheet/qblive-protocol';
 import { playersOf, publishesPlayers } from '../state/derive';
 
@@ -84,10 +84,13 @@ export function SelectPlayer({
   onSkip: () => void;
 }) {
   const players = playersOf(snapshot, teamId);
-  if (!publishesPlayers(snapshot) || players.length === 0) {
-    onSkip();
-    return null;
-  }
+  const shouldSkip = !publishesPlayers(snapshot) || players.length === 0;
+  // Do not update parent state during render. Push the skip decision to an effect
+  // so StrictMode double-render does not cause a spurious state update.
+  useEffect(() => {
+    if (shouldSkip) onSkip();
+  }, [shouldSkip, onSkip]);
+  if (shouldSkip) return null;
   return (
     <div className="gate">
       <h1>Show my player stats</h1>
@@ -109,7 +112,19 @@ export function SelectPlayer({
 }
 
 /** Shown when the link is malformed, the tournament is gone, or the backend cannot be reached. */
-export function Problem({ title, detail, onRetry }: { title: string; detail: string; onRetry?: () => void }) {
+export function Problem({
+  title,
+  detail,
+  onRetry,
+  secondaryLabel,
+  onSecondary,
+}: {
+  title: string;
+  detail: string;
+  onRetry?: () => void;
+  secondaryLabel?: string;
+  onSecondary?: () => void;
+}) {
   return (
     <div className="gate">
       <h1>{title}</h1>
@@ -117,6 +132,11 @@ export function Problem({ title, detail, onRetry }: { title: string; detail: str
       {onRetry && (
         <button type="button" className="primary" onClick={onRetry} style={{ width: '100%' }}>
           Try again
+        </button>
+      )}
+      {secondaryLabel && onSecondary && (
+        <button type="button" onClick={onSecondary} style={{ width: '100%', marginTop: 12 }}>
+          {secondaryLabel}
         </button>
       )}
     </div>

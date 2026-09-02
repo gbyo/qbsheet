@@ -29,19 +29,31 @@ import {
 import { createDirectorRepository, normalizeDirectorState, type DirectorRepository } from '../persistence';
 import {
   composeAnnouncement,
+  acknowledgeOutboxItem,
   derivePublication,
+  enqueueDelete,
+  enqueueUnpublish,
   markOutboxItemInFlight,
   nextOutboxItem,
+  recordOutboxFailure,
 } from '../live/publication';
-import { publishOnce } from '../live/worker';
+import { classifyFailure, publishOnce, recoverStaleInFlight } from '../live/worker';
 import { newPublication } from '../live/LiveView';
 import { buildBootstrapUrl, QbliveClient, type QbliveSnapshot } from '@qbsheet/qblive-protocol';
 import {
   claimLiveBackend,
+  ensureLiveCredentialStore,
   forgetLiveCredential,
   readLiveCredential,
   storeLiveCredential,
 } from '../live/credentials';
+import {
+  clearLocalLive,
+  localLiveOrigin,
+  publishLocalLive,
+  startLocalLiveServer,
+  stopLocalLiveServer,
+} from '../live/localServer';
 import {
   assessIncomingDocument,
   ingestWarnings,
@@ -282,7 +294,7 @@ export interface DirectorController {
 }
 
 export interface LiveActions {
-  enable(backend: LiveBackendDescriptor, setupToken: string | null): void;
+  enable(backend: LiveBackendDescriptor, setupToken: string | null): Promise<void>;
   disable(): void;
   updateSettings(changes: Partial<LivePublicationSettings>): void;
   publishAnnouncement(input: {
@@ -321,6 +333,9 @@ export function useDirectorController(repository = createDirectorRepository()): 
    */
   const publishedSnapshotRef = useRef<QbliveSnapshot | null>(null);
   const liveClientRef = useRef<QbliveClient | null>(null);
+  const liveSetupInFlightRef = useRef<Promise<void> | null>(null);
+  const liveDrainInFlightRef = useRef<Promise<void> | null>(null);
+  const localServerPublicationRef = useRef<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -1908,7 +1923,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         const round = draft.rounds.find((entry) => entry.id === roundId);
         if (!round || round.status !== 'prepared') return;
         round.status = 'released';
-        round.startedAt ??= isoNow();
+        round.releasedAt = isoNow();
         const phase = draft.phases.find((entry) => entry.id === round.phaseId);
         if (phase) phase.status = 'active';
         if (draft.tournament) {
@@ -2765,7 +2780,9 @@ export function useDirectorController(repository = createDirectorRepository()): 
    */
   const liveClientFor = useCallback(
     async (publication: DirectorState['live']): Promise<QbliveClient | null> => {
-      if (!publication?.backend || !publication.settings.enabled) return null;
+      if (!publication?.backend || !publication.settings.enabled || publication.backend.kind === 'local') {
+        return null;
+      }
       const token = await readLiveCredential(publication.publicationId);
       if (!token) return null;
       return new QbliveClient({
@@ -2784,38 +2801,223 @@ export function useDirectorController(repository = createDirectorRepository()): 
    * and must not fail because of it — see `docs/QBLIVE.md#8-the-durable-outbox`.
    */
   const drainLiveOutbox = useCallback(async (): Promise<void> => {
-    const publication = stateRef.current.live;
-    if (!publication?.settings.enabled) return;
-    if (publication.outbox.length === 0) return;
-    const next = nextOutboxItem(publication);
-    if (!next) return;
-    const inFlight = markOutboxItemInFlight(publication, next.id);
-    // Make the in-flight state visible to concurrent derivations before the network round-trip
-    // so transient coalescing cannot collapse the item being published onto a newer update.
-    commit((draft) => {
-      if (!draft.live) return;
-      draft.live.outbox = inFlight.outbox;
-    });
-    if (!liveClientRef.current) liveClientRef.current = await liveClientFor(inFlight);
-    const client = liveClientRef.current;
-    if (!client) return;
-    const attempt = await publishOnce(inFlight, client, publishedSnapshotRef.current);
-    if (!attempt) return;
-    commit((draft) => {
-      // Re-read from the draft: the outbox may have grown while the request was in flight, and
-      // overwriting it with the pre-flight copy would drop those items.
-      if (!draft.live) return;
-      const settled = attempt.publication;
-      const newer = draft.live.outbox.filter(
-        (item) => !inFlight.outbox.some((known) => known.id === item.id),
-      );
-      draft.live = {
-        ...draft.live,
-        outbox: [...settled.outbox, ...newer],
-        sync: { ...settled.sync, pendingItems: settled.outbox.length + newer.length },
-      };
-    });
+    if (liveDrainInFlightRef.current) return liveDrainInFlightRef.current;
+    const task = (async () => {
+      let publication = stateRef.current.live;
+      if (!publication?.settings.enabled) return;
+      const recovered = recoverStaleInFlight(publication);
+      if (recovered !== publication) {
+        publication = recovered;
+        commit((draft) => {
+          if (draft.live?.publicationId === recovered.publicationId) draft.live = recovered;
+        });
+      }
+      if (publication.outbox.length === 0) return;
+      const next = nextOutboxItem(publication);
+      if (!next) return;
+      const local = publication.backend?.kind === 'local';
+      let client: QbliveClient | null = null;
+      if (!local) {
+        if (!liveClientRef.current) liveClientRef.current = await liveClientFor(publication);
+        client = liveClientRef.current;
+        if (!client) return;
+      }
+      const inFlight = markOutboxItemInFlight(publication, next.id);
+      // Make the in-flight state visible to concurrent derivations before the network round-trip
+      // so transient coalescing cannot collapse the item being published onto a newer update.
+      commit((draft) => {
+        if (!draft.live) return;
+        draft.live.outbox = inFlight.outbox;
+      });
+      if (local) {
+        try {
+          if (next.kind === 'delete') {
+            await clearLocalLive(false);
+            await stopLocalLiveServer();
+            commit((draft) => {
+              if (draft.live?.publicationId === publication.publicationId) draft.live = null;
+            });
+            publishedSnapshotRef.current = null;
+            liveClientRef.current = null;
+            localServerPublicationRef.current = null;
+            return;
+          }
+          if (next.kind === 'unpublish') {
+            await clearLocalLive(true);
+            commit((draft) => {
+              if (draft.live?.publicationId !== publication.publicationId) return;
+              const deleting = draft.live.lifecycle === 'deleting';
+              const acknowledged = acknowledgeOutboxItem(
+                draft.live,
+                next.id,
+                draft.live.sync.acknowledgedRevision,
+              );
+              draft.live = {
+                ...acknowledged,
+                lifecycle: deleting ? 'deleting' : acknowledged.lifecycle,
+                publicUrl: null,
+              };
+            });
+            publishedSnapshotRef.current = null;
+            return;
+          }
+          const snapshot = publishedSnapshotRef.current;
+          if (!snapshot) return;
+          const status = await publishLocalLive(snapshot);
+          commit((draft) => {
+            if (draft.live?.publicationId !== publication.publicationId) return;
+            draft.live = acknowledgeOutboxItem(draft.live, next.id, status.revision);
+            draft.live.publicUrl = status.publicUrl;
+          });
+          return;
+        } catch (reason) {
+          commit((draft) => {
+            if (draft.live?.publicationId !== publication.publicationId) return;
+            if (
+              (draft.live.lifecycle === 'deleting' || draft.live.lifecycle === 'unpublishing') &&
+              next.kind !== 'delete' &&
+              next.kind !== 'unpublish'
+            ) {
+              // The request began before the lifecycle barrier. Its failure, including a revision
+              // conflict, must not manufacture repair work after Delete/Unpublish was enqueued.
+              const outbox = draft.live.outbox.filter((item) => item.id !== next.id);
+              draft.live = {
+                ...draft.live,
+                outbox,
+                sync: {
+                  ...draft.live.sync,
+                  pendingItems: outbox.length,
+                  lastError: null,
+                  retrying: false,
+                },
+              };
+              return;
+            }
+            draft.live = recordOutboxFailure(
+              draft.live,
+              next.id,
+              classifyFailure(reason),
+              publishedSnapshotRef.current,
+            );
+          });
+          return;
+        }
+      }
+      const attempt = await publishOnce(inFlight, client!, publishedSnapshotRef.current);
+      if (!attempt) return;
+      if (attempt.item.kind === 'delete' && attempt.outcome === 'published') {
+        commit((draft) => {
+          if (draft.live?.publicationId === publication.publicationId) draft.live = null;
+        });
+        publishedSnapshotRef.current = null;
+        liveClientRef.current = null;
+        await forgetLiveCredential(publication.publicationId);
+        return;
+      }
+      commit((draft) => {
+        // Re-read from the draft: the outbox may have grown while the request was in flight, and
+        // overwriting it with the pre-flight copy would drop those items.
+        if (!draft.live) return;
+        const settled = attempt.publication;
+        const supersededByBarrier =
+          (draft.live.lifecycle === 'deleting' || draft.live.lifecycle === 'unpublishing') &&
+          attempt.item.kind !== 'delete' &&
+          attempt.item.kind !== 'unpublish';
+        const lifecycle =
+          attempt.item.kind === 'unpublish' &&
+          attempt.outcome === 'published' &&
+          draft.live.lifecycle !== 'deleting'
+            ? 'unpublished'
+            : draft.live.lifecycle;
+        let newer = draft.live.outbox.filter(
+          (item) => !inFlight.outbox.some((known) => known.id === item.id),
+        );
+        if (lifecycle === 'unpublished') newer = [];
+        const settledOutbox = supersededByBarrier ? [] : settled.outbox;
+        const nextPublicUrl =
+          lifecycle === 'unpublished' || lifecycle === 'deleting'
+            ? null
+            : !draft.live.publicUrl &&
+                settled.sync.acknowledgedRevision > 0 &&
+                draft.live.backend?.origin &&
+                draft.live.publicationId
+              ? buildBootstrapUrl({
+                  publicationId: draft.live.publicationId,
+                  backendOrigin: draft.live.backend.origin,
+                })
+              : draft.live.publicUrl;
+        draft.live = {
+          ...draft.live,
+          lifecycle,
+          outbox: [...settledOutbox, ...newer],
+          sync: {
+            ...settled.sync,
+            pendingItems: settledOutbox.length + newer.length,
+            ...(supersededByBarrier && attempt.outcome === 'failed'
+              ? { lastError: null, retrying: false }
+              : {}),
+          },
+          publicUrl: nextPublicUrl,
+        };
+      });
+    })();
+    liveDrainInFlightRef.current = task;
+    try {
+      await task;
+    } finally {
+      if (liveDrainInFlightRef.current === task) liveDrainInFlightRef.current = null;
+    }
   }, [commit, liveClientFor]);
+
+  const localPublicationId = state.live?.publicationId;
+  const localPublicationEnabled = state.live?.settings.enabled;
+  const localPublicationBackendKind = state.live?.backend?.kind;
+  const localPublicationLifecycle = state.live?.lifecycle;
+
+  // A local listener is process state. Reopen it and republish a full current projection whenever a
+  // persisted local publication is reopened after Director/server restart.
+  useEffect(() => {
+    if (
+      !localPublicationId ||
+      !localPublicationEnabled ||
+      localPublicationBackendKind !== 'local' ||
+      (localPublicationLifecycle !== 'live' && localPublicationLifecycle !== 'final') ||
+      localServerPublicationRef.current === localPublicationId
+    ) {
+      return;
+    }
+    localServerPublicationRef.current = localPublicationId;
+    let active = true;
+    void startLocalLiveServer()
+      .then((status) => {
+        if (!active || stateRef.current.live?.publicationId !== localPublicationId) return;
+        const origin = localLiveOrigin(status);
+        publishedSnapshotRef.current = null;
+        commit((draft) => {
+          if (draft.live?.publicationId !== localPublicationId || !draft.live.backend) return;
+          draft.live.backend = { ...draft.live.backend, origin };
+          draft.live.publicUrl = null;
+        });
+      })
+      .catch((reason: unknown) => {
+        if (!active) return;
+        commit((draft) => {
+          if (draft.live?.publicationId !== localPublicationId) return;
+          draft.live.sync.lastError =
+            reason instanceof Error ? reason.message : 'The local Live server could not be started.';
+        });
+        localServerPublicationRef.current = null;
+      });
+    return () => {
+      active = false;
+    };
+  }, [
+    localPublicationId,
+    localPublicationEnabled,
+    localPublicationBackendKind,
+    localPublicationLifecycle,
+    commit,
+  ]);
 
   useEffect(() => {
     if (!state.live?.settings.enabled) return;
@@ -2838,77 +3040,92 @@ export function useDirectorController(repository = createDirectorRepository()): 
   const live = useMemo<LiveActions>(
     () => ({
       enable: (backend, setupToken) => {
-        const publication = newPublication(isoNow());
-        publication.backend = backend;
-        commit((draft) => {
-          draft.live = publication;
-          draft.audit.push({
-            id: newDirectorId('audit'),
-            at: isoNow(),
-            actor: 'Director',
-            type: 'exported',
-            summary: `Enabled QBSheet Live on ${backend.kind === 'local' ? 'the local network' : backend.origin}.`,
-          });
-        });
-        publishedSnapshotRef.current = null;
-        liveClientRef.current = null;
-        void (async () => {
-          try {
-            if (setupToken) {
-              const claim = await claimLiveBackend({
-                origin: backend.origin,
-                publicationId: publication.publicationId,
-                setupToken,
-                displayName: backend.displayName,
-              });
-              const credential = await storeLiveCredential(publication.publicationId, claim.managementToken);
-              commit((draft) => {
-                if (!draft.live) return;
-                draft.live = {
-                  ...draft.live,
-                  credential,
-                  lifecycle: 'live',
-                  // Built only now: a link printed before the backend acknowledged anything is a
-                  // link that resolves to nothing.
-                  publicUrl: buildBootstrapUrl({
-                    publicationId: draft.live.publicationId,
-                    backendOrigin: backend.origin,
-                  }),
-                };
-              });
-            }
-          } catch (reason) {
-            commit((draft) => {
-              if (!draft.live) return;
-              draft.live = {
-                ...draft.live,
-                sync: {
-                  ...draft.live.sync,
-                  lastError: reason instanceof Error ? reason.message : 'The backend could not be reached.',
-                },
-              };
+        if (liveSetupInFlightRef.current) {
+          return Promise.reject(new Error('A QBSheet Live setup attempt is already in progress.'));
+        }
+        const task = (async () => {
+          const publication = newPublication(isoNow());
+          const attemptId = publication.publicationId;
+          if (backend.kind === 'local') {
+            const status = await startLocalLiveServer();
+            publication.backend = { ...backend, origin: localLiveOrigin(status) };
+            publication.lifecycle = 'live';
+            localServerPublicationRef.current = attemptId;
+          } else {
+            if (!setupToken) throw new Error('Enter the backend one-time setup token.');
+            await ensureLiveCredentialStore();
+            const claim = await claimLiveBackend({
+              origin: backend.origin,
+              publicationId: attemptId,
+              setupToken,
+              displayName: backend.displayName,
             });
+            publication.backend = { ...backend, origin: claim.origin };
+            publication.credential = await storeLiveCredential(attemptId, claim.managementToken);
+            publication.lifecycle = 'live';
           }
+          publishedSnapshotRef.current = null;
+          liveClientRef.current = null;
+          commit((draft) => {
+            draft.live = publication;
+            draft.audit.push({
+              id: newDirectorId('audit'),
+              at: isoNow(),
+              actor: 'Director',
+              type: 'exported',
+              summary: `Configured QBSheet Live on ${backend.kind === 'local' ? 'the local network' : publication.backend?.origin}.`,
+            });
+          });
         })();
+        liveSetupInFlightRef.current = task;
+        return task.finally(() => {
+          if (liveSetupInFlightRef.current === task) liveSetupInFlightRef.current = null;
+        });
       },
 
       disable: () => {
+        const local = stateRef.current.live?.backend?.kind === 'local';
         commit((draft) => {
           if (!draft.live) return;
+          if (draft.live.lifecycle === 'unpublishing' || draft.live.lifecycle === 'deleting') return;
+          if (local) {
+            // Local mode has no durable remote publication to leave behind. Treat Off as an
+            // acknowledged lifecycle barrier so the UI remains truthful until the listener has
+            // actually been cleared and stopped.
+            draft.live = enqueueDelete(draft.live);
+            return;
+          }
           draft.live = {
             ...draft.live,
             lifecycle: 'disabled',
             settings: { ...draft.live.settings, enabled: false },
           };
         });
-        publishedSnapshotRef.current = null;
-        liveClientRef.current = null;
+        if (!local) {
+          publishedSnapshotRef.current = null;
+          liveClientRef.current = null;
+        }
       },
 
       updateSettings: (changes) => {
         commit((draft) => {
           if (!draft.live) return;
-          draft.live = { ...draft.live, settings: { ...draft.live.settings, ...changes } };
+          const next = { ...draft.live.settings, ...changes };
+          // Enforce dependent visibility settings. A switch that requires a parent
+          // cannot stay on while the parent is off, and turning a child on
+          // implicitly enables its parent so the UI never shows "On" while the
+          // projection silently cannot publish it (see docs/QBLIVE.md visibility matrix).
+          if ('playerNames' in changes && changes.playerNames === false) next.playerStatistics = false;
+          if ('playerStatistics' in changes && changes.playerStatistics === true) next.playerNames = true;
+          if ('liveGameStatus' in changes && changes.liveGameStatus === false) {
+            next.liveScores = false;
+            next.liveProgress = false;
+          }
+          if ('liveScores' in changes && changes.liveScores === true) next.liveGameStatus = true;
+          if ('liveProgress' in changes && changes.liveProgress === true) next.liveGameStatus = true;
+          if ('roomLocations' in changes && changes.roomLocations === false) next.roomDirections = false;
+          if ('roomDirections' in changes && changes.roomDirections === true) next.roomLocations = true;
+          draft.live = { ...draft.live, settings: next };
         });
       },
 
@@ -2954,6 +3171,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
       finalize: () => {
         commit((draft) => {
           if (!draft.live) return;
+          if (draft.live.lifecycle !== 'live') return;
           draft.live = { ...draft.live, lifecycle: 'final' };
         });
       },
@@ -2961,29 +3179,41 @@ export function useDirectorController(repository = createDirectorRepository()): 
       unpublish: () => {
         commit((draft) => {
           if (!draft.live) return;
-          draft.live = { ...draft.live, lifecycle: 'unpublished' };
+          if (draft.live.lifecycle === 'unpublished') return;
+          // Enqueue a durable unpublish request. The worker will send it and
+          // only move the lifecycle to `unpublished` after the backend acks.
+          draft.live = enqueueUnpublish(draft.live);
         });
-        void (async () => {
-          const client = await liveClientFor(stateRef.current.live);
-          await client?.unpublish().catch(() => undefined);
-        })();
       },
 
       destroy: () => {
         const publication = stateRef.current.live;
-        void (async () => {
-          const client = await liveClientFor(publication);
-          await client?.destroy().catch(() => undefined);
-          if (publication) await forgetLiveCredential(publication.publicationId);
-        })();
+        if (!publication) return;
+        // Enqueue a durable delete. The worker will drive it to completion
+        // and only then will we clear local state and the credential.
+        // Keep the publication visible until the remote is gone so a retry
+        // is possible and we never lose the credential while the tournament
+        // is still public.
         commit((draft) => {
-          draft.live = null;
+          if (!draft.live) return;
+          // Avoid enqueuing twice if a delete is already pending.
+          if (draft.live.outbox.some((item) => item.kind === 'delete')) return;
+          draft.live = enqueueDelete(draft.live);
         });
-        publishedSnapshotRef.current = null;
-        liveClientRef.current = null;
+        // Do not clear publishedSnapshotRef or liveClientRef yet – the worker
+        // needs them to finish the delete. They will be cleared after the
+        // outbox reports the delete as acknowledged (see effect below).
+        void (async () => {
+          // If the publication was already deleted locally (should not happen),
+          // ensure we don't leak a credential.
+          const current = stateRef.current.live;
+          if (!current && publication) {
+            await forgetLiveCredential(publication.publicationId).catch(() => undefined);
+          }
+        })();
       },
     }),
-    [commit, liveClientFor],
+    [commit],
   );
 
   return {

@@ -275,6 +275,11 @@ export function toInterchange(state: DirectorState): DirectorTournament {
     packetIds: round.packetId ? [round.packetId] : [],
     revision: round.revision,
     status: round.status,
+    extensions: {
+      scheduledStart: round.scheduledStart,
+      releasedAt: round.releasedAt,
+      startedAt: round.startedAt,
+    },
   }));
   const scheduledGames = state.scheduledGames.map((game) => ({
     id: game.id,
@@ -284,6 +289,7 @@ export function toInterchange(state: DirectorState): DirectorTournament {
     packetId: game.packetId ?? undefined,
     teamIds: [game.leftTeamId, game.rightTeamId] as [string | null, string | null],
     status: game.status,
+    startsAt: game.scheduledStart ?? undefined,
     bye: game.bye,
     extensions: game.movedFromRoomId ? { movedFromRoomId: game.movedFromRoomId } : undefined,
   }));
@@ -585,7 +591,9 @@ function fromInterchange(data: DirectorTournament): DirectorState {
     status: roundStatus(round.status),
     packetId: round.packetIds?.[0] ?? null,
     scheduledGameIds: data.scheduledGames.filter((game) => game.roundId === round.id).map((game) => game.id),
-    startedAt: null,
+    scheduledStart: text(round.extensions?.scheduledStart) ?? null,
+    releasedAt: text(round.extensions?.releasedAt) ?? null,
+    startedAt: text(round.extensions?.startedAt) ?? null,
     closedAt: round.status === 'closed' ? now : null,
   }));
   state.scheduledGames = data.scheduledGames.map((game) => ({
@@ -598,6 +606,7 @@ function fromInterchange(data: DirectorTournament): DirectorState {
     rightTeamId: game.teamIds?.[1] ?? null,
     bye: game.bye ?? game.teamIds?.[1] === null,
     status: scheduleStatus(game.status),
+    scheduledStart: game.startsAt ?? null,
     assignmentRevision: 1,
     movedFromRoomId: text(game.extensions?.movedFromRoomId),
   }));

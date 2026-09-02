@@ -32,7 +32,9 @@ export type ConnectionState =
   | 'polling'
   /** Showing cached data. The age indicator is on. */
   | 'offline'
-  /** Unrecoverable: a bad link, a deleted tournament. */
+  /** The backend permanently reports that this publication was removed. */
+  | 'removed'
+  /** Unrecoverable bootstrap or protocol error. Removed tournaments use their own state above. */
   | 'error';
 
 export interface LiveWebState {
@@ -185,7 +187,9 @@ export class LiveConnection {
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private attempts = 0;
   private stopped = false;
+  private removed = false;
   private snapshot: QbliveSnapshot | null = null;
+  private generation = 0;
 
   constructor(
     private readonly client: QbliveClient,
@@ -200,19 +204,23 @@ export class LiveConnection {
 
   stop(): void {
     this.stopped = true;
+    this.generation += 1;
     this.socket?.close();
     this.socket = null;
     if (this.pollTimer) clearInterval(this.pollTimer);
     if (this.retryTimer) clearTimeout(this.retryTimer);
+    this.pollTimer = null;
+    this.retryTimer = null;
   }
 
   /** Called on pull-to-refresh, on the Refresh button, and when the tab becomes visible again. */
   async refresh(): Promise<void> {
+    if (this.removed) return;
     await this.loadSnapshot();
   }
 
   private async loadSnapshot(): Promise<void> {
-    if (this.stopped) return;
+    if (this.stopped || this.removed) return;
     try {
       const manifest = await this.client.manifest();
       const snapshot =
@@ -233,6 +241,7 @@ export class LiveConnection {
   }
 
   private openStream(manifest: QbliveManifest): void {
+    if (this.removed) return;
     const url = this.client.streamUrl(manifest);
     if (!url) {
       this.startPolling();
@@ -242,15 +251,27 @@ export class LiveConnection {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
     }
+    // Close any existing socket before opening a new one – a manual refresh,
+    // visibility refresh, or reconnect must not leak another socket.
+    if (this.socket) {
+      this.socket.close();
+      this.socket = null;
+    }
+    this.generation += 1;
+    const generation = this.generation;
     const socket = new WebSocket(url);
     this.socket = socket;
     socket.addEventListener('open', () => {
+      if (this.stopped || generation !== this.generation) return;
       this.attempts = 0;
       this.hooks.onConnection('live');
     });
-    socket.addEventListener('message', (event) => void this.onFrame(String(event.data)));
+    socket.addEventListener('message', (event) => {
+      if (generation !== this.generation) return;
+      void this.onFrame(String(event.data));
+    });
     socket.addEventListener('close', () => {
-      if (this.stopped || this.socket !== socket) return;
+      if (this.stopped || this.socket !== socket || generation !== this.generation) return;
       this.socket = null;
       // Fall back to polling immediately so the page keeps updating, and try the socket again with
       // backoff. A reconnect storm after a WiFi blip is the failure mode to avoid here.
@@ -338,6 +359,7 @@ export class LiveConnection {
   }
 
   private async poll(): Promise<void> {
+    if (this.removed) return;
     try {
       const manifest = await this.client.manifest();
       if (this.snapshot && manifest.revision === this.snapshot.revision) {
@@ -358,7 +380,7 @@ export class LiveConnection {
   }
 
   private scheduleReconnect(): void {
-    if (this.stopped || this.retryTimer) return;
+    if (this.stopped || this.removed || this.retryTimer) return;
     this.attempts += 1;
     const delay = Math.min(60_000, 1_000 * 2 ** Math.min(this.attempts, 6));
     // Full jitter, so a building's worth of phones does not reconnect in the same millisecond.
@@ -375,7 +397,17 @@ export class LiveConnection {
     const fatal =
       reason instanceof QbliveClientError && (reason.code === 'not-found' || reason.code === 'gone');
     if (fatal) {
-      this.hooks.onConnection('error', reason.message);
+      // A permanent 404/410 is not an outage. Stop every automatic retry and make the removed
+      // state explicit even when a cached snapshot remains available.
+      this.generation += 1;
+      this.socket?.close();
+      this.socket = null;
+      if (this.pollTimer) clearInterval(this.pollTimer);
+      if (this.retryTimer) clearTimeout(this.retryTimer);
+      this.pollTimer = null;
+      this.retryTimer = null;
+      this.removed = true;
+      this.hooks.onConnection('removed', reason.message);
       return;
     }
     // Not fatal: keep showing what we have, say how old it is, and keep trying.

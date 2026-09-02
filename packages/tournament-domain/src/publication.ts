@@ -20,7 +20,8 @@ export const qbliveProtocolVersion = 1 as const;
 
 export type LiveBackendKind = 'cloudflare' | 'custom' | 'local';
 
-export type LivePublicationLifecycle = 'disabled' | 'configuring' | 'live' | 'final' | 'unpublished';
+export type LivePublicationLifecycle =
+  'disabled' | 'configuring' | 'live' | 'final' | 'unpublishing' | 'unpublished' | 'deleting';
 
 /**
  * Public visibility switches.
@@ -158,7 +159,7 @@ export interface LiveOutboxItem {
   id: DirectorId;
   /** The local public revision this item carries the tournament to. */
   revision: number;
-  kind: 'snapshot' | 'sections' | 'announcement' | 'finalize' | 'delete';
+  kind: 'snapshot' | 'sections' | 'announcement' | 'finalize' | 'delete' | 'unpublish';
   /** Serialized sanitized QBLive management-request body. */
   payload: unknown;
   state: LiveOutboxOperationState;
