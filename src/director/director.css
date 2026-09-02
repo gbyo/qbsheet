@@ -2604,3 +2604,180 @@ button:disabled:hover {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* -------------------------------------------------------------- QBSheet Live
+ *
+ * Rows and plain panels, like the rest of Director. A tournament director opens this between
+ * rounds to answer three questions — is it publishing, what is public, what is the link — and each
+ * of those is a line of text rather than a dashboard tile.
+ */
+
+.director-live-setup {
+  display: grid;
+  gap: var(--director-space-4);
+}
+
+.director-live-choices {
+  display: grid;
+  gap: var(--director-space-2);
+}
+
+.director-live-choice {
+  display: grid;
+  gap: var(--director-space-1);
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  padding: var(--director-space-3) var(--director-space-4);
+  border: 1px solid var(--director-border);
+  border-radius: var(--director-radius);
+  background: var(--director-surface);
+  cursor: pointer;
+}
+
+.director-live-choice:hover {
+  border-color: var(--director-border-strong);
+}
+
+.director-live-choice[aria-checked='true'] {
+  border-color: var(--director-accent);
+  background: var(--director-accent-soft);
+}
+
+.director-live-choice-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--director-space-2);
+}
+
+.director-live-badge {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--director-muted);
+  border: 1px solid var(--director-border);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+
+.director-live-rows {
+  display: grid;
+  gap: 0;
+}
+
+.director-live-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--director-space-4);
+  padding: var(--director-space-3) 0;
+  border-bottom: 1px solid var(--director-border);
+  min-height: 44px;
+}
+
+.director-live-row:last-child {
+  border-bottom: none;
+}
+
+.director-live-row > span:first-child {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.director-live-row small {
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.director-live-row-warning span:last-child {
+  color: var(--director-red);
+}
+
+.director-live-group {
+  padding-top: var(--director-space-3);
+}
+
+.director-live-group:first-child {
+  padding-top: 0;
+}
+
+.director-live-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--director-space-2);
+  flex: none;
+  cursor: pointer;
+  min-height: 32px;
+}
+
+.director-live-toggle span {
+  font-variant-numeric: tabular-nums;
+  min-width: 24px;
+  color: var(--director-muted);
+}
+
+.director-live-toggle input:checked + span {
+  color: var(--director-green);
+  font-weight: 600;
+}
+
+.director-live-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--director-space-2);
+}
+
+.director-live-link code {
+  font-size: 13px;
+  word-break: break-all;
+  background: var(--director-surface-soft);
+  border: 1px solid var(--director-border);
+  border-radius: var(--director-radius);
+  padding: var(--director-space-2) var(--director-space-3);
+  display: inline-block;
+}
+
+.director-live-qr {
+  margin-top: var(--director-space-4);
+  padding: var(--director-space-4);
+  background: #ffffff;
+  border: 1px solid var(--director-border);
+  border-radius: var(--director-radius);
+  width: max-content;
+}
+
+.director-live-warning {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--director-space-2) var(--director-space-3);
+  align-items: start;
+  background: var(--director-amber-soft);
+  border-top: 1px solid var(--director-border);
+  color: var(--director-amber);
+}
+
+.director-live-warning p {
+  margin: 0;
+}
+
+.director-live-warning .director-live-actions {
+  grid-column: 1 / -1;
+  justify-content: flex-end;
+}
+
+.director-live-compose {
+  display: grid;
+  gap: var(--director-space-3);
+}
+
+.director-live-compose textarea,
+.director-live-compose select {
+  font: inherit;
+  width: 100%;
+  border: 1px solid var(--director-border-strong);
+  border-radius: var(--director-radius);
+  padding: var(--director-space-2) var(--director-space-3);
+  background: var(--director-surface);
+  color: inherit;
+}

@@ -14,6 +14,7 @@ import { ResultsView } from '../results/ResultsView';
 import { TransfersView } from '../transfers/TransfersView';
 import { StandingsView } from '../standings/StandingsView';
 import { PublishView } from '../publish/PublishView';
+import { LiveView } from '../live/LiveView';
 import { SettingsView } from '../settings/SettingsView';
 import { importArchiveBytes, importDirectorTournament, importQbjText } from '../format/interchange';
 import { latestRound } from '../domain';
@@ -212,6 +213,8 @@ export default function DirectorApp() {
         );
       case 'publish':
         return <PublishView state={controller.state} onAnnounce={setAnnouncement} />;
+      case 'live':
+        return <LiveView state={controller.state} actions={controller.live} onAnnounce={setAnnouncement} />;
       case 'settings':
         return <SettingsView state={controller.state} controller={controller} onAnnounce={setAnnouncement} />;
     }

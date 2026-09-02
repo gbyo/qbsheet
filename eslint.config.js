@@ -21,6 +21,8 @@ export default tseslint.config(
       'test-results/**',
       '.claude/worktrees/**',
       '.stryker-tmp/**',
+      // Wrangler's local dev bundle. Generated, and not ours to lint.
+      '**/.wrangler/**',
     ],
   },
   js.configs.recommended,

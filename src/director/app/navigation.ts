@@ -11,6 +11,7 @@ export type SectionId =
   | 'results'
   | 'standings'
   | 'publish'
+  | 'live'
   | 'settings';
 
 export const navigation: Array<{
@@ -40,6 +41,7 @@ export const navigation: Array<{
     items: [
       { id: 'standings', label: 'Standings & stats', icon: 'standings' },
       { id: 'publish', label: 'Publish', icon: 'publish' },
+      { id: 'live', label: 'QBSheet Live', icon: 'server' },
     ],
   },
   { items: [{ id: 'settings', label: 'Settings', icon: 'settings' }] },

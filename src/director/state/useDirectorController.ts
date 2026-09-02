@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   closeRound,
   defaultRules,
@@ -16,6 +16,9 @@ import {
   type DetailedStatsStatus,
   type GameRecord,
   type IanaTimeZone,
+  type LiveAnnouncement,
+  type LiveBackendDescriptor,
+  type LivePublicationSettings,
   type PlayerGameStat,
   type ProtestScoreAdjustment,
   type ResultSubmission,
@@ -24,6 +27,16 @@ import {
   type TeamGameScore,
 } from '../domain';
 import { createDirectorRepository, normalizeDirectorState, type DirectorRepository } from '../persistence';
+import { composeAnnouncement, derivePublication } from '../live/publication';
+import { publishOnce } from '../live/worker';
+import { newPublication } from '../live/LiveView';
+import { buildBootstrapUrl, QbliveClient, type QbliveSnapshot } from '@qbsheet/qblive-protocol';
+import {
+  claimLiveBackend,
+  forgetLiveCredential,
+  readLiveCredential,
+  storeLiveCredential,
+} from '../live/credentials';
 import {
   assessIncomingDocument,
   ingestWarnings,
@@ -259,6 +272,24 @@ export interface DirectorController {
   checkpoint(reason: string): Promise<void>;
   exportSnapshot(): string;
   importSnapshot(value: unknown): boolean;
+  /** QBSheet Live. Everything here is optional; the tournament runs identically without it. */
+  live: LiveActions;
+}
+
+export interface LiveActions {
+  enable(backend: LiveBackendDescriptor, setupToken: string | null): void;
+  disable(): void;
+  updateSettings(changes: Partial<LivePublicationSettings>): void;
+  publishAnnouncement(input: {
+    title: string;
+    body: string;
+    severity: LiveAnnouncement['severity'];
+    audienceTeamIds: string[];
+  }): void;
+  withdrawAnnouncement(id: DirectorId): void;
+  finalize(): void;
+  unpublish(): void;
+  destroy(): void;
 }
 
 export function useDirectorController(repository = createDirectorRepository()): DirectorController {
@@ -277,6 +308,14 @@ export function useDirectorController(repository = createDirectorRepository()): 
   const persistenceQueueRef = useRef(Promise.resolve());
   const persistenceSequenceRef = useRef(0);
   const qbtcpSyncInFlightRef = useRef<Promise<void> | null>(null);
+  /**
+   * The last public snapshot Director derived.
+   *
+   * Held in a ref rather than in state: it is an input to the next derivation, never rendered, and
+   * putting it in React state would re-render every subscriber on every score tick.
+   */
+  const publishedSnapshotRef = useRef<QbliveSnapshot | null>(null);
+  const liveClientRef = useRef<QbliveClient | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -344,10 +383,30 @@ export function useDirectorController(repository = createDirectorRepository()): 
     [enqueuePersistence],
   );
 
+  /**
+   * Apply a mutation, derive the public projection, and persist both together.
+   *
+   * The QBSheet Live derivation lives *inside* `commit` rather than at the call sites that change
+   * something public. There are dozens of those, and any one that forgot would produce a tournament
+   * that is correct locally and silently stale to every spectator. Deriving here makes forgetting
+   * impossible, and it costs nothing when nothing public changed — `derivePublication` returns null
+   * and this is one deep-equality walk over a projection Director was going to build anyway.
+   *
+   * The outbox item and the authoritative change land in the same `persist`, which is the same
+   * single SQLite transaction. Director can never save an accepted result and lose the knowledge
+   * that it needs publishing. See `docs/QBLIVE.md#8-the-durable-outbox`.
+   */
   const commit = useCallback(
     (mutator: (draft: DirectorState) => void) => {
       const next = structuredClone(stateRef.current);
       mutator(next);
+      if (next.live?.settings.enabled) {
+        const derived = derivePublication(next, publishedSnapshotRef.current);
+        if (derived.live) {
+          next.live = derived.live;
+          publishedSnapshotRef.current = derived.snapshot;
+        }
+      }
       const revision = stateRevisionRef.current + 1;
       stateRevisionRef.current = revision;
       stateRef.current = next;
@@ -2688,6 +2747,231 @@ export function useDirectorController(repository = createDirectorRepository()): 
     [persist],
   );
 
+  // -------------------------------------------------------------------------
+  // QBSheet Live
+  // -------------------------------------------------------------------------
+
+  /**
+   * Build a client for the current publication, or null when there is nothing to publish to.
+   *
+   * The credential is read from the OS keychain on every rebuild rather than cached in state: it is
+   * a secret, and a secret held in a React tree is a secret in a heap snapshot and in a crash
+   * report. Rebuilding costs one keychain read per backend change.
+   */
+  const liveClientFor = useCallback(
+    async (publication: DirectorState['live']): Promise<QbliveClient | null> => {
+      if (!publication?.backend || !publication.settings.enabled) return null;
+      const token = await readLiveCredential(publication.publicationId);
+      if (!token) return null;
+      return new QbliveClient({
+        backendOrigin: publication.backend.origin,
+        publicationId: publication.publicationId,
+        managementToken: token,
+      });
+    },
+    [],
+  );
+
+  /**
+   * Drain one outbox item.
+   *
+   * Runs on a timer, never inside a mutation. A tournament operation must not wait on the internet
+   * and must not fail because of it — see `docs/QBLIVE.md#8-the-durable-outbox`.
+   */
+  const drainLiveOutbox = useCallback(async (): Promise<void> => {
+    const publication = stateRef.current.live;
+    if (!publication?.settings.enabled) return;
+    if (publication.outbox.length === 0) return;
+    if (!liveClientRef.current) liveClientRef.current = await liveClientFor(publication);
+    const client = liveClientRef.current;
+    if (!client) return;
+    const attempt = await publishOnce(publication, client, publishedSnapshotRef.current);
+    if (!attempt) return;
+    commit((draft) => {
+      // Re-read from the draft: the outbox may have grown while the request was in flight, and
+      // overwriting it with the pre-flight copy would drop those items.
+      if (!draft.live) return;
+      const settled = attempt.publication;
+      const newer = draft.live.outbox.filter(
+        (item) => !publication.outbox.some((known) => known.id === item.id),
+      );
+      draft.live = {
+        ...draft.live,
+        outbox: [...settled.outbox, ...newer],
+        sync: { ...settled.sync, pendingItems: settled.outbox.length + newer.length },
+      };
+    });
+  }, [commit, liveClientFor]);
+
+  useEffect(() => {
+    if (!state.live?.settings.enabled) return;
+    let active = true;
+    const tick = () => {
+      if (!active) return;
+      void drainLiveOutbox().catch(() => undefined);
+    };
+    // One second between passes. That is how fast the worker notices new work, not a publication
+    // cadence: the cadence comes from how often the projection changes and from the transient
+    // coalescing in `collapseOutbox`.
+    const timer = window.setInterval(tick, 1000);
+    tick();
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [state.live?.settings.enabled, state.live?.backend?.origin, drainLiveOutbox]);
+
+  const live = useMemo<LiveActions>(
+    () => ({
+      enable: (backend, setupToken) => {
+        const publication = newPublication(isoNow());
+        publication.backend = backend;
+        commit((draft) => {
+          draft.live = publication;
+          draft.audit.push({
+            id: newDirectorId('audit'),
+            at: isoNow(),
+            actor: 'Director',
+            type: 'exported',
+            summary: `Enabled QBSheet Live on ${backend.kind === 'local' ? 'the local network' : backend.origin}.`,
+          });
+        });
+        publishedSnapshotRef.current = null;
+        liveClientRef.current = null;
+        void (async () => {
+          try {
+            if (setupToken) {
+              const claim = await claimLiveBackend({
+                origin: backend.origin,
+                publicationId: publication.publicationId,
+                setupToken,
+                displayName: backend.displayName,
+              });
+              const credential = await storeLiveCredential(publication.publicationId, claim.managementToken);
+              commit((draft) => {
+                if (!draft.live) return;
+                draft.live = {
+                  ...draft.live,
+                  credential,
+                  lifecycle: 'live',
+                  // Built only now: a link printed before the backend acknowledged anything is a
+                  // link that resolves to nothing.
+                  publicUrl: buildBootstrapUrl({
+                    publicationId: draft.live.publicationId,
+                    backendOrigin: backend.origin,
+                  }),
+                };
+              });
+            }
+          } catch (reason) {
+            commit((draft) => {
+              if (!draft.live) return;
+              draft.live = {
+                ...draft.live,
+                sync: {
+                  ...draft.live.sync,
+                  lastError: reason instanceof Error ? reason.message : 'The backend could not be reached.',
+                },
+              };
+            });
+          }
+        })();
+      },
+
+      disable: () => {
+        commit((draft) => {
+          if (!draft.live) return;
+          draft.live = {
+            ...draft.live,
+            lifecycle: 'disabled',
+            settings: { ...draft.live.settings, enabled: false },
+          };
+        });
+        publishedSnapshotRef.current = null;
+        liveClientRef.current = null;
+      },
+
+      updateSettings: (changes) => {
+        commit((draft) => {
+          if (!draft.live) return;
+          draft.live = { ...draft.live, settings: { ...draft.live.settings, ...changes } };
+        });
+      },
+
+      publishAnnouncement: (input) => {
+        commit((draft) => {
+          if (!draft.live) return;
+          draft.live = {
+            ...draft.live,
+            announcements: [
+              composeAnnouncement({
+                title: input.title,
+                body: input.body,
+                severity: input.severity,
+                audienceTeamIds: input.audienceTeamIds,
+              }),
+              ...draft.live.announcements,
+            ],
+          };
+          draft.audit.push({
+            id: newDirectorId('audit'),
+            at: isoNow(),
+            actor: 'Director',
+            type: 'exported',
+            summary: `Published announcement "${input.title.trim()}".`,
+          });
+        });
+      },
+
+      withdrawAnnouncement: (id) => {
+        commit((draft) => {
+          if (!draft.live) return;
+          draft.live = {
+            ...draft.live,
+            announcements: draft.live.announcements.map((announcement) =>
+              announcement.id === id
+                ? { ...announcement, withdrawn: true, updatedAt: isoNow() }
+                : announcement,
+            ),
+          };
+        });
+      },
+
+      finalize: () => {
+        commit((draft) => {
+          if (!draft.live) return;
+          draft.live = { ...draft.live, lifecycle: 'final' };
+        });
+      },
+
+      unpublish: () => {
+        commit((draft) => {
+          if (!draft.live) return;
+          draft.live = { ...draft.live, lifecycle: 'unpublished' };
+        });
+        void (async () => {
+          const client = await liveClientFor(stateRef.current.live);
+          await client?.unpublish().catch(() => undefined);
+        })();
+      },
+
+      destroy: () => {
+        const publication = stateRef.current.live;
+        void (async () => {
+          const client = await liveClientFor(publication);
+          await client?.destroy().catch(() => undefined);
+          if (publication) await forgetLiveCredential(publication.publicationId);
+        })();
+        commit((draft) => {
+          draft.live = null;
+        });
+        publishedSnapshotRef.current = null;
+        liveClientRef.current = null;
+      },
+    }),
+    [commit, liveClientFor],
+  );
+
   return {
     state,
     loading,
@@ -2746,6 +3030,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
     checkpoint,
     exportSnapshot,
     importSnapshot,
+    live,
   };
 }
 
