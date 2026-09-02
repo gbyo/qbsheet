@@ -291,6 +291,25 @@ export function importTeamsCsv(text: string): FormatReport<TeamRecord[]> {
 
   const teams: TeamRecord[] = [];
   const byKey = new Map<string, TeamRecord>();
+  // Slugging erases the boundaries between the parts it joins, so a generated id cannot be trusted
+  // to be as distinct as the identity it came from: `Wren` + `` + `A-B` and `Wren` + `A` + `B` both
+  // slug to team_wren-a-b. Teams the fallback identity kept apart must keep distinct ids, so every
+  // generated id is made unique against the ids already in use -- including the explicit ids from
+  // rows that have not been read yet, which are authoritative and are never renamed.
+  const teamIdColumn = canonicalHeaders.indexOf('team_id');
+  const usedIds = new Set<string>(
+    teamIdColumn === -1
+      ? []
+      : parsed.value.rows
+          .map((values) => (values[teamIdColumn] ?? '').trim())
+          .filter((explicit) => explicit !== ''),
+  );
+  const uniqueId = (base: string): string => {
+    let candidate = base;
+    for (let suffix = 2; usedIds.has(candidate); suffix += 1) candidate = `${base}-${suffix}`;
+    usedIds.add(candidate);
+    return candidate;
+  };
   parsed.value.rows.forEach((values, rowIndex) => {
     const row = new Map<string, string>();
     canonicalHeaders.forEach((header, index) => {
@@ -316,10 +335,15 @@ export function importTeamsCsv(text: string): FormatReport<TeamRecord[]> {
       return;
     }
     const explicitId = rowValue(row, 'team_id').trim();
-    const key = explicitId || name.toLocaleLowerCase();
+    const organizationId = rowValue(row, 'organization_id').trim();
+    const letter = rowValue(row, 'letter').trim();
+    const fallbackIdentity = JSON.stringify(
+      [name, organizationId, letter].map((value) => value.toLocaleLowerCase()),
+    );
+    const key = explicitId ? `id:${explicitId}` : `identity:${fallbackIdentity}`;
     let team = byKey.get(key);
     if (!team) {
-      const id = explicitId || slugId('team', name);
+      const id = explicitId || uniqueId(slugId('team', name, organizationId, letter));
       if (!explicitId)
         warnings.push(
           warning(
@@ -340,8 +364,6 @@ export function importTeamsCsv(text: string): FormatReport<TeamRecord[]> {
         ),
       );
     }
-    const organizationId = rowValue(row, 'organization_id').trim();
-    const letter = rowValue(row, 'letter').trim();
     const seedText = rowValue(row, 'seed').trim();
     const seed = seedText === '' ? undefined : Number(seedText);
     if (seedText !== '' && !Number.isFinite(seed))
