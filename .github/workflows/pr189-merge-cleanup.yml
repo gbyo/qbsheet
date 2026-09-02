@@ -1,0 +1,60 @@
+name: PR 189 merge cleanup
+
+on:
+  push:
+    branches:
+      - gibby/issues-2
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    if: ${{ !contains(github.event.head_commit.message, '[pr189-merge-cleanup]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Clean union merge artifacts
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('src/director/state/useDirectorController.ts')
+          text = path.read_text()
+          duplicate = "import { createDirectorRepository, type DirectorRepository } from '../persistence';\n"
+          if text.count(duplicate) != 1:
+              raise SystemExit(f'expected one redundant persistence import, found {text.count(duplicate)}')
+          path.write_text(text.replace(duplicate, '', 1))
+          PY
+      - name: Install dependencies
+        run: npm ci
+      - name: Format merged sources
+        run: |
+          npm run format
+          cargo fmt --manifest-path crates/tournament-store/Cargo.toml --all
+          cargo fmt --manifest-path apps/director/src-tauri/Cargo.toml --all
+          cargo fmt --manifest-path crates/qbtcp-server/Cargo.toml --all
+      - name: Validate merge result
+        run: |
+          npm run format:check
+          npm run typecheck
+          cargo fmt --manifest-path crates/tournament-store/Cargo.toml --all -- --check
+          cargo fmt --manifest-path apps/director/src-tauri/Cargo.toml --all -- --check
+          cargo fmt --manifest-path crates/qbtcp-server/Cargo.toml --all -- --check
+          cargo check --manifest-path crates/tournament-store/Cargo.toml --all-targets --all-features
+      - name: Commit merge cleanup
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Resolve main merge integration [pr189-merge-cleanup]"
+          git push origin HEAD:gibby/issues-2
