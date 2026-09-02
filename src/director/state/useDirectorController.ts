@@ -27,7 +27,12 @@ import {
   type TeamGameScore,
 } from '../domain';
 import { createDirectorRepository, normalizeDirectorState, type DirectorRepository } from '../persistence';
-import { composeAnnouncement, derivePublication } from '../live/publication';
+import {
+  composeAnnouncement,
+  derivePublication,
+  markOutboxItemInFlight,
+  nextOutboxItem,
+} from '../live/publication';
 import { publishOnce } from '../live/worker';
 import { newPublication } from '../live/LiveView';
 import { buildBootstrapUrl, QbliveClient, type QbliveSnapshot } from '@qbsheet/qblive-protocol';
@@ -2782,10 +2787,19 @@ export function useDirectorController(repository = createDirectorRepository()): 
     const publication = stateRef.current.live;
     if (!publication?.settings.enabled) return;
     if (publication.outbox.length === 0) return;
-    if (!liveClientRef.current) liveClientRef.current = await liveClientFor(publication);
+    const next = nextOutboxItem(publication);
+    if (!next) return;
+    const inFlight = markOutboxItemInFlight(publication, next.id);
+    // Make the in-flight state visible to concurrent derivations before the network round-trip
+    // so transient coalescing cannot collapse the item being published onto a newer update.
+    commit((draft) => {
+      if (!draft.live) return;
+      draft.live.outbox = inFlight.outbox;
+    });
+    if (!liveClientRef.current) liveClientRef.current = await liveClientFor(inFlight);
     const client = liveClientRef.current;
     if (!client) return;
-    const attempt = await publishOnce(publication, client, publishedSnapshotRef.current);
+    const attempt = await publishOnce(inFlight, client, publishedSnapshotRef.current);
     if (!attempt) return;
     commit((draft) => {
       // Re-read from the draft: the outbox may have grown while the request was in flight, and
@@ -2793,7 +2807,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
       if (!draft.live) return;
       const settled = attempt.publication;
       const newer = draft.live.outbox.filter(
-        (item) => !publication.outbox.some((known) => known.id === item.id),
+        (item) => !inFlight.outbox.some((known) => known.id === item.id),
       );
       draft.live = {
         ...draft.live,
