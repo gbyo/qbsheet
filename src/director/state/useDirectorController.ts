@@ -2811,10 +2811,21 @@ export function useDirectorController(repository = createDirectorRepository()): 
       const newer = draft.live.outbox.filter(
         (item) => !inFlight.outbox.some((known) => known.id === item.id),
       );
+      const nextPublicUrl =
+        !draft.live.publicUrl &&
+        settled.sync.acknowledgedRevision > 0 &&
+        draft.live.backend?.origin &&
+        draft.live.publicationId
+          ? buildBootstrapUrl({
+              publicationId: draft.live.publicationId,
+              backendOrigin: draft.live.backend.origin,
+            })
+          : draft.live.publicUrl;
       draft.live = {
         ...draft.live,
         outbox: [...settled.outbox, ...newer],
         sync: { ...settled.sync, pendingItems: settled.outbox.length + newer.length },
+        publicUrl: nextPublicUrl,
       };
     });
   }, [commit, liveClientFor]);
@@ -2841,6 +2852,8 @@ export function useDirectorController(repository = createDirectorRepository()): 
     () => ({
       enable: (backend, setupToken) => {
         const publication = newPublication(isoNow());
+        const attemptId = publication.publicationId;
+        const attemptOrigin = backend.origin;
         publication.backend = backend;
         commit((draft) => {
           draft.live = publication;
@@ -2858,30 +2871,33 @@ export function useDirectorController(repository = createDirectorRepository()): 
           try {
             if (setupToken) {
               const claim = await claimLiveBackend({
-                origin: backend.origin,
-                publicationId: publication.publicationId,
+                origin: attemptOrigin,
+                publicationId: attemptId,
                 setupToken,
                 displayName: backend.displayName,
               });
-              const credential = await storeLiveCredential(publication.publicationId, claim.managementToken);
+              const credential = await storeLiveCredential(attemptId, claim.managementToken);
               commit((draft) => {
                 if (!draft.live) return;
+                if (draft.live.publicationId !== attemptId) return;
+                if (draft.live.backend?.origin !== attemptOrigin) return;
                 draft.live = {
                   ...draft.live,
                   credential,
                   lifecycle: 'live',
-                  // Built only now: a link printed before the backend acknowledged anything is a
-                  // link that resolves to nothing.
-                  publicUrl: buildBootstrapUrl({
-                    publicationId: draft.live.publicationId,
-                    backendOrigin: backend.origin,
-                  }),
                 };
+              });
+            } else if (backend.kind === 'local') {
+              commit((draft) => {
+                if (!draft.live) return;
+                if (draft.live.publicationId !== attemptId) return;
+                draft.live = { ...draft.live, lifecycle: 'live' };
               });
             }
           } catch (reason) {
             commit((draft) => {
               if (!draft.live) return;
+              if (draft.live.publicationId !== attemptId) return;
               draft.live = {
                 ...draft.live,
                 sync: {

@@ -108,8 +108,10 @@ function SetupPanel({
   const [setupToken, setSetupToken] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const submit = (): void => {
+    if (submitting) return;
     setError(null);
     const trimmed = origin.trim().replace(/\/+$/, '');
     if (!trimmed) {
@@ -124,11 +126,15 @@ function SetupPanel({
       setError(reason instanceof QbliveBootstrapError ? reason.message : 'That address is not valid.');
       return;
     }
+    setSubmitting(true);
     actions.enable(
       { kind, origin: trimmed, displayName: displayName.trim() || undefined },
       kind === 'local' ? null : setupToken.trim() || null,
     );
     onAnnounce('Connecting to the QBSheet Live backend.');
+    // Re-enable after a short cooldown so a transient failure can be retried without
+    // allowing an immediate double-click to create two publication IDs.
+    window.setTimeout(() => setSubmitting(false), 1500);
   };
 
   return (
@@ -161,7 +167,7 @@ function SetupPanel({
             onSelect={setKind}
             title="Connect a custom server"
             badge="Advanced"
-            description="Any server that implements QBLive v1. Director runs conformance checks before publishing."
+            description="Any server that implements QBLive v1. Director checks the address and protocol version before publishing; full conformance is available via the QBLive conformance suite."
           />
           <BackendChoice
             id="local"
@@ -224,8 +230,8 @@ function SetupPanel({
         )}
       </div>
       <div className="director-panel-footer">
-        <Button variant="primary" icon="server" onClick={submit}>
-          Connect and test
+        <Button variant="primary" icon="server" onClick={submit} disabled={submitting}>
+          {submitting ? 'Connecting…' : 'Connect and test'}
         </Button>
       </div>
     </section>
