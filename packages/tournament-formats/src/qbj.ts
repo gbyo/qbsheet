@@ -632,14 +632,10 @@ function inferAnswerCounts(
     const answerValue = asFiniteNumber(answerType.value);
     if (!label.trim() && answerValue === undefined) return undefined;
     if (label.includes('neg') || (answerValue !== undefined && answerValue < 0)) negs += count;
-    else if (
-      label.includes('power') ||
-      label.trim() === 'p' ||
-      (answerValue !== undefined && answerValue > 10)
-    )
-      powers += count;
-    else if (label.includes('correct') || label.includes('get') || label.trim() === 'c' || answerValue === 10)
-      gets += count;
+    else if (label.includes('correct') || label.includes('get') || label.trim() === 'c') gets += count;
+    else if (label.includes('power') || label.trim() === 'p') powers += count;
+    else if (answerValue !== undefined && answerValue > 10) powers += count;
+    else if (answerValue === 10) gets += count;
     else return undefined;
   }
   return { powers, gets, negs };

@@ -183,7 +183,7 @@ function readRoster(
     // The scorer addresses players by display name within a game. Even when two QBJ objects have
     // different stable ids, retaining both under one name would make later result reconciliation
     // choose one arbitrarily. Refuse the ambiguous roster instead of silently merging identities.
-    const nameKey = name.toLocaleLowerCase();
+    const nameKey = name.toLowerCase();
     if (seenNames.has(nameKey)) {
       problems.push(`A roster lists "${name}" more than once.`);
       continue;

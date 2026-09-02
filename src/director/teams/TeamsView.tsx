@@ -396,9 +396,15 @@ function organizationNameFor(state: DirectorState, organizationId: string | null
 }
 
 function importedTeamStatus(status: string | undefined): 'confirmed' | 'waitlist' | 'dropped' {
-  if (status === 'dropped' || status === 'withdrawn' || status === 'no-show' || status === 'forfeit') {
+  const normalized = typeof status === 'string' ? status.trim().toLowerCase() : '';
+  if (
+    normalized === 'dropped' ||
+    normalized === 'withdrawn' ||
+    normalized === 'no-show' ||
+    normalized === 'forfeit'
+  ) {
     return 'dropped';
   }
-  if (status === 'late' || status === 'waitlist') return 'waitlist';
+  if (normalized === 'late' || normalized === 'waitlist') return 'waitlist';
   return 'confirmed';
 }

@@ -241,8 +241,19 @@ export function packetUseConflicts(
   state: DirectorState,
 ): Array<{ packetId: DirectorId; gameIds: DirectorId[] }> {
   const uses = new Map<DirectorId, Set<DirectorId>>();
+  const roundUses = new Map<DirectorId, Set<DirectorId>>();
   const add = (packetId: DirectorId | null, gameId: DirectorId) => {
     if (!packetId) return;
+    const game = state.scheduledGames.find((candidate) => candidate.id === gameId);
+    const roundId = game?.roundId;
+    const round = roundId ? state.rounds.find((candidate) => candidate.id === roundId) : undefined;
+    const isRoundPacket = !game?.packetId && round?.packetId === packetId;
+    if (isRoundPacket && roundId) {
+      const rounds = roundUses.get(packetId) ?? new Set<DirectorId>();
+      rounds.add(roundId);
+      roundUses.set(packetId, rounds);
+      return;
+    }
     const gameIds = uses.get(packetId) ?? new Set<DirectorId>();
     gameIds.add(gameId);
     uses.set(packetId, gameIds);
@@ -258,6 +269,21 @@ export function packetUseConflicts(
     }
     for (const gameId of packet.usedGameIds) {
       add(packet.id, recordToScheduled.get(gameId) ?? gameId);
+    }
+  }
+  // Include round-level uses as a single representative per round so that a round packet shared
+  // by multiple games in the same round does not appear as reuse.
+  for (const [packetId, roundIds] of roundUses) {
+    if (roundIds.size === 0) continue;
+    const representativeIds = uses.get(packetId) ?? new Set<DirectorId>();
+    // If there is also a direct per-game use, keep it. Otherwise, collapse the round's games to
+    // one entry per round so a single round packet counts as one use.
+    if (representativeIds.size === 0) {
+      for (const roundId of roundIds) representativeIds.add(`round:${roundId}`);
+      uses.set(packetId, representativeIds);
+    } else if (roundIds.size > 1) {
+      // Multiple rounds sharing the same packet is actual reuse.
+      for (const roundId of roundIds) representativeIds.add(`round:${roundId}`);
     }
   }
   return [...uses.entries()]
