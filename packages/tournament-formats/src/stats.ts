@@ -470,7 +470,7 @@ export function exportTeamStandingsCsv(snapshot: StatsSnapshot): string {
       row.wins,
       row.losses,
       row.ties,
-      row.winPercentage,
+      `${(row.winPercentage * 100).toFixed(1)}%`,
       row.pointsFor,
       row.pointsAgainst,
       row.ppg,

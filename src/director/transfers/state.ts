@@ -41,6 +41,16 @@ export interface AddLocationInput {
   watching?: boolean;
 }
 
+function normalizeTransferPath(path: string): string {
+  const trimmed = path.trim();
+  if (!trimmed) return '';
+  // Stripping trailing separators from a filesystem root turns `/` into an empty path and `C:\`
+  // into `C:`. Preserve the root while still making repeated separators compare consistently.
+  if (/^[\\/]+$/.test(trimmed)) return trimmed[0] ?? trimmed;
+  if (/^[A-Za-z]:[\\/]+$/.test(trimmed)) return `${trimmed.slice(0, 2)}${trimmed[2]}`;
+  return trimmed.replace(/[\\/]+$/, '');
+}
+
 /**
  * Add a place, or re-adopt one already known.
  *
@@ -50,9 +60,9 @@ export interface AddLocationInput {
  * rather than a second copy of it.
  */
 export function addTransferLocation(draft: DirectorState, input: AddLocationInput): TransferLocation {
-  const normalized = input.path.replace(/[\\/]+$/, '');
+  const normalized = normalizeTransferPath(input.path);
   const existing = draft.transfers.locations.find(
-    (location) => location.path.replace(/[\\/]+$/, '') === normalized,
+    (location) => normalizeTransferPath(location.path) === normalized,
   );
   const cloudProvider = detectCloudProvider(normalized);
   if (existing) {
@@ -114,17 +124,34 @@ export function removeTransferLocation(draft: DirectorState, locationId: Directo
 export function syncRemovableVolumes(
   draft: DirectorState,
   volumes: TransferVolume[],
-): { appeared: TransferLocation[]; disappeared: TransferLocation[] } {
+): { appeared: TransferLocation[]; disappeared: TransferLocation[]; metadataChanged: boolean } {
   const now = isoNow();
+  const nowMs = Date.parse(now);
   const removable = volumes.filter((volume) => volume.removable);
   const byMountPoint = new Map(removable.map((volume) => [volume.mountPoint, volume]));
   const appeared: TransferLocation[] = [];
   const disappeared: TransferLocation[] = [];
+  let metadataChanged = false;
 
   for (const location of draft.transfers.locations) {
     if (location.kind !== 'removable-drive') continue;
     const volume = location.mountPoint ? byMountPoint.get(location.mountPoint) : undefined;
     if (volume) {
+      const nextLabel = volume.name || location.label;
+      const previousLastSeenMs = location.lastSeenAt ? Date.parse(location.lastSeenAt) : Number.NaN;
+      const heartbeatDue =
+        !Number.isFinite(previousLastSeenMs) ||
+        (Number.isFinite(nowMs) && nowMs - previousLastSeenMs >= 60_000);
+      if (
+        !location.connected ||
+        location.label !== nextLabel ||
+        location.readOnly !== volume.readOnly ||
+        location.availableBytes !== volume.availableBytes ||
+        heartbeatDue ||
+        location.message !== undefined
+      ) {
+        metadataChanged = true;
+      }
       if (!location.connected) {
         location.connected = true;
         appeared.push(location);
@@ -134,7 +161,7 @@ export function syncRemovableVolumes(
           locationId: location.id,
         });
       }
-      location.label = volume.name || location.label;
+      location.label = nextLabel;
       location.readOnly = volume.readOnly;
       location.availableBytes = volume.availableBytes;
       location.lastSeenAt = now;
@@ -170,7 +197,7 @@ export function syncRemovableVolumes(
     appeared.push(location);
   }
 
-  return { appeared, disappeared };
+  return { appeared, disappeared, metadataChanged };
 }
 
 export function setTransferWatching(draft: DirectorState, locationId: DirectorId, watching: boolean): void {

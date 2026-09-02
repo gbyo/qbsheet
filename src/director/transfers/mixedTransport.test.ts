@@ -289,8 +289,38 @@ describe('locations coming and going', () => {
       { mountPoint: '/', name: 'Macintosh HD', removable: false, readOnly: false },
     ]);
     expect(appeared.appeared).toHaveLength(1);
+    expect(appeared.metadataChanged).toBe(false);
     expect(state.transfers.locations).toHaveLength(1);
     expect(state.transfers.locations[0]).toMatchObject({ label: 'SanDisk Ultra', connected: true });
+
+    const updated = syncRemovableVolumes(state, [
+      {
+        mountPoint: mount,
+        name: 'SanDisk Ultra Renamed',
+        removable: true,
+        readOnly: true,
+        availableBytes: 2000,
+      },
+    ]);
+    expect(updated.appeared).toHaveLength(0);
+    expect(updated.disappeared).toHaveLength(0);
+    expect(updated.metadataChanged).toBe(true);
+    expect(state.transfers.locations[0]).toMatchObject({
+      label: 'SanDisk Ultra Renamed',
+      readOnly: true,
+      availableBytes: 2000,
+      connected: true,
+    });
+    const quiet = syncRemovableVolumes(state, [
+      {
+        mountPoint: mount,
+        name: 'SanDisk Ultra Renamed',
+        removable: true,
+        readOnly: true,
+        availableBytes: 2000,
+      },
+    ]);
+    expect(quiet.metadataChanged).toBe(false);
 
     const gone = syncRemovableVolumes(state, []);
     expect(gone.disappeared).toHaveLength(1);
@@ -326,6 +356,19 @@ describe('locations coming and going', () => {
     addTransferLocation(state, { kind: 'folder', label: 'Exchange', path: '/Users/td/Exchange' });
     addTransferLocation(state, { kind: 'folder', label: 'Exchange', path: '/Users/td/Exchange/' });
     expect(state.transfers.locations).toHaveLength(1);
+  });
+
+  it('keeps filesystem roots usable as transfer locations', () => {
+    const state = directorFixture();
+    const posixRoot = addTransferLocation(state, { kind: 'folder', label: 'Root', path: '/' });
+    expect(posixRoot.path).toBe('/');
+    expect(exchangePaths(posixRoot.path).root).toBe('/QBSheet');
+    addTransferLocation(state, { kind: 'folder', label: 'Root', path: '////' });
+    expect(state.transfers.locations).toHaveLength(1);
+
+    const windowsRoot = addTransferLocation(state, { kind: 'folder', label: 'Windows root', path: 'C:\\' });
+    expect(windowsRoot.path).toBe('C:\\');
+    expect(exchangePaths(windowsRoot.path).root).toBe('C:\\QBSheet');
   });
 });
 

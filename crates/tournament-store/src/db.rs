@@ -235,3 +235,33 @@ fn sync_directory(path: &Path) -> StoreResult<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use tempfile::tempdir;
+
+    use super::commit_backup_noreplace;
+    use crate::error::StoreError;
+
+    #[test]
+    fn backup_commit_does_not_replace_a_destination_created_after_precheck() {
+        let directory = tempdir().expect("temporary directory");
+        let temporary = directory.path().join(".backup.tmp");
+        let destination = directory.path().join("backup.sqlite3");
+        fs::write(&temporary, b"new backup").expect("write temporary backup");
+        fs::write(&destination, b"original backup").expect("create destination");
+
+        let error = commit_backup_noreplace(&temporary, &destination).unwrap_err();
+        assert!(matches!(error, StoreError::BackupDestinationExists(path) if path == destination));
+        assert_eq!(
+            fs::read(&destination).expect("read destination"),
+            b"original backup"
+        );
+        assert!(
+            temporary.exists(),
+            "failed commit should leave cleanup to caller"
+        );
+    }
+}

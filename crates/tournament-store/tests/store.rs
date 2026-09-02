@@ -1,11 +1,12 @@
 use std::fs;
 
 use qbsheet_tournament_store::{
-    CheckpointMode, NewManualGame, NewPhase, NewResultSubmission, NewRoom, NewRound,
-    NewScheduledGame, NewTeam, NewTournament, Store, StoreError,
+    CheckpointMode, NewManualGame, NewPacket, NewPhase, NewResultSubmission, NewRoom, NewRound,
+    NewScheduledGame, NewTeam, NewTournament, Store, StoreError, CURRENT_SCHEMA_VERSION,
 };
 use serde_json::json;
 use tempfile::tempdir;
+use uuid::Uuid;
 
 #[test]
 fn create_close_and_reopen_preserves_the_tournament_graph() {
@@ -26,7 +27,7 @@ fn create_close_and_reopen_preserves_the_tournament_graph() {
             .create(NewTeam::new(&tournament.id, "Northview A"))
             .expect("create team")
             .id;
-        assert_eq!(store.schema_version().unwrap(), 2);
+        assert_eq!(store.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
         assert_eq!(store.journal_mode().unwrap(), "wal");
         assert!(store.foreign_keys_enabled().unwrap());
     }
@@ -236,6 +237,84 @@ fn checkpoint_and_online_backup_are_reopenable() {
 
     let backup = Store::open(&backup_path).expect("open backup");
     assert_eq!(backup.tournaments().list(false).unwrap().len(), 1);
+}
+
+#[test]
+fn backup_to_accepts_a_bare_relative_destination() {
+    let store = Store::open_in_memory().expect("open store");
+    let destination = format!("qbsheet-store-backup-{}.sqlite3", Uuid::new_v4());
+
+    let report = store.backup_to(&destination).expect("relative backup");
+    assert_eq!(report.destination, std::path::PathBuf::from(&destination));
+    assert!(fs::metadata(&destination).expect("backup metadata").len() > 0);
+
+    fs::remove_file(&destination).expect("remove relative backup");
+}
+
+#[test]
+fn scheduled_game_packet_assignment_uses_only_the_game_target() {
+    let store = Store::open_in_memory().expect("open store");
+    let tournament = store
+        .tournaments()
+        .create(NewTournament::new("Packet target test"))
+        .expect("create tournament");
+    let phase = store
+        .phases()
+        .create(NewPhase {
+            tournament_id: tournament.id.clone(),
+            name: "Preliminaries".to_owned(),
+            phase_type: "round_robin".to_owned(),
+            sequence: 1,
+            status: "planned".to_owned(),
+            rules: json!({}),
+            advancement: json!({}),
+        })
+        .expect("create phase");
+    let round = store
+        .rounds()
+        .create(NewRound {
+            tournament_id: tournament.id.clone(),
+            phase_id: phase.id,
+            name: "Round 1".to_owned(),
+            sequence: 1,
+            round_number: 1,
+            status: "planned".to_owned(),
+        })
+        .expect("create round");
+    let packet = store
+        .packets()
+        .create(NewPacket {
+            tournament_id: tournament.id.clone(),
+            name: "Packet 1".to_owned(),
+            packet_type: "regular".to_owned(),
+            status: "available".to_owned(),
+            nominal_round_id: None,
+            replacement_for_id: None,
+            security_notes: None,
+        })
+        .expect("create packet");
+    let scheduled = store
+        .schedule()
+        .create(NewScheduledGame {
+            tournament_id: tournament.id,
+            round_id: round.id,
+            room_id: None,
+            packet_id: Some(packet.id.clone()),
+            team_a_id: None,
+            team_b_id: None,
+            game_number: 1,
+            status: "scheduled".to_owned(),
+            scheduled_at: None,
+            notes: None,
+        })
+        .expect("create scheduled game");
+
+    let assignment = store
+        .packets()
+        .assign_to_game(&packet.id, &scheduled.id)
+        .expect("read existing game assignment");
+    assert_eq!(assignment.round_id, None);
+    assert_eq!(assignment.scheduled_game_id, Some(scheduled.id));
 }
 
 #[test]

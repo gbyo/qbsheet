@@ -150,7 +150,10 @@ function teamName(team: QbjObject | null, registration: QbjObject | null): strin
  * anybody is a real and useful assignment, and the room types the names in. What is an error is a
  * roster that lists the same person twice, which silently merges two players' statistics.
  */
-function readRoster(team: QbjObject | null): {
+function readRoster(
+  team: QbjObject | null,
+  byId: ReadonlyMap<string, QbjObject>,
+): {
   players: IRosterPlayer[];
   ids: Record<string, string>;
   problems: string[];
@@ -164,19 +167,38 @@ function readRoster(team: QbjObject | null): {
     return { players, ids, problems: ['A roster lists an implausible number of players.'] };
   }
 
-  const seen = new Set<string>();
-  for (const entry of team.players) {
-    if (!isPlainObject(entry)) continue;
+  const seenNames = new Set<string>();
+  const seenIds = new Set<string>();
+  for (const rawEntry of team.players) {
+    if (!isPlainObject(rawEntry)) continue;
+    const entry = resolveRef(rawEntry, byId);
+    if (!entry) {
+      if (typeof rawEntry.$ref === 'string') {
+        problems.push(`A roster contains an unresolved player reference (${rawEntry.$ref}).`);
+      }
+      continue;
+    }
     const name = stringField(entry.name, playerNameMaxLength);
     if (!name) continue;
-    if (seen.has(name)) {
+    // The scorer addresses players by display name within a game. Even when two QBJ objects have
+    // different stable ids, retaining both under one name would make later result reconciliation
+    // choose one arbitrarily. Refuse the ambiguous roster instead of silently merging identities.
+    const nameKey = name.toLowerCase();
+    if (seenNames.has(nameKey)) {
       problems.push(`A roster lists "${name}" more than once.`);
       continue;
     }
-    seen.add(name);
+    seenNames.add(nameKey);
     players.push({ name });
     const id = stringField(entry.id);
-    if (id) ids[name] = id;
+    if (id) {
+      if (seenIds.has(id)) {
+        problems.push(`A roster assigns stable player id "${id}" more than once.`);
+        continue;
+      }
+      seenIds.add(id);
+      ids[name] = id;
+    }
   }
   return { players, ids, problems };
 }
@@ -508,7 +530,7 @@ export function defineGame(
     // Ids are read from the document whether or not the roster is being supplied by hand, so a
     // player the file already knew about keeps their identity even when the other side was typed
     // in. Identity is the document's to give; only the names are the scorekeeper's.
-    const fromDocument = readRoster(side.team);
+    const fromDocument = readRoster(side.team, byId);
     errors.push(...fromDocument.problems);
 
     const supplied = overrides.rosters?.[name];

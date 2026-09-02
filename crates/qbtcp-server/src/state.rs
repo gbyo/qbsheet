@@ -25,6 +25,20 @@ pub trait QbtcpState: Send + Sync {
         Ok(())
     }
 
+    /// Remove an operational presence after it expires or its room is no longer available.
+    ///
+    /// This is deliberately separate from result retention: cleanup of live room state must not
+    /// delete the audit trail for a submitted result.
+    fn clear_presence(&self, _room_id: &str, _device_id: Option<&str>) -> Result<(), StateError> {
+        Ok(())
+    }
+
+    /// Remove an operational progress snapshot after its session is closed or its assignment is
+    /// superseded. The durable result, if any, remains untouched.
+    fn clear_progress(&self, _session_id: &str) -> Result<(), StateError> {
+        Ok(())
+    }
+
     /// Retain the raw result and return the durable deduplication/review disposition.
     fn record_result(&self, submission: ResultSubmission) -> Result<ResultDisposition, StateError>;
 
@@ -119,6 +133,29 @@ impl MemoryState {
         if let Ok(mut inner) = self.inner.write() {
             inner.rooms.remove(room_id);
             inner.assignments.remove(room_id);
+            inner
+                .presences
+                .retain(|(presence_room, _), _| presence_room != room_id);
+            inner
+                .progresses
+                .retain(|_, progress| progress.room_id != room_id);
+        }
+    }
+
+    pub fn clear_presence(&self, room_id: &str, device_id: Option<&str>) {
+        if let Ok(mut inner) = self.inner.write() {
+            inner
+                .presences
+                .retain(|(presence_room, presence_device), _| {
+                    presence_room != room_id
+                        || device_id.is_some_and(|device| device != presence_device)
+                });
+        }
+    }
+
+    pub fn clear_progress(&self, session_id: &str) {
+        if let Ok(mut inner) = self.inner.write() {
+            inner.progresses.remove(session_id);
         }
     }
 
@@ -152,6 +189,20 @@ impl MemoryState {
                 .find(|result| result.id == result_id)
                 .map(|result| result.raw.clone())
         })
+    }
+
+    /// Restore one result that was loaded from a host's durable store.
+    pub fn restore_result(&self, result: MemoryRetainedResult) {
+        if let Ok(mut inner) = self.inner.write() {
+            if inner
+                .results
+                .iter()
+                .any(|existing| existing.id == result.id)
+            {
+                return;
+            }
+            inner.results.push(result);
+        }
     }
 
     pub fn progress(&self, session_id: &str) -> Option<ProgressRecord> {
@@ -255,6 +306,16 @@ impl QbtcpState for MemoryState {
         if should_replace {
             inner.progresses.insert(record.session_id.clone(), record);
         }
+        Ok(())
+    }
+
+    fn clear_presence(&self, room_id: &str, device_id: Option<&str>) -> Result<(), StateError> {
+        MemoryState::clear_presence(self, room_id, device_id);
+        Ok(())
+    }
+
+    fn clear_progress(&self, session_id: &str) -> Result<(), StateError> {
+        MemoryState::clear_progress(self, session_id);
         Ok(())
     }
 
@@ -393,7 +454,15 @@ impl QbtcpState for MemoryState {
     }
 
     fn record_session_event(&self, event: SessionEvent) -> Result<(), StateError> {
-        self.write()?.session_events.push(event);
+        let mut inner = self.write()?;
+        match &event {
+            SessionEvent::Expired { session_id, .. }
+            | SessionEvent::ResultRetained { session_id, .. } => {
+                inner.progresses.remove(session_id);
+            }
+            SessionEvent::Opened { .. } | SessionEvent::WriterTaken { .. } => {}
+        }
+        inner.session_events.push(event);
         Ok(())
     }
 

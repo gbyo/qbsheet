@@ -65,7 +65,11 @@ export const ingestWarnings = {
   cancelledGame: 'cancelled-game',
   alreadyAccepted: 'already-accepted',
   statisticsWarning: 'statistics-warning',
+  ambiguousTeamIdentity: 'ambiguous-team-identity',
+  unresolvedPlayerIdentity: 'unresolved-player-identity',
   lateAfterAbandon: 'late-after-abandon',
+  transportReviewRequired: 'transport-review-required',
+  directorAssociation: 'director-association',
 } as const;
 
 export type IngestWarning = (typeof ingestWarnings)[keyof typeof ingestWarnings];
@@ -97,8 +101,16 @@ export function describeWarning(code: string): string {
       return 'This game already has an accepted result.';
     case ingestWarnings.statisticsWarning:
       return 'The statistics did not validate cleanly.';
+    case ingestWarnings.ambiguousTeamIdentity:
+      return 'A team name matches more than one roster entry.';
+    case ingestWarnings.unresolvedPlayerIdentity:
+      return 'A player in the scoresheet could not be matched to exactly one roster entry.';
     case ingestWarnings.lateAfterAbandon:
       return 'The room had been marked abandoned when this arrived.';
+    case ingestWarnings.transportReviewRequired:
+      return 'The transport flagged this result for review.';
+    case ingestWarnings.directorAssociation:
+      return 'A director explicitly associated this result with the selected scheduled game; verify the matchup before accepting it.';
     default:
       return code;
   }
@@ -120,6 +132,12 @@ export interface IncomingDocument {
   sessionId?: string;
   /** Warnings the transport raised on its own terms; folded into this vocabulary. */
   transportWarnings?: string[];
+  /** Optional identity carried by the transport when the QBJ itself does not contain it. */
+  transportTournamentId?: string;
+  transportMatchId?: string;
+  /** An explicit assignment identity must not fall back to a weaker match/team guess. */
+  scheduledGameId?: DirectorId;
+  transportReviewRequired?: boolean;
 }
 
 export interface ResultAssessment {
@@ -149,6 +167,7 @@ function finiteNumber(value: unknown): number | undefined {
 }
 
 function namedIdentity(value: unknown): string | undefined {
+  if (typeof value === 'string') return value;
   if (!isRecord(value)) return undefined;
   if (typeof value.$ref === 'string') return value.$ref;
   if (typeof value.id === 'string') return value.id;
@@ -170,17 +189,21 @@ function resultTeamId(
   value: unknown,
   state: DirectorState,
   scheduled: DirectorState['scheduledGames'][number] | undefined,
+  warnings: string[] = [],
 ): string | undefined {
   const identity = namedIdentity(value);
   const candidates = [scheduled?.leftTeamId, scheduled?.rightTeamId].filter((entry): entry is string =>
     Boolean(entry),
   );
   if (identity && candidates.includes(identity)) return identity;
-  const team = state.teams.find(
+  const teams = state.teams.filter(
     (entry) =>
       entry.id === identity || entry.displayName.toLocaleLowerCase() === identity?.toLocaleLowerCase(),
   );
-  return team?.id;
+  if (teams.length > 1 && identity) {
+    warnings.push(ingestWarnings.ambiguousTeamIdentity);
+  }
+  return teams.length === 1 ? teams[0]?.id : undefined;
 }
 
 function answerAggregate(
@@ -247,13 +270,14 @@ export function readResultStatistics(
   value: unknown,
   state: DirectorState,
   scheduled: DirectorState['scheduledGames'][number] | undefined,
-): { scores: TeamGameScore[]; playerStats: PlayerGameStat[] } {
+): { scores: TeamGameScore[]; playerStats: PlayerGameStat[]; warnings: string[] } {
+  const warnings: string[] = [];
   const match = matchObject(value);
   const entries = Array.isArray(match?.match_teams) ? match.match_teams : [];
   const scores = entries
     .map((entry) => {
       if (!isRecord(entry)) return null;
-      const teamId = resultTeamId(entry.team, state, scheduled);
+      const teamId = resultTeamId(entry.team, state, scheduled, warnings);
       const score = finiteNumber(entry.points);
       if (!teamId || score === undefined) return null;
       return { teamId, score, ...teamAggregate(entry, state) };
@@ -261,17 +285,21 @@ export function readResultStatistics(
     .filter((entry): entry is TeamGameScore => entry !== null);
   const playerStats = entries.flatMap((entry): PlayerGameStat[] => {
     if (!isRecord(entry)) return [];
-    const teamId = resultTeamId(entry.team, state, scheduled);
+    const teamId = resultTeamId(entry.team, state, scheduled, warnings);
     if (!teamId || !Array.isArray(entry.match_players)) return [];
     return entry.match_players.flatMap((candidate): PlayerGameStat[] => {
       if (!isRecord(candidate)) return [];
       const playerName = namedValue(candidate.player) ?? namedIdentity(candidate.player);
-      const player = state.players.find(
+      const players = state.players.filter(
         (record) =>
           record.teamId === teamId &&
           (record.id === playerName || record.name.toLocaleLowerCase() === playerName?.toLocaleLowerCase()),
       );
-      if (!player) return [];
+      if (players.length !== 1) {
+        warnings.push(ingestWarnings.unresolvedPlayerIdentity);
+        return [];
+      }
+      const [player] = players;
       const aggregate = answerAggregate(candidate.answer_counts, state);
       return [
         {
@@ -285,7 +313,58 @@ export function readResultStatistics(
       ];
     });
   });
-  return { scores, playerStats };
+  return { scores, playerStats, warnings };
+}
+
+/**
+ * Re-read a result after a director has selected its scheduled game.
+ *
+ * Most files carry stable team ids or names and are already fully understood by
+ * `readResultStatistics`. A result from an older/offline scorer can instead carry two opaque team
+ * references. Once a director explicitly chooses the game, using the two result entries' existing
+ * left/right order is the safest available interpretation. It remains a review warning, and the
+ * result still needs a separate acceptance click.
+ */
+export function readResultStatisticsForAssociation(
+  value: unknown,
+  state: DirectorState,
+  scheduled: DirectorState['scheduledGames'][number] | undefined,
+): {
+  scores: TeamGameScore[];
+  playerStats: PlayerGameStat[];
+  warnings: string[];
+  positionalAssociation: boolean;
+} {
+  const direct = readResultStatistics(value, state, scheduled);
+  if (!scheduled?.rightTeamId || direct.scores.length >= 2) {
+    return { ...direct, positionalAssociation: false };
+  }
+  const match = matchObject(value);
+  const entries = Array.isArray(match?.match_teams) ? match.match_teams : [];
+  if (entries.length !== 2) return { ...direct, positionalAssociation: false };
+  try {
+    const remapped = structuredClone(value);
+    const remappedMatch = matchObject(remapped);
+    if (!remappedMatch || !Array.isArray(remappedMatch.match_teams))
+      return { ...direct, positionalAssociation: false };
+    const teamIds = [scheduled.leftTeamId, scheduled.rightTeamId];
+    remappedMatch.match_teams.forEach((entry, index) => {
+      if (!isRecord(entry)) return;
+      const teamId = teamIds[index];
+      if (teamId) entry.team = { $ref: teamId };
+    });
+    const reassociated = readResultStatistics(remapped, state, scheduled);
+    if (reassociated.scores.length < 2) return { ...direct, positionalAssociation: false };
+    return {
+      ...reassociated,
+      warnings: [
+        ...new Set([...direct.warnings, ...reassociated.warnings, ingestWarnings.directorAssociation]),
+      ],
+      positionalAssociation: true,
+    };
+  } catch {
+    return { ...direct, positionalAssociation: false };
+  }
 }
 
 /**
@@ -378,9 +457,15 @@ function foldTransportWarning(code: string): string {
  * the same call can preview a drop before the director commits to importing it.
  */
 export function assessIncomingDocument(state: DirectorState, document: IncomingDocument): ResultAssessment {
-  const identity = readQbjIdentity(document.qbj);
+  const parsedIdentity = readQbjIdentity(document.qbj);
+  const identity: QbjIdentity = {
+    ...parsedIdentity,
+    ...(document.transportTournamentId ? { tournamentId: document.transportTournamentId } : {}),
+    ...(document.transportMatchId ? { matchId: document.transportMatchId } : {}),
+  };
   const fingerprint = resultFingerprint(document.qbj);
   const warnings = new Set<string>((document.transportWarnings ?? []).map(foldTransportWarning));
+  if (document.transportReviewRequired) warnings.add(ingestWarnings.transportReviewRequired);
   const match = matchObject(document.qbj);
 
   if (!match) {
@@ -395,7 +480,13 @@ export function assessIncomingDocument(state: DirectorState, document: IncomingD
     };
   }
 
-  const { scheduled, matchedByTeams } = findScheduledGame(state, identity, document.qbj);
+  const explicitScheduledGameId = document.scheduledGameId?.trim();
+  const { scheduled, matchedByTeams } = explicitScheduledGameId
+    ? {
+        scheduled: state.scheduledGames.find((game) => game.id === explicitScheduledGameId),
+        matchedByTeams: false,
+      }
+    : findScheduledGame(state, identity, document.qbj);
   const scored = hasScoringContent(document.qbj);
 
   if (!scored) {
@@ -436,6 +527,7 @@ export function assessIncomingDocument(state: DirectorState, document: IncomingD
   if (scheduled?.status === 'cancelled') warnings.add(ingestWarnings.cancelledGame);
 
   const statistics = readResultStatistics(document.qbj, state, scheduled);
+  for (const warning of statistics.warnings) warnings.add(warning);
   if (scheduled && statistics.scores.length === 2) {
     const expected = new Set([scheduled.leftTeamId, scheduled.rightTeamId].filter(Boolean));
     if (statistics.scores.some((score) => !expected.has(score.teamId)))

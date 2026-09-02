@@ -18,13 +18,13 @@
  * mid-round is looking for one row, and cards make ten rows into a scroll.
  */
 import { useCallback, useMemo, useRef, useState } from 'react';
-import type { DirectorState } from '../domain/model';
+import type { DirectorState } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
 import { Button, StateLabel } from '../components/Controls';
 import { Icon } from '../components/Icon';
 import { PageHeader } from '../components/PageHeader';
 import type { SectionId } from '../app/navigation';
-import type { AssignmentSelection } from './assignment';
+import { currentOperationalRound, type AssignmentSelection } from './assignment';
 import { describeWarning } from './ingest';
 import { transportLabel, type IncomingArtifact, type TransferLocation } from './model';
 import { planAssignments } from './prepare';
@@ -59,13 +59,14 @@ export function TransfersView({
   );
   const plan = useMemo(() => planAssignments(state, selection), [selection, state]);
 
-  const currentRound =
-    state.rounds.find((round) => round.id === state.tournament?.currentRoundId) ?? state.rounds.at(-1);
+  const currentRound = currentOperationalRound(state);
   const connectedRoomIds = new Set(
     state.qbtcpSessions.filter((session) => session.state !== 'abandoned').map((session) => session.roomId),
   );
   const roundGames = currentRound
-    ? state.scheduledGames.filter((game) => game.roundId === currentRound.id && !game.bye)
+    ? state.scheduledGames.filter(
+        (game) => game.roundId === currentRound.id && !game.bye && game.status !== 'cancelled',
+      )
     : [];
   const connectedCount = roundGames.filter((game) => game.roomId && connectedRoomIds.has(game.roomId)).length;
 
@@ -153,7 +154,12 @@ export function TransfersView({
                   : `${state.transfers.locations.filter((location) => location.connected).length} of ${state.transfers.locations.length} available`}
               </h2>
             </div>
-            <Button variant="secondary" icon="plus" onClick={() => void transfers.addFolder()}>
+            <Button
+              variant="secondary"
+              icon="plus"
+              disabled={!transfers.native}
+              onClick={() => void transfers.addFolder()}
+            >
               Add folder
             </Button>
           </div>

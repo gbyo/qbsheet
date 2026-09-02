@@ -441,6 +441,28 @@ describe('incomplete QBJ', () => {
     expect(opened.ok).toBe(false);
     if (!opened.ok) expect(opened.errors.join(' ')).toContain('more than once');
   });
+
+  test('roster player references resolve to their stable QBJ ids', () => {
+    const document = assignmentDocument() as { objects: QbjObject[] };
+    const playerObjects: QbjObject[] = [];
+    for (const team of document.objects.filter((entry) => entry.type === 'Team')) {
+      const embeddedPlayers = Array.isArray(team.players) ? team.players.filter(isPlainObject) : [];
+      playerObjects.push(...embeddedPlayers);
+      team.players = embeddedPlayers.map((player) => ({ $ref: player.id }));
+    }
+    document.objects.push(...playerObjects);
+
+    const source = readQbjSource(document);
+    expect(source.ok).toBe(true);
+    if (!source.ok) return;
+    const defined = defineGame(source.value, source.value.candidates[0].index);
+
+    expect(defined.ok).toBe(true);
+    if (!defined.ok) return;
+    expect(defined.definition.qbjIdentity?.playerIds?.[playerIdentityKey('Ninety Six', 'Sarah')]).toBe(
+      'Player_Sarah',
+    );
+  });
 });
 
 describe('whole-tournament documents', () => {

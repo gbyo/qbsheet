@@ -1,4 +1,4 @@
-import { deriveTeamStandings, runPreflight, type DirectorState } from '../domain';
+import { deriveTeamStandings, latestRound, runPreflight, type DirectorState } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
 import { Button, StateLabel } from '../components/Controls';
 import { Icon } from '../components/Icon';
@@ -10,15 +10,19 @@ export function OverviewView({
   controller,
   onNavigate,
   onAnnounce,
+  nativeServerReady = false,
+  nativeServerAvailable = true,
 }: {
   state: DirectorState;
   controller: DirectorController;
   onNavigate: (section: SectionId) => void;
   onAnnounce: (message: string) => void;
+  nativeServerReady?: boolean;
+  nativeServerAvailable?: boolean;
 }) {
   const tournament = state.tournament;
   const round =
-    state.rounds.find((entry) => entry.id === tournament?.currentRoundId) ?? state.rounds.at(-1) ?? null;
+    state.rounds.find((entry) => entry.id === tournament?.currentRoundId) ?? latestRound(state.rounds);
   const games = round ? state.scheduledGames.filter((game) => game.roundId === round.id) : [];
   const finished = games.filter((game) => game.status === 'accepted').length;
   const live = games.filter((game) => game.status === 'live').length;
@@ -26,7 +30,8 @@ export function OverviewView({
   const reviewCount = state.submissions.filter(
     (submission) => submission.status === 'review' || submission.status === 'received',
   ).length;
-  const issues = runPreflight(state, false);
+  const readyRoomCount = state.rooms.filter((room) => room.available && room.status === 'available').length;
+  const issues = runPreflight(state, nativeServerReady, nativeServerAvailable);
   const standings = deriveTeamStandings(state).slice(0, 5);
 
   return (
@@ -82,21 +87,44 @@ export function OverviewView({
               </span>
             </div>
             <div className="director-round-actions">
-              <Button
-                variant="quiet"
-                icon={round.status === 'released' ? 'pause' : 'play'}
-                onClick={() => {
-                  if (round.status === 'released') controller.closeRound(round.id);
-                  else controller.releaseRound(round.id);
-                  onAnnounce(
-                    round.status === 'released'
-                      ? `${round.name} close requested.`
-                      : `${round.name} released.`,
-                  );
-                }}
-              >
-                {round.status === 'released' ? 'Close round' : 'Release assignments'}
-              </Button>
+              {round.status !== 'closed' && (
+                <Button
+                  variant="quiet"
+                  icon={
+                    round.status === 'released' ? 'pause' : round.status === 'planned' ? 'clipboard' : 'play'
+                  }
+                  onClick={() => {
+                    if (round.status === 'planned') {
+                      const prepared = controller.prepareRound(round.id);
+                      onAnnounce(
+                        prepared
+                          ? `${round.name} prepared.`
+                          : `${round.name} could not be prepared; review the schedule first.`,
+                      );
+                    } else if (round.status === 'prepared') {
+                      const released = controller.releaseRound(round.id);
+                      onAnnounce(
+                        released
+                          ? `${round.name} released.`
+                          : 'The round is not ready to release; review the Director error and room assignments.',
+                      );
+                    } else {
+                      const closed = controller.closeRound(round.id);
+                      onAnnounce(
+                        closed
+                          ? `${round.name} closed.`
+                          : `${round.name} could not close; accept or cancel every game first.`,
+                      );
+                    }
+                  }}
+                >
+                  {round.status === 'planned'
+                    ? 'Prepare round'
+                    : round.status === 'prepared'
+                      ? 'Release assignments'
+                      : 'Close round'}
+                </Button>
+              )}
               <Button variant="quiet" icon="chevron" onClick={() => onNavigate('tournament')}>
                 Open control
               </Button>
@@ -126,9 +154,11 @@ export function OverviewView({
             label="Rooms"
             value={String(state.rooms.length)}
             detail={
-              state.rooms.filter((room) => room.available).length
-                ? `${state.rooms.filter((room) => room.available).length} available`
-                : 'Add rooms'
+              readyRoomCount
+                ? `${readyRoomCount} ready for assignment`
+                : state.rooms.length
+                  ? 'None ready for assignment'
+                  : 'Add rooms'
             }
             onClick={() => onNavigate('rooms')}
           />
@@ -140,7 +170,15 @@ export function OverviewView({
           />
           <StatusStat
             label="Saved locally"
-            value={controller.saving ? 'Saving' : state.metadata.lastSavedAt ? 'Yes' : 'Not yet'}
+            value={
+              controller.error
+                ? 'Needs attention'
+                : controller.saving
+                  ? 'Saving'
+                  : state.metadata.lastSavedAt
+                    ? 'Yes'
+                    : 'Not yet'
+            }
             detail={
               controller.repositoryKind === 'tauri-sqlite'
                 ? 'SQLite'

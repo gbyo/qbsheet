@@ -25,7 +25,14 @@
  * Additive construction is the primary defence. The strip is the second one, kept because "the
  * builder provably cannot leak" is a property of today's builder.
  */
-import type { DirectorId, DirectorState, Round, ScheduledGame, TournamentRules } from '../domain/model';
+import {
+  latestRound,
+  type DirectorId,
+  type DirectorState,
+  type Round,
+  type ScheduledGame,
+  type TournamentRules,
+} from '../domain';
 import { stripSecrets } from './canonical';
 import { assignmentFileName } from './filenames';
 
@@ -313,6 +320,12 @@ export type AssignmentSelection =
   | { kind: 'games'; scheduledGameIds: DirectorId[] }
   | { kind: 'unconnected-rooms'; roundId?: DirectorId };
 
+export function currentOperationalRound(state: DirectorState): Round | undefined {
+  const selected = state.rounds.find((round) => round.id === state.tournament?.currentRoundId);
+  if (selected && selected.status !== 'closed') return selected;
+  return latestRound(state.rounds.filter((round) => round.status !== 'closed')) ?? undefined;
+}
+
 /**
  * Which games a selection names.
  *
@@ -323,13 +336,9 @@ export type AssignmentSelection =
  */
 export function selectScheduledGames(state: DirectorState, selection: AssignmentSelection): ScheduledGame[] {
   const playable = (game: ScheduledGame) => !game.bye && game.rightTeamId && game.status !== 'cancelled';
-  const currentRound = (): Round | undefined =>
-    state.rounds.find((round) => round.id === state.tournament?.currentRoundId) ??
-    [...state.rounds].reverse().find((round) => round.status === 'released') ??
-    state.rounds.at(-1);
   switch (selection.kind) {
     case 'current-round': {
-      const round = currentRound();
+      const round = currentOperationalRound(state);
       return round ? state.scheduledGames.filter((game) => game.roundId === round.id && playable(game)) : [];
     }
     case 'round':
@@ -345,7 +354,7 @@ export function selectScheduledGames(state: DirectorState, selection: Assignment
       return state.scheduledGames.filter((game) => wanted.has(game.id) && playable(game));
     }
     case 'unconnected-rooms': {
-      const roundId = selection.roundId ?? currentRound()?.id;
+      const roundId = selection.roundId ?? currentOperationalRound(state)?.id;
       const connectedRoomIds = new Set(
         state.qbtcpSessions
           .filter((session) => session.state !== 'abandoned')

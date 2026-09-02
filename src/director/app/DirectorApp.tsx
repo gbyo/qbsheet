@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import BrandLogo from '../../BrandLogo';
 import { Button, EmptyState, PanelBody, PanelFooter } from '../components/Controls';
 import { Icon } from '../components/Icon';
@@ -16,6 +16,7 @@ import { StandingsView } from '../standings/StandingsView';
 import { PublishView } from '../publish/PublishView';
 import { SettingsView } from '../settings/SettingsView';
 import { importArchiveBytes, importDirectorTournament, importQbjText } from '../format/interchange';
+import { latestRound } from '../domain';
 import {
   isNativeDirector,
   openNativeTournamentFile,
@@ -23,17 +24,23 @@ import {
   type NativeServerStatus,
 } from '../platform/native';
 import type { DirectorTournamentInput } from '@qbsheet/tournament-formats';
+import { localCalendarDate } from './date';
 
 export default function DirectorApp() {
   const controller = useDirectorController();
   const { loading, state, syncQbtcp } = controller;
+  const nativeDirector = isNativeDirector();
   const [activeSection, setActiveSection] = useState<SectionId>('overview');
   const [search, setSearch] = useState('');
+  const [searchActiveIndex, setSearchActiveIndex] = useState(-1);
   const [announcement, setAnnouncement] = useState('');
   const [qbtcpServerStatus, setQbtcpServerStatus] = useState<NativeServerStatus | null>(() =>
-    isNativeDirector() ? null : { running: false },
+    nativeDirector ? null : { running: false },
   );
   const searchRef = useRef<HTMLInputElement>(null);
+  const searchResults = useMemo(() => searchTournament(state, search), [search, state]);
+  const activeSearchIndex =
+    searchResults.length > 0 ? Math.min(searchActiveIndex, searchResults.length - 1) : -1;
 
   useEffect(() => {
     const focusSearch = (event: KeyboardEvent) => {
@@ -52,7 +59,7 @@ export default function DirectorApp() {
 
   useEffect(() => {
     if (loading || !state.tournament) return;
-    if (!isNativeDirector()) return;
+    if (!nativeDirector) return;
     let active = true;
     const poll = () => {
       if (!active) return;
@@ -67,12 +74,23 @@ export default function DirectorApp() {
       active = false;
       window.clearInterval(interval);
     };
-  }, [loading, state.tournament, syncQbtcp]);
+  }, [loading, nativeDirector, state.tournament, syncQbtcp]);
 
   if (loading) return <div className="director-loading">Opening local tournament storage…</div>;
   if (!state.tournament)
     return (
-      <NewTournamentScreen controller={controller} onAnnounce={setAnnouncement} announcement={announcement} />
+      <>
+        {controller.error && (
+          <p className="director-error-copy" role="alert">
+            {controller.error}
+          </p>
+        )}
+        <NewTournamentScreen
+          controller={controller}
+          onAnnounce={setAnnouncement}
+          announcement={announcement}
+        />
+      </>
     );
   const tournament = state.tournament;
 
@@ -80,13 +98,45 @@ export default function DirectorApp() {
     setActiveSection(section);
     setAnnouncement('');
   };
+  const selectSearchResult = (result: SearchResult) => {
+    navigate(result.section);
+    setSearch('');
+    setSearchActiveIndex(-1);
+  };
+  const updateSearch = (value: string) => {
+    setSearch(value);
+    setSearchActiveIndex(-1);
+  };
+  const handleSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      updateSearch('');
+      searchRef.current?.blur();
+      return;
+    }
+    if (!searchResults.length || !search.trim()) return;
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      const direction = event.key === 'ArrowDown' ? 1 : -1;
+      setSearchActiveIndex((current) => {
+        const next = current + direction;
+        return next < 0 ? searchResults.length - 1 : next >= searchResults.length ? 0 : next;
+      });
+      return;
+    }
+    if (event.key === 'Enter' && activeSearchIndex >= 0) {
+      event.preventDefault();
+      const result = searchResults[activeSearchIndex];
+      if (result) selectSearchResult(result);
+    }
+  };
   const resultReviewCount = controller.state.submissions.filter(
     (submission) => submission.status === 'review' || submission.status === 'received',
   ).length;
   const transferPendingCount = controller.state.transfers.artifacts.filter(
     (artifact) => artifact.status === 'staged',
   ).length;
-  const sidebarServer = describeSidebarServer(qbtcpServerStatus, isNativeDirector());
+  const sidebarServer = describeSidebarServer(qbtcpServerStatus, nativeDirector);
   const renderPage = () => {
     switch (activeSection) {
       case 'overview':
@@ -96,6 +146,8 @@ export default function DirectorApp() {
             controller={controller}
             onNavigate={navigate}
             onAnnounce={setAnnouncement}
+            nativeServerReady={qbtcpServerStatus?.running ?? false}
+            nativeServerAvailable={nativeDirector}
           />
         );
       case 'teams':
@@ -177,7 +229,9 @@ export default function DirectorApp() {
           <strong>{tournament.name}</strong>
           <span>
             {statusLabel(tournament.status)}
-            {controller.state.rounds.length ? ` · Round ${controller.state.rounds.at(-1)?.number ?? 0}` : ''}
+            {controller.state.rounds.length
+              ? ` · Round ${latestRound(controller.state.rounds)?.number ?? 0}`
+              : ''}
           </span>
           <Icon name="chevron" size={14} />
         </div>
@@ -193,7 +247,7 @@ export default function DirectorApp() {
                   onSelect={navigate}
                   count={
                     item.id === 'results'
-                      ? resultReviewCount
+                      ? resultReviewCount || undefined
                       : item.id === 'transfers'
                         ? transferPendingCount || undefined
                         : undefined
@@ -219,7 +273,9 @@ export default function DirectorApp() {
           <button
             type="button"
             className="director-help-link"
-            onClick={() => setAnnouncement('Use ⌘ K or Ctrl K to search teams, rooms, and games.')}
+            onClick={() =>
+              setAnnouncement('Use ⌘ K or Ctrl K to search teams, players, rooms, packets, and games.')
+            }
           >
             <Icon name="help" size={15} /> Help & keyboard shortcuts
           </button>
@@ -248,10 +304,47 @@ export default function DirectorApp() {
                 type="search"
                 placeholder="Search teams, rooms, games"
                 value={search}
-                onChange={(event) => setSearch(event.target.value)}
+                onChange={(event) => updateSearch(event.target.value)}
+                onKeyDown={handleSearchKeyDown}
+                aria-autocomplete="list"
+                aria-controls={search.trim() && searchResults.length ? 'director-search-results' : undefined}
+                aria-activedescendant={
+                  activeSearchIndex >= 0 ? `director-search-result-${activeSearchIndex}` : undefined
+                }
               />
-              <kbd>⌘ K</kbd>
+              <kbd>⌘/Ctrl K</kbd>
             </label>
+            {search.trim() &&
+              (searchResults.length > 0 ? (
+                <div
+                  id="director-search-results"
+                  className="director-search-results"
+                  role="listbox"
+                  aria-label="Search results"
+                >
+                  {searchResults.map((result, index) => (
+                    <button
+                      type="button"
+                      className={`director-search-result ${index === activeSearchIndex ? 'is-active' : ''}`}
+                      key={`${result.section}-${result.id}`}
+                      id={`director-search-result-${index}`}
+                      role="option"
+                      aria-selected={index === activeSearchIndex}
+                      onClick={() => selectSearchResult(result)}
+                    >
+                      <span>
+                        <strong>{result.label}</strong>
+                        <small>{result.detail}</small>
+                      </span>
+                      <Icon name="chevron" size={13} />
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="director-search-results director-search-empty" role="status">
+                  No matching teams, players, rooms, packets, or games.
+                </div>
+              ))}
             <button
               type="button"
               className="director-icon-button director-topbar-button"
@@ -266,7 +359,14 @@ export default function DirectorApp() {
             </span>
           </div>
         </header>
-        <div className="director-content">{renderPage()}</div>
+        <div className="director-content">
+          {controller.error && (
+            <p className="director-error-copy" role="alert">
+              {controller.error}
+            </p>
+          )}
+          {renderPage()}
+        </div>
         {announcement && (
           <div className="director-toast" role="status">
             <Icon name="check" size={16} />
@@ -296,6 +396,7 @@ function SectionLink({
     <button
       type="button"
       className={`director-nav-link ${active ? 'is-active' : ''}`}
+      aria-label={count !== undefined ? `${section.label}, ${count} needing attention` : section.label}
       aria-current={active ? 'page' : undefined}
       onClick={() => onSelect(section.id)}
     >
@@ -316,7 +417,7 @@ function NewTournamentScreen({
   announcement: string;
 }) {
   const [name, setName] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(() => localCalendarDate());
   const [venue, setVenue] = useState('');
   const [organizer, setOrganizer] = useState('');
   const create = () => {
@@ -336,7 +437,10 @@ function NewTournamentScreen({
           onAnnounce(report.errors.join(' ') || 'That archive is not valid.');
           return;
         }
-        controller.importSnapshot(report.state);
+        if (!controller.importSnapshot(report.state)) {
+          onAnnounce('That portable archive could not be imported.');
+          return;
+        }
         onAnnounce(importWarningMessage('Portable archive imported.', report.warnings));
         return;
       }
@@ -347,21 +451,37 @@ function NewTournamentScreen({
           onAnnounce(report.errors.join(' ') || 'That QBJ file is not valid.');
           return;
         }
-        controller.importSnapshot(report.state);
+        if (!controller.importSnapshot(report.state)) {
+          onAnnounce('That QBJ file could not be imported.');
+          return;
+        }
         onAnnounce(importWarningMessage('QBJ tournament imported.', report.warnings));
         return;
       }
       const parsed: unknown = JSON.parse(value);
-      if (controller.importSnapshot(parsed)) {
+      if (isDirectorStateLike(parsed)) {
+        if (!controller.importSnapshot(parsed)) return;
         onAnnounce('Director tournament imported.');
         return;
       }
-      if (parsed && typeof parsed === 'object' && 'tournament' in parsed) {
-        controller.importSnapshot(importDirectorTournament(parsed as DirectorTournamentInput));
+      if (isDirectorTournamentLike(parsed)) {
+        if (!controller.importSnapshot(importDirectorTournament(parsed as DirectorTournamentInput))) {
+          onAnnounce('That tournament data could not be imported.');
+          return;
+        }
         onAnnounce('Tournament data imported.');
         return;
       }
-      onAnnounce('That file is not a supported Director archive.');
+      const report = importQbjText(value);
+      if (report.ok && report.state) {
+        if (!controller.importSnapshot(report.state)) {
+          onAnnounce('That QBJ tournament could not be imported.');
+          return;
+        }
+        onAnnounce(importWarningMessage('QBJ tournament imported.', report.warnings));
+        return;
+      }
+      onAnnounce(report.errors.join(' ') || 'That file is not a supported Director archive.');
     } catch (reason: unknown) {
       onAnnounce(reason instanceof Error ? reason.message : 'That file could not be read.');
     }
@@ -377,14 +497,37 @@ function NewTournamentScreen({
         const report = importArchiveBytes(bytes);
         if (!report.ok || !report.state)
           throw new Error(report.errors.join(' ') || 'That archive is not valid.');
-        controller.importSnapshot(report.state);
+        if (!controller.importSnapshot(report.state)) throw new Error('That archive could not be imported.');
         onAnnounce(importWarningMessage('Portable archive imported.', report.warnings));
-      } else {
+      } else if (extension === 'qbj') {
         const report = importQbjText(new TextDecoder().decode(bytes));
         if (!report.ok || !report.state)
           throw new Error(report.errors.join(' ') || 'That file is not a supported QBJ archive.');
-        controller.importSnapshot(report.state);
+        if (!controller.importSnapshot(report.state)) throw new Error('That QBJ file could not be imported.');
         onAnnounce(importWarningMessage('QBJ tournament imported.', report.warnings));
+      } else if (extension === 'json') {
+        const text = new TextDecoder().decode(bytes);
+        const parsed: unknown = JSON.parse(text);
+        if (isDirectorStateLike(parsed)) {
+          if (!controller.importSnapshot(parsed))
+            throw new Error('That Director state could not be imported.');
+          onAnnounce('Director tournament imported.');
+        } else if (isDirectorTournamentLike(parsed)) {
+          if (!controller.importSnapshot(importDirectorTournament(parsed as DirectorTournamentInput)))
+            throw new Error('That tournament data could not be imported.');
+          onAnnounce('Tournament data imported.');
+        } else {
+          const report = importQbjText(text);
+          if (!report.ok || !report.state)
+            throw new Error(
+              report.errors.join(' ') || 'That file is not a supported Director or QBJ archive.',
+            );
+          if (!controller.importSnapshot(report.state))
+            throw new Error('That QBJ tournament could not be imported.');
+          onAnnounce(importWarningMessage('QBJ tournament imported.', report.warnings));
+        }
+      } else {
+        throw new Error('That file type is not supported. Choose a .qbst, .qbj, or .json file.');
       }
     } catch (reason: unknown) {
       onAnnounce(reason instanceof Error ? reason.message : 'That file could not be opened.');
@@ -451,7 +594,7 @@ function NewTournamentScreen({
                   <input
                     className="director-visually-hidden-input"
                     type="file"
-                    accept=".qbst,.qbj,.json,.qbsheet"
+                    accept=".qbst,.qbj,.json"
                     onChange={(event) => {
                       void importArchive(event.target.files?.[0]);
                       event.currentTarget.value = '';
@@ -518,4 +661,114 @@ function statusLabel(status: string): string {
       : status === 'complete'
         ? 'Complete'
         : 'Archived';
+}
+
+type SearchResult = { id: string; section: SectionId; label: string; detail: string };
+
+function searchTournament(
+  state: ReturnType<typeof useDirectorController>['state'],
+  query: string,
+): SearchResult[] {
+  const needle = query.trim().toLocaleLowerCase();
+  if (!needle) return [];
+  const results: SearchResult[] = [];
+  const matches = (values: unknown[]) =>
+    values.some((value) =>
+      String(value ?? '')
+        .toLocaleLowerCase()
+        .includes(needle),
+    );
+  for (const team of state.teams) {
+    const organization = team.organizationId
+      ? state.organizations.find((entry) => entry.id === team.organizationId)?.name
+      : undefined;
+    if (matches([team.displayName, team.teamLetter, team.status, organization])) {
+      results.push({
+        id: team.id,
+        section: 'teams',
+        label: team.displayName,
+        detail: [organization, team.teamLetter && `Team ${team.teamLetter}`, team.status]
+          .filter(Boolean)
+          .join(' · '),
+      });
+    }
+  }
+  for (const player of state.players) {
+    const team = state.teams.find((entry) => entry.id === player.teamId);
+    if (matches([player.name, team?.displayName, player.rosterNumber])) {
+      results.push({
+        id: player.id,
+        section: 'teams',
+        label: player.name,
+        detail: team?.displayName ?? 'Roster player',
+      });
+    }
+  }
+  for (const room of state.rooms) {
+    if (matches([room.name, room.building, room.floor, room.status])) {
+      results.push({ id: room.id, section: 'rooms', label: room.name, detail: room.status });
+    }
+  }
+  for (const packet of state.packets) {
+    if (matches([packet.name, packet.source])) {
+      results.push({
+        id: packet.id,
+        section: 'packets',
+        label: packet.name,
+        detail: `${packet.source} packet`,
+      });
+    }
+  }
+  for (const round of state.rounds) {
+    if (matches([round.name, round.number, round.status])) {
+      results.push({
+        id: round.id,
+        section: 'tournament',
+        label: round.name,
+        detail: `Round ${round.number} · ${round.status}`,
+      });
+    }
+  }
+  for (const game of state.scheduledGames) {
+    const left = state.teams.find((team) => team.id === game.leftTeamId)?.displayName;
+    const right = game.rightTeamId
+      ? state.teams.find((team) => team.id === game.rightTeamId)?.displayName
+      : 'Bye';
+    const round = state.rounds.find((entry) => entry.id === game.roundId);
+    if (matches([game.id, left, right, round?.name, game.status])) {
+      results.push({
+        id: game.id,
+        section: 'tournament',
+        label: `${left ?? 'Unknown'} · ${right ?? 'Unknown'}`,
+        detail: `${round?.name ?? 'Scheduled game'} · ${game.status}`,
+      });
+    }
+  }
+  for (const submission of state.submissions) {
+    const game = state.games.find((entry) => entry.id === submission.gameId);
+    if (matches([submission.id, submission.transportResultId, submission.status, game?.scheduledGameId])) {
+      results.push({
+        id: submission.id,
+        section: 'results',
+        label: `Result ${submission.transportResultId ?? submission.id}`,
+        detail: submission.status,
+      });
+    }
+  }
+  return results.slice(0, 12);
+}
+
+function isDirectorStateLike(value: unknown): value is Record<string, unknown> {
+  return Boolean(
+    value &&
+    typeof value === 'object' &&
+    'schemaVersion' in value &&
+    'tournament' in value &&
+    'teams' in value &&
+    'scheduledGames' in value,
+  );
+}
+
+function isDirectorTournamentLike(value: unknown): value is DirectorTournamentInput {
+  return Boolean(value && typeof value === 'object' && 'tournament' in value && !('schemaVersion' in value));
 }

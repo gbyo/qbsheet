@@ -634,7 +634,13 @@ mod tests {
         assert_eq!(omitted.end_date, None);
         assert_eq!(omitted.archived_at, None);
         let serialized = serde_json::to_value(omitted).unwrap();
-        for key in ["short_name", "location", "start_date", "end_date", "archived_at"] {
+        for key in [
+            "short_name",
+            "location",
+            "start_date",
+            "end_date",
+            "archived_at",
+        ] {
             assert!(serialized.get(key).is_none());
         }
 
@@ -676,7 +682,13 @@ mod tests {
         assert_eq!(omitted.notes, None);
         assert_eq!(omitted.archived_at, None);
         let serialized = serde_json::to_value(omitted).unwrap();
-        for key in ["organization_id", "team_letter", "seed", "notes", "archived_at"] {
+        for key in [
+            "organization_id",
+            "team_letter",
+            "seed",
+            "notes",
+            "archived_at",
+        ] {
             assert!(serialized.get(key).is_none());
         }
 

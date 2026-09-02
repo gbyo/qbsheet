@@ -203,7 +203,9 @@ fn modified_at(metadata: &fs::Metadata) -> Option<String> {
 /// desktop platforms' own APIs. Nothing here assumes `/Volumes`, and nothing here assumes drive
 /// letters; a Linux stick under `/run/media/<user>/<label>` is found the same way as either.
 #[tauri::command]
-pub fn transfers_list_volumes(roots: State<'_, TransferRoots>) -> Result<Vec<VolumeInfo>, CommandError> {
+pub fn transfers_list_volumes(
+    roots: State<'_, TransferRoots>,
+) -> Result<Vec<VolumeInfo>, CommandError> {
     let disks = Disks::new_with_refreshed_list();
     let mut volumes: Vec<VolumeInfo> = disks
         .list()
@@ -284,7 +286,10 @@ pub fn transfers_authorize_root(
 }
 
 #[tauri::command]
-pub fn transfers_forget_root(path: String, roots: State<'_, TransferRoots>) -> Result<(), CommandError> {
+pub fn transfers_forget_root(
+    path: String,
+    roots: State<'_, TransferRoots>,
+) -> Result<(), CommandError> {
     roots.forget(Path::new(&path));
     Ok(())
 }
@@ -319,7 +324,11 @@ pub fn transfers_list_directory(
             name: entry.file_name().to_string_lossy().into_owned(),
             path: path_string(&entry_path),
             directory: !symlink && metadata.is_dir(),
-            byte_length: if metadata.is_file() { metadata.len() } else { 0 },
+            byte_length: if metadata.is_file() {
+                metadata.len()
+            } else {
+                0
+            },
             modified_at: modified_at(&metadata),
             symlink,
         });
@@ -349,7 +358,9 @@ pub fn transfers_read_file(
     }
     let bound = max_bytes.unwrap_or(MAX_READ_BYTES).min(MAX_READ_BYTES);
     if metadata.len() > bound {
-        return Err(CommandError::dialog("That file is too large to read as QBJ."));
+        return Err(CommandError::dialog(
+            "That file is too large to read as QBJ.",
+        ));
     }
     let bytes = fs::read(&resolved).map_err(CommandError::io)?;
     Ok(FileContents {
@@ -369,7 +380,10 @@ pub fn transfers_create_directory(
 }
 
 #[tauri::command]
-pub fn transfers_exists(path: String, roots: State<'_, TransferRoots>) -> Result<bool, CommandError> {
+pub fn transfers_exists(
+    path: String,
+    roots: State<'_, TransferRoots>,
+) -> Result<bool, CommandError> {
     match roots.resolve_new(&path) {
         Ok(resolved) => Ok(resolved.exists()),
         Err(_) => Ok(false),
@@ -543,8 +557,7 @@ mod tests {
         fs::write(directory.join("a.qbj"), b"{}").expect("write");
         let roots = TransferRoots::default();
         roots.authorize(&directory).expect("authorize");
-        let entries =
-            transfers_list_entries(&roots, &path_string(&directory), 10).expect("list");
+        let entries = transfers_list_entries(&roots, &path_string(&directory), 10).expect("list");
         assert_eq!(entries.len(), 1);
         assert!(!entries[0].symlink);
         let _ = fs::remove_dir_all(directory);
@@ -572,7 +585,11 @@ mod tests {
                 name: entry.file_name().to_string_lossy().into_owned(),
                 path: path_string(&entry_path),
                 directory: !symlink && metadata.is_dir(),
-                byte_length: if metadata.is_file() { metadata.len() } else { 0 },
+                byte_length: if metadata.is_file() {
+                    metadata.len()
+                } else {
+                    0
+                },
                 modified_at: modified_at(&metadata),
                 symlink,
             });

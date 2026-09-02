@@ -1,5 +1,11 @@
-import { type DirectorState, type Room, type ScheduledGame } from './model';
-import { scheduleIsValid } from './scheduling';
+import { type DirectorId, type DirectorState, type ScheduledGame } from './model';
+import {
+  currentFormat,
+  currentPhase,
+  currentPacket,
+  formatGenerationAvailability,
+  scheduleIsValid,
+} from './scheduling';
 
 export type PreflightSeverity = 'blocker' | 'warning' | 'recommendation';
 
@@ -11,7 +17,11 @@ export interface PreflightIssue {
   action?: string;
 }
 
-export function runPreflight(state: DirectorState, nativeServerReady = false): PreflightIssue[] {
+export function runPreflight(
+  state: DirectorState,
+  nativeServerReady = false,
+  nativeServerAvailable = true,
+): PreflightIssue[] {
   const issues: PreflightIssue[] = [];
   if (!state.tournament) {
     issues.push({
@@ -43,17 +53,49 @@ export function runPreflight(state: DirectorState, nativeServerReady = false): P
       message: `Duplicate team names: ${duplicateNames.join(', ')}.`,
     });
   }
-  if (!state.tournament.formatId || state.formats.length === 0) {
+  const format = currentFormat(state);
+  const phase = currentPhase(state);
+  if (!state.tournament.formatId || !format) {
     issues.push({
       id: 'format-missing',
       severity: 'blocker',
       area: 'format',
-      message: 'Choose a tournament format.',
+      message: 'Choose a valid current tournament format.',
     });
   }
-  const unscheduled = state.scheduledGames.filter(
-    (game) => !game.bye && game.roomId === null && game.status !== 'cancelled',
-  );
+  if (format && (!phase || phase.formatId !== format.id)) {
+    issues.push({
+      id: 'phase-missing',
+      severity: 'blocker',
+      area: 'format',
+      message: 'Choose a valid current phase for the selected format.',
+    });
+  }
+  if (format) {
+    const availability = formatGenerationAvailability(state);
+    const tournamentClosed = state.tournament.status === 'complete' || state.tournament.status === 'archived';
+    if (!availability.supported && !tournamentClosed) {
+      issues.push({
+        id: 'format-generation-unavailable',
+        severity: 'blocker',
+        area: 'format',
+        message: availability.message,
+      });
+    }
+  }
+  if (state.tournament.currentPacketId && !currentPacket(state)) {
+    issues.push({
+      id: 'packet-current-missing',
+      severity: 'blocker',
+      area: 'packets',
+      message: 'The selected current packet no longer exists.',
+    });
+  }
+  const roundById = new Map(state.rounds.map((round) => [round.id, round]));
+  const unscheduled = state.scheduledGames.filter((game) => {
+    const round = roundById.get(game.roundId);
+    return !game.bye && game.roomId === null && game.status !== 'cancelled' && round?.status !== 'closed';
+  });
   if (unscheduled.length > 0) {
     issues.push({
       id: 'games-without-rooms',
@@ -62,38 +104,68 @@ export function runPreflight(state: DirectorState, nativeServerReady = false): P
       message: `${unscheduled.length} scheduled game(s) do not have a room.`,
     });
   }
+  const unavailableRooms = state.scheduledGames.filter((game) => {
+    if (game.bye || game.status === 'cancelled' || !game.roomId) return false;
+    const round = state.rounds.find((entry) => entry.id === game.roundId);
+    if (!round || (round.status !== 'planned' && round.status !== 'prepared')) return false;
+    const room = state.rooms.find((entry) => entry.id === game.roomId);
+    return !room || !room.available || room.status !== 'available';
+  });
+  if (unavailableRooms.length > 0) {
+    issues.push({
+      id: 'games-with-unavailable-rooms',
+      severity: 'blocker',
+      area: 'rooms',
+      message: `${unavailableRooms.length} scheduled game(s) use rooms that are unavailable or not operationally ready.`,
+      action: 'Open Rooms',
+    });
+  }
   for (const round of state.rounds) {
-    const games = state.scheduledGames.filter((game) => game.roundId === round.id);
-    if (!scheduleIsValid(games)) {
+    if (!roundScheduleIsValid(state, round.id)) {
       issues.push({
         id: `round-invalid-${round.id}`,
         severity: 'blocker',
         area: 'schedule',
-        message: `${round.name} contains a team conflict.`,
+        message: `${round.name} contains an invalid matchup or round membership.`,
       });
     }
   }
-  issues.push(...roomConflicts(state.rooms));
-  const packetReuse = state.packets.filter(
-    (packet) => new Set(packet.usedGameIds).size !== packet.usedGameIds.length,
-  );
+  const roundIds = new Set(state.rounds.map((round) => round.id));
+  const orphanedGames = state.scheduledGames.filter((game) => !roundIds.has(game.roundId));
+  if (orphanedGames.length > 0) {
+    issues.push({
+      id: 'games-without-round',
+      severity: 'blocker',
+      area: 'schedule',
+      message: `${orphanedGames.length} scheduled game(s) reference a missing round.`,
+    });
+  }
+  issues.push(...roomAssignmentConflicts(state));
+  const packetReuse = packetUseConflicts(state);
   if (packetReuse.length > 0) {
     issues.push({
       id: 'packet-reuse',
       severity: 'warning',
       area: 'packets',
-      message: 'One or more packets are recorded as used more than once.',
+      message: `Packet reuse detected: ${packetReuse.map((entry) => `${entry.packetId} (${entry.gameIds.length} games)`).join(', ')}.`,
     });
   }
-  if (!nativeServerReady) {
-    issues.push({
-      id: 'qbtcp-offline',
-      severity: 'recommendation',
-      area: 'qbtcp',
-      message: 'Start the native QBTCP server before releasing electronic assignments.',
-    });
+  issues.push(...packetReferenceIssues(state));
+  if (nativeServerAvailable && !nativeServerReady) {
+    if (state.tournament.status !== 'complete' && state.tournament.status !== 'archived') {
+      issues.push({
+        id: 'qbtcp-offline',
+        severity: 'recommendation',
+        area: 'qbtcp',
+        message: 'Start the native QBTCP server before releasing electronic assignments.',
+      });
+    }
   }
-  if (!state.metadata.lastCheckpointAt) {
+  if (
+    !state.metadata.lastCheckpointAt &&
+    state.tournament.status !== 'complete' &&
+    state.tournament.status !== 'archived'
+  ) {
     issues.push({
       id: 'checkpoint-missing',
       severity: 'recommendation',
@@ -104,21 +176,93 @@ export function runPreflight(state: DirectorState, nativeServerReady = false): P
   return issues;
 }
 
-function roomConflicts(rooms: Room[]): PreflightIssue[] {
+export function roomAssignmentConflicts(
+  state: DirectorState,
+  roomIds?: ReadonlySet<DirectorId>,
+): PreflightIssue[] {
+  const rooms = state.rooms.filter((room) => room.available && (!roomIds || roomIds.has(room.id)));
+  const staffById = new Map(state.staff.map((member) => [member.id, member]));
+  const equipmentById = new Map(state.equipment.map((item) => [item.id, item]));
   const usedStaff = new Map<string, string>();
+  const reportedStaffConflicts = new Set<string>();
+  const usedEquipment = new Map<string, string>();
+  const reportedEquipmentConflicts = new Set<string>();
   const issues: PreflightIssue[] = [];
-  for (const room of rooms.filter((room) => room.available)) {
-    for (const staffId of [room.moderatorId, room.scorekeeperId].filter((id): id is string => id !== null)) {
+  for (const room of rooms) {
+    for (const [role, staffId] of [
+      ['moderator', room.moderatorId],
+      ['scorekeeper', room.scorekeeperId],
+    ] as const) {
+      if (!staffId) continue;
+      const member = staffById.get(staffId);
+      if (!member) {
+        issues.push({
+          id: `staff-missing-${staffId}`,
+          severity: 'blocker',
+          area: 'rooms',
+          message: `${room.name} references a missing ${role}.`,
+        });
+        continue;
+      }
+      if (!member.available) {
+        issues.push({
+          id: `staff-unavailable-${staffId}`,
+          severity: 'blocker',
+          area: 'rooms',
+          message: `${member.name} is unavailable but assigned to ${room.name}.`,
+        });
+      }
+      if (!member.roles.includes(role)) {
+        issues.push({
+          id: `staff-role-${staffId}-${role}`,
+          severity: 'blocker',
+          area: 'rooms',
+          message: `${member.name} is assigned as ${role} in ${room.name} but is not marked for that role.`,
+        });
+      }
       const previous = usedStaff.get(staffId);
-      if (previous) {
+      if (previous && !reportedStaffConflicts.has(staffId)) {
         issues.push({
           id: `staff-conflict-${staffId}`,
           severity: 'blocker',
           area: 'rooms',
-          message: `${staffId} is assigned to both ${previous} and ${room.name}.`,
+          message: `${member.name} is assigned to both ${previous} and ${room.name}.`,
+        });
+        reportedStaffConflicts.add(staffId);
+      } else {
+        if (!previous) usedStaff.set(staffId, `${room.name} (${role})`);
+      }
+    }
+    if (room.equipmentId) {
+      const equipment = equipmentById.get(room.equipmentId);
+      if (!equipment) {
+        issues.push({
+          id: `equipment-missing-${room.equipmentId}`,
+          severity: 'blocker',
+          area: 'rooms',
+          message: `${room.name} references missing equipment.`,
         });
       } else {
-        usedStaff.set(staffId, room.name);
+        if (!equipment.available) {
+          issues.push({
+            id: `equipment-unavailable-${room.equipmentId}`,
+            severity: 'blocker',
+            area: 'rooms',
+            message: `${equipment.name} is unavailable but assigned to ${room.name}.`,
+          });
+        }
+        const previous = usedEquipment.get(room.equipmentId);
+        if (previous && !reportedEquipmentConflicts.has(room.equipmentId)) {
+          issues.push({
+            id: `equipment-conflict-${room.equipmentId}`,
+            severity: 'blocker',
+            area: 'rooms',
+            message: `${equipment.name} is assigned to both ${previous} and ${room.name}.`,
+          });
+          reportedEquipmentConflicts.add(room.equipmentId);
+        } else if (!previous) {
+          usedEquipment.set(room.equipmentId, room.name);
+        }
       }
     }
   }
@@ -133,4 +277,310 @@ function duplicateValues(values: string[]): string[] {
 
 export function roundGames(state: DirectorState, roundId: string): ScheduledGame[] {
   return state.scheduledGames.filter((game) => game.roundId === roundId);
+}
+
+/**
+ * Validate the round-local invariants required before a round can move through its lifecycle.
+ *
+ * `runPreflight` reports this as a single actionable issue, while the controller uses the same
+ * predicate immediately before prepare, release, and close. Keeping the check here prevents an
+ * imported or hand-edited round from bypassing the field and pool constraints merely because each
+ * individual pairing looks well formed.
+ */
+export function roundScheduleIsValid(state: DirectorState, roundId: DirectorId): boolean {
+  const round = state.rounds.find((entry) => entry.id === roundId);
+  if (!round) return false;
+  const games = roundGames(state, roundId);
+  const actualIds = games.map((game) => game.id);
+  const referencedIds = round.scheduledGameIds;
+  const membershipValid =
+    new Set(referencedIds).size === referencedIds.length &&
+    new Set(actualIds).size === actualIds.length &&
+    referencedIds.length === actualIds.length &&
+    actualIds.every((gameId) => referencedIds.includes(gameId));
+  if (!membershipValid) return false;
+
+  const phase = state.phases.find((candidate) => candidate.id === round.phaseId);
+  if (!phase || (phase.roundIds.length > 0 && !phase.roundIds.includes(round.id))) return false;
+
+  // Closed rounds are historical records. Their original field may contain teams that were later
+  // dropped, so preserve the existing preflight rule of checking membership without re-ranking it
+  // against today's active field.
+  if (round.status === 'closed') {
+    if (phase.poolIds.length === 0) return games.every((game) => game.poolId == null);
+    const poolIds = new Set(phase.poolIds);
+    return (
+      phase.poolIds.every((poolId) =>
+        state.pools.some((pool) => pool.id === poolId && pool.phaseId === phase.id),
+      ) && games.every((game) => typeof game.poolId === 'string' && poolIds.has(game.poolId))
+    );
+  }
+
+  const format = state.formats.find((candidate) => candidate.id === phase.formatId);
+  if (!format || games.length === 0) return false;
+  const expectedTeams = expectedRoundTeams(state, phase);
+  if (expectedTeams.length < 2) return false;
+  const expectedByeCount = expectedRoundByeCount(state, phase, expectedTeams.length);
+  if (
+    !scheduleIsValid(games, expectedTeams, {
+      expectedByeCount,
+      allowByes: format.allowByes,
+    })
+  ) {
+    return false;
+  }
+
+  if (phase.poolIds.length === 0) return games.every((game) => game.poolId == null);
+
+  const pools = phase.poolIds.map((poolId) => state.pools.find((pool) => pool.id === poolId));
+  if (pools.some((pool) => !pool || pool.phaseId !== phase.id)) return false;
+  const confirmedIds = new Set(
+    state.teams.filter((team) => team.status === 'confirmed').map((team) => team.id),
+  );
+  const poolTeamIds = pools.flatMap((pool) => pool?.teamIds ?? []);
+  const poolTeamIdSet = new Set(poolTeamIds);
+  if (
+    poolTeamIds.some((teamId, index) => !confirmedIds.has(teamId) || poolTeamIds.indexOf(teamId) !== index) ||
+    (format.kind === 'pools' &&
+      (poolTeamIdSet.size !== confirmedIds.size ||
+        [...confirmedIds].some((teamId) => !poolTeamIdSet.has(teamId))))
+  ) {
+    return false;
+  }
+  if (!games.every((game) => typeof game.poolId === 'string' && phase.poolIds.includes(game.poolId))) {
+    return false;
+  }
+  return pools.every((pool) => {
+    if (!pool) return false;
+    const poolTeams = state.teams.filter(
+      (team) => team.status === 'confirmed' && pool.teamIds.includes(team.id),
+    );
+    const poolGames = games.filter((game) => game.poolId === pool.id);
+    return scheduleIsValid(poolGames, poolTeams, {
+      expectedByeCount: poolTeams.length % 2,
+      allowByes: format.allowByes,
+    });
+  });
+}
+
+function expectedRoundTeams(state: DirectorState, phase: DirectorState['phases'][number] | undefined) {
+  if (!phase || phase.poolIds.length === 0) {
+    return state.teams.filter((team) => team.status === 'confirmed');
+  }
+  const ids = new Set(
+    state.pools.filter((pool) => phase.poolIds.includes(pool.id)).flatMap((pool) => pool.teamIds),
+  );
+  return state.teams.filter((team) => team.status === 'confirmed' && ids.has(team.id));
+}
+
+function expectedRoundByeCount(
+  state: DirectorState,
+  phase: DirectorState['phases'][number] | undefined,
+  expectedTeamCount: number,
+): number {
+  if (!phase || phase.poolIds.length === 0) return expectedTeamCount % 2;
+  return state.pools
+    .filter((pool) => phase.poolIds.includes(pool.id))
+    .reduce((count, pool) => {
+      const activeCount = pool.teamIds.filter(
+        (teamId) => state.teams.find((team) => team.id === teamId)?.status === 'confirmed',
+      ).length;
+      return count + (activeCount % 2);
+    }, 0);
+}
+
+export function packetUseConflicts(
+  state: DirectorState,
+): Array<{ packetId: DirectorId; gameIds: DirectorId[] }> {
+  const uses = new Map<DirectorId, Set<DirectorId>>();
+  const roundUses = new Map<DirectorId, Set<DirectorId>>();
+  const directUseRounds = new Map<DirectorId, Set<DirectorId>>();
+  const add = (packetId: DirectorId | null, gameId: DirectorId) => {
+    if (!packetId) return;
+    const game = state.scheduledGames.find((candidate) => candidate.id === gameId);
+    const roundId = game?.roundId;
+    const round = roundId ? state.rounds.find((candidate) => candidate.id === roundId) : undefined;
+    const isRoundPacket = !game?.packetId && round?.packetId === packetId;
+    if (isRoundPacket && roundId) {
+      const rounds = roundUses.get(packetId) ?? new Set<DirectorId>();
+      rounds.add(roundId);
+      roundUses.set(packetId, rounds);
+      return;
+    }
+    const gameIds = uses.get(packetId) ?? new Set<DirectorId>();
+    gameIds.add(gameId);
+    uses.set(packetId, gameIds);
+    if (roundId) {
+      const rounds = directUseRounds.get(packetId) ?? new Set<DirectorId>();
+      rounds.add(roundId);
+      directUseRounds.set(packetId, rounds);
+    }
+  };
+  const recordToScheduled = new Map(state.games.map((game) => [game.id, game.scheduledGameId]));
+  for (const game of state.scheduledGames) {
+    const round = state.rounds.find((candidate) => candidate.id === game.roundId);
+    add(game.packetId ?? round?.packetId ?? null, game.id);
+  }
+  for (const packet of state.packets) {
+    for (const gameId of packet.assignedGameIds) {
+      add(packet.id, recordToScheduled.get(gameId) ?? gameId);
+    }
+    for (const gameId of packet.usedGameIds) {
+      add(packet.id, recordToScheduled.get(gameId) ?? gameId);
+    }
+  }
+  // Include round-level uses as a single representative per round so that a round packet shared
+  // by multiple games in the same round does not appear as reuse.
+  for (const [packetId, roundIds] of roundUses) {
+    if (roundIds.size === 0) continue;
+    const representativeIds = uses.get(packetId) ?? new Set<DirectorId>();
+    // If there is also a direct per-game use, keep it. Otherwise, collapse the round's games to
+    // one entry per round so a single round packet counts as one use.
+    if (representativeIds.size === 0) {
+      for (const roundId of roundIds) representativeIds.add(`round:${roundId}`);
+      uses.set(packetId, representativeIds);
+    } else {
+      // A direct use in one round and a round-level use in another are two physical uses. Keep
+      // only round representatives that are not already represented by a direct game use; a
+      // direct override and an inherited packet in the same round are still one round's use.
+      const directRounds = directUseRounds.get(packetId) ?? new Set<DirectorId>();
+      for (const roundId of roundIds) {
+        if (!directRounds.has(roundId)) representativeIds.add(`round:${roundId}`);
+      }
+    }
+  }
+  return [...uses.entries()]
+    .filter(([, gameIds]) => gameIds.size > 1)
+    .map(([packetId, gameIds]) => ({ packetId, gameIds: [...gameIds] }));
+}
+
+function packetReferenceIssues(state: DirectorState): PreflightIssue[] {
+  const scheduledIds = new Set(state.scheduledGames.map((game) => game.id));
+  const scheduledById = new Map(state.scheduledGames.map((game) => [game.id, game]));
+  const roundById = new Map(state.rounds.map((round) => [round.id, round]));
+  const gameToScheduled = new Map(state.games.map((game) => [game.id, game.scheduledGameId]));
+  const packetIds = new Set(state.packets.map((packet) => packet.id));
+  const packetIdsByScheduled = new Map<DirectorId, Set<DirectorId>>();
+  const issues: PreflightIssue[] = [];
+  const canonicalReference = (id: string): string | undefined =>
+    scheduledIds.has(id) ? id : gameToScheduled.get(id);
+  const effectivePacketId = (scheduled: ScheduledGame): DirectorId | null =>
+    scheduled.packetId ?? roundById.get(scheduled.roundId)?.packetId ?? null;
+  const addPacketForScheduled = (scheduledGameId: DirectorId, packetId: DirectorId): void => {
+    const ids = packetIdsByScheduled.get(scheduledGameId) ?? new Set<DirectorId>();
+    ids.add(packetId);
+    packetIdsByScheduled.set(scheduledGameId, ids);
+  };
+  const addIssue = (issue: PreflightIssue): void => {
+    if (!issues.some((existing) => existing.id === issue.id)) issues.push(issue);
+  };
+
+  for (const scheduled of state.scheduledGames) {
+    const effective = effectivePacketId(scheduled);
+    if (effective) {
+      addPacketForScheduled(scheduled.id, effective);
+      if (!packetIds.has(effective)) {
+        addIssue({
+          id: `scheduled-packet-missing-${scheduled.id}-${effective}`,
+          severity: 'blocker',
+          area: 'packets',
+          message: `Scheduled game “${scheduled.id}” references unknown packet “${effective}”.`,
+        });
+      }
+    }
+  }
+  for (const game of state.games) {
+    const scheduled = scheduledById.get(game.scheduledGameId);
+    if (!scheduled || !game.packetId) continue;
+    addPacketForScheduled(scheduled.id, game.packetId);
+    const effective = effectivePacketId(scheduled);
+    if (effective && effective !== game.packetId) {
+      addIssue({
+        id: `record-packet-mismatch-${game.id}`,
+        severity: 'blocker',
+        area: 'packets',
+        message: `Result “${game.id}” references packet “${game.packetId}”, but its scheduled game uses “${effective}”.`,
+      });
+    }
+    if (!packetIds.has(game.packetId)) {
+      addIssue({
+        id: `record-packet-missing-${game.id}-${game.packetId}`,
+        severity: 'blocker',
+        area: 'packets',
+        message: `Result “${game.id}” references unknown packet “${game.packetId}”.`,
+      });
+    }
+  }
+  for (const packet of state.packets) {
+    const assigned = packet.assignedGameIds ?? [];
+    const used = packet.usedGameIds ?? [];
+    for (const [kind, ids] of [
+      ['assigned', assigned],
+      ['used', used],
+    ] as const) {
+      for (const id of ids) {
+        const canonical = canonicalReference(id);
+        if (!canonical) {
+          addIssue({
+            id: `packet-${kind}-missing-${packet.id}-${id}`,
+            severity: 'blocker',
+            area: 'packets',
+            message: `Packet “${packet.name}” has a ${kind} reference to unknown game “${id}”.`,
+          });
+        } else {
+          addPacketForScheduled(canonical, packet.id);
+          const scheduled = scheduledById.get(canonical);
+          const effective = scheduled ? effectivePacketId(scheduled) : null;
+          if (scheduled && effective && effective !== packet.id) {
+            addIssue({
+              id: `packet-${kind}-mismatch-${packet.id}-${canonical}`,
+              severity: 'blocker',
+              area: 'packets',
+              message: `Packet “${packet.name}” lists game “${canonical}”, but that scheduled game uses packet “${effective}”.`,
+            });
+          }
+        }
+      }
+      const canonicalIds = ids.map(canonicalReference).filter((id): id is string => Boolean(id));
+      if (new Set(canonicalIds).size !== canonicalIds.length) {
+        addIssue({
+          id: `packet-${kind}-duplicate-${packet.id}`,
+          severity: 'warning',
+          area: 'packets',
+          message: `Packet “${packet.name}” repeats a ${kind} reference; repeated entries do not count as separate game use.`,
+        });
+      }
+    }
+    for (const roundId of packet.assignedRoundIds ?? []) {
+      if (!state.rounds.some((round) => round.id === roundId)) {
+        addIssue({
+          id: `packet-round-missing-${packet.id}-${roundId}`,
+          severity: 'blocker',
+          area: 'packets',
+          message: `Packet “${packet.name}” references unknown round “${roundId}”.`,
+        });
+      } else {
+        const roundPacketId = roundById.get(roundId)?.packetId;
+        if (roundPacketId && roundPacketId !== packet.id) {
+          addIssue({
+            id: `packet-round-mismatch-${packet.id}-${roundId}`,
+            severity: 'blocker',
+            area: 'packets',
+            message: `Packet “${packet.name}” lists round “${roundId}”, but that round uses packet “${roundPacketId}”.`,
+          });
+        }
+      }
+    }
+  }
+  for (const [scheduledGameId, packetIdsForGame] of packetIdsByScheduled) {
+    if (packetIdsForGame.size > 1) {
+      addIssue({
+        id: `packet-assignment-conflict-${scheduledGameId}`,
+        severity: 'blocker',
+        area: 'packets',
+        message: `Scheduled game “${scheduledGameId}” is associated with multiple packet IDs: ${[...packetIdsForGame].join(', ')}.`,
+      });
+    }
+  }
+  return issues;
 }

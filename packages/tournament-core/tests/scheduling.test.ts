@@ -30,15 +30,15 @@ describe('deterministic tournament scheduling', () => {
 
     expect(first.games).toHaveLength(28);
     expect(games).toHaveLength(28);
-    expect(pairs).toHaveLength(28);
+    expect(pairs.size).toBe(28);
     expect(first.issues.filter((issue) => issue.severity === 'error')).toHaveLength(0);
     expect(first.expectedGamesPerTeam).toBe(7);
     expect(second.games).toEqual(first.games);
     for (const roundId of Array.from(new Set(games.map((game) => game.roundId)))) {
       const round = games.filter((game) => game.roundId === roundId);
       expect(round).toHaveLength(4);
-      expect(new Set(round.flatMap((game) => [game.teamAId, game.teamBId]))).toHaveLength(8);
-      expect(new Set(round.map((game) => game.roomId))).toHaveLength(4);
+      expect(new Set(round.flatMap((game) => [game.teamAId, game.teamBId])).size).toBe(8);
+      expect(new Set(round.map((game) => game.roomId)).size).toBe(4);
     }
   });
 
@@ -63,7 +63,7 @@ describe('deterministic tournament scheduling', () => {
     expect(schedule.roundCount).toBe(5);
     expect(games).toHaveLength(10);
     expect(byes).toHaveLength(5);
-    expect(byeTeams).toHaveLength(5);
+    expect(byeTeams.size).toBe(5);
     expect([...counts.values()]).toEqual([4, 4, 4, 4, 4]);
     expect(schedule.issues.filter((issue) => issue.severity === 'error')).toHaveLength(0);
   });
@@ -91,6 +91,23 @@ describe('deterministic tournament scheduling', () => {
     expect(forbidden.issues.some((issue) => issue.code === 'rematch-forbidden')).toBe(true);
   });
 
+  it('keeps generated fallback rounds when an explicit definition list is shorter than the request', () => {
+    const schedule = generateRoundRobinSchedule({
+      phaseId: 'phase-1',
+      teams: makeTeams(4),
+      rounds: [{ id: 'round-1', number: 1 }],
+      roundCount: 3,
+      seed: 'fallback-rounds',
+    });
+    const games = matchGames(schedule.games);
+
+    expect(schedule.roundCount).toBe(3);
+    expect(games).toHaveLength(6);
+    expect(new Set(games.map((game) => game.roundId))).toHaveLength(3);
+    expect(schedule.issues.some((issue) => issue.code === 'unknown-round')).toBe(false);
+    expect(schedule.issues.filter((issue) => issue.severity === 'error')).toHaveLength(0);
+  });
+
   it('synchronizes multiple pools without double-booking rooms', () => {
     const teams = makeTeams(8);
     const pools = [
@@ -111,7 +128,7 @@ describe('deterministic tournament scheduling', () => {
     expect(schedule.expectedGamesPerTeam).toBe(3);
     for (const roundId of Array.from(new Set(games.map((game) => game.roundId)))) {
       const roundGames = games.filter((game) => game.roundId === roundId);
-      expect(new Set(roundGames.map((game) => game.roomId))).toHaveLength(roundGames.length);
+      expect(new Set(roundGames.map((game) => game.roomId)).size).toBe(roundGames.length);
     }
     expect(schedule.issues.filter((issue) => issue.severity === 'error')).toHaveLength(0);
   });
