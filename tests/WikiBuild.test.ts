@@ -77,7 +77,8 @@ describe('production wiki output', () => {
   test('uses relative links and assets from a deeply nested article', () => {
     const html = readFileSync(startHerePath, 'utf8');
 
-    expect(html).toContain('<a href="../../../">Open QBSheet</a>');
+    expect(html).toContain('<a href="../../../">Scorer</a>');
+    expect(html).toContain('<a href="../../../director.html">Director</a>');
     // The brand mark is inlined into the markup rather than fetched, so the header draws on the
     // first paint and at whatever depth the article sits. There is no `<img>` on this page to
     // check a relative path on; the favicon and the two build assets below cover that.
