@@ -11,11 +11,15 @@ export function ResultsView({
   controller,
   onNavigate,
   onAnnounce,
+  navigationTarget: _navigationTarget,
+  onClearNavigationTarget: _onClearNavigationTarget,
 }: {
   state: DirectorState;
   controller: DirectorController;
   onNavigate?: (section: SectionId) => void;
   onAnnounce: (message: string) => void;
+  navigationTarget?: any;
+  onClearNavigationTarget?: () => void;
 }) {
   const [filter, setFilter] = useState<'all' | 'review' | 'accepted' | 'rejected'>('all');
   const [showManual, setShowManual] = useState(false);
@@ -139,10 +143,14 @@ function ScheduledGamesPanel({
   state,
   controller,
   onAnnounce,
+  navigationTarget: _navigationTarget,
+  onClearNavigationTarget: _onClearNavigationTarget,
 }: {
   state: DirectorState;
   controller: DirectorController;
   onAnnounce: (message: string) => void;
+  navigationTarget?: any;
+  onClearNavigationTarget?: () => void;
 }) {
   const [confirmCancelId, setConfirmCancelId] = useState<string | null>(null);
   const games = state.scheduledGames.filter((game) => !game.bye);
@@ -233,11 +241,15 @@ function ResultRow({
   submission,
   controller,
   onAnnounce,
+  navigationTarget: _navigationTarget,
+  onClearNavigationTarget: _onClearNavigationTarget,
 }: {
   state: DirectorState;
   submission: DirectorState['submissions'][number];
   controller: DirectorController;
   onAnnounce: (message: string) => void;
+  navigationTarget?: any;
+  onClearNavigationTarget?: () => void;
 }) {
   const [action, setAction] = useState<'associate' | 'edit' | 'protest' | null>(null);
   const game = state.games.find((entry) => entry.id === submission.gameId);
@@ -402,6 +414,8 @@ function AssociateResult({
   onCancel,
   onSuccess,
   onAnnounce,
+  navigationTarget: _navigationTarget,
+  onClearNavigationTarget: _onClearNavigationTarget,
 }: {
   state: DirectorState;
   submission: DirectorState['submissions'][number];
@@ -409,6 +423,8 @@ function AssociateResult({
   onCancel: () => void;
   onSuccess: () => void;
   onAnnounce: (message: string) => void;
+  navigationTarget?: any;
+  onClearNavigationTarget?: () => void;
 }) {
   const choices = state.scheduledGames.filter(
     (game) => !game.bye && game.status !== 'accepted' && game.status !== 'cancelled',
@@ -478,6 +494,8 @@ function AcceptedResultEditor({
   onCancel,
   onSuccess,
   onAnnounce,
+  navigationTarget: _navigationTarget,
+  onClearNavigationTarget: _onClearNavigationTarget,
 }: {
   state: DirectorState;
   game: DirectorState['games'][number];
@@ -486,6 +504,8 @@ function AcceptedResultEditor({
   onCancel: () => void;
   onSuccess: () => void;
   onAnnounce: (message: string) => void;
+  navigationTarget?: any;
+  onClearNavigationTarget?: () => void;
 }) {
   const leftScore = game.scores.find((entry) => entry.teamId === scheduled.leftTeamId);
   const rightScore = scheduled.rightTeamId
@@ -556,12 +576,16 @@ function ProtestCreator({
   onCancel,
   onSuccess,
   onAnnounce,
+  navigationTarget: _navigationTarget,
+  onClearNavigationTarget: _onClearNavigationTarget,
 }: {
   game: DirectorState['games'][number];
   controller: DirectorController;
   onCancel: () => void;
   onSuccess: () => void;
   onAnnounce: (message: string) => void;
+  navigationTarget?: any;
+  onClearNavigationTarget?: () => void;
 }) {
   const [category, setCategory] = useState<'tossup' | 'bonus' | 'procedure' | 'other'>('other');
   const [description, setDescription] = useState('');
@@ -618,10 +642,14 @@ function ProtestsPanel({
   state,
   controller,
   onAnnounce,
+  navigationTarget: _navigationTarget,
+  onClearNavigationTarget: _onClearNavigationTarget,
 }: {
   state: DirectorState;
   controller: DirectorController;
   onAnnounce: (message: string) => void;
+  navigationTarget?: any;
+  onClearNavigationTarget?: () => void;
 }) {
   return (
     <section className="director-panel">
@@ -683,11 +711,15 @@ function ProtestRuling({
   state,
   controller,
   onAnnounce,
+  navigationTarget: _navigationTarget,
+  onClearNavigationTarget: _onClearNavigationTarget,
 }: {
   protest: DirectorState['protests'][number];
   state: DirectorState;
   controller: DirectorController;
   onAnnounce: (message: string) => void;
+  navigationTarget?: any;
+  onClearNavigationTarget?: () => void;
 }) {
   const game = state.games.find((entry) => entry.id === protest.gameId);
   const scheduled = game
@@ -761,11 +793,15 @@ function ManualResult({
   controller,
   onSuccess,
   onAnnounce,
+  navigationTarget: _navigationTarget,
+  onClearNavigationTarget: _onClearNavigationTarget,
 }: {
   state: DirectorState;
   controller: DirectorController;
   onSuccess: () => void;
   onAnnounce: (message: string) => void;
+  navigationTarget?: any;
+  onClearNavigationTarget?: () => void;
 }) {
   const choices = state.scheduledGames.filter(
     (game) => !game.bye && !['accepted', 'cancelled'].includes(game.status),

@@ -10,10 +10,14 @@ export function PacketsView({
   state,
   controller,
   onAnnounce,
+  navigationTarget: _navigationTarget,
+  onClearNavigationTarget: _onClearNavigationTarget,
 }: {
   state: DirectorState;
   controller: DirectorController;
   onAnnounce: (message: string) => void;
+  navigationTarget?: any;
+  onClearNavigationTarget?: () => void;
 }) {
   const [showForm, setShowForm] = useState(false);
   const [detailsPacketId, setDetailsPacketId] = useState<string | null>(null);

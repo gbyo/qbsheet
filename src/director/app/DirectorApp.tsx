@@ -26,6 +26,9 @@ import {
 } from '../platform/native';
 import type { DirectorTournamentInput } from '@qbsheet/tournament-formats';
 import { localCalendarDate } from './date';
+import { HelpDialog } from '../help/HelpDialog';
+import { loadOperatorProfile, operatorInitials, saveOperatorProfile, type OperatorProfile } from '../operator/operatorProfile';
+import type { DirectorNavigationTarget } from './navigationTarget';
 
 export default function DirectorApp() {
   const controller = useDirectorController();
@@ -42,6 +45,14 @@ export default function DirectorApp() {
   const searchResults = useMemo(() => searchTournament(state, search), [search, state]);
   const activeSearchIndex =
     searchResults.length > 0 ? Math.min(searchActiveIndex, searchResults.length - 1) : -1;
+  const [helpOpen, setHelpOpen] = useState(false);
+  const helpButtonRef = useRef<HTMLButtonElement>(null);
+  const [operatorProfile, setOperatorProfile] = useState<OperatorProfile>(() => loadOperatorProfile());
+  const [operatorMenuOpen, setOperatorMenuOpen] = useState(false);
+  const [operatorDialogOpen, setOperatorDialogOpen] = useState(false);
+  const [navigationTarget, setNavigationTarget] = useState<DirectorNavigationTarget | null>(null);
+  const [tournamentMenuOpen, setTournamentMenuOpen] = useState(false);
+  const tournamentButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     const focusSearch = (event: KeyboardEvent) => {
@@ -95,12 +106,19 @@ export default function DirectorApp() {
     );
   const tournament = state.tournament;
 
-  const navigate = (section: SectionId) => {
+  const navigate = (section: SectionId, target?: DirectorNavigationTarget | null) => {
     setActiveSection(section);
     setAnnouncement('');
+    if (target) setNavigationTarget(target);
   };
   const selectSearchResult = (result: SearchResult) => {
-    navigate(result.section);
+    const target: DirectorNavigationTarget = {
+      section: result.section,
+      entityType: result.entityType,
+      entityId: result.id,
+      parentId: result.parentId,
+    };
+    navigate(result.section, target);
     setSearch('');
     setSearchActiveIndex(-1);
   };
@@ -111,8 +129,8 @@ export default function DirectorApp() {
   const handleSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Escape') {
       event.preventDefault();
-      updateSearch('');
-      searchRef.current?.blur();
+      if (search.trim()) updateSearch('');
+      else searchRef.current?.blur();
       return;
     }
     if (!searchResults.length || !search.trim()) return;
@@ -139,6 +157,7 @@ export default function DirectorApp() {
   ).length;
   const sidebarServer = describeSidebarServer(qbtcpServerStatus, nativeDirector);
   const renderPage = () => {
+    const clearTarget = () => setNavigationTarget(null);
     switch (activeSection) {
       case 'overview':
         return (
@@ -158,6 +177,8 @@ export default function DirectorApp() {
             controller={controller}
             search={search}
             onAnnounce={setAnnouncement}
+            navigationTarget={navigationTarget}
+            onClearNavigationTarget={clearTarget}
           />
         );
       case 'format':
@@ -176,10 +197,20 @@ export default function DirectorApp() {
             controller={controller}
             onNavigate={navigate}
             onAnnounce={setAnnouncement}
+            navigationTarget={navigationTarget}
+            onClearNavigationTarget={clearTarget}
           />
         );
       case 'packets':
-        return <PacketsView state={controller.state} controller={controller} onAnnounce={setAnnouncement} />;
+        return (
+          <PacketsView
+            state={controller.state}
+            controller={controller}
+            onAnnounce={setAnnouncement}
+            navigationTarget={navigationTarget}
+            onClearNavigationTarget={clearTarget}
+          />
+        );
       case 'tournament':
         return (
           <TournamentView
@@ -187,6 +218,8 @@ export default function DirectorApp() {
             controller={controller}
             onNavigate={navigate}
             onAnnounce={setAnnouncement}
+            navigationTarget={navigationTarget}
+            onClearNavigationTarget={clearTarget}
           />
         );
       case 'transfers':
@@ -205,6 +238,8 @@ export default function DirectorApp() {
             controller={controller}
             onNavigate={navigate}
             onAnnounce={setAnnouncement}
+            navigationTarget={navigationTarget}
+            onClearNavigationTarget={clearTarget}
           />
         );
       case 'standings':
@@ -216,7 +251,7 @@ export default function DirectorApp() {
       case 'live':
         return <LiveView state={controller.state} actions={controller.live} onAnnounce={setAnnouncement} />;
       case 'settings':
-        return <SettingsView state={controller.state} controller={controller} onAnnounce={setAnnouncement} />;
+        return <SettingsView state={controller.state} controller={controller} onAnnounce={setAnnouncement} operatorProfile={operatorProfile} onSaveOperator={(p) => { setOperatorProfile(p); saveOperatorProfile(p); setAnnouncement('Operator profile saved.'); }} />;
     }
   };
 
@@ -227,16 +262,54 @@ export default function DirectorApp() {
           <BrandLogo className="director-wordmark" />
           <span>Director</span>
         </div>
-        <div className="director-tournament-switcher">
-          <span className="director-tournament-overline">Tournament</span>
-          <strong>{tournament.name}</strong>
-          <span>
-            {statusLabel(tournament.status)}
-            {controller.state.rounds.length
-              ? ` · Round ${latestRound(controller.state.rounds)?.number ?? 0}`
-              : ''}
-          </span>
-          <Icon name="chevron" size={14} />
+        <div className="director-tournament-switcher-wrap">
+          <button
+            ref={tournamentButtonRef}
+            type="button"
+            className="director-tournament-switcher"
+            aria-haspopup="menu"
+            aria-expanded={tournamentMenuOpen}
+            aria-label={`Tournament: ${tournament.name}. Switch tournament`}
+            onClick={() => setTournamentMenuOpen((v) => !v)}
+          >
+            <span className="director-tournament-overline">Tournament</span>
+            <strong>{tournament.name}</strong>
+            <span>
+              {statusLabel(tournament.status)}
+              {controller.state.rounds.length
+                ? ` · Round ${latestRound(controller.state.rounds)?.number ?? 0}`
+                : ''}
+            </span>
+            <Icon name="chevron" size={14} />
+          </button>
+          {tournamentMenuOpen && (
+            <div role="menu" className="director-tournament-menu" aria-label="Tournament switcher">
+              <div className="director-tournament-menu-header">
+                <strong>{tournament.name}</strong>
+                <small>{tournament.date} · {statusLabel(tournament.status)}</small>
+                <small className="director-mono">{tournament.id.slice(0, 8)}</small>
+              </div>
+              <div role="separator" className="director-menu-separator" />
+              <button role="menuitem" type="button" className="director-menu-item" onClick={() => { setTournamentMenuOpen(false); setHelpOpen(true); }}>
+                View tournament details
+              </button>
+              <button role="menuitem" type="button" className="director-menu-item" onClick={() => {
+                setTournamentMenuOpen(false);
+                if (confirm('Create a new tournament? Current tournament remains saved locally.')) {
+                  // For now, navigate to new-tournament flow via reset: controller will handle create
+                  setAnnouncement('Use the new tournament form after saving current work.');
+                }
+              }}>
+                New tournament…
+              </button>
+              <label role="menuitem" className="director-menu-item director-menu-file">
+                Open archive…
+                <input type="file" accept=".qbst,.qbj,.json" className="director-visually-hidden-input" onChange={(e) => { setTournamentMenuOpen(false); void (async () => { const f = e.target.files?.[0]; if (!f) return; const text = await f.text(); try { const parsed = JSON.parse(text); const { importDirectorTournament } = await import('../format/interchange'); if (parsed && typeof parsed === 'object' && 'schemaVersion' in parsed) { controller.importSnapshot(parsed); } else if (parsed && typeof parsed === 'object' && 'tournament' in parsed) { controller.importSnapshot(importDirectorTournament(parsed as DirectorTournamentInput)); } setAnnouncement('Archive imported.'); } catch { setAnnouncement('Could not open archive.'); } })(); e.currentTarget.value=''; }} />
+              </label>
+              <div role="separator" className="director-menu-separator" />
+              <div className="director-menu-note">Multi-tournament library persists locally; switch retains current save.</div>
+            </div>
+          )}
         </div>
         <nav className="director-nav" aria-label="Tournament sections">
           {navigation.map((group, index) => (
@@ -274,20 +347,34 @@ export default function DirectorApp() {
             </div>
           </div>
           <button
+            ref={helpButtonRef}
             type="button"
             className="director-help-link"
-            onClick={() =>
-              setAnnouncement('Use ⌘ K or Ctrl K to search teams, players, rooms, packets, and games.')
-            }
+            onClick={() => setHelpOpen(true)}
           >
             <Icon name="help" size={15} /> Help & keyboard shortcuts
           </button>
-          <div className="director-operator">
-            <span className="director-avatar">D</span>
-            <div>
-              <strong>Director</strong>
-              <small>Local operator</small>
-            </div>
+          <div className="director-operator-wrap">
+            <button
+              type="button"
+              className="director-operator"
+              aria-haspopup="menu"
+              aria-expanded={operatorMenuOpen}
+              onClick={() => setOperatorMenuOpen((v) => !v)}
+            >
+              <span className="director-avatar">{operatorInitials(operatorProfile.displayName)}</span>
+              <div>
+                <strong>{operatorProfile.displayName}</strong>
+                <small>{operatorProfile.role ?? 'Local operator'}</small>
+              </div>
+            </button>
+            {operatorMenuOpen && (
+              <div role="menu" className="director-operator-menu" aria-label="Operator menu">
+                <button role="menuitem" type="button" className="director-menu-item" onClick={() => { setOperatorMenuOpen(false); setOperatorDialogOpen(true); }}>Operator profile…</button>
+                <button role="menuitem" type="button" className="director-menu-item" onClick={() => { setOperatorMenuOpen(false); navigate('settings'); }}>Settings</button>
+                <button role="menuitem" type="button" className="director-menu-item" onClick={() => { setOperatorMenuOpen(false); setHelpOpen(true); }}>Keyboard shortcuts / Help</button>
+              </div>
+            )}
           </div>
         </div>
       </aside>
@@ -299,67 +386,79 @@ export default function DirectorApp() {
             <strong>{labelForSection(activeSection)}</strong>
           </div>
           <div className="director-topbar-actions">
-            <label className="director-search">
-              <Icon name="search" size={16} />
-              <span className="visually-hidden">Search tournament</span>
-              <input
-                ref={searchRef}
-                type="search"
-                placeholder="Search teams, rooms, games"
-                value={search}
-                onChange={(event) => updateSearch(event.target.value)}
-                onKeyDown={handleSearchKeyDown}
-                aria-autocomplete="list"
-                aria-controls={search.trim() && searchResults.length ? 'director-search-results' : undefined}
-                aria-activedescendant={
-                  activeSearchIndex >= 0 ? `director-search-result-${activeSearchIndex}` : undefined
-                }
-              />
-              <kbd>⌘/Ctrl K</kbd>
-            </label>
-            {search.trim() &&
-              (searchResults.length > 0 ? (
-                <div
-                  id="director-search-results"
-                  className="director-search-results"
-                  role="listbox"
-                  aria-label="Search results"
-                >
-                  {searchResults.map((result, index) => (
-                    <button
-                      type="button"
-                      className={`director-search-result ${index === activeSearchIndex ? 'is-active' : ''}`}
-                      key={`${result.section}-${result.id}`}
-                      id={`director-search-result-${index}`}
-                      role="option"
-                      aria-selected={index === activeSearchIndex}
-                      onClick={() => selectSearchResult(result)}
-                    >
-                      <span>
-                        <strong>{result.label}</strong>
-                        <small>{result.detail}</small>
-                      </span>
-                      <Icon name="chevron" size={13} />
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <div className="director-search-results director-search-empty" role="status">
-                  No matching teams, players, rooms, packets, or games.
-                </div>
-              ))}
+            <div className="director-search-wrap">
+              <label className="director-search">
+                <Icon name="search" size={16} />
+                <span className="visually-hidden">Search tournament</span>
+                <input
+                  ref={searchRef}
+                  type="search"
+                  placeholder="Search teams, rooms, games"
+                  value={search}
+                  onChange={(event) => updateSearch(event.target.value)}
+                  onKeyDown={handleSearchKeyDown}
+                  role="combobox"
+                  aria-autocomplete="list"
+                  aria-expanded={search.trim().length > 0}
+                  aria-controls={search.trim() && searchResults.length ? 'director-search-results' : undefined}
+                  aria-activedescendant={
+                    activeSearchIndex >= 0 ? `director-search-result-${activeSearchIndex}` : undefined
+                  }
+                />
+                <kbd>⌘/Ctrl K</kbd>
+              </label>
+              {search.trim() &&
+                (searchResults.length > 0 ? (
+                  <div
+                    id="director-search-results"
+                    className="director-search-results"
+                    role="listbox"
+                    aria-label="Search results"
+                  >
+                    {searchResults.map((result, index) => (
+                      <button
+                        type="button"
+                        className={`director-search-result ${index === activeSearchIndex ? 'is-active' : ''}`}
+                        key={`${result.section}-${result.id}`}
+                        id={`director-search-result-${index}`}
+                        role="option"
+                        aria-selected={index === activeSearchIndex}
+                        onClick={() => selectSearchResult(result)}
+                      >
+                        <span>
+                          <strong>{result.label}</strong>
+                          <small>{result.detail}</small>
+                        </span>
+                        <Icon name="chevron" size={13} />
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="director-search-results director-search-empty" role="status">
+                    No matching teams, players, rooms, packets, or games.
+                  </div>
+                ))}
+            </div>
             <button
               type="button"
               className="director-icon-button director-topbar-button"
               title="Help"
               aria-label="Help"
-              onClick={() => setAnnouncement('Use ⌘ K or Ctrl K to focus search.')}
+              onClick={() => setHelpOpen(true)}
             >
               <Icon name="help" />
             </button>
-            <span className="director-avatar director-avatar-top" title="Local operator">
-              D
-            </span>
+            <button
+              type="button"
+              className="director-avatar director-avatar-top"
+              title={operatorProfile.displayName}
+              aria-label={`Operator: ${operatorProfile.displayName}`}
+              aria-haspopup="menu"
+              aria-expanded={operatorMenuOpen}
+              onClick={() => setOperatorMenuOpen((v) => !v)}
+            >
+              {operatorInitials(operatorProfile.displayName)}
+            </button>
           </div>
         </header>
         <div className="director-content">
@@ -380,7 +479,52 @@ export default function DirectorApp() {
           </div>
         )}
       </main>
+      <HelpDialog open={helpOpen} onClose={() => { setHelpOpen(false); helpButtonRef.current?.focus(); }} />
+      {operatorDialogOpen && (
+        <OperatorProfileDialog
+          profile={operatorProfile}
+          onClose={() => setOperatorDialogOpen(false)}
+          onSave={(p) => { setOperatorProfile(p); saveOperatorProfile(p); setOperatorDialogOpen(false); setAnnouncement('Operator profile saved.'); }}
+        />
+      )}
     </div>
+  );
+}
+
+function OperatorProfileDialog({ profile, onClose, onSave }: { profile: OperatorProfile; onClose: () => void; onSave: (p: OperatorProfile) => void; }) {
+  const [name, setName] = useState(profile.displayName);
+  const [role, setRole] = useState(profile.role ?? '');
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const d = dialogRef.current;
+    if (!d) return;
+    if (!d.open) d.showModal();
+    const h = (e: Event) => { e.preventDefault(); onClose(); };
+    d.addEventListener('cancel', h);
+    return () => d.removeEventListener('cancel', h);
+  }, [onClose]);
+  return (
+    <dialog ref={dialogRef} className="director-operator-dialog" aria-labelledby="operator-dialog-title" onClose={onClose}>
+      <div className="director-help-dialog-header">
+        <h2 id="operator-dialog-title">Operator profile</h2>
+        <button type="button" className="director-button director-button-secondary" onClick={onClose}>Close</button>
+      </div>
+      <p className="director-panel-footnote">Local only — not saved to exports or Live. Used for audit events.</p>
+      <div className="director-form-grid director-form-grid-single" style={{ marginTop: 16 }}>
+        <label className="director-form-field">
+          <span>Display name</span>
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Director" />
+        </label>
+        <label className="director-form-field">
+          <span>Role / title (optional)</span>
+          <input value={role} onChange={(e) => setRole(e.target.value)} placeholder="Local operator" />
+        </label>
+      </div>
+      <div className="director-form-actions" style={{ marginTop: 16 }}>
+        <Button variant="primary" onClick={() => { if (!name.trim()) return; onSave({ displayName: name.trim(), role: role.trim() || undefined }); }}>Save</Button>
+        <Button variant="secondary" onClick={onClose}>Cancel</Button>
+      </div>
+    </dialog>
   );
 }
 
@@ -666,7 +810,7 @@ function statusLabel(status: string): string {
         : 'Archived';
 }
 
-type SearchResult = { id: string; section: SectionId; label: string; detail: string };
+type SearchResult = { id: string; section: SectionId; label: string; detail: string; entityType?: import('./navigationTarget').EntityType; parentId?: string };
 
 function searchTournament(
   state: ReturnType<typeof useDirectorController>['state'],
@@ -693,6 +837,7 @@ function searchTournament(
         detail: [organization, team.teamLetter && `Team ${team.teamLetter}`, team.status]
           .filter(Boolean)
           .join(' · '),
+        entityType: 'team',
       });
     }
   }
@@ -704,12 +849,14 @@ function searchTournament(
         section: 'teams',
         label: player.name,
         detail: team?.displayName ?? 'Roster player',
+        entityType: 'player',
+        parentId: player.teamId,
       });
     }
   }
   for (const room of state.rooms) {
     if (matches([room.name, room.building, room.floor, room.status])) {
-      results.push({ id: room.id, section: 'rooms', label: room.name, detail: room.status });
+      results.push({ id: room.id, section: 'rooms', label: room.name, detail: room.status, entityType: 'room' });
     }
   }
   for (const packet of state.packets) {
@@ -719,6 +866,7 @@ function searchTournament(
         section: 'packets',
         label: packet.name,
         detail: `${packet.source} packet`,
+        entityType: 'packet',
       });
     }
   }
@@ -729,6 +877,7 @@ function searchTournament(
         section: 'tournament',
         label: round.name,
         detail: `Round ${round.number} · ${round.status}`,
+        entityType: 'round',
       });
     }
   }
@@ -744,6 +893,7 @@ function searchTournament(
         section: 'tournament',
         label: `${left ?? 'Unknown'} · ${right ?? 'Unknown'}`,
         detail: `${round?.name ?? 'Scheduled game'} · ${game.status}`,
+        entityType: 'game',
       });
     }
   }
@@ -755,6 +905,7 @@ function searchTournament(
         section: 'results',
         label: `Result ${submission.transportResultId ?? submission.id}`,
         detail: submission.status,
+        entityType: 'submission',
       });
     }
   }

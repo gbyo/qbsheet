@@ -11,11 +11,15 @@ export function RoomsView({
   controller,
   onNavigate,
   onAnnounce,
+  navigationTarget: _navigationTarget,
+  onClearNavigationTarget: _onClearNavigationTarget,
 }: {
   state: DirectorState;
   controller: DirectorController;
   onNavigate?: (section: SectionId) => void;
   onAnnounce: (message: string) => void;
+  navigationTarget?: any;
+  onClearNavigationTarget?: () => void;
 }) {
   const [showForm, setShowForm] = useState<'room' | 'staff' | 'equipment' | null>(null);
   const [name, setName] = useState('');
@@ -508,12 +512,16 @@ function RoomRows({
   controller,
   onNavigate,
   onAnnounce,
+  navigationTarget: _navigationTarget,
+  onClearNavigationTarget: _onClearNavigationTarget,
 }: {
   state: DirectorState;
   room: DirectorState['rooms'][number];
   controller: DirectorController;
   onNavigate?: (section: SectionId) => void;
   onAnnounce: (message: string) => void;
+  navigationTarget?: any;
+  onClearNavigationTarget?: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(room.name);
@@ -739,10 +747,14 @@ function StaffResourceRow({
   member,
   controller,
   onAnnounce,
+  navigationTarget: _navigationTarget,
+  onClearNavigationTarget: _onClearNavigationTarget,
 }: {
   member: DirectorState['staff'][number];
   controller: DirectorController;
   onAnnounce: (message: string) => void;
+  navigationTarget?: any;
+  onClearNavigationTarget?: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(member.name);
@@ -871,10 +883,14 @@ function EquipmentResourceRow({
   item,
   controller,
   onAnnounce,
+  navigationTarget: _navigationTarget,
+  onClearNavigationTarget: _onClearNavigationTarget,
 }: {
   item: DirectorState['equipment'][number];
   controller: DirectorController;
   onAnnounce: (message: string) => void;
+  navigationTarget?: any;
+  onClearNavigationTarget?: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(item.name);

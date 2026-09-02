@@ -11,11 +11,15 @@ export function TeamsView({
   controller,
   search,
   onAnnounce,
+  navigationTarget: _navigationTarget,
+  onClearNavigationTarget: _onClearNavigationTarget,
 }: {
   state: DirectorState;
   controller: DirectorController;
   search: string;
   onAnnounce: (message: string) => void;
+  navigationTarget?: any;
+  onClearNavigationTarget?: () => void;
 }) {
   const [showForm, setShowForm] = useState(false);
   const [showPaste, setShowPaste] = useState(false);
@@ -317,11 +321,15 @@ function TeamRow({
   teamId,
   controller,
   onAnnounce,
+  navigationTarget: _navigationTarget,
+  onClearNavigationTarget: _onClearNavigationTarget,
 }: {
   state: DirectorState;
   teamId: string;
   controller: DirectorController;
   onAnnounce: (message: string) => void;
+  navigationTarget?: any;
+  onClearNavigationTarget?: () => void;
 }) {
   const team = state.teams.find((entry) => entry.id === teamId);
   const [playerName, setPlayerName] = useState('');
@@ -553,11 +561,15 @@ function PlayerRow({
   teamName,
   controller,
   onAnnounce,
+  navigationTarget: _navigationTarget,
+  onClearNavigationTarget: _onClearNavigationTarget,
 }: {
   player: DirectorState['players'][number];
   teamName: string;
   controller: DirectorController;
   onAnnounce: (message: string) => void;
+  navigationTarget?: any;
+  onClearNavigationTarget?: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(player.name);

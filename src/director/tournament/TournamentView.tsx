@@ -18,11 +18,15 @@ export function TournamentView({
   controller,
   onNavigate,
   onAnnounce,
+  navigationTarget: _navigationTarget,
+  onClearNavigationTarget: _onClearNavigationTarget,
 }: {
   state: DirectorState;
   controller: DirectorController;
   onNavigate: (section: SectionId) => void;
   onAnnounce: (message: string) => void;
+  navigationTarget?: any;
+  onClearNavigationTarget?: () => void;
 }) {
   const [server, setServer] = useState<NativeServerStatus>({ running: false });
   const [serverLoading, setServerLoading] = useState(true);
