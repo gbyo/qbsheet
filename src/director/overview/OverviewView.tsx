@@ -1,4 +1,4 @@
-import { deriveTeamStandings, runPreflight, type DirectorState } from '../domain';
+import { deriveTeamStandings, latestRound, runPreflight, type DirectorState } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
 import { Button, StateLabel } from '../components/Controls';
 import { Icon } from '../components/Icon';
@@ -22,7 +22,7 @@ export function OverviewView({
 }) {
   const tournament = state.tournament;
   const round =
-    state.rounds.find((entry) => entry.id === tournament?.currentRoundId) ?? state.rounds.at(-1) ?? null;
+    state.rounds.find((entry) => entry.id === tournament?.currentRoundId) ?? latestRound(state.rounds);
   const games = round ? state.scheduledGames.filter((game) => game.roundId === round.id) : [];
   const finished = games.filter((game) => game.status === 'accepted').length;
   const live = games.filter((game) => game.status === 'live').length;
@@ -30,6 +30,7 @@ export function OverviewView({
   const reviewCount = state.submissions.filter(
     (submission) => submission.status === 'review' || submission.status === 'received',
   ).length;
+  const readyRoomCount = state.rooms.filter((room) => room.available && room.status === 'available').length;
   const issues = runPreflight(state, nativeServerReady, nativeServerAvailable);
   const standings = deriveTeamStandings(state).slice(0, 5);
 
@@ -153,9 +154,11 @@ export function OverviewView({
             label="Rooms"
             value={String(state.rooms.length)}
             detail={
-              state.rooms.filter((room) => room.available).length
-                ? `${state.rooms.filter((room) => room.available).length} available`
-                : 'Add rooms'
+              readyRoomCount
+                ? `${readyRoomCount} ready for assignment`
+                : state.rooms.length
+                  ? 'None ready for assignment'
+                  : 'Add rooms'
             }
             onClick={() => onNavigate('rooms')}
           />

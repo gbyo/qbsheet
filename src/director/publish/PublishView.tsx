@@ -20,7 +20,12 @@ export function PublishView({
         title="Publish"
         description="Generate files locally for teams, staff, and tournament records."
         actions={
-          <Button variant="primary" icon="download" onClick={() => void downloadArchive(state, onAnnounce)}>
+          <Button
+            variant="primary"
+            icon="download"
+            disabled={!hasTournament}
+            onClick={() => void downloadArchive(state, onAnnounce)}
+          >
             Export archive
           </Button>
         }

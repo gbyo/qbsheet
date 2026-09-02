@@ -16,6 +16,7 @@ export function PacketsView({
   onAnnounce: (message: string) => void;
 }) {
   const [showForm, setShowForm] = useState(false);
+  const [detailsPacketId, setDetailsPacketId] = useState<string | null>(null);
   const [name, setName] = useState('');
   const save = () => {
     if (!name.trim()) {
@@ -61,7 +62,7 @@ export function PacketsView({
       <PageHeader
         eyebrow="Plan"
         title="Packets"
-        description="Inventory is separate from rounds: replacements, tiebreakers, and per-game overrides stay explicit."
+        description="Inventory is separate from rounds: replacements, tiebreakers, and assignment history stay visible."
         actions={
           <>
             <label className="director-button director-button-secondary">
@@ -196,14 +197,13 @@ export function PacketsView({
                             type="button"
                             className="director-button director-button-quiet director-table-action"
                             aria-label={`View details for ${packet.name}`}
+                            aria-expanded={detailsPacketId === packet.id}
                             onClick={() =>
-                              onAnnounce(
-                                `${packet.name}: ${packet.assignedGameIds.length} game assignment${packet.assignedGameIds.length === 1 ? '' : 's'}.`,
-                              )
+                              setDetailsPacketId((current) => (current === packet.id ? null : packet.id))
                             }
                           >
                             <Icon name="file" size={14} />
-                            <span>Details</span>
+                            <span>{detailsPacketId === packet.id ? 'Hide details' : 'Details'}</span>
                           </button>
                         </div>
                       </td>
@@ -212,9 +212,131 @@ export function PacketsView({
                 </tbody>
               </table>
             </div>
+            {detailsPacketId && (
+              <PacketDetails
+                state={state}
+                packet={state.packets.find((entry) => entry.id === detailsPacketId)}
+              />
+            )}
           </section>
         )}
       </div>
     </>
   );
+}
+
+function PacketDetails({
+  state,
+  packet,
+}: {
+  state: DirectorState;
+  packet: DirectorState['packets'][number] | undefined;
+}) {
+  if (!packet) return null;
+  const scheduledById = new Map(state.scheduledGames.map((game) => [game.id, game]));
+  const recordsById = new Map(state.games.map((game) => [game.id, game]));
+  const assignments = packet.assignedGameIds.map((assignmentId) => {
+    const scheduled = scheduledById.get(assignmentId);
+    const record = recordsById.get(assignmentId);
+    const resolvedScheduled = scheduled ?? (record ? scheduledById.get(record.scheduledGameId) : undefined);
+    return {
+      assignmentId,
+      scheduled: resolvedScheduled,
+      record,
+    };
+  });
+  const unknownAssignments = assignments.filter((assignment) => !assignment.scheduled && !assignment.record);
+  const replacement = packet.replacementForPacketId
+    ? state.packets.find((entry) => entry.id === packet.replacementForPacketId)
+    : undefined;
+  return (
+    <div className="director-packet-details" role="region" aria-label={`${packet.name} details`}>
+      <div className="director-panel-body">
+        <div className="director-panel-heading director-panel-heading-compact">
+          <div>
+            <p className="director-eyebrow">Packet details</p>
+            <h3>{packet.name}</h3>
+          </div>
+          <StateLabel
+            state={packet.usedGameIds.length > 0 ? 'finished' : 'available'}
+            label={packet.usedGameIds.length > 0 ? 'Used' : 'Available'}
+          />
+        </div>
+        <dl className="director-packet-metadata">
+          <div>
+            <dt>Source</dt>
+            <dd>{packet.source}</dd>
+          </div>
+          <div>
+            <dt>Round assignments</dt>
+            <dd>{packet.assignedRoundIds.length || 'None'}</dd>
+          </div>
+          <div>
+            <dt>Game assignments</dt>
+            <dd>{packet.assignedGameIds.length || 'None'}</dd>
+          </div>
+          <div>
+            <dt>Replacement</dt>
+            <dd>
+              {replacement
+                ? `Replaces ${replacement.name}`
+                : packet.replacementForPacketId
+                  ? 'Unknown packet'
+                  : 'None'}
+            </dd>
+          </div>
+        </dl>
+        {packet.tiebreaker && <p className="director-table-subtext">Marked as a tiebreaker packet.</p>}
+        {packet.notes && <p className="director-packet-notes">{packet.notes}</p>}
+        {assignments.length > 0 && (
+          <div className="director-packet-assignments">
+            <p className="director-eyebrow">Assigned games</p>
+            <ul className="director-plain-list">
+              {assignments.map(({ assignmentId, scheduled, record }) => {
+                const resolvedAssignmentId = scheduled?.id ?? assignmentId;
+                const used =
+                  packet.usedGameIds.includes(assignmentId) ||
+                  packet.usedGameIds.includes(resolvedAssignmentId) ||
+                  Boolean(record?.acceptedAt);
+                const round = scheduled
+                  ? state.rounds.find((entry) => entry.id === scheduled.roundId)
+                  : undefined;
+                const status = record?.status ?? scheduled?.status;
+                return (
+                  <li key={assignmentId}>
+                    <div>
+                      <strong>
+                        {scheduled
+                          ? `${teamName(state, scheduled.leftTeamId)} · ${teamName(state, scheduled.rightTeamId)}`
+                          : `Assignment ${assignmentId}`}
+                      </strong>
+                      <span>
+                        {round?.name ?? 'Unresolved round'} · {status ?? 'Unresolved assignment'}
+                        {scheduled?.roomId ? ` · ${roomName(state, scheduled.roomId)}` : ''}
+                      </span>
+                    </div>
+                    <StateLabel state={used ? 'finished' : 'scheduled'} label={used ? 'Used' : 'Assigned'} />
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
+        {unknownAssignments.length > 0 && (
+          <p className="director-warning-copy">
+            {unknownAssignments.length} assignment{unknownAssignments.length === 1 ? '' : 's'} could not be
+            resolved to a scheduled game or result record.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function teamName(state: DirectorState, teamId: string | null): string {
+  return teamId ? (state.teams.find((team) => team.id === teamId)?.displayName ?? 'Unknown team') : 'Bye';
+}
+
+function roomName(state: DirectorState, roomId: string): string {
+  return state.rooms.find((room) => room.id === roomId)?.name ?? 'Unknown room';
 }

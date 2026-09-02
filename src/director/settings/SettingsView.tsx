@@ -22,7 +22,10 @@ export function SettingsView({
       onAnnounce('Enter a tournament name first.');
       return;
     }
-    controller.updateTournament({ name, date, venue, organizer });
+    if (!controller.updateTournament({ name, date, venue, organizer })) {
+      onAnnounce('Tournament details were not updated; review the Director error.');
+      return;
+    }
     onAnnounce('Tournament details updated locally; saving now.');
   };
   return (

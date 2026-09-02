@@ -57,10 +57,8 @@ export function ResultsView({
           <ManualResult
             state={state}
             controller={controller}
-            onAnnounce={(message) => {
-              setShowManual(false);
-              onAnnounce(message);
-            }}
+            onSuccess={() => setShowManual(false)}
+            onAnnounce={onAnnounce}
           />
         )}
         <section className="director-panel">
@@ -92,6 +90,11 @@ export function ResultsView({
                 No submissions in this view. Electronic QBTCP submissions and paper/manual results will appear
                 here.
               </p>
+              {filter !== 'all' && (
+                <button type="button" className="director-inline-action" onClick={() => setFilter('all')}>
+                  Show all results
+                </button>
+              )}
             </div>
           ) : (
             <div className="director-table-wrap">
@@ -121,11 +124,107 @@ export function ResultsView({
             </div>
           )}
         </section>
+        {state.scheduledGames.some((game) => !game.bye) && (
+          <ScheduledGamesPanel state={state} controller={controller} onAnnounce={onAnnounce} />
+        )}
         {state.protests.length > 0 && (
           <ProtestsPanel state={state} controller={controller} onAnnounce={onAnnounce} />
         )}
       </div>
     </>
+  );
+}
+
+function ScheduledGamesPanel({
+  state,
+  controller,
+  onAnnounce,
+}: {
+  state: DirectorState;
+  controller: DirectorController;
+  onAnnounce: (message: string) => void;
+}) {
+  const [confirmCancelId, setConfirmCancelId] = useState<string | null>(null);
+  const games = state.scheduledGames.filter((game) => !game.bye);
+  return (
+    <section className="director-panel">
+      <div className="director-panel-heading">
+        <div>
+          <p className="director-eyebrow">Schedule</p>
+          <h2>Scheduled games</h2>
+        </div>
+        <span className="director-muted">
+          {games.filter((game) => !['accepted', 'cancelled'].includes(game.status)).length} unresolved
+        </span>
+      </div>
+      <div className="director-table-wrap">
+        <table className="director-table">
+          <thead>
+            <tr>
+              <th scope="col">Game</th>
+              <th scope="col">Round</th>
+              <th scope="col">Room</th>
+              <th scope="col">Status</th>
+              <th scope="col" aria-label="Actions" />
+            </tr>
+          </thead>
+          <tbody>
+            {games.map((game) => {
+              const round = state.rounds.find((entry) => entry.id === game.roundId);
+              const room = game.roomId ? state.rooms.find((entry) => entry.id === game.roomId) : undefined;
+              const canCancel = !['accepted', 'cancelled'].includes(game.status);
+              const confirming = confirmCancelId === game.id;
+              return (
+                <tr key={game.id}>
+                  <td>
+                    <strong>
+                      {teamLabel(state, game.leftTeamId)} · {teamLabel(state, game.rightTeamId)}
+                    </strong>
+                    <small className="director-table-subtext">{game.id}</small>
+                  </td>
+                  <td>{round?.name ?? 'Unknown round'}</td>
+                  <td>{room?.name ?? 'Unassigned'}</td>
+                  <td>
+                    <StateLabel state={game.status} label={game.status} />
+                  </td>
+                  <td>
+                    {canCancel && (
+                      <div className="director-row-actions">
+                        {confirming ? (
+                          <>
+                            <Button
+                              variant="danger"
+                              onClick={() => {
+                                const cancelled = controller.cancelScheduledGame(game.id);
+                                if (cancelled) {
+                                  setConfirmCancelId(null);
+                                  onAnnounce('Scheduled game cancelled; the round can now close without it.');
+                                } else {
+                                  onAnnounce('The game was not cancelled; review the Director error.');
+                                }
+                              }}
+                            >
+                              Confirm cancel
+                            </Button>
+                            <Button variant="quiet" onClick={() => setConfirmCancelId(null)}>
+                              Keep game
+                            </Button>
+                          </>
+                        ) : (
+                          <Button variant="quiet" onClick={() => setConfirmCancelId(game.id)}>
+                            Cancel game
+                          </Button>
+                        )}
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 
@@ -159,6 +258,7 @@ function ResultRow({
       : game.scores.map((entry) => entry.score).join('–') || '—'
     : '—';
   const reviewWarnings = submission.warnings ?? [];
+  const cancelledGame = scheduled?.status === 'cancelled' || game?.status === 'cancelled';
   return (
     <tr>
       <td>{formatTime(submission.receivedAt)}</td>
@@ -198,19 +298,23 @@ function ResultRow({
         <div className="director-row-actions">
           {(submission.status === 'received' || submission.status === 'review') && (
             <>
-              <Button
-                variant="primary"
-                onClick={() => {
-                  const accepted = controller.acceptSubmission(submission.id);
-                  onAnnounce(
-                    accepted
-                      ? `${left} result accepted.`
-                      : `${left} result remains in review; it was not accepted.`,
-                  );
-                }}
-              >
-                Accept
-              </Button>
+              {cancelledGame ? (
+                <span className="director-muted">Cancelled game · accept disabled</span>
+              ) : (
+                <Button
+                  variant="primary"
+                  onClick={() => {
+                    const accepted = controller.acceptSubmission(submission.id);
+                    onAnnounce(
+                      accepted
+                        ? `${left} result accepted.`
+                        : `${left} result remains in review; it was not accepted.`,
+                    );
+                  }}
+                >
+                  Accept
+                </Button>
+              )}
               <Button
                 variant="quiet"
                 onClick={() => {
@@ -655,10 +759,12 @@ function ProtestRuling({
 function ManualResult({
   state,
   controller,
+  onSuccess,
   onAnnounce,
 }: {
   state: DirectorState;
   controller: DirectorController;
+  onSuccess: () => void;
   onAnnounce: (message: string) => void;
 }) {
   const choices = state.scheduledGames.filter(
@@ -703,6 +809,7 @@ function ManualResult({
     if (accepted) {
       setLeftScore('');
       setRightScore('');
+      onSuccess();
     }
     onAnnounce(
       accepted
@@ -734,7 +841,15 @@ function ManualResult({
           <div className="director-panel-body">
             <div className="director-form-grid">
               <FormField label="Scheduled game">
-                <select value={effectiveGameId} onChange={(event) => setGameId(event.target.value)}>
+                <select
+                  value={effectiveGameId}
+                  onChange={(event) => {
+                    setGameId(event.target.value);
+                    setLeftScore('');
+                    setRightScore('');
+                    setValidationError(null);
+                  }}
+                >
                   {choices.map((game) => (
                     <option key={game.id} value={game.id}>
                       {teamLabel(state, game.leftTeamId)} · {teamLabel(state, game.rightTeamId)}

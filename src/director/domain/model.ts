@@ -307,6 +307,7 @@ export interface AuditEvent {
     | 'protest-ruled'
     | 'team-dropped'
     | 'schedule-repaired'
+    | 'schedule-cancelled'
     | 'roster-amendment'
     | 'checkpoint-created'
     | 'imported'
@@ -453,4 +454,19 @@ export function newDirectorId(prefix: string): DirectorId {
 
 export function isoNow(): string {
   return new Date().toISOString();
+}
+
+/** Return the highest-numbered round without depending on persistence array order. */
+export function latestRound<T extends { id: string; number?: number }>(rounds: readonly T[]): T | null {
+  const selected = rounds.reduce<{ entry: T; index: number } | null>((current, entry, index) => {
+    if (!current) return { entry, index };
+    const currentNumber = Number.isFinite(current.entry.number)
+      ? (current.entry.number ?? -Infinity)
+      : -Infinity;
+    const entryNumber = Number.isFinite(entry.number) ? (entry.number ?? -Infinity) : -Infinity;
+    return entryNumber > currentNumber || (entryNumber === currentNumber && index > current.index)
+      ? { entry, index }
+      : current;
+  }, null);
+  return selected?.entry ?? null;
 }

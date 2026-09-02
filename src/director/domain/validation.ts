@@ -73,7 +73,8 @@ export function runPreflight(
   }
   if (format) {
     const availability = formatGenerationAvailability(state);
-    if (!availability.supported) {
+    const tournamentClosed = state.tournament.status === 'complete' || state.tournament.status === 'archived';
+    if (!availability.supported && !tournamentClosed) {
       issues.push({
         id: 'format-generation-unavailable',
         severity: 'blocker',
@@ -90,15 +91,33 @@ export function runPreflight(
       message: 'The selected current packet no longer exists.',
     });
   }
-  const unscheduled = state.scheduledGames.filter(
-    (game) => !game.bye && game.roomId === null && game.status !== 'cancelled',
-  );
+  const roundById = new Map(state.rounds.map((round) => [round.id, round]));
+  const unscheduled = state.scheduledGames.filter((game) => {
+    const round = roundById.get(game.roundId);
+    return !game.bye && game.roomId === null && game.status !== 'cancelled' && round?.status !== 'closed';
+  });
   if (unscheduled.length > 0) {
     issues.push({
       id: 'games-without-rooms',
       severity: 'warning',
       area: 'schedule',
       message: `${unscheduled.length} scheduled game(s) do not have a room.`,
+    });
+  }
+  const unavailableRooms = state.scheduledGames.filter((game) => {
+    if (game.bye || game.status === 'cancelled' || !game.roomId) return false;
+    const round = state.rounds.find((entry) => entry.id === game.roundId);
+    if (!round || (round.status !== 'planned' && round.status !== 'prepared')) return false;
+    const room = state.rooms.find((entry) => entry.id === game.roomId);
+    return !room || !room.available || room.status !== 'available';
+  });
+  if (unavailableRooms.length > 0) {
+    issues.push({
+      id: 'games-with-unavailable-rooms',
+      severity: 'blocker',
+      area: 'rooms',
+      message: `${unavailableRooms.length} scheduled game(s) use rooms that are unavailable or not operationally ready.`,
+      action: 'Open Rooms',
     });
   }
   for (const round of state.rounds) {
@@ -133,14 +152,20 @@ export function runPreflight(
   }
   issues.push(...packetReferenceIssues(state));
   if (nativeServerAvailable && !nativeServerReady) {
-    issues.push({
-      id: 'qbtcp-offline',
-      severity: 'recommendation',
-      area: 'qbtcp',
-      message: 'Start the native QBTCP server before releasing electronic assignments.',
-    });
+    if (state.tournament.status !== 'complete' && state.tournament.status !== 'archived') {
+      issues.push({
+        id: 'qbtcp-offline',
+        severity: 'recommendation',
+        area: 'qbtcp',
+        message: 'Start the native QBTCP server before releasing electronic assignments.',
+      });
+    }
   }
-  if (!state.metadata.lastCheckpointAt) {
+  if (
+    !state.metadata.lastCheckpointAt &&
+    state.tournament.status !== 'complete' &&
+    state.tournament.status !== 'archived'
+  ) {
     issues.push({
       id: 'checkpoint-missing',
       severity: 'recommendation',

@@ -190,8 +190,14 @@ function normalizeTournamentRules(value: Record<string, unknown>): TournamentRul
   if (isFiniteNumber(value.regulationMinutes) && value.regulationMinutes > 0) {
     rules.regulationMinutes = value.regulationMinutes;
   }
-  if (Array.isArray(value.tiebreakers) && value.tiebreakers.every(isTiebreaker)) {
-    rules.tiebreakers = [...value.tiebreakers];
+  const tiebreakers = value.tiebreakers;
+  if (
+    Array.isArray(tiebreakers) &&
+    tiebreakers.length > 0 &&
+    tiebreakers.every(isTiebreaker) &&
+    new Set(tiebreakers).size === tiebreakers.length
+  ) {
+    rules.tiebreakers = [...tiebreakers];
   }
   return rules;
 }

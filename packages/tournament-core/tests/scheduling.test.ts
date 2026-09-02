@@ -91,6 +91,23 @@ describe('deterministic tournament scheduling', () => {
     expect(forbidden.issues.some((issue) => issue.code === 'rematch-forbidden')).toBe(true);
   });
 
+  it('keeps generated fallback rounds when an explicit definition list is shorter than the request', () => {
+    const schedule = generateRoundRobinSchedule({
+      phaseId: 'phase-1',
+      teams: makeTeams(4),
+      rounds: [{ id: 'round-1', number: 1 }],
+      roundCount: 3,
+      seed: 'fallback-rounds',
+    });
+    const games = matchGames(schedule.games);
+
+    expect(schedule.roundCount).toBe(3);
+    expect(games).toHaveLength(6);
+    expect(new Set(games.map((game) => game.roundId))).toHaveLength(3);
+    expect(schedule.issues.some((issue) => issue.code === 'unknown-round')).toBe(false);
+    expect(schedule.issues.filter((issue) => issue.severity === 'error')).toHaveLength(0);
+  });
+
   it('synchronizes multiple pools without double-booking rooms', () => {
     const teams = makeTeams(8);
     const pools = [

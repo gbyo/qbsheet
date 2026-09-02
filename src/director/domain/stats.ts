@@ -94,6 +94,7 @@ export function acceptedGameRecords(
     if (!scheduled) {
       return options.phaseId === undefined && options.poolId === undefined && options.gameIds === undefined;
     }
+    if (scheduled.status === 'cancelled') return false;
     if (scheduled.bye || scheduled.leftTeamId === scheduled.rightTeamId) return false;
     const round = roundById.get(scheduled.roundId) ?? roundById.get(game.roundId);
     if (options.phaseId && round && round.phaseId !== options.phaseId) return false;

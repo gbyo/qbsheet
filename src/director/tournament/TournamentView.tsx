@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { runPreflight, type DirectorState } from '../domain';
+import { latestRound, runPreflight, type DirectorState } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
 import { Button, StateLabel } from '../components/Controls';
 import { PageHeader } from '../components/PageHeader';
@@ -30,7 +30,7 @@ export function TournamentView({
   const nativeDirector = isNativeDirector();
   const issues = runPreflight(state, server.running, nativeDirector);
   const round =
-    state.rounds.find((entry) => entry.id === state.tournament?.currentRoundId) ?? state.rounds.at(-1);
+    state.rounds.find((entry) => entry.id === state.tournament?.currentRoundId) ?? latestRound(state.rounds);
   useEffect(() => {
     let mounted = true;
     void readNativeServerStatus()
@@ -87,7 +87,7 @@ export function TournamentView({
       : server.running
         ? 'Running'
         : 'Stopped';
-  const pairingRooms = state.rooms.filter((room) => room.available);
+  const pairingRooms = state.rooms.filter((room) => room.available && room.status === 'available');
   const invitations = server.pairingInvitations ?? [];
   const issuePairing = async (roomId: string) => {
     setPairingRoomId(roomId);

@@ -25,7 +25,14 @@
  * Additive construction is the primary defence. The strip is the second one, kept because "the
  * builder provably cannot leak" is a property of today's builder.
  */
-import type { DirectorId, DirectorState, Round, ScheduledGame, TournamentRules } from '../domain/model';
+import {
+  latestRound,
+  type DirectorId,
+  type DirectorState,
+  type Round,
+  type ScheduledGame,
+  type TournamentRules,
+} from '../domain';
 import { stripSecrets } from './canonical';
 import { assignmentFileName } from './filenames';
 
@@ -325,8 +332,9 @@ export function selectScheduledGames(state: DirectorState, selection: Assignment
   const playable = (game: ScheduledGame) => !game.bye && game.rightTeamId && game.status !== 'cancelled';
   const currentRound = (): Round | undefined =>
     state.rounds.find((round) => round.id === state.tournament?.currentRoundId) ??
-    [...state.rounds].reverse().find((round) => round.status === 'released') ??
-    state.rounds.at(-1);
+    latestRound(state.rounds.filter((round) => round.status === 'released')) ??
+    latestRound(state.rounds) ??
+    undefined;
   switch (selection.kind) {
     case 'current-round': {
       const round = currentRound();

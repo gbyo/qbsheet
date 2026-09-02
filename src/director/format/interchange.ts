@@ -17,6 +17,7 @@ import {
   defaultRules,
   emptyDirectorState,
   isoNow,
+  latestRound,
   newDirectorId,
   type DirectorState,
   type GameRecord,
@@ -105,6 +106,7 @@ function scheduleStatus(status: string | undefined): DirectorState['scheduledGam
 }
 
 function auditType(action: string): DirectorState['audit'][number]['type'] {
+  if (action.includes('cancel')) return 'schedule-cancelled';
   if (action.includes('drop')) return 'team-dropped';
   if (action.includes('schedule') || action.includes('repair')) return 'schedule-repaired';
   if (action.includes('accept')) return 'result-accepted';
@@ -435,7 +437,7 @@ function fromInterchange(data: DirectorTournament): DirectorState {
   const formatId = text(tournamentExtensions.formatId) ?? newDirectorId('format');
   const phaseIds = data.phases.map((phase) => phase.id);
   const firstPhase = data.phases[0];
-  const currentRoundId = text(tournamentExtensions.currentRoundId) ?? data.rounds.at(-1)?.id ?? null;
+  const currentRoundId = text(tournamentExtensions.currentRoundId) ?? latestRound(data.rounds)?.id ?? null;
   const currentPhaseId =
     text(tournamentExtensions.currentPhaseId) ??
     data.rounds.find((round) => round.id === currentRoundId)?.phaseId ??

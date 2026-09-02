@@ -215,6 +215,40 @@ test('Director edits scoring rules without persisting an incomplete numeric fiel
   await expect(page.getByLabel('Tossup value')).toHaveValue('10');
 });
 
+test('Director configures phases, advancement, and standings order', async ({ page }) => {
+  await createTournament(page);
+
+  const navigation = page.locator('nav[aria-label="Tournament sections"]');
+  await navigation.getByRole('button', { name: 'Format', exact: true }).click();
+
+  await page.getByLabel('Phase name').first().fill('Preliminary rankings');
+  await page.getByLabel('Phase type').first().selectOption('preliminary');
+  await page.getByLabel('Use an advancement rule').check();
+  await page.getByLabel('Qualifiers from phase').fill('1');
+  await page.getByLabel('Allow director override for unresolved ties').check();
+  await page.getByRole('button', { name: 'Save phase settings' }).click();
+  await expect(page.getByText('Preliminary rankings phase settings updated.')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Move Overall record up' }).click();
+  await expect(page.getByRole('status')).toContainText('Overall record moved up');
+  await expect(page.getByRole('button', { name: 'Move Overall record down' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Add phase' }).click();
+  const phaseForm = page.locator('.director-phase-add-form');
+  await phaseForm.getByLabel('Phase name').fill('Playoffs');
+  await phaseForm.getByLabel('Phase type').selectOption('playoff');
+  await phaseForm.getByRole('button', { name: 'Save phase' }).click();
+  await expect(page.getByText('Playoffs', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Use', exact: true }).click();
+  await expect(page.getByLabel('Phase name').first()).toHaveValue('Playoffs');
+  await expect(page.getByLabel('Phase type').first()).toHaveValue('playoff');
+
+  await page.reload();
+  await navigation.getByRole('button', { name: 'Format', exact: true }).click();
+  await expect(page.getByLabel('Phase name').first()).toHaveValue('Playoffs');
+  await expect(page.getByText('Preliminary rankings', { exact: true })).toBeVisible();
+});
+
 test('Director supports keyboard search, inline edits, and audited result review', async ({ page }) => {
   await createTournament(page);
 
@@ -285,13 +319,31 @@ test('Director keeps unavailable resources out of new room assignments', async (
   await navigation.getByRole('button', { name: 'Rooms & staff', exact: true }).click();
   await page.getByRole('button', { name: 'Add staff' }).click();
   await page.getByRole('textbox', { name: 'Name', exact: true }).fill('Moderator One');
+  await page.getByLabel('Notes').fill('Covers room checks.');
   await page.getByRole('button', { name: 'Save staff member' }).click();
   await page.getByRole('button', { name: 'Add equipment' }).click();
   await page.getByRole('textbox', { name: 'Name', exact: true }).fill('Buzzer One');
+  await page.getByLabel('Notes').fill('Keep the spare cable nearby.');
   await page.getByRole('button', { name: 'Save equipment' }).click();
 
   await expect(page.getByRole('heading', { level: 2, name: /1 member · 1 available/ })).toBeVisible();
   await expect(page.getByRole('heading', { level: 2, name: /1 resource · 1 available/ })).toBeVisible();
+  const staffPanel = page.locator('.director-two-column section').nth(0);
+  await staffPanel.getByRole('button', { name: 'Edit' }).click();
+  await staffPanel.getByLabel('Name').fill('Moderator Two');
+  await staffPanel.getByLabel('Notes').fill('Also covers room checks.');
+  await staffPanel.getByLabel('Runner').check();
+  await staffPanel.getByRole('button', { name: 'Save changes' }).click();
+  await expect(staffPanel).toContainText('Moderator Two');
+  await expect(staffPanel).toContainText('Also covers room checks.');
+  const equipmentPanel = page.locator('.director-two-column section').nth(1);
+  await equipmentPanel.getByRole('button', { name: 'Edit' }).click();
+  await equipmentPanel.getByLabel('Name').fill('Buzzer Two');
+  await equipmentPanel.getByLabel('Notes').fill('Fully charged.');
+  await equipmentPanel.getByLabel('Type').selectOption('device');
+  await equipmentPanel.getByRole('button', { name: 'Save changes' }).click();
+  await expect(equipmentPanel).toContainText('Buzzer Two');
+  await expect(equipmentPanel).toContainText('Fully charged.');
   await page.getByRole('button', { name: 'Mark unavailable' }).nth(0).click();
   await page.getByRole('button', { name: 'Mark unavailable' }).nth(0).click();
   await expect(page.getByRole('heading', { level: 2, name: /1 member · 0 available/ })).toBeVisible();
@@ -300,7 +352,7 @@ test('Director keeps unavailable resources out of new room assignments', async (
   await page.getByRole('button', { name: 'Add room' }).click();
   await page.getByLabel('Room name').fill('Room 101');
   await page.getByRole('button', { name: 'Save room' }).click();
-  await page.getByRole('button', { name: 'Edit' }).click();
+  await page.locator('.director-table').getByRole('button', { name: 'Edit' }).click();
   const editor = page.locator('.director-table-edit-row');
   await expect(
     editor.locator('select').nth(0).locator('option').filter({ hasText: 'Moderator One' }),

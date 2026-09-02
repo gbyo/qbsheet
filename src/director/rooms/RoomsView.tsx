@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { DirectorState } from '../domain';
+import type { DirectorState, StaffRole } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
 import { Button, EmptyState, FormField, PanelBody, PanelFooter, StateLabel } from '../components/Controls';
 import type { SectionId } from '../app/navigation';
@@ -66,9 +66,10 @@ export function RoomsView({
       onAnnounce('Enter a staff name first.');
       return;
     }
-    controller.addStaff({ name, roles: [staffRole] });
+    controller.addStaff({ name, roles: [staffRole], notes });
     onAnnounce(`${name.trim()} added to staff.`);
     setName('');
+    setNotes('');
     setShowForm(null);
   };
   const saveEquipment = () => {
@@ -76,9 +77,10 @@ export function RoomsView({
       onAnnounce('Enter an equipment name first.');
       return;
     }
-    controller.addEquipment({ name, kind: equipmentKind });
+    controller.addEquipment({ name, kind: equipmentKind, notes });
     onAnnounce(`${name.trim()} added to equipment.`);
     setName('');
+    setNotes('');
     setShowForm(null);
   };
   return (
@@ -218,6 +220,15 @@ export function RoomsView({
                     </select>
                   </FormField>
                 </div>
+                <FormField label="Notes" hint="Optional handoff or contact details for the director team.">
+                  <textarea
+                    className="director-textarea"
+                    rows={2}
+                    value={notes}
+                    onChange={(event) => setNotes(event.target.value)}
+                    placeholder="Prefers early rounds; call from HQ if reassigned"
+                  />
+                </FormField>
               </PanelBody>
               <PanelFooter className="director-form-actions">
                 <Button variant="primary" type="submit">
@@ -264,6 +275,15 @@ export function RoomsView({
                     </select>
                   </FormField>
                 </div>
+                <FormField label="Notes" hint="Optional handoff or contact details for the director team.">
+                  <textarea
+                    className="director-textarea"
+                    rows={2}
+                    value={notes}
+                    onChange={(event) => setNotes(event.target.value)}
+                    placeholder="Bring the spare buzzer to HQ"
+                  />
+                </FormField>
               </PanelBody>
               <PanelFooter className="director-form-actions">
                 <Button variant="primary" type="submit">
@@ -433,34 +453,12 @@ export function RoomsView({
               <PanelBody>
                 <ul className="director-plain-list">
                   {state.staff.map((member) => (
-                    <li key={member.id}>
-                      <div>
-                        <strong>{member.name}</strong>
-                        <span>{member.roles.join(' · ')}</span>
-                      </div>
-                      <div className="director-row-actions">
-                        <StateLabel
-                          state={member.available ? 'available' : 'offline'}
-                          label={member.available ? 'Available' : 'Unavailable'}
-                        />
-                        <Button
-                          variant="quiet"
-                          icon={member.available ? 'pause' : 'play'}
-                          onClick={() => {
-                            const updated = controller.updateStaff(member.id, {
-                              available: !member.available,
-                            });
-                            if (updated) {
-                              onAnnounce(
-                                `${member.name} marked ${member.available ? 'unavailable' : 'available'} for future assignment.`,
-                              );
-                            }
-                          }}
-                        >
-                          {member.available ? 'Mark unavailable' : 'Mark available'}
-                        </Button>
-                      </div>
-                    </li>
+                    <StaffResourceRow
+                      key={member.id}
+                      member={member}
+                      controller={controller}
+                      onAnnounce={onAnnounce}
+                    />
                   ))}
                 </ul>
               </PanelBody>
@@ -478,34 +476,12 @@ export function RoomsView({
               <PanelBody>
                 <ul className="director-plain-list">
                   {state.equipment.map((item) => (
-                    <li key={item.id}>
-                      <div>
-                        <strong>{item.name}</strong>
-                        <span>{item.kind}</span>
-                      </div>
-                      <div className="director-row-actions">
-                        <StateLabel
-                          state={item.available ? 'available' : 'offline'}
-                          label={item.available ? 'Available' : 'Unavailable'}
-                        />
-                        <Button
-                          variant="quiet"
-                          icon={item.available ? 'pause' : 'play'}
-                          onClick={() => {
-                            const updated = controller.updateEquipment(item.id, {
-                              available: !item.available,
-                            });
-                            if (updated) {
-                              onAnnounce(
-                                `${item.name} marked ${item.available ? 'unavailable' : 'available'} for future assignment.`,
-                              );
-                            }
-                          }}
-                        >
-                          {item.available ? 'Mark unavailable' : 'Mark available'}
-                        </Button>
-                      </div>
-                    </li>
+                    <EquipmentResourceRow
+                      key={item.id}
+                      item={item}
+                      controller={controller}
+                      onAnnounce={onAnnounce}
+                    />
                   ))}
                 </ul>
               </PanelBody>
@@ -560,7 +536,7 @@ function RoomRows({
       onAnnounce('Enter a room name first.');
       return;
     }
-    controller.updateRoom(room.id, {
+    const updated = controller.updateRoom(room.id, {
       name: trimmedName,
       building: building.trim(),
       floor: floor.trim(),
@@ -572,6 +548,10 @@ function RoomRows({
       equipmentId: equipmentId || null,
       available,
     });
+    if (!updated) {
+      onAnnounce('The room could not be updated; review the Director error.');
+      return;
+    }
     setEditing(false);
     onAnnounce(`${trimmedName} updated.`);
   };
@@ -604,10 +584,11 @@ function RoomRows({
               className="director-button director-button-quiet director-table-action"
               aria-label={`${room.available ? 'Mark' : 'Make'} ${room.name} ${room.available ? 'unavailable' : 'available'}`}
               onClick={() => {
-                controller.updateRoom(room.id, { available: !room.available });
-                onAnnounce(
-                  `${room.name} marked ${room.available ? 'unavailable' : 'available'} for the next round.`,
-                );
+                if (controller.updateRoom(room.id, { available: !room.available })) {
+                  onAnnounce(
+                    `${room.name} marked ${room.available ? 'unavailable' : 'available'} for the next round.`,
+                  );
+                }
               }}
             >
               <Icon name={room.available ? 'pause' : 'play'} size={14} />
@@ -615,7 +596,8 @@ function RoomRows({
             </button>
             {onNavigate &&
               state.scheduledGames.some(
-                (game) => game.roomId === room.id && !game.bye && game.status !== 'accepted',
+                (game) =>
+                  game.roomId === room.id && !game.bye && !['accepted', 'cancelled'].includes(game.status),
               ) && (
                 <Button variant="quiet" icon="upload" onClick={() => onNavigate('transfers')}>
                   Prepare game file
@@ -729,6 +711,268 @@ function RoomRows({
       )}
     </>
   );
+}
+
+const staffRoleOptions: Array<{ value: StaffRole; label: string }> = [
+  { value: 'moderator', label: 'Moderator' },
+  { value: 'scorekeeper', label: 'Scorekeeper' },
+  { value: 'runner', label: 'Runner' },
+  { value: 'hq', label: 'HQ staff' },
+];
+
+function StaffResourceRow({
+  member,
+  controller,
+  onAnnounce,
+}: {
+  member: DirectorState['staff'][number];
+  controller: DirectorController;
+  onAnnounce: (message: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(member.name);
+  const [roles, setRoles] = useState<StaffRole[]>(member.roles.length ? [...member.roles] : ['moderator']);
+  const [notes, setNotes] = useState(member.notes ?? '');
+  const beginEdit = () => {
+    setName(member.name);
+    setRoles(member.roles.length ? [...member.roles] : ['moderator']);
+    setNotes(member.notes ?? '');
+    setEditing(true);
+  };
+  const save = () => {
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      onAnnounce('Enter a staff name first.');
+      return;
+    }
+    if (roles.length === 0) {
+      onAnnounce('Choose at least one staff role.');
+      return;
+    }
+    if (
+      !controller.updateStaff(member.id, {
+        name: trimmedName,
+        roles,
+        notes,
+      })
+    ) {
+      onAnnounce('The staff member could not be updated; review the Director error.');
+      return;
+    }
+    setEditing(false);
+    onAnnounce(`${trimmedName} updated.`);
+  };
+  return (
+    <li className="director-resource-item">
+      <div className="director-resource-summary">
+        <strong>{member.name}</strong>
+        <span>{member.roles.map(roleLabel).join(' · ') || 'No role assigned'}</span>
+        {member.notes && <small className="director-table-subtext">{member.notes}</small>}
+      </div>
+      <div className="director-row-actions">
+        <StateLabel
+          state={member.available ? 'available' : 'offline'}
+          label={member.available ? 'Available' : 'Unavailable'}
+        />
+        <Button variant="quiet" icon="edit" onClick={beginEdit}>
+          Edit
+        </Button>
+        <Button
+          variant="quiet"
+          icon={member.available ? 'pause' : 'play'}
+          onClick={() => {
+            const updated = controller.updateStaff(member.id, {
+              available: !member.available,
+            });
+            if (updated) {
+              onAnnounce(
+                `${member.name} marked ${member.available ? 'unavailable' : 'available'} for future assignment.`,
+              );
+            }
+          }}
+        >
+          {member.available ? 'Mark unavailable' : 'Mark available'}
+        </Button>
+      </div>
+      {editing && (
+        <form
+          className="director-resource-edit"
+          onSubmit={(event) => {
+            event.preventDefault();
+            save();
+          }}
+        >
+          <div className="director-form-grid director-form-grid-two">
+            <FormField label="Name">
+              <input value={name} onChange={(event) => setName(event.target.value)} />
+            </FormField>
+            <fieldset className="director-resource-role-field">
+              <legend>Roles</legend>
+              <div className="director-resource-role-grid">
+                {staffRoleOptions.map((role) => (
+                  <label className="director-checkbox-field" key={role.value}>
+                    <input
+                      type="checkbox"
+                      checked={roles.includes(role.value)}
+                      onChange={(event) => {
+                        setRoles((current) =>
+                          event.target.checked
+                            ? current.includes(role.value)
+                              ? current
+                              : [...current, role.value]
+                            : current.filter((entry) => entry !== role.value),
+                        );
+                      }}
+                    />
+                    <span>{role.label}</span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          </div>
+          <FormField label="Notes" hint="Optional handoff or contact details for the director team.">
+            <textarea
+              className="director-textarea"
+              rows={2}
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+            />
+          </FormField>
+          <div className="director-row-actions">
+            <Button variant="primary" type="submit">
+              Save changes
+            </Button>
+            <Button variant="quiet" onClick={() => setEditing(false)}>
+              Cancel
+            </Button>
+          </div>
+        </form>
+      )}
+    </li>
+  );
+}
+
+function EquipmentResourceRow({
+  item,
+  controller,
+  onAnnounce,
+}: {
+  item: DirectorState['equipment'][number];
+  controller: DirectorController;
+  onAnnounce: (message: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(item.name);
+  const [kind, setKind] = useState<DirectorState['equipment'][number]['kind']>(item.kind);
+  const [notes, setNotes] = useState(item.notes ?? '');
+  const beginEdit = () => {
+    setName(item.name);
+    setKind(item.kind);
+    setNotes(item.notes ?? '');
+    setEditing(true);
+  };
+  const save = () => {
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      onAnnounce('Enter an equipment name first.');
+      return;
+    }
+    if (
+      !controller.updateEquipment(item.id, {
+        name: trimmedName,
+        kind,
+        notes,
+      })
+    ) {
+      onAnnounce('The equipment resource could not be updated; review the Director error.');
+      return;
+    }
+    setEditing(false);
+    onAnnounce(`${trimmedName} updated.`);
+  };
+  return (
+    <li className="director-resource-item">
+      <div className="director-resource-summary">
+        <strong>{item.name}</strong>
+        <span>{equipmentKindLabel(item.kind)}</span>
+        {item.notes && <small className="director-table-subtext">{item.notes}</small>}
+      </div>
+      <div className="director-row-actions">
+        <StateLabel
+          state={item.available ? 'available' : 'offline'}
+          label={item.available ? 'Available' : 'Unavailable'}
+        />
+        <Button variant="quiet" icon="edit" onClick={beginEdit}>
+          Edit
+        </Button>
+        <Button
+          variant="quiet"
+          icon={item.available ? 'pause' : 'play'}
+          onClick={() => {
+            const updated = controller.updateEquipment(item.id, {
+              available: !item.available,
+            });
+            if (updated) {
+              onAnnounce(
+                `${item.name} marked ${item.available ? 'unavailable' : 'available'} for future assignment.`,
+              );
+            }
+          }}
+        >
+          {item.available ? 'Mark unavailable' : 'Mark available'}
+        </Button>
+      </div>
+      {editing && (
+        <form
+          className="director-resource-edit"
+          onSubmit={(event) => {
+            event.preventDefault();
+            save();
+          }}
+        >
+          <div className="director-form-grid director-form-grid-two">
+            <FormField label="Name">
+              <input value={name} onChange={(event) => setName(event.target.value)} />
+            </FormField>
+            <FormField label="Type">
+              <select
+                value={kind}
+                onChange={(event) => setKind(event.target.value as typeof kind)}
+              >
+                <option value="buzzer">Buzzer</option>
+                <option value="device">Laptop / tablet</option>
+                <option value="other">Other</option>
+              </select>
+            </FormField>
+          </div>
+          <FormField label="Notes" hint="Optional handoff or contact details for the director team.">
+            <textarea
+              className="director-textarea"
+              rows={2}
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+            />
+          </FormField>
+          <div className="director-row-actions">
+            <Button variant="primary" type="submit">
+              Save changes
+            </Button>
+            <Button variant="quiet" onClick={() => setEditing(false)}>
+              Cancel
+            </Button>
+          </div>
+        </form>
+      )}
+    </li>
+  );
+}
+
+function roleLabel(role: StaffRole): string {
+  return staffRoleOptions.find((option) => option.value === role)?.label ?? role;
+}
+
+function equipmentKindLabel(kind: DirectorState['equipment'][number]['kind']): string {
+  return kind === 'buzzer' ? 'Buzzer' : kind === 'device' ? 'Laptop / tablet' : 'Other';
 }
 
 function staffForRole(

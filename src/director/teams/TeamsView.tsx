@@ -40,7 +40,7 @@ export function TeamsView({
       onAnnounce('Enter a team name first.');
       return;
     }
-    controller.addTeam({ displayName, organizationName, teamLetter });
+    if (!controller.addTeam({ displayName, organizationName, teamLetter })) return;
     setDisplayName('');
     setOrganizationName('');
     setTeamLetter('');
@@ -338,12 +338,16 @@ function TeamRow({
       onAnnounce('Seed must be a positive whole number or blank.');
       return;
     }
-    controller.updateTeam(team.id, {
+    const updated = controller.updateTeam(team.id, {
       displayName,
       organizationName: editOrganizationName,
       teamLetter: editTeamLetter,
       seed,
     });
+    if (!updated) {
+      onAnnounce('Team changes were not saved; review the Director error.');
+      return;
+    }
     setEditing(false);
     onAnnounce(`${displayName} updated.`);
   };
@@ -441,8 +445,12 @@ function TeamRow({
               className="director-button director-button-quiet director-table-action"
               aria-label={`${team.status === 'dropped' ? 'Restore' : 'Drop'} ${team.displayName}`}
               onClick={() => {
-                if (team.status === 'dropped') controller.restoreTeam(team.id);
-                else controller.dropTeam(team.id);
+                const updated =
+                  team.status === 'dropped' ? controller.restoreTeam(team.id) : controller.dropTeam(team.id);
+                if (!updated) {
+                  onAnnounce('Team status was not changed; review the Director error.');
+                  return;
+                }
                 onAnnounce(
                   team.status === 'dropped'
                     ? `${team.displayName} restored.`

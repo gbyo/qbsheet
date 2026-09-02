@@ -11,12 +11,9 @@ import {
   isoNow,
 } from './model';
 import {
-  generatePoolSchedule,
   generateRoundRobinSchedule,
   type ScheduledGame as CoreScheduledGame,
   type Team as CoreTeam,
-  type Room as CoreRoom,
-  type Pool as CorePool,
 } from '@qbsheet/tournament-core';
 
 export interface ScheduleOptions {
@@ -30,6 +27,7 @@ export interface ScheduleOptions {
   avoidSameOrganization?: boolean;
   allowByes?: boolean;
   formatKind?: 'round-robin' | 'double-round-robin';
+  roundsPerTeam?: number | null;
   seed?: number;
 }
 
@@ -84,9 +82,25 @@ export function currentPacket(state: DirectorState): DirectorState['packets'][nu
 export function formatGenerationAvailability(state: DirectorState): FormatGenerationAvailability {
   const format = currentFormat(state);
   if (!format) return { supported: false, message: 'Choose a valid current format before generating.' };
+  if (state.tournament?.status === 'complete' || state.tournament?.status === 'archived') {
+    return {
+      supported: false,
+      message: `This tournament is ${state.tournament.status}; schedule generation is disabled.`,
+    };
+  }
   const phase = currentPhase(state);
   if (!phase || phase.formatId !== format.id) {
     return { supported: false, message: 'Choose a valid current phase for this format before generating.' };
+  }
+  const confirmedCount = state.teams.filter((team) => team.status === 'confirmed').length;
+  if (confirmedCount < 2) {
+    return { supported: false, message: 'Add at least two confirmed teams before generating a round.' };
+  }
+  if (phase.status === 'complete') {
+    return {
+      supported: false,
+      message: 'This phase is complete; select or add another phase for additional play.',
+    };
   }
   if (format.kind === 'pools' || format.kind === 'playoff-pools') {
     const pools = state.pools.filter((pool) => phase.poolIds.includes(pool.id));
@@ -100,21 +114,35 @@ export function formatGenerationAvailability(state: DirectorState): FormatGenera
       format.allowByes,
       format.kind !== 'playoff-pools',
     );
-    return configurationProblem
-      ? { supported: false, message: configurationProblem }
-      : { supported: true, message: 'Pool round-robin generation is available for this phase.' };
+    if (configurationProblem) return { supported: false, message: configurationProblem };
+    const phaseRoundCount = state.rounds.filter((round) => round.phaseId === phase.id).length;
+    if (format.roundsPerTeam !== null && phaseRoundCount >= format.roundsPerTeam) {
+      return {
+        supported: false,
+        message: `This format has reached its configured limit of ${format.roundsPerTeam} round${format.roundsPerTeam === 1 ? '' : 's'} per team.`,
+      };
+    }
+    return { supported: true, message: 'Pool round-robin generation is available for this phase.' };
   }
   if (format.kind === 'round-robin' || format.kind === 'double-round-robin') {
-    if (format.kind === 'double-round-robin') {
-      const confirmedCount = state.teams.filter((team) => team.status === 'confirmed').length;
-      const phaseRoundCount = state.rounds.filter((round) => round.phaseId === phase.id).length;
-      const maximumRoundCount = roundRobinCycleLength(confirmedCount) * 2;
-      if (confirmedCount >= 2 && phaseRoundCount >= maximumRoundCount) {
+    const phaseRoundCount = state.rounds.filter((round) => round.phaseId === phase.id).length;
+    const naturalLimit =
+      format.kind === 'double-round-robin' ? roundRobinCycleLength(confirmedCount) * 2 : null;
+    const maximumRoundCount =
+      naturalLimit === null
+        ? format.roundsPerTeam
+        : Math.min(format.roundsPerTeam ?? naturalLimit, naturalLimit);
+    if (maximumRoundCount !== null && phaseRoundCount >= maximumRoundCount) {
+      if (naturalLimit !== null && phaseRoundCount >= naturalLimit) {
         return {
           supported: false,
           message: 'This double round robin is complete; add a new phase for additional play.',
         };
       }
+      return {
+        supported: false,
+        message: `This format has reached its configured limit of ${maximumRoundCount} round${maximumRoundCount === 1 ? '' : 's'} per team.`,
+      };
     }
     return { supported: true, message: 'Round-robin generation is available for this format.' };
   }
@@ -249,6 +277,19 @@ export function generateRoundRobinRound(
     });
     return buildGenerationResult(roundId, roundNumber, options, [], conflicts);
   }
+  const naturalLimit = options.formatKind === 'double-round-robin' ? cycleLength * 2 : null;
+  const maximumRoundCount =
+    naturalLimit === null
+      ? (options.roundsPerTeam ?? null)
+      : Math.min(options.roundsPerTeam ?? naturalLimit, naturalLimit);
+  if (maximumRoundCount !== null && roundIndex >= maximumRoundCount) {
+    conflicts.push({
+      code: 'format-complete',
+      severity: 'error',
+      message: `This format has reached its configured limit of ${maximumRoundCount} round${maximumRoundCount === 1 ? '' : 's'} per team.`,
+    });
+    return buildGenerationResult(roundId, roundNumber, options, [], conflicts);
+  }
   const intentionalRematch = options.formatKind === 'double-round-robin' && roundIndex >= cycleLength;
   const firstCycleOptions =
     options.formatKind === 'double-round-robin' && !intentionalRematch
@@ -270,31 +311,8 @@ export function generateRoundRobinRound(
   const games = pairings.map(([left, right]) =>
     buildGame(roundNumber, left?.id ?? '', right?.id ?? null, options),
   );
-  if (options.avoidRematches || options.avoidSameOrganization) {
-    for (const [left, right] of pairings) {
-      if (!left || !right || legalPair(state, left, right, options)) continue;
-      if (options.avoidRematches && hasPlayed(state, left.id, right.id) && !intentionalRematch) {
-        conflicts.push({
-          code: 'rematch',
-          severity: 'warning',
-          message: `${left.displayName} and ${right.displayName} are a rematch because no fully constrained pairing was available.`,
-          teamIds: [left.id, right.id],
-        });
-      } else if (
-        options.avoidSameOrganization &&
-        organizationId(state, left.id) !== null &&
-        organizationId(state, left.id) === organizationId(state, right.id)
-      ) {
-        conflicts.push({
-          code: 'same-organization',
-          severity: 'warning',
-          message: `${left.displayName} and ${right.displayName} share an organization because no fully constrained pairing was available.`,
-          teamIds: [left.id, right.id],
-        });
-      }
-    }
-  }
-  const roomIds = options.roomIds ?? state.rooms.filter((room) => room.available).map((room) => room.id);
+  appendPairingConflicts(conflicts, state, pairings, options, intentionalRematch);
+  const roomIds = options.roomIds ?? assignableRoomIds(state);
   let roomIndex = 0;
   for (const game of games) {
     if (game.bye) continue;
@@ -337,6 +355,38 @@ function pairRoundRobinTeams(
   }
 
   return findCompleteMatching(teams, () => true);
+}
+
+function appendPairingConflicts(
+  conflicts: ScheduleConflict[],
+  state: DirectorState,
+  pairings: Array<[Team | null, Team | null]>,
+  options: ScheduleOptions,
+  intentionalRematch: boolean,
+): void {
+  if (!options.avoidRematches && !options.avoidSameOrganization) return;
+  for (const [left, right] of pairings) {
+    if (!left || !right || legalPair(state, left, right, options)) continue;
+    if (options.avoidRematches && hasPlayed(state, left.id, right.id) && !intentionalRematch) {
+      conflicts.push({
+        code: 'rematch',
+        severity: 'warning',
+        message: `${left.displayName} and ${right.displayName} are a rematch because no fully constrained pairing was available.`,
+        teamIds: [left.id, right.id],
+      });
+    } else if (
+      options.avoidSameOrganization &&
+      organizationId(state, left.id) !== null &&
+      organizationId(state, left.id) === organizationId(state, right.id)
+    ) {
+      conflicts.push({
+        code: 'same-organization',
+        severity: 'warning',
+        message: `${left.displayName} and ${right.displayName} share an organization because no fully constrained pairing was available.`,
+        teamIds: [left.id, right.id],
+      });
+    }
+  }
 }
 
 function repeatRoundPairings(
@@ -580,12 +630,29 @@ export function generateDirectorRound(
       'Choose a valid current phase for the selected format first.',
     );
   }
+  if (state.tournament?.status === 'complete' || state.tournament?.status === 'archived') {
+    return failedGenerationResult(
+      state,
+      { ...options, phaseId: phase.id },
+      'format-complete',
+      `This tournament is ${state.tournament?.status}; schedule generation is disabled.`,
+    );
+  }
+  if (phase.status === 'complete') {
+    return failedGenerationResult(
+      state,
+      { ...options, phaseId: phase.id },
+      'format-complete',
+      'This phase is complete; select or add another phase for additional play.',
+    );
+  }
   const packet = currentPacket(state);
   const scheduleOptions: ScheduleOptions = {
     ...options,
     phaseId: phase.id,
     packetId: packet?.id ?? null,
     formatKind: format.kind === 'double-round-robin' ? 'double-round-robin' : 'round-robin',
+    roundsPerTeam: format.roundsPerTeam,
     avoidRematches: options.avoidRematches ?? format.avoidRematches,
     avoidSameOrganization: options.avoidSameOrganization ?? format.avoidSameOrganization,
     allowByes: format.allowByes,
@@ -631,6 +698,19 @@ function generatePoolRound(
   phase: Phase,
   options: ScheduleOptions,
 ): ScheduleGenerationResult {
+  const phaseRoundCount = state.rounds.filter((round) => round.phaseId === phase.id).length;
+  if (
+    options.roundsPerTeam !== null &&
+    options.roundsPerTeam !== undefined &&
+    phaseRoundCount >= options.roundsPerTeam
+  ) {
+    return failedGenerationResult(
+      state,
+      options,
+      'format-complete',
+      `This format has reached its configured limit of ${options.roundsPerTeam} round${options.roundsPerTeam === 1 ? '' : 's'} per team.`,
+    );
+  }
   const pools = state.pools
     .filter((pool) => phase.poolIds.includes(pool.id))
     .sort((left, right) => left.order - right.order || left.id.localeCompare(right.id));
@@ -713,43 +793,41 @@ function generatePoolRound(
     return failedGenerationResultWithConflicts(state, options, conflicts);
   }
 
-  const schedule = generatePoolSchedule({
-    phaseId: phase.id,
-    pools: pools.map(toCorePool),
-    teams: expectedTeams.map(toCoreTeam),
-    rooms: state.rooms.filter((room) => room.available).map(toCoreRoom),
-    roomIds: options.roomIds ?? state.rooms.filter((room) => room.available).map((room) => room.id),
-    roundCount: 1,
-    seed: options.seed ?? nextRoundNumber(state),
-    rematchPolicy: options.avoidRematches ? 'avoid-when-possible' : 'allow',
-    avoidSameOrganization: options.avoidSameOrganization,
-  });
-  for (const issue of schedule.issues) {
+  const resolvedRoundNumber = options.roundNumber ?? nextRoundNumber(state);
+  const roomIds = options.roomIds ?? assignableRoomIds(state);
+  let roomIndex = 0;
+  const games: ScheduledGame[] = [];
+  for (const { pool, teams } of activeTeamsByPool) {
+    const pairings = pairRoundRobinTeams(state, teams, { ...options, poolId: pool.id }, resolvedRoundNumber);
+    if (!pairings) {
+      conflicts.push({
+        code: 'invalid-generation',
+        severity: 'error',
+        message: `No complete valid pairing could be generated for pool ${pool.name}.`,
+        teamIds: teams.map((team) => team.id),
+      });
+      continue;
+    }
+    appendPairingConflicts(conflicts, state, pairings, options, false);
+    for (const [left, right] of pairings) {
+      const game = buildGame(resolvedRoundNumber, left?.id ?? '', right?.id ?? null, {
+        ...options,
+        poolId: pool.id,
+      });
+      if (!game.bye) {
+        game.roomId = roomIds[roomIndex] ?? null;
+        roomIndex += 1;
+      }
+      games.push(game);
+    }
+  }
+  if (roomIndex > roomIds.length) {
     conflicts.push({
-      code:
-        issue.code === 'room-capacity' || issue.code === 'room-unassigned'
-          ? 'not-enough-rooms'
-          : issue.code === 'same-organization-match'
-            ? 'same-organization'
-            : issue.code === 'rematch-forbidden' || issue.code === 'same-round-rematch'
-              ? 'rematch'
-              : 'invalid-generation',
-      severity: issue.severity === 'error' ? 'error' : 'warning',
-      message: issue.message,
-      teamIds: [...issue.teamIds],
+      code: 'not-enough-rooms',
+      severity: 'warning',
+      message: `${roomIndex} games need rooms, but only ${roomIds.length} are available.`,
     });
   }
-
-  const resolvedRoundNumber = options.roundNumber ?? nextRoundNumber(state);
-  const coreGames = schedule.games;
-  const games = coreGames.map((entry) => {
-    const game =
-      entry.kind === 'bye'
-        ? buildGame(resolvedRoundNumber, entry.byeTeamId, null, { ...options, poolId: entry.poolId })
-        : buildGame(resolvedRoundNumber, entry.teamAId, entry.teamBId, { ...options, poolId: entry.poolId });
-    game.roomId = entry.kind === 'bye' ? null : entry.roomId;
-    return game;
-  });
   const round = buildGenerationResult(
     newDirectorId('round'),
     options.roundNumber ?? nextRoundNumber(state),
@@ -790,33 +868,12 @@ function failedGenerationResultWithConflicts(
   );
 }
 
-function toCorePool(pool: Pool): CorePool {
-  return {
-    id: pool.id,
-    phaseId: pool.phaseId,
-    name: pool.name,
-    order: pool.order,
-    teamIds: pool.teamIds,
-    sourcePoolIds: [],
-  };
-}
-
-function toCoreRoom(room: DirectorState['rooms'][number]): CoreRoom {
-  return {
-    id: room.id,
-    name: room.name,
-    building: room.building ?? null,
-    floor: room.floor ?? null,
-    accessible: Boolean(room.accessibility),
-    directions: room.directions ?? '',
-    notes: room.notes ?? '',
-    availability: [],
-    active: room.available,
-  };
-}
-
 export function scheduleGameCount(games: ScheduledGame[]): number {
   return games.filter((game) => !game.bye && game.status !== 'cancelled').length;
+}
+
+function assignableRoomIds(state: DirectorState): DirectorId[] {
+  return state.rooms.filter((room) => room.available && room.status === 'available').map((room) => room.id);
 }
 
 function roundRobinCycleLength(teamCount: number): number {

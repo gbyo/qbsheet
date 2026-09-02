@@ -16,6 +16,7 @@ import { StandingsView } from '../standings/StandingsView';
 import { PublishView } from '../publish/PublishView';
 import { SettingsView } from '../settings/SettingsView';
 import { importArchiveBytes, importDirectorTournament, importQbjText } from '../format/interchange';
+import { latestRound } from '../domain';
 import {
   isNativeDirector,
   openNativeTournamentFile,
@@ -228,7 +229,9 @@ export default function DirectorApp() {
           <strong>{tournament.name}</strong>
           <span>
             {statusLabel(tournament.status)}
-            {controller.state.rounds.length ? ` · Round ${controller.state.rounds.at(-1)?.number ?? 0}` : ''}
+            {controller.state.rounds.length
+              ? ` · Round ${latestRound(controller.state.rounds)?.number ?? 0}`
+              : ''}
           </span>
           <Icon name="chevron" size={14} />
         </div>
@@ -434,7 +437,10 @@ function NewTournamentScreen({
           onAnnounce(report.errors.join(' ') || 'That archive is not valid.');
           return;
         }
-        controller.importSnapshot(report.state);
+        if (!controller.importSnapshot(report.state)) {
+          onAnnounce('That portable archive could not be imported.');
+          return;
+        }
         onAnnounce(importWarningMessage('Portable archive imported.', report.warnings));
         return;
       }
@@ -445,7 +451,10 @@ function NewTournamentScreen({
           onAnnounce(report.errors.join(' ') || 'That QBJ file is not valid.');
           return;
         }
-        controller.importSnapshot(report.state);
+        if (!controller.importSnapshot(report.state)) {
+          onAnnounce('That QBJ file could not be imported.');
+          return;
+        }
         onAnnounce(importWarningMessage('QBJ tournament imported.', report.warnings));
         return;
       }
@@ -456,13 +465,19 @@ function NewTournamentScreen({
         return;
       }
       if (isDirectorTournamentLike(parsed)) {
-        controller.importSnapshot(importDirectorTournament(parsed as DirectorTournamentInput));
+        if (!controller.importSnapshot(importDirectorTournament(parsed as DirectorTournamentInput))) {
+          onAnnounce('That tournament data could not be imported.');
+          return;
+        }
         onAnnounce('Tournament data imported.');
         return;
       }
       const report = importQbjText(value);
       if (report.ok && report.state) {
-        controller.importSnapshot(report.state);
+        if (!controller.importSnapshot(report.state)) {
+          onAnnounce('That QBJ tournament could not be imported.');
+          return;
+        }
         onAnnounce(importWarningMessage('QBJ tournament imported.', report.warnings));
         return;
       }
@@ -482,13 +497,13 @@ function NewTournamentScreen({
         const report = importArchiveBytes(bytes);
         if (!report.ok || !report.state)
           throw new Error(report.errors.join(' ') || 'That archive is not valid.');
-        controller.importSnapshot(report.state);
+        if (!controller.importSnapshot(report.state)) throw new Error('That archive could not be imported.');
         onAnnounce(importWarningMessage('Portable archive imported.', report.warnings));
       } else if (extension === 'qbj') {
         const report = importQbjText(new TextDecoder().decode(bytes));
         if (!report.ok || !report.state)
           throw new Error(report.errors.join(' ') || 'That file is not a supported QBJ archive.');
-        controller.importSnapshot(report.state);
+        if (!controller.importSnapshot(report.state)) throw new Error('That QBJ file could not be imported.');
         onAnnounce(importWarningMessage('QBJ tournament imported.', report.warnings));
       } else if (extension === 'json') {
         const text = new TextDecoder().decode(bytes);
@@ -498,7 +513,8 @@ function NewTournamentScreen({
             throw new Error('That Director state could not be imported.');
           onAnnounce('Director tournament imported.');
         } else if (isDirectorTournamentLike(parsed)) {
-          controller.importSnapshot(importDirectorTournament(parsed as DirectorTournamentInput));
+          if (!controller.importSnapshot(importDirectorTournament(parsed as DirectorTournamentInput)))
+            throw new Error('That tournament data could not be imported.');
           onAnnounce('Tournament data imported.');
         } else {
           const report = importQbjText(text);
@@ -506,7 +522,8 @@ function NewTournamentScreen({
             throw new Error(
               report.errors.join(' ') || 'That file is not a supported Director or QBJ archive.',
             );
-          controller.importSnapshot(report.state);
+          if (!controller.importSnapshot(report.state))
+            throw new Error('That QBJ tournament could not be imported.');
           onAnnounce(importWarningMessage('QBJ tournament imported.', report.warnings));
         }
       } else {

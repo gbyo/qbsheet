@@ -5,6 +5,7 @@ import {
   deriveTeamStandings,
   emptyDirectorState,
   formatGenerationAvailability,
+  generateDirectorRound,
   generateRoundRobinRound,
   packetUseConflicts,
   previewAdvancement,
@@ -188,6 +189,34 @@ describe('Director integration hardening', () => {
     expect(imported.state).toEqual(state);
   });
 
+  test('tournament detail updates normalize persisted text and reject blank names', async () => {
+    const { hook } = await directorWithSetup();
+
+    let updated = false;
+    act(() => {
+      updated = hook.result.current.updateTournament({
+        name: '  Renamed event  ',
+        date: ' 2026-09-02 ',
+        venue: '  Main hall  ',
+        organizer: '  Quiz staff  ',
+      });
+    });
+    expect(updated).toBe(true);
+    expect(hook.result.current.state.tournament).toMatchObject({
+      name: 'Renamed event',
+      date: '2026-09-02',
+      venue: 'Main hall',
+      organizer: 'Quiz staff',
+    });
+
+    act(() => {
+      updated = hook.result.current.updateTournament({ name: '   ' });
+    });
+    expect(updated).toBe(false);
+    expect(hook.result.current.state.tournament?.name).toBe('Renamed event');
+    expect(hook.result.current.error).toMatch(/tournament name is required/i);
+  });
+
   test('Director interchange exports player points from the full stat line', () => {
     const state = emptyDirectorState();
     state.tournament = {
@@ -337,6 +366,30 @@ describe('Director integration hardening', () => {
     ).toBe(true);
   });
 
+  test('pool rounds avoid repeating a matchup while the pool rotation is still available', async () => {
+    const { hook } = await directorWithSetup(4);
+    const phaseId = hook.result.current.state.phases[0]?.id;
+    const teamIds = hook.result.current.state.teams.map((entry) => entry.id);
+    if (!phaseId || teamIds.length !== 4) throw new Error('test setup did not create the pool field');
+    act(() => {
+      hook.result.current.updateFormat({ kind: 'pools', name: 'Preliminary pools' });
+      expect(hook.result.current.addPool({ phaseId, name: 'Pool A', teamIds })).toBe(true);
+    });
+
+    for (let round = 0; round < 3; round += 1) {
+      let result: { generated: boolean; conflicts: string[] } | undefined;
+      act(() => {
+        result = hook.result.current.generateSchedule();
+      });
+      expect(result?.generated).toBe(true);
+    }
+
+    const pairs = hook.result.current.state.scheduledGames
+      .filter((game) => game.rightTeamId)
+      .map((game) => [game.leftTeamId, game.rightTeamId].sort().join('|'));
+    expect(new Set(pairs).size).toBe(pairs.length);
+  });
+
   test('player roster entry rejects an active duplicate and supports captain assignment', async () => {
     const { hook } = await directorWithSetup();
     const teamId = hook.result.current.state.teams[0]?.id;
@@ -407,6 +460,41 @@ describe('Director integration hardening', () => {
     await waitFor(() => expect(hook.result.current.saving).toBe(false));
   });
 
+  test('preflight blocks a prepared game assigned to an unavailable room', async () => {
+    const { hook } = await directorWithSetup();
+    act(() => hook.result.current.generateSchedule());
+    const round = hook.result.current.state.rounds[0];
+    const room = hook.result.current.state.rooms[0];
+    if (!round || !room) throw new Error('test setup did not generate a room assignment');
+    act(() => {
+      expect(hook.result.current.prepareRound(round.id)).toBe(true);
+      hook.result.current.updateRoom(room.id, { available: false });
+    });
+
+    expect(runPreflight(hook.result.current.state)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'games-with-unavailable-rooms',
+          severity: 'blocker',
+        }),
+      ]),
+    );
+  });
+
+  test('completed tournaments do not show next-round setup blockers', async () => {
+    const { hook } = await directorWithSetup();
+    const complete = structuredClone(hook.result.current.state);
+    if (!complete.tournament || !complete.phases[0])
+      throw new Error('test setup did not create a tournament');
+    complete.tournament.status = 'complete';
+    complete.phases[0].status = 'complete';
+
+    const issueIds = runPreflight(complete, false, true).map((issue) => issue.id);
+    expect(issueIds).not.toEqual(
+      expect.arrayContaining(['format-generation-unavailable', 'qbtcp-offline', 'checkpoint-missing']),
+    );
+  });
+
   test('room operational notes are trimmed and persisted with the room', async () => {
     const { hook, repository } = await directorWithSetup();
     const roomId = hook.result.current.state.rooms[0]?.id;
@@ -443,6 +531,80 @@ describe('Director integration hardening', () => {
     });
   });
 
+  test('staff and equipment notes and metadata remain editable and persisted', async () => {
+    const { hook, repository } = await directorWithSetup();
+    act(() => {
+      hook.result.current.addStaff({
+        name: '  Moderator One ',
+        roles: ['moderator'],
+        notes: '  Call from HQ if reassigned. ',
+      });
+      hook.result.current.addEquipment({
+        name: '  Buzzer One ',
+        kind: 'buzzer',
+        notes: '  Keep the spare cable nearby. ',
+      });
+    });
+    const staffId = hook.result.current.state.staff[0]?.id;
+    const equipmentId = hook.result.current.state.equipment[0]?.id;
+    if (!staffId || !equipmentId) throw new Error('test setup did not create staff resources');
+
+    act(() => {
+      expect(
+        hook.result.current.updateStaff(staffId, {
+          name: '  Moderator Two ',
+          roles: ['moderator', 'runner'],
+          notes: '  Also covers room checks. ',
+        }),
+      ).toBe(true);
+      expect(
+        hook.result.current.updateEquipment(equipmentId, {
+          name: '  Buzzer Two ',
+          kind: 'device',
+          notes: '  Fully charged. ',
+        }),
+      ).toBe(true);
+    });
+
+    expect(hook.result.current.state.staff[0]).toMatchObject({
+      name: 'Moderator Two',
+      roles: ['moderator', 'runner'],
+      notes: 'Also covers room checks.',
+    });
+    expect(hook.result.current.state.equipment[0]).toMatchObject({
+      name: 'Buzzer Two',
+      kind: 'device',
+      notes: 'Fully charged.',
+    });
+    await waitFor(async () => {
+      const saved = await repository.load();
+      expect(saved.staff[0]).toMatchObject({ name: 'Moderator Two', notes: 'Also covers room checks.' });
+      expect(saved.equipment[0]).toMatchObject({ name: 'Buzzer Two', kind: 'device', notes: 'Fully charged.' });
+    });
+  });
+
+  test('schedule generation does not assign rooms that are operationally busy', async () => {
+    const { hook } = await directorWithSetup();
+    const roomId = hook.result.current.state.rooms[0]?.id;
+    if (!roomId) throw new Error('test setup did not create a room');
+    const imported = structuredClone(hook.result.current.state);
+    imported.rooms[0]!.status = 'live';
+    act(() => {
+      expect(hook.result.current.importSnapshot(imported)).toBe(true);
+    });
+
+    let generated = false;
+    act(() => {
+      generated = hook.result.current.generateSchedule().generated;
+    });
+    expect(generated).toBe(true);
+    expect(hook.result.current.state.scheduledGames[0]?.roomId).toBeNull();
+    expect(hook.result.current.state.scheduledGames[0]?.roomId).not.toBe(roomId);
+    expect(runPreflight(hook.result.current.state)).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 'games-without-rooms', severity: 'warning' })]),
+    );
+  });
+
   test('round lifecycle actions require complete field and ledger validation', async () => {
     const { hook } = await directorWithSetup(4);
     act(() => hook.result.current.generateSchedule());
@@ -461,6 +623,111 @@ describe('Director integration hardening', () => {
     });
     expect(hook.result.current.prepareRound(roundId)).toBe(false);
     expect(hook.result.current.state.rounds[0]?.status).toBe('planned');
+  });
+
+  test('cancelling a scheduled game rejects pending submissions and lets an unassigned slot close', async () => {
+    const { hook } = await directorWithSetup();
+    act(() => hook.result.current.generateSchedule());
+    const generated = hook.result.current.state.scheduledGames[0];
+    const round = hook.result.current.state.rounds[0];
+    if (!generated || !round || !generated.rightTeamId) {
+      throw new Error('test setup did not generate a playable round');
+    }
+
+    const imported = structuredClone(hook.result.current.state);
+    const scheduled = imported.scheduledGames.find((game) => game.id === generated.id);
+    if (!scheduled) throw new Error('test setup lost the generated game');
+    const rightTeamId = scheduled.rightTeamId;
+    if (!rightTeamId) throw new Error('test setup lost the opposing team');
+    scheduled.roomId = null;
+    scheduled.status = 'submitted';
+    imported.games.push({
+      id: 'pending-cancellation-game',
+      scheduledGameId: scheduled.id,
+      roundId: scheduled.roundId,
+      packetId: scheduled.packetId,
+      status: 'submitted',
+      scores: [score(scheduled.leftTeamId, 20), score(rightTeamId, 10)],
+      playerStats: [],
+      source: 'qbtcp',
+      detailedStats: 'unknown',
+    });
+    imported.submissions.push({
+      id: 'pending-cancellation-submission',
+      gameId: 'pending-cancellation-game',
+      receivedAt: '2026-09-01T12:00:00.000Z',
+      fingerprint: 'pending-cancellation-fingerprint',
+      status: 'review',
+      rawSubmission: { source: 'test' },
+    });
+    act(() => {
+      expect(hook.result.current.importSnapshot(imported)).toBe(true);
+      expect(hook.result.current.cancelScheduledGame(scheduled.id, 'Room closed')).toBe(true);
+    });
+
+    expect(hook.result.current.state.scheduledGames.find((game) => game.id === scheduled.id)?.status).toBe(
+      'cancelled',
+    );
+    expect(
+      hook.result.current.state.games.find((game) => game.id === 'pending-cancellation-game'),
+    ).toMatchObject({
+      status: 'cancelled',
+      note: expect.stringContaining('Room closed'),
+    });
+    expect(
+      hook.result.current.state.submissions.find(
+        (submission) => submission.id === 'pending-cancellation-submission',
+      ),
+    ).toMatchObject({
+      status: 'rejected',
+      reason: expect.stringContaining('Room closed'),
+    });
+
+    const lateSubmissionState = structuredClone(hook.result.current.state);
+    lateSubmissionState.games.push({
+      id: 'late-cancellation-game',
+      scheduledGameId: scheduled.id,
+      roundId: scheduled.roundId,
+      packetId: scheduled.packetId,
+      status: 'submitted',
+      scores: [score(scheduled.leftTeamId, 30), score(rightTeamId, 15)],
+      playerStats: [],
+      source: 'qbtcp',
+      detailedStats: 'unknown',
+    });
+    lateSubmissionState.submissions.push({
+      id: 'late-cancellation-submission',
+      gameId: 'late-cancellation-game',
+      receivedAt: '2026-09-01T12:01:00.000Z',
+      fingerprint: 'late-cancellation-fingerprint',
+      status: 'review',
+      rawSubmission: { source: 'test' },
+    });
+    act(() => {
+      expect(hook.result.current.importSnapshot(lateSubmissionState)).toBe(true);
+    });
+    let acceptedLateResult = true;
+    let addedLateResult = true;
+    act(() => {
+      acceptedLateResult = hook.result.current.acceptSubmission('late-cancellation-submission');
+      addedLateResult = hook.result.current.addManualResult({
+        scheduledGameId: scheduled.id,
+        scores: [score(scheduled.leftTeamId, 30), score(rightTeamId, 15)],
+      });
+    });
+    expect(acceptedLateResult).toBe(false);
+    expect(addedLateResult).toBe(false);
+    expect(hook.result.current.state.scheduledGames.find((game) => game.id === scheduled.id)?.status).toBe(
+      'cancelled',
+    );
+
+    act(() => {
+      expect(hook.result.current.prepareRound(round.id)).toBe(true);
+      expect(hook.result.current.releaseRound(round.id)).toBe(true);
+      expect(hook.result.current.closeRound(round.id)).toBe(true);
+    });
+    expect(hook.result.current.state.rounds.find((entry) => entry.id === round.id)?.status).toBe('closed');
+    expect(hook.result.current.state.audit.some((event) => event.type === 'schedule-cancelled')).toBe(true);
   });
 
   test('preflight reports scheduled games that are detached from every round', async () => {
@@ -483,6 +750,41 @@ describe('Director integration hardening', () => {
 
     expect(hook.result.current.state.formats[0]?.kind).toBe('round-robin');
     expect(hook.result.current.error).toMatch(/locked after schedule generation/i);
+  });
+
+  test('rounds per team limits generation and validates persisted format settings', async () => {
+    const { hook } = await directorWithSetup(4);
+    let updated = false;
+    act(() => {
+      updated = hook.result.current.updateFormat({ roundsPerTeam: 2 });
+    });
+    expect(updated).toBe(true);
+    expect(hook.result.current.state.formats[0]?.roundsPerTeam).toBe(2);
+
+    for (let index = 0; index < 2; index += 1) {
+      let result: ReturnType<typeof hook.result.current.generateSchedule> | undefined;
+      act(() => {
+        result = hook.result.current.generateSchedule({ seed: index + 1 });
+      });
+      expect(result?.generated).toBe(true);
+    }
+
+    let extraRound: ReturnType<typeof hook.result.current.generateSchedule> | undefined;
+    act(() => {
+      extraRound = hook.result.current.generateSchedule({ seed: 3 });
+    });
+    expect(extraRound).toEqual({
+      generated: false,
+      conflicts: ['This format has reached its configured limit of 2 rounds per team.'],
+    });
+    expect(formatGenerationAvailability(hook.result.current.state)).toMatchObject({ supported: false });
+
+    act(() => {
+      updated = hook.result.current.updateFormat({ roundsPerTeam: 0 });
+    });
+    expect(updated).toBe(false);
+    expect(hook.result.current.state.formats[0]?.roundsPerTeam).toBe(2);
+    expect(hook.result.current.error).toMatch(/whole number from 1 to 99/i);
   });
 
   test('double round robin repeats its first rotation once and then stops', async () => {
@@ -617,6 +919,75 @@ describe('Director integration hardening', () => {
     expect(hook.result.current.error).toMatch(/finite positive number/i);
   });
 
+  test('phase and tiebreaker settings validate and persist as structured rules', async () => {
+    const { hook } = await directorWithSetup();
+    const phase = hook.result.current.state.phases[0];
+    if (!phase) throw new Error('test setup did not create a phase');
+
+    act(() => {
+      expect(
+        hook.result.current.updatePhase(phase.id, {
+          name: 'Championship prelims',
+          kind: 'playoff',
+          carryover: true,
+          advancementRule: {
+            qualifiersPerPool: 2,
+            tiebreakers: ['record', 'points'],
+            manualOverrideAllowed: true,
+          },
+        }),
+      ).toBe(true);
+      expect(
+        hook.result.current.updateRules({
+          tiebreakers: ['record', 'head-to-head', 'points', 'margin', 'powers', 'gets', 'playoff'],
+        }),
+      ).toBe(true);
+    });
+
+    expect(hook.result.current.state.phases[0]).toMatchObject({
+      name: 'Championship prelims',
+      kind: 'playoff',
+      carryover: true,
+      advancementRule: {
+        qualifiersPerPool: 2,
+        tiebreakers: ['record', 'points'],
+        manualOverrideAllowed: true,
+      },
+    });
+    expect(hook.result.current.state.tournament?.rules.tiebreakers[0]).toBe('record');
+
+    act(() => {
+      expect(
+        hook.result.current.updatePhase(phase.id, {
+          advancementRule: {
+            qualifiersPerPool: 0,
+            tiebreakers: ['record'],
+            manualOverrideAllowed: false,
+          },
+        }),
+      ).toBe(false);
+      expect(hook.result.current.updateRules({ tiebreakers: ['record', 'record'] })).toBe(false);
+    });
+    expect(hook.result.current.error).toMatch(/repeated|positive whole number/i);
+  });
+
+  test('generation availability blocks fields that are too small or phases that are complete', async () => {
+    const { hook } = await directorWithSetup(1);
+    expect(formatGenerationAvailability(hook.result.current.state)).toMatchObject({
+      supported: false,
+      message: expect.stringMatching(/at least two confirmed teams/i),
+    });
+
+    const complete = structuredClone(hook.result.current.state);
+    complete.teams.push({ ...team('second') });
+    complete.phases[0]!.status = 'complete';
+    expect(formatGenerationAvailability(complete)).toMatchObject({
+      supported: false,
+      message: expect.stringMatching(/phase is complete/i),
+    });
+    expect(generateDirectorRound(complete).hardFailure).toBe(true);
+  });
+
   test('editing a team keeps organization data relational', async () => {
     const { hook } = await directorWithSetup();
     const target = hook.result.current.state.teams[0];
@@ -652,6 +1023,65 @@ describe('Director integration hardening', () => {
     expect(
       hook.result.current.state.teams.find((entry) => entry.id === target.id)?.organizationId,
     ).toBeNull();
+  });
+
+  test('team mutations reject duplicate names and protect open rounds', async () => {
+    const { hook } = await directorWithSetup();
+    const firstTeam = hook.result.current.state.teams[0];
+    if (!firstTeam) throw new Error('test setup did not create a team');
+
+    let added = true;
+    act(() => {
+      added = hook.result.current.addTeam({ displayName: ` ${firstTeam.displayName.toUpperCase()} ` });
+    });
+    expect(added).toBe(false);
+    expect(hook.result.current.state.teams).toHaveLength(2);
+
+    let edited = true;
+    act(() => {
+      edited = hook.result.current.updateTeam(firstTeam.id, { displayName: '   ' });
+    });
+    expect(edited).toBe(false);
+    expect(hook.result.current.state.teams[0]?.displayName).toBe(firstTeam.displayName);
+
+    act(() => hook.result.current.generateSchedule());
+    let dropped = true;
+    act(() => {
+      dropped = hook.result.current.dropTeam(firstTeam.id);
+    });
+    expect(dropped).toBe(false);
+    expect(hook.result.current.state.teams[0]?.status).toBe('confirmed');
+    expect(hook.result.current.error).toMatch(/finish or repair/i);
+  });
+
+  test('closed round history remains valid after a team is dropped and replaced', async () => {
+    const { hook } = await directorWithSetup();
+    act(() => hook.result.current.generateSchedule());
+    const scheduled = hook.result.current.state.scheduledGames.find((game) => !game.bye);
+    const round = hook.result.current.state.rounds[0];
+    if (!scheduled || !round || !scheduled.rightTeamId) throw new Error('test setup did not generate a game');
+
+    act(() => {
+      expect(hook.result.current.prepareRound(round.id)).toBe(true);
+      expect(hook.result.current.releaseRound(round.id)).toBe(true);
+      expect(
+        hook.result.current.addManualResult({
+          scheduledGameId: scheduled.id,
+          scores: [score(scheduled.leftTeamId, 120), score(scheduled.rightTeamId!, 90)],
+        }),
+      ).toBe(true);
+      expect(hook.result.current.closeRound(round.id)).toBe(true);
+    });
+    expect(hook.result.current.state.rounds[0]?.status).toBe('closed');
+
+    act(() => {
+      expect(hook.result.current.dropTeam(scheduled.leftTeamId, 'Medical withdrawal')).toBe(true);
+      expect(hook.result.current.addTeam({ displayName: 'Replacement Team' })).toBe(true);
+    });
+    expect(roundScheduleIsValid(hook.result.current.state, round.id)).toBe(true);
+    expect(runPreflight(hook.result.current.state).some((issue) => issue.id === `round-invalid-${round.id}`)).toBe(
+      false,
+    );
   });
 
   test('rejecting a submission reopens the assignment for a later result', async () => {
@@ -1283,6 +1713,17 @@ describe('Director integration hardening', () => {
     expect(standings[0]).toMatchObject({ teamId: 'active', gamesPlayed: 1, wins: 1, pointsFor: 5 });
   });
 
+  test('cancelled scheduled games never contribute accepted records to standings', () => {
+    const state = emptyDirectorState();
+    state.teams = [team('active'), team('opponent')];
+    state.games = [acceptedGame('2026-02-02', 'round-1', 'active', 5, 'opponent', 0)];
+    state.scheduledGames = [scheduledForGame(state.games[0]!, 'active', 'opponent', { status: 'cancelled' })];
+
+    const standings = deriveTeamStandings(state);
+    expect(standings.every((standing) => standing.gamesPlayed === 0)).toBe(true);
+    expect(standings.every((standing) => standing.wins === 0 && standing.losses === 0)).toBe(true);
+  });
+
   test('advancement selects the configured number from each pool and ignores later-phase games', () => {
     const state = emptyDirectorState();
     state.tournament = {
@@ -1473,6 +1914,20 @@ describe('Director integration hardening', () => {
       bouncebacks: true,
       tiebreakers: defaultRules.tiebreakers,
     });
+
+    const emptyTiebreakers = structuredClone(legacy);
+    (emptyTiebreakers.tournament as Record<string, unknown>).rules = { tiebreakers: [] };
+    expect(normalizeDirectorState(emptyTiebreakers).tournament?.rules.tiebreakers).toEqual(
+      defaultRules.tiebreakers,
+    );
+
+    const duplicateTiebreakers = structuredClone(legacy);
+    (duplicateTiebreakers.tournament as Record<string, unknown>).rules = {
+      tiebreakers: ['record', 'record'],
+    };
+    expect(normalizeDirectorState(duplicateTiebreakers).tournament?.rules.tiebreakers).toEqual(
+      defaultRules.tiebreakers,
+    );
   });
 
   test('malformed required state shapes are rejected instead of erased', () => {
