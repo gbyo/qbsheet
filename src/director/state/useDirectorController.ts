@@ -2803,8 +2803,31 @@ export function useDirectorController(repository = createDirectorRepository()): 
   const drainLiveOutbox = useCallback(async (): Promise<void> => {
     if (liveDrainInFlightRef.current) return liveDrainInFlightRef.current;
     const task = (async () => {
+      const initialPublication = stateRef.current.live;
+      if (!initialPublication?.settings.enabled) return;
+      const initialBackend = initialPublication.backend;
+      const initialLocal = initialBackend?.kind === 'local';
+      let client: QbliveClient | null = null;
+      if (!initialLocal) {
+        if (!liveClientRef.current) liveClientRef.current = await liveClientFor(initialPublication);
+        client = liveClientRef.current;
+        if (
+          !client ||
+          client.publicationId !== initialPublication.publicationId ||
+          client.origin !== initialBackend?.origin
+        ) {
+          return;
+        }
+      }
       let publication = stateRef.current.live;
-      if (!publication?.settings.enabled) return;
+      if (
+        !publication?.settings.enabled ||
+        publication.publicationId !== initialPublication.publicationId ||
+        publication.backend?.kind !== initialBackend?.kind ||
+        publication.backend?.origin !== initialBackend?.origin
+      ) {
+        return;
+      }
       const recovered = recoverStaleInFlight(publication);
       if (recovered !== publication) {
         publication = recovered;
@@ -2816,12 +2839,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
       const next = nextOutboxItem(publication);
       if (!next) return;
       const local = publication.backend?.kind === 'local';
-      let client: QbliveClient | null = null;
-      if (!local) {
-        if (!liveClientRef.current) liveClientRef.current = await liveClientFor(publication);
-        client = liveClientRef.current;
-        if (!client) return;
-      }
       const inFlight = markOutboxItemInFlight(publication, next.id);
       // Make the in-flight state visible to concurrent derivations before the network round-trip
       // so transient coalescing cannot collapse the item being published onto a newer update.
@@ -2903,7 +2920,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
           return;
         }
       }
-      const attempt = await publishOnce(inFlight, client!, publishedSnapshotRef.current);
+      const attempt = await publishOnce(inFlight, client!, publishedSnapshotRef.current, next);
       if (!attempt) return;
       if (attempt.item.kind === 'delete' && attempt.outcome === 'published') {
         commit((draft) => {

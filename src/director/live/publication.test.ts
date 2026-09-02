@@ -308,10 +308,12 @@ describe('the worker', () => {
   test('publishes a queued snapshot and records the acknowledged revision', async () => {
     const state = liveState();
     const derived = derivePublication(state, null, { now: at(0) });
+    const item = derived.live!.outbox[0];
+    const inFlight = markOutboxItemInFlight(derived.live!, item.id, at(1));
     const client = clientReturning(() =>
       Response.json({ publicationId: 'bcdfghjkmnpqrstvwxyz', revision: 1, final: false }),
     );
-    const attempt = await publishOnce(derived.live!, client, derived.snapshot, at(1));
+    const attempt = await publishOnce(inFlight, client, derived.snapshot, item, at(1));
     expect(attempt?.outcome).toBe('published');
     expect(attempt?.publication.outbox).toHaveLength(0);
     expect(attempt?.publication.sync.acknowledgedRevision).toBe(1);
@@ -324,7 +326,7 @@ describe('the worker', () => {
     const client = clientReturning(() =>
       Response.json({ error: 'conflict', message: 'moved on', currentRevision: 9 }, { status: 409 }),
     );
-    const attempt = await publishOnce(derived.live!, client, derived.snapshot, at(1));
+    const attempt = await publishOnce(derived.live!, client, derived.snapshot, undefined, at(1));
     expect(attempt?.outcome).toBe('failed');
     expect(attempt?.publication.outbox[0].kind).toBe('snapshot');
     expect(attempt?.publication.sync.acknowledgedRevision).toBe(9);
@@ -333,7 +335,7 @@ describe('the worker', () => {
   test('does nothing when the outbox is empty', async () => {
     const state = liveState();
     const client = clientReturning(() => Response.json({}));
-    expect(await publishOnce(state.live!, client, null, at(1))).toBeNull();
+    expect(await publishOnce(state.live!, client, null, undefined, at(1))).toBeNull();
   });
 });
 
@@ -364,7 +366,7 @@ describe('the internet disappears mid-tournament', () => {
       }) as unknown as typeof fetch,
     });
 
-    const attempt = await publishOnce(state.live!, client, snapshot, at(1));
+    const attempt = await publishOnce(state.live!, client, snapshot, undefined, at(1));
     expect(attempt?.outcome).toBe('published');
     state = { ...state, live: attempt!.publication };
 
@@ -385,7 +387,7 @@ describe('the internet disappears mid-tournament', () => {
       state = { ...next, live: derived.live! };
       snapshot = derived.snapshot;
 
-      const failedAttempt = await publishOnce(state.live!, client, snapshot, at(10 + round));
+      const failedAttempt = await publishOnce(state.live!, client, snapshot, undefined, at(10 + round));
       expect(failedAttempt?.outcome).toBe('failed');
       state = { ...state, live: failedAttempt!.publication };
     }
@@ -400,7 +402,7 @@ describe('the internet disappears mid-tournament', () => {
     online = true;
     let guard = 0;
     while (state.live!.outbox.length > 0 && guard < 20) {
-      const retry = await publishOnce(state.live!, client, snapshot, at(600 + guard));
+      const retry = await publishOnce(state.live!, client, snapshot, undefined, at(600 + guard));
       if (retry) state = { ...state, live: retry.publication };
       guard += 1;
     }
@@ -475,6 +477,15 @@ describe('lifecycle outbox', () => {
     const pending = enqueueUnpublish(initial.live!, at(1));
     expect(pending.outbox.map((item) => item.kind)).toEqual(['unpublish']);
     expect(pending.lifecycle).toBe('unpublishing');
+  });
+
+  test('Unpublish preserves a pending delete barrier', () => {
+    const state = liveState();
+    const initial = derivePublication(state, null, { now: at(0) });
+    const deleting = enqueueDelete(initial.live!, at(1));
+    const preserved = enqueueUnpublish(deleting, at(2));
+    expect(preserved.lifecycle).toBe('deleting');
+    expect(preserved.outbox.map((item) => item.kind)).toEqual(['delete']);
   });
 
   test('delete enqueues and survives until acknowledged', () => {
@@ -633,7 +644,7 @@ describe('outbox race: new score update arrives while previous publish is awaiti
     expect(acknowledged.sync.acknowledgedRevision).toBe(newer.live!.outbox[0].revision);
   });
 
-  test('publishOnce marks the item in-flight so a concurrent transient tick is preserved', async () => {
+  test('publishOnce sends the selected in-flight item so a concurrent transient tick is preserved', async () => {
     const state = liveState();
     state.live!.settings.liveScores = true;
     const first = derivePublication(state, null, { now: at(0) });
@@ -647,7 +658,7 @@ describe('outbox race: new score update arrives while previous publish is awaiti
     publication = tick.live!;
     snapshot = tick.snapshot!;
 
-    // Start publish with a fetch that hangs, verify publishOnce created an in-flight publication.
+    // Start publish with a fetch that hangs, passing the item already marked in-flight.
     let resolveFetch!: (value: Response) => void;
     const hangingFetch = () =>
       new Promise<Response>((resolve) => {
@@ -660,12 +671,11 @@ describe('outbox race: new score update arrives while previous publish is awaiti
       fetch: hangingFetch as unknown as typeof fetch,
     });
 
-    const pendingPromise = publishOnce(publication, client, snapshot, at(3));
-    // While the network is pending, derive a newer tick against the in-flight publication
-    // (which publishOnce derived internally). We simulate what drainLiveOutbox does: the
-    // in-flight state is the one future derivations must see.
     const pendingItemId = publication.outbox[0].id;
     const inFlightForDerive = markOutboxItemInFlight(publication, pendingItemId, at(3));
+    const pendingPromise = publishOnce(inFlightForDerive, client, snapshot, publication.outbox[0], at(3));
+    // While the network is pending, derive a newer tick against the in-flight publication. We
+    // simulate what drainLiveOutbox does: the in-flight state is the one future derivations must see.
     const newerState = structuredClone(tickState);
     newerState.live = inFlightForDerive;
     newerState.qbtcpSessions[0].progress = { tossupsRead: 15, leftScore: 205, rightScore: 135 };

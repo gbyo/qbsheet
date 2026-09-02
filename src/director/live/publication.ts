@@ -245,6 +245,8 @@ function basePayloadRevision(item: LiveOutboxItem): number {
 
 export function enqueueUnpublish(publication: LivePublication, at = new Date()): LivePublication {
   if (publication.lifecycle === 'unpublished') return publication;
+  // Delete is the terminal barrier. An unpublish request must never supersede it.
+  if (publication.lifecycle === 'deleting') return publication;
   if (publication.outbox.some((item) => item.kind === 'unpublish' && item.state !== 'done')) {
     return publication;
   }

@@ -111,7 +111,12 @@ export function Schedule({
         <p className="empty">No games have been released yet.</p>
       ) : (
         grouped.map(([sectionKey, roundGames]) => (
-          <section key={sectionKey} aria-label={roundGames[0].roundName}>
+          <section
+            key={sectionKey}
+            aria-label={`${roundGames[0].roundName}${
+              roundGames[0].poolName && scope === 'all' ? ` · ${roundGames[0].poolName}` : ''
+            }`}
+          >
             <h2>
               {roundGames[0].roundName}
               {roundGames[0].poolName && scope === 'all' ? ` · ${roundGames[0].poolName}` : ''}

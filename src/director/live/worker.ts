@@ -57,7 +57,7 @@ export function classifyFailure(reason: unknown): PublishFailure {
 }
 
 /**
- * Attempt the next due outbox item, if any.
+ * Attempt the selected outbox item, or the next due item when no item is supplied.
  *
  * Returns null when there is nothing to do, which is the ordinary case between rounds. The caller
  * persists `attempt.publication` with the rest of the document.
@@ -66,11 +66,21 @@ export async function publishOnce(
   publication: LivePublication,
   client: QbliveClient,
   currentSnapshot: QbliveSnapshot | null,
+  selectedItem?: LiveOutboxItem,
   at = new Date(),
 ): Promise<PublishAttempt | null> {
-  const item = nextOutboxItem(publication, at);
-  if (!item) return null;
-  const inFlight = markOutboxItemInFlight(publication, item.id, at);
+  const selected = selectedItem ?? nextOutboxItem(publication, at);
+  if (!selected) return null;
+  const item = publication.outbox.find((entry) => entry.id === selected.id);
+  if (
+    !item ||
+    item.state === 'done' ||
+    publication.outbox.some((entry) => entry.state === 'in-flight' && entry.id !== item.id)
+  ) {
+    return null;
+  }
+  const inFlight =
+    item.state === 'in-flight' ? publication : markOutboxItemInFlight(publication, item.id, at);
 
   try {
     const acknowledged = await send(client, item);
@@ -184,7 +194,7 @@ export function startPublicationWorker(hooks: WorkerHooks, intervalMs = 1000): (
       if (!client) return;
       const inFlight = markOutboxItemInFlight(publication, next.id);
       await hooks.write(inFlight);
-      const attempt = await publishOnce(inFlight, client, snapshot);
+      const attempt = await publishOnce(inFlight, client, snapshot, next);
       if (attempt) await hooks.write(attempt.publication);
     } catch {
       // A worker that throws is a worker that stops. Nothing here is allowed to be fatal: the
