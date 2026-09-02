@@ -30,10 +30,53 @@ jobs:
           from pathlib import Path
           path = Path('src/director/state/useDirectorController.ts')
           text = path.read_text()
+
           duplicate = "import { createDirectorRepository, type DirectorRepository } from '../persistence';\n"
           if text.count(duplicate) != 1:
               raise SystemExit(f'expected one redundant persistence import, found {text.count(duplicate)}')
-          path.write_text(text.replace(duplicate, '', 1))
+          text = text.replace(duplicate, '', 1)
+
+          broken = """        draft.audit.push({
+          id: newDirectorId('audit'),
+          at: isoNow(),
+          actor: 'Director',
+          type: 'assignment-released',
+          summary: `Released ${round.name}.`,
+          entityId: roundId,
+        });
+      });
+      return true;
+    },
+        // Releasing a round is QBTCP's delivery. Recording it as a transfer keeps the unified
+        // history honest: \"how did this room get its assignment\" has one table with one answer,
+        // whether that answer was the network, a stick, or both.
+        recordQbtcpDelivery(draft, roundId);
+      }),
+    [commit],
+  );
+"""
+          repaired = """        draft.audit.push({
+          id: newDirectorId('audit'),
+          at: isoNow(),
+          actor: 'Director',
+          type: 'assignment-released',
+          summary: `Released ${round.name}.`,
+          entityId: roundId,
+        });
+        // Releasing a round is QBTCP's delivery. Recording it as a transfer keeps the unified
+        // history honest: \"how did this room get its assignment\" has one table with one answer,
+        // whether that answer was the network, a stick, or both.
+        recordQbtcpDelivery(draft, roundId);
+      });
+      return true;
+    },
+    [commit],
+  );
+"""
+          if text.count(broken) != 1:
+              raise SystemExit(f'expected one malformed releaseRound splice, found {text.count(broken)}')
+          text = text.replace(broken, repaired, 1)
+          path.write_text(text)
           PY
       - name: Install dependencies
         run: npm ci
