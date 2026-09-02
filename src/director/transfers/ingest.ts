@@ -65,6 +65,8 @@ export const ingestWarnings = {
   cancelledGame: 'cancelled-game',
   alreadyAccepted: 'already-accepted',
   statisticsWarning: 'statistics-warning',
+  ambiguousTeamIdentity: 'ambiguous-team-identity',
+  unresolvedPlayerIdentity: 'unresolved-player-identity',
   lateAfterAbandon: 'late-after-abandon',
   transportReviewRequired: 'transport-review-required',
 } as const;
@@ -98,6 +100,10 @@ export function describeWarning(code: string): string {
       return 'This game already has an accepted result.';
     case ingestWarnings.statisticsWarning:
       return 'The statistics did not validate cleanly.';
+    case ingestWarnings.ambiguousTeamIdentity:
+      return 'A team name matches more than one roster entry.';
+    case ingestWarnings.unresolvedPlayerIdentity:
+      return 'A player in the scoresheet could not be matched to exactly one roster entry.';
     case ingestWarnings.lateAfterAbandon:
       return 'The room had been marked abandoned when this arrived.';
     case ingestWarnings.transportReviewRequired:
@@ -192,7 +198,7 @@ function resultTeamId(
       entry.id === identity || entry.displayName.toLocaleLowerCase() === identity?.toLocaleLowerCase(),
   );
   if (teams.length > 1 && identity) {
-    warnings.push(`Team name “${identity}” is ambiguous; the result remains in review.`);
+    warnings.push(ingestWarnings.ambiguousTeamIdentity);
   }
   return teams.length === 1 ? teams[0]?.id : undefined;
 }
@@ -286,7 +292,10 @@ export function readResultStatistics(
           record.teamId === teamId &&
           (record.id === playerName || record.name.toLocaleLowerCase() === playerName?.toLocaleLowerCase()),
       );
-      if (players.length !== 1) return [];
+      if (players.length !== 1) {
+        warnings.push(ingestWarnings.unresolvedPlayerIdentity);
+        return [];
+      }
       const [player] = players;
       const aggregate = answerAggregate(candidate.answer_counts, state);
       return [
@@ -417,13 +426,13 @@ export function assessIncomingDocument(state: DirectorState, document: IncomingD
     };
   }
 
-  const { scheduled, matchedByTeams } =
-    document.scheduledGameId !== undefined
-      ? {
-          scheduled: state.scheduledGames.find((game) => game.id === document.scheduledGameId),
-          matchedByTeams: false,
-        }
-      : findScheduledGame(state, identity, document.qbj);
+  const explicitScheduledGameId = document.scheduledGameId?.trim();
+  const { scheduled, matchedByTeams } = explicitScheduledGameId
+    ? {
+        scheduled: state.scheduledGames.find((game) => game.id === explicitScheduledGameId),
+        matchedByTeams: false,
+      }
+    : findScheduledGame(state, identity, document.qbj);
   const scored = hasScoringContent(document.qbj);
 
   if (!scored) {

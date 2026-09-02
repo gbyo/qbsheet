@@ -242,6 +242,7 @@ export function packetUseConflicts(
 ): Array<{ packetId: DirectorId; gameIds: DirectorId[] }> {
   const uses = new Map<DirectorId, Set<DirectorId>>();
   const roundUses = new Map<DirectorId, Set<DirectorId>>();
+  const directUseRounds = new Map<DirectorId, Set<DirectorId>>();
   const add = (packetId: DirectorId | null, gameId: DirectorId) => {
     if (!packetId) return;
     const game = state.scheduledGames.find((candidate) => candidate.id === gameId);
@@ -257,6 +258,11 @@ export function packetUseConflicts(
     const gameIds = uses.get(packetId) ?? new Set<DirectorId>();
     gameIds.add(gameId);
     uses.set(packetId, gameIds);
+    if (roundId) {
+      const rounds = directUseRounds.get(packetId) ?? new Set<DirectorId>();
+      rounds.add(roundId);
+      directUseRounds.set(packetId, rounds);
+    }
   };
   const recordToScheduled = new Map(state.games.map((game) => [game.id, game.scheduledGameId]));
   for (const game of state.scheduledGames) {
@@ -281,9 +287,14 @@ export function packetUseConflicts(
     if (representativeIds.size === 0) {
       for (const roundId of roundIds) representativeIds.add(`round:${roundId}`);
       uses.set(packetId, representativeIds);
-    } else if (roundIds.size > 1) {
-      // Multiple rounds sharing the same packet is actual reuse.
-      for (const roundId of roundIds) representativeIds.add(`round:${roundId}`);
+    } else {
+      // A direct use in one round and a round-level use in another are two physical uses. Keep
+      // only round representatives that are not already represented by a direct game use; a
+      // direct override and an inherited packet in the same round are still one round's use.
+      const directRounds = directUseRounds.get(packetId) ?? new Set<DirectorId>();
+      for (const roundId of roundIds) {
+        if (!directRounds.has(roundId)) representativeIds.add(`round:${roundId}`);
+      }
     }
   }
   return [...uses.entries()]

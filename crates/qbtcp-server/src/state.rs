@@ -310,12 +310,12 @@ impl QbtcpState for MemoryState {
     }
 
     fn clear_presence(&self, room_id: &str, device_id: Option<&str>) -> Result<(), StateError> {
-        self.clear_presence(room_id, device_id);
+        MemoryState::clear_presence(self, room_id, device_id);
         Ok(())
     }
 
     fn clear_progress(&self, session_id: &str) -> Result<(), StateError> {
-        self.clear_progress(session_id);
+        MemoryState::clear_progress(self, session_id);
         Ok(())
     }
 

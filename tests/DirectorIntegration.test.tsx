@@ -471,6 +471,92 @@ describe('Director integration hardening', () => {
     expect(conflicts[0]?.gameIds).toHaveLength(2);
   });
 
+  test('packet-use validation reports direct use in a different round from a round packet', () => {
+    const state = emptyDirectorState();
+    state.packets = [
+      {
+        id: 'packet-shared',
+        name: 'Shared packet',
+        source: 'manual',
+        assignedRoundIds: [],
+        assignedGameIds: ['game-round-2'],
+        usedGameIds: [],
+        replacementForPacketId: null,
+        tiebreaker: false,
+      },
+    ];
+    state.rounds = [
+      {
+        id: 'round-1',
+        phaseId: 'phase-1',
+        name: 'Round 1',
+        number: 1,
+        revision: 1,
+        status: 'released',
+        packetId: 'packet-shared',
+        scheduledGameIds: ['scheduled-round-1'],
+        startedAt: null,
+        closedAt: null,
+      },
+      {
+        id: 'round-2',
+        phaseId: 'phase-1',
+        name: 'Round 2',
+        number: 2,
+        revision: 1,
+        status: 'released',
+        packetId: null,
+        scheduledGameIds: ['scheduled-round-2'],
+        startedAt: null,
+        closedAt: null,
+      },
+    ];
+    state.scheduledGames = [
+      {
+        id: 'scheduled-round-1',
+        roundId: 'round-1',
+        poolId: null,
+        roomId: null,
+        packetId: null,
+        leftTeamId: 'team-a',
+        rightTeamId: 'team-b',
+        bye: false,
+        status: 'released',
+        assignmentRevision: 1,
+      },
+      {
+        id: 'scheduled-round-2',
+        roundId: 'round-2',
+        poolId: null,
+        roomId: null,
+        packetId: null,
+        leftTeamId: 'team-c',
+        rightTeamId: 'team-d',
+        bye: false,
+        status: 'released',
+        assignmentRevision: 1,
+      },
+    ];
+    state.games = [
+      {
+        id: 'game-round-2',
+        scheduledGameId: 'scheduled-round-2',
+        roundId: 'round-2',
+        packetId: 'packet-shared',
+        status: 'submitted',
+        scores: [],
+        playerStats: [],
+        source: 'manual',
+        detailedStats: 'unknown',
+      },
+    ];
+
+    const conflicts = packetUseConflicts(state);
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0]?.packetId).toBe('packet-shared');
+    expect(conflicts[0]?.gameIds).toEqual(['scheduled-round-2', 'round:round-1']);
+  });
+
   test('packet validation catches a ledger reference that disagrees with a game override', async () => {
     const { hook } = await directorWithSetup();
     act(() => hook.result.current.generateSchedule());
@@ -857,6 +943,25 @@ describe('Director integration hardening', () => {
     expect(() => normalizeDirectorState({ ...current, schemaVersion: 99 })).toThrow(
       /newest supported schema/i,
     );
+  });
+
+  test('a tournament without rules receives a complete independent default ruleset', () => {
+    const legacy = emptyDirectorState() as unknown as Record<string, unknown>;
+    legacy.tournament = {
+      id: 'tournament-without-rules',
+      name: 'Legacy tournament',
+      date: '',
+      venue: '',
+      organizer: '',
+      status: 'draft',
+    };
+
+    const normalized = normalizeDirectorState(legacy);
+    expect(normalized.tournament?.rules).toEqual(defaultRules);
+    if (!normalized.tournament) throw new Error('test setup did not produce a tournament');
+    normalized.tournament.rules.tossupValue = 99;
+    expect(defaultRules.tossupValue).toBe(10);
+    expect(normalizeDirectorState(legacy).tournament?.rules.tossupValue).toBe(10);
   });
 
   test('malformed required state shapes are rejected instead of erased', () => {

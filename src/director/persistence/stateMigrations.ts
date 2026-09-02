@@ -1,4 +1,5 @@
 import {
+  defaultRules,
   directorSchemaVersion,
   emptyDirectorState,
   type DirectorState,
@@ -142,11 +143,10 @@ function normalizeTournament(value: unknown): DirectorState['tournament'] {
   const rulesValue = value.rules;
   let rules: TournamentRules;
   if (rulesValue === undefined || rulesValue === null) {
-    rules = structuredClone(emptyDirectorState().tournament?.rules ?? ({} as TournamentRules));
-    // Provide a fresh default copy; do not reuse a shared mutable default object.
-    if (!rules || typeof rules !== 'object') {
-      throw new Error('Director storage contains invalid tournament rules.');
-    }
+    // A missing rules object is a legacy document, not permission to construct an incomplete one.
+    // Clone the complete canonical defaults so every scoring field is present and callers cannot
+    // mutate the shared defaults through a normalized state.
+    rules = structuredClone(defaultRules);
   } else {
     if (!isRecord(rulesValue)) throw new Error('Director storage contains invalid tournament rules.');
     rules = rulesValue as unknown as TournamentRules;

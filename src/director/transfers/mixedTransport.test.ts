@@ -289,8 +289,28 @@ describe('locations coming and going', () => {
       { mountPoint: '/', name: 'Macintosh HD', removable: false, readOnly: false },
     ]);
     expect(appeared.appeared).toHaveLength(1);
+    expect(appeared.metadataChanged).toBe(false);
     expect(state.transfers.locations).toHaveLength(1);
     expect(state.transfers.locations[0]).toMatchObject({ label: 'SanDisk Ultra', connected: true });
+
+    const updated = syncRemovableVolumes(state, [
+      {
+        mountPoint: mount,
+        name: 'SanDisk Ultra Renamed',
+        removable: true,
+        readOnly: true,
+        availableBytes: 2000,
+      },
+    ]);
+    expect(updated.appeared).toHaveLength(0);
+    expect(updated.disappeared).toHaveLength(0);
+    expect(updated.metadataChanged).toBe(true);
+    expect(state.transfers.locations[0]).toMatchObject({
+      label: 'SanDisk Ultra Renamed',
+      readOnly: true,
+      availableBytes: 2000,
+      connected: true,
+    });
 
     const gone = syncRemovableVolumes(state, []);
     expect(gone.disappeared).toHaveLength(1);

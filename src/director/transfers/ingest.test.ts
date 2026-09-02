@@ -191,6 +191,37 @@ describe('identity that does not line up', () => {
     expect(assessment.scheduledGameId).toBe('game-5-1');
     expect(assessment.classification).toBe('ready');
   });
+
+  it('treats an empty explicit scheduled-game identity as absent', () => {
+    const state = directorFixture();
+    const result = scoreAssignment(assignmentFor(state, 'game-5-1').document);
+    const { assessment } = stage(state, result, { scheduledGameId: '   ' });
+    expect(assessment.scheduledGameId).toBe('game-5-1');
+    expect(assessment.classification).toBe('ready');
+  });
+
+  it('uses stable warning codes for ambiguous teams and unresolved players', () => {
+    const state = directorFixture();
+    state.teams.push({ ...state.teams[0]!, id: 'team-duplicate' });
+    const result = scoreAssignment(assignmentFor(state, 'game-5-1').document) as {
+      objects: Array<Record<string, unknown>>;
+    };
+    const match = result.objects.find((object) => object.type === 'Match');
+    const teams = match?.match_teams as Array<Record<string, unknown>> | undefined;
+    const firstTeam = teams?.[0];
+    if (!firstTeam) throw new Error('test setup did not produce team statistics');
+    firstTeam.team = { name: state.teams[0]!.displayName };
+    const secondTeam = teams?.[1];
+    const players = secondTeam?.match_players as Array<Record<string, unknown>> | undefined;
+    const firstPlayer = players?.[0];
+    if (!firstPlayer) throw new Error('test setup did not produce player statistics');
+    firstPlayer.player = { name: 'Not on this roster' };
+
+    const { assessment } = stage(state, result);
+    expect(assessment.warnings).toContain(ingestWarnings.ambiguousTeamIdentity);
+    expect(assessment.warnings).toContain(ingestWarnings.unresolvedPlayerIdentity);
+    expect(assessment.detail).toContain('more than one roster entry');
+  });
 });
 
 describe('a batch', () => {

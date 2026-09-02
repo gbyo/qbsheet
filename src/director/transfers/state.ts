@@ -114,17 +114,29 @@ export function removeTransferLocation(draft: DirectorState, locationId: Directo
 export function syncRemovableVolumes(
   draft: DirectorState,
   volumes: TransferVolume[],
-): { appeared: TransferLocation[]; disappeared: TransferLocation[] } {
+): { appeared: TransferLocation[]; disappeared: TransferLocation[]; metadataChanged: boolean } {
   const now = isoNow();
   const removable = volumes.filter((volume) => volume.removable);
   const byMountPoint = new Map(removable.map((volume) => [volume.mountPoint, volume]));
   const appeared: TransferLocation[] = [];
   const disappeared: TransferLocation[] = [];
+  let metadataChanged = false;
 
   for (const location of draft.transfers.locations) {
     if (location.kind !== 'removable-drive') continue;
     const volume = location.mountPoint ? byMountPoint.get(location.mountPoint) : undefined;
     if (volume) {
+      const nextLabel = volume.name || location.label;
+      if (
+        !location.connected ||
+        location.label !== nextLabel ||
+        location.readOnly !== volume.readOnly ||
+        location.availableBytes !== volume.availableBytes ||
+        location.lastSeenAt !== now ||
+        location.message !== undefined
+      ) {
+        metadataChanged = true;
+      }
       if (!location.connected) {
         location.connected = true;
         appeared.push(location);
@@ -134,7 +146,7 @@ export function syncRemovableVolumes(
           locationId: location.id,
         });
       }
-      location.label = volume.name || location.label;
+      location.label = nextLabel;
       location.readOnly = volume.readOnly;
       location.availableBytes = volume.availableBytes;
       location.lastSeenAt = now;
@@ -170,7 +182,7 @@ export function syncRemovableVolumes(
     appeared.push(location);
   }
 
-  return { appeared, disappeared };
+  return { appeared, disappeared, metadataChanged };
 }
 
 export function setTransferWatching(draft: DirectorState, locationId: DirectorId, watching: boolean): void {

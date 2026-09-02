@@ -470,8 +470,12 @@ impl DirectorQbtcpState {
             .read()
             .map(|tournament| tournament.id.clone())
             .unwrap_or_else(|_| "director".to_owned());
-        let Ok(results) = store.load_qbtcp_results(&tournament_id) else {
-            return;
+        let results = match store.load_qbtcp_results(&tournament_id) {
+            Ok(results) => results,
+            Err(error) => {
+                eprintln!("QBTCP retained results could not be restored: {error}");
+                return;
+            }
         };
         for result in results {
             let session_id = result.session_id.clone();
@@ -604,6 +608,9 @@ impl DirectorQbtcpState {
         }
         if let Ok(mut sessions) = self.session_rooms.lock() {
             sessions.retain(|_, room_id| !room_ids.contains(room_id));
+        }
+        if let Ok(mut snapshots) = self.session_snapshots.lock() {
+            snapshots.retain(|_, snapshot| !room_ids.contains(&snapshot.room_id));
         }
         if let Ok(mut paired) = self.paired_rooms.lock() {
             paired.retain(|room_id| !room_ids.contains(room_id));
@@ -846,7 +853,7 @@ impl QbtcpState for DirectorQbtcpState {
     }
 
     fn clear_presence(&self, room_id: &str, device_id: Option<&str>) -> Result<(), StateError> {
-        self.memory.clear_presence(room_id, device_id);
+        MemoryState::clear_presence(&self.memory, room_id, device_id);
         self.presence
             .lock()
             .map_err(|_| StateError::Unavailable)?
@@ -859,7 +866,7 @@ impl QbtcpState for DirectorQbtcpState {
     }
 
     fn clear_progress(&self, session_id: &str) -> Result<(), StateError> {
-        self.memory.clear_progress(session_id);
+        MemoryState::clear_progress(&self.memory, session_id);
         self.progress
             .lock()
             .map_err(|_| StateError::Unavailable)?
@@ -918,6 +925,8 @@ impl QbtcpState for DirectorQbtcpState {
             .session_snapshots
             .lock()
             .map_err(|_| StateError::Unavailable)?;
+        let mut clear_progress_session_id = None;
+        let mut recompute_room_id = None;
         match &event {
             SessionEvent::Opened {
                 session_id,
@@ -980,8 +989,8 @@ impl QbtcpState for DirectorQbtcpState {
                     .lock()
                     .map_err(|_| StateError::Unavailable)?
                     .remove(session_id);
-                self.clear_progress(session_id)?;
-                self.recompute_paired_room(room_id);
+                clear_progress_session_id = Some(session_id.clone());
+                recompute_room_id = Some(room_id.clone());
             }
             SessionEvent::ResultRetained { session_id, .. } => {
                 let session = sessions
@@ -1007,14 +1016,18 @@ impl QbtcpState for DirectorQbtcpState {
                     .lock()
                     .map_err(|_| StateError::Unavailable)?
                     .remove(session_id);
-                self.clear_progress(session_id)?;
-                if let Some(room_id) = room_id {
-                    self.recompute_paired_room(&room_id);
-                }
+                clear_progress_session_id = Some(session_id.clone());
+                recompute_room_id = room_id;
             }
             SessionEvent::WriterTaken { .. } => {}
         }
         drop(sessions);
+        if let Some(session_id) = clear_progress_session_id {
+            self.clear_progress(&session_id)?;
+        }
+        if let Some(room_id) = recompute_room_id {
+            self.recompute_paired_room(&room_id);
+        }
         Ok(())
     }
 
@@ -1524,7 +1537,7 @@ fn u32_field(object: Option<&serde_json::Map<String, Value>>, key: &str) -> Opti
 }
 
 fn detect_lan_address() -> Option<String> {
-    get_if_addrs::get_if_addrs()
+    if_addrs::get_if_addrs()
         .ok()
         .and_then(|interfaces| {
             select_lan_address(interfaces.into_iter().map(|interface| interface.ip()))
@@ -1640,6 +1653,31 @@ mod tests {
             .unwrap_or_default()
             .contains("Internal staffing note"));
         assert_eq!(state.paired_room_count(), 0);
+    }
+
+    #[test]
+    fn disabling_a_room_removes_its_operational_session_snapshot() {
+        let document = json!({
+            "tournament": {"id": "t-1", "name": "Local Invitational"},
+            "rooms": [{"id": "room-101", "name": "Room 101", "available": true}]
+        });
+        let state = DirectorQbtcpState::from_document(Some(&document));
+        <DirectorQbtcpState as QbtcpState>::record_session_event(
+            &state,
+            SessionEvent::Opened {
+                session_id: "session-1".to_owned(),
+                room_id: "room-101".to_owned(),
+                match_id: "match-1".to_owned(),
+            },
+        )
+        .expect("session is recorded");
+        assert_eq!(state.snapshot().expect("snapshot").sessions.len(), 1);
+
+        let mut disabled = document;
+        disabled["rooms"][0]["available"] = json!(false);
+        state.refresh_from_document(Some(&disabled));
+
+        assert!(state.snapshot().expect("snapshot").sessions.is_empty());
     }
 
     #[test]

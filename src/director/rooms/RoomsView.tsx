@@ -264,10 +264,7 @@ export function RoomsView({
                       <td>{staffName(state, room.scorekeeperId) || 'Unassigned'}</td>
                       <td>{equipmentName(state, room.equipmentId) || 'Unassigned'}</td>
                       <td>
-                        <StateLabel
-                          state={room.status}
-                          label={room.available ? room.status : 'Unavailable'}
-                        />
+                        <StateLabel state={room.status} />
                         <small className="director-table-subtext">
                           {room.available ? 'Available next round' : 'Unavailable next round'}
                         </small>

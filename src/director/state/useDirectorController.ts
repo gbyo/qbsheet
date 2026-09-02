@@ -1599,12 +1599,17 @@ export function useDirectorController(repository = createDirectorRepository()): 
       // a save per poll would rewrite the tournament document every few seconds all day.
       const next = structuredClone(stateRef.current);
       const changes = syncRemovableVolumes(next, volumes);
-      if (changes.appeared.length === 0 && changes.disappeared.length === 0) return;
+      if (changes.appeared.length === 0 && changes.disappeared.length === 0 && !changes.metadataChanged)
+        return;
       const revision = stateRevisionRef.current + 1;
       stateRevisionRef.current = revision;
       stateRef.current = next;
       setState(next);
-      void persist(next, revision).catch(() => undefined);
+      // Polling metadata (label, read-only state, capacity and last-seen time) belongs in the live
+      // component state immediately, but only connection inventory changes need a durable write.
+      if (changes.appeared.length > 0 || changes.disappeared.length > 0) {
+        void persist(next, revision).catch(() => undefined);
+      }
     },
     [persist],
   );

@@ -175,12 +175,12 @@ export function PacketsView({
                                 onAnnounce('That packet is not in the current inventory.');
                                 return;
                               }
-                              const before = state.tournament?.currentPacketId;
-                              controller.selectPacket(packet.id);
-                              // Only announce success; selectPacket validates and will set error if invalid
-                              if (before !== packet.id || state.tournament?.currentPacketId === packet.id) {
-                                onAnnounce(`${packet.name} selected for the next generated round.`);
+                              if (!state.tournament) {
+                                onAnnounce('Create a tournament before selecting a packet.');
+                                return;
                               }
+                              controller.selectPacket(packet.id);
+                              onAnnounce(`${packet.name} selected for the next generated round.`);
                             }}
                           >
                             {packet.id === state.tournament?.currentPacketId ? 'Current' : 'Use next'}

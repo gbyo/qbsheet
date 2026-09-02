@@ -1223,10 +1223,7 @@ impl QbtcpServer {
                 let assignment_is_known = assignments.get(&session.room_id);
                 let assignment_matches = match assignment_is_known {
                     Some(AssignmentState::Assigned(assignment)) => {
-                        session.match_id == assignment.match_id
-                            && session.round_revision == assignment.meta.round_revision
-                            && session.assignment_revision == assignment.meta.assignment_revision
-                            && session.assignment_fingerprint == result_fingerprint(&assignment.qbj)
+                        session_matches_assignment(session, assignment)
                     }
                     Some(
                         AssignmentState::None(_)
