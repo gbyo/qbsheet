@@ -608,6 +608,7 @@ function fromInterchange(data: DirectorTournament): DirectorState {
     advancementRule: phase.advancement
       ? {
           qualifiersPerPool: number(phase.advancement.qualifiersPerPool) ?? 1,
+          wildcards: Math.max(0, Math.floor(number(phase.advancement.wildcards) ?? 0)),
           tiebreakers: defaultRules.tiebreakers,
           manualOverrideAllowed: true,
         }
