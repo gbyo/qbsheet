@@ -497,6 +497,160 @@ describe('Director integration hardening', () => {
     expect([...dayOrders].sort((a, b) => a - b)).toEqual(dayOrders);
   });
 
+  test('advancement commit: wildcards rebracket into playoff pools with audit', async () => {
+    const { hook } = await directorWithSetup(18);
+    const set = recommendTournamentPlan(18);
+    act(() => {
+      expect(hook.result.current.applyTournamentPlan(set?.recommended ?? ({} as never))).toBe(true);
+    });
+    let live = hook.result.current.state;
+    const prelim = live.phases.find((phase) => phase.name === 'Prelims')!;
+    const playoff = live.phases.find((phase) => phase.name === 'Playoffs')!;
+    expect(live.tournament?.currentPhaseId).toBe(prelim.id);
+    const prelimNumbers = set?.recommended.stages[0].roundNumbers ?? [];
+    expect(prelimNumbers.length).toBeGreaterThan(0);
+
+    act(() => {
+      expect(
+        hook.result.current.updatePhase(prelim.id, {
+          advancementRule: { ...prelim.advancementRule!, wildcards: 2 },
+        }),
+      ).toBe(true);
+    });
+
+    // Play every prelim round; the left team always wins. Scores carry a
+    // per-team seed so every team's total points differ and no cutoff tie
+    // survives the points tiebreaker.
+    // Pairings append after the plan's empty placeholder rounds, so each
+    // generated round is resolved through the tournament's current round.
+    const seedOf = new Map(live.teams.map((team, index) => [team.id, index + 1]));
+    let gameIndex = 0;
+    for (let index = 0; index < prelimNumbers.length; index += 1) {
+      act(() => {
+        expect(hook.result.current.generateSchedule().generated).toBe(true);
+      });
+      live = hook.result.current.state;
+      const roundId = live.tournament?.currentRoundId;
+      expect(roundId).toBeTruthy();
+      const games = live.scheduledGames.filter(
+        (game) => game.roundId === roundId && !game.bye && game.rightTeamId,
+      );
+      expect(games.length).toBeGreaterThan(0);
+      for (const game of games) {
+        gameIndex += 1;
+        act(() => {
+          expect(
+            hook.result.current.addManualResult({
+              scheduledGameId: game.id,
+              scores: [
+                score(game.leftTeamId, 5000 + (seedOf.get(game.leftTeamId) ?? 0) * 200 + gameIndex),
+                score(game.rightTeamId!, (seedOf.get(game.rightTeamId!) ?? 0) * 200 + (gameIndex % 7)),
+              ],
+            }),
+          ).toBe(true);
+        });
+      }
+    }
+    live = hook.result.current.state;
+    const gamesBefore = live.games.length;
+
+    const decidedPrelim = live.phases.find((phase) => phase.id === prelim.id)!;
+    const preview = previewAdvancement(live, decidedPrelim);
+    expect(preview.unresolved).toHaveLength(0);
+    expect(preview.wildcards).toHaveLength(2);
+    const qualifierIds = preview.qualifiers.map((team) => team.id);
+    expect(qualifierIds).toHaveLength((prelim.advancementRule?.qualifiersPerPool ?? 0) * 3 + 2);
+
+    const playoffPools = live.pools
+      .filter((pool) => pool.phaseId === playoff.id)
+      .sort((left, right) => left.order - right.order || left.id.localeCompare(right.id));
+    expect(playoffPools.length).toBeGreaterThan(0);
+    const assignments = qualifierIds.map((teamId, index) => ({
+      teamId,
+      targetPoolId: playoffPools[index % playoffPools.length]!.id,
+    }));
+    let result: ReturnType<typeof hook.result.current.commitAdvancement>;
+    act(() => {
+      result = hook.result.current.commitAdvancement({
+        sourcePhaseId: prelim.id,
+        targetPhaseId: playoff.id,
+        assignments,
+      });
+    });
+    expect(result!.committed).toBe(true);
+    expect(result!.overridden).toHaveLength(0);
+
+    live = hook.result.current.state;
+    const placed = live.pools
+      .filter((pool) => pool.phaseId === playoff.id)
+      .flatMap((pool) => pool.teamIds)
+      .sort();
+    expect(placed).toEqual([...qualifierIds].sort());
+    // Game results are untouched by the rebracket.
+    expect(live.games.length).toBe(gamesBefore);
+    expect(
+      live.audit.some(
+        (event) =>
+          event.type === 'advancement-committed' &&
+          event.details !== undefined &&
+          (event.details as { overridden?: unknown }).overridden !== undefined,
+      ),
+    ).toBe(true);
+
+    // The portable archive round-trips the wildcard rule and the committed pools.
+    const roundTripped = importArchiveBytes(exportArchiveBytes(live));
+    expect(roundTripped.ok).toBe(true);
+    const restored = roundTripped.state!;
+    expect(restored.phases.find((phase) => phase.id === prelim.id)?.advancementRule?.wildcards).toBe(2);
+    expect(
+      restored.pools
+        .filter((pool) => pool.phaseId === playoff.id)
+        .flatMap((pool) => pool.teamIds)
+        .sort(),
+    ).toEqual([...qualifierIds].sort());
+
+    // A team outside the preview needs an explicit director reason.
+    const outsider = live.teams.find(
+      (team) => team.status === 'confirmed' && !qualifierIds.includes(team.id),
+    )!;
+    const overrideAssignments = [{ teamId: outsider.id, targetPoolId: playoffPools[0]!.id }];
+    act(() => {
+      result = hook.result.current.commitAdvancement({
+        sourcePhaseId: prelim.id,
+        targetPhaseId: playoff.id,
+        assignments: overrideAssignments,
+      });
+    });
+    expect(result!.committed).toBe(false);
+    act(() => {
+      result = hook.result.current.commitAdvancement({
+        sourcePhaseId: prelim.id,
+        targetPhaseId: playoff.id,
+        assignments: overrideAssignments,
+        reason: 'Injury replacement approved by the director.',
+      });
+    });
+    expect(result!.committed).toBe(true);
+    expect(result!.overridden).toEqual([outsider.id]);
+
+    // Once the target stage has pairings, rebracketing is refused.
+    act(() => {
+      hook.result.current.selectPhase(playoff.id);
+    });
+    act(() => {
+      expect(hook.result.current.generateSchedule().generated).toBe(true);
+    });
+    act(() => {
+      result = hook.result.current.commitAdvancement({
+        sourcePhaseId: prelim.id,
+        targetPhaseId: playoff.id,
+        assignments,
+      });
+    });
+    expect(result!.committed).toBe(false);
+    expect(result!.message).toMatch(/pairings/);
+  });
+
   test('round orchestration: manual start needs no rooms, one finish closes the round', async () => {
     const { hook } = await directorWithSetup(4);
     act(() => {
@@ -1816,6 +1970,7 @@ describe('Director integration hardening', () => {
           carryover: true,
           advancementRule: {
             qualifiersPerPool: 2,
+            wildcards: 0,
             tiebreakers: ['record', 'points'],
             manualOverrideAllowed: true,
           },
@@ -1834,6 +1989,7 @@ describe('Director integration hardening', () => {
       carryover: true,
       advancementRule: {
         qualifiersPerPool: 2,
+        wildcards: 0,
         tiebreakers: ['record', 'points'],
         manualOverrideAllowed: true,
       },
@@ -1845,6 +2001,7 @@ describe('Director integration hardening', () => {
         hook.result.current.updatePhase(phase.id, {
           advancementRule: {
             qualifiersPerPool: 0,
+            wildcards: 0,
             tiebreakers: ['record'],
             manualOverrideAllowed: false,
           },
@@ -2962,6 +3119,7 @@ describe('Director integration hardening', () => {
         roundIds: ['round-prelim'],
         advancementRule: {
           qualifiersPerPool: 1,
+          wildcards: 0,
           tiebreakers: defaultRules.tiebreakers,
           manualOverrideAllowed: false,
         },
@@ -3029,6 +3187,101 @@ describe('Director integration hardening', () => {
     state.rounds[1]!.scheduledGameIds = [state.scheduledGames[2]!.id];
     const preview = previewAdvancement(state, state.phases[0]!);
     expect(preview.qualifiers.map((entry) => entry.id).sort()).toEqual(['A', 'C']);
+  });
+
+  function wildcardState(options: {
+    wildcards: number;
+    bScore: number;
+    dScore: number;
+    winnerScore?: number;
+  }) {
+    const state = emptyDirectorState();
+    state.tournament = {
+      id: 'tournament-wildcard',
+      name: 'Wildcards',
+      date: '',
+      venue: '',
+      organizer: '',
+      status: 'running',
+      timeZone: 'America/New_York',
+      rules: structuredClone(defaultRules),
+      formatId: 'format-prelim',
+      currentPhaseId: 'phase-prelim',
+      currentPacketId: null,
+      currentRoundId: null,
+      createdAt: '',
+      updatedAt: '',
+    };
+    state.teams = [team('A'), team('B'), team('C'), team('D')];
+    state.phases = [
+      {
+        id: 'phase-prelim',
+        name: 'Prelim',
+        kind: 'preliminary',
+        order: 1,
+        formatId: 'format-prelim',
+        poolIds: ['pool-1', 'pool-2'],
+        roundIds: ['round-prelim'],
+        advancementRule: {
+          qualifiersPerPool: 1,
+          wildcards: options.wildcards,
+          tiebreakers: defaultRules.tiebreakers,
+          manualOverrideAllowed: true,
+        },
+        carryover: false,
+        status: 'active',
+      },
+    ];
+    state.pools = [
+      { id: 'pool-1', phaseId: 'phase-prelim', name: 'Pool 1', teamIds: ['A', 'B'], order: 1 },
+      { id: 'pool-2', phaseId: 'phase-prelim', name: 'Pool 2', teamIds: ['C', 'D'], order: 2 },
+    ];
+    state.rounds = [
+      {
+        id: 'round-prelim',
+        phaseId: 'phase-prelim',
+        name: 'Prelim round',
+        number: 1,
+        revision: 1,
+        status: 'closed',
+        packetId: null,
+        scheduledGameIds: [],
+        scheduledStart: null,
+        releasedAt: null,
+        startedAt: null,
+        closedAt: null,
+      },
+    ];
+    const winner = options.winnerScore ?? 100;
+    state.games = [
+      acceptedGame('2026-03-01', 'round-prelim', 'A', winner, 'B', options.bScore),
+      acceptedGame('2026-03-02', 'round-prelim', 'C', 10, 'D', options.dScore),
+    ];
+    state.scheduledGames = [
+      scheduledForGame(state.games[0]!, 'A', 'B', { poolId: 'pool-1' }),
+      scheduledForGame(state.games[1]!, 'C', 'D', { poolId: 'pool-2' }),
+    ];
+    state.rounds[0]!.scheduledGameIds = [state.scheduledGames[0]!.id, state.scheduledGames[1]!.id];
+    return state;
+  }
+
+  test('advancement wildcards select the best remaining team across pools', () => {
+    const state = wildcardState({ wildcards: 1, bScore: 0, dScore: 0 });
+    const preview = previewAdvancement(state, state.phases[0]!);
+    // A and C win their pools; D lost by less than B, so D is the wildcard.
+    expect(preview.qualifiers.map((entry) => entry.id).sort()).toEqual(['A', 'C', 'D']);
+    expect(preview.wildcards.map((entry) => entry.id)).toEqual(['D']);
+    expect(preview.unresolved).toHaveLength(0);
+    expect(preview.explanation.join(' ')).toMatch(/1 wildcard\(s\) selected across pools/);
+  });
+
+  test('advancement wildcard cutoff ties stay unresolved for a director decision', () => {
+    // Both losers finish 0-1 with identical points and margin.
+    const state = wildcardState({ wildcards: 1, bScore: 0, dScore: 0, winnerScore: 10 });
+    const preview = previewAdvancement(state, state.phases[0]!);
+    expect(preview.wildcards).toHaveLength(1);
+    expect(preview.unresolved).toHaveLength(1);
+    expect(preview.unresolved[0]?.reason).toMatch(/wildcard cutoff is tied/);
   });
 
   test('known old state migrates and future state is not rewritten', () => {
