@@ -13,8 +13,11 @@ npm install --prefix apps/director
 npm run dev --prefix apps/director
 ```
 
-The browser preview is served at <http://127.0.0.1:1420/>. To run the native shell, install the
-platform prerequisites documented by Tauri and run:
+That serves Director's user interface in a browser at <http://127.0.0.1:1420/>, which is how the UI
+is developed and how `playwright.director.config.ts` drives it. It is not a way to run a tournament:
+the durable store and the QBTCP listener are native, so the browser-served UI reports the limit
+rather than pretending. To run the real desktop application, install the platform prerequisites
+documented by Tauri and run:
 
 ```sh
 npm run tauri:dev --prefix apps/director

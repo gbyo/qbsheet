@@ -8,11 +8,15 @@ QBJ is the file format used for quiz bowl game and tournament data. QBSheet read
 
 A scoresheet and tournament-control software do different jobs. QBSheet scores a single room: it owns the game in front of it, and it keeps working with no network and no server. Tournament-control software owns the tournament around that room — the schedule, room assignments, and collected results.
 
+QBSheet is one of three products. QBSheet Director is the desktop tournament-control application, installed on the computer running the event; it is not a web application and no URL on this website launches it. QBLive is the public, read-only view of a tournament Director has published, and it is served separately at https://live.qbsheet.com/. This website carries the scorer plus an informational page for each of the other two.
+
 ## Website
 
 - [About QBSheet](https://qbsheet.com/about/): Overview of QBSheet and its scoring workflows.
 - [Scoring with QBSheet](https://qbsheet.com/about/scoring/): The per-question sequence, keyboard shortcuts, corrections and lineup changes, local recovery, and the guided practice game.
 - [QBSheet for tournaments](https://qbsheet.com/about/tournaments/): Pairing a room over QBTCP, receiving assignments as QBJ, behaviour when the connection fails, and returning results.
+- [QBSheet Director](https://qbsheet.com/about/director/): The desktop tournament-control application: what it sets up, runs, collects, and publishes, and why it is installed rather than opened in a browser.
+- [QBLive](https://qbsheet.com/about/qblive/): The public, read-only view of a tournament that tournament control has published, served separately at live.qbsheet.com.
 - [Host QBSheet yourself](https://qbsheet.com/about/self-host/): Building QBSheet and serving it from any static host.
 - [Frequently asked questions](https://qbsheet.com/about/faq/): Supported devices and browsers, format and scoring configuration, files and local storage, and licensing.
 - [Privacy](https://qbsheet.com/about/privacy/): What QBSheet stores on a device, what a connected room transmits and to whom, and the absence of accounts and analytics.

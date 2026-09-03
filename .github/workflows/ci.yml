@@ -47,7 +47,7 @@ jobs:
       quality: ${{ steps.impact.outputs.quality }}
       scorer: ${{ steps.impact.outputs.scorer }}
       scorer-browser: ${{ steps.impact.outputs.scorer-browser }}
-      director-web: ${{ steps.impact.outputs.director-web }}
+      director-ui: ${{ steps.impact.outputs.director-ui }}
       tournament-js: ${{ steps.impact.outputs.tournament-js }}
       qblive-js: ${{ steps.impact.outputs.qblive-js }}
       rust-director: ${{ steps.impact.outputs.rust-director }}
@@ -195,14 +195,18 @@ jobs:
           if-no-files-found: ignore
 
   # -----------------------------------------------------------------------------------------------
-  # Director's web frontend. `apps/director` is a thin shell whose entry imports `src/director`, so
-  # its build is the real compile of the Director application. Nothing outside `src/director`
-  # imports `src/director`, which is why a Director change owes the scorer nothing.
+  # Director's user interface. `apps/director` is a thin Vite/Tauri shell whose entry imports
+  # `src/director`, so its build is the real compile of the Director application. Nothing outside
+  # `src/director` imports `src/director`, which is why a Director change owes the scorer nothing.
+  #
+  # Director is a desktop application. It uses web technology inside its Tauri window and the
+  # website emits no Director entry at all, which is what this job's name says — it was
+  # `director-web` while a browser build of tournament control was deployed beside the scorer.
   # -----------------------------------------------------------------------------------------------
-  director-web:
-    name: Director web
+  director-ui:
+    name: Director UI
     needs: changes
-    if: needs.changes.outputs.director-web == 'true'
+    if: needs.changes.outputs.director-ui == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -237,8 +241,10 @@ jobs:
       - name: Install Playwright video helper
         run: npx playwright install ffmpeg
 
-      # `e2e/Director.spec.ts` drives `/director.html` in a real browser. Director keeps its browser
-      # coverage; what it no longer runs is the scorer's torture suite.
+      # `e2e/director/Director.spec.ts` drives the Director application's own Vite dev server on
+      # port 1420 in a real browser, through `playwright.director.config.ts`. Director keeps its
+      # browser coverage; what it no longer runs is the scorer's torture suite, and what it no
+      # longer drives is a website entry.
       - name: Run Director browser test
         run: npm run test:browser:director
 
@@ -248,8 +254,8 @@ jobs:
         with:
           name: playwright-report-director
           path: |
-            playwright-report/
-            test-results/
+            playwright-report-director/
+            test-results-director/
           if-no-files-found: ignore
 
   # -----------------------------------------------------------------------------------------------
@@ -487,7 +493,7 @@ jobs:
       - quality
       - scorer
       - scorer-browser
-      - director-web
+      - director-ui
       - tournament-js
       - qblive-js
       - rust-director

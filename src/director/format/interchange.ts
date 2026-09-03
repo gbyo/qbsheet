@@ -33,6 +33,7 @@ import { scoringRulesObject } from '../transfers/assignment';
  * public QBJ document while allowing a .qbst round trip to restore operational state exactly.
  */
 export const directorStateArchiveExtension = 'qbsheet:director-state' as const;
+export const directorOrganizationShortNameExtension = 'qbsheet:director-short-name' as const;
 
 export interface DirectorImportReport {
   ok: boolean;
@@ -328,9 +329,18 @@ export function toInterchange(state: DirectorState): DirectorTournament {
     organizations: state.organizations.map((organization) => ({
       id: organization.id,
       name: organization.name,
-      ...(organization.shortName ? { city: organization.shortName } : {}),
+      ...(organization.city ? { city: organization.city } : {}),
       ...(organization.notes ? { notes: organization.notes } : {}),
-      ...(organization.archived ? { extensions: { archived: true } } : {}),
+      ...(organization.archived || organization.shortName
+        ? {
+            extensions: {
+              ...(organization.archived ? { archived: true } : {}),
+              ...(organization.shortName
+                ? { [directorOrganizationShortNameExtension]: organization.shortName }
+                : {}),
+            },
+          }
+        : {}),
     })),
     players: state.players.map((player) => ({
       id: player.id,
@@ -514,7 +524,8 @@ function fromInterchange(data: DirectorTournament): DirectorState {
   state.organizations = data.organizations.map((organization) => ({
     id: organization.id,
     name: organization.name,
-    shortName: organization.city,
+    city: organization.city,
+    shortName: text(organization.extensions?.[directorOrganizationShortNameExtension]),
     notes: organization.notes,
     ...(organization.extensions?.archived === true ? { archived: true } : {}),
   }));

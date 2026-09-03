@@ -30,6 +30,7 @@ import {
   exportArchiveBytes,
   exportQbj,
   importArchiveBytes,
+  importQbjText,
   toInterchange,
 } from '../src/director/format/interchange';
 import { derivePublication } from '../src/director/live/publication';
@@ -1137,6 +1138,108 @@ describe('Director integration hardening', () => {
     expect(hook.result.current.state.players.find((player) => player.id === playerId)?.active).toBe(true);
   });
 
+  test('team creation saves an optional initial roster atomically and reuses schools case-insensitively', async () => {
+    const { hook } = await directorWithSetup(0);
+    act(() => {
+      expect(
+        hook.result.current.addTeam({
+          displayName: 'Northview A',
+          organizationName: ' Northview High ',
+          teamLetter: ' A ',
+          players: [
+            { name: ' Alice Smith ', captain: true, rosterNumber: '07', notes: ' Arriving late ' },
+            { name: 'Bob Jones' },
+            { name: 'Charlie Lee', rosterNumber: 3 },
+            { name: 'Dana Patel' },
+            { name: '   ' },
+          ],
+        }),
+      ).toBe(true);
+      expect(
+        hook.result.current.addTeam({
+          displayName: 'Northview B',
+          organizationName: 'northview high',
+          teamLetter: 'B',
+        }),
+      ).toBe(true);
+      expect(hook.result.current.addTeam({ displayName: 'Independent' })).toBe(true);
+    });
+
+    expect(hook.result.current.state.organizations).toHaveLength(1);
+    const northviewTeams = hook.result.current.state.teams.filter((team) =>
+      team.displayName.startsWith('Northview'),
+    );
+    expect(northviewTeams).toHaveLength(2);
+    expect(northviewTeams[0]?.organizationId).toBe(northviewTeams[1]?.organizationId);
+    const roster = hook.result.current.state.players.filter(
+      (player) => player.teamId === northviewTeams[0]?.id,
+    );
+    expect(roster).toHaveLength(4);
+    expect(roster[0]).toMatchObject({
+      name: 'Alice Smith',
+      captain: true,
+      rosterNumber: '07',
+      notes: 'Arriving late',
+      active: true,
+    });
+    expect(roster[2]).toMatchObject({ name: 'Charlie Lee', rosterNumber: 3 });
+    expect(hook.result.current.state.players.some((player) => player.teamId === northviewTeams[1]?.id)).toBe(
+      false,
+    );
+  });
+
+  test('invalid initial rosters do not create a team, school, or orphan players', async () => {
+    const { hook } = await directorWithSetup(0);
+    act(() => {
+      expect(
+        hook.result.current.addTeam({
+          displayName: 'Duplicate roster',
+          organizationName: 'New School',
+          players: [{ name: 'Ada Lovelace' }, { name: ' ada lovelace ' }],
+        }),
+      ).toBe(false);
+    });
+    expect(hook.result.current.error).toMatch(/already on this active roster/i);
+    expect(hook.result.current.state.teams).toHaveLength(0);
+    expect(hook.result.current.state.organizations).toHaveLength(0);
+    expect(hook.result.current.state.players).toHaveLength(0);
+
+    act(() => {
+      expect(
+        hook.result.current.addTeam({
+          displayName: 'Nameless roster detail',
+          organizationName: 'Another School',
+          players: [{ name: '', rosterNumber: '12' }],
+        }),
+      ).toBe(false);
+    });
+    expect(hook.result.current.error).toMatch(/details but no name/i);
+    expect(hook.result.current.state.teams).toHaveLength(0);
+    expect(hook.result.current.state.organizations).toHaveLength(0);
+    expect(hook.result.current.state.players).toHaveLength(0);
+  });
+
+  test('same-school teams retain one relationship for scheduling constraints', async () => {
+    const { hook } = await directorWithSetup(0);
+    act(() => {
+      expect(hook.result.current.addTeam({ displayName: 'Northview A', organizationName: 'Northview' })).toBe(
+        true,
+      );
+      expect(hook.result.current.addTeam({ displayName: 'Northview B', organizationName: 'northview' })).toBe(
+        true,
+      );
+    });
+    const [left, right] = hook.result.current.state.teams;
+    expect(left?.organizationId).toBeTruthy();
+    expect(left?.organizationId).toBe(right?.organizationId);
+    const generated = generateRoundRobinRound(hook.result.current.state, {
+      avoidSameOrganization: true,
+    });
+    expect(generated.conflicts).toContainEqual(
+      expect.objectContaining({ code: 'same-organization', teamIds: [left?.id, right?.id] }),
+    );
+  });
+
   test('unavailable room resources can be restored and block release until they are ready', async () => {
     const { hook } = await directorWithSetup();
     act(() => {
@@ -1992,7 +2095,10 @@ describe('Director integration hardening', () => {
     });
     expect(hook.result.current.state.teams[0]?.organizationId).toBe(organization.id);
     expect(hook.result.current.state.organizations[0]?.archived).toBe(true);
-    expect(toInterchange(hook.result.current.state).organizations[0]?.extensions).toEqual({ archived: true });
+    expect(toInterchange(hook.result.current.state).organizations[0]?.extensions).toEqual({
+      archived: true,
+      'qbsheet:director-short-name': 'NV',
+    });
 
     let addedToArchived = true;
     act(() => {
@@ -2006,6 +2112,102 @@ describe('Director integration hardening', () => {
       expect(hook.result.current.setOrganizationArchived(organization.id, false)).toBe(true);
     });
     expect(hook.result.current.state.organizations[0]?.archived).toBeUndefined();
+  });
+
+  test('merging schools reassigns teams, archives the duplicate, and rejects self-merges', async () => {
+    const { hook } = await directorWithSetup(0);
+    act(() => {
+      expect(
+        hook.result.current.addTeam({
+          displayName: 'Northview A',
+          organizationName: 'Northview High School',
+        }),
+      ).toBe(true);
+      expect(
+        hook.result.current.addTeam({
+          displayName: 'Northview B',
+          organizationName: 'Northview High',
+        }),
+      ).toBe(true);
+    });
+    const source = hook.result.current.state.organizations.find(
+      (organization) => organization.name === 'Northview High School',
+    );
+    const target = hook.result.current.state.organizations.find(
+      (organization) => organization.name === 'Northview High',
+    );
+    if (!source || !target) throw new Error('test setup did not create both school records');
+
+    act(() => expect(hook.result.current.mergeOrganizations(source.id, source.id)).toBe(false));
+    expect(
+      hook.result.current.state.organizations.find((organization) => organization.id === source.id)?.archived,
+    ).toBeUndefined();
+
+    act(() => expect(hook.result.current.mergeOrganizations(source.id, target.id)).toBe(true));
+    expect(
+      hook.result.current.state.teams.find((team) => team.displayName === 'Northview A')?.organizationId,
+    ).toBe(target.id);
+    expect(
+      hook.result.current.state.teams.find((team) => team.displayName === 'Northview B')?.organizationId,
+    ).toBe(target.id);
+    expect(
+      hook.result.current.state.organizations.find((organization) => organization.id === source.id),
+    ).toMatchObject({ archived: true });
+    expect(hook.result.current.state.audit.at(-1)).toMatchObject({
+      entityId: source.id,
+      details: { mergedIntoOrganizationId: target.id, reassignedTeamCount: 1, retainsHistory: true },
+    });
+  });
+
+  test('organization city and Director display labels retain distinct interchange semantics', async () => {
+    const { hook } = await directorWithSetup(0);
+    act(() => {
+      expect(
+        hook.result.current.addOrganization({
+          name: 'Thomas Jefferson High School',
+          shortName: 'TJ',
+          city: 'Alexandria',
+        }),
+      ).toBe(true);
+      expect(
+        hook.result.current.addTeam({
+          displayName: 'TJ A',
+          organizationName: 'Thomas Jefferson High School',
+        }),
+      ).toBe(true);
+    });
+    const interchangeOrganization = toInterchange(hook.result.current.state).organizations[0];
+    expect(interchangeOrganization).toMatchObject({
+      name: 'Thomas Jefferson High School',
+      city: 'Alexandria',
+      extensions: { 'qbsheet:director-short-name': 'TJ' },
+    });
+
+    const qbj = JSON.parse(exportQbj(hook.result.current.state)) as {
+      objects: Array<Record<string, unknown>>;
+    };
+    const qbjOrganization = qbj.objects.find((object) => object.type === 'Organization');
+    expect(qbjOrganization).toMatchObject({
+      name: 'Thomas Jefferson High School',
+      city: 'Alexandria',
+      'qbsheet:director-short-name': 'TJ',
+    });
+    expect(qbjOrganization?.city).not.toBe('TJ');
+
+    const imported = importQbjText(JSON.stringify(qbj));
+    expect(imported.ok).toBe(true);
+    expect(imported.state?.organizations[0]).toMatchObject({
+      city: 'Alexandria',
+      shortName: 'TJ',
+    });
+  });
+
+  test('older persisted short names load without being reinterpreted as cities', () => {
+    const oldState = emptyDirectorState();
+    oldState.organizations.push({ id: 'school-tj', name: 'Thomas Jefferson', shortName: 'TJ' });
+    const normalized = normalizeDirectorState(structuredClone(oldState));
+    expect(normalized.organizations[0]).toMatchObject({ shortName: 'TJ' });
+    expect(normalized.organizations[0]).not.toHaveProperty('city');
   });
 
   test('team mutations reject duplicate names and protect open rounds', async () => {
