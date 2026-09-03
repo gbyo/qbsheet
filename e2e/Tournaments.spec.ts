@@ -31,10 +31,11 @@ test('the tournaments page explains running QBSheet across rooms', async ({ page
   expect(await fits(page)).toBe(true);
 });
 
-test('the product page reaches it from the header, and it comes back', async ({ page }) => {
+test('the product page reaches it from the footer, and it comes back', async ({ page }) => {
   await page.goto('/about/');
 
-  const nav = page.getByRole('navigation', { name: 'Primary navigation' });
+  // The header carries the products; the content pages are reached from the footer navigation.
+  const nav = page.getByRole('navigation', { name: 'Footer navigation' });
   await nav.getByRole('link', { name: 'Tournaments' }).click();
   await expect(page).toHaveURL(/\/about\/tournaments\/$/);
   await expect(page.getByRole('heading', { level: 1, name: 'QBSheet for tournaments' })).toBeVisible();
@@ -59,9 +60,10 @@ test('it reaches its sibling pages sideways', async ({ page }) => {
 test('the scorer is two directories up', async ({ page }) => {
   await page.goto('/about/tournaments/');
 
+  // `Scorer` is the header's way into the application, and from here it has to climb two directories.
   await page
     .getByRole('navigation', { name: 'Primary navigation' })
-    .getByRole('link', { name: 'Open QBSheet' })
+    .getByRole('link', { name: 'Scorer' })
     .click();
   await expect(page.getByRole('link', { name: 'About QBSheet' })).toBeVisible();
 });

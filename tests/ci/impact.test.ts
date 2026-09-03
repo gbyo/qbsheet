@@ -100,28 +100,46 @@ describe('a scorer change keeps the whole scorer safety net', () => {
     // A file under `tests/` is run by the scorer job. It cannot change what a browser does.
     expect(affected(['tests/RoomGameProperty.test.ts'])).toEqual(['quality', 'scorer']);
   });
+
+  it('stops a QBSheet Live demo-backend change short of the browser suite', () => {
+    // The demo backend is a development affordance: nothing imports it, nothing builds it, and its
+    // own tests are in the root Node project. The unmapped-script catch-all would run Playwright.
+    expect(affected(['scripts/qblive-demo/server.mjs'])).toEqual(['quality', 'scorer']);
+  });
 });
 
 describe('a Director-only change does not run the scorer browser torture test', () => {
-  it('routes Director web source to the Director job alone', () => {
+  it('routes Director source to the Director job alone', () => {
     // Nothing outside `src/director/` imports `src/director/`. That is the fact this rests on.
-    expect(affected(['src/director/rooms/RoomsView.tsx'])).toEqual(['quality', 'director-web']);
-    expect(affected(['src/director/live/publication.ts'])).toEqual(['quality', 'director-web']);
+    expect(affected(['src/director/rooms/RoomsView.tsx'])).toEqual(['quality', 'director-ui']);
+    expect(affected(['src/director/live/publication.ts'])).toEqual(['quality', 'director-ui']);
   });
 
   it('routes the Director shell and its build config to the Director job', () => {
-    expect(affected(['apps/director/src/native.ts'])).toEqual(['quality', 'director-web']);
-    expect(affected(['apps/director/vite.config.ts'])).toEqual(['quality', 'director-web']);
+    expect(affected(['apps/director/src/native.ts'])).toEqual(['quality', 'director-ui']);
+    expect(affected(['apps/director/vite.config.ts'])).toEqual(['quality', 'director-ui']);
   });
 
   it('runs the Director browser spec, and only it, for a Director browser test change', () => {
-    expect(affected(['e2e/Director.spec.ts'])).toEqual(['quality', 'director-web']);
+    // The spec lives with the application it drives now, and it has its own Playwright config
+    // because it starts `apps/director`'s dev server rather than the website's.
+    expect(affected(['e2e/director/Director.spec.ts'])).toEqual(['quality', 'director-ui']);
+    expect(affected(['playwright.director.config.ts'])).toEqual(['quality', 'director-ui']);
   });
 
-  it('still runs the project-path build for the Director entry document', () => {
-    // `director.html` is an input to the root site build as well as the Director entry, so a break
-    // there would break the deployed build.
-    expect(affected(['director.html'])).toEqual(['scorer', 'director-web']);
+  it('owes the scorer nothing, because the website no longer builds Director', () => {
+    // `director.html` was a root build input as well as the Director entry, so a Director entry
+    // change used to have to run the project-path build. There is no such entry any more: the
+    // website's only Director is the marketing page under `about/`, and Director itself is built
+    // by `apps/director`.
+    for (const domains of [
+      affected(['src/director/rooms/RoomsView.tsx']),
+      affected(['apps/director/index.html']),
+      affected(['e2e/director/Director.spec.ts']),
+    ]) {
+      expect(domains).not.toContain('scorer');
+      expect(domains).not.toContain('scorer-browser');
+    }
   });
 });
 
@@ -147,9 +165,9 @@ describe('a QBLive-only change relies on the dedicated QBLive workflow', () => {
     expect(result.domains['rust-qbtcp']).toBe(false);
   });
 
-  it('compiles Director web for a protocol or projection change, because src/director imports them', () => {
-    expect(affected(['packages/qblive-protocol/src/snapshot.ts'])).toEqual(['quality', 'director-web']);
-    expect(affected(['packages/qblive-projection/src/project.ts'])).toEqual(['quality', 'director-web']);
+  it('compiles Director for a protocol or projection change, because src/director imports them', () => {
+    expect(affected(['packages/qblive-protocol/src/snapshot.ts'])).toEqual(['quality', 'director-ui']);
+    expect(affected(['packages/qblive-projection/src/project.ts'])).toEqual(['quality', 'director-ui']);
     expect(affected(['packages/qblive-protocol/src/snapshot.ts'])).not.toContain('scorer-browser');
   });
 
@@ -164,7 +182,7 @@ describe('the tournament packages route by their real consumers', () => {
     for (const name of ['tournament-core', 'tournament-formats', 'tournament-domain']) {
       expect(affected([`packages/${name}/src/index.ts`]), name).toEqual([
         'quality',
-        'director-web',
+        'director-ui',
         'tournament-js',
       ]);
     }
@@ -175,7 +193,7 @@ describe('the tournament packages route by their real consumers', () => {
       'quality',
       'scorer',
       'scorer-browser',
-      'director-web',
+      'director-ui',
       'tournament-js',
       'qblive-js',
     ]);
@@ -258,8 +276,17 @@ describe('an unrecognised path fails safe', () => {
 });
 
 describe('shared and global configuration is treated conservatively', () => {
-  it('runs the scorer, browser, and Director domains for the root Vite config', () => {
-    expect(affected(['vite.config.ts'])).toEqual(['quality', 'scorer', 'scorer-browser', 'director-web']);
+  it('keeps the root Vite config inside the scorer and website domains', () => {
+    // It builds the scorer, prerenders the marketing pages, and emits the service worker. It has
+    // no Director entry, no Director chunking, and no Director service-worker exclusion left.
+    expect(affected(['vite.config.ts'])).toEqual(['quality', 'scorer', 'scorer-browser']);
+  });
+
+  it('keeps the marketing pages inside the scorer domains', () => {
+    // The Director and QBLive pages are prerendered documents like every other page under
+    // `about/`, so they belong to the website build rather than to the Director application.
+    expect(affected(['about/director/index.html'])).toEqual(['scorer', 'scorer-browser']);
+    expect(affected(['src/about/QbLive.tsx'])).toEqual(['quality', 'scorer', 'scorer-browser']);
   });
 
   it('runs every JavaScript domain for the root TypeScript config, which every package extends', () => {
@@ -267,7 +294,7 @@ describe('shared and global configuration is treated conservatively', () => {
       'quality',
       'scorer',
       'scorer-browser',
-      'director-web',
+      'director-ui',
       'tournament-js',
       'qblive-js',
     ]);
@@ -279,7 +306,7 @@ describe('shared and global configuration is treated conservatively', () => {
       'quality',
       'scorer',
       'scorer-browser',
-      'director-web',
+      'director-ui',
       'tournament-js',
       'qblive-js',
     ]);
@@ -335,7 +362,7 @@ describe('the root lockfile', () => {
     expect(lockfileProjects(base, head)).toEqual({ projects: ['apps/director'], unexplained: [] });
     const result = classify(['package-lock.json'], { base, head });
     expect(result.domains['scorer-browser']).toBe(false);
-    expect(result.domains['director-web']).toBe(true);
+    expect(result.domains['director-ui']).toBe(true);
   });
 
   it('runs the scorer and the browser suite for a root dependency update', () => {
@@ -427,6 +454,6 @@ describe('a mixed change is the union of its parts', () => {
   it('runs each domain its own files ask for and nothing else', () => {
     expect(
       affected(['src/director/teams/TeamsView.tsx', 'crates/tournament-store/src/lib.rs', 'docs/QBLIVE.md']),
-    ).toEqual(['quality', 'director-web', 'rust-tournament-store']);
+    ).toEqual(['quality', 'director-ui', 'rust-tournament-store']);
   });
 });

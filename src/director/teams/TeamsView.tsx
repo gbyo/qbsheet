@@ -1,13 +1,33 @@
-import { useMemo, useState } from 'react';
-import type { DirectorController } from '../state/useDirectorController';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { DirectorController, NewPlayerInput } from '../state/useDirectorController';
 import type { DirectorState } from '../domain';
 import { Button, EmptyState, FormField, PanelBody, PanelFooter, StateLabel } from '../components/Controls';
 import { Icon } from '../components/Icon';
 import { PageHeader } from '../components/PageHeader';
-import { importTeamsCsv, type TeamRecord } from '@qbsheet/tournament-formats';
+import { importQbj, importSqbsTeams, importTeamsCsv, type TeamRecord } from '@qbsheet/tournament-formats';
+import { toImportedTeamInputs } from './teamImport';
 import type { DirectorNavigationTarget } from '../app/navigationTarget';
 import { useNavigationHighlight } from '../app/useNavigationHighlight';
 import { errorNotice, type AnnounceInput } from '../notices';
+
+interface RosterDraft {
+  key: number;
+  name: string;
+  captain: boolean;
+  rosterNumber: string;
+  notes: string;
+}
+
+let rosterDraftKey = 0;
+
+function blankRosterDraft(): RosterDraft {
+  rosterDraftKey += 1;
+  return { key: rosterDraftKey, name: '', captain: false, rosterNumber: '', notes: '' };
+}
+
+function blankRoster(count: number): RosterDraft[] {
+  return Array.from({ length: count }, blankRosterDraft);
+}
 
 export function TeamsView({
   state,
@@ -26,15 +46,8 @@ export function TeamsView({
 }) {
   const [showForm, setShowForm] = useState(false);
   const [showPaste, setShowPaste] = useState(false);
-  const [showOrganizationForm, setShowOrganizationForm] = useState(false);
-  const [displayName, setDisplayName] = useState('');
-  const [organizationName, setOrganizationName] = useState('');
-  const [teamLetter, setTeamLetter] = useState('');
-  const [notes, setNotes] = useState('');
+  const [showSchools, setShowSchools] = useState(false);
   const [paste, setPaste] = useState('');
-  const [newOrganizationName, setNewOrganizationName] = useState('');
-  const [newOrganizationShortName, setNewOrganizationShortName] = useState('');
-  const [newOrganizationNotes, setNewOrganizationNotes] = useState('');
   const visibleTeams = useMemo(() => {
     const needle = search.trim().toLocaleLowerCase();
     return state.teams.filter(
@@ -54,6 +67,7 @@ export function TeamsView({
         [
           organization.name,
           organization.shortName,
+          organization.city,
           organization.notes,
           organization.archived ? 'archived' : 'active',
         ]
@@ -64,39 +78,8 @@ export function TeamsView({
     );
   }, [search, state.organizations]);
 
-  const submitTeam = () => {
-    if (!displayName.trim()) {
-      onAnnounce(errorNotice('Enter a team name first.'));
-      return;
-    }
-    if (!controller.addTeam({ displayName, organizationName, teamLetter, notes })) return;
-    setDisplayName('');
-    setOrganizationName('');
-    setTeamLetter('');
-    setNotes('');
-    setShowForm(false);
-    onAnnounce(`${displayName.trim()} added locally; saving now.`);
-  };
-
   const addImportedRows = (teams: TeamRecord[], warningCount: number) => {
-    const result = controller.addImportedTeams(
-      teams.map((team) => ({
-        id: team.id,
-        displayName: team.displayName ?? team.name,
-        organizationId: team.organizationId,
-        teamLetter: team.letter,
-        seed: team.seed ?? null,
-        status: importedTeamStatus(team.status),
-        notes: team.notes,
-        players: team.players?.map((player) => ({
-          id: player.id,
-          name: player.name,
-          captain: player.captain,
-          rosterNumber: player.rosterNumber,
-          notes: player.notes,
-        })),
-      })),
-    );
+    const result = controller.addImportedTeams(toImportedTeamInputs(teams));
     const importedLabel = `${result.inserted} team${result.inserted === 1 ? '' : 's'}`;
     const duplicateLabel = result.skipped
       ? `; ${result.skipped} duplicate${result.skipped === 1 ? '' : 's'} skipped`
@@ -126,25 +109,6 @@ export function TeamsView({
     setShowPaste(false);
   };
 
-  const submitOrganization = () => {
-    if (
-      !controller.addOrganization({
-        name: newOrganizationName,
-        shortName: newOrganizationShortName,
-        notes: newOrganizationNotes,
-      })
-    ) {
-      onAnnounce(controller.error ?? 'Organization was not added; review the Director error.');
-      return;
-    }
-    const label = newOrganizationName.trim();
-    setNewOrganizationName('');
-    setNewOrganizationShortName('');
-    setNewOrganizationNotes('');
-    setShowOrganizationForm(false);
-    onAnnounce(`${label} added as an organization.`);
-  };
-
   const importCsv = async (file: File | undefined) => {
     if (!file) return;
     try {
@@ -161,7 +125,49 @@ export function TeamsView({
       }
       addImportedRows(report.value, report.warnings.length);
     } catch (reason: unknown) {
-      onAnnounce(reason instanceof Error ? reason.message : 'That CSV could not be read.');
+      onAnnounce(errorNotice(reason instanceof Error ? reason.message : 'That CSV could not be read.'));
+    }
+  };
+
+  const importSqbs = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      const report = importSqbsTeams(await file.text());
+      if (!report.ok) {
+        onAnnounce(
+          errorNotice(
+            report.errors.map((entry) => entry.message).join(' ') || 'That SQBS file is not valid.',
+          ),
+        );
+        return;
+      }
+      if (report.value.length === 0) {
+        onAnnounce('No teams found in that SQBS file.');
+        return;
+      }
+      addImportedRows(report.value, report.warnings.length);
+    } catch (reason: unknown) {
+      onAnnounce(reason instanceof Error ? reason.message : 'That SQBS file could not be read.');
+    }
+  };
+
+  const importQbjRoster = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      const report = importQbj(await file.text());
+      if (!report.ok) {
+        onAnnounce(
+          errorNotice(report.errors.map((entry) => entry.message).join(' ') || 'That QBJ file is not valid.'),
+        );
+        return;
+      }
+      if (report.value.tournament.teams.length === 0) {
+        onAnnounce('No teams found in that QBJ file.');
+        return;
+      }
+      addImportedRows(report.value.tournament.teams, report.warnings.length);
+    } catch (reason: unknown) {
+      onAnnounce(reason instanceof Error ? reason.message : 'That QBJ file could not be read.');
     }
   };
 
@@ -170,7 +176,7 @@ export function TeamsView({
       <PageHeader
         eyebrow="Plan"
         title="Teams"
-        description={`${state.teams.length} team record${state.teams.length === 1 ? '' : 's'} · changes persist locally as you work`}
+        description={`${state.teams.length} team${state.teams.length === 1 ? '' : 's'} · changes persist locally as you work`}
         actions={
           <>
             <label className="director-button director-button-secondary">
@@ -188,8 +194,41 @@ export function TeamsView({
                 />
               </span>
             </label>
+            <label className="director-button director-button-secondary">
+              <Icon name="upload" size={15} />
+              <span>
+                Import SQBS
+                <input
+                  className="director-visually-hidden-input"
+                  type="file"
+                  accept=".sqbs,.txt,text/plain"
+                  onChange={(event) => {
+                    void importSqbs(event.target.files?.[0]);
+                    event.currentTarget.value = '';
+                  }}
+                />
+              </span>
+            </label>
+            <label className="director-button director-button-secondary">
+              <Icon name="upload" size={15} />
+              <span>
+                Import QBJ
+                <input
+                  className="director-visually-hidden-input"
+                  type="file"
+                  accept=".qbj,application/json"
+                  onChange={(event) => {
+                    void importQbjRoster(event.target.files?.[0]);
+                    event.currentTarget.value = '';
+                  }}
+                />
+              </span>
+            </label>
             <Button variant="secondary" icon="clipboard" onClick={() => setShowPaste((value) => !value)}>
-              Paste
+              Paste teams
+            </Button>
+            <Button variant="quiet" icon="edit" onClick={() => setShowSchools((value) => !value)}>
+              Manage schools &amp; clubs
             </Button>
             <Button variant="primary" icon="plus" onClick={() => setShowForm((value) => !value)}>
               Add team
@@ -199,68 +238,12 @@ export function TeamsView({
       />
       <div className="director-page-stack">
         {showForm && (
-          <section className="director-panel director-form-panel">
-            <form
-              onSubmit={(event) => {
-                event.preventDefault();
-                submitTeam();
-              }}
-            >
-              <div className="director-panel-heading">
-                <div>
-                  <p className="director-eyebrow">New team</p>
-                  <h2>Registration</h2>
-                </div>
-                <Button variant="quiet" icon="x" onClick={() => setShowForm(false)}>
-                  Close
-                </Button>
-              </div>
-              <PanelBody>
-                <div className="director-form-grid director-form-grid-three">
-                  <FormField label="Display name">
-                    <input
-                      value={displayName}
-                      onChange={(event) => setDisplayName(event.target.value)}
-                      placeholder="Northview A"
-                    />
-                  </FormField>
-                  <FormField label="School / organization">
-                    <input
-                      list="director-organization-options"
-                      value={organizationName}
-                      onChange={(event) => setOrganizationName(event.target.value)}
-                      placeholder="Northview High"
-                    />
-                  </FormField>
-                  <FormField label="Team letter">
-                    <input
-                      value={teamLetter}
-                      onChange={(event) => setTeamLetter(event.target.value)}
-                      placeholder="A"
-                      maxLength={4}
-                    />
-                  </FormField>
-                </div>
-                <FormField
-                  label="Notes"
-                  hint="Optional registration or operations notes for the director team."
-                >
-                  <textarea
-                    className="director-textarea"
-                    rows={2}
-                    value={notes}
-                    onChange={(event) => setNotes(event.target.value)}
-                    placeholder="Needs a late check-in"
-                  />
-                </FormField>
-              </PanelBody>
-              <PanelFooter className="director-form-actions">
-                <Button variant="primary" type="submit">
-                  Save team
-                </Button>
-              </PanelFooter>
-            </form>
-          </section>
+          <NewTeamForm
+            state={state}
+            controller={controller}
+            onAnnounce={onAnnounce}
+            onClose={() => setShowForm(false)}
+          />
         )}
 
         {showPaste && (
@@ -274,7 +257,7 @@ export function TeamsView({
               <div className="director-panel-heading">
                 <div>
                   <p className="director-eyebrow">Bulk entry</p>
-                  <h2>Paste teams</h2>
+                  <h2>Paste teams from CSV</h2>
                 </div>
                 <Button variant="quiet" icon="x" onClick={() => setShowPaste(false)}>
                   Close
@@ -282,10 +265,12 @@ export function TeamsView({
               </div>
               <PanelBody>
                 <p className="director-panel-description">
-                  Paste RFC 4180 CSV with a header row. Quoted commas and line breaks are supported; use
-                  team_name, organization_id, and letter for the basic columns.
+                  Paste CSV with a header row. Use <code>team_name</code> for the team and{' '}
+                  <code>organization_id</code> for either the School / club name or its stable import ID.
+                  Player columns and existing CSV exports remain supported.
                 </p>
                 <textarea
+                  aria-label="Team CSV"
                   className="director-textarea"
                   value={paste}
                   onChange={(event) => setPaste(event.target.value)}
@@ -304,108 +289,7 @@ export function TeamsView({
           </section>
         )}
 
-        <section className="director-panel" data-testid="director-organizations">
-          <div className="director-panel-heading">
-            <div>
-              <p className="director-eyebrow">Organizations</p>
-              <h2>{visibleOrganizations.length} shown</h2>
-            </div>
-            <div className="director-row-actions">
-              <span className="director-muted">
-                {state.organizations.filter((organization) => !organization.archived).length} active
-              </span>
-              <Button variant="quiet" icon="plus" onClick={() => setShowOrganizationForm((value) => !value)}>
-                Add organization
-              </Button>
-            </div>
-          </div>
-          {showOrganizationForm && (
-            <form
-              className="director-panel-body director-inline-edit"
-              onSubmit={(event) => {
-                event.preventDefault();
-                submitOrganization();
-              }}
-            >
-              <div className="director-form-grid director-form-grid-three">
-                <FormField label="Organization name">
-                  <input
-                    aria-label="Organization name"
-                    value={newOrganizationName}
-                    onChange={(event) => setNewOrganizationName(event.target.value)}
-                    placeholder="Northview High"
-                  />
-                </FormField>
-                <FormField label="Short name">
-                  <input
-                    value={newOrganizationShortName}
-                    onChange={(event) => setNewOrganizationShortName(event.target.value)}
-                    placeholder="Northview"
-                  />
-                </FormField>
-                <FormField label="Notes">
-                  <input
-                    value={newOrganizationNotes}
-                    onChange={(event) => setNewOrganizationNotes(event.target.value)}
-                    placeholder="Optional"
-                  />
-                </FormField>
-              </div>
-              <div className="director-row-actions">
-                <Button variant="primary" type="submit">
-                  Save organization
-                </Button>
-                <Button variant="quiet" onClick={() => setShowOrganizationForm(false)}>
-                  Cancel
-                </Button>
-              </div>
-            </form>
-          )}
-          {state.organizations.length === 0 ? (
-            <PanelBody>
-              <p className="director-empty-copy">
-                No organizations yet. Teams can also create one as they are registered.
-              </p>
-            </PanelBody>
-          ) : (
-            <div className="director-table-wrap">
-              <table className="director-table">
-                <thead>
-                  <tr>
-                    <th>Organization</th>
-                    <th>Short name</th>
-                    <th>Teams</th>
-                    <th>Status</th>
-                    <th aria-label="Actions" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleOrganizations.length > 0 ? (
-                    visibleOrganizations.map((organization) => (
-                      <OrganizationRow
-                        key={organization.id}
-                        organization={organization}
-                        teamCount={
-                          state.teams.filter((team) => team.organizationId === organization.id).length
-                        }
-                        controller={controller}
-                        onAnnounce={onAnnounce}
-                      />
-                    ))
-                  ) : (
-                    <tr className="director-table-empty-row">
-                      <td colSpan={5}>
-                        <p className="director-empty-copy">No organizations match the current search.</p>
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
-
-        <datalist id="director-organization-options">
+        <datalist id="director-school-options">
           {state.organizations
             .filter((organization) => organization.archived !== true)
             .map((organization) => (
@@ -416,17 +300,17 @@ export function TeamsView({
         {state.teams.length === 0 ? (
           <EmptyState
             title="No teams yet"
-            description="Add registrations one at a time, paste a roster, or import a CSV. Teams stay editable after the schedule is generated."
+            description="Add a team and its full roster in one step, paste team CSV, or import an existing file."
           >
             <Button variant="primary" icon="plus" onClick={() => setShowForm(true)}>
               Add first team
             </Button>
           </EmptyState>
         ) : (
-          <section className="director-panel">
+          <section className="director-panel" data-testid="director-teams">
             <div className="director-panel-heading">
               <div>
-                <p className="director-eyebrow">Registrations</p>
+                <p className="director-eyebrow">Teams</p>
                 <h2>{visibleTeams.length} shown</h2>
               </div>
               <span className="director-muted">
@@ -437,10 +321,10 @@ export function TeamsView({
               <table className="director-table director-team-table">
                 <thead>
                   <tr>
-                    <th>Seed</th>
                     <th>Team</th>
-                    <th>School</th>
-                    <th>Roster</th>
+                    <th>School / club</th>
+                    <th>Players</th>
+                    <th>Seed</th>
                     <th>Status</th>
                     <th aria-label="Actions" />
                   </tr>
@@ -470,8 +354,328 @@ export function TeamsView({
             </div>
           </section>
         )}
+
+        {showSchools && (
+          <SchoolsPanel
+            state={state}
+            organizations={visibleOrganizations}
+            controller={controller}
+            onAnnounce={onAnnounce}
+          />
+        )}
       </div>
     </>
+  );
+}
+
+function NewTeamForm({
+  state,
+  controller,
+  onAnnounce,
+  onClose,
+}: {
+  state: DirectorState;
+  controller: DirectorController;
+  onAnnounce: (announcement: AnnounceInput) => void;
+  onClose: () => void;
+}) {
+  const [displayName, setDisplayName] = useState('');
+  const [displayNameCustomized, setDisplayNameCustomized] = useState(false);
+  const [organizationName, setOrganizationName] = useState('');
+  const [teamLetter, setTeamLetter] = useState('');
+  const [seed, setSeed] = useState('');
+  const [notes, setNotes] = useState('');
+  const [players, setPlayers] = useState(() => blankRoster(5));
+  const [showRosterPaste, setShowRosterPaste] = useState(false);
+  const [rosterPaste, setRosterPaste] = useState('');
+  const focusKeyRef = useRef<number | null>(null);
+  const rosterRegionRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const focusKey = focusKeyRef.current;
+    if (focusKey === null) return;
+    rosterRegionRef.current?.querySelector<HTMLInputElement>(`input[data-roster-key="${focusKey}"]`)?.focus();
+    focusKeyRef.current = null;
+  }, [players.length]);
+
+  const suggestedName = (school: string, letter: string) => {
+    const match = state.organizations.find(
+      (organization) =>
+        !organization.archived &&
+        organization.name.trim().toLocaleLowerCase() === school.trim().toLocaleLowerCase(),
+    );
+    return [match?.shortName || school.trim(), letter.trim()].filter(Boolean).join(' ');
+  };
+  const updateOrganizationName = (value: string) => {
+    setOrganizationName(value);
+    if (!displayNameCustomized) setDisplayName(suggestedName(value, teamLetter));
+  };
+  const updateTeamLetter = (value: string) => {
+    setTeamLetter(value);
+    if (!displayNameCustomized) setDisplayName(suggestedName(organizationName, value));
+  };
+  const updatePlayer = (key: number, changes: Partial<RosterDraft>) => {
+    setPlayers((current) =>
+      current.map((player) => {
+        if (changes.captain && player.key !== key) return { ...player, captain: false };
+        return player.key === key ? { ...player, ...changes } : player;
+      }),
+    );
+  };
+  const addPlayerRow = () => {
+    const row = blankRosterDraft();
+    focusKeyRef.current = row.key;
+    setPlayers((current) => [...current, row]);
+  };
+  const pasteRoster = () => {
+    const parsed = parseRosterPaste(rosterPaste);
+    if (parsed.length === 0) {
+      onAnnounce(errorNotice('Paste at least one player name.'));
+      return;
+    }
+    const firstCaptain = parsed.findIndex((player) => player.captain);
+    const exclusive = parsed.map((player, index) => ({ ...player, captain: index === firstCaptain }));
+    setPlayers([...exclusive, ...blankRoster(Math.max(0, 5 - exclusive.length))]);
+    setRosterPaste('');
+    setShowRosterPaste(false);
+    onAnnounce(`${parsed.length} player${parsed.length === 1 ? '' : 's'} added to the editable roster.`);
+  };
+  const submit = () => {
+    const teamName = displayName.trim();
+    if (!teamName) {
+      onAnnounce(errorNotice('Enter a display name first.'));
+      return;
+    }
+    const parsedSeed = seed.trim() ? Number(seed) : null;
+    if (parsedSeed !== null && (!Number.isInteger(parsedSeed) || parsedSeed < 1)) {
+      onAnnounce(errorNotice('Seed must be a positive whole number or blank.'));
+      return;
+    }
+    const validation = validateRosterDrafts(players);
+    if (validation) {
+      onAnnounce(errorNotice(validation));
+      return;
+    }
+    const roster = rosterInputs(players);
+    if (
+      !controller.addTeam({
+        displayName: teamName,
+        organizationName,
+        teamLetter,
+        seed: parsedSeed,
+        notes,
+        players: roster,
+      })
+    ) {
+      onAnnounce(errorNotice('Team and roster were not saved; review the Director error.'));
+      return;
+    }
+    onClose();
+    onAnnounce(
+      `${teamName} and ${roster.filter((player) => player.name.trim()).length} player${roster.filter((player) => player.name.trim()).length === 1 ? '' : 's'} added locally; saving now.`,
+    );
+  };
+
+  return (
+    <section className="director-panel director-form-panel director-team-registration">
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          submit();
+        }}
+      >
+        <div className="director-panel-heading">
+          <div>
+            <p className="director-eyebrow">New team</p>
+            <h2>Team and roster</h2>
+          </div>
+          <Button variant="quiet" icon="x" onClick={onClose}>
+            Close
+          </Button>
+        </div>
+        <PanelBody>
+          <fieldset className="director-fieldset">
+            <legend>Team</legend>
+            <div className="director-form-grid director-team-registration-grid">
+              <FormField
+                label="School / club"
+                hint="Choose an existing school or type a new one. New schools are created automatically."
+              >
+                <input
+                  list="director-school-options"
+                  value={organizationName}
+                  onChange={(event) => updateOrganizationName(event.target.value)}
+                  placeholder="Northview High"
+                  autoComplete="off"
+                />
+              </FormField>
+              <FormField label="Team letter" hint="Optional, such as A, B, or C.">
+                <input
+                  value={teamLetter}
+                  onChange={(event) => updateTeamLetter(event.target.value)}
+                  placeholder="A"
+                  maxLength={4}
+                />
+              </FormField>
+              <FormField label="Display name" hint="Suggested automatically until you edit it.">
+                <input
+                  required
+                  value={displayName}
+                  onChange={(event) => {
+                    setDisplayName(event.target.value);
+                    setDisplayNameCustomized(true);
+                  }}
+                  placeholder="Northview A"
+                />
+              </FormField>
+            </div>
+            <details className="director-secondary-details">
+              <summary>More team details</summary>
+              <div className="director-form-grid director-form-grid-two">
+                <FormField label="Seed">
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={seed}
+                    onChange={(event) => setSeed(event.target.value)}
+                    placeholder="Unseeded"
+                  />
+                </FormField>
+                <FormField label="Team notes">
+                  <input
+                    value={notes}
+                    onChange={(event) => setNotes(event.target.value)}
+                    placeholder="Optional registration note"
+                  />
+                </FormField>
+              </div>
+            </details>
+          </fieldset>
+
+          <fieldset className="director-fieldset director-roster-fieldset">
+            <legend>Players</legend>
+            <div className="director-section-heading-inline">
+              <p>Enter the initial roster now. Completely empty rows are ignored.</p>
+              <Button variant="quiet" icon="clipboard" onClick={() => setShowRosterPaste((value) => !value)}>
+                Paste roster
+              </Button>
+            </div>
+            {showRosterPaste && (
+              <div className="director-roster-paste">
+                <FormField
+                  label="Player names"
+                  hint="One name per line. You can edit every row before saving."
+                >
+                  <textarea
+                    className="director-textarea"
+                    rows={5}
+                    value={rosterPaste}
+                    onChange={(event) => setRosterPaste(event.target.value)}
+                    placeholder={'Alice Smith\nBob Jones\nCharlie Lee\nDana Patel'}
+                  />
+                </FormField>
+                <Button variant="secondary" onClick={pasteRoster}>
+                  Use pasted roster
+                </Button>
+              </div>
+            )}
+            <div className="director-roster-entry" ref={rosterRegionRef}>
+              {players.map((player, index) => (
+                <RosterDraftRow
+                  key={player.key}
+                  player={player}
+                  index={index}
+                  canRemove={players.length > 1}
+                  onChange={(changes) => updatePlayer(player.key, changes)}
+                  onRemove={() =>
+                    setPlayers((current) => current.filter((entry) => entry.key !== player.key))
+                  }
+                />
+              ))}
+            </div>
+            <Button variant="quiet" icon="plus" onClick={addPlayerRow}>
+              Add player
+            </Button>
+          </fieldset>
+        </PanelBody>
+        <PanelFooter className="director-form-actions">
+          <Button variant="primary" type="submit">
+            Save team
+          </Button>
+          <span className="director-muted">The team, school, and roster are saved together.</span>
+        </PanelFooter>
+      </form>
+    </section>
+  );
+}
+
+function RosterDraftRow({
+  player,
+  index,
+  canRemove,
+  onChange,
+  onRemove,
+}: {
+  player: RosterDraft;
+  index: number;
+  canRemove: boolean;
+  onChange: (changes: Partial<RosterDraft>) => void;
+  onRemove: () => void;
+}) {
+  const number = index + 1;
+  return (
+    <div className="director-roster-entry-row">
+      <span className="director-roster-entry-number" aria-hidden="true">
+        {number}
+      </span>
+      <label className="director-roster-name-field">
+        <span className="director-visually-hidden">Player {number} name</span>
+        <input
+          data-roster-key={player.key}
+          aria-label={`Player ${number} name`}
+          value={player.name}
+          onChange={(event) => onChange({ name: event.target.value })}
+          placeholder="Player name"
+        />
+      </label>
+      <label className="director-roster-number-field">
+        <span className="director-visually-hidden">Player {number} roster number</span>
+        <input
+          aria-label={`Player ${number} roster number`}
+          value={player.rosterNumber}
+          onChange={(event) => onChange({ rosterNumber: event.target.value })}
+          placeholder="No."
+        />
+      </label>
+      <label className="director-checkbox-field director-roster-captain-field">
+        <input
+          aria-label={`Player ${number} captain`}
+          type="checkbox"
+          checked={player.captain}
+          onChange={(event) => onChange({ captain: event.target.checked })}
+        />
+        <span>Captain</span>
+      </label>
+      <label className="director-roster-notes-field">
+        <span className="director-visually-hidden">Player {number} notes</span>
+        <input
+          aria-label={`Player ${number} notes`}
+          value={player.notes}
+          onChange={(event) => onChange({ notes: event.target.value })}
+          placeholder="Notes (optional)"
+        />
+      </label>
+      <button
+        type="button"
+        className="director-inline-action director-roster-remove-action"
+        aria-label={`Remove player row ${number}`}
+        onClick={onRemove}
+        disabled={!canRemove}
+      >
+        Remove
+      </button>
+    </div>
   );
 }
 
@@ -498,15 +702,7 @@ function TeamRow({
     teamId,
     onClearNavigationTarget,
   );
-  const [playerName, setPlayerName] = useState('');
-  const [playerCaptain, setPlayerCaptain] = useState(false);
-  const [editing, setEditing] = useState(false);
-  const [editDisplayName, setEditDisplayName] = useState('');
-  const [editOrganizationName, setEditOrganizationName] = useState('');
-  const [editTeamLetter, setEditTeamLetter] = useState('');
-  const [editSeed, setEditSeed] = useState('');
-  const [editNotes, setEditNotes] = useState('');
-  const [rosterOpen, setRosterOpen] = useState(false);
+  const [editorOpen, setEditorOpen] = useState(false);
   if (!team) return null;
   const targetOpensRoster =
     navigationTarget?.section === 'teams' &&
@@ -515,40 +711,10 @@ function TeamRow({
   const players = state.players.filter((player) => player.teamId === team.id);
   const activePlayerCount = players.filter((player) => player.active).length;
   const inactivePlayerCount = players.length - activePlayerCount;
-  const beginEdit = () => {
-    setEditDisplayName(team.displayName);
-    setEditOrganizationName(organizationNameFor(state, team.organizationId));
-    setEditTeamLetter(team.teamLetter);
-    setEditSeed(team.seed === null ? '' : String(team.seed));
-    setEditNotes(team.notes ?? '');
-    setEditing(true);
-  };
-  const saveEdit = () => {
-    const displayName = editDisplayName.trim();
-    if (!displayName) {
-      onAnnounce(errorNotice('Enter a team name first.'));
-      return;
-    }
-    const seedText = editSeed.trim();
-    const seed = seedText ? Number(seedText) : null;
-    if (seed !== null && (!Number.isInteger(seed) || seed < 1)) {
-      onAnnounce(errorNotice('Seed must be a positive whole number or blank.'));
-      return;
-    }
-    const updated = controller.updateTeam(team.id, {
-      displayName,
-      organizationName: editOrganizationName,
-      teamLetter: editTeamLetter,
-      seed,
-      notes: editNotes,
-    });
-    if (!updated) {
-      onAnnounce('Team changes were not saved; review the Director error.');
-      return;
-    }
-    setEditing(false);
-    onAnnounce(`${displayName} updated.`);
-  };
+  const rosterLabel = inactivePlayerCount
+    ? `${activePlayerCount} active · ${inactivePlayerCount} inactive`
+    : `${activePlayerCount} player${activePlayerCount === 1 ? '' : 's'}`;
+  const isOpen = editorOpen || targetOpensRoster;
   return (
     <>
       <tr
@@ -557,81 +723,25 @@ function TeamRow({
         data-director-navigation-id={team.id}
       >
         <td>
-          <span data-director-navigation-focus tabIndex={-1}>
-            {team.seed ?? '—'}
-          </span>
-        </td>
-        <td>
-          <strong>{team.displayName}</strong>
+          <strong data-director-navigation-focus tabIndex={-1}>
+            {team.displayName}
+          </strong>
           {team.teamLetter && <small className="director-table-subtext">Team {team.teamLetter}</small>}
           {team.notes && <small className="director-table-subtext">{team.notes}</small>}
         </td>
         <td>{organizationNameFor(state, team.organizationId) || '—'}</td>
         <td>
-          <details
-            className="director-roster-details"
-            open={rosterOpen || targetOpensRoster}
-            onToggle={(event) => setRosterOpen(event.currentTarget.open)}
+          <button
+            type="button"
+            className="director-inline-action director-roster-open-action"
+            aria-expanded={isOpen}
+            aria-controls={`team-editor-${team.id}`}
+            onClick={() => setEditorOpen((value) => !value)}
           >
-            <summary className="director-roster-summary">
-              {inactivePlayerCount > 0
-                ? `${activePlayerCount} active · ${inactivePlayerCount} inactive`
-                : `${activePlayerCount} player${activePlayerCount === 1 ? '' : 's'}`}
-            </summary>
-            <div className="director-roster-editor">
-              {players.length > 0 && (
-                <ul className="director-list director-roster-list">
-                  {players.map((player) => (
-                    <PlayerRow
-                      key={player.id}
-                      player={player}
-                      teamName={team.displayName}
-                      controller={controller}
-                      onAnnounce={onAnnounce}
-                      navigationTarget={navigationTarget}
-                      onClearNavigationTarget={() => {
-                        if (targetOpensRoster) setRosterOpen(true);
-                        onClearNavigationTarget?.();
-                      }}
-                    />
-                  ))}
-                </ul>
-              )}
-              <form
-                className="director-inline-form director-roster-add-row"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  if (!playerName.trim()) {
-                    onAnnounce('Enter a player name first.');
-                    return;
-                  }
-                  if (!controller.addPlayer(team.id, playerName, playerCaptain)) return;
-                  setPlayerName('');
-                  setPlayerCaptain(false);
-                  onAnnounce(`Player added to ${team.displayName}.`);
-                }}
-              >
-                <input
-                  aria-label={`Add player to ${team.displayName}`}
-                  value={playerName}
-                  onChange={(event) => setPlayerName(event.target.value)}
-                  placeholder="Add player"
-                />
-                <label className="director-checkbox-field director-roster-captain-field">
-                  <input
-                    type="checkbox"
-                    checked={playerCaptain}
-                    onChange={(event) => setPlayerCaptain(event.target.checked)}
-                  />
-                  <span>Captain</span>
-                </label>
-                <button type="submit" className="director-inline-action director-roster-add-action">
-                  Add
-                </button>
-              </form>
-            </div>
-          </details>
+            {rosterLabel}
+          </button>
         </td>
+        <td>{team.seed ?? '—'}</td>
         <td>
           <StateLabel
             state={team.status}
@@ -646,7 +756,7 @@ function TeamRow({
               type="button"
               className="director-button director-button-quiet director-table-action"
               aria-label={`Edit ${team.displayName}`}
-              onClick={beginEdit}
+              onClick={() => setEditorOpen(true)}
             >
               <Icon name="edit" size={14} />
               <span>Edit</span>
@@ -659,7 +769,7 @@ function TeamRow({
                 const updated =
                   team.status === 'dropped' ? controller.restoreTeam(team.id) : controller.dropTeam(team.id);
                 if (!updated) {
-                  onAnnounce('Team status was not changed; review the Director error.');
+                  onAnnounce(errorNotice('Team status was not changed; review the Director error.'));
                   return;
                 }
                 onAnnounce(
@@ -675,69 +785,23 @@ function TeamRow({
           </div>
         </td>
       </tr>
-      {editing && (
-        <tr className="director-table-edit-row">
+      {isOpen && (
+        <tr className="director-table-edit-row director-team-editor-row">
           <td colSpan={6}>
-            <form
-              className="director-inline-edit"
-              onSubmit={(event) => {
-                event.preventDefault();
-                saveEdit();
+            <TeamEditor
+              id={`team-editor-${team.id}`}
+              state={state}
+              team={team}
+              players={players}
+              controller={controller}
+              onAnnounce={onAnnounce}
+              onClose={() => setEditorOpen(false)}
+              navigationTarget={navigationTarget}
+              onClearNavigationTarget={() => {
+                if (targetOpensRoster) setEditorOpen(true);
+                onClearNavigationTarget?.();
               }}
-            >
-              <div className="director-form-grid director-form-grid-three">
-                <FormField label="Display name">
-                  <input
-                    value={editDisplayName}
-                    onChange={(event) => setEditDisplayName(event.target.value)}
-                  />
-                </FormField>
-                <FormField label="School / organization">
-                  <input
-                    list="director-organization-options"
-                    value={editOrganizationName}
-                    onChange={(event) => setEditOrganizationName(event.target.value)}
-                  />
-                </FormField>
-                <FormField label="Team letter">
-                  <input
-                    value={editTeamLetter}
-                    onChange={(event) => setEditTeamLetter(event.target.value)}
-                    maxLength={4}
-                  />
-                </FormField>
-                <FormField label="Seed">
-                  <input
-                    type="number"
-                    min="1"
-                    step="1"
-                    value={editSeed}
-                    onChange={(event) => setEditSeed(event.target.value)}
-                    placeholder="Unseeded"
-                  />
-                </FormField>
-              </div>
-              <FormField
-                label="Notes"
-                hint="Optional registration or operations notes for the director team."
-              >
-                <textarea
-                  className="director-textarea"
-                  rows={2}
-                  value={editNotes}
-                  onChange={(event) => setEditNotes(event.target.value)}
-                  placeholder="Needs a late check-in"
-                />
-              </FormField>
-              <div className="director-row-actions">
-                <Button variant="primary" type="submit">
-                  Save changes
-                </Button>
-                <Button variant="quiet" onClick={() => setEditing(false)}>
-                  Cancel
-                </Button>
-              </div>
-            </form>
+            />
           </td>
         </tr>
       )}
@@ -745,122 +809,217 @@ function TeamRow({
   );
 }
 
-function OrganizationRow({
-  organization,
-  teamCount,
+function TeamEditor({
+  id,
+  state,
+  team,
+  players,
   controller,
   onAnnounce,
+  onClose,
+  navigationTarget,
+  onClearNavigationTarget,
 }: {
-  organization: DirectorState['organizations'][number];
-  teamCount: number;
+  id: string;
+  state: DirectorState;
+  team: DirectorState['teams'][number];
+  players: DirectorState['players'];
   controller: DirectorController;
   onAnnounce: (announcement: AnnounceInput) => void;
+  onClose: () => void;
+  navigationTarget?: DirectorNavigationTarget | null;
+  onClearNavigationTarget?: () => void;
 }) {
-  const [editing, setEditing] = useState(false);
-  const [name, setName] = useState(organization.name);
-  const [shortName, setShortName] = useState(organization.shortName ?? '');
-  const [notes, setNotes] = useState(organization.notes ?? '');
-  const beginEdit = () => {
-    setName(organization.name);
-    setShortName(organization.shortName ?? '');
-    setNotes(organization.notes ?? '');
-    setEditing(true);
+  const [displayName, setDisplayName] = useState(team.displayName);
+  const [organizationName, setOrganizationName] = useState(organizationNameFor(state, team.organizationId));
+  const [teamLetter, setTeamLetter] = useState(team.teamLetter);
+  const [seed, setSeed] = useState(team.seed === null ? '' : String(team.seed));
+  const [notes, setNotes] = useState(team.notes ?? '');
+  const [newPlayers, setNewPlayers] = useState(() => blankRoster(2));
+  const focusKeyRef = useRef<number | null>(null);
+  const rosterRegionRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const focusKey = focusKeyRef.current;
+    if (focusKey === null) return;
+    rosterRegionRef.current?.querySelector<HTMLInputElement>(`input[data-roster-key="${focusKey}"]`)?.focus();
+    focusKeyRef.current = null;
+  }, [newPlayers.length]);
+
+  const updateNewPlayer = (key: number, changes: Partial<RosterDraft>) => {
+    setNewPlayers((current) =>
+      current.map((player) => {
+        if (changes.captain && player.key !== key) return { ...player, captain: false };
+        return player.key === key ? { ...player, ...changes } : player;
+      }),
+    );
   };
-  const save = () => {
-    const nextName = name.trim();
-    if (!nextName) {
-      onAnnounce('Enter an organization name first.');
+  const saveTeam = () => {
+    const parsedSeed = seed.trim() ? Number(seed) : null;
+    if (!displayName.trim()) {
+      onAnnounce(errorNotice('Enter a display name first.'));
       return;
     }
-    if (!controller.updateOrganization(organization.id, { name: nextName, shortName, notes })) {
-      onAnnounce(controller.error ?? 'Organization changes were not saved.');
+    if (parsedSeed !== null && (!Number.isInteger(parsedSeed) || parsedSeed < 1)) {
+      onAnnounce(errorNotice('Seed must be a positive whole number or blank.'));
       return;
     }
-    setEditing(false);
-    onAnnounce(`${nextName} updated.`);
-  };
-  const toggleArchived = () => {
-    const archived = organization.archived !== true;
-    if (archived && !window.confirm(`Archive ${organization.name}? Historical team links will be retained.`))
-      return;
-    if (!controller.setOrganizationArchived(organization.id, archived)) {
-      onAnnounce(controller.error ?? 'Organization status was not changed.');
+    if (
+      !controller.updateTeam(team.id, { displayName, organizationName, teamLetter, seed: parsedSeed, notes })
+    ) {
+      onAnnounce(errorNotice('Team changes were not saved; review the Director error.'));
       return;
     }
-    onAnnounce(`${organization.name} ${archived ? 'archived' : 'reopened'}.`);
+    onAnnounce(`${displayName.trim()} updated.`);
   };
+  const addPlayers = () => {
+    const existingNames = new Set(
+      players.filter((player) => player.active).map((player) => player.name.trim().toLocaleLowerCase()),
+    );
+    const validation = validateRosterDrafts(newPlayers, existingNames);
+    if (validation) {
+      onAnnounce(errorNotice(validation));
+      return;
+    }
+    const inputs = rosterInputs(newPlayers).filter((player) => player.name.trim());
+    if (inputs.length === 0) {
+      onAnnounce(errorNotice('Enter at least one player name.'));
+      return;
+    }
+    for (const player of inputs) {
+      if (!controller.addPlayer(team.id, player.name, player.captain, player.rosterNumber, player.notes)) {
+        onAnnounce(errorNotice('Roster changes were not saved; review the Director error.'));
+        return;
+      }
+    }
+    setNewPlayers(blankRoster(2));
+    onAnnounce(`${inputs.length} player${inputs.length === 1 ? '' : 's'} added to ${team.displayName}.`);
+  };
+
   return (
-    <>
-      <tr className={organization.archived ? 'is-inactive' : undefined}>
-        <td>
-          <strong>{organization.name}</strong>
-          {organization.notes && <small className="director-table-subtext">{organization.notes}</small>}
-        </td>
-        <td>{organization.shortName || '—'}</td>
-        <td>{teamCount}</td>
-        <td>
-          <StateLabel
-            state={organization.archived ? 'archived' : 'active'}
-            label={organization.archived ? 'Archived' : 'Active'}
+    <div id={id} className="director-team-editor">
+      <div className="director-section-heading-inline">
+        <div>
+          <p className="director-eyebrow">Edit team</p>
+          <h3>{team.displayName}</h3>
+        </div>
+        <Button variant="quiet" icon="x" onClick={onClose}>
+          Close editor
+        </Button>
+      </div>
+      <form
+        className="director-inline-edit"
+        onSubmit={(event) => {
+          event.preventDefault();
+          saveTeam();
+        }}
+      >
+        <div className="director-form-grid director-team-edit-grid">
+          <FormField label="Display name">
+            <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+          </FormField>
+          <FormField label="School / club">
+            <input
+              list="director-school-options"
+              value={organizationName}
+              onChange={(event) => setOrganizationName(event.target.value)}
+            />
+          </FormField>
+          <FormField label="Team letter">
+            <input value={teamLetter} onChange={(event) => setTeamLetter(event.target.value)} maxLength={4} />
+          </FormField>
+          <FormField label="Seed">
+            <input
+              type="number"
+              min="1"
+              step="1"
+              value={seed}
+              onChange={(event) => setSeed(event.target.value)}
+              placeholder="Unseeded"
+            />
+          </FormField>
+        </div>
+        <FormField label="Team notes">
+          <textarea
+            className="director-textarea"
+            rows={2}
+            value={notes}
+            onChange={(event) => setNotes(event.target.value)}
+            placeholder="Optional registration note"
           />
-        </td>
-        <td>
-          <div className="director-row-actions">
-            <button
-              type="button"
-              className="director-button director-button-quiet director-table-action"
-              aria-label={`Edit ${organization.name}`}
-              onClick={beginEdit}
-            >
-              <Icon name="edit" size={14} />
-              <span>Edit</span>
-            </button>
-            <button
-              type="button"
-              className="director-button director-button-quiet director-table-action"
-              aria-label={`${organization.archived ? 'Reopen' : 'Archive'} ${organization.name}`}
-              onClick={toggleArchived}
-            >
-              <Icon name={organization.archived ? 'refresh' : 'x'} size={14} />
-              <span>{organization.archived ? 'Reopen' : 'Archive'}</span>
-            </button>
+        </FormField>
+        <Button variant="secondary" type="submit">
+          Save team details
+        </Button>
+      </form>
+
+      <section className="director-existing-roster" aria-labelledby={`${id}-roster-heading`}>
+        <div className="director-section-heading-inline">
+          <div>
+            <p className="director-eyebrow">Roster</p>
+            <h3 id={`${id}-roster-heading`}>
+              {players.filter((player) => player.active).length} active player
+              {players.filter((player) => player.active).length === 1 ? '' : 's'}
+            </h3>
           </div>
-        </td>
-      </tr>
-      {editing && (
-        <tr className="director-table-edit-row">
-          <td colSpan={5}>
-            <form
-              className="director-inline-edit"
-              onSubmit={(event) => {
-                event.preventDefault();
-                save();
-              }}
-            >
-              <div className="director-form-grid director-form-grid-three">
-                <FormField label="Organization name">
-                  <input value={name} onChange={(event) => setName(event.target.value)} />
-                </FormField>
-                <FormField label="Short name">
-                  <input value={shortName} onChange={(event) => setShortName(event.target.value)} />
-                </FormField>
-                <FormField label="Notes">
-                  <input value={notes} onChange={(event) => setNotes(event.target.value)} />
-                </FormField>
-              </div>
-              <div className="director-row-actions">
-                <Button variant="primary" type="submit">
-                  Save changes
-                </Button>
-                <Button variant="quiet" onClick={() => setEditing(false)}>
-                  Cancel
-                </Button>
-              </div>
-            </form>
-          </td>
-        </tr>
-      )}
-    </>
+        </div>
+        {players.length > 0 ? (
+          <div className="director-roster-list">
+            {players.map((player) => (
+              <PlayerRow
+                key={player.id}
+                player={player}
+                teamName={team.displayName}
+                controller={controller}
+                onAnnounce={onAnnounce}
+                navigationTarget={navigationTarget}
+                onClearNavigationTarget={onClearNavigationTarget}
+              />
+            ))}
+          </div>
+        ) : (
+          <p className="director-empty-copy">No players have been added yet.</p>
+        )}
+      </section>
+
+      <form
+        className="director-add-players-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          addPlayers();
+        }}
+      >
+        <h4>Add players</h4>
+        <div className="director-roster-entry" ref={rosterRegionRef}>
+          {newPlayers.map((player, index) => (
+            <RosterDraftRow
+              key={player.key}
+              player={player}
+              index={index}
+              canRemove={newPlayers.length > 1}
+              onChange={(changes) => updateNewPlayer(player.key, changes)}
+              onRemove={() => setNewPlayers((current) => current.filter((entry) => entry.key !== player.key))}
+            />
+          ))}
+        </div>
+        <div className="director-row-actions director-roster-add-actions">
+          <Button
+            variant="quiet"
+            icon="plus"
+            onClick={() => {
+              const row = blankRosterDraft();
+              focusKeyRef.current = row.key;
+              setNewPlayers((current) => [...current, row]);
+            }}
+          >
+            Add another row
+          </Button>
+          <Button variant="primary" type="submit">
+            Add players to roster
+          </Button>
+        </div>
+      </form>
+    </div>
   );
 }
 
@@ -901,159 +1060,497 @@ function PlayerRow({
     setEditing(true);
   };
   const save = () => {
-    const trimmedName = name.trim();
-    if (!trimmedName) {
-      onAnnounce('Enter a player name first.');
+    if (!name.trim()) {
+      onAnnounce(errorNotice('Enter a player name first.'));
       return;
     }
-    if (
-      !controller.updatePlayer(player.id, {
-        name: trimmedName,
-        captain,
-        rosterNumber: rosterNumber.trim(),
-        notes,
-      })
-    ) {
-      onAnnounce('Player changes were not saved; review the Director error.');
+    if (!controller.updatePlayer(player.id, { name, captain, rosterNumber, notes })) {
+      onAnnounce(errorNotice('Player changes were not saved; review the Director error.'));
       return;
     }
     setEditing(false);
-    onAnnounce(`${trimmedName} updated.`);
+    onAnnounce(`${name.trim()} updated.`);
   };
   return (
-    <>
-      <li
-        tabIndex={-1}
-        data-director-navigation-id={player.id}
-        className={`director-list-row director-roster-row${player.active ? '' : ' is-inactive'}${playerNavigation ? ' is-navigation-target' : ''}`}
-      >
-        <div className="director-roster-player-summary">
-          <span>
-            {player.name}
-            {player.captain ? ' · captain' : ''}
-            {!player.active && <em className="director-roster-status"> · inactive</em>}
-          </span>
-          {(player.rosterNumber !== undefined || player.notes) && (
-            <small className="director-table-subtext">
-              {player.rosterNumber !== undefined ? `Roster ${player.rosterNumber}` : ''}
-              {player.rosterNumber !== undefined && player.notes ? ' · ' : ''}
-              {player.notes ?? ''}
-            </small>
-          )}
-        </div>
-        <div className="director-row-actions">
+    <div
+      tabIndex={-1}
+      data-director-navigation-id={player.id}
+      className={`director-roster-player-card${player.active ? '' : ' is-inactive'}${playerNavigation ? ' is-navigation-target' : ''}`}
+    >
+      <div className="director-roster-player-summary" data-director-navigation-focus tabIndex={-1}>
+        <strong>{player.name}</strong>
+        <span>
+          {player.captain ? 'Captain' : 'Player'}
+          {player.rosterNumber !== undefined ? ` · No. ${player.rosterNumber}` : ''}
+          {!player.active ? ' · inactive' : ''}
+        </span>
+        {player.notes && <small>{player.notes}</small>}
+      </div>
+      <div className="director-row-actions">
+        <button
+          type="button"
+          className="director-inline-action"
+          aria-label={`Edit ${player.name}`}
+          onClick={beginEdit}
+        >
+          <Icon name="edit" size={13} />
+          <span>Edit</span>
+        </button>
+        {player.active ? (
+          <button
+            type="button"
+            className="director-inline-action director-roster-remove-action"
+            aria-label={`Remove ${player.name} from ${teamName}`}
+            onClick={() => {
+              if (!controller.removePlayer(player.id)) {
+                onAnnounce(errorNotice('Player status was not changed; review the Director error.'));
+                return;
+              }
+              setEditing(false);
+              onAnnounce(`${player.name} removed from the active roster.`);
+            }}
+          >
+            Remove
+          </button>
+        ) : (
           <button
             type="button"
             className="director-inline-action"
-            aria-label={`Edit ${player.name}`}
-            onClick={beginEdit}
-          >
-            <Icon name="edit" size={13} />
-            <span>Edit</span>
-          </button>
-          {player.active ? (
-            <button
-              type="button"
-              className="director-inline-action director-roster-remove-action"
-              aria-label={`Remove ${player.name} from ${teamName}`}
-              onClick={() => {
-                if (!controller.removePlayer(player.id)) {
-                  onAnnounce('Player status was not changed; review the Director error.');
-                  return;
-                }
-                setEditing(false);
-                onAnnounce(`${player.name} removed from the active roster.`);
-              }}
-            >
-              Remove
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="director-inline-action"
-              aria-label={`Restore ${player.name} to ${teamName}`}
-              onClick={() => {
-                if (!controller.updatePlayer(player.id, { active: true })) {
-                  onAnnounce('Player could not be restored; review the Director error.');
-                  return;
-                }
-                onAnnounce(`${player.name} restored to the active roster.`);
-              }}
-            >
-              Restore
-            </button>
-          )}
-        </div>
-      </li>
-      {editing && (
-        <li className="director-roster-player-edit">
-          <form
-            className="director-inline-edit"
-            onSubmit={(event) => {
-              event.preventDefault();
-              save();
+            aria-label={`Restore ${player.name} to ${teamName}`}
+            onClick={() => {
+              if (!controller.updatePlayer(player.id, { active: true })) {
+                onAnnounce(errorNotice('Player could not be restored; review the Director error.'));
+                return;
+              }
+              onAnnounce(`${player.name} restored to the active roster.`);
             }}
           >
-            <div className="director-form-grid director-form-grid-two">
-              <FormField label="Name">
-                <input value={name} onChange={(event) => setName(event.target.value)} />
-              </FormField>
-              <FormField label="Roster number">
-                <input
-                  value={rosterNumber}
-                  onChange={(event) => setRosterNumber(event.target.value)}
-                  placeholder="Optional"
-                />
-              </FormField>
-            </div>
-            <label className="director-checkbox-field">
+            Restore
+          </button>
+        )}
+      </div>
+      {editing && (
+        <form
+          className="director-roster-player-edit"
+          onSubmit={(event) => {
+            event.preventDefault();
+            save();
+          }}
+        >
+          <div className="director-form-grid director-form-grid-two">
+            <FormField label="Name">
+              <input value={name} onChange={(event) => setName(event.target.value)} />
+            </FormField>
+            <FormField label="Roster number">
               <input
-                type="checkbox"
-                checked={captain}
-                onChange={(event) => setCaptain(event.target.checked)}
-              />
-              <span>Captain</span>
-            </label>
-            <FormField label="Notes">
-              <textarea
-                className="director-textarea"
-                rows={2}
-                value={notes}
-                onChange={(event) => setNotes(event.target.value)}
-                placeholder="Optional roster note"
+                value={rosterNumber}
+                onChange={(event) => setRosterNumber(event.target.value)}
+                placeholder="Optional"
               />
             </FormField>
-            <div className="director-row-actions">
-              <Button variant="primary" type="submit">
-                Save player
-              </Button>
-              <Button variant="quiet" onClick={() => setEditing(false)}>
-                Cancel
-              </Button>
-            </div>
-          </form>
-        </li>
+          </div>
+          <label className="director-checkbox-field">
+            <input type="checkbox" checked={captain} onChange={(event) => setCaptain(event.target.checked)} />
+            <span>Captain</span>
+          </label>
+          <FormField label="Player notes">
+            <textarea
+              className="director-textarea"
+              rows={2}
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+              placeholder="Optional roster note"
+            />
+          </FormField>
+          <div className="director-row-actions">
+            <Button variant="primary" type="submit">
+              Save player
+            </Button>
+            <Button variant="quiet" onClick={() => setEditing(false)}>
+              Cancel
+            </Button>
+          </div>
+        </form>
+      )}
+    </div>
+  );
+}
+
+function SchoolsPanel({
+  state,
+  organizations,
+  controller,
+  onAnnounce,
+}: {
+  state: DirectorState;
+  organizations: DirectorState['organizations'];
+  controller: DirectorController;
+  onAnnounce: (announcement: AnnounceInput) => void;
+}) {
+  const [showAdd, setShowAdd] = useState(false);
+  const [name, setName] = useState('');
+  const [shortName, setShortName] = useState('');
+  const [city, setCity] = useState('');
+  const [notes, setNotes] = useState('');
+  const submit = () => {
+    if (!controller.addOrganization({ name, shortName, city, notes })) {
+      onAnnounce(errorNotice('School or club was not added; review the Director error.'));
+      return;
+    }
+    const label = name.trim();
+    setName('');
+    setShortName('');
+    setCity('');
+    setNotes('');
+    setShowAdd(false);
+    onAnnounce(`${label} added to Schools & clubs.`);
+  };
+  return (
+    <section className="director-panel director-schools-panel" data-testid="director-schools-management">
+      <div className="director-panel-heading">
+        <div>
+          <p className="director-eyebrow">Advanced cleanup</p>
+          <h2>Schools &amp; clubs</h2>
+          <p className="director-panel-description">
+            Rename, archive, or merge records created through registration and imports.
+          </p>
+        </div>
+        <div className="director-row-actions">
+          <span className="director-muted">
+            {state.organizations.filter((organization) => !organization.archived).length} active
+          </span>
+          <Button variant="quiet" icon="plus" onClick={() => setShowAdd((value) => !value)}>
+            Add school
+          </Button>
+        </div>
+      </div>
+      {showAdd && (
+        <form
+          className="director-panel-body director-inline-edit"
+          onSubmit={(event) => {
+            event.preventDefault();
+            submit();
+          }}
+        >
+          <div className="director-form-grid director-school-edit-grid">
+            <FormField label="School / club name">
+              <input
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                placeholder="Northview High"
+              />
+            </FormField>
+            <FormField label="Display label" hint="Optional short label used in compact public views.">
+              <input
+                value={shortName}
+                onChange={(event) => setShortName(event.target.value)}
+                placeholder="Northview"
+              />
+            </FormField>
+            <FormField label="City">
+              <input
+                value={city}
+                onChange={(event) => setCity(event.target.value)}
+                placeholder="Springfield"
+              />
+            </FormField>
+            <FormField label="School notes">
+              <input
+                value={notes}
+                onChange={(event) => setNotes(event.target.value)}
+                placeholder="Optional"
+              />
+            </FormField>
+          </div>
+          <div className="director-row-actions">
+            <Button variant="primary" type="submit">
+              Save school
+            </Button>
+            <Button variant="quiet" onClick={() => setShowAdd(false)}>
+              Cancel
+            </Button>
+          </div>
+        </form>
+      )}
+      {state.organizations.length === 0 ? (
+        <PanelBody>
+          <p className="director-empty-copy">
+            No schools or clubs yet. Adding a team creates its school or club automatically.
+          </p>
+        </PanelBody>
+      ) : (
+        <div className="director-table-wrap">
+          <table className="director-table director-school-table">
+            <thead>
+              <tr>
+                <th>School / club</th>
+                <th>Location</th>
+                <th>Teams</th>
+                <th>Status</th>
+                <th aria-label="Actions" />
+              </tr>
+            </thead>
+            <tbody>
+              {organizations.length > 0 ? (
+                organizations.map((organization) => (
+                  <OrganizationRow
+                    key={organization.id}
+                    organization={organization}
+                    organizations={state.organizations}
+                    teamCount={state.teams.filter((team) => team.organizationId === organization.id).length}
+                    controller={controller}
+                    onAnnounce={onAnnounce}
+                  />
+                ))
+              ) : (
+                <tr className="director-table-empty-row">
+                  <td colSpan={5}>
+                    <p className="director-empty-copy">No schools or clubs match the current search.</p>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function OrganizationRow({
+  organization,
+  organizations,
+  teamCount,
+  controller,
+  onAnnounce,
+}: {
+  organization: DirectorState['organizations'][number];
+  organizations: DirectorState['organizations'];
+  teamCount: number;
+  controller: DirectorController;
+  onAnnounce: (announcement: AnnounceInput) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [merging, setMerging] = useState(false);
+  const [name, setName] = useState(organization.name);
+  const [shortName, setShortName] = useState(organization.shortName ?? '');
+  const [city, setCity] = useState(organization.city ?? '');
+  const [notes, setNotes] = useState(organization.notes ?? '');
+  const [mergeTargetId, setMergeTargetId] = useState('');
+  const beginEdit = () => {
+    setName(organization.name);
+    setShortName(organization.shortName ?? '');
+    setCity(organization.city ?? '');
+    setNotes(organization.notes ?? '');
+    setEditing(true);
+    setMerging(false);
+  };
+  const save = () => {
+    if (!name.trim()) {
+      onAnnounce(errorNotice('Enter a school or club name first.'));
+      return;
+    }
+    if (!controller.updateOrganization(organization.id, { name, shortName, city, notes })) {
+      onAnnounce(errorNotice('School or club changes were not saved; review the Director error.'));
+      return;
+    }
+    setEditing(false);
+    onAnnounce(`${name.trim()} updated.`);
+  };
+  const toggleArchived = () => {
+    const archived = organization.archived !== true;
+    if (archived && !window.confirm(`Archive ${organization.name}? Historical team links will be retained.`))
+      return;
+    if (!controller.setOrganizationArchived(organization.id, archived)) {
+      onAnnounce(errorNotice('School or club status was not changed; review the Director error.'));
+      return;
+    }
+    onAnnounce(`${organization.name} ${archived ? 'archived' : 'reopened'}.`);
+  };
+  const merge = () => {
+    const target = organizations.find((candidate) => candidate.id === mergeTargetId);
+    if (!target) {
+      onAnnounce(errorNotice('Choose the school or club record to keep.'));
+      return;
+    }
+    if (
+      !window.confirm(
+        `Merge ${organization.name} into ${target.name}? ${teamCount} team${teamCount === 1 ? '' : 's'} will be reassigned and the duplicate archived.`,
+      )
+    )
+      return;
+    if (!controller.mergeOrganizations(organization.id, target.id)) {
+      onAnnounce(errorNotice('Schools or clubs were not merged; review the Director error.'));
+      return;
+    }
+    setMerging(false);
+    setMergeTargetId('');
+    onAnnounce(`${organization.name} merged into ${target.name}; team links were preserved.`);
+  };
+  return (
+    <>
+      <tr className={organization.archived ? 'is-inactive' : undefined}>
+        <td>
+          <strong>{organization.name}</strong>
+          {organization.shortName && (
+            <small className="director-table-subtext">Display label: {organization.shortName}</small>
+          )}
+          {organization.notes && <small className="director-table-subtext">{organization.notes}</small>}
+        </td>
+        <td>{organization.city || '—'}</td>
+        <td>{teamCount}</td>
+        <td>
+          <StateLabel
+            state={organization.archived ? 'archived' : 'active'}
+            label={organization.archived ? 'Archived' : 'Active'}
+          />
+        </td>
+        <td>
+          <div className="director-row-actions">
+            <button
+              type="button"
+              className="director-button director-button-quiet director-table-action"
+              aria-label={`Edit ${organization.name}`}
+              onClick={beginEdit}
+            >
+              <Icon name="edit" size={14} />
+              <span>Edit</span>
+            </button>
+            <button
+              type="button"
+              className="director-button director-button-quiet director-table-action"
+              aria-label={`Merge ${organization.name}`}
+              onClick={() => {
+                setMerging((value) => !value);
+                setEditing(false);
+              }}
+            >
+              <span>Merge</span>
+            </button>
+            <button
+              type="button"
+              className="director-button director-button-quiet director-table-action"
+              aria-label={`${organization.archived ? 'Reopen' : 'Archive'} ${organization.name}`}
+              onClick={toggleArchived}
+            >
+              <Icon name={organization.archived ? 'refresh' : 'x'} size={14} />
+              <span>{organization.archived ? 'Reopen' : 'Archive'}</span>
+            </button>
+          </div>
+        </td>
+      </tr>
+      {(editing || merging) && (
+        <tr className="director-table-edit-row">
+          <td colSpan={5}>
+            {editing ? (
+              <form
+                className="director-inline-edit"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  save();
+                }}
+              >
+                <div className="director-form-grid director-school-edit-grid">
+                  <FormField label="School / club name">
+                    <input value={name} onChange={(event) => setName(event.target.value)} />
+                  </FormField>
+                  <FormField label="Display label">
+                    <input value={shortName} onChange={(event) => setShortName(event.target.value)} />
+                  </FormField>
+                  <FormField label="City">
+                    <input value={city} onChange={(event) => setCity(event.target.value)} />
+                  </FormField>
+                  <FormField label="School notes">
+                    <input value={notes} onChange={(event) => setNotes(event.target.value)} />
+                  </FormField>
+                </div>
+                <div className="director-row-actions">
+                  <Button variant="primary" type="submit">
+                    Save changes
+                  </Button>
+                  <Button variant="quiet" onClick={() => setEditing(false)}>
+                    Cancel
+                  </Button>
+                </div>
+              </form>
+            ) : (
+              <div className="director-inline-edit director-merge-school">
+                <FormField
+                  label={`Merge ${organization.name} into`}
+                  hint="All linked teams move to the record you keep. The duplicate remains archived for history."
+                >
+                  <select value={mergeTargetId} onChange={(event) => setMergeTargetId(event.target.value)}>
+                    <option value="">Choose the record to keep</option>
+                    {organizations
+                      .filter((candidate) => candidate.id !== organization.id && !candidate.archived)
+                      .map((candidate) => (
+                        <option key={candidate.id} value={candidate.id}>
+                          {candidate.name}
+                        </option>
+                      ))}
+                  </select>
+                </FormField>
+                <div className="director-row-actions">
+                  <Button variant="danger" onClick={merge}>
+                    Merge and archive duplicate
+                  </Button>
+                  <Button variant="quiet" onClick={() => setMerging(false)}>
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            )}
+          </td>
+        </tr>
       )}
     </>
   );
+}
+
+function rosterInputs(players: RosterDraft[]): NewPlayerInput[] {
+  return players.map((player) => ({
+    name: player.name,
+    captain: player.captain,
+    rosterNumber: player.rosterNumber,
+    notes: player.notes,
+  }));
+}
+
+function validateRosterDrafts(players: RosterDraft[], existingNames = new Set<string>()): string | null {
+  const names = new Set(existingNames);
+  for (const [index, player] of players.entries()) {
+    const name = player.name.trim();
+    const hasSecondary =
+      player.captain || Boolean(player.rosterNumber.trim()) || Boolean(player.notes.trim());
+    if (!name && hasSecondary)
+      return `Player row ${index + 1} has roster details but no name. Enter a name or clear that row.`;
+    if (!name) continue;
+    const key = name.toLocaleLowerCase();
+    if (names.has(key)) return `“${name}” is already on this active roster.`;
+    names.add(key);
+  }
+  return null;
+}
+
+function parseRosterPaste(value: string): RosterDraft[] {
+  return value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [name = '', rosterNumber = '', captain = '', notes = ''] = line.split('\t');
+      return {
+        ...blankRosterDraft(),
+        name: name.trim(),
+        rosterNumber: rosterNumber.trim(),
+        captain: /^(?:captain|c|yes|true|1)$/i.test(captain.trim()),
+        notes: notes.trim(),
+      };
+    });
 }
 
 function organizationNameFor(state: DirectorState, organizationId: string | null): string {
   return organizationId
     ? (state.organizations.find((organization) => organization.id === organizationId)?.name ?? '')
     : '';
-}
-
-function importedTeamStatus(status: string | undefined): 'confirmed' | 'waitlist' | 'dropped' {
-  const normalized = typeof status === 'string' ? status.trim().toLowerCase() : '';
-  if (
-    normalized === 'dropped' ||
-    normalized === 'withdrawn' ||
-    normalized === 'no-show' ||
-    normalized === 'forfeit'
-  ) {
-    return 'dropped';
-  }
-  if (normalized === 'late' || normalized === 'waitlist') return 'waitlist';
-  return 'confirmed';
 }

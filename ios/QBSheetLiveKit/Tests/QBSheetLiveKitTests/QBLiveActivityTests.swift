@@ -70,6 +70,7 @@ struct QBLiveActivityTests {
         let stripped = snapshot.schedule.map { game in
             QBLiveScheduledGame(
                 id: game.id, roundId: game.roundId, roundName: game.roundName, roundNumber: game.roundNumber,
+                sequence: game.sequence,
                 phaseId: game.phaseId, phaseName: game.phaseName, poolId: game.poolId, poolName: game.poolName,
                 teamIds: game.teamIds, roomId: game.roomId, scheduledStart: nil, state: game.state
             )

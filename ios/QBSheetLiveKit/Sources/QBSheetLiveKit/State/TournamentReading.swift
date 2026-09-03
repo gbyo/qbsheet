@@ -1,5 +1,15 @@
 import Foundation
 
+/// Explicit day sequence first, then round number; sequenceless games keep
+/// legacy order. Mirrors `compareOptionalSequence` in live-web derive.ts.
+func compareDayOrder(_ left: QBLiveScheduledGame?, _ right: QBLiveScheduledGame?) -> Bool {
+    let leftRank = left?.sequence ?? .greatestFiniteMagnitude
+    let rightRank = right?.sequence ?? .greatestFiniteMagnitude
+    if leftRank != rightRank { return leftRank < rightRank }
+    return (left?.roundNumber ?? .greatestFiniteMagnitude)
+        < (right?.roundNumber ?? .greatestFiniteMagnitude)
+}
+
 /// Reading a snapshot from a followed team's point of view.
 ///
 /// The Swift counterpart of `apps/live-web/src/state/derive.ts`. The two are kept deliberately
@@ -70,10 +80,11 @@ public extension QBLiveSnapshot {
             .sorted { $0.scheduledStart! < $1.scheduledStart! }
         if let soonest = timed.first { return soonest }
 
-        // Nothing has a usable time. The first unfinished game in round order, shown with no time.
+        // Nothing has a usable time. The first unfinished game in day-sequence order,
+        // then round number, shown with no time.
         return candidates
             .filter { $0.game != nil }
-            .sorted { ($0.game?.roundNumber ?? .greatestFiniteMagnitude) < ($1.game?.roundNumber ?? .greatestFiniteMagnitude) }
+            .sorted { compareDayOrder($0.game, $1.game) }
             .first ?? candidates.first
     }
 

@@ -92,7 +92,9 @@ const tournamentKeys = new Set([
   'organization',
   'school',
   'date',
+  'endDate',
   'location',
+  'questionSet',
   'notes',
 ]);
 const organizationKeys = new Set(['type', 'id', 'name', 'city', 'state', 'country', 'notes']);
@@ -952,7 +954,9 @@ function importQbjValue(
       ? { organizationId: valueId(tournamentRaw?.organization ?? tournamentRaw?.school, byId) }
       : {}),
     ...(asString(tournamentRaw?.date) ? { date: asString(tournamentRaw?.date) } : {}),
+    ...(asString(tournamentRaw?.endDate) ? { endDate: asString(tournamentRaw?.endDate) } : {}),
     ...(asString(tournamentRaw?.location) ? { location: asString(tournamentRaw?.location) } : {}),
+    ...(asString(tournamentRaw?.questionSet) ? { questionSet: asString(tournamentRaw?.questionSet) } : {}),
     ...(asString(tournamentRaw?.notes) ? { notes: asString(tournamentRaw?.notes) } : {}),
     ...(tournamentRaw ? rawWithExtensions(tournamentRaw, tournamentKeys, 'tournament', warnings) : {}),
   };
@@ -1573,7 +1577,9 @@ function buildQbjDocument(
     ...(phaseObjects.length > 0 ? { phases: phaseObjects } : {}),
     ...(data.tournament.organizationId ? { organization: { $ref: data.tournament.organizationId } } : {}),
     ...(data.tournament.date !== undefined ? { date: data.tournament.date } : {}),
+    ...(data.tournament.endDate !== undefined ? { endDate: data.tournament.endDate } : {}),
     ...(data.tournament.location !== undefined ? { location: data.tournament.location } : {}),
+    ...(data.tournament.questionSet !== undefined ? { questionSet: data.tournament.questionSet } : {}),
     ...(data.tournament.notes !== undefined ? { notes: data.tournament.notes } : {}),
   };
   const unknownObjects = data.qbj?.unknownObjects ?? [];

@@ -29,11 +29,12 @@ test('the self-hosting page explains what hosting QBSheet involves', async ({ pa
   expect(await fits(page)).toBe(true);
 });
 
-test('the product page links to it from the header', async ({ page }) => {
+test('the product page links to it from the footer', async ({ page }) => {
   await page.goto('/about/');
 
+  // The header carries the products; the content pages are reached from the footer navigation.
   await page
-    .getByRole('navigation', { name: 'Primary navigation' })
+    .getByRole('navigation', { name: 'Footer navigation' })
     .getByRole('link', { name: 'Self-host' })
     .click();
   await expect(page).toHaveURL(/\/about\/self-host\/$/);
@@ -49,7 +50,7 @@ test('the product page links to it and it links back', async ({ page }) => {
 
   // Back up one directory, not two. This is the assertion that catches a path written from `about/`.
   await page
-    .getByRole('navigation', { name: 'Primary navigation' })
+    .getByRole('navigation', { name: 'Footer navigation' })
     .getByRole('link', { name: 'About' })
     .click();
   await expect(page).toHaveURL(/\/about\/$/);
@@ -59,9 +60,10 @@ test('the product page links to it and it links back', async ({ page }) => {
 test('the scorer is two directories up from the self-hosting page', async ({ page }) => {
   await page.goto('/about/self-host/');
 
+  // `Scorer` is the header's way into the application, and from here it has to climb two directories.
   await page
     .getByRole('navigation', { name: 'Primary navigation' })
-    .getByRole('link', { name: 'Open QBSheet' })
+    .getByRole('link', { name: 'Scorer' })
     .click();
   await expect(page.getByRole('link', { name: 'About QBSheet' })).toBeVisible();
 });

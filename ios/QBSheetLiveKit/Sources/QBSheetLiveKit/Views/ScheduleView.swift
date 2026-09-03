@@ -107,8 +107,7 @@ struct ScheduleView: View {
                 return Round(id: id, title: title, games: entries)
             }
             .sorted {
-                ($0.games.first?.roundNumber ?? .greatestFiniteMagnitude)
-                    < ($1.games.first?.roundNumber ?? .greatestFiniteMagnitude)
+                compareDayOrder($0.games.first, $1.games.first)
             }
     }
 }

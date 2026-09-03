@@ -129,6 +129,12 @@ export interface QbliveTimelineEvent {
   title: string;
   description: string | null;
   /**
+   * Explicit position in the tournament-day sequence, or null when the
+   * publisher predates day ordering. Consumers sort by it first and fall
+   * back to scheduled time, so no-time tournaments still order correctly.
+   */
+  sequence: number | null;
+  /**
    * An exact scheduled time, or null.
    *
    * Null means the tournament has not committed to a time. QBSheet Live renders nothing in that
@@ -149,6 +155,11 @@ export interface QbliveScheduledGame {
   roundId: QbliveId;
   roundName: string;
   roundNumber: number | null;
+  /**
+   * Explicit day-sequence position of this game's round, or null when the
+   * publisher predates day ordering. Consumers sort by it first.
+   */
+  sequence: number | null;
   phaseId: QbliveId | null;
   phaseName: string | null;
   poolId: QbliveId | null;

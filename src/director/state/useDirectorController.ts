@@ -8,7 +8,11 @@ import {
   newDirectorId,
   hostTimeZone,
   isValidTimeZone,
+  normalizeDayOrder,
   normalizeTimeZone,
+  nextDayOrder,
+  orderDayItems,
+  previewAdvancement,
   roomAssignmentConflicts,
   roundScheduleIsValid,
   rosterAmendmentId,
@@ -18,6 +22,8 @@ import {
   type DirectorId,
   type DirectorState,
   type AdvancementRule,
+  type FormatKind,
+  type TournamentPlanRecommendation,
   type DetailedStatsStatus,
   type GameRecord,
   type IanaTimeZone,
@@ -119,11 +125,20 @@ export interface NewTeamInput {
   teamLetter?: string;
   seed?: number | null;
   notes?: string;
+  players?: NewPlayerInput[];
+}
+
+export interface NewPlayerInput {
+  name: string;
+  captain?: boolean;
+  rosterNumber?: string | number;
+  notes?: string;
 }
 
 export interface NewOrganizationInput {
   name: string;
   shortName?: string;
+  city?: string;
   notes?: string;
 }
 
@@ -192,6 +207,72 @@ export interface ManualResultInput {
   note?: string;
 }
 
+export interface StartRoundResult {
+  ok: boolean;
+  roundId: DirectorId;
+  roundName: string;
+  /** The round was already released; nothing changed. */
+  alreadyStarted?: boolean;
+  /** No room-based delivery is in use, so rooms were not required. */
+  manual?: boolean;
+  /** Competitive games carrying a room assignment. */
+  deliveredGames: number;
+  /** Matchup labels still needing a physical (USB) handoff. */
+  pendingHandoffs: string[];
+  /** One honest line the UI can announce as-is. */
+  summary: string;
+  /** Set when ok is false. */
+  reason?: string;
+}
+
+export interface CommitAdvancementAssignment {
+  teamId: DirectorId;
+  targetPoolId: DirectorId;
+}
+
+export interface CommitAdvancementInput {
+  sourcePhaseId: DirectorId;
+  targetPhaseId: DirectorId;
+  assignments: CommitAdvancementAssignment[];
+  /** Required when any assigned team is not a preview qualifier. */
+  reason?: string;
+}
+
+export interface CommitAdvancementResult {
+  committed: boolean;
+  /** One honest line the UI can announce as-is. */
+  message: string;
+  assigned: number;
+  /** Assigned teams that were not preview qualifiers. */
+  overridden: DirectorId[];
+}
+
+export interface SetFinalPlacementInput {
+  /** Team ids from first place down. Partial lists are allowed; unlisted teams keep calculated order. */
+  order: DirectorId[];
+  /** Optional reason recorded on the tournament and in the audit trail. */
+  reason?: string;
+}
+
+export interface SetFinalPlacementResult {
+  applied: boolean;
+  /** One honest line the UI can announce as-is. */
+  message: string;
+}
+
+export interface FinishRoundResult {
+  finished: boolean;
+  roundId: DirectorId;
+  roundName: string;
+  /** The round was already closed; nothing changed. */
+  alreadyFinished?: boolean;
+  /** Competitive games still awaiting an accepted result or cancellation. */
+  remaining?: number;
+  summary: string;
+  /** Set when finished is false. */
+  reason?: string;
+}
+
 export interface DirectorController {
   state: DirectorState;
   loading: boolean;
@@ -207,12 +288,16 @@ export interface DirectorController {
   createTournament(input: NewTournamentInput): void;
   updateTournament(
     changes: Partial<
-      Pick<NonNullable<DirectorState['tournament']>, 'name' | 'date' | 'venue' | 'organizer' | 'timeZone'>
+      Pick<
+        NonNullable<DirectorState['tournament']>,
+        'name' | 'date' | 'endDate' | 'venue' | 'organizer' | 'questionSet' | 'timeZone'
+      >
     >,
   ): boolean;
   addOrganization(input: NewOrganizationInput): boolean;
   updateOrganization(organizationId: DirectorId, changes: Partial<NewOrganizationInput>): boolean;
   setOrganizationArchived(organizationId: DirectorId, archived: boolean): boolean;
+  mergeOrganizations(sourceOrganizationId: DirectorId, targetOrganizationId: DirectorId): boolean;
   addTeam(input: NewTeamInput): boolean;
   addImportedTeams(teams: ImportedTeamInput[]): { inserted: number; skipped: number };
   updateTeam(teamId: DirectorId, changes: Partial<NewTeamInput>): boolean;
@@ -276,6 +361,7 @@ export interface DirectorController {
   addTimelineEvent(input: NewTimelineEventInput): boolean;
   updateTimelineEvent(eventId: DirectorId, changes: Partial<NewTimelineEventInput>): boolean;
   removeTimelineEvent(eventId: DirectorId): boolean;
+  moveDayItem(itemId: DirectorId, direction: 'up' | 'down'): boolean;
   setRoundScheduledStart(roundId: DirectorId, scheduledStart: string | null): boolean;
   selectPhase(phaseId: DirectorId): void;
   selectPacket(packetId: DirectorId): void;
@@ -287,6 +373,10 @@ export interface DirectorController {
       >
     >,
   ): boolean;
+  applyTournamentPlan(plan: TournamentPlanRecommendation): boolean;
+  commitAdvancement(input: CommitAdvancementInput): CommitAdvancementResult;
+  setFinalPlacement(input: SetFinalPlacementInput): SetFinalPlacementResult;
+  clearFinalPlacement(): boolean;
   addPhase(name: string, kind?: NonNullable<DirectorState['phases'][number]>['kind']): void;
   updatePhase(
     phaseId: DirectorId,
@@ -314,6 +404,19 @@ export interface DirectorController {
   prepareRound(roundId: DirectorId): boolean;
   releaseRound(roundId: DirectorId): boolean;
   closeRound(roundId: DirectorId): boolean;
+  /**
+   * One-action round start: validate, checkpoint, prepare, and release through
+   * whichever delivery paths the tournament actually uses. Rooms are required
+   * only when room-based delivery is in play; a manual tournament starts
+   * without them, and USB-configured games without rooms are reported as
+   * physical handoffs instead of failing the whole round.
+   */
+  startRound(roundId: DirectorId): Promise<StartRoundResult>;
+  /**
+   * One-action round finish. Closes the round only when every competitive game
+   * is accepted or deliberately cancelled; otherwise reports what remains.
+   */
+  finishRound(roundId: DirectorId): FinishRoundResult;
   cancelScheduledGame(scheduledGameId: DirectorId, reason?: string): boolean;
   addManualResult(input: ManualResultInput): boolean;
   associateSubmission(submissionId: DirectorId, scheduledGameId: DirectorId): boolean;
@@ -366,6 +469,69 @@ export interface LiveActions {
   finalize(): void;
   unpublish(): void;
   destroy(): void;
+}
+
+/**
+ * The shared prepared → released transition: activate the phase, mark the
+ * tournament running, flip scheduled games to released, and record the
+ * delivery. Used by both the manual releaseRound path and the high-level
+ * startRound orchestration so the two can never diverge.
+ *
+ * Returns the released round's name, or null when the draft round is missing
+ * or not prepared.
+ */
+function applyRoundRelease(draft: DirectorState, roundId: DirectorId): string | null {
+  const round = draft.rounds.find((entry) => entry.id === roundId);
+  if (!round || round.status !== 'prepared') return null;
+  round.status = 'released';
+  round.releasedAt = isoNow();
+  const phase = draft.phases.find((entry) => entry.id === round.phaseId);
+  if (phase && phase.status !== 'active') {
+    const previousPhaseStatus = phase.status;
+    phase.status = 'active';
+    draft.audit.push({
+      id: newDirectorId('audit'),
+      at: isoNow(),
+      actor: 'Director',
+      type: 'format-changed',
+      summary: `Phase ${phase.name} changed from ${previousPhaseStatus} to active.`,
+      entityId: phase.id,
+      details: { from: previousPhaseStatus, to: 'active', reason: 'round-released' },
+    });
+  }
+  if (draft.tournament) {
+    const previousTournamentStatus = draft.tournament.status;
+    draft.tournament.status = 'running';
+    draft.tournament.currentRoundId = roundId;
+    draft.tournament.updatedAt = isoNow();
+    if (previousTournamentStatus !== 'running') {
+      draft.audit.push({
+        id: newDirectorId('audit'),
+        at: isoNow(),
+        actor: 'Director',
+        type: 'tournament-updated',
+        summary: `Tournament lifecycle changed from ${previousTournamentStatus} to running.`,
+        entityId: draft.tournament.id,
+        details: { from: previousTournamentStatus, to: 'running', reason: 'round-released' },
+      });
+    }
+  }
+  draft.scheduledGames
+    .filter((game) => game.roundId === roundId && game.status === 'scheduled')
+    .forEach((game) => (game.status = 'released'));
+  draft.audit.push({
+    id: newDirectorId('audit'),
+    at: isoNow(),
+    actor: 'Director',
+    type: 'assignment-released',
+    summary: `Released ${round.name}.`,
+    entityId: roundId,
+  });
+  // Releasing a round is QBTCP's delivery. Recording it as a transfer keeps the unified
+  // history honest: "how did this room get its assignment" has one table with one answer,
+  // whether that answer was the network, a stick, or both.
+  recordQbtcpDelivery(draft, roundId);
+  return round.name;
 }
 
 export function useDirectorController(repository = createDirectorRepository()): DirectorController {
@@ -717,7 +883,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
   const updateTournament = useCallback(
     (
       changes: Partial<
-        Pick<NonNullable<DirectorState['tournament']>, 'name' | 'date' | 'venue' | 'organizer' | 'timeZone'>
+        Pick<
+          NonNullable<DirectorState['tournament']>,
+          'name' | 'date' | 'endDate' | 'venue' | 'organizer' | 'questionSet' | 'timeZone'
+        >
       >,
     ): boolean => {
       const current = stateRef.current.tournament;
@@ -728,8 +897,14 @@ export function useDirectorController(repository = createDirectorRepository()): 
       const normalized = {
         ...(changes.name !== undefined ? { name: changes.name.trim() } : {}),
         ...(changes.date !== undefined ? { date: changes.date.trim() } : {}),
+        ...(changes.endDate !== undefined
+          ? { endDate: changes.endDate?.trim() ? changes.endDate.trim() : undefined }
+          : {}),
         ...(changes.venue !== undefined ? { venue: changes.venue.trim() } : {}),
         ...(changes.organizer !== undefined ? { organizer: changes.organizer.trim() } : {}),
+        ...(changes.questionSet !== undefined
+          ? { questionSet: changes.questionSet?.trim() ? changes.questionSet.trim() : undefined }
+          : {}),
         ...(changes.timeZone !== undefined ? { timeZone: changes.timeZone } : {}),
       };
       if ('name' in normalized && !normalized.name) {
@@ -762,7 +937,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
       const snapshot = stateRef.current;
       const name = input.name.trim();
       if (!name) {
-        setError('An organization name is required.');
+        setError('A school or club name is required.');
         return false;
       }
       if (
@@ -770,7 +945,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
           (organization) => organization.name.trim().toLocaleLowerCase() === name.toLocaleLowerCase(),
         )
       ) {
-        setError(`Organization “${name}” already exists; reopen it or edit the existing record.`);
+        setError(`School / club “${name}” already exists; reopen it or edit the existing record.`);
         return false;
       }
       commit((draft) => {
@@ -780,6 +955,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
           id,
           name,
           shortName: input.shortName?.trim() || undefined,
+          city: input.city?.trim() || undefined,
           notes: input.notes?.trim() || undefined,
         });
         draft.audit.push({
@@ -787,7 +963,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
           at: now,
           actor: 'Director',
           type: 'team-changed',
-          summary: `Added organization ${name}.`,
+          summary: `Added school / club ${name}.`,
           entityId: id,
           details: { entityType: 'organization' },
         });
@@ -802,12 +978,12 @@ export function useDirectorController(repository = createDirectorRepository()): 
       const snapshot = stateRef.current;
       const current = snapshot.organizations.find((organization) => organization.id === organizationId);
       if (!current) {
-        setError('That organization is no longer in the tournament workspace.');
+        setError('That school or club is no longer in the tournament workspace.');
         return false;
       }
       const name = changes.name === undefined ? current.name : changes.name.trim();
       if (!name) {
-        setError('An organization name is required.');
+        setError('A school or club name is required.');
         return false;
       }
       if (
@@ -817,7 +993,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
             organization.name.trim().toLocaleLowerCase() === name.toLocaleLowerCase(),
         )
       ) {
-        setError(`Organization “${name}” already exists.`);
+        setError(`School / club “${name}” already exists.`);
         return false;
       }
       commit((draft) => {
@@ -825,13 +1001,14 @@ export function useDirectorController(repository = createDirectorRepository()): 
         if (!organization) return;
         organization.name = name;
         if (changes.shortName !== undefined) organization.shortName = changes.shortName.trim() || undefined;
+        if (changes.city !== undefined) organization.city = changes.city.trim() || undefined;
         if (changes.notes !== undefined) organization.notes = changes.notes.trim() || undefined;
         draft.audit.push({
           id: newDirectorId('audit'),
           at: isoNow(),
           actor: 'Director',
           type: 'team-changed',
-          summary: `Updated organization ${name}.`,
+          summary: `Updated school / club ${name}.`,
           entityId: organizationId,
           details: { entityType: 'organization' },
         });
@@ -846,7 +1023,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
       const snapshot = stateRef.current;
       const current = snapshot.organizations.find((organization) => organization.id === organizationId);
       if (!current) {
-        setError('That organization is no longer in the tournament workspace.');
+        setError('That school or club is no longer in the tournament workspace.');
         return false;
       }
       if (current.archived === archived) return true;
@@ -855,7 +1032,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         snapshot.teams.some((team) => team.organizationId === organizationId && team.status !== 'dropped')
       ) {
         setError(
-          'An organization with active teams cannot be archived; retire or reassign those teams first.',
+          'A school or club with active teams cannot be archived; retire or reassign those teams first.',
         );
         return false;
       }
@@ -868,9 +1045,60 @@ export function useDirectorController(repository = createDirectorRepository()): 
           at: isoNow(),
           actor: 'Director',
           type: 'team-changed',
-          summary: `${archived ? 'Archived' : 'Reopened'} organization ${organization.name}.`,
+          summary: `${archived ? 'Archived' : 'Reopened'} school / club ${organization.name}.`,
           entityId: organizationId,
           details: { entityType: 'organization', archived, retainsHistory: true },
+        });
+      });
+      return true;
+    },
+    [commit],
+  );
+
+  const mergeOrganizations = useCallback(
+    (sourceOrganizationId: DirectorId, targetOrganizationId: DirectorId): boolean => {
+      const snapshot = stateRef.current;
+      if (sourceOrganizationId === targetOrganizationId) {
+        setError('Choose two different schools or clubs to merge.');
+        return false;
+      }
+      const source = snapshot.organizations.find((organization) => organization.id === sourceOrganizationId);
+      const target = snapshot.organizations.find((organization) => organization.id === targetOrganizationId);
+      if (!source || !target) {
+        setError('One of those school or club records is no longer available.');
+        return false;
+      }
+      if (target.archived) {
+        setError(`Reopen ${target.name} before merging another school or club into it.`);
+        return false;
+      }
+      const reassignedTeamCount = snapshot.teams.filter(
+        (team) => team.organizationId === sourceOrganizationId,
+      ).length;
+      commit((draft) => {
+        draft.teams
+          .filter((team) => team.organizationId === sourceOrganizationId)
+          .forEach((team) => {
+            team.organizationId = targetOrganizationId;
+            team.updatedAt = isoNow();
+          });
+        const duplicate = draft.organizations.find(
+          (organization) => organization.id === sourceOrganizationId,
+        );
+        if (duplicate) duplicate.archived = true;
+        draft.audit.push({
+          id: newDirectorId('audit'),
+          at: isoNow(),
+          actor: 'Director',
+          type: 'team-changed',
+          summary: `Merged ${source.name} into ${target.name}.`,
+          entityId: sourceOrganizationId,
+          details: {
+            entityType: 'organization',
+            mergedIntoOrganizationId: targetOrganizationId,
+            reassignedTeamCount,
+            retainsHistory: true,
+          },
         });
       });
       return true;
@@ -902,7 +1130,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         : undefined;
       if (archivedOrganization?.archived) {
         setError(
-          `Organization “${archivedOrganization.name}” is archived; reopen it before assigning a new team.`,
+          `School / club “${archivedOrganization.name}” is archived; reopen it before assigning a new team.`,
         );
         return false;
       }
@@ -914,13 +1142,19 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError('Seed must be a positive whole number or blank.');
         return false;
       }
+      const roster = normalizeNewPlayerInputs(input.players ?? []);
+      if (!roster.ok) {
+        setError(roster.message);
+        return false;
+      }
       commit((draft) => {
         const now = isoNow();
         let organizationId: DirectorId | null = null;
         const organizationName = input.organizationName?.trim();
         if (organizationName) {
           const existing = draft.organizations.find(
-            (organization) => organization.name.toLocaleLowerCase() === organizationName.toLocaleLowerCase(),
+            (organization) =>
+              organization.name.trim().toLocaleLowerCase() === organizationName.toLocaleLowerCase(),
           );
           organizationId = existing?.id ?? newDirectorId('organization');
           if (!existing) draft.organizations.push({ id: organizationId, name: organizationName });
@@ -937,6 +1171,21 @@ export function useDirectorController(repository = createDirectorRepository()): 
           createdAt: now,
           updatedAt: now,
         });
+        let captainIndex = -1;
+        roster.players.forEach((player, index) => {
+          if (player.captain) captainIndex = index;
+        });
+        roster.players.forEach((player, index) => {
+          draft.players.push({
+            id: newDirectorId('player'),
+            teamId,
+            name: player.name,
+            captain: index === captainIndex,
+            active: true,
+            ...(player.rosterNumber === undefined ? {} : { rosterNumber: player.rosterNumber }),
+            ...(player.notes ? { notes: player.notes } : {}),
+          });
+        });
         draft.audit.push({
           id: newDirectorId('audit'),
           at: now,
@@ -944,6 +1193,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
           type: 'team-changed',
           summary: `Added ${displayName}.`,
           entityId: teamId,
+          details: { initialPlayerCount: roster.players.length },
         });
       });
       return true;
@@ -983,7 +1233,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
             const organization = draft.organizations.find(
               (candidate) =>
                 candidate.id === organizationName ||
-                candidate.name.toLocaleLowerCase() === organizationName.toLocaleLowerCase(),
+                candidate.name.trim().toLocaleLowerCase() === organizationName.toLocaleLowerCase(),
             );
             if (organization) organizationId = organization.id;
             else {
@@ -1011,7 +1261,8 @@ export function useDirectorController(repository = createDirectorRepository()): 
           teamNames.add(name.toLocaleLowerCase());
           const teamPlayerNames = new Set<string>();
           for (const sourcePlayer of input.players ?? []) {
-            const playerName = sourcePlayer.name.trim();
+            const normalizedPlayer = normalizePlayerInput(sourcePlayer);
+            const playerName = normalizedPlayer.name;
             if (!playerName || teamPlayerNames.has(playerName.toLocaleLowerCase())) continue;
             const requestedPlayerId = sourcePlayer.id?.trim();
             const playerId =
@@ -1022,10 +1273,12 @@ export function useDirectorController(repository = createDirectorRepository()): 
               id: playerId,
               teamId,
               name: playerName,
-              captain: sourcePlayer.captain ?? false,
+              captain: normalizedPlayer.captain,
               active: sourcePlayer.active ?? true,
-              rosterNumber: sourcePlayer.rosterNumber,
-              notes: sourcePlayer.notes?.trim(),
+              ...(normalizedPlayer.rosterNumber === undefined
+                ? {}
+                : { rosterNumber: normalizedPlayer.rosterNumber }),
+              ...(normalizedPlayer.notes ? { notes: normalizedPlayer.notes } : {}),
             });
             playerIds.add(playerId);
             teamPlayerNames.add(playerName.toLocaleLowerCase());
@@ -1088,7 +1341,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         : undefined;
       if (archivedOrganization?.archived && archivedOrganization.id !== current.organizationId) {
         setError(
-          `Organization “${archivedOrganization.name}” is archived; reopen it before assigning this team.`,
+          `School / club “${archivedOrganization.name}” is archived; reopen it before assigning this team.`,
         );
         return false;
       }
@@ -1102,7 +1355,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
             const existing = draft.organizations.find(
               (organization) =>
                 organization.id === organizationName ||
-                organization.name.toLocaleLowerCase() === organizationName.toLocaleLowerCase(),
+                organization.name.trim().toLocaleLowerCase() === organizationName.toLocaleLowerCase(),
             );
             if (existing) team.organizationId = existing.id;
             else {
@@ -1227,7 +1480,8 @@ export function useDirectorController(repository = createDirectorRepository()): 
       rosterNumber?: string | number,
       notes?: string,
     ): boolean => {
-      const normalizedName = name.trim();
+      const normalizedPlayer = normalizePlayerInput({ name, captain, rosterNumber, notes });
+      const normalizedName = normalizedPlayer.name;
       const snapshot = stateRef.current;
       if (!normalizedName) {
         setError('A player name is required.');
@@ -1258,10 +1512,12 @@ export function useDirectorController(repository = createDirectorRepository()): 
           id: playerId,
           teamId,
           name: normalizedName,
-          captain,
+          captain: normalizedPlayer.captain,
           active: true,
-          rosterNumber: normalizeRosterNumber(rosterNumber),
-          notes: notes?.trim() || undefined,
+          ...(normalizedPlayer.rosterNumber === undefined
+            ? {}
+            : { rosterNumber: normalizedPlayer.rosterNumber }),
+          ...(normalizedPlayer.notes ? { notes: normalizedPlayer.notes } : {}),
         });
         draft.audit.push({
           id: newDirectorId('audit'),
@@ -1991,6 +2247,9 @@ export function useDirectorController(repository = createDirectorRepository()): 
           description: input.description?.trim() || undefined,
           scheduledStart: input.scheduledStart ?? null,
           scheduledEnd: input.scheduledEnd ?? null,
+          // New events append at the end of the tournament day; the Rounds
+          // view offers "insert after" placement and keyboard reordering.
+          dayOrder: nextDayOrder(draft.rounds, draft.timeline),
           visibility: input.visibility,
           roomId: input.roomId ?? null,
           location: input.location?.trim() || undefined,
@@ -2080,6 +2339,42 @@ export function useDirectorController(repository = createDirectorRepository()): 
           type: 'tournament-updated',
           summary: `Removed schedule event “${current.title}”.`,
           entityId: eventId,
+        });
+      });
+      return true;
+    },
+    [commit],
+  );
+
+  /**
+   * Move a round or timeline event one step earlier or later in the
+   * tournament-day sequence. The reorder is a single commit assigning a dense
+   * order, so persistence, reload, and undo treat it like any other change.
+   */
+  const moveDayItem = useCallback(
+    (itemId: DirectorId, direction: 'up' | 'down'): boolean => {
+      const snapshot = stateRef.current;
+      const ordered = orderDayItems(snapshot.rounds, snapshot.timeline);
+      const index = ordered.findIndex((entry) => entry.id === itemId);
+      const target = direction === 'up' ? index - 1 : index + 1;
+      if (index < 0 || target < 0 || target >= ordered.length) return false;
+      const ids = ordered.map((entry) => entry.id);
+      [ids[index], ids[target]] = [ids[target], ids[index]];
+      const moving = ordered[index];
+      commit((draft) => {
+        const normalized = normalizeDayOrder(draft.rounds, draft.timeline, ids);
+        draft.rounds = normalized.rounds;
+        draft.timeline = normalized.timeline;
+        draft.audit.push({
+          id: newDirectorId('audit'),
+          at: isoNow(),
+          actor: 'Director',
+          type: 'tournament-updated',
+          summary:
+            moving.kind === 'round'
+              ? `Moved ${moving.round?.name ?? 'round'} ${direction === 'up' ? 'earlier' : 'later'} in the day order.`
+              : `Moved ${moving.event?.title ?? 'event'} ${direction === 'up' ? 'earlier' : 'later'} in the day order.`,
+          entityId: itemId,
         });
       });
       return true;
@@ -2332,6 +2627,190 @@ export function useDirectorController(repository = createDirectorRepository()): 
     [commit],
   );
 
+  const commitAdvancement = useCallback(
+    (input: CommitAdvancementInput): CommitAdvancementResult => {
+      const fail = (message: string): CommitAdvancementResult => {
+        setError(message);
+        return { committed: false, message, assigned: 0, overridden: [] };
+      };
+      const snapshot = stateRef.current;
+      const source = snapshot.phases.find((entry) => entry.id === input.sourcePhaseId);
+      const target = snapshot.phases.find((entry) => entry.id === input.targetPhaseId);
+      if (!snapshot.tournament || !source || !target) {
+        return fail('Advancement needs a source stage and a target stage in this tournament.');
+      }
+      if (source.id === target.id) {
+        return fail('Advancement needs a different target stage.');
+      }
+      if (source.archived || target.archived) {
+        return fail('Advancement cannot move teams between archived stages.');
+      }
+      if (input.assignments.length === 0) {
+        return fail('Assign at least one team before committing advancement.');
+      }
+      const targetPoolIds = new Set(target.poolIds);
+      const seenTeams = new Set<DirectorId>();
+      for (const assignment of input.assignments) {
+        if (!targetPoolIds.has(assignment.targetPoolId)) {
+          return fail('Every assigned team needs a playoff pool in the target stage.');
+        }
+        if (seenTeams.has(assignment.teamId)) {
+          return fail('Each team can only be placed in one playoff pool.');
+        }
+        seenTeams.add(assignment.teamId);
+        const team = snapshot.teams.find((entry) => entry.id === assignment.teamId);
+        if (!team || team.status !== 'confirmed') {
+          return fail('Only confirmed teams can advance into playoff pools.');
+        }
+      }
+      const preview = previewAdvancement(snapshot, source);
+      const qualifierIds = new Set(preview.qualifiers.map((team) => team.id));
+      const overridden = input.assignments
+        .map((assignment) => assignment.teamId)
+        .filter((teamId) => !qualifierIds.has(teamId));
+      const reason = input.reason?.trim() ?? '';
+      if (overridden.length > 0) {
+        if (!source.advancementRule?.manualOverrideAllowed) {
+          return fail('This stage does not allow director overrides. Enable the override first.');
+        }
+        if (reason === '') {
+          return fail('Record a reason for each team placed outside the preview.');
+        }
+      }
+      if (preview.unresolved.length > 0 && reason === '') {
+        return fail('An advancement cutoff is tied. Record the director decision as a reason.');
+      }
+      const targetRoundIds = new Set(target.roundIds);
+      const hasPairings = snapshot.scheduledGames.some((game) => targetRoundIds.has(game.roundId));
+      if (hasPairings) {
+        return fail('The target stage already has pairings. Remove them before re-bracketing.');
+      }
+      let assigned = 0;
+      commit((draft) => {
+        const draftTarget = draft.phases.find((entry) => entry.id === input.targetPhaseId);
+        if (!draftTarget) return;
+        const byPool = new Map<DirectorId, DirectorId[]>();
+        for (const assignment of input.assignments) {
+          const list = byPool.get(assignment.targetPoolId) ?? [];
+          list.push(assignment.teamId);
+          byPool.set(assignment.targetPoolId, list);
+        }
+        for (const [poolId, teamIds] of byPool) {
+          const pool = draft.pools.find((entry) => entry.id === poolId);
+          if (pool) pool.teamIds = teamIds;
+        }
+        draft.audit.push({
+          id: newDirectorId('audit'),
+          at: isoNow(),
+          actor: 'Director',
+          type: 'advancement-committed',
+          summary: `Moved ${input.assignments.length} team${input.assignments.length === 1 ? '' : 's'} from ${source.name} to ${target.name}.`,
+          entityId: target.id,
+          details: {
+            sourcePhaseId: source.id,
+            assignments: input.assignments,
+            overridden,
+            ...(reason === '' ? {} : { reason }),
+          },
+        });
+        assigned = input.assignments.length;
+      });
+      if (assigned === 0) {
+        return fail('Advancement was not saved; review the Director error.');
+      }
+      const names = (ids: DirectorId[]): string =>
+        ids
+          .map((teamId) => snapshot.teams.find((team) => team.id === teamId)?.displayName ?? 'Team')
+          .join(', ');
+      return {
+        committed: true,
+        message:
+          overridden.length > 0
+            ? `Placed ${assigned} teams in ${target.name}, including director overrides: ${names(overridden)}.`
+            : `Placed ${assigned} teams in ${target.name}.`,
+        assigned,
+        overridden,
+      };
+    },
+    [commit],
+  );
+
+  /**
+   * Record an explicit final ranking. The order is normalized on write —
+   * duplicates collapse to the first occurrence and unknown teams are dropped —
+   * so a conflicting placement can never be stored. Raw scores, W/L records,
+   * and the calculated order are untouched; ignoring `finalPlacement` recovers
+   * them exactly.
+   */
+  const setFinalPlacement = useCallback(
+    (input: SetFinalPlacementInput): SetFinalPlacementResult => {
+      const fail = (message: string): SetFinalPlacementResult => {
+        setError(message);
+        return { applied: false, message };
+      };
+      const snapshot = stateRef.current;
+      if (!snapshot.tournament) {
+        return fail('Create a tournament before setting a final placement.');
+      }
+      const knownTeams = new Set(snapshot.teams.map((team) => team.id));
+      const seen = new Set<DirectorId>();
+      const order: DirectorId[] = [];
+      for (const teamId of input.order) {
+        if (seen.has(teamId) || !knownTeams.has(teamId)) continue;
+        seen.add(teamId);
+        order.push(teamId);
+      }
+      if (order.length === 0) {
+        return fail('Choose at least one team for the final placement.');
+      }
+      const reason = input.reason?.trim() ?? '';
+      commit((draft) => {
+        if (!draft.tournament) return;
+        draft.tournament.finalPlacement = {
+          order,
+          actor: 'Director',
+          at: isoNow(),
+          ...(reason === '' ? {} : { reason }),
+        };
+        draft.audit.push({
+          id: newDirectorId('audit'),
+          at: isoNow(),
+          actor: 'Director',
+          type: 'final-placement-set',
+          summary: `Set an explicit final placement over ${order.length} team${order.length === 1 ? '' : 's'}. Calculated standings are unchanged.`,
+          details: { order, ...(reason === '' ? {} : { reason }) },
+        });
+      });
+      return {
+        applied: true,
+        message: `Final placement recorded for ${order.length} team${order.length === 1 ? '' : 's'}.`,
+      };
+    },
+    [commit],
+  );
+
+  /** Remove the explicit final ranking and restore calculated standings everywhere. */
+  const clearFinalPlacement = useCallback((): boolean => {
+    const snapshot = stateRef.current;
+    if (!snapshot.tournament) {
+      setError('Create a tournament before clearing its final placement.');
+      return false;
+    }
+    if (!snapshot.tournament.finalPlacement) return true;
+    commit((draft) => {
+      if (!draft.tournament) return;
+      draft.tournament.finalPlacement = undefined;
+      draft.audit.push({
+        id: newDirectorId('audit'),
+        at: isoNow(),
+        actor: 'Director',
+        type: 'final-placement-cleared',
+        summary: 'Cleared the explicit final placement. Calculated standings are final again.',
+      });
+    });
+    return true;
+  }, [commit]);
+
   const addPool = useCallback(
     (input: NewPoolInput): boolean => {
       const snapshot = stateRef.current;
@@ -2525,13 +3004,46 @@ export function useDirectorController(repository = createDirectorRepository()): 
 
   const updateRules = useCallback(
     (changes: Partial<NonNullable<DirectorState['tournament']>['rules']>): boolean => {
-      if (!stateRef.current.tournament) {
+      const snapshot = stateRef.current;
+      if (!snapshot.tournament) {
         setError('Create a tournament before editing scoring rules.');
         return false;
       }
-      const validationError = validateDirectorRuleChanges(changes);
+      const merged = { ...snapshot.tournament.rules, ...changes };
+      const validationError = validateDirectorRuleChanges(changes, merged);
       if (validationError) {
         setError(validationError);
+        return false;
+      }
+      // Point values, bonus shapes, and game lengths reinterpret games that
+      // already exist: an accepted result scored under different values must
+      // keep its original meaning, so those fields lock once play starts.
+      // Procedure toggles (overtime, timers, lightning, bouncebacks) and
+      // tiebreakers only affect future games and stay editable.
+      const reinterpreted = (
+        [
+          'tossupValue',
+          'superpowerValue',
+          'powerValue',
+          'negValue',
+          'useBonuses',
+          'bonusValue',
+          'tossupCount',
+          'maximumTossupCount',
+          'bonusParts',
+          'minimumBonusParts',
+          'maximumBonusScore',
+          'bonusDivisor',
+          'maximumActivePlayers',
+        ] as const
+      ).some((key) => changes[key] !== undefined);
+      const acceptedCount = snapshot.games.filter((game) => game.status === 'accepted').length;
+      if (reinterpreted && acceptedCount > 0) {
+        setError(
+          `Scoring values are locked: ${acceptedCount} accepted result${acceptedCount === 1 ? '' : 's'} ` +
+            'already use them, and changing point values now would reinterpret those games. ' +
+            'To run a different format, start a new tournament.',
+        );
         return false;
       }
       commit((draft) => {
@@ -2761,56 +3273,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         return false;
       }
       commit((draft) => {
-        const round = draft.rounds.find((entry) => entry.id === roundId);
-        if (!round || round.status !== 'prepared') return;
-        round.status = 'released';
-        round.releasedAt = isoNow();
-        const phase = draft.phases.find((entry) => entry.id === round.phaseId);
-        if (phase && phase.status !== 'active') {
-          const previousPhaseStatus = phase.status;
-          phase.status = 'active';
-          draft.audit.push({
-            id: newDirectorId('audit'),
-            at: isoNow(),
-            actor: 'Director',
-            type: 'format-changed',
-            summary: `Phase ${phase.name} changed from ${previousPhaseStatus} to active.`,
-            entityId: phase.id,
-            details: { from: previousPhaseStatus, to: 'active', reason: 'round-released' },
-          });
-        }
-        if (draft.tournament) {
-          const previousTournamentStatus = draft.tournament.status;
-          draft.tournament.status = 'running';
-          draft.tournament.currentRoundId = roundId;
-          draft.tournament.updatedAt = isoNow();
-          if (previousTournamentStatus !== 'running') {
-            draft.audit.push({
-              id: newDirectorId('audit'),
-              at: isoNow(),
-              actor: 'Director',
-              type: 'tournament-updated',
-              summary: `Tournament lifecycle changed from ${previousTournamentStatus} to running.`,
-              entityId: draft.tournament.id,
-              details: { from: previousTournamentStatus, to: 'running', reason: 'round-released' },
-            });
-          }
-        }
-        draft.scheduledGames
-          .filter((game) => game.roundId === roundId && game.status === 'scheduled')
-          .forEach((game) => (game.status = 'released'));
-        draft.audit.push({
-          id: newDirectorId('audit'),
-          at: isoNow(),
-          actor: 'Director',
-          type: 'assignment-released',
-          summary: `Released ${round.name}.`,
-          entityId: roundId,
-        });
-        // Releasing a round is QBTCP's delivery. Recording it as a transfer keeps the unified
-        // history honest: "how did this room get its assignment" has one table with one answer,
-        // whether that answer was the network, a stick, or both.
-        recordQbtcpDelivery(draft, roundId);
+        applyRoundRelease(draft, roundId);
       });
       return true;
     },
@@ -2916,7 +3379,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         if (!target || target.status === 'cancelled' || target.status === 'accepted') return;
         target.status = 'cancelled';
         for (const game of draft.games.filter((entry) => entry.scheduledGameId === scheduledGameId)) {
-          if (game.status !== 'accepted') {
+          if (game.status !== 'accepted' && game.status !== 'forfeit') {
             game.status = 'cancelled';
             game.note = [game.note, `Scheduled game cancelled: ${normalizedReason}`]
               .filter(Boolean)
@@ -3641,6 +4104,187 @@ export function useDirectorController(repository = createDirectorRepository()): 
     },
     [enqueuePersistence],
   );
+  const startRound = useCallback(
+    async (roundId: DirectorId): Promise<StartRoundResult> => {
+      const snapshot = stateRef.current;
+      const round = snapshot.rounds.find((entry) => entry.id === roundId);
+      const fail = (roundName: string, reason: string): StartRoundResult => {
+        setError(reason);
+        return {
+          ok: false,
+          roundId,
+          roundName,
+          deliveredGames: 0,
+          pendingHandoffs: [],
+          summary: reason,
+          reason,
+        };
+      };
+      if (!round) return fail('Unknown round', 'That round is no longer in the tournament workspace.');
+      if (round.status === 'closed') {
+        return fail(round.name, `${round.name} is already closed and cannot be started again.`);
+      }
+      const games = snapshot.scheduledGames.filter((game) => game.roundId === roundId);
+      const activeGames = games.filter((game) => !game.bye && game.status !== 'cancelled');
+      if (games.length === 0 || !roundScheduleIsValid(snapshot, roundId)) {
+        return fail(round.name, `${round.name} cannot start until every matchup is valid.`);
+      }
+      const teamName = (teamId: DirectorId | null): string =>
+        (teamId && snapshot.teams.find((team) => team.id === teamId)?.displayName) || 'Unknown team';
+      const gameLabel = (game: ScheduledGame): string =>
+        game.rightTeamId
+          ? `${teamName(game.leftTeamId)} vs ${teamName(game.rightTeamId)}`
+          : teamName(game.leftTeamId);
+      // Room-based delivery is in play when every game already carries a room,
+      // a QBTCP session is actively paired, or a transfer location is
+      // configured. A manual tournament uses none of those, so rooms stay
+      // optional even when a room record or a partial assignment exists.
+      const usbConfigured = snapshot.transfers.locations.length > 0;
+      const sessionsPaired = snapshot.qbtcpSessions.some((session) => session.state !== 'abandoned');
+      const fullyAssigned = activeGames.length > 0 && activeGames.every((game) => game.roomId !== null);
+      const roomsInPlay = sessionsPaired || usbConfigured || fullyAssigned;
+      const describe = (pending: string[], delivered: number, manual: boolean): string => {
+        if (manual && pending.length === 0) return `${round.name} started. Results can be entered manually.`;
+        if (manual)
+          return (
+            `${round.name} started. ` +
+            `${pending.length} game${pending.length === 1 ? '' : 's'} still need${pending.length === 1 ? 's' : ''} files.`
+          );
+        const base = `${round.name} started with ${delivered} room assignment${delivered === 1 ? '' : 's'}.`;
+        return pending.length === 0
+          ? base
+          : `${base} ${pending.length} still need${pending.length === 1 ? 's' : ''} a physical handoff.`;
+      };
+      if (round.status === 'released') {
+        const pending = usbConfigured
+          ? activeGames.filter((game) => game.roomId === null).map(gameLabel)
+          : [];
+        const delivered = activeGames.filter((game) => game.roomId !== null).length;
+        return {
+          ok: true,
+          roundId,
+          roundName: round.name,
+          alreadyStarted: true,
+          manual: !roomsInPlay,
+          deliveredGames: delivered,
+          pendingHandoffs: pending,
+          summary: describe(pending, delivered, !roomsInPlay),
+        };
+      }
+      if (roomsInPlay) {
+        // Every game that carries a room must carry a usable one. Games without
+        // a room are allowed only when a USB workflow exists to hand them out.
+        const roomIds = activeGames.map((game) => game.roomId);
+        const duplicateRoom = roomIds.filter(
+          (roomId, index) => roomId && roomIds.indexOf(roomId) !== index,
+        )[0];
+        const invalidRoom = activeGames.find((game) => {
+          if (!game.roomId) return !usbConfigured;
+          const room = snapshot.rooms.find((entry) => entry.id === game.roomId);
+          return !room || !room.available || room.status !== 'available';
+        });
+        const roomIdsForRound = new Set(roomIds.filter((roomId): roomId is DirectorId => roomId !== null));
+        const resourceIssues = roomAssignmentConflicts(snapshot, roomIdsForRound);
+        if (
+          !roundScheduleIsValid(snapshot, roundId) ||
+          games.length === 0 ||
+          duplicateRoom ||
+          invalidRoom ||
+          resourceIssues.length > 0
+        ) {
+          return fail(
+            round.name,
+            resourceIssues[0]?.message ??
+              (duplicateRoom
+                ? 'A room can only host one game in a round.'
+                : usbConfigured
+                  ? `${round.name} cannot start until every room game has an available room. Games without a room will need USB files.`
+                  : `${round.name} cannot start until every game has an available room.`),
+          );
+        }
+      }
+      try {
+        await checkpoint(`Before starting ${round.name}`);
+      } catch (reason: unknown) {
+        return fail(
+          round.name,
+          reason instanceof Error
+            ? `A durable checkpoint could not be written: ${reason.message}`
+            : `${round.name} could not be started until a durable checkpoint succeeds.`,
+        );
+      }
+      const pending = usbConfigured ? activeGames.filter((game) => game.roomId === null).map(gameLabel) : [];
+      const delivered = activeGames.filter((game) => game.roomId !== null).length;
+      const manual = !roomsInPlay;
+      commit((draft) => {
+        const target = draft.rounds.find((entry) => entry.id === roundId);
+        if (!target || (target.status !== 'planned' && target.status !== 'prepared')) return;
+        if (target.status === 'planned') target.status = 'prepared';
+        const releasedName = applyRoundRelease(draft, roundId);
+        if (!releasedName) return;
+        draft.audit.push({
+          id: newDirectorId('audit'),
+          at: isoNow(),
+          actor: 'Director',
+          type: 'assignment-released',
+          summary: `Started ${releasedName}.`,
+          entityId: roundId,
+          details: { manual, deliveredGames: delivered, pendingHandoffs: pending },
+        });
+      });
+      return {
+        ok: true,
+        roundId,
+        roundName: round.name,
+        manual,
+        deliveredGames: delivered,
+        pendingHandoffs: pending,
+        summary: describe(pending, delivered, manual),
+      };
+    },
+    [commit, checkpoint],
+  );
+
+  const finishRound = useCallback(
+    (roundId: DirectorId): FinishRoundResult => {
+      const snapshot = stateRef.current;
+      const round = snapshot.rounds.find((entry) => entry.id === roundId);
+      if (!round) {
+        const reason = 'That round is no longer in the tournament workspace.';
+        setError(reason);
+        return { finished: false, roundId, roundName: 'Unknown round', summary: reason, reason };
+      }
+      if (round.status === 'closed') {
+        return {
+          finished: true,
+          roundId,
+          roundName: round.name,
+          alreadyFinished: true,
+          summary: `${round.name} is already finished.`,
+        };
+      }
+      if (round.status !== 'released') {
+        const reason = `${round.name} has not started yet.`;
+        setError(reason);
+        return { finished: false, roundId, roundName: round.name, summary: reason, reason };
+      }
+      const remaining = snapshot.scheduledGames.filter(
+        (game) => game.roundId === roundId && !game.bye && !['accepted', 'cancelled'].includes(game.status),
+      ).length;
+      if (remaining > 0) {
+        const reason =
+          `${round.name} still has ${remaining} game${remaining === 1 ? '' : 's'} ` +
+          `without an accepted result.`;
+        return { finished: false, roundId, roundName: round.name, remaining, summary: reason, reason };
+      }
+      if (!closeRoundAction(roundId)) {
+        const reason = `${round.name} could not be finished.`;
+        return { finished: false, roundId, roundName: round.name, summary: reason, reason };
+      }
+      return { finished: true, roundId, roundName: round.name, summary: `${round.name} finished.` };
+    },
+    [closeRoundAction],
+  );
 
   const exportSnapshot = useCallback(() => JSON.stringify(stateRef.current, null, 2), []);
 
@@ -4160,6 +4804,132 @@ export function useDirectorController(repository = createDirectorRepository()): 
     [commit],
   );
 
+  const applyTournamentPlan = useCallback(
+    (plan: TournamentPlanRecommendation) => {
+      let applied = false;
+      commit((draft) => {
+        const tournament = draft.tournament;
+        const format = tournament
+          ? draft.formats.find((entry) => entry.id === tournament.formatId)
+          : undefined;
+        if (!tournament || !format) return;
+        // Never rewrite structure once play is underway: a round past
+        // planned, or any pairings already generated.
+        if (draft.rounds.some((round) => round.status !== 'planned')) return;
+        if (draft.scheduledGames.length > 0) return;
+        const formatKind: FormatKind =
+          plan.id === 'pools-playoffs'
+            ? 'playoff-pools'
+            : plan.id === 'double-round-robin'
+              ? 'double-round-robin'
+              : plan.id === 'swiss'
+                ? 'swiss'
+                : plan.id === 'manual'
+                  ? 'custom'
+                  : 'round-robin';
+        format.kind = formatKind;
+        format.phaseIds = [];
+        draft.phases = [];
+        draft.pools = [];
+        draft.rounds = [];
+        // The old phases are gone, so repoint the current stage at the first
+        // new one instead of leaving a dangling reference.
+        tournament.currentPhaseId = null;
+        tournament.currentRoundId = null;
+        const activeTeams = draft.teams.filter((team) => team.status !== 'dropped');
+        // Timeline events (Lunch, breaks) survive a plan change; new rounds
+        // sequence after them so day order stays duplicate-free.
+        let dayOrder = nextDayOrder(draft.rounds, draft.timeline);
+        plan.stages.forEach((stage, stageIndex) => {
+          const phaseId = newDirectorId('phase');
+          format.phaseIds.push(phaseId);
+          const poolIds: DirectorId[] = [];
+          stage.poolNames.forEach((poolName, poolIndex) => {
+            const poolId = newDirectorId('pool');
+            poolIds.push(poolId);
+            draft.pools.push({
+              id: poolId,
+              phaseId,
+              name: poolName,
+              teamIds: [],
+              order: poolIndex + 1,
+            });
+          });
+          if (stage.assignTeams && poolIds.length > 0) {
+            // Snake distribution over seed order so pools start balanced.
+            const ordered = [...activeTeams].sort(
+              (a, b) => (a.seed ?? Number.MAX_SAFE_INTEGER) - (b.seed ?? Number.MAX_SAFE_INTEGER),
+            );
+            ordered.forEach((team, index) => {
+              const lap = Math.floor(index / poolIds.length);
+              const slot = index % poolIds.length;
+              const poolIndex = lap % 2 === 0 ? slot : poolIds.length - 1 - slot;
+              draft.pools.find((candidate) => candidate.id === poolIds[poolIndex])?.teamIds.push(team.id);
+            });
+          }
+          const nextStage = plan.stages[stageIndex + 1];
+          const advancementRule: AdvancementRule | null =
+            nextStage && stage.poolNames.length > 0 && plan.poolPlan
+              ? {
+                  qualifiersPerPool: Math.max(
+                    1,
+                    Math.floor(plan.poolPlan.divisions[0].teamCount / stage.poolNames.length),
+                  ),
+                  wildcards: 0,
+                  tiebreakers: [...tournament.rules.tiebreakers],
+                  manualOverrideAllowed: true,
+                }
+              : null;
+          draft.phases.push({
+            id: phaseId,
+            name: stage.name,
+            kind: stage.kind,
+            order: stageIndex + 1,
+            formatId: format.id,
+            poolIds,
+            roundIds: [],
+            advancementRule,
+            carryover: false,
+            status: 'planned',
+          });
+          stage.roundNumbers.forEach((roundNumber) => {
+            const roundId = newDirectorId('round');
+            draft.rounds.push({
+              id: roundId,
+              phaseId,
+              name: `Round ${roundNumber}`,
+              number: roundNumber,
+              revision: 1,
+              status: 'planned',
+              packetId: null,
+              scheduledGameIds: [],
+              dayOrder: dayOrder++,
+              scheduledStart: null,
+              releasedAt: null,
+              startedAt: null,
+              closedAt: null,
+            });
+            draft.phases.find((candidate) => candidate.id === phaseId)?.roundIds.push(roundId);
+          });
+        });
+        tournament.currentPhaseId = format.phaseIds[0] ?? null;
+        tournament.updatedAt = isoNow();
+        draft.audit.push({
+          id: newDirectorId('audit'),
+          at: isoNow(),
+          actor: 'Director',
+          type: 'format-changed',
+          summary: `Applied tournament plan: ${plan.title}.`,
+          entityId: format.id,
+          details: { plan: plan.id },
+        });
+        applied = true;
+      });
+      return applied;
+    },
+    [commit],
+  );
+
   return {
     state,
     loading,
@@ -4177,6 +4947,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
     addOrganization,
     updateOrganization,
     setOrganizationArchived,
+    mergeOrganizations,
     addTeam,
     updateTeam,
     dropTeam,
@@ -4200,13 +4971,18 @@ export function useDirectorController(repository = createDirectorRepository()): 
     addTimelineEvent,
     updateTimelineEvent,
     removeTimelineEvent,
+    moveDayItem,
     setRoundScheduledStart,
     addImportedTeams,
     selectPhase,
     selectPacket,
     updateFormat,
+    applyTournamentPlan,
     addPhase,
     updatePhase,
+    commitAdvancement,
+    setFinalPlacement,
+    clearFinalPlacement,
     addPool,
     updatePool,
     setPhaseArchived,
@@ -4216,6 +4992,8 @@ export function useDirectorController(repository = createDirectorRepository()): 
     prepareRound,
     releaseRound,
     closeRound: closeRoundAction,
+    startRound,
+    finishRound,
     cancelScheduledGame,
     addManualResult,
     associateSubmission,
@@ -4287,6 +5065,43 @@ function normalizeRosterNumber(value: string | number | undefined): string | num
   if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
   const trimmed = value?.trim();
   return trimmed || undefined;
+}
+
+function normalizePlayerInput(
+  input: NewPlayerInput,
+): Required<Pick<NewPlayerInput, 'name' | 'captain'>> & Pick<NewPlayerInput, 'rosterNumber' | 'notes'> {
+  return {
+    name: input.name.trim(),
+    captain: input.captain ?? false,
+    rosterNumber: normalizeRosterNumber(input.rosterNumber),
+    notes: input.notes?.trim() || undefined,
+  };
+}
+
+function normalizeNewPlayerInputs(
+  inputs: NewPlayerInput[],
+): { ok: true; players: ReturnType<typeof normalizePlayerInput>[] } | { ok: false; message: string } {
+  const players: ReturnType<typeof normalizePlayerInput>[] = [];
+  const activeNames = new Set<string>();
+  for (const [index, input] of inputs.entries()) {
+    const player = normalizePlayerInput(input);
+    if (!player.name) {
+      if (player.captain || player.rosterNumber !== undefined || player.notes) {
+        return {
+          ok: false,
+          message: `Player row ${index + 1} has roster details but no name. Enter a name or clear that row.`,
+        };
+      }
+      continue;
+    }
+    const key = player.name.toLocaleLowerCase();
+    if (activeNames.has(key)) {
+      return { ok: false, message: `“${player.name}” is already on this active roster.` };
+    }
+    activeNames.add(key);
+    players.push(player);
+  }
+  return { ok: true, players };
 }
 
 function validateTimelineEventInput(state: DirectorState, input: NewTimelineEventInput): string | null {
@@ -4425,7 +5240,11 @@ function validateDetailedStats(
 
 function canonicalAcceptedGame(state: DirectorState, scheduledGameId: DirectorId): GameRecord | undefined {
   const candidates = state.games.filter((game) => {
-    return game.scheduledGameId === scheduledGameId && game.status === 'accepted';
+    // Forfeits are decided results: they resolve the scheduled game exactly
+    // like accepted scores.
+    return (
+      game.scheduledGameId === scheduledGameId && (game.status === 'accepted' || game.status === 'forfeit')
+    );
   });
   // Corrected results retain their historical GameRecord/submission. Prefer the record with a
   // current accepted submission over legacy accepted records that predate the submission ledger.
@@ -4933,6 +5752,9 @@ function validateAdvancementRule(value: AdvancementRule | null | undefined): str
   if (!Number.isInteger(value.qualifiersPerPool) || value.qualifiersPerPool < 1) {
     return 'Qualifiers per pool must be a positive whole number.';
   }
+  if (!Number.isInteger(value.wildcards ?? 0) || (value.wildcards ?? 0) < 0) {
+    return 'Wildcards must be zero or a positive whole number.';
+  }
   if (!Array.isArray(value.tiebreakers) || value.tiebreakers.length === 0) {
     return 'Advancement needs at least one standings tiebreaker.';
   }
@@ -4950,6 +5772,7 @@ function validateAdvancementRule(value: AdvancementRule | null | undefined): str
 
 function validateDirectorRuleChanges(
   changes: Partial<NonNullable<DirectorState['tournament']>['rules']>,
+  merged: NonNullable<DirectorState['tournament']>['rules'],
 ): string | null {
   if (
     changes.tossupValue !== undefined &&
@@ -4957,14 +5780,52 @@ function validateDirectorRuleChanges(
   ) {
     return 'Tossup value must be a finite positive number.';
   }
-  if (changes.powerValue !== undefined && (!Number.isFinite(changes.powerValue) || changes.powerValue <= 0)) {
+  if (changes.tossupValue !== undefined && !Number.isInteger(changes.tossupValue)) {
+    return 'Tossup value must be a whole number.';
+  }
+  if (
+    changes.superpowerValue !== undefined &&
+    changes.superpowerValue !== null &&
+    (!Number.isFinite(changes.superpowerValue) || changes.superpowerValue <= 0)
+  ) {
+    return 'Superpower value must be a finite positive number.';
+  }
+  if (
+    changes.superpowerValue !== undefined &&
+    changes.superpowerValue !== null &&
+    !Number.isInteger(changes.superpowerValue)
+  ) {
+    return 'Superpower value must be a whole number.';
+  }
+  if (
+    changes.powerValue !== undefined &&
+    changes.powerValue !== null &&
+    (!Number.isFinite(changes.powerValue) || changes.powerValue <= 0)
+  ) {
     return 'Power value must be a finite positive number.';
   }
-  if (changes.negValue !== undefined && (!Number.isFinite(changes.negValue) || changes.negValue > 0)) {
+  if (
+    changes.powerValue !== undefined &&
+    changes.powerValue !== null &&
+    !Number.isInteger(changes.powerValue)
+  ) {
+    return 'Power value must be a whole number.';
+  }
+  if (
+    changes.negValue !== undefined &&
+    changes.negValue !== null &&
+    (!Number.isFinite(changes.negValue) || changes.negValue > 0)
+  ) {
     return 'Neg value must be a finite number of zero or less.';
+  }
+  if (changes.negValue !== undefined && changes.negValue !== null && !Number.isInteger(changes.negValue)) {
+    return 'Neg value must be a whole number.';
   }
   if (changes.bonusValue !== undefined && (!Number.isFinite(changes.bonusValue) || changes.bonusValue < 0)) {
     return 'Bonus value must be a finite non-negative number.';
+  }
+  if (changes.bonusValue !== undefined && !Number.isInteger(changes.bonusValue)) {
+    return 'Bonus value must be a whole number.';
   }
   if (
     changes.tossupCount !== undefined &&
@@ -4972,8 +5833,54 @@ function validateDirectorRuleChanges(
   ) {
     return 'Tossups must be a positive whole number.';
   }
+  if (
+    changes.maximumTossupCount !== undefined &&
+    changes.maximumTossupCount !== null &&
+    (!Number.isInteger(changes.maximumTossupCount) || changes.maximumTossupCount < 1)
+  ) {
+    return 'Maximum tossups must be a positive whole number.';
+  }
   if (changes.bonusParts !== undefined && (!Number.isInteger(changes.bonusParts) || changes.bonusParts < 1)) {
     return 'Bonus parts must be a positive whole number.';
+  }
+  if (
+    changes.minimumBonusParts !== undefined &&
+    changes.minimumBonusParts !== null &&
+    (!Number.isInteger(changes.minimumBonusParts) || changes.minimumBonusParts < 1)
+  ) {
+    return 'Minimum bonus parts must be a positive whole number.';
+  }
+  if (
+    changes.maximumBonusScore !== undefined &&
+    changes.maximumBonusScore !== null &&
+    (!Number.isInteger(changes.maximumBonusScore) || changes.maximumBonusScore < 0)
+  ) {
+    return 'Maximum bonus score must be a non-negative whole number.';
+  }
+  if (
+    changes.bonusDivisor !== undefined &&
+    changes.bonusDivisor !== null &&
+    (!Number.isInteger(changes.bonusDivisor) || changes.bonusDivisor < 1)
+  ) {
+    return 'Bonus divisor must be a positive whole number.';
+  }
+  if (
+    changes.overtimeTossupCount !== undefined &&
+    (!Number.isInteger(changes.overtimeTossupCount) || changes.overtimeTossupCount < 1)
+  ) {
+    return 'Overtime tossups must be a positive whole number.';
+  }
+  if (
+    changes.lightningCountPerTeam !== undefined &&
+    (!Number.isInteger(changes.lightningCountPerTeam) || changes.lightningCountPerTeam < 1)
+  ) {
+    return 'Lightning rounds per team must be a positive whole number.';
+  }
+  if (
+    changes.lightningDivisor !== undefined &&
+    (!Number.isInteger(changes.lightningDivisor) || changes.lightningDivisor < 1)
+  ) {
+    return 'Lightning divisor must be a positive whole number.';
   }
   if (
     changes.maximumActivePlayers !== undefined &&
@@ -4986,6 +5893,53 @@ function validateDirectorRuleChanges(
     (!Number.isFinite(changes.regulationMinutes) || changes.regulationMinutes <= 0)
   ) {
     return 'Regulation minutes must be a finite positive number.';
+  }
+  // Tier ordering is checked against the merged rules so a single edit is
+  // judged in the context it would land in. Edits that touch no scoring
+  // value (tiebreakers, display toggles) never trigger these, so legacy
+  // documents stay editable outside the scoring section.
+  const scoringKeys = [
+    'tossupValue',
+    'superpowerValue',
+    'powerValue',
+    'negValue',
+    'useBonuses',
+    'bonusValue',
+    'tossupCount',
+    'maximumTossupCount',
+    'bonusParts',
+    'minimumBonusParts',
+    'maximumBonusScore',
+    'bonusDivisor',
+    'overtime',
+    'overtimeTossupCount',
+    'overtimeBonuses',
+  ] as const;
+  if (scoringKeys.some((key) => changes[key] !== undefined)) {
+    if (merged.superpowerValue !== null && merged.powerValue !== null) {
+      if (merged.superpowerValue <= merged.powerValue) {
+        return 'Superpower must be worth more than power.';
+      }
+    }
+    if (merged.superpowerValue !== null && merged.superpowerValue <= merged.tossupValue) {
+      return 'Superpower must be worth more than the tossup value.';
+    }
+    if (merged.powerValue !== null && merged.powerValue <= merged.tossupValue) {
+      return 'Power must be worth more than the tossup value.';
+    }
+    const minimumParts = merged.minimumBonusParts ?? merged.bonusParts;
+    if (minimumParts > merged.bonusParts) {
+      return 'Minimum bonus parts cannot exceed bonus parts.';
+    }
+    if (merged.maximumTossupCount !== null && merged.maximumTossupCount < merged.tossupCount) {
+      return 'Maximum tossups cannot be fewer than regulation tossups.';
+    }
+    if (merged.overtimeBonuses && !merged.overtime) {
+      return 'Overtime bonuses require overtime play.';
+    }
+    if (merged.overtimeBonuses && !merged.useBonuses) {
+      return 'Overtime bonuses require bonuses.';
+    }
   }
   if (changes.tiebreakers !== undefined) {
     if (changes.tiebreakers.length === 0) return 'Configure at least one standings tiebreaker.';

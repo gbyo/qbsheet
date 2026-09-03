@@ -67,6 +67,7 @@ export const ingestWarnings = {
   statisticsWarning: 'statistics-warning',
   ambiguousTeamIdentity: 'ambiguous-team-identity',
   unresolvedPlayerIdentity: 'unresolved-player-identity',
+  unrecognizedAnswerValue: 'unrecognized-answer-value',
   lateAfterAbandon: 'late-after-abandon',
   transportReviewRequired: 'transport-review-required',
   directorAssociation: 'director-association',
@@ -105,6 +106,8 @@ export function describeWarning(code: string): string {
       return 'A team name matches more than one roster entry.';
     case ingestWarnings.unresolvedPlayerIdentity:
       return 'A player in the scoresheet could not be matched to exactly one roster entry.';
+    case ingestWarnings.unrecognizedAnswerValue:
+      return 'The file scores a point value these tournament rules do not name; points kept, detail unclassified.';
     case ingestWarnings.lateAfterAbandon:
       return 'The room had been marked abandoned when this arrived.';
     case ingestWarnings.transportReviewRequired:
@@ -209,47 +212,59 @@ function resultTeamId(
 function answerAggregate(
   counts: unknown,
   state: DirectorState,
-): { powers: number; gets: number; negs: number } {
+  warnings: string[] = [],
+): { superpowers: number; powers: number; gets: number; negs: number; tossupPoints: number } {
+  let superpowers = 0;
   let powers = 0;
   let gets = 0;
   let negs = 0;
-  if (!Array.isArray(counts)) return { powers, gets, negs };
+  let tossupPoints = 0;
+  if (!Array.isArray(counts)) return { superpowers, powers, gets, negs, tossupPoints };
+  const rules = state.tournament?.rules;
   for (const count of counts) {
     if (!isRecord(count)) continue;
     const value = isRecord(count.answer_type) ? finiteNumber(count.answer_type.value) : undefined;
     const number = finiteNumber(count.number) ?? 0;
-    if (value === undefined) continue;
-    if (value === (state.tournament?.rules.powerValue ?? 15)) powers += number;
-    else if (value === (state.tournament?.rules.tossupValue ?? 10)) gets += number;
+    if (value === undefined || number === 0) continue;
+    // Points always reconcile from the document's own values, even for an
+    // answer type the tournament rules do not name. Bucketing is where the
+    // rules matter — and an unmapped value is a warning, never a silent drop.
+    tossupPoints += value * number;
+    if (value === (rules?.superpowerValue ?? Number.NaN)) superpowers += number;
+    else if (value === (rules?.powerValue ?? 15)) powers += number;
+    else if (value === (rules?.tossupValue ?? 10)) gets += number;
     else if (value < 0) negs += number;
+    else warnings.push(ingestWarnings.unrecognizedAnswerValue);
   }
-  return { powers, gets, negs };
+  return { superpowers, powers, gets, negs, tossupPoints };
 }
 
 function teamAggregate(
   entry: Record<string, unknown>,
   state: DirectorState,
+  warnings: string[] = [],
 ): Omit<TeamGameScore, 'teamId' | 'score'> {
+  let superpowers = 0;
   let powers = 0;
   let gets = 0;
   let negs = 0;
+  let tossupPoints = 0;
   if (Array.isArray(entry.match_players)) {
     for (const candidate of entry.match_players) {
       if (!isRecord(candidate)) continue;
-      const aggregate = answerAggregate(candidate.answer_counts, state);
+      const aggregate = answerAggregate(candidate.answer_counts, state, warnings);
+      superpowers += aggregate.superpowers;
       powers += aggregate.powers;
       gets += aggregate.gets;
       negs += aggregate.negs;
+      tossupPoints += aggregate.tossupPoints;
     }
   }
   const bouncebacks = finiteNumber(entry.bonus_bounceback_points) ?? 0;
   const lightning = finiteNumber(entry.lightning_points) ?? 0;
-  const tossupPoints =
-    powers * (state.tournament?.rules.powerValue ?? 15) +
-    gets * (state.tournament?.rules.tossupValue ?? 10) +
-    negs * (state.tournament?.rules.negValue ?? -5);
   const points = finiteNumber(entry.points) ?? tossupPoints;
   return {
+    superpowers,
     powers,
     gets,
     negs,
@@ -280,7 +295,7 @@ export function readResultStatistics(
       const teamId = resultTeamId(entry.team, state, scheduled, warnings);
       const score = finiteNumber(entry.points);
       if (!teamId || score === undefined) return null;
-      return { teamId, score, ...teamAggregate(entry, state) };
+      return { teamId, score, ...teamAggregate(entry, state, warnings) };
     })
     .filter((entry): entry is TeamGameScore => entry !== null);
   const playerStats = entries.flatMap((entry): PlayerGameStat[] => {
@@ -300,15 +315,19 @@ export function readResultStatistics(
         return [];
       }
       const [player] = players;
-      const aggregate = answerAggregate(candidate.answer_counts, state);
+      const aggregate = answerAggregate(candidate.answer_counts, state, warnings);
       return [
         {
           playerId: player.id,
           teamId,
-          ...aggregate,
+          superpowers: aggregate.superpowers,
+          powers: aggregate.powers,
+          gets: aggregate.gets,
+          negs: aggregate.negs,
           bonusPoints: finiteNumber(candidate.bonus_points) ?? 0,
           tossupsHeard:
-            finiteNumber(candidate.tossups_heard) ?? aggregate.powers + aggregate.gets + aggregate.negs,
+            finiteNumber(candidate.tossups_heard) ??
+            aggregate.superpowers + aggregate.powers + aggregate.gets + aggregate.negs,
         },
       ];
     });

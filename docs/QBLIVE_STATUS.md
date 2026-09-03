@@ -18,7 +18,7 @@ deciding whether to ship needs to see which is which.
 
 | # | Criterion | | Evidence |
 | --: | --- | :-: | --- |
-| 1 | Director creates and opens a real tournament | ✅ | Created "Saturday Invitational" in a browser Director |
+| 1 | Director creates and opens a real tournament | ✅ | Created "Saturday Invitational" in Director's user interface |
 | 2 | Director configures QBSheet Live | ✅ | Chose Cloudflare, pasted origin and setup token |
 | 3 | A Cloudflare backend is deployed and reachable | ✅ | Real `workerd` via `wrangler dev`. **Not** a deployed Cloudflare account — see below |
 | 4 | Director connects to it | ✅ | Exchanged the setup token for a management credential, once |
@@ -82,7 +82,7 @@ deciding whether to ship needs to see which is which.
    the deploy step is deliberately left unwired rather than invented.
 3. **An Apple Developer account.** Replace `TEAMID`, register the App Clip and its Advanced
    Experience, create the APNs key with Broadcast Push enabled, and work through
-   [`QBLIVE_IOS.md#12-app-store-connect-checklist`](QBLIVE_IOS.md#12-app-store-connect-checklist).
+   [`QBLIVE_IOS.md#13-app-store-connect-checklist`](QBLIVE_IOS.md#13-app-store-connect-checklist).
 4. **Run the probe once.** `apps/qblive-push-prototype`, deployed, `GET /reachability`. That is the
    last architectural question outstanding, and it is one request.
 

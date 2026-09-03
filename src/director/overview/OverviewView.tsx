@@ -1,10 +1,36 @@
-import { deriveTeamStandings, latestRound, runPreflight, type DirectorState } from '../domain';
+import {
+  deriveTeamStandings,
+  latestRound,
+  runPreflight,
+  type DirectorState,
+  type PreflightIssue,
+} from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
-import { Button, StateLabel } from '../components/Controls';
+import { Button } from '../components/Controls';
 import { Icon } from '../components/Icon';
 import { PageHeader } from '../components/PageHeader';
 import type { SectionId } from '../app/navigation';
 import type { AnnounceInput } from '../notices';
+
+function sectionForArea(area: PreflightIssue['area']): SectionId {
+  switch (area) {
+    case 'teams':
+      return 'teams';
+    case 'format':
+      return 'format';
+    case 'schedule':
+      return 'schedule';
+    case 'rooms':
+    case 'qbtcp':
+      return 'rooms';
+    case 'packets':
+      return 'packets';
+    case 'storage':
+      return 'settings';
+    default:
+      return 'tournament';
+  }
+}
 
 export function OverviewView({
   state,
@@ -26,19 +52,58 @@ export function OverviewView({
     state.rounds.find((entry) => entry.id === tournament?.currentRoundId) ?? latestRound(state.rounds);
   const games = round ? state.scheduledGames.filter((game) => game.roundId === round.id) : [];
   const finished = games.filter((game) => game.status === 'accepted').length;
-  const live = games.filter((game) => game.status === 'live').length;
-  const waiting = games.filter((game) => game.status === 'scheduled' || game.status === 'released').length;
+  const complete =
+    games.length > 0 &&
+    games.every((game) => game.bye || game.status === 'accepted' || game.status === 'cancelled');
+  const playing = games.filter(
+    (game) => game.status === 'live' || game.status === 'released' || game.status === 'scheduled',
+  ).length;
   const reviewCount = state.submissions.filter(
     (submission) => submission.status === 'review' || submission.status === 'received',
   ).length;
-  const readyRoomCount = state.rooms.filter((room) => room.available && room.status === 'available').length;
+  const openProtests = state.protests.filter((protest) => protest.status === 'open').length;
+  const helpSessions = state.qbtcpSessions.filter((session) => session.helpRequestId);
   const issues = runPreflight(state, nativeServerReady, nativeServerAvailable);
+  const blockers = issues.filter((issue) => issue.severity === 'blocker');
+  const otherChecks = issues.length - blockers.length;
   const standings = deriveTeamStandings(state).slice(0, 5);
+  // Every blocker answers where it can be fixed: the attention item deep-links
+  // into the tool that owns the problem instead of dumping everything on the
+  // Tournament section.
+  const attention: Array<{ id: string; text: string; section: SectionId }> = [
+    ...blockers.map((issue) => ({
+      id: issue.id,
+      text: issue.message,
+      section: sectionForArea(issue.area),
+    })),
+    ...(reviewCount
+      ? [
+          {
+            id: 'results-to-review',
+            text: `${reviewCount} result${reviewCount === 1 ? '' : 's'} need${reviewCount === 1 ? 's' : ''} a decision.`,
+            section: 'results' as SectionId,
+          },
+        ]
+      : []),
+    ...(openProtests
+      ? [
+          {
+            id: 'open-protests',
+            text: `${openProtests} open protest${openProtests === 1 ? '' : 's'}.`,
+            section: 'results' as SectionId,
+          },
+        ]
+      : []),
+    ...helpSessions.map((session) => ({
+      id: `help-${session.roomId}`,
+      text: `${state.rooms.find((room) => room.id === session.roomId)?.name ?? 'A room'} requested help.`,
+      section: 'rooms' as SectionId,
+    })),
+  ];
 
   return (
     <>
       <PageHeader
-        eyebrow="Tournament overview"
         title={tournament?.name ?? 'No tournament open'}
         description={
           tournament
@@ -47,14 +112,9 @@ export function OverviewView({
             : 'Create a tournament to begin planning.'
         }
         actions={
-          <>
-            <Button variant="secondary" icon="clipboard" onClick={() => onNavigate('tournament')}>
-              Preflight
-            </Button>
-            <Button variant="primary" icon="arrow" onClick={() => onNavigate(round ? 'tournament' : 'teams')}>
-              {round ? 'Preview next round' : 'Set up teams'}
-            </Button>
-          </>
+          <Button variant="primary" icon="arrow" onClick={() => onNavigate(round ? 'tournament' : 'teams')}>
+            {round ? `Open ${round.name}` : 'Set up teams'}
+          </Button>
         }
       />
 
@@ -64,68 +124,45 @@ export function OverviewView({
             <div className="director-round-heading">
               <div className="director-round-number">{String(round.number).padStart(2, '0')}</div>
               <div>
-                <p className="director-eyebrow">Current round</p>
                 <h2 id="director-current-round-title">{round.name}</h2>
                 <p>
-                  {round.status === 'closed'
-                    ? 'Closed'
-                    : round.status === 'released'
-                      ? 'Assignments released'
-                      : 'Not released'}{' '}
-                  · revision {round.revision}
+                  {finished} of {games.length} result{games.length === 1 ? '' : 's'} accepted
+                  {playing > 0 && round.status !== 'closed'
+                    ? ` · ${playing} still playing`
+                    : round.status === 'closed'
+                      ? ' · complete'
+                      : ''}
                 </p>
               </div>
             </div>
-            <div className="director-round-summary" aria-label="Round summary">
-              <span>
-                <strong>{finished}</strong> accepted
-              </span>
-              <span>
-                <strong>{live}</strong> live
-              </span>
-              <span>
-                <strong>{waiting}</strong> waiting
-              </span>
-            </div>
             <div className="director-round-actions">
-              {round.status !== 'closed' && (
+              {round.status !== 'closed' && round.status !== 'released' && (
                 <Button
-                  variant="quiet"
-                  icon={
-                    round.status === 'released' ? 'pause' : round.status === 'planned' ? 'clipboard' : 'play'
-                  }
+                  variant="primary"
+                  icon="play"
                   onClick={() => {
-                    if (round.status === 'planned') {
-                      const prepared = controller.prepareRound(round.id);
-                      onAnnounce(
-                        prepared
-                          ? `${round.name} prepared.`
-                          : `${round.name} could not be prepared; review the schedule first.`,
-                      );
-                    } else if (round.status === 'prepared') {
-                      const released = controller.releaseRound(round.id);
-                      onAnnounce(
-                        released
-                          ? `${round.name} released.`
-                          : 'The round is not ready to release; review the Director error and room assignments.',
-                      );
-                    } else {
-                      const closed = controller.closeRound(round.id);
-                      onAnnounce(
-                        closed
-                          ? `${round.name} closed.`
-                          : `${round.name} could not close; accept or cancel every game first.`,
-                      );
-                    }
+                    void controller.startRound(round.id).then((result) => onAnnounce(result.summary));
                   }}
                 >
-                  {round.status === 'planned'
-                    ? 'Prepare round'
-                    : round.status === 'prepared'
-                      ? 'Release assignments'
-                      : 'Close round'}
+                  Start {round.name}
                 </Button>
               )}
+              {round.status === 'released' &&
+                (complete ? (
+                  <Button
+                    variant="primary"
+                    icon="chevron"
+                    onClick={() => {
+                      onAnnounce(controller.finishRound(round.id).summary);
+                    }}
+                  >
+                    Finish {round.name}
+                  </Button>
+                ) : (
+                  <Button variant="primary" icon="chevron" onClick={() => onNavigate('tournament')}>
+                    Open {round.name}
+                  </Button>
+                ))}
               <Button variant="quiet" icon="chevron" onClick={() => onNavigate('tournament')}>
                 Open control
               </Button>
@@ -134,7 +171,6 @@ export function OverviewView({
         ) : (
           <section className="director-round-banner director-round-banner-empty">
             <div>
-              <p className="director-eyebrow">First step</p>
               <h2>Build the tournament plan</h2>
               <p>Add teams, rooms, and a format. Director will persist each change locally.</p>
             </div>
@@ -144,54 +180,7 @@ export function OverviewView({
           </section>
         )}
 
-        <div className="director-stat-grid" aria-label="Tournament status">
-          <StatusStat
-            label="Teams"
-            value={String(state.teams.filter((team) => team.status === 'confirmed').length)}
-            detail={`${state.teams.length} records`}
-            onClick={() => onNavigate('teams')}
-          />
-          <StatusStat
-            label="Rooms"
-            value={String(state.rooms.length)}
-            detail={
-              readyRoomCount
-                ? `${readyRoomCount} ready for assignment`
-                : state.rooms.length
-                  ? 'None ready for assignment'
-                  : 'Add rooms'
-            }
-            onClick={() => onNavigate('rooms')}
-          />
-          <StatusStat
-            label="Results to review"
-            value={String(reviewCount)}
-            detail={reviewCount ? 'Needs a decision' : 'Inbox clear'}
-            onClick={() => onNavigate('results')}
-          />
-          <StatusStat
-            label="Saved locally"
-            value={
-              controller.error
-                ? 'Needs attention'
-                : controller.saving
-                  ? 'Saving'
-                  : state.metadata.lastSavedAt
-                    ? 'Yes'
-                    : 'Not yet'
-            }
-            detail={
-              controller.repositoryKind === 'tauri-sqlite'
-                ? 'SQLite'
-                : controller.repositoryKind === 'indexeddb'
-                  ? 'IndexedDB'
-                  : 'Memory only'
-            }
-            onClick={() => onNavigate('settings')}
-          />
-        </div>
-
-        {issues.length > 0 && (
+        {attention.length > 0 && (
           <section
             className="director-callout director-callout-warning"
             aria-labelledby="director-attention-title"
@@ -200,196 +189,86 @@ export function OverviewView({
               <Icon name="alert" size={18} />
             </div>
             <div>
-              <p className="director-eyebrow">Before you run the next round</p>
-              <h2 id="director-attention-title">
-                {issues.filter((issue) => issue.severity === 'blocker').length
-                  ? `${issues.filter((issue) => issue.severity === 'blocker').length} blocker(s) need attention`
-                  : 'A few checks are still open'}
-              </h2>
+              <h2 id="director-attention-title">Needs attention</h2>
               <ul className="director-compact-list">
-                {issues.slice(0, 3).map((issue) => (
-                  <li key={issue.id}>
-                    <StateLabel state={issue.severity} label={issue.message} />
+                {attention.slice(0, 5).map((item) => (
+                  <li key={item.id}>
+                    <Button variant="quiet" onClick={() => onNavigate(item.section)}>
+                      {item.text}
+                    </Button>
                   </li>
                 ))}
+                {otherChecks > 0 && (
+                  <li>
+                    <Button variant="quiet" onClick={() => onNavigate('tournament')}>
+                      {otherChecks} more check{otherChecks === 1 ? '' : 's'} in preflight.
+                    </Button>
+                  </li>
+                )}
               </ul>
             </div>
-            <Button variant="secondary" onClick={() => onNavigate('tournament')}>
-              Review preflight
-            </Button>
           </section>
         )}
 
-        <div className="director-two-column">
-          <section className="director-panel">
-            <div className="director-panel-heading">
-              <div>
-                <p className="director-eyebrow">Live rooms</p>
-                <h2>Rooms now</h2>
-              </div>
-              <Button variant="quiet" onClick={() => onNavigate('rooms')}>
-                View all <Icon name="chevron" size={14} />
-              </Button>
-            </div>
-            {state.rooms.length === 0 ? (
-              <div className="director-panel-body">
-                <p className="director-empty-copy">No rooms have been added yet.</p>
-              </div>
-            ) : (
-              <div className="director-table-wrap">
-                <table className="director-table">
-                  <thead>
-                    <tr>
-                      <th scope="col">Room</th>
-                      <th scope="col">Assignment</th>
-                      <th scope="col">Status</th>
-                      <th scope="col">Last activity</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {state.rooms.slice(0, 8).map((room) => {
-                      const game = games.find((entry) => entry.roomId === room.id);
-                      const session = state.qbtcpSessions.find((entry) => entry.roomId === room.id);
-                      return (
-                        <tr key={room.id}>
-                          <td>
-                            <strong>{room.name}</strong>
-                          </td>
-                          <td>{game ? teamNames(state, game.leftTeamId, game.rightTeamId) : 'Unassigned'}</td>
-                          <td>
-                            <StateLabel
-                              state={
-                                session?.state === 'result-received'
-                                  ? 'review'
-                                  : session?.state === 'live' || game?.status === 'live'
-                                    ? 'live'
-                                    : game?.status === 'accepted'
-                                      ? 'finished'
-                                      : room.status
-                              }
-                              label={
-                                session?.state === 'result-received'
-                                  ? 'Result received'
-                                  : game?.status === 'accepted'
-                                    ? 'Finished'
-                                    : room.status
-                              }
-                            />
-                          </td>
-                          <td>{session?.lastSeenAt ? formatTime(session.lastSeenAt) : '—'}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
-          <section className="director-panel">
-            <div className="director-panel-heading">
-              <div>
-                <p className="director-eyebrow">Standings</p>
-                <h2>Current leaders</h2>
-              </div>
-              <Button variant="quiet" onClick={() => onNavigate('standings')}>
-                Open standings <Icon name="chevron" size={14} />
-              </Button>
-            </div>
-            {standings.length === 0 ? (
-              <div className="director-panel-body">
-                <p className="director-empty-copy">Accepted results will appear here.</p>
-              </div>
-            ) : (
-              <div className="director-panel-body director-panel-body-list">
-                <ol className="director-list director-leader-list">
-                  {standings.map((standing, index) => (
-                    <li key={standing.teamId}>
-                      <span className="director-leader-rank">{index + 1}</span>
-                      <span className="director-leader-name">
-                        {state.teams.find((team) => team.id === standing.teamId)?.displayName ??
-                          'Unknown team'}
-                      </span>
-                      <strong>
-                        {standing.wins}–{standing.losses}
-                        {standing.ties ? `–${standing.ties}` : ''}
-                      </strong>
-                    </li>
-                  ))}
-                </ol>
-              </div>
-            )}
-          </section>
-        </div>
-
-        <section className="director-panel director-activity-panel">
+        <section className="director-panel">
           <div className="director-panel-heading">
             <div>
-              <p className="director-eyebrow">Audit history</p>
-              <h2>Recent activity</h2>
+              <h2>Current leaders</h2>
             </div>
-            <Button variant="quiet" icon="history" onClick={() => onNavigate('settings')}>
-              View history
+            <Button variant="quiet" onClick={() => onNavigate('standings')}>
+              View standings <Icon name="chevron" size={14} />
             </Button>
           </div>
-          {state.audit.length === 0 ? (
+          {standings.length === 0 ? (
             <div className="director-panel-body">
-              <p className="director-empty-copy">Changes you make will be recorded here.</p>
+              <p className="director-empty-copy">Accepted results will appear here.</p>
             </div>
           ) : (
             <div className="director-panel-body director-panel-body-list">
-              <ul className="director-list director-activity-list">
-                {[...state.audit]
-                  .reverse()
-                  .slice(0, 5)
-                  .map((event) => (
-                    <li key={event.id}>
-                      <span className="director-activity-dot" />
-                      <div>
-                        <strong>{event.summary}</strong>
-                        <small>
-                          {event.actor} · {formatTime(event.at)}
-                        </small>
-                      </div>
-                    </li>
-                  ))}
-              </ul>
+              <ol className="director-list director-leader-list">
+                {standings.map((standing, index) => (
+                  <li key={standing.teamId}>
+                    <span className="director-leader-rank">{index + 1}</span>
+                    <span className="director-leader-name">
+                      {state.teams.find((team) => team.id === standing.teamId)?.displayName ?? 'Unknown team'}
+                    </span>
+                    <strong>
+                      {standing.wins}–{standing.losses}
+                      {standing.ties ? `–${standing.ties}` : ''}
+                    </strong>
+                  </li>
+                ))}
+              </ol>
             </div>
           )}
         </section>
+
+        <details className="director-panel director-diagnostics">
+          <summary>Diagnostics</summary>
+          <div className="director-panel-body">
+            <p className="director-empty-copy">
+              Saved:{' '}
+              {controller.error
+                ? 'needs attention'
+                : controller.saving
+                  ? 'saving…'
+                  : (state.metadata.lastSavedAt ?? 'not yet')}{' '}
+              ·{' '}
+              {controller.repositoryKind === 'tauri-sqlite'
+                ? 'SQLite'
+                : controller.repositoryKind === 'indexeddb'
+                  ? 'IndexedDB'
+                  : 'memory only'}
+              {' · '}
+              {state.audit.length} audit {state.audit.length === 1 ? 'entry' : 'entries'}
+              {!nativeServerAvailable && ' · native server unavailable in this browser'}
+            </p>
+            <Button variant="quiet" icon="history" onClick={() => onNavigate('settings')}>
+              Recovery and history
+            </Button>
+          </div>
+        </details>
       </div>
     </>
   );
-}
-
-function StatusStat({
-  label,
-  value,
-  detail,
-  onClick,
-}: {
-  label: string;
-  value: string;
-  detail: string;
-  onClick: () => void;
-}) {
-  return (
-    <button type="button" className="director-stat" onClick={onClick}>
-      <span>{label}</span>
-      <strong>{value}</strong>
-      <small>{detail}</small>
-    </button>
-  );
-}
-
-function teamNames(state: DirectorState, leftId: string, rightId: string | null): string {
-  const left = state.teams.find((team) => team.id === leftId)?.displayName ?? 'Unknown';
-  const right = rightId ? (state.teams.find((team) => team.id === rightId)?.displayName ?? 'Unknown') : 'Bye';
-  return `${left} · ${right}`;
-}
-
-function formatTime(value: string): string {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? '—'
-    : date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }

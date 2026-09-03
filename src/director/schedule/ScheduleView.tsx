@@ -1,20 +1,26 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
   availableTimeZones,
   isoToZonedDateTimeInput,
+  orderDayItems,
   timeZoneLabel,
   timelineEventTypeLabel,
   timelineEventTypes,
   zonedDateTimeInputToIso,
   type DirectorState,
+  type OrderedDayItem,
   type TimelineEventType,
   type TimelineVisibility,
   type TournamentTimelineEvent,
 } from '../domain';
 import type { DirectorController, NewTimelineEventInput } from '../state/useDirectorController';
 import { Button, FormField, PanelBody, StateLabel } from '../components/Controls';
+import { DirectorMenu } from '../components/DirectorMenu';
 import { PageHeader } from '../components/PageHeader';
 import { errorNotice, type AnnounceInput } from '../notices';
+
+/** One-click day events. Anything else uses the full event form. */
+const quickEventTypes: TimelineEventType[] = ['lunch', 'break', 'check-in', 'awards'];
 
 const eventTypeOptions: Array<{ value: TimelineEventType; label: string }> = timelineEventTypes.map(
   (type) => ({
@@ -35,18 +41,30 @@ export function ScheduleView({
   const tournament = state.tournament;
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const orderedItems = useMemo(
+  const [showQuickAdd, setShowQuickAdd] = useState(false);
+  const quickAddOpenerRef = useRef<HTMLElement | null>(null);
+
+  const quickAddEvent = (type: TimelineEventType) => {
+    const title = timelineEventTypeLabel(type);
+    if (controller.addTimelineEvent({ type, title, visibility: 'public' })) {
+      onAnnounce(`${title} added at the end of the day. Reorder it with the move buttons.`);
+    } else {
+      onAnnounce(
+        errorNotice(`The ${title.toLowerCase()} event could not be saved; review the Director error.`),
+      );
+    }
+    setShowQuickAdd(false);
+  };
+  // The tournament day in its explicit persisted order. Timestamps never decide
+  // placement; see `packages/tournament-domain/src/dayOrder.ts`.
+  const orderedItems: OrderedDayItem[] = useMemo(
+    () => orderDayItems(state.rounds, state.timeline),
+    [state.rounds, state.timeline],
+  );
+  const hasTimes = useMemo(
     () =>
-      [
-        ...state.rounds.map((round) => ({ kind: 'round' as const, value: round })),
-        ...state.timeline.map((event) => ({ kind: 'event' as const, value: event })),
-      ].sort(
-        (left, right) =>
-          compareOptionalTimestamp(left.value.scheduledStart, right.value.scheduledStart) ||
-          (left.kind === 'round' && right.kind === 'round'
-            ? left.value.number - right.value.number
-            : left.value.id.localeCompare(right.value.id)),
-      ),
+      state.rounds.some((round) => round.scheduledStart) ||
+      state.timeline.some((event) => event.scheduledStart || event.scheduledEnd),
     [state.rounds, state.timeline],
   );
   if (!tournament) {
@@ -69,64 +87,118 @@ export function ScheduleView({
   return (
     <>
       <PageHeader
-        eyebrow="Plan"
-        title="Schedule"
-        description={`Tournament day in ${timeZoneLabel(tournament.timeZone)}. Planned times are stored as absolute instants and stay fixed when this file moves computers.`}
+        title="Rounds"
+        description={
+          hasTimes
+            ? `Tournament day in ${timeZoneLabel(tournament.timeZone)}. Planned times are stored as absolute instants and stay fixed when this file moves computers.`
+            : 'The order of the day, top to bottom. Times are optional — add them only where they matter.'
+        }
         actions={
-          <Button
-            variant="primary"
-            icon="plus"
-            onClick={() => {
-              setEditingId(null);
-              setShowForm(true);
-            }}
-          >
-            Add event
-          </Button>
+          <>
+            <Button
+              variant="primary"
+              icon="plus"
+              onClick={() => {
+                const result = controller.generateSchedule();
+                onAnnounce(
+                  result.generated
+                    ? 'Round added at the end of the day.'
+                    : result.conflicts.join(' ') || 'The round could not be generated.',
+                );
+              }}
+            >
+              Add round
+            </Button>
+            <span
+              ref={(node) => {
+                quickAddOpenerRef.current = node;
+              }}
+            >
+              <Button
+                variant="secondary"
+                aria-haspopup="menu"
+                aria-expanded={showQuickAdd}
+                onClick={() => setShowQuickAdd((open) => !open)}
+              >
+                Add event
+              </Button>
+            </span>
+            {showQuickAdd && (
+              <DirectorMenu
+                label="Add day event"
+                openerRef={quickAddOpenerRef}
+                onClose={() => setShowQuickAdd(false)}
+              >
+                {quickEventTypes.map((type) => (
+                  <button key={type} role="menuitem" type="button" onClick={() => quickAddEvent(type)}>
+                    {timelineEventTypeLabel(type)}
+                  </button>
+                ))}
+                <button
+                  role="menuitem"
+                  type="button"
+                  onClick={() => {
+                    setShowQuickAdd(false);
+                    setEditingId(null);
+                    setShowForm(true);
+                  }}
+                >
+                  Other event…
+                </button>
+              </DirectorMenu>
+            )}
+          </>
         }
       />
       <div className="director-page-stack">
-        <section className="director-panel">
+        <section className="director-panel" aria-label="Tournament day">
           <div className="director-panel-heading">
             <div>
-              <p className="director-eyebrow">Tournament day</p>
               <h2>
-                {orderedItems.length} scheduled item{orderedItems.length === 1 ? '' : 's'}
+                {orderedItems.length} day item{orderedItems.length === 1 ? '' : 's'}
               </h2>
             </div>
-            <StateLabel state="info" label={timeZoneLabel(tournament.timeZone)} />
+            {hasTimes && <StateLabel state="info" label={timeZoneLabel(tournament.timeZone)} />}
           </div>
           <PanelBody>
             {orderedItems.length === 0 ? (
               <p className="director-empty-copy">No rounds or day events have been planned yet.</p>
             ) : (
               <ol className="director-schedule-timeline">
-                {orderedItems.map((item) =>
-                  item.kind === 'round' ? (
+                {orderedItems.map((item, index) => {
+                  const moveProps = {
+                    position: index + 1,
+                    total: orderedItems.length,
+                    onMoveUp: () => controller.moveDayItem(item.id, 'up'),
+                    onMoveDown: () => controller.moveDayItem(item.id, 'down'),
+                  };
+                  return item.kind === 'round' && item.round ? (
                     <RoundScheduleRow
-                      key={item.value.id}
+                      key={item.id}
                       state={state}
-                      round={item.value}
+                      round={item.round}
                       controller={controller}
                       onAnnounce={onAnnounce}
+                      {...moveProps}
                     />
-                  ) : (
+                  ) : item.event ? (
                     <TimelineEventRow
-                      key={item.value.id}
+                      key={item.id}
                       state={state}
-                      event={item.value}
+                      event={item.event}
                       onEdit={() => {
-                        setEditingId(item.value.id);
+                        setEditingId(item.id);
                         setShowForm(true);
                       }}
                       onDelete={() => {
-                        if (!confirm(`Remove “${item.value.title}” from the schedule?`)) return;
-                        if (controller.removeTimelineEvent(item.value.id))
-                          onAnnounce(`${item.value.title} removed.`);
+                        if (!confirm(`Remove “${item.event?.title}” from the day?`)) return;
+                        if (controller.removeTimelineEvent(item.id))
+                          onAnnounce(`${item.event?.title} removed.`);
                       }}
+                      {...moveProps}
                     />
-                  ),
-                )}
+                  ) : null;
+                })}
               </ol>
             )}
           </PanelBody>
@@ -154,15 +226,24 @@ function RoundScheduleRow({
   round,
   controller,
   onAnnounce,
+  position,
+  total,
+  onMoveUp,
+  onMoveDown,
 }: {
   state: DirectorState;
   round: DirectorState['rounds'][number];
   controller: DirectorController;
   onAnnounce: (announcement: AnnounceInput) => void;
+  position: number;
+  total: number;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
 }) {
   const timeZone = state.tournament?.timeZone ?? 'UTC';
   const [value, setValue] = useState(isoToZonedDateTimeInput(round.scheduledStart, timeZone));
   const [draftKey, setDraftKey] = useState(`${round.id}|${round.scheduledStart ?? ''}`);
+  const [editingTime, setEditingTime] = useState(false);
   const currentKey = `${round.id}|${round.scheduledStart ?? ''}`;
   const displayedValue =
     draftKey === currentKey ? value : isoToZonedDateTimeInput(round.scheduledStart, timeZone);
@@ -176,6 +257,7 @@ function RoundScheduleRow({
     }
     if (controller.setRoundScheduledStart(round.id, iso)) onAnnounce(`${round.name} planned time updated.`);
   };
+  const showTimeControl = round.scheduledStart || editingTime;
   return (
     <li className="director-schedule-item">
       <div className="director-schedule-marker" aria-hidden="true">
@@ -189,21 +271,39 @@ function RoundScheduleRow({
               {gameCount} competitive game{gameCount === 1 ? '' : 's'} · {round.status}
             </small>
           </div>
-          <StateLabel state={round.status} />
+          <div className="director-row-actions">
+            <StateLabel state={round.status} />
+            <DayMoveButtons
+              label={round.name}
+              position={position}
+              total={total}
+              onMoveUp={onMoveUp}
+              onMoveDown={onMoveDown}
+            />
+          </div>
         </div>
         <div className="director-schedule-round-controls">
-          <FormField label={`Planned start for ${round.name}`}>
-            <input
-              type="datetime-local"
-              value={displayedValue}
-              disabled={round.status === 'released' || round.status === 'closed'}
-              onChange={(event) => {
-                setDraftKey(currentKey);
-                setValue(event.target.value);
-              }}
-              onBlur={save}
-            />
-          </FormField>
+          {showTimeControl ? (
+            <FormField label={`Planned start for ${round.name}`}>
+              <input
+                type="datetime-local"
+                value={displayedValue}
+                disabled={round.status === 'released' || round.status === 'closed'}
+                onChange={(event) => {
+                  setDraftKey(currentKey);
+                  setValue(event.target.value);
+                }}
+                onBlur={save}
+              />
+            </FormField>
+          ) : (
+            round.status !== 'released' &&
+            round.status !== 'closed' && (
+              <Button variant="quiet" onClick={() => setEditingTime(true)}>
+                Set time
+              </Button>
+            )
+          )}
           {round.releasedAt && <small>Released {formatTimestamp(round.releasedAt, timeZone)}</small>}
           {round.startedAt && <small>Started {formatTimestamp(round.startedAt, timeZone)}</small>}
         </div>
@@ -212,16 +312,59 @@ function RoundScheduleRow({
   );
 }
 
+function DayMoveButtons({
+  label,
+  position,
+  total,
+  onMoveUp,
+  onMoveDown,
+}: {
+  label: string;
+  position: number;
+  total: number;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+}) {
+  return (
+    <div className="director-row-actions" role="group" aria-label={`Reorder ${label}`}>
+      <Button
+        variant="quiet"
+        disabled={position <= 1}
+        aria-label={`Move ${label} earlier`}
+        onClick={onMoveUp}
+      >
+        ↑ Up
+      </Button>
+      <Button
+        variant="quiet"
+        disabled={position >= total}
+        aria-label={`Move ${label} later`}
+        onClick={onMoveDown}
+      >
+        ↓ Down
+      </Button>
+    </div>
+  );
+}
+
 function TimelineEventRow({
   state,
   event,
   onEdit,
   onDelete,
+  position,
+  total,
+  onMoveUp,
+  onMoveDown,
 }: {
   state: DirectorState;
   event: TournamentTimelineEvent;
   onEdit: () => void;
   onDelete: () => void;
+  position: number;
+  total: number;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
 }) {
   const timeZone = state.tournament?.timeZone ?? 'UTC';
   const location = event.roomId
@@ -242,6 +385,13 @@ function TimelineEventRow({
             </small>
           </div>
           <div className="director-row-actions">
+            <DayMoveButtons
+              label={event.title}
+              position={position}
+              total={total}
+              onMoveUp={onMoveUp}
+              onMoveDown={onMoveDown}
+            />
             <Button variant="quiet" icon="edit" onClick={onEdit}>
               Edit
             </Button>
@@ -250,13 +400,19 @@ function TimelineEventRow({
             </Button>
           </div>
         </div>
-        <p>{event.description || 'No description.'}</p>
+        {event.description ? <p>{event.description}</p> : null}
         <small className="director-table-subtext">
-          {event.scheduledStart ? formatTimestamp(event.scheduledStart, timeZone) : 'Time not set'}
-          {event.scheduledEnd ? ` – ${formatTimestamp(event.scheduledEnd, timeZone)}` : ''}
-          {event.teamIds?.length
-            ? ` · ${event.teamIds.length} targeted team${event.teamIds.length === 1 ? '' : 's'}`
-            : ' · All teams'}
+          {[
+            event.scheduledStart ? formatTimestamp(event.scheduledStart, timeZone) : null,
+            event.scheduledStart && event.scheduledEnd
+              ? `– ${formatTimestamp(event.scheduledEnd, timeZone)}`
+              : null,
+            event.teamIds?.length
+              ? `${event.teamIds.length} targeted team${event.teamIds.length === 1 ? '' : 's'}`
+              : 'All teams',
+          ]
+            .filter(Boolean)
+            .join(' · ')}
         </small>
       </div>
     </li>
@@ -440,13 +596,6 @@ function TimelineEventForm({
       </PanelBody>
     </section>
   );
-}
-
-function compareOptionalTimestamp(left: string | null | undefined, right: string | null | undefined): number {
-  if (!left && !right) return 0;
-  if (!left) return 1;
-  if (!right) return -1;
-  return left.localeCompare(right);
 }
 
 function formatTimestamp(value: string, timeZone: string): string {

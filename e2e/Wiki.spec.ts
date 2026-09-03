@@ -23,8 +23,10 @@ test('the site navigation enters the wiki at its own front page', async ({ page 
 
   // There is no index page above the articles. The wiki's `Home` is its front page, so that is what
   // the navigation entry has to reach — and a link to `about/wiki/` would be served by nothing.
+  //
+  // The entry lives in the footer, which is where every content page hangs; the header is products.
   await page
-    .getByRole('navigation', { name: 'Primary navigation' })
+    .getByRole('navigation', { name: 'Footer navigation' })
     .getByRole('link', { name: 'Wiki' })
     .click();
   await expect(page).toHaveURL(/\/about\/wiki\/home\/$/);
@@ -77,19 +79,41 @@ test('the site navigation resolves from three directories deep', async ({ page }
   await page.goto('/about/wiki/start-here/');
 
   await page
-    .getByRole('navigation', { name: 'Primary navigation' })
+    .getByRole('navigation', { name: 'Footer navigation' })
     .getByRole('link', { name: 'FAQ' })
     .click();
   await expect(page).toHaveURL(/\/about\/faq\/$/);
   await expect(page.getByRole('heading', { level: 1, name: 'Frequently asked questions' })).toBeVisible();
 });
 
+test('the product pages resolve from three directories deep', async ({ page }) => {
+  await page.goto('/about/wiki/start-here/');
+
+  // An article is the deepest document on the site, so it is where a product link written against
+  // the wrong depth fails first. Both of these are `../../` from here, not `../` and not the
+  // deployment root.
+  const nav = page.getByRole('navigation', { name: 'Primary navigation' });
+  await nav.getByRole('link', { name: 'Director' }).click();
+  await expect(page).toHaveURL(/\/about\/director\/$/);
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Tournament control that stays with you.' }),
+  ).toBeVisible();
+
+  await page.goto('/about/wiki/start-here/');
+  await nav.getByRole('link', { name: 'QBLive' }).click();
+  await expect(page).toHaveURL(/\/about\/qblive\/$/);
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Follow the tournament as it happens.' }),
+  ).toBeVisible();
+});
+
 test('the scorer is three directories up from a wiki page', async ({ page }) => {
   await page.goto('/about/wiki/start-here/');
 
+  // `Scorer` is the header's way into the application, and this is the deepest page on the site.
   await page
     .getByRole('navigation', { name: 'Primary navigation' })
-    .getByRole('link', { name: 'Open QBSheet' })
+    .getByRole('link', { name: 'Scorer' })
     .click();
   await expect(page.getByRole('link', { name: 'About QBSheet' })).toBeVisible();
 });

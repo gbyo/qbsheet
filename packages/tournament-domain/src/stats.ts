@@ -1,6 +1,7 @@
 import {
   type DirectorId,
   type DirectorState,
+  type FinalPlacement,
   type GameRecord,
   type PlayerGameStat,
   type TournamentRules,
@@ -15,9 +16,13 @@ export interface TeamStanding {
   pointsFor: number;
   pointsAgainst: number;
   margin: number;
+  superpowers: number;
   powers: number;
   gets: number;
   negs: number;
+  tossupsHeard: number;
+  /** False when any contributing scoresheet omitted tossups-heard. */
+  tossupsHeardKnown: boolean;
   bonuses: number;
   bonusPoints: number;
   gamesPlayed: number;
@@ -31,6 +36,7 @@ export interface PlayerStanding {
   tossupsHeard: number;
   /** False when at least one contributing scoresheet did not report TUH. */
   tossupsHeardKnown?: boolean;
+  superpowers: number;
   powers: number;
   gets: number;
   negs: number;
@@ -85,7 +91,9 @@ export function acceptedGameRecords(
   const scheduledById = new Map(state.scheduledGames.map((game) => [game.id, game]));
   const roundById = new Map(state.rounds.map((round) => [round.id, round]));
   const accepted = state.games.filter((game) => {
-    if (game.status !== 'accepted') return false;
+    // Forfeits are decided results: they count in W/L (the non-forfeiting
+    // side wins) while recorded scores are aggregated as-entered.
+    if (game.status !== 'accepted' && game.status !== 'forfeit') return false;
     if (requestedGameIds && !requestedGameIds.has(game.scheduledGameId)) return false;
     const scheduled = scheduledById.get(game.scheduledGameId);
     // Older imported Director documents may contain accepted records before the corresponding
@@ -183,9 +191,12 @@ export function deriveTeamStandings(
       pointsFor: 0,
       pointsAgainst: 0,
       margin: 0,
+      superpowers: 0,
       powers: 0,
       gets: 0,
       negs: 0,
+      tossupsHeard: 0,
+      tossupsHeardKnown: true,
       bonuses: 0,
       bonusPoints: 0,
       gamesPlayed: 0,
@@ -207,6 +218,10 @@ export function deriveTeamStandings(
     rightStanding.pointsAgainst += left.score;
     leftStanding.margin += left.score - right.score;
     rightStanding.margin += right.score - left.score;
+    leftStanding.superpowers += left.superpowers;
+    rightStanding.superpowers += right.superpowers;
+    addTeamTossupsHeard(leftStanding, game.playerStats, left.teamId);
+    addTeamTossupsHeard(rightStanding, game.playerStats, right.teamId);
     leftStanding.powers += left.powers;
     leftStanding.gets += left.gets;
     leftStanding.negs += left.negs;
@@ -217,7 +232,20 @@ export function deriveTeamStandings(
     rightStanding.negs += right.negs;
     rightStanding.bonuses += right.bonuses;
     rightStanding.bonusPoints += right.bonusPoints;
-    if (left.score > right.score) {
+    if (
+      game.status === 'forfeit' &&
+      (left.teamId === game.forfeitedTeamId || right.teamId === game.forfeitedTeamId)
+    ) {
+      // A forfeit is never a tie and never decided by the score line: the
+      // side that did not forfeit wins, even when both scores are zero.
+      if (left.teamId === game.forfeitedTeamId) {
+        rightStanding.wins += 1;
+        leftStanding.losses += 1;
+      } else {
+        leftStanding.wins += 1;
+        rightStanding.losses += 1;
+      }
+    } else if (left.score > right.score) {
       leftStanding.wins += 1;
       rightStanding.losses += 1;
     } else if (right.score > left.score) {
@@ -343,6 +371,7 @@ export function derivePlayerStandings(
       gamesPlayed: 0,
       tossupsHeard: 0,
       tossupsHeardKnown: true,
+      superpowers: 0,
       powers: 0,
       gets: 0,
       negs: 0,
@@ -360,16 +389,53 @@ export function derivePlayerStandings(
   }
   for (const standing of byPlayer.values()) {
     standing.ppg =
-      standing.gamesPlayed === 0
-        ? 0
-        : (standing.powers * (state.tournament?.rules.powerValue ?? 15) +
-            standing.gets * (state.tournament?.rules.tossupValue ?? 10) +
-            standing.negs * (state.tournament?.rules.negValue ?? -5) +
-            standing.bonusPoints) /
-          standing.gamesPlayed;
+      standing.gamesPlayed === 0 ? 0 : playerPoints(standing, state.tournament?.rules) / standing.gamesPlayed;
   }
   return [...byPlayer.values()].sort(
     (a, b) => b.ppg - a.ppg || b.powers - a.powers || a.playerId.localeCompare(b.playerId),
+  );
+}
+
+/**
+ * Team tossups-heard comes from the team's own scoresheet lines. A game with
+ * no lines for the team, or any line without a count, makes the team's total
+ * unknown rather than a fabricated partial sum.
+ */
+function addTeamTossupsHeard(
+  standing: TeamStanding,
+  playerStats: readonly PlayerGameStat[],
+  teamId: DirectorId,
+): void {
+  const lines = playerStats.filter((stat) => stat.teamId === teamId);
+  if (lines.length === 0) {
+    standing.tossupsHeardKnown = false;
+    return;
+  }
+  for (const line of lines) {
+    if (line.tossupsHeard === null) {
+      standing.tossupsHeardKnown = false;
+      continue;
+    }
+    standing.tossupsHeard += line.tossupsHeard;
+  }
+}
+
+/**
+ * A player's total tossup/bonus points from aggregate counts, scored with the
+ * tournament's own answer values. This is the one place that arithmetic lives:
+ * Director tables, Live projection, CSV, HTML, and SQBS adapters all share it
+ * so they cannot disagree about who scored what.
+ */
+export function playerPoints(
+  standing: Pick<PlayerStanding, 'superpowers' | 'powers' | 'gets' | 'negs' | 'bonusPoints'>,
+  rules?: Pick<TournamentRules, 'superpowerValue' | 'powerValue' | 'tossupValue' | 'negValue'> | null,
+): number {
+  return (
+    standing.superpowers * (rules?.superpowerValue ?? rules?.powerValue ?? 15) +
+    standing.powers * (rules?.powerValue ?? 15) +
+    standing.gets * (rules?.tossupValue ?? 10) +
+    standing.negs * (rules?.negValue ?? -5) +
+    standing.bonusPoints
   );
 }
 
@@ -377,6 +443,7 @@ function addPlayerGame(standing: PlayerStanding, stat: PlayerGameStat): void {
   standing.gamesPlayed += 1;
   if (stat.tossupsHeard !== null) standing.tossupsHeard += stat.tossupsHeard;
   else standing.tossupsHeardKnown = false;
+  standing.superpowers += stat.superpowers;
   standing.powers += stat.powers;
   standing.gets += stat.gets;
   standing.negs += stat.negs;
@@ -385,4 +452,36 @@ function addPlayerGame(standing: PlayerStanding, stat: PlayerGameStat): void {
 
 export function totalAcceptedResults(state: DirectorState): number {
   return acceptedGameRecords(state).length;
+}
+
+/**
+ * Reorder calculated standings rows by an explicit final placement.
+ *
+ * Rows whose team appears in `placement.order` move to the front in that
+ * order; every other row keeps its relative calculated order. Duplicates are
+ * impossible by construction: the first occurrence wins. Unknown ids are
+ * ignored. Raw scores, W/L records, and the input order are never rewritten —
+ * the calculated order stays recoverable by ignoring the returned array.
+ */
+export function applyFinalPlacement<T extends { teamId: DirectorId }>(
+  calculated: readonly T[],
+  placement: FinalPlacement | undefined,
+): T[] {
+  if (!placement || placement.order.length === 0) return [...calculated];
+  const rows = new Map(calculated.map((row) => [row.teamId, row]));
+  const seen = new Set<DirectorId>();
+  const ordered: T[] = [];
+  for (const teamId of placement.order) {
+    if (seen.has(teamId)) continue;
+    seen.add(teamId);
+    const row = rows.get(teamId);
+    if (row) {
+      ordered.push(row);
+      rows.delete(teamId);
+    }
+  }
+  for (const row of calculated) {
+    if (rows.has(row.teamId)) ordered.push(row);
+  }
+  return ordered;
 }
