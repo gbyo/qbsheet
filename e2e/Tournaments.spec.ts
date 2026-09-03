@@ -31,10 +31,13 @@ test('the tournaments page explains running QBSheet across rooms', async ({ page
   expect(await fits(page)).toBe(true);
 });
 
-test('the product page reaches it from the header, and it comes back', async ({ page }) => {
+test('the product page reaches it from the site navigation, and it comes back', async ({ page }) => {
   await page.goto('/about/');
 
-  const nav = page.getByRole('navigation', { name: 'Primary navigation' });
+  // The content pages are the footer's navigation. The header carries the three products — the
+  // scorer, and the pages for Director and QBLive — so a link to a page of writing is looked for
+  // where the site actually offers it.
+  const nav = page.getByRole('navigation', { name: 'Footer navigation' });
   await nav.getByRole('link', { name: 'Tournaments' }).click();
   await expect(page).toHaveURL(/\/about\/tournaments\/$/);
   await expect(page.getByRole('heading', { level: 1, name: 'QBSheet for tournaments' })).toBeVisible();
@@ -59,9 +62,11 @@ test('it reaches its sibling pages sideways', async ({ page }) => {
 test('the scorer is two directories up', async ({ page }) => {
   await page.goto('/about/tournaments/');
 
+  // `Scorer` is the header's way into the application, and it is the depth-dependent link: from
+  // here it has to be `../../` rather than the `../` that would be right on the product page.
   await page
     .getByRole('navigation', { name: 'Primary navigation' })
-    .getByRole('link', { name: 'Open QBSheet' })
+    .getByRole('link', { name: 'Scorer' })
     .click();
   await expect(page.getByRole('link', { name: 'About QBSheet' })).toBeVisible();
 });

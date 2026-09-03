@@ -1,9 +1,26 @@
+/**
+ * The Director user interface, in a real browser, driven through the Director application itself.
+ *
+ * # Why this spec is not in `e2e/` with the scorer's
+ *
+ * It used to be, and it opened `/director.html` on the root website's dev server — an entry that
+ * existed on the deployed site as well, and which the site no longer has. Director is a desktop
+ * application: `apps/director` is the real Vite application, its `index.html` is the real entry, and
+ * its Tauri shell loads that same build. So the coverage moved rather than being dropped, and it now
+ * drives the application under test at its own root on its own configured port (1420). See
+ * `playwright.director.config.ts`.
+ *
+ * What this spec covers is the Director UI as web technology, which is what the Tauri window renders.
+ * The native half — the SQLite store, the QBTCP listener, the file dialogs — is covered separately;
+ * `apps/director/src/native.test.ts` and the Rust crate's own tests own that side, and a browser
+ * cannot exercise it, which `TournamentView` says on screen rather than pretending otherwise.
+ */
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { assignmentDocument } from '../tests/qbjDocuments';
+import { assignmentDocument } from '../../tests/qbjDocuments';
 
 async function createTournament(page: Page) {
-  await page.goto('/director.html');
+  await page.goto('/');
   await expect(page.getByRole('heading', { level: 2, name: 'Create or open a tournament' })).toBeVisible();
   await page.getByLabel('Tournament name').fill('Local Invitational');
   await page.getByLabel('Venue').fill('Main building');
@@ -13,7 +30,7 @@ async function createTournament(page: Page) {
 }
 
 test('Director starts with an empty, persisted tournament workspace', async ({ page }) => {
-  await page.goto('/director.html');
+  await page.goto('/');
 
   await expect(page).toHaveTitle('QBSheet Director');
   await expect(page.getByRole('heading', { level: 2, name: 'Create or open a tournament' })).toBeVisible();
@@ -25,7 +42,7 @@ test('Director starts with an empty, persisted tournament workspace', async ({ p
 });
 
 test('Director accepts a QBJ document even when its upload is named .json', async ({ page }) => {
-  await page.goto('/director.html');
+  await page.goto('/');
   await expect(page.getByRole('heading', { level: 2, name: 'Create or open a tournament' })).toBeVisible();
 
   await page.locator('input[type="file"]').setInputFiles({

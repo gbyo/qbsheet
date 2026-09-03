@@ -42,7 +42,7 @@
     "test:property": "vitest --run tests/RoomGameProperty.test.ts",
     "test:director": "vitest --run src/director tests/DirectorIntegration",
     "test:browser": "playwright test",
-    "test:browser:director": "playwright test e2e/Director.spec.ts",
+    "test:browser:director": "playwright test --config playwright.director.config.ts",
     "director:dev": "npm run dev --workspace=@qbsheet/director",
     "director:build": "npm run build --workspace=@qbsheet/director",
     "director:test": "npm run test --workspace=@qbsheet/director",

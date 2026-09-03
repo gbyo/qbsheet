@@ -102,6 +102,28 @@ describe('the product page', () => {
     expect(bands[0].querySelector('.about-assurance-grid')).not.toBeNull();
   });
 
+  test('introduces the other two products without taking the page over', () => {
+    const { container } = render(<About />);
+
+    expect(screen.getByText('One system')).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'Three parts of a tournament day.' }),
+    ).toBeInTheDocument();
+    for (const term of ['QBSheet', 'Director', 'QBLive']) {
+      expect(screen.getByText(term, { selector: 'dt' })).toBeInTheDocument();
+    }
+    // Relative, and each product page is a directory below this one.
+    expect(screen.getByRole('link', { name: 'About Director' })).toHaveAttribute('href', './director/');
+    expect(screen.getByRole('link', { name: 'About QBLive' })).toHaveAttribute('href', './qblive/');
+
+    // A supporting section, not a second hero: no tint of its own, no actions, and one line each.
+    const family = container.querySelector('.about-family');
+    expect(family).not.toBeNull();
+    expect(family?.closest('.about-band')).toBeNull();
+    expect(family?.querySelector('.about-actions')).toBeNull();
+    expect(family?.querySelectorAll('.about-definition-list > div')).toHaveLength(3);
+  });
+
   test('explains the open-by-design promise and keeps its documentation links', () => {
     render(<About />);
 

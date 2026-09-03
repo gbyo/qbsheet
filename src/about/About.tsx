@@ -48,6 +48,8 @@ const slug = '' as const;
 
 /** Relative, because this page does not know what directory the deployment put it in. */
 const selfHostUrl = pageUrl(slug, 'self-host');
+const directorUrl = pageUrl(slug, 'director');
+const qbliveUrl = pageUrl(slug, 'qblive');
 
 /**
  * React 18 does not recognise `fetchPriority` and drops it with a warning, so it is spread in as the
@@ -181,6 +183,59 @@ function AssuranceSection() {
   );
 }
 
+/**
+ * The other two products, introduced once and briefly.
+ *
+ * # Why this page mentions them at all
+ *
+ * Because the reader who has got this far is often the person who would need all three, and until
+ * this section existed the only statement of the product family on this site was three words in a
+ * header navigation. A director evaluating a scoresheet for sixteen rooms is also the person who
+ * has to run those sixteen rooms and put standings somewhere the parents can see them.
+ *
+ * # Why it is not longer than this
+ *
+ * This page markets the scorer. Director and QBLive have their own pages, written for their own
+ * readers, and the job here is one line each and a route to them — not a second hero and not a
+ * feature grid that competes with the scoring workflow above it. So it reuses the definition list
+ * exactly as the open-by-design section below it does, and it does not take the tint: there is one
+ * band on this page and it belongs to tournament day.
+ */
+function FamilySection() {
+  return (
+    <section className="about-section about-family" aria-labelledby="family-heading">
+      <div className="about-section-heading about-section-heading-narrow">
+        <p className="about-kicker">One system</p>
+        <h2 id="family-heading">Three parts of a tournament day.</h2>
+        <p>
+          QBSheet is the scoresheet. Two other pieces sit either side of it, and each is optional until you
+          want it.
+        </p>
+      </div>
+      <dl className="about-definition-list">
+        <div>
+          <dt>QBSheet</dt>
+          <dd>Score each game, in a browser, connected or not. You are reading its page.</dd>
+        </div>
+        <div>
+          <dt>Director</dt>
+          <dd>
+            Run the tournament from the desktop application on the tournament-control computer.{' '}
+            <a href={directorUrl}>About Director</a>.
+          </dd>
+        </div>
+        <div>
+          <dt>QBLive</dt>
+          <dd>
+            Let everyone follow along, from what tournament control chooses to publish.{' '}
+            <a href={qbliveUrl}>About QBLive</a>.
+          </dd>
+        </div>
+      </dl>
+    </section>
+  );
+}
+
 export default function About() {
   return (
     <div className="about-page">
@@ -210,6 +265,8 @@ export default function About() {
         <WorkflowSection />
 
         <AssuranceSection />
+
+        <FamilySection />
 
         <section className="about-section about-open" aria-labelledby="open-heading">
           <div className="about-section-heading about-section-heading-narrow">

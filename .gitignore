@@ -3,7 +3,9 @@ dist/
 *.local
 .DS_Store
 playwright-report/
+playwright-report-director/
 test-results/
+test-results-director/
 .stryker-tmp/
 reports/
 # Generated build/runtime state.
