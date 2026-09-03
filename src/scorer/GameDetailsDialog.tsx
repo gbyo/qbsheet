@@ -34,7 +34,7 @@ import { exceptionFacts, procedureExceptionLine, procedureExceptions } from '../
 import { ScoreEvent } from '../scoring/ScoreEvents';
 import { playerNameMaxLength } from '../game/Roster';
 import { teamNameMaxLength } from '../scoring/identityCorrection';
-import { correctionSentence, isCorrectionNote } from '../scoring/gameCorrection';
+import { correctionSentence, GameCorrectionRefusal, isCorrectionNote } from '../scoring/gameCorrection';
 import {
   canonicalSideForDisplay,
   DisplaySideMapping,
@@ -70,7 +70,19 @@ function DetailRow(props: {
   );
 }
 
-/** Rename one team or one player, without offering a whole roster editor to do it. */
+/**
+ * Rename one team or one player, without offering a whole roster editor to do it.
+ *
+ * # Why it can be mid-save
+ *
+ * A rename is persisted by the host, and the host can refuse it: `ScoringScreen.correctGame` throws
+ * a `GameCorrectionRefusal` when the journal or the record store would not take the change. This
+ * form used to close itself the moment the promise settled either way, which meant a refused rename
+ * looked exactly like an applied one — the editor went away, the old name was still on the
+ * scoresheet, and whoever typed it had no reason to look again. So the same standard the scoring
+ * rules correction already holds itself to: one submission at a time, the reason on screen beside
+ * the field it belongs to, and the typed name still there to press Save on again.
+ */
 function NameCorrectionForm(props: {
   title: string;
   initial: string;
@@ -78,19 +90,25 @@ function NameCorrectionForm(props: {
   /** Set when the proposed name collides with somebody already on this roster. */
   mergeOffer?: string;
   problems: string[];
+  /** What the device said when it refused to write the correction. Empty until it has. */
+  failure: string;
+  /** True while the correction is being persisted, when nothing may be submitted again. */
+  saving: boolean;
   onPreview: (name: string) => void;
   onSave: (name: string, merge: boolean) => void;
   onCancel: () => void;
 }) {
-  const { title, initial, maxLength, mergeOffer, problems, onPreview, onSave, onCancel } = props;
+  const { title, initial, maxLength, mergeOffer, problems, failure, saving, onPreview, onSave, onCancel } =
+    props;
   const [name, setName] = useState(initial);
+  const unusable = name.trim() === '' || name.trim() === initial || problems.length > 0;
 
   return (
     <form
       className="scorer-note-form"
       onSubmit={(submitEvent) => {
         submitEvent.preventDefault();
-        if (name.trim() === '' || name.trim() === initial) return;
+        if (unusable || saving) return;
         onSave(name.trim(), false);
       }}
     >
@@ -101,6 +119,7 @@ function NameCorrectionForm(props: {
           data-dialog-autofocus
           value={name}
           maxLength={maxLength}
+          disabled={saving}
           onChange={(changeEvent) => {
             setName(changeEvent.target.value);
             onPreview(changeEvent.target.value);
@@ -118,21 +137,27 @@ function NameCorrectionForm(props: {
             If {initial} and {mergeOffer} are the same person, everything recorded for {initial} can be moved
             onto {mergeOffer}. That cannot be undone by renaming them back.
           </p>
-          <button type="button" className="scorer-danger" onClick={() => onSave(name.trim(), true)}>
+          <button
+            type="button"
+            className="scorer-danger"
+            disabled={saving || name.trim() === ''}
+            onClick={() => onSave(name.trim(), true)}
+          >
             They are the same person — combine them
           </button>
         </>
       )}
+      {failure !== '' && (
+        <p className="scorer-problem" role="alert">
+          {failure}
+        </p>
+      )}
       <div className="rules-correction-actions">
-        <button type="button" className="scorer-action" onClick={onCancel}>
+        <button type="button" className="scorer-action" onClick={onCancel} disabled={saving}>
           Cancel
         </button>
-        <button
-          type="submit"
-          className="scorer-choice"
-          disabled={name.trim() === '' || name.trim() === initial || problems.length > 0}
-        >
-          Save
+        <button type="submit" className="scorer-choice" disabled={unusable || saving}>
+          {saving ? 'Saving…' : 'Save'}
         </button>
       </div>
     </form>
@@ -202,11 +227,53 @@ export default function GameDetailsDialog(props: IGameDetailsDialogProps) {
   const [moderatorName, setModeratorName] = useState(moderator);
   const [problems, setProblems] = useState<string[]>([]);
   const [mergeWith, setMergeWith] = useState<string | undefined>(undefined);
+  /** True from the moment a rename is submitted until the host has accepted or refused it. */
+  const [saving, setSaving] = useState(false);
+  /** The refusal on screen, if the last attempt was refused. Cleared by the next attempt. */
+  const [failure, setFailure] = useState('');
 
   const stopEditing = () => {
     setEditing({ kind: 'none' });
     setProblems([]);
     setMergeWith(undefined);
+    setSaving(false);
+    setFailure('');
+  };
+
+  /** Open one editor with nothing left over from the last one that was open. */
+  const beginEditing = (next: Editing) => {
+    setProblems([]);
+    setMergeWith(undefined);
+    setSaving(false);
+    setFailure('');
+    setEditing(next);
+  };
+
+  /**
+   * Submit one name correction and only close on success.
+   *
+   * The refusal's own sentence is preferred when the host marked one for the room, because "nothing
+   * has changed" is a claim only the host can make; anything else thrown is reported in this
+   * screen's own words rather than rendered, which is what every other surface in this application
+   * does with an error string. See `GameCorrectionRefusal`.
+   */
+  const persistCorrection = async (write: () => void | Promise<void>): Promise<void> => {
+    if (saving) return;
+    setSaving(true);
+    setFailure('');
+    try {
+      await write();
+    } catch (thrown) {
+      // Still open, still holding what was typed: pressing Save again is the retry.
+      setSaving(false);
+      setFailure(
+        thrown instanceof GameCorrectionRefusal && thrown.message.trim() !== ''
+          ? thrown.message
+          : 'That correction could not be saved on this device. Nothing has changed; try again.',
+      );
+      return;
+    }
+    stopEditing();
   };
 
   if (editing.kind === 'team') {
@@ -222,9 +289,11 @@ export default function GameDetailsDialog(props: IGameDetailsDialogProps) {
           initial={game[side].name}
           maxLength={teamNameMaxLength}
           problems={problems}
+          failure={failure}
+          saving={saving}
           onPreview={(name) => setProblems(name.trim() === '' ? [] : (teamNameProblem?.(side, name) ?? []))}
           onSave={(name) => {
-            void Promise.resolve(onCorrectTeamName?.(side, name)).then(stopEditing);
+            void persistCorrection(() => onCorrectTeamName?.(side, name));
           }}
           onCancel={stopEditing}
         />
@@ -246,6 +315,8 @@ export default function GameDetailsDialog(props: IGameDetailsDialogProps) {
           maxLength={playerNameMaxLength}
           problems={problems}
           mergeOffer={mergeWith}
+          failure={failure}
+          saving={saving}
           onPreview={(name) => {
             if (name.trim() === '' || name.trim() === player) {
               setProblems([]);
@@ -257,7 +328,7 @@ export default function GameDetailsDialog(props: IGameDetailsDialogProps) {
             setMergeWith(verdict.mergeWith);
           }}
           onSave={(name, merge) => {
-            void Promise.resolve(onCorrectPlayerName?.(side, player, name, merge)).then(stopEditing);
+            void persistCorrection(() => onCorrectPlayerName?.(side, player, name, merge));
           }}
           onCancel={stopEditing}
         />
@@ -282,11 +353,7 @@ export default function GameDetailsDialog(props: IGameDetailsDialogProps) {
                 <button
                   type="button"
                   className="scorer-text-action"
-                  onClick={() => {
-                    setProblems([]);
-                    setMergeWith(undefined);
-                    setEditing({ kind: 'player', side, player: player.name });
-                  }}
+                  onClick={() => beginEditing({ kind: 'player', side, player: player.name })}
                 >
                   Correct
                 </button>
@@ -362,7 +429,7 @@ export default function GameDetailsDialog(props: IGameDetailsDialogProps) {
               value={`${game[side].name} · ${game[side].players.length} on the roster`}
               action={
                 onCorrectTeamName
-                  ? { label: 'Correct…', onSelect: () => setEditing({ kind: 'team', side }) }
+                  ? { label: 'Correct…', onSelect: () => beginEditing({ kind: 'team', side }) }
                   : undefined
               }
             />
@@ -377,7 +444,7 @@ export default function GameDetailsDialog(props: IGameDetailsDialogProps) {
               value={game[side].players.map((player) => player.name).join(', ') || 'nobody yet'}
               action={
                 onCorrectPlayerName
-                  ? { label: 'Correct…', onSelect: () => setEditing({ kind: 'roster', side }) }
+                  ? { label: 'Correct…', onSelect: () => beginEditing({ kind: 'roster', side }) }
                   : undefined
               }
             />
@@ -391,7 +458,7 @@ export default function GameDetailsDialog(props: IGameDetailsDialogProps) {
         <DetailRow
           label="Moderator"
           value={moderator || 'not recorded'}
-          action={{ label: 'Edit', onSelect: () => setEditing({ kind: 'moderator' }) }}
+          action={{ label: 'Edit', onSelect: () => beginEditing({ kind: 'moderator' }) }}
         />
         <DetailRow label="Scorekeeper" value={scorekeeper || 'not signed in on this device'} />
         <DetailRow

@@ -7,7 +7,8 @@ import {
 import type { DirectorController } from '../state/useDirectorController';
 import { Button, EmptyState } from '../components/Controls';
 import { PageHeader } from '../components/PageHeader';
-import { csvCell } from '@qbsheet/tournament-formats';
+import { playerStatsCsv, standingsFileStem, teamStandingsCsv } from '../format/standingsCsv';
+import { csvMediaType, downloadText } from '../format/downloadFile';
 
 export function StandingsView({
   state,
@@ -18,9 +19,15 @@ export function StandingsView({
   onAnnounce: (message: string) => void;
 }) {
   const teamStandings = deriveTeamStandings(state);
-  const playerStandings = derivePlayerStandings(state)
-    .filter((standing) => standing.gamesPlayed > 0)
-    .slice(0, 10);
+  /*
+   * Everybody who has played, in the order the derivation ranks them.
+   *
+   * This used to be `.slice(0, 10)` with nothing on screen saying so, which is a table that looks
+   * complete and is not: the eleventh player was unreachable from the only page that reports player
+   * statistics, and a director checking a stat leader against a protest would have found the page
+   * silently disagreeing with the export.
+   */
+  const playerStandings = derivePlayerStandings(state).filter((standing) => standing.gamesPlayed > 0);
   return (
     <>
       <PageHeader
@@ -28,9 +35,22 @@ export function StandingsView({
         title="Standings & stats"
         description="Derived from accepted game records and the tournament tiebreak configuration."
         actions={
-          <Button variant="secondary" icon="download" onClick={() => downloadCsv(state, onAnnounce)}>
-            Export CSV
-          </Button>
+          <>
+            <Button
+              variant="secondary"
+              icon="download"
+              onClick={() => downloadTeamStandings(state, onAnnounce)}
+            >
+              Export team standings CSV
+            </Button>
+            <Button
+              variant="secondary"
+              icon="download"
+              onClick={() => downloadPlayerStats(state, onAnnounce)}
+            >
+              Export player stats CSV
+            </Button>
+          </>
         }
       />
       <div className="director-page-stack">
@@ -99,7 +119,9 @@ export function StandingsView({
               <div className="director-panel-heading">
                 <div>
                   <p className="director-eyebrow">Player statistics</p>
-                  <h2>Scoring leaders</h2>
+                  <h2>
+                    {playerStandings.length} player{playerStandings.length === 1 ? '' : 's'}
+                  </h2>
                 </div>
                 <span className="director-muted">Accepted games only</span>
               </div>
@@ -157,40 +179,16 @@ export function StandingsView({
   );
 }
 
-function downloadCsv(state: DirectorState, onAnnounce: (message: string) => void): void {
-  const rows = [
-    ['Rank', 'Team', 'Wins', 'Losses', 'Ties', 'Win %', 'Points for', 'Points against', 'Margin'],
-    ...deriveTeamStandings(state).map((standing, index) => [
-      String(index + 1),
-      state.teams.find((team) => team.id === standing.teamId)?.displayName ?? '',
-      String(standing.wins),
-      String(standing.losses),
-      String(standing.ties),
-      `${(standing.winPercentage * 100).toFixed(1)}%`,
-      String(standing.pointsFor),
-      String(standing.pointsAgainst),
-      String(standing.margin),
-    ]),
-  ];
-  const blob = new Blob([rows.map((row) => row.map(csvCell).join(',')).join('\n')], {
-    type: 'text/csv;charset=utf-8',
-  });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = `${safeName(state.tournament?.name ?? 'tournament')}-standings.csv`;
-  document.body.append(anchor);
-  anchor.click();
-  anchor.remove();
-  // Revoking synchronously can cancel the download in some browsers before navigation starts.
-  window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
-  onAnnounce('Standings CSV exported.');
+/*
+ * Both exports write the shared serialization, so the file a director opens has the columns the
+ * table above them has. See `standingsCsv` for why that is one module rather than one per page.
+ */
+function downloadTeamStandings(state: DirectorState, onAnnounce: (message: string) => void): void {
+  downloadText(teamStandingsCsv(state), `${standingsFileStem(state)}-standings.csv`, csvMediaType);
+  onAnnounce('Team standings CSV exported.');
 }
-function safeName(value: string): string {
-  return (
-    value
-      .trim()
-      .replace(/[^a-z0-9]+/gi, '-')
-      .replace(/^-|-$/g, '') || 'tournament'
-  );
+
+function downloadPlayerStats(state: DirectorState, onAnnounce: (message: string) => void): void {
+  downloadText(playerStatsCsv(state), `${standingsFileStem(state)}-player-stats.csv`, csvMediaType);
+  onAnnounce('Player statistics CSV exported.');
 }

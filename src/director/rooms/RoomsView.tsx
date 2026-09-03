@@ -8,6 +8,48 @@ import { useNavigationHighlight } from '../app/useNavigationHighlight';
 import { Icon } from '../components/Icon';
 import { PageHeader } from '../components/PageHeader';
 
+type EquipmentKind = DirectorState['equipment'][number]['kind'];
+
+interface RoomDraft {
+  name: string;
+  building: string;
+  floor: string;
+  accessibility: string;
+  directions: string;
+  notes: string;
+}
+interface StaffDraft {
+  name: string;
+  roles: StaffRole[];
+  notes: string;
+}
+interface EquipmentDraft {
+  name: string;
+  kind: EquipmentKind;
+  notes: string;
+}
+
+/*
+ * The three empty drafts, module-level so a save can restore one by identity rather than by
+ * retyping the shape.
+ */
+const emptyRoomDraft: RoomDraft = {
+  name: '',
+  building: '',
+  floor: '',
+  accessibility: '',
+  directions: '',
+  notes: '',
+};
+/** Fresh each time, so the module-level default cannot be reached through a draft's array. */
+const emptyStaffDraft = (): StaffDraft => ({
+  name: '',
+  /** At least one, because the domain expects at least one. Moderator is the commonest. */
+  roles: ['moderator'],
+  notes: '',
+});
+const emptyEquipmentDraft: EquipmentDraft = { name: '', kind: 'buzzer', notes: '' };
+
 export function RoomsView({
   state,
   controller,
@@ -24,27 +66,24 @@ export function RoomsView({
   onClearNavigationTarget?: () => void;
 }) {
   const [showForm, setShowForm] = useState<'room' | 'staff' | 'equipment' | null>(null);
-  const [name, setName] = useState('');
-  const [building, setBuilding] = useState('');
-  const [floor, setFloor] = useState('');
-  const [accessibility, setAccessibility] = useState('');
-  const [directions, setDirections] = useState('');
-  const [notes, setNotes] = useState('');
-  const [staffRole, setStaffRole] = useState<'moderator' | 'scorekeeper' | 'runner' | 'hq'>('moderator');
-  const [equipmentKind, setEquipmentKind] = useState<'buzzer' | 'device' | 'other'>('buzzer');
+  /*
+   * Three drafts, because there are three forms.
+   *
+   * The Add room / Add staff / Add equipment buttons all opened one shared set of fields and cleared
+   * them on the way in, so a director halfway through typing a room's directions who pressed Add
+   * staff to check something lost the lot — silently, with no way back. They are small independent
+   * forms and switching between them should cost nothing, which is what separate state buys without
+   * a confirmation dialog standing between somebody and a button they meant to press.
+   *
+   * A draft survives closing the form as well as switching away from it, for the same reason: the
+   * only thing that empties one is the save that consumed it.
+   */
+  const [roomDraft, setRoomDraft] = useState(emptyRoomDraft);
+  const [staffDraft, setStaffDraft] = useState<StaffDraft>(emptyStaffDraft);
+  const [equipmentDraft, setEquipmentDraft] = useState(emptyEquipmentDraft);
   const [filter, setFilter] = useState<'all' | 'available' | 'live' | 'help' | 'offline'>('all');
   const [amendmentMappings, setAmendmentMappings] = useState<Record<string, string>>({});
-  const openForm = (kind: 'room' | 'staff' | 'equipment') => {
-    setShowForm(kind);
-    setName('');
-    setBuilding('');
-    setFloor('');
-    setAccessibility('');
-    setDirections('');
-    setNotes('');
-    if (kind === 'staff') setStaffRole('moderator');
-    if (kind === 'equipment') setEquipmentKind('buzzer');
-  };
+  const openForm = (kind: 'room' | 'staff' | 'equipment') => setShowForm(kind);
   const targetRoomId =
     navigationTarget?.section === 'rooms' && navigationTarget.entityType === 'room'
       ? navigationTarget.entityId
@@ -61,49 +100,53 @@ export function RoomsView({
   const rosterAmendments = [...state.qbtcpRosterAmendments].reverse();
   const openHelpCount = helpRequests.filter((request) => request.status === 'open').length;
   const save = () => {
-    if (!name.trim()) {
+    if (!roomDraft.name.trim()) {
       onAnnounce('Enter a room name first.');
       return;
     }
-    if (!controller.addRoom({ name, building, floor, accessibility, directions, notes })) {
+    if (!controller.addRoom(roomDraft)) {
       onAnnounce('The room could not be added; review the Director error.');
       return;
     }
-    onAnnounce(`${name.trim()} added.`);
-    setName('');
-    setBuilding('');
-    setFloor('');
-    setAccessibility('');
-    setDirections('');
-    setNotes('');
+    onAnnounce(`${roomDraft.name.trim()} added.`);
+    // Only this form's draft. A staff or equipment draft left open beside it is untouched.
+    setRoomDraft(emptyRoomDraft);
     setShowForm(null);
   };
   const saveStaff = () => {
-    if (!name.trim()) {
+    if (!staffDraft.name.trim()) {
       onAnnounce('Enter a staff name first.');
       return;
     }
-    if (!controller.addStaff({ name, roles: [staffRole], notes })) {
+    if (staffDraft.roles.length === 0) {
+      onAnnounce('Choose at least one staff role.');
+      return;
+    }
+    if (!controller.addStaff({ name: staffDraft.name, roles: staffDraft.roles, notes: staffDraft.notes })) {
       onAnnounce('The staff member could not be added; review the Director error.');
       return;
     }
-    onAnnounce(`${name.trim()} added to staff.`);
-    setName('');
-    setNotes('');
+    onAnnounce(`${staffDraft.name.trim()} added to staff.`);
+    setStaffDraft(emptyStaffDraft());
     setShowForm(null);
   };
   const saveEquipment = () => {
-    if (!name.trim()) {
+    if (!equipmentDraft.name.trim()) {
       onAnnounce('Enter an equipment name first.');
       return;
     }
-    if (!controller.addEquipment({ name, kind: equipmentKind, notes })) {
+    if (
+      !controller.addEquipment({
+        name: equipmentDraft.name,
+        kind: equipmentDraft.kind,
+        notes: equipmentDraft.notes,
+      })
+    ) {
       onAnnounce('The equipment resource could not be added; review the Director error.');
       return;
     }
-    onAnnounce(`${name.trim()} added to equipment.`);
-    setName('');
-    setNotes('');
+    onAnnounce(`${equipmentDraft.name.trim()} added to equipment.`);
+    setEquipmentDraft(emptyEquipmentDraft);
     setShowForm(null);
   };
   return (
@@ -148,22 +191,24 @@ export function RoomsView({
                 <div className="director-form-grid director-form-grid-three">
                   <FormField label="Room name">
                     <input
-                      value={name}
-                      onChange={(event) => setName(event.target.value)}
+                      value={roomDraft.name}
+                      onChange={(event) => setRoomDraft((draft) => ({ ...draft, name: event.target.value }))}
                       placeholder="Room 101"
                     />
                   </FormField>
                   <FormField label="Building">
                     <input
-                      value={building}
-                      onChange={(event) => setBuilding(event.target.value)}
+                      value={roomDraft.building}
+                      onChange={(event) =>
+                        setRoomDraft((draft) => ({ ...draft, building: event.target.value }))
+                      }
                       placeholder="Main building"
                     />
                   </FormField>
                   <FormField label="Floor">
                     <input
-                      value={floor}
-                      onChange={(event) => setFloor(event.target.value)}
+                      value={roomDraft.floor}
+                      onChange={(event) => setRoomDraft((draft) => ({ ...draft, floor: event.target.value }))}
                       placeholder="First"
                     />
                   </FormField>
@@ -174,15 +219,19 @@ export function RoomsView({
                     hint="For example: step-free entrance or hearing loop."
                   >
                     <input
-                      value={accessibility}
-                      onChange={(event) => setAccessibility(event.target.value)}
+                      value={roomDraft.accessibility}
+                      onChange={(event) =>
+                        setRoomDraft((draft) => ({ ...draft, accessibility: event.target.value }))
+                      }
                       placeholder="Step-free entrance"
                     />
                   </FormField>
                   <FormField label="Directions" hint="Give staff a short wayfinding note.">
                     <input
-                      value={directions}
-                      onChange={(event) => setDirections(event.target.value)}
+                      value={roomDraft.directions}
+                      onChange={(event) =>
+                        setRoomDraft((draft) => ({ ...draft, directions: event.target.value }))
+                      }
                       placeholder="East stairwell, first door on the left"
                     />
                   </FormField>
@@ -191,8 +240,8 @@ export function RoomsView({
                   <textarea
                     className="director-textarea"
                     rows={2}
-                    value={notes}
-                    onChange={(event) => setNotes(event.target.value)}
+                    value={roomDraft.notes}
+                    onChange={(event) => setRoomDraft((draft) => ({ ...draft, notes: event.target.value }))}
                     placeholder="Anything the director or runners should know"
                   />
                 </FormField>
@@ -226,29 +275,29 @@ export function RoomsView({
                 <div className="director-form-grid director-form-grid-two">
                   <FormField label="Name">
                     <input
-                      value={name}
-                      onChange={(event) => setName(event.target.value)}
+                      value={staffDraft.name}
+                      onChange={(event) => setStaffDraft((draft) => ({ ...draft, name: event.target.value }))}
                       placeholder="Alex Morgan"
                     />
                   </FormField>
-                  <FormField label="Primary role">
-                    <select
-                      value={staffRole}
-                      onChange={(event) => setStaffRole(event.target.value as typeof staffRole)}
-                    >
-                      <option value="moderator">Moderator</option>
-                      <option value="scorekeeper">Scorekeeper</option>
-                      <option value="runner">Runner</option>
-                      <option value="hq">HQ staff</option>
-                    </select>
-                  </FormField>
+                  {/*
+                    The same checkboxes editing a staff member offers, rather than a single
+                    "Primary role" select. Somebody who moderates and keeps score is one person with
+                    two roles in the domain, and entering them used to require saving them wrong and
+                    editing them straight afterwards.
+                  */}
+                  <StaffRoleField
+                    roles={staffDraft.roles}
+                    onChange={(roles) => setStaffDraft((draft) => ({ ...draft, roles }))}
+                    idPrefix="new-staff"
+                  />
                 </div>
                 <FormField label="Notes" hint="Optional handoff or contact details for the director team.">
                   <textarea
                     className="director-textarea"
                     rows={2}
-                    value={notes}
-                    onChange={(event) => setNotes(event.target.value)}
+                    value={staffDraft.notes}
+                    onChange={(event) => setStaffDraft((draft) => ({ ...draft, notes: event.target.value }))}
                     placeholder="Prefers early rounds; call from HQ if reassigned"
                   />
                 </FormField>
@@ -282,15 +331,22 @@ export function RoomsView({
                 <div className="director-form-grid director-form-grid-two">
                   <FormField label="Name">
                     <input
-                      value={name}
-                      onChange={(event) => setName(event.target.value)}
+                      value={equipmentDraft.name}
+                      onChange={(event) =>
+                        setEquipmentDraft((draft) => ({ ...draft, name: event.target.value }))
+                      }
                       placeholder="Buzzer set 1"
                     />
                   </FormField>
                   <FormField label="Type">
                     <select
-                      value={equipmentKind}
-                      onChange={(event) => setEquipmentKind(event.target.value as typeof equipmentKind)}
+                      value={equipmentDraft.kind}
+                      onChange={(event) =>
+                        setEquipmentDraft((draft) => ({
+                          ...draft,
+                          kind: event.target.value as EquipmentKind,
+                        }))
+                      }
                     >
                       <option value="buzzer">Buzzer</option>
                       <option value="device">Laptop / tablet</option>
@@ -302,8 +358,10 @@ export function RoomsView({
                   <textarea
                     className="director-textarea"
                     rows={2}
-                    value={notes}
-                    onChange={(event) => setNotes(event.target.value)}
+                    value={equipmentDraft.notes}
+                    onChange={(event) =>
+                      setEquipmentDraft((draft) => ({ ...draft, notes: event.target.value }))
+                    }
                     placeholder="Bring the spare buzzer to HQ"
                   />
                 </FormField>
@@ -852,6 +910,52 @@ const staffRoleOptions: Array<{ value: StaffRole; label: string }> = [
   { value: 'hq', label: 'HQ staff' },
 ];
 
+/**
+ * Which roles somebody has, asked the same way wherever it is asked.
+ *
+ * Creating a staff member and editing one are the same question about the same field, and they used
+ * to be two different controls: a single-choice "Primary role" select on the way in, checkboxes
+ * afterwards. Somebody who both moderates and keeps score could not be entered as such, so the
+ * mental model a director learned on the first screen was wrong by the second.
+ */
+function StaffRoleField({
+  roles,
+  onChange,
+  idPrefix,
+}: {
+  roles: readonly StaffRole[];
+  onChange: (roles: StaffRole[]) => void;
+  /** Distinguishes this group's checkboxes from another instance rendered on the same page. */
+  idPrefix: string;
+}) {
+  return (
+    <fieldset className="director-resource-role-field">
+      <legend>Roles</legend>
+      <div className="director-resource-role-grid">
+        {staffRoleOptions.map((role) => (
+          <label className="director-checkbox-field" key={role.value} htmlFor={`${idPrefix}-${role.value}`}>
+            <input
+              id={`${idPrefix}-${role.value}`}
+              type="checkbox"
+              checked={roles.includes(role.value)}
+              onChange={(event) =>
+                onChange(
+                  event.target.checked
+                    ? roles.includes(role.value)
+                      ? [...roles]
+                      : [...roles, role.value]
+                    : roles.filter((entry) => entry !== role.value),
+                )
+              }
+            />
+            <span>{role.label}</span>
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  );
+}
+
 function StaffResourceRow({
   member,
   controller,
@@ -942,29 +1046,7 @@ function StaffResourceRow({
             <FormField label="Name">
               <input value={name} onChange={(event) => setName(event.target.value)} />
             </FormField>
-            <fieldset className="director-resource-role-field">
-              <legend>Roles</legend>
-              <div className="director-resource-role-grid">
-                {staffRoleOptions.map((role) => (
-                  <label className="director-checkbox-field" key={role.value}>
-                    <input
-                      type="checkbox"
-                      checked={roles.includes(role.value)}
-                      onChange={(event) => {
-                        setRoles((current) =>
-                          event.target.checked
-                            ? current.includes(role.value)
-                              ? current
-                              : [...current, role.value]
-                            : current.filter((entry) => entry !== role.value),
-                        );
-                      }}
-                    />
-                    <span>{role.label}</span>
-                  </label>
-                ))}
-              </div>
-            </fieldset>
+            <StaffRoleField roles={roles} onChange={setRoles} idPrefix={`staff-${member.id}`} />
           </div>
           <FormField label="Notes" hint="Optional handoff or contact details for the director team.">
             <textarea

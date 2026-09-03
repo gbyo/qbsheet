@@ -1749,8 +1749,9 @@ export default function Scorer(props: IScorerProps) {
    * The layout question, answered.
    *
    * One press does all of it: the layout changes, the device remembers it for the next game, and
-   * this game is marked as asked so a reload does not ask again. Dismissing without choosing is the
-   * same answer with the preselected layout, which is why it records the same acknowledgement.
+   * this game is marked as asked so a reload does not ask again. Dismissing is the same answer with
+   * whichever card the dialog is showing as selected — see `ScoringLayoutDialog` — so it arrives
+   * here as an ordinary answer rather than as a separate route that leaves the layout alone.
    */
   const answerLayoutPrompt = useCallback(
     (layout?: ScoringView) => {
@@ -3534,13 +3535,7 @@ export default function Scorer(props: IScorerProps) {
         The same dialog from both routes: automatically for a game nobody has scored yet, and from
         the Game menu whenever somebody wants to read what the two are. See `scoringLayoutPrompt`.
       */}
-      {layoutChooserOpen && (
-        <ScoringLayoutDialog
-          value={scoringLayout}
-          onChoose={answerLayoutPrompt}
-          onClose={() => answerLayoutPrompt()}
-        />
-      )}
+      {layoutChooserOpen && <ScoringLayoutDialog value={scoringLayout} onChoose={answerLayoutPrompt} />}
       {dialog === 'export' && (
         <ExportDialog
           onDownloadQbjBackup={downloadQbj}

@@ -19,6 +19,7 @@
  */
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { IScorekeeperFormat } from '../src/scoring/ScorekeeperFormat';
 import scoringRulesToScorekeeperFormat, { CommonRuleSets, ScoringRules } from './rules';
 import ScorerHost from '../src/scorer/ScorerHost';
@@ -223,6 +224,116 @@ describe('the question a new game opens with', () => {
     expect(chooser()).toBeNull();
     expect(document.querySelector('.scorer-table-view')).toBeTruthy();
     // And the game has been asked, so a reload does not ask again.
+    expect(window.localStorage.getItem(scoringLayoutPromptStorageKey(gameKey))).toBeTruthy();
+  });
+});
+
+/**
+ * The card marked as selected and the layout that is actually in force, which have to be one thing.
+ *
+ * Arrow keys move a radio group's selection — that is what the role promises and what
+ * `SegmentedChoice` implements — so the dialog could be showing `Table` as the selected card while
+ * the scoresheet behind it was still what dismissal would leave in place. Two answers to one
+ * question, with the one the scorekeeper could see losing.
+ */
+describe('what the selected card and the layout in force agree about', () => {
+  /** Move the selection with the keyboard, from the card that is currently selected. */
+  function arrowToOtherLayout(): HTMLElement {
+    const dialog = chooser();
+    if (!dialog) throw new Error('The scoring-layout chooser is not open.');
+    const selected = within(dialog)
+      .getAllByRole('radio')
+      .find((radio) => radio.getAttribute('aria-checked') === 'true');
+    fireEvent.keyDown(selected as HTMLElement, { key: 'ArrowRight' });
+    return dialog;
+  }
+
+  test('arrowing to Table marks Table, and Escape leaves the table on screen', () => {
+    newGame('scoresheet');
+
+    const dialog = arrowToOtherLayout();
+    expect(within(dialog).getByRole('radio', { name: 'Table' }).getAttribute('aria-checked')).toBe('true');
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(chooser()).toBeNull();
+    expect(document.querySelector('.scorer-table-view')).toBeTruthy();
+    expect(document.querySelector('.scorer-teams')).toBeNull();
+    expect(window.localStorage.getItem(scoringViewStorageKey)).toBe('table');
+  });
+
+  test('arrowing to Table and pressing the close button does the same thing', () => {
+    newGame('scoresheet');
+
+    arrowToOtherLayout();
+    fireEvent.click(screen.getByRole('button', { name: 'Close dialog' }));
+
+    expect(chooser()).toBeNull();
+    expect(document.querySelector('.scorer-table-view')).toBeTruthy();
+  });
+
+  test('arrowing back before dismissing commits what is selected then, not what was selected first', () => {
+    newGame('scoresheet');
+
+    const dialog = arrowToOtherLayout();
+    fireEvent.keyDown(within(dialog).getByRole('radio', { name: 'Table' }), { key: 'ArrowLeft' });
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(document.querySelector('.scorer-teams')).toBeTruthy();
+    expect(document.querySelector('.scorer-table-view')).toBeNull();
+  });
+
+  test('Home and End reach the ends, and dismissal commits where they landed', () => {
+    newGame('scoresheet');
+
+    const dialog = chooser() as HTMLElement;
+    fireEvent.keyDown(within(dialog).getByRole('radio', { name: 'Scoresheet' }), { key: 'End' });
+    expect(within(dialog).getByRole('radio', { name: 'Table' }).getAttribute('aria-checked')).toBe('true');
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(document.querySelector('.scorer-table-view')).toBeTruthy();
+  });
+
+  test('a mouse press on a card is still the answer it always was', () => {
+    newGame('scoresheet');
+
+    choose('Table');
+
+    expect(chooser()).toBeNull();
+    expect(document.querySelector('.scorer-table-view')).toBeTruthy();
+    expect(window.localStorage.getItem(scoringViewStorageKey)).toBe('table');
+  });
+
+  test('Enter on a card answers with it', async () => {
+    const user = userEvent.setup();
+    newGame('scoresheet');
+
+    // Arrowing moves focus with the selection, so the focused card is the one Enter answers with.
+    arrowToOtherLayout();
+    await user.keyboard('{Enter}');
+
+    expect(chooser()).toBeNull();
+    expect(document.querySelector('.scorer-table-view')).toBeTruthy();
+  });
+
+  test('Space on a card answers with it', async () => {
+    const user = userEvent.setup();
+    newGame('scoresheet');
+
+    arrowToOtherLayout();
+    await user.keyboard(' ');
+
+    expect(chooser()).toBeNull();
+    expect(document.querySelector('.scorer-table-view')).toBeTruthy();
+  });
+
+  test('answering by dismissal still writes nothing to the game', () => {
+    const gameKey = newGame('scoresheet');
+    const before = savedEvents(gameKey);
+
+    arrowToOtherLayout();
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(savedEvents(gameKey)).toEqual(before);
     expect(window.localStorage.getItem(scoringLayoutPromptStorageKey(gameKey))).toBeTruthy();
   });
 });

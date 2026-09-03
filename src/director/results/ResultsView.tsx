@@ -42,12 +42,15 @@ export function ResultsView({
   const reviewCount = state.submissions.filter(
     (submission) => submission.status === 'review' || submission.status === 'received',
   ).length;
+  // Protests sit below the schedule, which at a large tournament is a long way below the fold.
+  // The count belongs where a director already looks for what still needs them.
+  const openProtestCount = state.protests.filter((protest) => protest.status === 'open').length;
   return (
     <>
       <PageHeader
         eyebrow="Run"
         title="Results"
-        description={`${reviewCount} result${reviewCount === 1 ? '' : 's'} need${reviewCount === 1 ? 's' : ''} review · raw submissions are retained`}
+        description={`${reviewCount} result${reviewCount === 1 ? '' : 's'} need${reviewCount === 1 ? 's' : ''} review · ${openProtestCount} open protest${openProtestCount === 1 ? '' : 's'} · raw submissions are retained`}
         actions={
           <>
             {onNavigate && (
@@ -166,7 +169,26 @@ function ScheduledGamesPanel({
   onClearNavigationTarget?: () => void;
 }) {
   const [confirmCancelId, setConfirmCancelId] = useState<string | null>(null);
-  const games = state.scheduledGames.filter((game) => !game.bye);
+  /*
+   * By default, the games that still want something from a director.
+   *
+   * This panel used to list every scheduled game for the whole tournament, so by the afternoon the
+   * three rooms that had not reported were somewhere in a table of two hundred rows that had. The
+   * settled ones are not lost: `Show all scheduled games` puts them back, and a cross-page
+   * navigation to a particular game still finds it whichever mode the panel is in.
+   */
+  const [showAll, setShowAll] = useState(false);
+  const targetGameId =
+    navigationTarget?.section === 'results' && navigationTarget.entityType === 'game'
+      ? navigationTarget.entityId
+      : undefined;
+  const scheduled = state.scheduledGames.filter((game) => !game.bye);
+  const unresolvedCount = scheduled.filter((game) => !['accepted', 'cancelled'].includes(game.status)).length;
+  const games = showAll
+    ? scheduled
+    : scheduled.filter(
+        (game) => game.id === targetGameId || !['accepted', 'cancelled'].includes(game.status),
+      );
   return (
     <section className="director-panel">
       <div className="director-panel-heading">
@@ -174,39 +196,55 @@ function ScheduledGamesPanel({
           <p className="director-eyebrow">Schedule</p>
           <h2>Scheduled games</h2>
         </div>
-        <span className="director-muted">
-          {games.filter((game) => !['accepted', 'cancelled'].includes(game.status)).length} unresolved
-        </span>
+        <div className="director-row-actions">
+          <span className="director-muted">
+            {unresolvedCount} unresolved of {scheduled.length}
+          </span>
+          <Button variant="quiet" onClick={() => setShowAll((value) => !value)}>
+            {showAll ? 'Show only unresolved' : 'Show all scheduled games'}
+          </Button>
+        </div>
       </div>
-      <div className="director-table-wrap">
-        <table className="director-table">
-          <thead>
-            <tr>
-              <th scope="col">Game</th>
-              <th scope="col">Round</th>
-              <th scope="col">Room</th>
-              <th scope="col">Status</th>
-              <th scope="col" aria-label="Actions" />
-            </tr>
-          </thead>
-          <tbody>
-            {games.map((game) => (
-              <ScheduledGameRow
-                key={game.id}
-                state={state}
-                game={game}
-                controller={controller}
-                onAnnounce={onAnnounce}
-                navigationTarget={navigationTarget}
-                onClearNavigationTarget={onClearNavigationTarget}
-                confirming={confirmCancelId === game.id}
-                onConfirmCancel={() => setConfirmCancelId(null)}
-                onRequestCancel={() => setConfirmCancelId(game.id)}
-              />
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {games.length === 0 ? (
+        // Deliberately not a live region: the page already has one (the announcement toast), and a
+        // second one competing with it would announce this panel's own filter over a director's
+        // confirmation that a result was saved.
+        <div className="director-panel-body director-panel-empty-body">
+          <p className="director-empty-copy">
+            Every scheduled game has been accepted or cancelled. Nothing needs attention here.
+          </p>
+        </div>
+      ) : (
+        <div className="director-table-wrap">
+          <table className="director-table">
+            <thead>
+              <tr>
+                <th scope="col">Game</th>
+                <th scope="col">Round</th>
+                <th scope="col">Room</th>
+                <th scope="col">Status</th>
+                <th scope="col" aria-label="Actions" />
+              </tr>
+            </thead>
+            <tbody>
+              {games.map((game) => (
+                <ScheduledGameRow
+                  key={game.id}
+                  state={state}
+                  game={game}
+                  controller={controller}
+                  onAnnounce={onAnnounce}
+                  navigationTarget={navigationTarget}
+                  onClearNavigationTarget={onClearNavigationTarget}
+                  confirming={confirmCancelId === game.id}
+                  onConfirmCancel={() => setConfirmCancelId(null)}
+                  onRequestCancel={() => setConfirmCancelId(game.id)}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </section>
   );
 }
@@ -318,7 +356,18 @@ function ResultRow({
     submission.id,
     onClearNavigationTarget,
   );
-  const [action, setAction] = useState<'associate' | 'edit' | 'protest' | null>(null);
+  const [action, setAction] = useState<'associate' | 'edit' | 'protest' | 'reject' | null>(null);
+  /*
+   * Why rejecting takes two presses.
+   *
+   * Reject sat beside Accept as a single-click action on a row a director is scanning quickly, and
+   * it is the destructive one of the pair: it reopens the scheduled game, hands the room back, and
+   * writes a reason into the audit history that nobody chose. The controller has always taken an
+   * optional reason and never had anywhere to get one from. A small inline panel is a cheap
+   * confirmation -- one extra press, no modal, the row stays where it is -- and it is the only
+   * place a director can say *why*, which is what the team standing at HQ is going to ask.
+   */
+  const [rejectionReason, setRejectionReason] = useState('');
   const game = state.games.find((entry) => entry.id === submission.gameId);
   const scheduled = game
     ? state.scheduledGames.find((entry) => entry.id === game.scheduledGameId)
@@ -403,15 +452,8 @@ function ResultRow({
                 </Button>
               )}
               <Button
-                variant="quiet"
-                onClick={() => {
-                  const rejected = controller.rejectSubmission(submission.id);
-                  onAnnounce(
-                    rejected
-                      ? `${left} result rejected.`
-                      : `${left} result could not be rejected; review the current state.`,
-                  );
-                }}
+                variant={action === 'reject' ? 'secondary' : 'quiet'}
+                onClick={() => setAction((current) => (current === 'reject' ? null : 'reject'))}
               >
                 Reject
               </Button>
@@ -447,6 +489,49 @@ function ResultRow({
             </>
           )}
         </div>
+        {action === 'reject' && (submission.status === 'received' || submission.status === 'review') && (
+          <div className="director-result-action-panel">
+            <p className="director-eyebrow">Reject this result</p>
+            <p className="director-empty-copy">
+              The submission is retained and the scheduled game reopens so the room can send it again.
+            </p>
+            <FormField label="Reason" hint="Optional. Stored on the submission and in the audit history.">
+              <textarea
+                className="director-textarea"
+                rows={2}
+                value={rejectionReason}
+                onChange={(event) => setRejectionReason(event.target.value)}
+                placeholder="Scores transposed; room is re-entering"
+              />
+            </FormField>
+            <div className="director-row-actions">
+              <Button
+                variant="primary"
+                onClick={() => {
+                  // An empty reason keeps the controller's own default, which is what the audit
+                  // history has always recorded for a rejection nobody explained.
+                  const reason = rejectionReason.trim();
+                  const rejected = controller.rejectSubmission(
+                    submission.id,
+                    reason === '' ? undefined : reason,
+                  );
+                  onAnnounce(
+                    rejected
+                      ? `${left} result rejected.`
+                      : `${left} result could not be rejected; review the current state.`,
+                  );
+                  if (rejected) setRejectionReason('');
+                  setAction(null);
+                }}
+              >
+                Reject result
+              </Button>
+              <Button variant="quiet" onClick={() => setAction(null)}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        )}
         {!scheduled && action === 'associate' && game && (
           <AssociateResult
             state={state}
