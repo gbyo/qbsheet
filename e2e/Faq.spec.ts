@@ -32,11 +32,13 @@ test('the questions page answers the four groups', async ({ page }) => {
   expect(await fits(page)).toBe(true);
 });
 
-test('the product page reaches it from the header, and it comes back', async ({ page }) => {
+test('the product page reaches it from the footer, and it comes back', async ({ page }) => {
   await page.goto('/about/');
 
+  // The header carries the products — scorer, director, live. Every content page, this one included,
+  // hangs off the footer navigation, so that is the route a reader actually has to it.
   await page
-    .getByRole('navigation', { name: 'Primary navigation' })
+    .getByRole('navigation', { name: 'Footer navigation' })
     .getByRole('link', { name: 'FAQ' })
     .click();
   await expect(page).toHaveURL(/\/about\/faq\/$/);
