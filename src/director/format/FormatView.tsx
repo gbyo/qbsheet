@@ -629,9 +629,7 @@ function PhaseConfiguration({
   const qualifiersPerPool = draft.advancementDirty
     ? draft.qualifiersPerPool
     : String(phase.advancementRule?.qualifiersPerPool ?? 1);
-  const wildcards = draft.advancementDirty
-    ? draft.wildcards
-    : String(phase.advancementRule?.wildcards ?? 0);
+  const wildcards = draft.advancementDirty ? draft.wildcards : String(phase.advancementRule?.wildcards ?? 0);
   const manualOverrideAllowed = draft.advancementDirty
     ? draft.manualOverrideAllowed
     : (phase.advancementRule?.manualOverrideAllowed ?? false);
@@ -847,9 +845,7 @@ function PhaseConfiguration({
               {preview.qualifiers.map((team) => (
                 <li key={team.id}>
                   {team.displayName}
-                  {preview.wildcards.some((wildcard) => wildcard.id === team.id)
-                    ? ' (wildcard)'
-                    : ''}
+                  {preview.wildcards.some((wildcard) => wildcard.id === team.id) ? ' (wildcard)' : ''}
                 </li>
               ))}
             </ul>
