@@ -181,6 +181,8 @@ export interface GameTeamResult extends ExtensibleRecord {
   bonusPoints?: number;
   bonusBouncebackPoints?: number;
   lightningPoints?: number;
+  /** Early-buzz tier above power (for example 20-point superpowers). */
+  superpowers?: number;
   powers?: number;
   gets?: number;
   negs?: number;
@@ -195,6 +197,8 @@ export interface GamePlayerResult extends ExtensibleRecord {
   playerId: string;
   teamId: string;
   tossupsHeard?: number;
+  /** Early-buzz tier above power (for example 20-point superpowers). */
+  superpowers?: number;
   powers?: number;
   gets?: number;
   negs?: number;
