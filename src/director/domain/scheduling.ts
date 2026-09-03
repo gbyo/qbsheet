@@ -417,7 +417,7 @@ function appendPairingConflicts(
       conflicts.push({
         code: 'same-organization',
         severity: 'warning',
-        message: `${left.displayName} and ${right.displayName} share an organization because no fully constrained pairing was available.`,
+        message: `${left.displayName} and ${right.displayName} share a school or club because no fully constrained pairing was available.`,
         teamIds: [left.id, right.id],
       });
     }
