@@ -23,6 +23,8 @@ test('the site navigation enters the wiki at its own front page', async ({ page 
 
   // There is no index page above the articles. The wiki's `Home` is its front page, so that is what
   // the navigation entry has to reach — and a link to `about/wiki/` would be served by nothing.
+  //
+  // The entry lives in the footer, which is where every content page hangs; the header is products.
   await page
     .getByRole('navigation', { name: 'Footer navigation' })
     .getByRole('link', { name: 'Wiki' })
@@ -108,8 +110,7 @@ test('the product pages resolve from three directories deep', async ({ page }) =
 test('the scorer is three directories up from a wiki page', async ({ page }) => {
   await page.goto('/about/wiki/start-here/');
 
-  // Three `../`, from the deepest document on the site. `Scorer` is the header's link into the
-  // application and the one whose depth an article gets wrong first.
+  // `Scorer` is the header's way into the application, and this is the deepest page on the site.
   await page
     .getByRole('navigation', { name: 'Primary navigation' })
     .getByRole('link', { name: 'Scorer' })
