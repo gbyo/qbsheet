@@ -9,6 +9,7 @@ import { importQbj, importSqbsTeams, importTeamsCsv, type TeamRecord } from '@qb
 import { toImportedTeamInputs } from './teamImport';
 import type { DirectorNavigationTarget } from '../app/navigationTarget';
 import { errorNotice, type AnnounceInput } from '../notices';
+import { dropTeamFlexibly } from '../state/flexibleEditing';
 
 interface PlayerDraft {
   key: string;
@@ -352,7 +353,7 @@ function TeamRow({
                   const round = state.rounds.find((entry) => entry.id === game.roundId);
                   return round?.status !== 'closed' && !game.bye && game.status !== 'cancelled' && game.status !== 'accepted' && (game.leftTeamId === team.id || game.rightTeamId === team.id);
                 }).length;
-                const changed = team.status === 'dropped' ? controller.restoreTeam(team.id) : controller.dropTeam(team.id);
+                const changed = team.status === 'dropped' ? controller.restoreTeam(team.id) : dropTeamFlexibly(controller, team.id);
                 if (!changed) {
                   onAnnounce(errorNotice('Team status was not changed; review the Director error.'));
                   return;

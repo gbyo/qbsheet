@@ -14,6 +14,7 @@ import {
   type TournamentTimelineEvent,
 } from '../domain';
 import type { DirectorController, NewTimelineEventInput } from '../state/useDirectorController';
+import { removeRoundFlexibly } from '../state/flexibleEditing';
 import { Button, FormField, PanelBody, StateLabel } from '../components/Controls';
 import { DirectorMenu } from '../components/DirectorMenu';
 import { PageHeader } from '../components/PageHeader';
@@ -241,7 +242,7 @@ function RoundScheduleRow({
         : '';
     if (!confirm(`Delete ${round.name}?${consequence} A recovery checkpoint will be created first.`)) return;
     await controller.checkpoint(`Before deleting ${round.name}`);
-    if (!controller.removeRound(round.id)) {
+    if (!removeRoundFlexibly(controller, round.id)) {
       onAnnounce(errorNotice(`${round.name} could not be removed; review the Director error.`));
       return;
     }
