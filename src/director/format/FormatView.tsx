@@ -13,6 +13,7 @@ import { PageHeader } from '../components/PageHeader';
 import type { SectionId } from '../app/navigation';
 import { poolName, recommendPoolSizes } from '@qbsheet/tournament-core';
 import { errorNotice, type AnnounceInput } from '../notices';
+import { RecommendedPlan } from './RecommendedPlan';
 
 export function FormatView({
   state,
@@ -155,6 +156,12 @@ export function FormatView({
         }
       />
       <div className="director-page-stack">
+        <RecommendedPlan
+          state={state}
+          controller={controller}
+          onNavigate={onNavigate}
+          onAnnounce={onAnnounce}
+        />
         <section className="director-panel director-format-recommendation">
           <div>
             <p className="director-eyebrow">Current plan</p>
