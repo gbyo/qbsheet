@@ -369,9 +369,12 @@ test.describe('a server that speaks only QBTCP', () => {
     expect(control.results).toHaveLength(0);
     expect(control.resultAttempts[0]).not.toHaveProperty('_yf_scorekeeper_recovery');
 
-    // The existing handoff gate remains closed until the automatic retry is accepted.
+    // The existing handoff gate remains closed until the automatic retry is accepted. Since the
+    // completion redesign the closed gate shows the handoff it demands rather than a disabled
+    // continuation: no Next button exists yet, and the QBJ download is the primary action.
     const next = page.getByRole('button', { name: `Next game in ${roomName}` });
-    await expect(next).toBeDisabled();
+    await expect(next).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Download QBJ', exact: true })).toBeVisible();
 
     await expect.poll(() => control.results.length, { timeout: 20_000 }).toBe(1);
     await expect.poll(() => control.resultAttempts.length, { timeout: 20_000 }).toBe(2);
