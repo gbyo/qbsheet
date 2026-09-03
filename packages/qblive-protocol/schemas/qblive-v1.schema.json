@@ -78,7 +78,7 @@
     },
     "timelineEvent": {
       "type": "object",
-      "required": ["id", "type", "title", "description", "scheduledStart", "scheduledEnd", "teamIds", "roomId", "location"],
+      "required": ["id", "type", "title", "description", "scheduledStart", "scheduledEnd", "sequence", "teamIds", "roomId", "location"],
       "properties": {
         "id": { "$ref": "#/$defs/id" },
         "type": { "enum": ["round", "lunch", "break", "check-in", "awards", "ceremony", "custom"] },
@@ -86,6 +86,10 @@
         "description": { "$ref": "#/$defs/nullableString" },
         "scheduledStart": { "$ref": "#/$defs/nullableTimestamp" },
         "scheduledEnd": { "$ref": "#/$defs/nullableTimestamp" },
+        "sequence": {
+          "description": "Explicit position in the tournament-day sequence, or null when the publisher predates day ordering. Consumers sort by it first and fall back to scheduled time.",
+          "type": ["number", "null"]
+        },
         "teamIds": { "type": "array", "items": { "$ref": "#/$defs/id" }, "maxItems": 512 },
         "roomId": { "oneOf": [{ "$ref": "#/$defs/id" }, { "type": "null" }] },
         "location": { "$ref": "#/$defs/nullableString" }
@@ -94,12 +98,16 @@
     },
     "scheduledGame": {
       "type": "object",
-      "required": ["id", "roundId", "roundName", "roundNumber", "phaseId", "phaseName", "poolId", "poolName", "teamIds", "roomId", "scheduledStart", "state"],
+      "required": ["id", "roundId", "roundName", "roundNumber", "sequence", "phaseId", "phaseName", "poolId", "poolName", "teamIds", "roomId", "scheduledStart", "state"],
       "properties": {
         "id": { "$ref": "#/$defs/id" },
         "roundId": { "$ref": "#/$defs/id" },
         "roundName": { "type": "string", "maxLength": 4096 },
         "roundNumber": { "type": ["number", "null"] },
+        "sequence": {
+          "description": "Explicit day-sequence position of this game's round, or null when the publisher predates day ordering. Consumers sort by it first.",
+          "type": ["number", "null"]
+        },
         "phaseId": { "oneOf": [{ "$ref": "#/$defs/id" }, { "type": "null" }] },
         "phaseName": { "$ref": "#/$defs/nullableString" },
         "poolId": { "oneOf": [{ "$ref": "#/$defs/id" }, { "type": "null" }] },
