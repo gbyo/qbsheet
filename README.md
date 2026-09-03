@@ -6,9 +6,10 @@ You can use QBSheet to score a game from a QBJ file. You can also connect it to 
 
 QBSheet works as a website or an installable PWA. Standalone scoring does not require an account, a database, or an internet connection.
 
-The repository also includes the QBSheet Director operational UI preview. It is a separate entry so the
-existing scorer remains the default application: after starting Vite, open `director.html` to explore
-the tournament overview, rooms, results inbox, standings, publishing, and local-control settings.
+The repository also includes QBSheet Director, the desktop tournament-control application. It is a
+separate application under [`apps/director`](apps/director) with its own Vite config and Tauri shell,
+and it is not part of the website: the deployed site has no URL that launches tournament control. See
+[running Director](#run-director) below, and the product page at `/about/director/`.
 
 ## The QBSheet family
 
@@ -17,6 +18,10 @@ the tournament overview, rooms, results inbox, standings, publishing, and local-
 | **QBSheet Web / Scorer** | The browser scoresheet. Offline-first, no account, QBTCP client. |
 | **QBSheet Director** | The desktop tournament-management application. Authoritative tournament state, local SQLite, QBTCP server. |
 | **QBSheet Live** | The participant-facing half: a native iOS app, an App Clip, a responsive web client, and an open protocol for publishing a tournament. |
+
+The website carries the scorer plus a marketing page for each of the other two, at `/about/director/`
+and `/about/qblive/`. Director is installed on the tournament-control computer; QBSheet Live Web is
+served from `live.qbsheet.com`. Neither runs on the QBSheet website.
 
 **Director runs the tournament. Live publishes the tournament.**
 
@@ -98,7 +103,20 @@ npm start
 
 Vite starts the local development server.
 
-To open the Director preview during development, visit `http://localhost:5173/director.html`.
+### Run Director
+
+Director is a separate application and does not run from the root Vite server.
+
+```sh
+npm run director:dev        # the Director user interface, on http://127.0.0.1:1420
+npm run director:tauri:dev  # the real desktop application, with its native storage and QBTCP server
+npm run director:build      # typecheck and build the Director frontend
+npm run director:test       # the Director shell's own suite
+```
+
+The local QBTCP listener and the durable tournament store exist only in the native shell, so the
+browser-served user interface can plan a tournament but cannot run one. See
+[`apps/director/README.md`](apps/director/README.md).
 
 Run these checks before you submit a change:
 

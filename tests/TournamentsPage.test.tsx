@@ -190,14 +190,12 @@ describe('the tournaments page', () => {
     const header = container.querySelector('.about-nav') as HTMLElement;
     expect(within(header).getAllByRole('link')).toHaveLength(4);
     expect(within(header).getByRole('link', { name: 'Scorer' })).toHaveAttribute('href', '../../');
-    expect(within(header).getByRole('link', { name: 'Director' })).toHaveAttribute(
-      'href',
-      '../../director.html',
-    );
-    expect(within(header).getByRole('link', { name: /^QBLive/ })).toHaveAttribute(
-      'href',
-      'https://live.qbsheet.com/',
-    );
+    // Both product entries are pages on this site now, one directory across from this one. Neither
+    // is a jump into an application: Director is not deployed here at all, and QBLive is somebody
+    // else's server, so the header offers the pages that say so.
+    expect(within(header).getByRole('link', { name: 'Director' })).toHaveAttribute('href', '../director/');
+    expect(within(header).getByRole('link', { name: 'QBLive' })).toHaveAttribute('href', '../qblive/');
+    expect(within(header).queryByRole('link', { name: /live\.qbsheet\.com/ })).toBeNull();
 
     for (const region of ['.about-nav', '.about-footer nav']) {
       const github = within(container.querySelector(region) as HTMLElement).getByRole('link', {

@@ -90,7 +90,10 @@ export interface Tournament {
 export interface Organization {
   id: DirectorId;
   name: string;
+  /** Optional Director-facing label; kept separate from the QBJ geographic fields. */
   shortName?: string;
+  /** Actual municipality from QBJ/interchange data. */
+  city?: string;
   notes?: string;
   /** Retired organization records remain addressable by historical teams and results. */
   archived?: boolean;

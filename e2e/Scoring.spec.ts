@@ -26,11 +26,12 @@ test('the scoring page explains the job to somebody who has not done it', async 
   expect(await fits(page)).toBe(true);
 });
 
-test('the product page reaches it from the header, and it comes back', async ({ page }) => {
+test('the product page reaches it from the footer, and it comes back', async ({ page }) => {
   await page.goto('/about/');
 
+  // The header carries the products; the content pages are reached from the footer navigation.
   await page
-    .getByRole('navigation', { name: 'Primary navigation' })
+    .getByRole('navigation', { name: 'Footer navigation' })
     .getByRole('link', { name: 'Scoring' })
     .click();
   await expect(page).toHaveURL(/\/about\/scoring\/$/);

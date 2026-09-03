@@ -64,10 +64,11 @@ describe('a wiki article', () => {
     expect(container.querySelector('.about-brand')).toHaveAttribute('href', '../../');
     const nav = container.querySelector('.about-nav') as HTMLElement;
     expect(within(nav).getByRole('link', { name: 'Scorer' })).toHaveAttribute('href', '../../../');
-    expect(within(nav).getByRole('link', { name: 'Director' })).toHaveAttribute(
-      'href',
-      '../../../director.html',
-    );
+    // The two product pages are pages on this site, two directories up from an article rather than
+    // beside the scorer. A wiki article is the deepest document here, so it is where a product link
+    // written against the wrong depth shows up first.
+    expect(within(nav).getByRole('link', { name: 'Director' })).toHaveAttribute('href', '../../director/');
+    expect(within(nav).getByRole('link', { name: 'QBLive' })).toHaveAttribute('href', '../../qblive/');
 
     // The wiki has no index page: its own `Home` is the front page, so that is where the navigation
     // entry goes. It must not be written as `./`, the shortcut every other page takes for itself.
