@@ -84,7 +84,7 @@ describe('Director flexible editing', () => {
       expect(removeRoundFlexibly(hook.result.current, round.id)).toBe(true);
     });
     expect(hook.result.current.state.rounds.some((entry) => entry.id === round.id)).toBe(false);
-    expect(hook.result.current.state.scheduledGames.some((game) => scheduledIds.includes(game.id))).toBe(false);
+    expect(hook.result.current.state.scheduledGames.some((game) => scheduledIds.includes(round.id))).toBe(false);
     expect(hook.result.current.state.phases.some((phase) => phase.roundIds.includes(round.id))).toBe(false);
     expect(hook.result.current.state.packets.some((packet) => packet.assignedRoundIds.includes(round.id))).toBe(false);
   });
