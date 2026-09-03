@@ -137,14 +137,25 @@ if [ "$build" = "yes" ]; then
     (cd "$repo_root/ios" && xcodegen generate --quiet)
   fi
   echo "Building $scheme…"
-  xcodebuild \
+  build_log="$(mktemp)"
+  if xcodebuild \
     -project "$repo_root/ios/QBSheetLive.xcodeproj" \
     -scheme "$scheme" \
     -configuration Debug \
     -destination "id=$device" \
     -derivedDataPath "$derived" \
     CODE_SIGNING_ALLOWED=NO \
-    build | grep -E "error:|warning: .*(deprecated|unused)|BUILD" || true
+    build >"$build_log" 2>&1; then
+    build_status=0
+  else
+    build_status=$?
+  fi
+  grep -E "error:|warning: .*(deprecated|unused)|BUILD" "$build_log" || true
+  rm -f "$build_log"
+  if [ "$build_status" -ne 0 ]; then
+    echo "Build failed." >&2
+    exit "$build_status"
+  fi
 fi
 
 app="$derived/Build/Products/Debug-iphonesimulator/$scheme.app"
