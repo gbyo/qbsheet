@@ -16,14 +16,15 @@ import { defaultRules, emptyDirectorState } from '../src/director/domain';
 import type { DirectorController } from '../src/director/state/useDirectorController';
 import { IStoredGameRecord } from '../src/game/GameStore';
 import { validPackage } from './packages';
-import { openControl } from '../src/app/ControlPairing';
+import { exchangePairingCode, openControl } from '../src/app/ControlPairing';
 
 vi.mock('../src/app/ControlPairing', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/app/ControlPairing')>();
-  return { ...actual, openControl: vi.fn() };
+  return { ...actual, openControl: vi.fn(), exchangePairingCode: vi.fn() };
 });
 
 const mockedOpenControl = vi.mocked(openControl);
+const mockedExchangePairingCode = vi.mocked(exchangePairingCode);
 
 function gameRecord(overrides: Partial<IStoredGameRecord> = {}): IStoredGameRecord {
   return {
@@ -285,6 +286,67 @@ describe('connected setup stale state', () => {
     expect(screen.getByLabelText('Tournament control address')).toHaveValue('http://address-b:8080');
     expect(screen.queryByLabelText('Pairing code')).toBeNull();
   });
+
+  test('a launch link that falls back to the manual form still pairs the suggested room', async () => {
+    mockedOpenControl.mockReset();
+    mockedExchangePairingCode.mockReset();
+    mockedOpenControl.mockResolvedValue({
+      ok: true,
+      value: {
+        client: {},
+        tournamentName: 'Fallback Invitational',
+        rooms: [
+          { id: 'room-3', name: 'Room 3' },
+          { id: 'room-7', name: 'Room 7' },
+        ],
+      },
+    } as never);
+    // The launch link's own code is rejected, so the flow falls back to the manual form with the
+    // link's room preselected. The second exchange, with a hand-typed code, succeeds.
+    mockedExchangePairingCode
+      .mockResolvedValueOnce({ ok: false, error: 'That pairing code has expired.' } as never)
+      .mockResolvedValueOnce({
+        ok: true,
+        value: {
+          baseUrl: 'http://control:8080',
+          roomId: 'room-7',
+          roomName: 'Room 7',
+          roomToken: 'token-7',
+          deviceId: 'device-1',
+        },
+      } as never);
+    const onPaired = vi.fn();
+    render(
+      <ConnectedSetup
+        initialBaseUrl=""
+        launch={{ version: 1, server: 'http://control:8080', code: '999999', roomId: 'room-7' }}
+        onPaired={onPaired}
+        onPairingLaunch={vi.fn()}
+        onOtherScoring={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Connect and pair' }));
+    });
+    await waitFor(() => expect(screen.getByLabelText('Pairing code')).toBeInTheDocument());
+    // The fallback form shows the room the link asked for, without the user touching the select.
+    expect(screen.getByLabelText('Room')).toHaveValue('room-7');
+    expect(onPaired).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText('Pairing code'), { target: { value: '123456' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Pair this room' }));
+    });
+
+    // The suggested room id was mirrored into the guard, so the successful response is adopted
+    // rather than mistaken for a response to a room the user has since moved away from.
+    await waitFor(() => expect(onPaired).toHaveBeenCalledTimes(1));
+    expect(onPaired.mock.calls[0][0]).toMatchObject({ roomId: 'room-7', roomName: 'Room 7' });
+    expect(mockedExchangePairingCode).toHaveBeenLastCalledWith({}, '123456', 'room-7', undefined);
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
 });
 
 describe('transfers operation-aware busy state', () => {
@@ -383,6 +445,122 @@ describe('shared native QBTCP server status', () => {
       read.mockRestore();
       start.mockRestore();
       stop.mockRestore();
+    }
+  });
+
+  test('overlapping poll ticks never put a second native read in flight', async () => {
+    vi.useFakeTimers();
+    const native = await import('../src/director/platform/native');
+    const pending = deferred<{ running: boolean }>();
+    const read = vi.spyOn(native, 'readNativeServerStatus').mockReturnValue(pending.promise as never);
+    try {
+      const { useNativeServerStatus } = await import('../src/director/server/useNativeServerStatus');
+      const { result, unmount } = renderHook(() => useNativeServerStatus({ active: true }));
+      // The mount tick starts the first read and it never settles.
+      expect(read).toHaveBeenCalledTimes(1);
+
+      // Two further ticks fire while that read is still pending: both are skipped.
+      await act(async () => {
+        vi.advanceTimersByTime(2000);
+      });
+      expect(read).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        pending.resolve({ running: true });
+        await pending.promise;
+      });
+      expect(result.current.status.running).toBe(true);
+      // Once the read has settled the next tick is free to start another one.
+      const second = deferred<{ running: boolean }>();
+      read.mockReturnValue(second.promise as never);
+      await act(async () => {
+        vi.advanceTimersByTime(1000);
+      });
+      expect(read).toHaveBeenCalledTimes(2);
+      await act(async () => {
+        second.resolve({ running: true });
+        await second.promise;
+      });
+      unmount();
+    } finally {
+      read.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  test('a read started before a toggle cannot overwrite the toggle result', async () => {
+    const native = await import('../src/director/platform/native');
+    const pendingRead = deferred<{ running: boolean }>();
+    const read = vi.spyOn(native, 'readNativeServerStatus').mockReturnValue(pendingRead.promise as never);
+    const start = vi
+      .spyOn(native, 'startNativeServer')
+      .mockResolvedValue({ running: true, port: 8080 } as never);
+    try {
+      const { useNativeServerStatus } = await import('../src/director/server/useNativeServerStatus');
+      const { result, unmount } = renderHook(() => useNativeServerStatus({ active: true }));
+      expect(read).toHaveBeenCalledTimes(1);
+
+      // Start succeeds while the older read is still outstanding.
+      await act(async () => {
+        await result.current.toggle();
+      });
+      expect(start).toHaveBeenCalled();
+      expect(result.current.status).toMatchObject({ running: true, port: 8080 });
+
+      // The stale read now resolves with the pre-start snapshot; it must be discarded.
+      await act(async () => {
+        pendingRead.resolve({ running: false });
+        await pendingRead.promise;
+      });
+      expect(result.current.status).toMatchObject({ running: true, port: 8080 });
+      expect(result.current.loading).toBe(false);
+      unmount();
+    } finally {
+      read.mockRestore();
+      start.mockRestore();
+    }
+  });
+
+  test('a slow background refresh never reopens the never-loaded state', async () => {
+    vi.useFakeTimers();
+    const native = await import('../src/director/platform/native');
+    const first = deferred<{ running: boolean }>();
+    const slow = deferred<{ running: boolean }>();
+    const read = vi
+      .spyOn(native, 'readNativeServerStatus')
+      .mockReturnValueOnce(first.promise as never)
+      .mockReturnValue(slow.promise as never);
+    try {
+      const { useNativeServerStatus } = await import('../src/director/server/useNativeServerStatus');
+      const { result, unmount } = renderHook(() => useNativeServerStatus({ active: true }));
+      expect(result.current.loading).toBe(true);
+
+      await act(async () => {
+        first.resolve({ running: true });
+        await first.promise;
+      });
+      expect(result.current.loading).toBe(false);
+      expect(result.current.status.running).toBe(true);
+
+      // A background read that outlasts several poll intervals keeps the last known snapshot
+      // rather than sending the UI back to "Checking server".
+      await act(async () => {
+        vi.advanceTimersByTime(5000);
+      });
+      expect(result.current.loading).toBe(false);
+      expect(result.current.status.running).toBe(true);
+      expect(read).toHaveBeenCalledTimes(2);
+
+      await act(async () => {
+        slow.resolve({ running: false });
+        await slow.promise;
+      });
+      expect(result.current.loading).toBe(false);
+      expect(result.current.status.running).toBe(false);
+      unmount();
+    } finally {
+      read.mockRestore();
+      vi.useRealTimers();
     }
   });
 
