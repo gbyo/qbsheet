@@ -14,6 +14,7 @@ import {
 import type { DirectorController, NewTimelineEventInput } from '../state/useDirectorController';
 import { Button, FormField, PanelBody, StateLabel } from '../components/Controls';
 import { PageHeader } from '../components/PageHeader';
+import { errorNotice, type AnnounceInput } from '../notices';
 
 const eventTypeOptions: Array<{ value: TimelineEventType; label: string }> = timelineEventTypes.map(
   (type) => ({
@@ -29,7 +30,7 @@ export function ScheduleView({
 }: {
   state: DirectorState;
   controller: DirectorController;
-  onAnnounce: (message: string) => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
 }) {
   const tournament = state.tournament;
   const [showForm, setShowForm] = useState(false);
@@ -132,6 +133,7 @@ export function ScheduleView({
         </section>
         {showForm && (
           <TimelineEventForm
+            key={editingId ?? 'new'}
             state={state}
             event={editingId ? state.timeline.find((entry) => entry.id === editingId) : undefined}
             controller={controller}
@@ -156,7 +158,7 @@ function RoundScheduleRow({
   state: DirectorState;
   round: DirectorState['rounds'][number];
   controller: DirectorController;
-  onAnnounce: (message: string) => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
 }) {
   const timeZone = state.tournament?.timeZone ?? 'UTC';
   const [value, setValue] = useState(isoToZonedDateTimeInput(round.scheduledStart, timeZone));
@@ -271,7 +273,7 @@ function TimelineEventForm({
   state: DirectorState;
   event?: TournamentTimelineEvent;
   controller: DirectorController;
-  onAnnounce: (message: string) => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
   onClose: () => void;
 }) {
   const timeZone = state.tournament?.timeZone ?? 'UTC';
@@ -310,7 +312,7 @@ function TimelineEventForm({
       ? controller.updateTimelineEvent(event.id, input)
       : controller.addTimelineEvent(input);
     if (!saved) {
-      onAnnounce('The schedule event could not be saved; review the Director error.');
+      onAnnounce(errorNotice('The schedule event could not be saved; review the Director error.'));
       return;
     }
     onAnnounce(event ? `${title.trim()} updated.` : `${title.trim()} added to the schedule.`);

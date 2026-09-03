@@ -372,7 +372,7 @@ function GamePicker(props: { choice: IPendingChoice; onPick: (candidate: IQbjMat
     <div className="game-picker">
       <h2 className="game-picker-title">Choose a game</h2>
       {groups.map((group) => (
-        <section key={group.label} className="game-picker-group">
+        <section key={group.key} className="game-picker-group">
           <h3 className="game-picker-round">{group.label}</h3>
           <ul className="game-picker-list">
             {group.candidates.map((candidate) => (

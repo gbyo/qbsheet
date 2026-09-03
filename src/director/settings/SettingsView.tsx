@@ -4,6 +4,7 @@ import type { DirectorController } from '../state/useDirectorController';
 import type { OperatorProfile } from '../operator/operatorProfile';
 import { Button, FormField, PanelBody, PanelFooter, StateLabel } from '../components/Controls';
 import { PageHeader } from '../components/PageHeader';
+import type { AnnounceInput } from '../notices';
 
 export function SettingsView({
   state,
@@ -14,7 +15,7 @@ export function SettingsView({
 }: {
   state: DirectorState;
   controller: DirectorController;
-  onAnnounce: (message: string) => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
   operatorProfile?: OperatorProfile;
   onSaveOperator?: (profile: OperatorProfile) => void;
 }) {

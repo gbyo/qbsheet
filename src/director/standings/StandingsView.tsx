@@ -8,6 +8,7 @@ import type { DirectorController } from '../state/useDirectorController';
 import { Button, EmptyState } from '../components/Controls';
 import { PageHeader } from '../components/PageHeader';
 import { csvCell } from '@qbsheet/tournament-formats';
+import type { AnnounceInput } from '../notices';
 
 export function StandingsView({
   state,
@@ -15,7 +16,7 @@ export function StandingsView({
 }: {
   state: DirectorState;
   controller: DirectorController;
-  onAnnounce: (message: string) => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
 }) {
   const teamStandings = deriveTeamStandings(state);
   const playerStandings = derivePlayerStandings(state)
@@ -157,7 +158,7 @@ export function StandingsView({
   );
 }
 
-function downloadCsv(state: DirectorState, onAnnounce: (message: string) => void): void {
+function downloadCsv(state: DirectorState, onAnnounce: (announcement: AnnounceInput) => void): void {
   const rows = [
     ['Rank', 'Team', 'Wins', 'Losses', 'Ties', 'Win %', 'Points for', 'Points against', 'Margin'],
     ...deriveTeamStandings(state).map((standing, index) => [

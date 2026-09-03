@@ -19,12 +19,11 @@ import { LiveView } from '../live/LiveView';
 import { SettingsView } from '../settings/SettingsView';
 import { importArchiveBytes, importDirectorTournament, importQbjText } from '../format/interchange';
 import { latestRound } from '../domain';
-import {
-  isNativeDirector,
-  openNativeTournamentFile,
-  readNativeServerStatus,
-  type NativeServerStatus,
-} from '../platform/native';
+import { isNativeDirector, openNativeTournamentFile, type NativeServerStatus } from '../platform/native';
+import { useNativeServerStatus } from '../server/useNativeServerStatus';
+import { DirectorToast } from '../components/DirectorToast';
+import { DirectorMenu } from '../components/DirectorMenu';
+import { errorNotice, toDirectorNotice, type AnnounceInput, type DirectorNotice } from '../notices';
 import type { DirectorTournamentInput } from '@qbsheet/tournament-formats';
 import { localCalendarDate } from './date';
 import { HelpDialog } from '../help/HelpDialog';
@@ -43,10 +42,23 @@ export default function DirectorApp() {
   const [activeSection, setActiveSection] = useState<SectionId>('overview');
   const [search, setSearch] = useState('');
   const [searchActiveIndex, setSearchActiveIndex] = useState(-1);
-  const [announcement, setAnnouncement] = useState('');
-  const [qbtcpServerStatus, setQbtcpServerStatus] = useState<NativeServerStatus | null>(() =>
-    nativeDirector ? null : { running: false },
-  );
+  const [announcement, setAnnouncement] = useState<DirectorNotice | null>(null);
+  const announce = (input: AnnounceInput) => setAnnouncement(toDirectorNotice(input));
+  // The one shared native QBTCP snapshot: sidebar, Overview preflight, and Tournament Control
+  // all read this same state, and Tournament Control writes through to it. Polling depends on
+  // the tournament lifecycle identity (presence + id), not the whole immutable tournament
+  // object, so a normal commit never restarts the interval while switching tournaments resets it.
+  const nativeServer = useNativeServerStatus({
+    active: !loading && state.tournament != null && nativeDirector,
+    onPoll: () => {
+      void syncQbtcp();
+    },
+  });
+  const qbtcpServerStatus: NativeServerStatus | null = !nativeDirector
+    ? { running: false }
+    : nativeServer.loading
+      ? null
+      : nativeServer.status;
   const searchRef = useRef<HTMLInputElement>(null);
   const searchResults = useMemo(() => searchTournament(state, search), [search, state]);
   const activeSearchIndex =
@@ -54,10 +66,17 @@ export default function DirectorApp() {
   const [helpOpen, setHelpOpen] = useState(false);
   const helpButtonRef = useRef<HTMLButtonElement>(null);
   const [operatorProfile, setOperatorProfile] = useState<OperatorProfile>(() => loadOperatorProfile());
-  const [operatorMenuOpen, setOperatorMenuOpen] = useState(false);
+  // Exactly one Director popover menu is ever open: opening one closes the other, and opening
+  // an overlay (help, dialogs) closes any menu so none is stranded underneath.
+  const [openMenu, setOpenMenu] = useState<'tournament' | 'operator' | null>(null);
+  const menuOpenerRef = useRef<HTMLElement | null>(null);
+  const closeMenu = () => setOpenMenu(null);
+  const openMenuFrom = (name: 'tournament' | 'operator', opener: { currentTarget: HTMLElement }) => {
+    menuOpenerRef.current = opener.currentTarget;
+    setOpenMenu((current) => (current === name ? null : name));
+  };
   const [operatorDialogOpen, setOperatorDialogOpen] = useState(false);
   const [navigationTarget, setNavigationTarget] = useState<DirectorNavigationTarget | null>(null);
-  const [tournamentMenuOpen, setTournamentMenuOpen] = useState(false);
   const [newTournamentOpen, setNewTournamentOpen] = useState(false);
   const tournamentButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -76,25 +95,6 @@ export default function DirectorApp() {
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
   }, [activeSection]);
 
-  useEffect(() => {
-    if (loading || !state.tournament) return;
-    if (!nativeDirector) return;
-    let active = true;
-    const poll = () => {
-      if (!active) return;
-      void syncQbtcp();
-      void readNativeServerStatus().then((next) => {
-        if (active) setQbtcpServerStatus(next);
-      });
-    };
-    poll();
-    const interval = window.setInterval(poll, 1000);
-    return () => {
-      active = false;
-      window.clearInterval(interval);
-    };
-  }, [loading, nativeDirector, state.tournament, syncQbtcp]);
-
   if (loading) return <div className="director-loading">Opening local tournament storage…</div>;
   if (!state.tournament)
     return (
@@ -104,11 +104,7 @@ export default function DirectorApp() {
             {controller.error}
           </p>
         )}
-        <NewTournamentScreen
-          controller={controller}
-          onAnnounce={setAnnouncement}
-          announcement={announcement}
-        />
+        <NewTournamentScreen controller={controller} onAnnounce={announce} announcement={announcement} />
       </>
     );
   const tournament = state.tournament;
@@ -130,8 +126,9 @@ export default function DirectorApp() {
   const archivedTournaments = catalog.filter((entry) => entry.status === 'archived');
 
   const navigate = (section: SectionId, target?: DirectorNavigationTarget | null) => {
+    setOpenMenu(null);
     setActiveSection(section);
-    setAnnouncement('');
+    setAnnouncement(null);
     if (target) setNavigationTarget(target);
   };
   const selectSearchResult = (result: SearchResult) => {
@@ -188,7 +185,7 @@ export default function DirectorApp() {
             state={controller.state}
             controller={controller}
             onNavigate={navigate}
-            onAnnounce={setAnnouncement}
+            onAnnounce={announce}
             nativeServerReady={qbtcpServerStatus?.running ?? false}
             nativeServerAvailable={nativeDirector}
           />
@@ -199,7 +196,7 @@ export default function DirectorApp() {
             state={controller.state}
             controller={controller}
             search={search}
-            onAnnounce={setAnnouncement}
+            onAnnounce={announce}
             navigationTarget={navigationTarget}
             onClearNavigationTarget={clearTarget}
           />
@@ -210,18 +207,18 @@ export default function DirectorApp() {
             state={controller.state}
             controller={controller}
             onNavigate={navigate}
-            onAnnounce={setAnnouncement}
+            onAnnounce={announce}
           />
         );
       case 'schedule':
-        return <ScheduleView state={controller.state} controller={controller} onAnnounce={setAnnouncement} />;
+        return <ScheduleView state={controller.state} controller={controller} onAnnounce={announce} />;
       case 'rooms':
         return (
           <RoomsView
             state={controller.state}
             controller={controller}
             onNavigate={navigate}
-            onAnnounce={setAnnouncement}
+            onAnnounce={announce}
             navigationTarget={navigationTarget}
             onClearNavigationTarget={clearTarget}
           />
@@ -231,7 +228,7 @@ export default function DirectorApp() {
           <PacketsView
             state={controller.state}
             controller={controller}
-            onAnnounce={setAnnouncement}
+            onAnnounce={announce}
             navigationTarget={navigationTarget}
             onClearNavigationTarget={clearTarget}
           />
@@ -242,9 +239,10 @@ export default function DirectorApp() {
             state={controller.state}
             controller={controller}
             onNavigate={navigate}
-            onAnnounce={setAnnouncement}
+            onAnnounce={announce}
             navigationTarget={navigationTarget}
             onClearNavigationTarget={clearTarget}
+            server={nativeServer}
           />
         );
       case 'transfers':
@@ -253,7 +251,7 @@ export default function DirectorApp() {
             state={controller.state}
             controller={controller}
             onNavigate={navigate}
-            onAnnounce={setAnnouncement}
+            onAnnounce={announce}
           />
         );
       case 'results':
@@ -262,30 +260,28 @@ export default function DirectorApp() {
             state={controller.state}
             controller={controller}
             onNavigate={navigate}
-            onAnnounce={setAnnouncement}
+            onAnnounce={announce}
             navigationTarget={navigationTarget}
             onClearNavigationTarget={clearTarget}
           />
         );
       case 'standings':
-        return (
-          <StandingsView state={controller.state} controller={controller} onAnnounce={setAnnouncement} />
-        );
+        return <StandingsView state={controller.state} controller={controller} onAnnounce={announce} />;
       case 'publish':
-        return <PublishView state={controller.state} onAnnounce={setAnnouncement} />;
+        return <PublishView state={controller.state} onAnnounce={announce} />;
       case 'live':
-        return <LiveView state={controller.state} actions={controller.live} onAnnounce={setAnnouncement} />;
+        return <LiveView state={controller.state} actions={controller.live} onAnnounce={announce} />;
       case 'settings':
         return (
           <SettingsView
             state={controller.state}
             controller={controller}
-            onAnnounce={setAnnouncement}
+            onAnnounce={announce}
             operatorProfile={operatorProfile}
             onSaveOperator={(p) => {
               setOperatorProfile(p);
               saveOperatorProfile(p);
-              setAnnouncement('Operator profile saved.');
+              announce('Operator profile saved.');
             }}
           />
         );
@@ -305,9 +301,9 @@ export default function DirectorApp() {
             type="button"
             className="director-tournament-switcher"
             aria-haspopup="menu"
-            aria-expanded={tournamentMenuOpen}
+            aria-expanded={openMenu === 'tournament'}
             aria-label={`Tournament: ${tournament.name}. Switch tournament`}
-            onClick={() => setTournamentMenuOpen((v) => !v)}
+            onClick={(event) => openMenuFrom('tournament', event)}
           >
             <span className="director-tournament-overline">Tournament</span>
             <strong>{tournament.name}</strong>
@@ -319,8 +315,13 @@ export default function DirectorApp() {
             </span>
             <Icon name="chevron" size={14} />
           </button>
-          {tournamentMenuOpen && (
-            <div role="menu" className="director-tournament-menu" aria-label="Tournament switcher">
+          {openMenu === 'tournament' && (
+            <DirectorMenu
+              label="Tournament switcher"
+              className="director-tournament-menu"
+              openerRef={menuOpenerRef}
+              onClose={closeMenu}
+            >
               <div className="director-tournament-menu-header">
                 <strong>{tournament.name}</strong>
                 <small>
@@ -337,9 +338,9 @@ export default function DirectorApp() {
                   type="button"
                   className={`director-menu-item ${entry.id === tournament.id ? 'is-selected' : ''}`}
                   onClick={() => {
-                    setTournamentMenuOpen(false);
+                    closeMenu();
                     void controller.switchTournament(entry.id).then((switched) => {
-                      if (switched) setAnnouncement(`Opened ${entry.name}.`);
+                      if (switched) announce(`Opened ${entry.name}.`);
                     });
                   }}
                 >
@@ -356,9 +357,9 @@ export default function DirectorApp() {
                         role="menuitem"
                         type="button"
                         onClick={() => {
-                          setTournamentMenuOpen(false);
+                          closeMenu();
                           void controller.switchTournament(entry.id).then((switched) => {
-                            if (switched) setAnnouncement(`Opened archived tournament ${entry.name}.`);
+                            if (switched) announce(`Opened archived tournament ${entry.name}.`);
                           });
                         }}
                       >
@@ -370,7 +371,7 @@ export default function DirectorApp() {
                         className="director-inline-action"
                         onClick={() => {
                           void controller.reopenTournament(entry.id).then((reopened) => {
-                            if (reopened) setAnnouncement(`${entry.name} reopened as a draft.`);
+                            if (reopened) announce(`${entry.name} reopened as a draft.`);
                           });
                         }}
                       >
@@ -385,7 +386,7 @@ export default function DirectorApp() {
                 type="button"
                 className="director-menu-item"
                 onClick={() => {
-                  setTournamentMenuOpen(false);
+                  closeMenu();
                   setNewTournamentOpen(true);
                 }}
               >
@@ -398,7 +399,7 @@ export default function DirectorApp() {
                   accept=".qbst,.qbj,.json"
                   className="director-visually-hidden-input"
                   onChange={(event) => {
-                    setTournamentMenuOpen(false);
+                    closeMenu();
                     const file = event.currentTarget.files?.[0];
                     void (async () => {
                       if (!file) return;
@@ -410,9 +411,7 @@ export default function DirectorApp() {
                             throw new Error(report.errors.join(' ') || 'That archive is not valid.');
                           if (!controller.importSnapshot(report.state))
                             throw new Error('That archive could not be imported.');
-                          setAnnouncement(
-                            importWarningMessage('Portable archive imported.', report.warnings),
-                          );
+                          announce(importWarningMessage('Portable archive imported.', report.warnings));
                           return;
                         }
                         const text = await file.text();
@@ -422,7 +421,7 @@ export default function DirectorApp() {
                             throw new Error(report.errors.join(' ') || 'That QBJ file is not valid.');
                           if (!controller.importSnapshot(report.state))
                             throw new Error('That QBJ file could not be imported.');
-                          setAnnouncement(importWarningMessage('QBJ tournament imported.', report.warnings));
+                          announce(importWarningMessage('QBJ tournament imported.', report.warnings));
                           return;
                         }
                         const parsed: unknown = JSON.parse(text);
@@ -444,13 +443,15 @@ export default function DirectorApp() {
                             );
                           if (!controller.importSnapshot(report.state))
                             throw new Error('That QBJ tournament could not be imported.');
-                          setAnnouncement(importWarningMessage('QBJ tournament imported.', report.warnings));
+                          announce(importWarningMessage('QBJ tournament imported.', report.warnings));
                           return;
                         }
-                        setAnnouncement('Tournament archive imported and opened.');
+                        announce('Tournament archive imported and opened.');
                       } catch (reason: unknown) {
                         setAnnouncement(
-                          reason instanceof Error ? reason.message : 'That archive could not be opened.',
+                          errorNotice(
+                            reason instanceof Error ? reason.message : 'That archive could not be opened.',
+                          ),
                         );
                       }
                     })();
@@ -470,9 +471,9 @@ export default function DirectorApp() {
                     )
                   )
                     return;
-                  setTournamentMenuOpen(false);
+                  closeMenu();
                   void controller.archiveTournament().then((archived) => {
-                    if (archived) setAnnouncement(`${tournament.name} archived.`);
+                    if (archived) announce(`${tournament.name} archived.`);
                   });
                 }}
                 disabled={tournament.status !== 'complete'}
@@ -483,7 +484,7 @@ export default function DirectorApp() {
                 Recent and archived tournament documents persist locally; switching checkpoints the outgoing
                 document first.
               </div>
-            </div>
+            </DirectorMenu>
           )}
         </div>
         <nav className="director-nav" aria-label="Tournament sections">
@@ -525,7 +526,10 @@ export default function DirectorApp() {
             ref={helpButtonRef}
             type="button"
             className="director-help-link"
-            onClick={() => setHelpOpen(true)}
+            onClick={() => {
+              closeMenu();
+              setHelpOpen(true);
+            }}
           >
             <Icon name="help" size={15} /> Help & keyboard shortcuts
           </button>
@@ -534,8 +538,8 @@ export default function DirectorApp() {
               type="button"
               className="director-operator"
               aria-haspopup="menu"
-              aria-expanded={operatorMenuOpen}
-              onClick={() => setOperatorMenuOpen((v) => !v)}
+              aria-expanded={openMenu === 'operator'}
+              onClick={(event) => openMenuFrom('operator', event)}
             >
               <span className="director-avatar">{operatorInitials(operatorProfile.displayName)}</span>
               <div>
@@ -543,14 +547,19 @@ export default function DirectorApp() {
                 <small>{operatorProfile.role ?? 'Local operator'}</small>
               </div>
             </button>
-            {operatorMenuOpen && (
-              <div role="menu" className="director-operator-menu" aria-label="Operator menu">
+            {openMenu === 'operator' && (
+              <DirectorMenu
+                label="Operator menu"
+                className="director-operator-menu"
+                openerRef={menuOpenerRef}
+                onClose={closeMenu}
+              >
                 <button
                   role="menuitem"
                   type="button"
                   className="director-menu-item"
                   onClick={() => {
-                    setOperatorMenuOpen(false);
+                    closeMenu();
                     setOperatorDialogOpen(true);
                   }}
                 >
@@ -561,7 +570,7 @@ export default function DirectorApp() {
                   type="button"
                   className="director-menu-item"
                   onClick={() => {
-                    setOperatorMenuOpen(false);
+                    closeMenu();
                     navigate('settings');
                   }}
                 >
@@ -572,13 +581,13 @@ export default function DirectorApp() {
                   type="button"
                   className="director-menu-item"
                   onClick={() => {
-                    setOperatorMenuOpen(false);
+                    closeMenu();
                     setHelpOpen(true);
                   }}
                 >
                   Keyboard shortcuts / Help
                 </button>
-              </div>
+              </DirectorMenu>
             )}
           </div>
         </div>
@@ -651,7 +660,10 @@ export default function DirectorApp() {
               className="director-icon-button director-topbar-button"
               title="Help"
               aria-label="Help"
-              onClick={() => setHelpOpen(true)}
+              onClick={() => {
+                closeMenu();
+                setHelpOpen(true);
+              }}
             >
               <Icon name="help" />
             </button>
@@ -661,8 +673,8 @@ export default function DirectorApp() {
               title={operatorProfile.displayName}
               aria-label={`Operator: ${operatorProfile.displayName}`}
               aria-haspopup="menu"
-              aria-expanded={operatorMenuOpen}
-              onClick={() => setOperatorMenuOpen((v) => !v)}
+              aria-expanded={openMenu === 'operator'}
+              onClick={(event) => openMenuFrom('operator', event)}
             >
               {operatorInitials(operatorProfile.displayName)}
             </button>
@@ -677,13 +689,7 @@ export default function DirectorApp() {
           {renderPage()}
         </div>
         {announcement && (
-          <div className="director-toast" role="status">
-            <Icon name="check" size={16} />
-            <span>{announcement}</span>
-            <button type="button" aria-label="Dismiss notification" onClick={() => setAnnouncement('')}>
-              ×
-            </button>
-          </div>
+          <DirectorToast announcement={announcement} onDismiss={() => setAnnouncement(null)} />
         )}
       </main>
       <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
@@ -693,7 +699,7 @@ export default function DirectorApp() {
           onClose={() => setNewTournamentOpen(false)}
           onCreated={(name) => {
             setNewTournamentOpen(false);
-            setAnnouncement(`${name} created.`);
+            announce(`${name} created.`);
           }}
         />
       )}
@@ -705,7 +711,7 @@ export default function DirectorApp() {
             setOperatorProfile(p);
             saveOperatorProfile(p);
             setOperatorDialogOpen(false);
-            setAnnouncement('Operator profile saved.');
+            announce('Operator profile saved.');
           }}
         />
       )}
@@ -894,8 +900,8 @@ function NewTournamentScreen({
   announcement,
 }: {
   controller: ReturnType<typeof useDirectorController>;
-  onAnnounce: (message: string) => void;
-  announcement: string;
+  onAnnounce: (announcement: AnnounceInput) => void;
+  announcement: DirectorNotice | null;
 }) {
   const [name, setName] = useState('');
   const [date, setDate] = useState(() => localCalendarDate());
@@ -903,7 +909,7 @@ function NewTournamentScreen({
   const [organizer, setOrganizer] = useState('');
   const create = () => {
     if (!name.trim()) {
-      onAnnounce('Enter a tournament name first.');
+      onAnnounce(errorNotice('Enter a tournament name first.'));
       return;
     }
     controller.createTournament({ name, date, venue, organizer });
@@ -915,11 +921,11 @@ function NewTournamentScreen({
       if (extension === 'qbst') {
         const report = importArchiveBytes(new Uint8Array(await file.arrayBuffer()));
         if (!report.ok || !report.state) {
-          onAnnounce(report.errors.join(' ') || 'That archive is not valid.');
+          onAnnounce(errorNotice(report.errors.join(' ') || 'That archive is not valid.'));
           return;
         }
         if (!controller.importSnapshot(report.state)) {
-          onAnnounce('That portable archive could not be imported.');
+          onAnnounce(errorNotice('That portable archive could not be imported.'));
           return;
         }
         onAnnounce(importWarningMessage('Portable archive imported.', report.warnings));
@@ -929,11 +935,11 @@ function NewTournamentScreen({
       if (extension === 'qbj') {
         const report = importQbjText(value);
         if (!report.ok || !report.state) {
-          onAnnounce(report.errors.join(' ') || 'That QBJ file is not valid.');
+          onAnnounce(errorNotice(report.errors.join(' ') || 'That QBJ file is not valid.'));
           return;
         }
         if (!controller.importSnapshot(report.state)) {
-          onAnnounce('That QBJ file could not be imported.');
+          onAnnounce(errorNotice('That QBJ file could not be imported.'));
           return;
         }
         onAnnounce(importWarningMessage('QBJ tournament imported.', report.warnings));
@@ -947,7 +953,7 @@ function NewTournamentScreen({
       }
       if (isDirectorTournamentLike(parsed)) {
         if (!controller.importSnapshot(importDirectorTournament(parsed as DirectorTournamentInput))) {
-          onAnnounce('That tournament data could not be imported.');
+          onAnnounce(errorNotice('That tournament data could not be imported.'));
           return;
         }
         onAnnounce('Tournament data imported.');
@@ -956,15 +962,15 @@ function NewTournamentScreen({
       const report = importQbjText(value);
       if (report.ok && report.state) {
         if (!controller.importSnapshot(report.state)) {
-          onAnnounce('That QBJ tournament could not be imported.');
+          onAnnounce(errorNotice('That QBJ tournament could not be imported.'));
           return;
         }
         onAnnounce(importWarningMessage('QBJ tournament imported.', report.warnings));
         return;
       }
-      onAnnounce(report.errors.join(' ') || 'That file is not a supported Director archive.');
+      onAnnounce(errorNotice(report.errors.join(' ') || 'That file is not a supported Director archive.'));
     } catch (reason: unknown) {
-      onAnnounce(reason instanceof Error ? reason.message : 'That file could not be read.');
+      onAnnounce(errorNotice(reason instanceof Error ? reason.message : 'That file could not be read.'));
     }
   };
   const openNative = async () => {
@@ -1011,7 +1017,7 @@ function NewTournamentScreen({
         throw new Error('That file type is not supported. Choose a .qbst, .qbj, or .json file.');
       }
     } catch (reason: unknown) {
-      onAnnounce(reason instanceof Error ? reason.message : 'That file could not be opened.');
+      onAnnounce(errorNotice(reason instanceof Error ? reason.message : 'That file could not be opened.'));
     }
   };
   return (
@@ -1092,10 +1098,7 @@ function NewTournamentScreen({
           </form>
         </EmptyState>
         {announcement && (
-          <div className="director-toast director-toast-start" role="status">
-            <Icon name="alert" size={16} />
-            <span>{announcement}</span>
-          </div>
+          <DirectorToast announcement={announcement} className="director-toast director-toast-start" />
         )}
       </main>
     </div>

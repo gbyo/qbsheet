@@ -4,6 +4,7 @@ import { Button, StateLabel } from '../components/Controls';
 import { Icon } from '../components/Icon';
 import { PageHeader } from '../components/PageHeader';
 import type { SectionId } from '../app/navigation';
+import type { AnnounceInput } from '../notices';
 
 export function OverviewView({
   state,
@@ -16,7 +17,7 @@ export function OverviewView({
   state: DirectorState;
   controller: DirectorController;
   onNavigate: (section: SectionId) => void;
-  onAnnounce: (message: string) => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
   nativeServerReady?: boolean;
   nativeServerAvailable?: boolean;
 }) {

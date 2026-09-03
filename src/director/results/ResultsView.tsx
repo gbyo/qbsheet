@@ -7,6 +7,7 @@ import type { SectionId } from '../app/navigation';
 import type { DirectorNavigationTarget } from '../app/navigationTarget';
 import { useNavigationHighlight } from '../app/useNavigationHighlight';
 import { describeWarning } from '../transfers/ingest';
+import { errorNotice, type AnnounceInput } from '../notices';
 
 export function ResultsView({
   state,
@@ -19,7 +20,7 @@ export function ResultsView({
   state: DirectorState;
   controller: DirectorController;
   onNavigate?: (section: SectionId) => void;
-  onAnnounce: (message: string) => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
   navigationTarget?: DirectorNavigationTarget | null;
   onClearNavigationTarget?: () => void;
 }) {
@@ -72,7 +73,7 @@ export function ResultsView({
         )}
         <section className="director-panel">
           <div className="director-panel-body director-panel-filter">
-            <div className="director-filter-tabs" role="tablist" aria-label="Result status">
+            <div className="director-filter-tabs" role="group" aria-label="Result status">
               <FilterButton active={filter === 'all'} onClick={() => setFilter('all')}>
                 All <span>{state.submissions.length}</span>
               </FilterButton>
@@ -161,7 +162,7 @@ function ScheduledGamesPanel({
 }: {
   state: DirectorState;
   controller: DirectorController;
-  onAnnounce: (message: string) => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
   navigationTarget?: DirectorNavigationTarget | null;
   onClearNavigationTarget?: () => void;
 }) {
@@ -225,7 +226,7 @@ function ScheduledGameRow({
   state: DirectorState;
   game: DirectorState['scheduledGames'][number];
   controller: DirectorController;
-  onAnnounce: (message: string) => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
   navigationTarget?: DirectorNavigationTarget | null;
   onClearNavigationTarget?: () => void;
   confirming: boolean;
@@ -274,7 +275,7 @@ function ScheduledGameRow({
                       onConfirmCancel();
                       onAnnounce('Scheduled game cancelled; the round can now close without it.');
                     } else {
-                      onAnnounce('The game was not cancelled; review the Director error.');
+                      onAnnounce(errorNotice('The game was not cancelled; review the Director error.'));
                     }
                   }}
                 >
@@ -307,7 +308,7 @@ function ResultRow({
   state: DirectorState;
   submission: DirectorState['submissions'][number];
   controller: DirectorController;
-  onAnnounce: (message: string) => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
   navigationTarget?: DirectorNavigationTarget | null;
   onClearNavigationTarget?: () => void;
 }) {
@@ -395,7 +396,7 @@ function ResultRow({
                     onAnnounce(
                       accepted
                         ? `${left} result accepted.`
-                        : `${left} result remains in review; it was not accepted.`,
+                        : errorNotice(`${left} result remains in review; it was not accepted.`),
                     );
                   }}
                 >
@@ -409,7 +410,7 @@ function ResultRow({
                   onAnnounce(
                     rejected
                       ? `${left} result rejected.`
-                      : `${left} result could not be rejected; review the current state.`,
+                      : errorNotice(`${left} result could not be rejected; review the current state.`),
                   );
                 }}
               >
@@ -497,7 +498,7 @@ function AssociateResult({
   controller: DirectorController;
   onCancel: () => void;
   onSuccess: () => void;
-  onAnnounce: (message: string) => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
   navigationTarget?: DirectorNavigationTarget | null;
   onClearNavigationTarget?: () => void;
 }) {
@@ -578,7 +579,7 @@ function AcceptedResultEditor({
   controller: DirectorController;
   onCancel: () => void;
   onSuccess: () => void;
-  onAnnounce: (message: string) => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
   navigationTarget?: DirectorNavigationTarget | null;
   onClearNavigationTarget?: () => void;
 }) {
@@ -658,7 +659,7 @@ function ProtestCreator({
   controller: DirectorController;
   onCancel: () => void;
   onSuccess: () => void;
-  onAnnounce: (message: string) => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
   navigationTarget?: DirectorNavigationTarget | null;
   onClearNavigationTarget?: () => void;
 }) {
@@ -722,7 +723,7 @@ function ProtestsPanel({
 }: {
   state: DirectorState;
   controller: DirectorController;
-  onAnnounce: (message: string) => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
   navigationTarget?: DirectorNavigationTarget | null;
   onClearNavigationTarget?: () => void;
 }) {
@@ -792,7 +793,7 @@ function ProtestRuling({
   protest: DirectorState['protests'][number];
   state: DirectorState;
   controller: DirectorController;
-  onAnnounce: (message: string) => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
   navigationTarget?: DirectorNavigationTarget | null;
   onClearNavigationTarget?: () => void;
 }) {
@@ -874,7 +875,7 @@ function ManualResult({
   state: DirectorState;
   controller: DirectorController;
   onSuccess: () => void;
-  onAnnounce: (message: string) => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
   navigationTarget?: DirectorNavigationTarget | null;
   onClearNavigationTarget?: () => void;
 }) {
@@ -925,7 +926,7 @@ function ManualResult({
     onAnnounce(
       accepted
         ? 'Manual result accepted locally; standings updated and saving now.'
-        : 'Manual result was not accepted; review the Director error and current game state.',
+        : errorNotice('Manual result was not accepted; review the Director error and current game state.'),
     );
   };
   return (
@@ -974,7 +975,10 @@ function ManualResult({
                   step="1"
                   aria-invalid={validationError ? true : undefined}
                   value={leftScore}
-                  onChange={(event) => setLeftScore(event.target.value)}
+                  onChange={(event) => {
+                    setLeftScore(event.target.value);
+                    setValidationError(null);
+                  }}
                 />
               </FormField>
               <FormField label={selected ? teamLabel(state, selected.rightTeamId) : 'Right score'}>
@@ -983,7 +987,10 @@ function ManualResult({
                   step="1"
                   aria-invalid={validationError ? true : undefined}
                   value={rightScore}
-                  onChange={(event) => setRightScore(event.target.value)}
+                  onChange={(event) => {
+                    setRightScore(event.target.value);
+                    setValidationError(null);
+                  }}
                 />
               </FormField>
             </div>
@@ -1030,8 +1037,7 @@ function FilterButton({
   return (
     <button
       type="button"
-      role="tab"
-      aria-selected={active}
+      aria-pressed={active}
       className={`director-filter-tab ${active ? 'is-active' : ''}`}
       onClick={onClick}
     >

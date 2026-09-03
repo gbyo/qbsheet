@@ -1,16 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { latestRound, runPreflight, type DirectorState } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
 import { Button, StateLabel } from '../components/Controls';
 import { PageHeader } from '../components/PageHeader';
-import {
-  isNativeDirector,
-  readNativeServerStatus,
-  issueNativeRoomPairing,
-  startNativeServer,
-  stopNativeServer,
-  type NativeServerStatus,
-} from '../platform/native';
+import { isNativeDirector, issueNativeRoomPairing } from '../platform/native';
+import type { NativeServerState } from '../server/useNativeServerStatus';
+import { errorNotice, type AnnounceInput } from '../notices';
 import type { SectionId } from '../app/navigation';
 import type { DirectorNavigationTarget } from '../app/navigationTarget';
 import { useNavigationHighlight } from '../app/useNavigationHighlight';
@@ -22,51 +17,33 @@ export function TournamentView({
   onAnnounce,
   navigationTarget,
   onClearNavigationTarget,
+  server: nativeServer,
 }: {
   state: DirectorState;
   controller: DirectorController;
   onNavigate: (section: SectionId) => void;
-  onAnnounce: (message: string) => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
   navigationTarget?: DirectorNavigationTarget | null;
   onClearNavigationTarget?: () => void;
+  /** The shared native QBTCP snapshot owned by the Director shell (sidebar + Overview read it too). */
+  server: NativeServerState;
 }) {
-  const [server, setServer] = useState<NativeServerStatus>({ running: false });
-  const [serverLoading, setServerLoading] = useState(true);
+  // One source of truth: this page reads and writes the same snapshot the sidebar and the
+  // Overview preflight read. No local copy, no separate poll, no initial self-read.
+  const { status: server, loading: serverLoading } = nativeServer;
   const [pairingRoomId, setPairingRoomId] = useState<string | null>(null);
   const nativeDirector = isNativeDirector();
   const issues = runPreflight(state, server.running, nativeDirector);
   const round =
     state.rounds.find((entry) => entry.id === state.tournament?.currentRoundId) ?? latestRound(state.rounds);
-  useEffect(() => {
-    let mounted = true;
-    void readNativeServerStatus()
-      .then((next) => {
-        if (!mounted) return;
-        setServer(next);
-        setServerLoading(false);
-      })
-      .catch((reason: unknown) => {
-        if (!mounted) return;
-        setServer({
-          running: false,
-          message: reason instanceof Error ? reason.message : 'Server status could not be read.',
-        });
-        setServerLoading(false);
-      });
-    return () => {
-      mounted = false;
-    };
-  }, []);
   const toggleServer = async () => {
-    setServerLoading(true);
     try {
-      const next = server.running ? await stopNativeServer() : await startNativeServer();
-      setServer(next);
+      const next = await nativeServer.toggle();
       onAnnounce(next.message ?? (next.running ? 'QBTCP server started.' : 'QBTCP server stopped.'));
     } catch (reason: unknown) {
-      onAnnounce(reason instanceof Error ? reason.message : 'The QBTCP server could not be changed.');
-    } finally {
-      setServerLoading(false);
+      onAnnounce(
+        errorNotice(reason instanceof Error ? reason.message : 'The QBTCP server could not be changed.'),
+      );
     }
   };
   const copyPairingLink = async (url: string, message: string) => {
@@ -75,7 +52,7 @@ export function TournamentView({
       await navigator.clipboard.writeText(url);
       onAnnounce(message);
     } catch {
-      onAnnounce('The pairing link could not be copied; use the link shown in the desktop app.');
+      onAnnounce(errorNotice('The pairing link could not be copied; use the link shown in the desktop app.'));
     }
   };
   const serverHasError = !serverLoading && nativeDirector && !server.running && Boolean(server.message);
@@ -99,21 +76,14 @@ export function TournamentView({
     setPairingRoomId(roomId);
     try {
       const invitation = await issueNativeRoomPairing(roomId);
-      setServer((previous) => {
-        const current = (previous.pairingInvitations ?? []).filter((entry) => entry.roomId !== roomId);
-        const nextInvitations = [...current, invitation].sort((left, right) =>
-          left.roomId.localeCompare(right.roomId),
-        );
-        return {
-          ...previous,
-          pairingInvitations: nextInvitations,
-          pairingCode: nextInvitations.length === 1 ? nextInvitations[0].pairingCode : undefined,
-          pairingUrl: nextInvitations.length === 1 ? nextInvitations[0].pairingUrl : undefined,
-        };
-      });
+      nativeServer.addInvitation(invitation);
       onAnnounce(`Pairing invitation issued for ${invitation.roomName}.`);
     } catch (reason: unknown) {
-      onAnnounce(reason instanceof Error ? reason.message : 'A room pairing invitation could not be issued.');
+      onAnnounce(
+        errorNotice(
+          reason instanceof Error ? reason.message : 'A room pairing invitation could not be issued.',
+        ),
+      );
     } finally {
       setPairingRoomId(null);
     }
@@ -133,7 +103,9 @@ export function TournamentView({
                 .checkpoint('running the tournament')
                 .then(() => onAnnounce('Checkpoint created.'))
                 .catch((reason: unknown) =>
-                  onAnnounce(reason instanceof Error ? reason.message : 'Checkpoint could not be saved.'),
+                  onAnnounce(
+                    errorNotice(reason instanceof Error ? reason.message : 'Checkpoint could not be saved.'),
+                  ),
                 );
             }}
           >
@@ -464,7 +436,7 @@ function LifecycleButton({
   label: string;
   nextStatus: NonNullable<DirectorState['tournament']>['status'];
   onChange: (status: NonNullable<DirectorState['tournament']>['status']) => boolean;
-  onAnnounce: (message: string) => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
 }) {
   return (
     <Button
@@ -503,7 +475,7 @@ function RoundRow({
   current: boolean;
   controller: DirectorController;
   onNavigate: (section: SectionId) => void;
-  onAnnounce: (message: string) => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
   navigationTarget?: DirectorNavigationTarget | null;
   onClearNavigationTarget?: () => void;
 }) {

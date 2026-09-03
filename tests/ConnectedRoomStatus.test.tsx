@@ -434,3 +434,27 @@ describe('room recovery', () => {
     expect(screen.getByLabelText('Pairing code')).toBeInTheDocument();
   });
 });
+
+describe('the quiet practice action', () => {
+  test('offers Practice when no practice game exists and navigates on press', async () => {
+    const onPractice = vi.fn();
+    renderRoom({ practiceInProgress: false, onPractice });
+    await settle();
+
+    const practice = screen.getByRole('button', { name: 'Practice' });
+    expect(practice.className).toContain('shell-button-quiet');
+    fireEvent.click(practice);
+    expect(onPractice).toHaveBeenCalledTimes(1);
+  });
+
+  test('offers Resume practice when a practice game is in progress', async () => {
+    const onPractice = vi.fn();
+    renderRoom({ practiceInProgress: true, onPractice });
+    await settle();
+
+    const resume = screen.getByRole('button', { name: 'Resume practice' });
+    expect(resume.className).toContain('shell-button-quiet');
+    fireEvent.click(resume);
+    expect(onPractice).toHaveBeenCalledTimes(1);
+  });
+});

@@ -25,6 +25,7 @@ import {
 } from './state/store';
 import { formatAge } from './state/format';
 import { publishesPlayers } from './state/derive';
+import { restoreSelections } from './state/selections';
 
 type TabId = 'home' | 'schedule' | 'standings' | 'stats' | 'updates';
 
@@ -111,9 +112,19 @@ export default function App() {
   const [state, setState] = useState<LiveWebState>(() => {
     if ('error' in bootstrap) return { ...emptyState, connection: 'error', error: bootstrap.error };
     const cached = readCache(bootstrap.publicationId);
+    // The cached snapshot re-validates the cached selections on the way in: a team or player
+    // that is gone from the saved snapshot must not survive the boot.
+    const restored = restoreSelections(
+      {
+        followedTeamId: cached?.followedTeamId ?? null,
+        selectedPlayerId: cached?.selectedPlayerId ?? null,
+      },
+      cached?.snapshot ?? null,
+    );
     return {
       ...emptyState,
       ...cached,
+      ...restored,
       publicationId: bootstrap.publicationId,
       backendOrigin: bootstrap.backendOrigin,
       connection: cached?.snapshot ? 'offline' : 'loading',
@@ -141,19 +152,17 @@ export default function App() {
     const connection = new LiveConnection(client, {
       onSnapshot: (snapshot) =>
         setState((previous) => {
+          // Re-validate personalization against the fresh rosters (see restoreSelections): a
+          // withdrawn team clears both choices, a vanished player clears the player, and a
+          // player from another team never survives. The corrected state is what persists.
+          const restored = restoreSelections(previous, snapshot);
           const next: LiveWebState = {
             ...previous,
+            ...restored,
             snapshot,
             receivedAt: Date.now(),
             connection: previous.connection === 'live' ? 'live' : 'polling',
             error: null,
-            // A followed team that is no longer in the tournament is dropped rather than left
-            // pointing at nothing: teams do withdraw, and a Home tab about a missing team is worse
-            // than being asked to choose again.
-            followedTeamId:
-              previous.followedTeamId && snapshot.teams.some((team) => team.id === previous.followedTeamId)
-                ? previous.followedTeamId
-                : null,
           };
           writeCache(next);
           return next;
@@ -182,7 +191,9 @@ export default function App() {
 
   const follow = useCallback((teamId: string) => {
     setState((previous) => {
-      const next = { ...previous, followedTeamId: teamId };
+      // Following a different team never carries the previous team's player: the chooser opens
+      // next, and skipping it leaves the new team with no stale player selected.
+      const next = { ...previous, followedTeamId: teamId, selectedPlayerId: null };
       writeCache(next);
       return next;
     });

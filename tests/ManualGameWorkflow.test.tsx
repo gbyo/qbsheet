@@ -542,7 +542,8 @@ describe('finishing a practice', () => {
     await finishGame();
 
     expect(screen.getByText('This result needs to be handed over.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Done' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Done' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Download QBJ' })).toHaveClass('is-primary');
     expect(screen.getByText(/Download the QBJ before finishing/)).toBeInTheDocument();
   });
 });

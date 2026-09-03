@@ -84,7 +84,8 @@ describe('a file game that owes its result', () => {
     const download = screen.getByRole('button', { name: 'Download QBJ' });
     expect(download).toHaveClass('is-primary');
     expect(primaryButtons()).toHaveLength(1);
-    expect(screen.getByRole('button', { name: 'Done' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Done' })).toBeNull();
+    expect(screen.getByText(/before finishing\./)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Review score' })).toBeEnabled();
   });
 
@@ -130,7 +131,8 @@ describe('handoff acknowledgement', () => {
     const confirm = screen.getByRole('button', { name: 'I uploaded the result' });
     expect(confirm).toHaveClass('is-primary');
     expect(primaryButtons()).toHaveLength(1);
-    expect(screen.getByRole('button', { name: 'Done' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Done' })).toBeNull();
+    expect(screen.getByText(/before finishing\./)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Review score' })).toBeEnabled();
   });
 
@@ -144,7 +146,8 @@ describe('handoff acknowledgement', () => {
     });
 
     expect(await screen.findByText(/could not save that confirmation/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Done' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Done' })).toBeNull();
+    expect(screen.getByText(/before finishing\./)).toBeInTheDocument();
   });
 
   test('a recorded acknowledgement advances to continuation', () => {
@@ -184,7 +187,8 @@ describe('delivery failures and explicit instructions', () => {
     expect(screen.getByText('Tournament control did not accept this result.')).toBeInTheDocument();
     expect(screen.getByText('Round already closed by the director.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Download QBJ' })).toHaveClass('is-primary');
-    expect(screen.getByRole('button', { name: 'Done' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Done' })).toBeNull();
+    expect(screen.getByText(/before finishing\./)).toBeInTheDocument();
   });
 
   test('an explicit handoff instruction is honored even after acceptance', () => {
@@ -199,7 +203,8 @@ describe('delivery failures and explicit instructions', () => {
     expect(screen.getByText('Result sent')).toBeInTheDocument();
     expect(screen.getByText('Upload the QBJ to the tournament drive.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Download QBJ' })).toHaveClass('is-primary');
-    expect(screen.getByRole('button', { name: 'Done' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Done' })).toBeNull();
+    expect(screen.getByText(/before finishing\./)).toBeInTheDocument();
   });
 
   test('a refused download write explains itself beside the handoff', () => {
@@ -209,7 +214,8 @@ describe('delivery failures and explicit instructions', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Download QBJ' }));
 
     expect(screen.getByText(/would not save the file/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Done' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Done' })).toBeNull();
+    expect(screen.getByText(/before finishing\./)).toBeInTheDocument();
   });
 
   test('an unrecorded download offers a retry that writes again', async () => {
