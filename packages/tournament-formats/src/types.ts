@@ -40,7 +40,11 @@ export interface TournamentRecord extends ExtensibleRecord {
   id: string;
   name: string;
   date?: string;
+  /** Optional last day for multi-day events. Absent means single-day. */
+  endDate?: string;
   location?: string;
+  /** Optional question-set name, carried through imports/exports/reports. */
+  questionSet?: string;
   organizationId?: string;
   notes?: string;
 }

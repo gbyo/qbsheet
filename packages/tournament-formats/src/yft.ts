@@ -130,12 +130,10 @@ function normalizeYellowFruit(root: JsonObject): {
     tournamentClone.location = asString(site.name) as JsonValue;
   if (asString(tournamentClone.date) === undefined && asString(tournamentClone.start_date) !== undefined)
     tournamentClone.date = tournamentClone.start_date;
-  const questionSet = tournamentClone.question_set;
-  if (questionSet !== undefined && typeof questionSet === 'string') {
-    notCarriedOver.push(
-      `Question set ${JSON.stringify(questionSet)} is preserved on the imported tournament but is not linked to packet inventory.`,
-    );
-  }
+  if (asString(tournamentClone.endDate) === undefined && asString(tournamentClone.end_date) !== undefined)
+    tournamentClone.endDate = tournamentClone.end_date;
+  if (asString(tournamentClone.questionSet) === undefined && asString(tournamentClone.question_set) !== undefined)
+    tournamentClone.questionSet = tournamentClone.question_set;
 
   // Overall seed order lives in the tournament YfData sidecar.
   const tournamentData = asJsonObject(tournamentClone.YfData) ?? {};
@@ -166,6 +164,11 @@ function normalizeYellowFruit(root: JsonObject): {
       'The file has no scoring-rules block; Director cannot infer a ruleset for the imported tournament.',
     );
   }
+
+  const overallRankingId =
+    asObjectArray(tournamentClone.rankings).find((ranking) => asString(ranking.name) === 'Overall')?.id ??
+    'Ranking_Overall';
+  const teamPlacements: { teamId: string; rankingId: string | undefined; position: unknown }[] = [];
 
   // Registrations carry the full roster tree. Hoist teams and players to the
   // top level and rewrite the nesting as references.
@@ -204,6 +207,9 @@ function normalizeYellowFruit(root: JsonObject): {
         hoist(player);
       }
       team.players = playerRefs;
+      for (const rank of asObjectArray(team.ranks)) {
+        teamPlacements.push({ teamId, rankingId: refOf(rank.ranking), position: rank.position });
+      }
       teamCount += 1;
       teamRefs.push({ $ref: teamId } as JsonObject);
       hoist(team);
@@ -274,20 +280,14 @@ function normalizeYellowFruit(root: JsonObject): {
     }
   });
 
-  // Final ranks: an in-progress file only carries ranking shells. Carry real
-  // placements through when the file actually stores them.
-  for (const ranking of asObjectArray(tournamentClone.rankings)) {
-    const placed = asObjectArray(ranking.ranks ?? ranking.placements);
-    if (placed.length > 0) {
-      const finals = placed
-        .map((entry) => ({ rank: entry.rank, team: refOf(entry.team) }))
-        .filter((entry) => typeof entry.rank === 'number' && typeof entry.team === 'string');
-      if (finals.length > 0) {
-        tournamentClone.yftFinalRanks = finals as unknown as JsonValue;
-        break;
-      }
-    }
-  }
+  // Final ranks: YellowFruit stores placements on the teams themselves
+  // (team.ranks[] entries pointing at a ranking, with a position once known).
+  // An in-progress file only carries ranking shells, which rank nothing.
+  const finals = teamPlacements
+    .filter((entry) => entry.rankingId === overallRankingId && typeof entry.position === 'number')
+    .sort((left, right) => (left.position as number) - (right.position as number))
+    .map((entry) => ({ rank: entry.position as number, team: entry.teamId }));
+  if (finals.length > 0) tournamentClone.yftFinalRanks = finals as unknown as JsonValue;
   if (tournamentClone.yftFinalRanks === undefined)
     notCarriedOver.push('Final rankings are not stored in this file; Director uses calculated standings.');
 

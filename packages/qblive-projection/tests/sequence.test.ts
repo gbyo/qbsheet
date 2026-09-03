@@ -13,8 +13,8 @@ import {
   defaultRules,
   emptyDirectorState,
   type DirectorState,
-  type QbliveCapabilities,
 } from '@qbsheet/tournament-domain';
+import type { QbliveCapabilities } from '@qbsheet/qblive-protocol';
 import { projectLiveSnapshot } from '../src/projection';
 
 const capabilities: QbliveCapabilities = { snapshot: true, events: true, stream: true, applePush: false };
@@ -46,8 +46,8 @@ function untimedDay(): DirectorState {
     id: 'tournament-1',
     name: 'Saturday Invitational',
     date: '2026-09-05',
-    venue: null,
-    organizer: null,
+    venue: '',
+    organizer: '',
     status: 'running',
     timeZone: 'UTC',
     rules: structuredClone(defaultRules),
@@ -62,11 +62,14 @@ function untimedDay(): DirectorState {
     {
       id: 'phase-1',
       name: 'Preliminary',
+      kind: 'preliminary',
       order: 0,
+      formatId: 'format-1',
       roundIds: ['round-1', 'round-2'],
       poolIds: [],
       advancementRule: null,
-      format: null,
+      carryover: false,
+      status: 'active',
     },
   ];
   state.rounds = [

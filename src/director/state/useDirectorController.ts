@@ -288,7 +288,10 @@ export interface DirectorController {
   createTournament(input: NewTournamentInput): void;
   updateTournament(
     changes: Partial<
-      Pick<NonNullable<DirectorState['tournament']>, 'name' | 'date' | 'venue' | 'organizer' | 'timeZone'>
+      Pick<
+        NonNullable<DirectorState['tournament']>,
+        'name' | 'date' | 'endDate' | 'venue' | 'organizer' | 'questionSet' | 'timeZone'
+      >
     >,
   ): boolean;
   addOrganization(input: NewOrganizationInput): boolean;
@@ -880,7 +883,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
   const updateTournament = useCallback(
     (
       changes: Partial<
-        Pick<NonNullable<DirectorState['tournament']>, 'name' | 'date' | 'venue' | 'organizer' | 'timeZone'>
+        Pick<
+          NonNullable<DirectorState['tournament']>,
+          'name' | 'date' | 'endDate' | 'venue' | 'organizer' | 'questionSet' | 'timeZone'
+        >
       >,
     ): boolean => {
       const current = stateRef.current.tournament;
@@ -891,8 +897,14 @@ export function useDirectorController(repository = createDirectorRepository()): 
       const normalized = {
         ...(changes.name !== undefined ? { name: changes.name.trim() } : {}),
         ...(changes.date !== undefined ? { date: changes.date.trim() } : {}),
+        ...(changes.endDate !== undefined
+          ? { endDate: changes.endDate?.trim() ? changes.endDate.trim() : undefined }
+          : {}),
         ...(changes.venue !== undefined ? { venue: changes.venue.trim() } : {}),
         ...(changes.organizer !== undefined ? { organizer: changes.organizer.trim() } : {}),
+        ...(changes.questionSet !== undefined
+          ? { questionSet: changes.questionSet?.trim() ? changes.questionSet.trim() : undefined }
+          : {}),
         ...(changes.timeZone !== undefined ? { timeZone: changes.timeZone } : {}),
       };
       if ('name' in normalized && !normalized.name) {

@@ -104,6 +104,10 @@ export interface Tournament {
   id: DirectorId;
   name: string;
   date: string;
+  /** Optional last day for multi-day events. Absent means single-day. */
+  endDate?: string;
+  /** Optional question-set name, shown in exports and reports. */
+  questionSet?: string;
   /**
    * The IANA zone the tournament is actually run in.
    *

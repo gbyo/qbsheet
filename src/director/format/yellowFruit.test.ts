@@ -37,6 +37,8 @@ describe('yellowfruit Director import', () => {
     expect(state.teams.every((team) => team.seed !== null)).toBe(true);
     expect(state.tournament?.venue).toBe('Gould Academy');
     expect(state.tournament?.date).toBe('2025-10-05T04:00:00.000Z');
+    expect(state.tournament?.questionSet).toBe('IS-241A');
+    expect(state.tournament?.endDate).toBeUndefined();
     // Player years become structured school years, not notes.
     expect(state.players.some((player) => player.schoolYear === 12)).toBe(true);
     // Every game links to a stage round with both sides resolved.
@@ -57,5 +59,26 @@ describe('yellowfruit Director import', () => {
     const report = importYellowFruitText(JSON.stringify({ version: '2.1.1', objects: [] }));
     expect(report.ok).toBe(false);
     expect(report.errors.length).toBeGreaterThan(0);
+  });
+
+  test('finished-file team ranks become an attributed final placement', () => {
+    // Simulate a finished file by stamping Overall positions onto each team,
+    // exactly where YellowFruit writes them.
+    const parsed = JSON.parse(fixture()) as {
+      objects: [{ registrations: [{ teams: { ranks?: Record<string, unknown>[] }[] }] }];
+    };
+    const teams = parsed.objects[0].registrations.flatMap((registration) => registration.teams);
+    teams.forEach((team, index) => {
+      team.ranks = [{ ...(team.ranks?.[0] ?? {}), position: index + 1 }];
+    });
+    const report = importYellowFruitText(JSON.stringify(parsed));
+    expect(report.errors).toEqual([]);
+    expect(report.ok).toBe(true);
+    if (!report.ok || !report.state) return;
+    const placement = report.state.tournament?.finalPlacement;
+    expect(placement?.actor).toBe('YellowFruit import');
+    expect(placement?.order).toHaveLength(12);
+    // Calculated data is untouched: every game still resolves to real teams.
+    expect(report.state.games).toHaveLength(48);
   });
 });

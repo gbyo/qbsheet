@@ -31,6 +31,8 @@ function classifiedFixture() {
     at: '2026-09-05T18:00:00.000Z',
     reason: 'Final decided on the last question.',
   };
+  state.tournament.endDate = '2026-09-06';
+  state.tournament.questionSet = 'ACF Fall 2025';
   return { state, first, firstPlayer, second };
 }
 
@@ -48,6 +50,8 @@ describe('classifications, school year, and final placement round-trip', () => {
     expect(restored.teams.find((team) => team.id === first.id)?.tags).toEqual(['region-3']);
     expect(restored.players.find((player) => player.id === firstPlayer.id)?.schoolYear).toBe(10);
     expect(restored.tournament?.finalPlacement).toEqual(state.tournament?.finalPlacement);
+    expect(restored.tournament?.endDate).toBe('2026-09-06');
+    expect(restored.tournament?.questionSet).toBe('ACF Fall 2025');
   });
 
   it('foreign QBJ carries the same fields through grade and extensions', () => {
@@ -64,6 +68,8 @@ describe('classifications, school year, and final placement round-trip', () => {
     expect(restored.players.find((player) => player.id === firstPlayer.id)?.schoolYear).toBe(10);
     expect(restored.tournament?.finalPlacement?.order).toEqual([second.id, first.id]);
     expect(restored.tournament?.finalPlacement?.reason).toBe('Final decided on the last question.');
+    expect(restored.tournament?.endDate).toBe('2026-09-06');
+    expect(restored.tournament?.questionSet).toBe('ACF Fall 2025');
   });
 
   it('a free-text foreign grade never fabricates a school year', () => {

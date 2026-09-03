@@ -48,9 +48,11 @@ const tournamentKeys = new Set([
   'id',
   'name',
   'date',
+  'endDate',
   'location',
   'organizationId',
   'notes',
+  'questionSet',
   'extensions',
   'source',
 ]);
@@ -418,11 +420,13 @@ function readTournament(value: unknown, warnings: FormatWarning[], errors: Forma
     id,
     name,
     ...(optionalString(raw, 'date') ? { date: optionalString(raw, 'date') } : {}),
+    ...(optionalString(raw, 'endDate') ? { endDate: optionalString(raw, 'endDate') } : {}),
     ...(optionalString(raw, 'location') ? { location: optionalString(raw, 'location') } : {}),
     ...(optionalString(raw, 'organizationId')
       ? { organizationId: optionalString(raw, 'organizationId') }
       : {}),
     ...(optionalString(raw, 'notes') ? { notes: optionalString(raw, 'notes') } : {}),
+    ...(optionalString(raw, 'questionSet') ? { questionSet: optionalString(raw, 'questionSet') } : {}),
     ...sourceAndExtensions(raw, tournamentKeys, 'tournament', warnings),
   };
 }

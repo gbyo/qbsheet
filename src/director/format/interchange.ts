@@ -465,7 +465,9 @@ export function toInterchange(state: DirectorState): DirectorTournament {
       id: tournament.id,
       name: tournament.name,
       ...(tournament.date ? { date: tournament.date } : {}),
+      ...(tournament.endDate ? { endDate: tournament.endDate } : {}),
       ...(tournament.venue ? { location: tournament.venue } : {}),
+      ...(tournament.questionSet ? { questionSet: tournament.questionSet } : {}),
       notes: tournament.organizer ? `Organizer: ${tournament.organizer}` : undefined,
       extensions: {
         status: tournament.status,
@@ -651,7 +653,9 @@ function fromInterchange(data: DirectorTournament): DirectorState {
     id: data.tournament.id,
     name: data.tournament.name,
     date: data.tournament.date ?? '',
+    endDate: text(data.tournament.endDate),
     venue: data.tournament.location ?? '',
+    questionSet: text(data.tournament.questionSet),
     organizer: text(data.tournament.notes)?.replace(/^Organizer:\s*/, '') ?? '',
     status,
     // An interchange document that never carried a zone gets the unambiguous one rather than this

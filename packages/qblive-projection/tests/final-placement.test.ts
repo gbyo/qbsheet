@@ -76,6 +76,7 @@ function liveState(): DirectorState {
       rightTeamId: 'team-b',
       bye: false,
       status: 'accepted',
+      assignmentRevision: 1,
     },
     {
       id: 'scheduled-2',
@@ -86,6 +87,7 @@ function liveState(): DirectorState {
       rightTeamId: 'team-a',
       bye: false,
       status: 'accepted',
+      assignmentRevision: 1,
     },
   ];
   const teamScore = (teamId: string, score: number) => ({

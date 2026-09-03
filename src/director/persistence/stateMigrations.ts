@@ -327,7 +327,9 @@ function normalizeTournament(value: unknown): DirectorState['tournament'] {
     id,
     name: stringOrEmpty(value.name),
     date: stringOrEmpty(value.date),
+    endDate: optionalStoredText(value.endDate),
     venue: stringOrEmpty(value.venue),
+    questionSet: optionalStoredText(value.questionSet),
     organizer: stringOrEmpty(value.organizer),
     status: isTournamentStatus(value.status) ? value.status : 'draft',
     rules,
@@ -642,6 +644,10 @@ function stringOrNull(value: unknown): string | null {
 
 function stringOrEmpty(value: unknown): string {
   return typeof value === 'string' ? value : '';
+}
+
+function optionalStoredText(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value : undefined;
 }
 
 function isFiniteNumber(value: unknown): value is number {
