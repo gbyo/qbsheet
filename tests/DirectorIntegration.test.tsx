@@ -12,6 +12,7 @@ import {
   orderDayItems,
   packetUseConflicts,
   previewAdvancement,
+  recommendTournamentPlan,
   roundScheduleIsValid,
   runPreflight,
   scheduleIsValid,
@@ -416,6 +417,84 @@ describe('Director integration hardening', () => {
     const report = importArchiveBytes(exportArchiveBytes(live));
     expect(report.ok).toBe(true);
     expect(report.state ? dayLabels(report.state) : []).toEqual(expected);
+  });
+
+  test('planner recommendations: use-this-plan builds nine rounds for ten teams', async () => {
+    const { hook } = await directorWithSetup(10);
+    const set = recommendTournamentPlan(10);
+    expect(set?.recommended.id).toBe('full-round-robin');
+
+    let applied = false;
+    act(() => {
+      applied = hook.result.current.applyTournamentPlan(set?.recommended ?? ({} as never));
+    });
+    expect(applied).toBe(true);
+    const live = hook.result.current.state;
+    expect(live.rounds.map((round) => round.number)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    expect(live.rounds.map((round) => round.dayOrder)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(live.phases).toHaveLength(1);
+    expect(live.pools).toHaveLength(0);
+    expect(live.rounds.every((round) => round.scheduledStart == null)).toBe(true);
+    const format = live.formats.find((entry) => entry.id === live.tournament?.formatId);
+    expect(format?.kind).toBe('round-robin');
+    expect(live.audit.some((event) => event.summary.includes('Applied tournament plan'))).toBe(true);
+
+    // Re-applying a different plan before play starts is a safe rebuild.
+    act(() => {
+      applied = hook.result.current.applyTournamentPlan(set?.alternatives[0] ?? ({} as never));
+    });
+    expect(applied).toBe(true);
+    expect(hook.result.current.state.rounds).toHaveLength(18);
+
+    // Once pairings exist the plan is refused rather than wiping them.
+    const paired = await directorWithSetup(10);
+    act(() => {
+      expect(paired.hook.result.current.generateSchedule().generated).toBe(true);
+    });
+    const roundsBefore = paired.hook.result.current.state.rounds.length;
+    expect(roundsBefore).toBeGreaterThan(0);
+    act(() => {
+      applied = paired.hook.result.current.applyTournamentPlan(set?.recommended ?? ({} as never));
+    });
+    expect(applied).toBe(false);
+    expect(paired.hook.result.current.state.rounds.length).toBe(roundsBefore);
+  });
+
+  test('planner recommendations: eighteen teams get pools, stages, and advancement', async () => {
+    const { hook } = await directorWithSetup(18);
+    const set = recommendTournamentPlan(18);
+    expect(set?.recommended.id).toBe('pools-playoffs');
+
+    act(() => {
+      expect(hook.result.current.applyTournamentPlan(set?.recommended ?? ({} as never))).toBe(true);
+    });
+    const live = hook.result.current.state;
+    expect(live.phases.map((phase) => phase.name)).toEqual(['Prelims', 'Playoffs']);
+
+    const prelim = live.phases[0];
+    const prelimPools = live.pools.filter((pool) => pool.phaseId === prelim.id);
+    expect(prelimPools).toHaveLength(3);
+    for (const pool of prelimPools) {
+      expect(pool.teamIds).toHaveLength(6);
+    }
+    const placed = prelimPools.flatMap((pool) => pool.teamIds).sort();
+    expect(placed).toEqual(live.teams.map((team) => team.id).sort());
+
+    expect(prelim.advancementRule?.qualifiersPerPool).toBeGreaterThan(0);
+    expect(prelim.advancementRule?.manualOverrideAllowed).toBe(true);
+
+    const playoff = live.phases[1];
+    const playoffPools = live.pools.filter((pool) => pool.phaseId === playoff.id);
+    expect(playoffPools.length).toBeGreaterThan(0);
+    expect(playoffPools.every((pool) => pool.teamIds.length === 0)).toBe(true);
+
+    const expectedNumbers = [
+      ...(set?.recommended.stages[0].roundNumbers ?? []),
+      ...(set?.recommended.stages[1].roundNumbers ?? []),
+    ];
+    expect(live.rounds.map((round) => round.number)).toEqual(expectedNumbers);
+    const dayOrders = live.rounds.map((round) => round.dayOrder ?? -1);
+    expect([...dayOrders].sort((a, b) => a - b)).toEqual(dayOrders);
   });
 
   test('round orchestration: manual start needs no rooms, one finish closes the round', async () => {
