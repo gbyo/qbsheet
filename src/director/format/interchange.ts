@@ -16,12 +16,15 @@ import {
 import {
   defaultRules,
   emptyDirectorState,
+  isTeamClassification,
   isoNow,
   latestRound,
   newDirectorId,
   normalizeTimeZone,
   type DirectorState,
+  type FinalPlacement,
   type GameRecord,
+  type TeamClassification,
   type TeamGameScore,
 } from '../domain';
 import { normalizeDirectorState } from '../persistence/stateMigrations';
@@ -108,6 +111,9 @@ function scheduleStatus(status: string | undefined): DirectorState['scheduledGam
 }
 
 function auditType(action: string): DirectorState['audit'][number]['type'] {
+  if (action === 'final-placement-set') return 'final-placement-set';
+  if (action === 'final-placement-cleared') return 'final-placement-cleared';
+  if (action === 'advancement-committed') return 'advancement-committed';
   if (action.includes('cancel')) return 'schedule-cancelled';
   if (action.includes('drop')) return 'team-dropped';
   if (action.includes('schedule') || action.includes('repair')) return 'schedule-repaired';
@@ -169,16 +175,68 @@ function resultScores(game: InterchangeGameRecord): TeamGameScore[] {
   }));
 }
 
+/**
+ * A structured school year survives interchange as the QBJ player grade: a
+ * plain integer grade round-trips exactly, while a foreign free-text grade is
+ * left alone rather than fabricated into a year.
+ */
+function schoolYearGrade(schoolYear: number | null | undefined): { grade: string } | Record<string, never> {
+  if (typeof schoolYear !== 'number' || !Number.isInteger(schoolYear)) return {};
+  return { grade: String(schoolYear) };
+}
+
+export function schoolYearFromGrade(grade: string | undefined): number | undefined {
+  if (grade === undefined || !/^\d{1,2}$/.test(grade.trim())) return undefined;
+  const year = Number.parseInt(grade.trim(), 10);
+  return year >= 1 && year <= 16 ? year : undefined;
+}
+
+/**
+ * Read an explicit final placement back from tournament extensions. Anything
+ * malformed yields undefined rather than a fabricated ranking; duplicates
+ * collapse to the first occurrence so a conflicting order can never be stored.
+ */
+function finalPlacementFromExtension(value: unknown): FinalPlacement | undefined {
+  if (value === null || value === undefined || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const candidate = value as Record<string, unknown>;
+  if (!Array.isArray(candidate.order)) return undefined;
+  const seen = new Set<string>();
+  const order: string[] = [];
+  for (const entry of candidate.order) {
+    if (typeof entry !== 'string' || entry === '' || seen.has(entry)) continue;
+    seen.add(entry);
+    order.push(entry);
+  }
+  if (order.length === 0) return undefined;
+  return {
+    order,
+    actor: typeof candidate.actor === 'string' ? candidate.actor : '',
+    at: typeof candidate.at === 'string' ? candidate.at : '',
+    ...(typeof candidate.reason === 'string' && candidate.reason !== ''
+      ? { reason: candidate.reason }
+      : {}),
+  };
+}
+
+function interchangePlayer(player: DirectorState['players'][number]): Record<string, unknown> {
+  return {
+    id: player.id,
+    name: player.name,
+    captain: player.captain,
+    ...(player.rosterNumber === undefined ? {} : { rosterNumber: player.rosterNumber }),
+    ...schoolYearGrade(player.schoolYear),
+    ...(player.notes ? { notes: player.notes } : {}),
+  };
+}
+
 function interchangeTeam(state: DirectorState, team: DirectorState['teams'][number]): TeamRecord {
   const players = state.players
     .filter((player) => player.teamId === team.id)
-    .map((player) => ({
-      id: player.id,
-      name: player.name,
-      captain: player.captain,
-      ...(player.rosterNumber === undefined ? {} : { rosterNumber: player.rosterNumber }),
-      ...(player.notes ? { notes: player.notes } : {}),
-    }));
+    .map(interchangePlayer);
+  const classifications = (team.classifications ?? []).filter(isTeamClassification);
+  const tags = (team.tags ?? []).filter((tag) => typeof tag === 'string' && tag.trim() !== '');
   const output = {
     id: team.id,
     name: team.displayName,
@@ -188,6 +246,14 @@ function interchangeTeam(state: DirectorState, team: DirectorState['teams'][numb
     ...(team.seed === null ? {} : { seed: team.seed }),
     status: team.status === 'confirmed' ? 'active' : team.status === 'waitlist' ? 'late' : 'dropped',
     ...(team.notes ? { notes: team.notes } : {}),
+    ...(classifications.length > 0 || tags.length > 0
+      ? {
+          extensions: {
+            ...(classifications.length > 0 ? { classifications } : {}),
+            ...(tags.length > 0 ? { tags } : {}),
+          },
+        }
+      : {}),
     playerIds: players.map((player) => player.id),
     players,
   };
@@ -320,6 +386,7 @@ export function toInterchange(state: DirectorState): DirectorTournament {
         currentPhaseId: tournament.currentPhaseId,
         currentPacketId: tournament.currentPacketId,
         currentRoundId: tournament.currentRoundId,
+        ...(tournament.finalPlacement ? { finalPlacement: jsonValue(tournament.finalPlacement) } : {}),
         timeZone: tournament.timeZone,
         timed: tournament.rules.timed,
         regulationMinutes: tournament.rules.regulationMinutes,
@@ -338,17 +405,13 @@ export function toInterchange(state: DirectorState): DirectorTournament {
       ...(organization.archived ? { extensions: { archived: true } } : {}),
     })),
     players: state.players.map((player) => ({
-      id: player.id,
-      name: player.name,
+      ...interchangePlayer(player),
       ...(state.teams.find((team) => team.id === player.teamId)?.organizationId
         ? {
             organizationId:
               state.teams.find((team) => team.id === player.teamId)?.organizationId ?? undefined,
           }
         : {}),
-      captain: player.captain,
-      ...(player.rosterNumber === undefined ? {} : { rosterNumber: player.rosterNumber }),
-      ...(player.notes ? { notes: player.notes } : {}),
     })),
     teams: state.teams.map((team) => interchangeTeam(state, team)),
     registrations: state.teams.map((team) => ({
@@ -502,6 +565,7 @@ function fromInterchange(data: DirectorTournament): DirectorState {
     currentRoundId,
     createdAt: now,
     updatedAt: now,
+    finalPlacement: finalPlacementFromExtension(tournamentExtensions.finalPlacement),
   };
   state.formats = [
     {
@@ -527,30 +591,47 @@ function fromInterchange(data: DirectorTournament): DirectorState {
   data.teams.forEach((team) =>
     teamPlayers.set(team.id, team.playerIds ?? team.players?.map((player) => player.id) ?? []),
   );
-  state.teams = data.teams.map((team) => ({
-    id: team.id,
-    organizationId: team.organizationId ?? null,
-    displayName: team.displayName ?? team.name,
-    teamLetter: team.letter ?? '',
-    seed: team.seed ?? null,
-    status: teamStatus(team.status),
-    notes: team.notes,
-    createdAt: now,
-    updatedAt: now,
-  }));
+  state.teams = data.teams.map((team) => {
+    const extensions = team.extensions ?? {};
+    const classifications = Array.isArray(extensions.classifications)
+      ? extensions.classifications.filter(isTeamClassification)
+      : [];
+    const tags = Array.isArray(extensions.tags)
+      ? extensions.tags.filter((tag): tag is string => typeof tag === 'string' && tag.trim() !== '')
+      : [];
+    return {
+      id: team.id,
+      organizationId: team.organizationId ?? null,
+      displayName: team.displayName ?? team.name,
+      teamLetter: team.letter ?? '',
+      seed: team.seed ?? null,
+      status: teamStatus(team.status),
+      ...(classifications.length > 0
+        ? { classifications: classifications as TeamClassification[] }
+        : {}),
+      ...(tags.length > 0 ? { tags } : {}),
+      notes: team.notes,
+      createdAt: now,
+      updatedAt: now,
+    };
+  });
   const teamForPlayer = new Map<string, string>();
   teamPlayers.forEach((players, teamId) =>
     players.forEach((playerId) => teamForPlayer.set(playerId, teamId)),
   );
-  state.players = data.players.map((player) => ({
-    id: player.id,
-    teamId: teamForPlayer.get(player.id) ?? '',
-    name: player.name,
-    captain: player.captain ?? false,
-    active: true,
-    rosterNumber: player.rosterNumber,
-    notes: player.notes,
-  }));
+  state.players = data.players.map((player) => {
+    const schoolYear = schoolYearFromGrade(player.grade);
+    return {
+      id: player.id,
+      teamId: teamForPlayer.get(player.id) ?? '',
+      name: player.name,
+      captain: player.captain ?? false,
+      active: true,
+      rosterNumber: player.rosterNumber,
+      ...(schoolYear === undefined ? {} : { schoolYear }),
+      notes: player.notes,
+    };
+  });
   state.rooms = data.rooms.map((room) => ({
     id: room.id,
     name: room.name,

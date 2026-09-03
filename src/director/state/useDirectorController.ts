@@ -238,6 +238,19 @@ export interface CommitAdvancementResult {
   overridden: DirectorId[];
 }
 
+export interface SetFinalPlacementInput {
+  /** Team ids from first place down. Partial lists are allowed; unlisted teams keep calculated order. */
+  order: DirectorId[];
+  /** Optional reason recorded on the tournament and in the audit trail. */
+  reason?: string;
+}
+
+export interface SetFinalPlacementResult {
+  applied: boolean;
+  /** One honest line the UI can announce as-is. */
+  message: string;
+}
+
 export interface FinishRoundResult {
   finished: boolean;
   roundId: DirectorId;
@@ -349,6 +362,8 @@ export interface DirectorController {
   ): boolean;
   applyTournamentPlan(plan: TournamentPlanRecommendation): boolean;
   commitAdvancement(input: CommitAdvancementInput): CommitAdvancementResult;
+  setFinalPlacement(input: SetFinalPlacementInput): SetFinalPlacementResult;
+  clearFinalPlacement(): boolean;
   addPhase(name: string, kind?: NonNullable<DirectorState['phases'][number]>['kind']): void;
   updatePhase(
     phaseId: DirectorId,
@@ -2617,6 +2632,82 @@ export function useDirectorController(repository = createDirectorRepository()): 
     [commit],
   );
 
+  /**
+   * Record an explicit final ranking. The order is normalized on write —
+   * duplicates collapse to the first occurrence and unknown teams are dropped —
+   * so a conflicting placement can never be stored. Raw scores, W/L records,
+   * and the calculated order are untouched; ignoring `finalPlacement` recovers
+   * them exactly.
+   */
+  const setFinalPlacement = useCallback(
+    (input: SetFinalPlacementInput): SetFinalPlacementResult => {
+      const fail = (message: string): SetFinalPlacementResult => {
+        setError(message);
+        return { applied: false, message };
+      };
+      const snapshot = stateRef.current;
+      if (!snapshot.tournament) {
+        return fail('Create a tournament before setting a final placement.');
+      }
+      const knownTeams = new Set(snapshot.teams.map((team) => team.id));
+      const seen = new Set<DirectorId>();
+      const order: DirectorId[] = [];
+      for (const teamId of input.order) {
+        if (seen.has(teamId) || !knownTeams.has(teamId)) continue;
+        seen.add(teamId);
+        order.push(teamId);
+      }
+      if (order.length === 0) {
+        return fail('Choose at least one team for the final placement.');
+      }
+      const reason = input.reason?.trim() ?? '';
+      commit((draft) => {
+        if (!draft.tournament) return;
+        draft.tournament.finalPlacement = {
+          order,
+          actor: 'Director',
+          at: isoNow(),
+          ...(reason === '' ? {} : { reason }),
+        };
+        draft.audit.push({
+          id: newDirectorId('audit'),
+          at: isoNow(),
+          actor: 'Director',
+          type: 'final-placement-set',
+          summary: `Set an explicit final placement over ${order.length} team${order.length === 1 ? '' : 's'}. Calculated standings are unchanged.`,
+          details: { order, ...(reason === '' ? {} : { reason }) },
+        });
+      });
+      return {
+        applied: true,
+        message: `Final placement recorded for ${order.length} team${order.length === 1 ? '' : 's'}.`,
+      };
+    },
+    [commit],
+  );
+
+  /** Remove the explicit final ranking and restore calculated standings everywhere. */
+  const clearFinalPlacement = useCallback((): boolean => {
+    const snapshot = stateRef.current;
+    if (!snapshot.tournament) {
+      setError('Create a tournament before clearing its final placement.');
+      return false;
+    }
+    if (!snapshot.tournament.finalPlacement) return true;
+    commit((draft) => {
+      if (!draft.tournament) return;
+      draft.tournament.finalPlacement = undefined;
+      draft.audit.push({
+        id: newDirectorId('audit'),
+        at: isoNow(),
+        actor: 'Director',
+        type: 'final-placement-cleared',
+        summary: 'Cleared the explicit final placement. Calculated standings are final again.',
+      });
+    });
+    return true;
+  }, [commit]);
+
   const addPool = useCallback(
     (input: NewPoolInput): boolean => {
       const snapshot = stateRef.current;
@@ -4786,6 +4877,8 @@ export function useDirectorController(repository = createDirectorRepository()): 
     addPhase,
     updatePhase,
     commitAdvancement,
+    setFinalPlacement,
+    clearFinalPlacement,
     addPool,
     updatePool,
     setPhaseArchived,

@@ -3094,3 +3094,145 @@ button:disabled:hover {
   padding: 5px 7px;
   margin-right: 4px;
 }
+
+/* Stats workspace: one tab bar, plain tables, inline detail rows. Sections are
+ * separated by whitespace and headings, not nested cards. */
+
+.director-stats-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--director-space-2) 16px;
+}
+
+.director-tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--director-border);
+}
+
+.director-tabs button {
+  padding: 8px 14px;
+  color: var(--director-muted);
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  font-size: 14px;
+}
+
+.director-tabs button:hover {
+  color: var(--director-ink);
+}
+
+.director-tabs .director-tab-active {
+  color: var(--director-ink);
+  border-bottom-color: var(--director-ink);
+  font-weight: 600;
+}
+
+.director-stats-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--director-space-2) 12px;
+  align-items: flex-end;
+  padding-bottom: 2px;
+}
+
+.director-inline-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--director-muted);
+  font-size: 13px;
+}
+
+.director-link-button {
+  padding: 0;
+  color: var(--director-ink);
+  background: none;
+  border: 0;
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-color: var(--director-border);
+  text-underline-offset: 2px;
+}
+
+.director-link-button:hover strong,
+.director-link-button:hover {
+  text-decoration-color: var(--director-ink);
+}
+
+.director-round-stats {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--director-border);
+}
+
+.director-round-stats:last-child {
+  border-bottom: 0;
+}
+
+.director-round-stats h3 {
+  margin: 0 0 6px;
+  font-size: 14px;
+}
+
+.director-columns-config {
+  margin-top: 12px;
+  color: var(--director-muted);
+  font-size: 13px;
+}
+
+.director-columns-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  padding: 8px 0 0;
+}
+
+.director-columns-options label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.director-final-placement {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--director-border);
+}
+
+.director-final-placement p {
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+
+.director-final-placement .director-muted {
+  white-space: normal;
+}
+
+.director-final-placement-list {
+  margin: 0 0 12px;
+  padding-left: 0;
+  list-style: none;
+}
+
+.director-final-placement-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--director-border);
+}
+
+.director-final-placement-list .director-row-actions {
+  margin-left: auto;
+}
+
+.director-field {
+  display: grid;
+  gap: 4px;
+  margin: 0 0 12px;
+  font-size: 13px;
+}
