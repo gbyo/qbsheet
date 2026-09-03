@@ -12,6 +12,17 @@ async function createTournament(page: Page) {
   await expect(page.getByRole('heading', { level: 1, name: 'Local Invitational' })).toBeVisible();
 }
 
+async function goToSection(page: Page, name: string) {
+  const navigation = page.locator('nav[aria-label="Tournament sections"]');
+  const primary = navigation.getByRole('button', { name, exact: true });
+  if ((await primary.count()) > 0) {
+    await primary.click();
+    return;
+  }
+  await navigation.getByRole('button', { name: /More tournament tools/ }).click();
+  await page.getByRole('menuitem', { name, exact: true }).click();
+}
+
 test('Director starts with an empty, persisted tournament workspace', async ({ page }) => {
   await page.goto('/director.html');
 
@@ -21,7 +32,8 @@ test('Director starts with an empty, persisted tournament workspace', async ({ p
   await page.getByLabel('Tournament name').fill('Spring Invitational');
   await page.getByRole('button', { name: 'Create tournament' }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'Spring Invitational' })).toBeVisible();
-  await expect(page.getByText('No rooms have been added yet.')).toBeVisible();
+  await expect(page.getByText('Build the tournament plan')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Add teams' })).toBeVisible();
 });
 
 test('Director accepts a QBJ document even when its upload is named .json', async ({ page }) => {
@@ -91,7 +103,7 @@ test('Director layout keeps panel, table, status, and narrow-window contracts', 
   expect(tableContract.firstCellPadding).toBeGreaterThanOrEqual(16);
   expect(tableContract.lastCellPadding).toBeGreaterThanOrEqual(16);
 
-  await navigation.getByRole('button', { name: 'Rooms & staff', exact: true }).click();
+  await goToSection(page, 'Rooms & staff');
   await page.getByRole('button', { name: 'Add room' }).click();
   const roomForm = page.locator('.director-form-panel').first();
   await expect(roomForm.locator('.director-panel-body')).toBeVisible();
@@ -115,7 +127,7 @@ test('Director layout keeps panel, table, status, and narrow-window contracts', 
   await expect(page.getByText('Room 101', { exact: true })).toBeVisible();
 
   await page.setViewportSize({ width: 520, height: 720 });
-  await navigation.getByRole('button', { name: 'Settings', exact: true }).click();
+  await goToSection(page, 'Settings');
   await expect(page.getByRole('heading', { level: 1, name: 'Settings' })).toBeVisible();
   const documentWidth = await page.evaluate(() => document.documentElement.scrollWidth);
   expect(documentWidth).toBeLessThanOrEqual(521);
@@ -139,18 +151,12 @@ test('Director runs a local tournament slice and reopens its result', async ({ p
   await expect(page.getByText('Northview A', { exact: true })).toBeVisible();
   await expect(page.getByText('Riverside A', { exact: true })).toBeVisible();
 
-  await page
-    .locator('nav[aria-label="Tournament sections"]')
-    .getByRole('button', { name: 'Rooms & staff', exact: true })
-    .click();
+  await goToSection(page, 'Rooms & staff');
   await page.getByRole('button', { name: 'Add room' }).click();
   await page.getByLabel('Room name').fill('Room 101');
   await page.getByRole('button', { name: 'Save room' }).click();
 
-  await page
-    .locator('nav[aria-label="Tournament sections"]')
-    .getByRole('button', { name: 'Packets', exact: true })
-    .click();
+  await goToSection(page, 'Packets');
   await page.getByRole('button', { name: 'Add packet' }).click();
   await page.getByLabel('Packet name').fill('Set A');
   await page.getByLabel('Tiebreaker packet').check();
@@ -166,17 +172,14 @@ test('Director runs a local tournament slice and reopens its result', async ({ p
   await page.getByRole('button', { name: 'View details for Set A final' }).click();
   await expect(page.getByText('Ready for the final round.', { exact: true })).toBeVisible();
 
-  await page
-    .locator('nav[aria-label="Tournament sections"]')
-    .getByRole('button', { name: 'Format', exact: true })
-    .click();
+  await goToSection(page, 'Format');
   await page.getByRole('button', { name: 'Generate next round' }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'Tournament control' })).toBeVisible();
   const navigation = page.locator('nav[aria-label="Tournament sections"]');
   await navigation.getByRole('button', { name: 'Overview', exact: true }).click();
   await page.getByRole('button', { name: 'Prepare round', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Release assignments', exact: true })).toBeVisible();
-  await navigation.getByRole('button', { name: 'Tournament', exact: true }).click();
+  await goToSection(page, 'Tournament');
   await page.getByRole('button', { name: 'Release', exact: true }).click();
 
   await page
@@ -191,7 +194,7 @@ test('Director runs a local tournament slice and reopens its result', async ({ p
 
   await page
     .locator('nav[aria-label="Tournament sections"]')
-    .getByRole('button', { name: 'Standings & stats', exact: true })
+    .getByRole('button', { name: 'Stats', exact: true })
     .click();
   await expect(page.getByRole('heading', { level: 2, name: '2 teams' })).toBeVisible();
   await expect(page.getByText('Northview A', { exact: true })).toBeVisible();
@@ -200,7 +203,7 @@ test('Director runs a local tournament slice and reopens its result', async ({ p
   await expect(page.getByRole('heading', { level: 1, name: 'Local Invitational' })).toBeVisible();
   await page
     .locator('nav[aria-label="Tournament sections"]')
-    .getByRole('button', { name: 'Standings & stats', exact: true })
+    .getByRole('button', { name: 'Stats', exact: true })
     .click();
   await expect(page.getByRole('heading', { level: 2, name: '2 teams' })).toBeVisible();
   await expect(page.getByRole('cell', { name: '210', exact: true }).first()).toBeVisible();
@@ -209,8 +212,7 @@ test('Director runs a local tournament slice and reopens its result', async ({ p
 test('Director edits scoring rules without persisting an incomplete numeric field', async ({ page }) => {
   await createTournament(page);
 
-  const navigation = page.locator('nav[aria-label="Tournament sections"]');
-  await navigation.getByRole('button', { name: 'Format', exact: true }).click();
+  await goToSection(page, 'Format');
 
   const bonusValue = page.getByLabel('Bonus value');
   await expect(bonusValue).toHaveValue('10');
@@ -224,7 +226,7 @@ test('Director edits scoring rules without persisting an incomplete numeric fiel
   await expect(page.getByRole('alert').last()).toContainText('Tossup value must be a number.');
 
   await page.reload();
-  await navigation.getByRole('button', { name: 'Format', exact: true }).click();
+  await goToSection(page, 'Format');
   await expect(page.getByLabel('Bonus value')).toHaveValue('12');
   await expect(page.getByLabel('Tossup value')).toHaveValue('10');
 });
@@ -232,8 +234,7 @@ test('Director edits scoring rules without persisting an incomplete numeric fiel
 test('Director configures phases, advancement, and standings order', async ({ page }) => {
   await createTournament(page);
 
-  const navigation = page.locator('nav[aria-label="Tournament sections"]');
-  await navigation.getByRole('button', { name: 'Format', exact: true }).click();
+  await goToSection(page, 'Format');
 
   await page.getByLabel('Phase name').first().fill('Preliminary rankings');
   await page.getByLabel('Phase type').first().selectOption('preliminary');
@@ -257,8 +258,43 @@ test('Director configures phases, advancement, and standings order', async ({ pa
   await expect(page.getByLabel('Phase name').first()).toHaveValue('Playoffs');
   await expect(page.getByLabel('Phase type').first()).toHaveValue('playoff');
 
+  // Persistence is an async queue: wait until the phase selection has landed in
+  // IndexedDB before reloading, or the reload can win the race and restore the
+  // previous current phase.
+  await page.waitForFunction(async () => {
+    interface PersistedPhase {
+      id: string;
+      name: string;
+    }
+    interface PersistedDocument {
+      state?: {
+        phases?: PersistedPhase[];
+        tournament?: { currentPhaseId: string | null } | null;
+      };
+    }
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const open = indexedDB.open('qbsheet-director');
+      open.onsuccess = () => resolve(open.result);
+      open.onerror = () => reject(open.error);
+    });
+    try {
+      const records = await new Promise<PersistedDocument[]>((resolve, reject) => {
+        const tx = db.transaction('tournament-documents', 'readonly');
+        const req = tx.objectStore('tournament-documents').getAll();
+        req.onsuccess = () => resolve((req.result ?? []) as PersistedDocument[]);
+        req.onerror = () => reject(req.error);
+      });
+      return records.some((record) => {
+        const playoff = (record.state?.phases ?? []).find((phase) => phase.name === 'Playoffs');
+        return Boolean(playoff && record.state?.tournament?.currentPhaseId === playoff.id);
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   await page.reload();
-  await navigation.getByRole('button', { name: 'Format', exact: true }).click();
+  await goToSection(page, 'Format');
   await expect(page.getByLabel('Phase name').first()).toHaveValue('Playoffs');
   await expect(page.getByText('Preliminary rankings', { exact: true })).toBeVisible();
 });
@@ -312,7 +348,7 @@ test('Director supports keyboard search, inline edits, and audited result review
   await northviewRow.getByRole('button', { name: 'Restore Ada Lovelace to Northview B' }).click();
   await expect(northviewRow).toContainText('1 player');
 
-  await navigation.getByRole('button', { name: 'Format', exact: true }).click();
+  await goToSection(page, 'Format');
   await page.getByRole('button', { name: 'Generate next round' }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'Tournament control' })).toBeVisible();
   await page.getByRole('button', { name: 'Prepare', exact: true }).click();
@@ -364,12 +400,12 @@ test('Director opens every indexed search entity at its exact operational target
   await page.getByLabel('Add player to Northview A').fill('Ada Lovelace');
   await northviewRow.getByRole('button', { name: 'Add', exact: true }).click();
 
-  await navigation.getByRole('button', { name: 'Rooms & staff', exact: true }).click();
+  await goToSection(page, 'Rooms & staff');
   await page.getByRole('button', { name: 'Add room' }).click();
   await page.getByLabel('Room name').fill('Room 101');
   await page.getByRole('button', { name: 'Save room' }).click();
 
-  await navigation.getByRole('button', { name: 'Packets', exact: true }).click();
+  await goToSection(page, 'Packets');
   await page.getByRole('button', { name: 'Add packet' }).click();
   await page.getByLabel('Packet name').fill('Set A');
   await page.getByRole('button', { name: 'Save packet' }).click();
@@ -414,7 +450,7 @@ test('Director opens every indexed search entity at its exact operational target
   await expect(selectedPacket.locator('[data-director-navigation-focus]')).toBeFocused();
   await expect(page.getByRole('region', { name: 'Set A details' })).toBeVisible();
 
-  await navigation.getByRole('button', { name: 'Format', exact: true }).click();
+  await goToSection(page, 'Format');
   await page.getByRole('button', { name: 'Generate next round' }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'Tournament control' })).toBeVisible();
   await page.getByRole('button', { name: 'Prepare', exact: true }).click();
@@ -473,8 +509,7 @@ test('Director Help opens from both controls, owns focus, and restores the exact
 test('Director keeps unavailable resources out of new room assignments', async ({ page }) => {
   await createTournament(page);
 
-  const navigation = page.locator('nav[aria-label="Tournament sections"]');
-  await navigation.getByRole('button', { name: 'Rooms & staff', exact: true }).click();
+  await goToSection(page, 'Rooms & staff');
   await page.getByRole('button', { name: 'Add staff' }).click();
   await page.getByRole('textbox', { name: 'Name', exact: true }).fill('Moderator One');
   await page.getByLabel('Notes').fill('Covers room checks.');
@@ -531,14 +566,14 @@ test('Director configures a pool format before generating its first round', asyn
     await page.getByRole('button', { name: 'Save team' }).click();
   }
 
-  await navigation.getByRole('button', { name: 'Rooms & staff', exact: true }).click();
+  await goToSection(page, 'Rooms & staff');
   for (const room of ['Room 101', 'Room 102']) {
     await page.getByRole('button', { name: 'Add room' }).click();
     await page.getByLabel('Room name').fill(room);
     await page.getByRole('button', { name: 'Save room' }).click();
   }
 
-  await navigation.getByRole('button', { name: 'Format', exact: true }).click();
+  await goToSection(page, 'Format');
   await page.getByRole('combobox', { name: 'Format' }).selectOption('pools');
   await page.getByLabel('Number of pools').fill('2');
   await page.getByRole('button', { name: 'Create and distribute pools' }).click();
