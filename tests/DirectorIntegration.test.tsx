@@ -9,6 +9,7 @@ import {
   formatGenerationAvailability,
   generateDirectorRound,
   generateRoundRobinRound,
+  orderDayItems,
   packetUseConflicts,
   previewAdvancement,
   roundScheduleIsValid,
@@ -357,6 +358,63 @@ describe('Director integration hardening', () => {
     expect(reloadedOrder.get('round-1')).toBe(0);
     expect(reloadedOrder.get('round-2')).toBe(1);
     expect(reloadedOrder.get('lunch')).toBe(2);
+  });
+
+  test('scenario A: ten-team no-time day with Lunch after round 5 survives reload', async () => {
+    const { hook } = await directorWithSetup(10);
+    act(() => {
+      for (let index = 0; index < 9; index += 1) {
+        expect(hook.result.current.generateSchedule().generated).toBe(true);
+      }
+      expect(
+        hook.result.current.addTimelineEvent({ type: 'lunch', title: 'Lunch', visibility: 'public' }),
+      ).toBe(true);
+    });
+    const lunchId = hook.result.current.state.timeline.find((entry) => entry.type === 'lunch')?.id;
+    expect(lunchId).toBeTruthy();
+    act(() => {
+      for (let index = 0; index < 4; index += 1) {
+        expect(hook.result.current.moveDayItem(lunchId as string, 'up')).toBe(true);
+      }
+    });
+
+    const dayLabels = (state: DirectorState): string[] =>
+      orderDayItems(state.rounds, state.timeline).map((item) =>
+        item.kind === 'round' && item.round ? `R${item.round.number}` : (item.event?.title ?? '?'),
+      );
+    const expected = ['R1', 'R2', 'R3', 'R4', 'R5', 'Lunch', 'R6', 'R7', 'R8', 'R9'];
+    const live = hook.result.current.state;
+    expect(dayLabels(live)).toEqual(expected);
+
+    // Full round robin: five games per round, nine games per team, no byes.
+    const games = live.scheduledGames.filter((game) => !game.bye);
+    expect(games).toHaveLength(45);
+    const appearances = new Map<string, number>();
+    for (const game of games) {
+      for (const teamId of [game.leftTeamId, game.rightTeamId]) {
+        if (teamId) appearances.set(teamId, (appearances.get(teamId) ?? 0) + 1);
+      }
+    }
+    expect([...appearances.values()]).toEqual(live.teams.map(() => 9));
+
+    // No clock times anywhere, and preflight never nags about times.
+    expect(live.rounds.every((round) => round.scheduledStart == null)).toBe(true);
+    expect(live.timeline.every((event) => event.scheduledStart == null && event.scheduledEnd == null)).toBe(
+      true,
+    );
+    const timeIssues = runPreflight(live, false, false).filter((issue) =>
+      /time|clock|timezone/i.test(issue.message),
+    );
+    expect(timeIssues).toEqual([]);
+
+    // Reloading the persisted document preserves the sequence exactly.
+    const reloaded = normalizeDirectorState(JSON.parse(JSON.stringify(live)) as Record<string, unknown>);
+    expect(dayLabels(reloaded)).toEqual(expected);
+
+    // The portable archive round-trips the sequence too.
+    const report = importArchiveBytes(exportArchiveBytes(live));
+    expect(report.ok).toBe(true);
+    expect(report.state ? dayLabels(report.state) : []).toEqual(expected);
   });
 
   test('tournament detail updates normalize persisted text and reject blank names', async () => {

@@ -39,11 +39,46 @@ describe('orderDayItems', () => {
   test('merges rounds and events by day order, unordered items last', () => {
     const items = orderDayItems(
       [
-        { id: 'r1', phaseId: 'p', name: 'Round 1', number: 1, revision: 1, status: 'planned', packetId: null, scheduledGameIds: [], dayOrder: 0, scheduledStart: null, releasedAt: null, startedAt: null, closedAt: null },
-        { id: 'r2', phaseId: 'p', name: 'Round 2', number: 2, revision: 1, status: 'planned', packetId: null, scheduledGameIds: [], scheduledStart: null, releasedAt: null, startedAt: null, closedAt: null },
+        {
+          id: 'r1',
+          phaseId: 'p',
+          name: 'Round 1',
+          number: 1,
+          revision: 1,
+          status: 'planned',
+          packetId: null,
+          scheduledGameIds: [],
+          dayOrder: 0,
+          scheduledStart: null,
+          releasedAt: null,
+          startedAt: null,
+          closedAt: null,
+        },
+        {
+          id: 'r2',
+          phaseId: 'p',
+          name: 'Round 2',
+          number: 2,
+          revision: 1,
+          status: 'planned',
+          packetId: null,
+          scheduledGameIds: [],
+          scheduledStart: null,
+          releasedAt: null,
+          startedAt: null,
+          closedAt: null,
+        },
       ],
       [
-        { id: 'lunch', type: 'lunch', title: 'Lunch', visibility: 'public', dayOrder: 1, createdAt: '', updatedAt: '' },
+        {
+          id: 'lunch',
+          type: 'lunch',
+          title: 'Lunch',
+          visibility: 'public',
+          dayOrder: 1,
+          createdAt: '',
+          updatedAt: '',
+        },
       ],
     );
     expect(items.map((item) => item.id)).toEqual(['r1', 'lunch', 'r2']);
@@ -66,9 +101,7 @@ describe('normalizeDayOrder', () => {
       [event('lunch', 3)],
       ['lunch', 'r2'],
     );
-    const byId = new Map(
-      [...rounds, ...timeline].map((entry) => [entry.id, entry.dayOrder]),
-    );
+    const byId = new Map([...rounds, ...timeline].map((entry) => [entry.id, entry.dayOrder]));
     expect(byId.get('lunch')).toBe(0);
     expect(byId.get('r2')).toBe(1);
     expect(byId.get('r1')).toBe(2);
@@ -105,9 +138,7 @@ describe('legacyDayOrder', () => {
       ],
       [{ ...event('lunch'), scheduledStart: null, title: 'Lunch' }],
     );
-    const byId = new Map(
-      [...rounds, ...timeline].map((entry) => [entry.id, entry.dayOrder]),
-    );
+    const byId = new Map([...rounds, ...timeline].map((entry) => [entry.id, entry.dayOrder]));
     // Round-vs-round falls to round number. Untimed round-vs-event puts the
     // rounds first: id order would strand 'lunch' above Round 1, which no
     // director arranged.

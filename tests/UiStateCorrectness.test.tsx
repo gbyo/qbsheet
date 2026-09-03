@@ -136,6 +136,7 @@ describe('schedule event editor entity identity', () => {
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Alpha draft' } });
 
     fireEvent.click(screen.getByRole('button', { name: 'Add event' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Other event…' }));
     expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe('');
   });
 

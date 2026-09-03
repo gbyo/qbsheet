@@ -100,6 +100,12 @@ describe('a scorer change keeps the whole scorer safety net', () => {
     // A file under `tests/` is run by the scorer job. It cannot change what a browser does.
     expect(affected(['tests/RoomGameProperty.test.ts'])).toEqual(['quality', 'scorer']);
   });
+
+  it('stops a QBSheet Live demo-backend change short of the browser suite', () => {
+    // The demo backend is a development affordance: nothing imports it, nothing builds it, and its
+    // own tests are in the root Node project. The unmapped-script catch-all would run Playwright.
+    expect(affected(['scripts/qblive-demo/server.mjs'])).toEqual(['quality', 'scorer']);
+  });
 });
 
 describe('a Director-only change does not run the scorer browser torture test', () => {

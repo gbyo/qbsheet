@@ -292,9 +292,7 @@ function normalizeRounds(value: unknown): DirectorState['rounds'] {
   return arrayOrEmpty<DirectorState['rounds'][number]>(value, 'rounds').map((round) => ({
     ...round,
     dayOrder:
-      typeof round.dayOrder === 'number' && Number.isFinite(round.dayOrder)
-        ? round.dayOrder
-        : undefined,
+      typeof round.dayOrder === 'number' && Number.isFinite(round.dayOrder) ? round.dayOrder : undefined,
     scheduledStart: typeof round.scheduledStart === 'string' ? round.scheduledStart : null,
     releasedAt: typeof round.releasedAt === 'string' ? round.releasedAt : null,
     startedAt: typeof round.startedAt === 'string' ? round.startedAt : null,

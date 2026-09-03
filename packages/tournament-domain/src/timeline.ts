@@ -105,9 +105,7 @@ export function normalizeTimelineEvents(value: unknown): TournamentTimelineEvent
       location: typeof record.location === 'string' ? record.location : undefined,
       visibility,
       dayOrder:
-        typeof record.dayOrder === 'number' && Number.isFinite(record.dayOrder)
-          ? record.dayOrder
-          : undefined,
+        typeof record.dayOrder === 'number' && Number.isFinite(record.dayOrder) ? record.dayOrder : undefined,
       createdAt: typeof record.createdAt === 'string' ? record.createdAt : new Date(0).toISOString(),
       updatedAt: typeof record.updatedAt === 'string' ? record.updatedAt : new Date(0).toISOString(),
     });

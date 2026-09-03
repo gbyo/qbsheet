@@ -40,9 +40,7 @@ function inputKey(item: DayOrderInput): string {
 }
 
 function inputDayOrder(item: DayOrderInput): number | null {
-  return typeof item.dayOrder === 'number' && Number.isFinite(item.dayOrder)
-    ? item.dayOrder
-    : null;
+  return typeof item.dayOrder === 'number' && Number.isFinite(item.dayOrder) ? item.dayOrder : null;
 }
 
 function inputTimestamp(item: DayOrderInput): string | null {
@@ -80,9 +78,7 @@ function finiteDayOrderOrNull(item: DayOrdered): number | null {
  * never flap. Never consults timestamps, ids-as-time, or array position.
  */
 export function compareDayOrder(left: DayOrdered, right: DayOrdered): number {
-  return (
-    effectiveDayOrder(left) - effectiveDayOrder(right) || left.id.localeCompare(right.id)
-  );
+  return effectiveDayOrder(left) - effectiveDayOrder(right) || left.id.localeCompare(right.id);
 }
 
 /**
@@ -107,17 +103,12 @@ export function orderDayItems(
       event,
     })),
   ];
-  items.sort(
-    (left, right) => left.dayOrder - right.dayOrder || left.id.localeCompare(right.id),
-  );
+  items.sort((left, right) => left.dayOrder - right.dayOrder || left.id.localeCompare(right.id));
   return items;
 }
 
 /** One past the highest explicit day order, for appending new items. */
-export function nextDayOrder(
-  rounds: readonly DayOrdered[],
-  timeline: readonly DayOrdered[],
-): number {
+export function nextDayOrder(rounds: readonly DayOrdered[], timeline: readonly DayOrdered[]): number {
   let maximum = -1;
   for (const item of [...rounds, ...timeline]) {
     const order = finiteDayOrderOrNull(item);

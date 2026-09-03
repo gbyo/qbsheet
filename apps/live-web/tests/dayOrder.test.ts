@@ -40,10 +40,7 @@ function untimedSnapshot(): QbliveSnapshot {
   return {
     ...base,
     timeline: [],
-    schedule: [
-      game('game-1', 'round-1', 'Round 1', 1, 0),
-      game('game-2', 'round-2', 'Round 2', 2, 2),
-    ],
+    schedule: [game('game-1', 'round-1', 'Round 1', 1, 0), game('game-2', 'round-2', 'Round 2', 2, 2)],
   };
 }
 

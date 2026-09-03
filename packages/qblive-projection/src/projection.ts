@@ -251,8 +251,7 @@ function projectTimeline(
       type: event.type,
       title: event.title,
       description: event.description ?? null,
-      sequence:
-        typeof event.dayOrder === 'number' && Number.isFinite(event.dayOrder) ? event.dayOrder : null,
+      sequence: typeof event.dayOrder === 'number' && Number.isFinite(event.dayOrder) ? event.dayOrder : null,
       scheduledStart: zonedIsoOrNull(event.scheduledStart, timeZone),
       scheduledEnd: zonedIsoOrNull(event.scheduledEnd, timeZone),
       teamIds: event.teamIds ? [...event.teamIds] : [],
