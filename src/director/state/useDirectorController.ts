@@ -8,7 +8,10 @@ import {
   newDirectorId,
   hostTimeZone,
   isValidTimeZone,
+  normalizeDayOrder,
   normalizeTimeZone,
+  nextDayOrder,
+  orderDayItems,
   roomAssignmentConflicts,
   roundScheduleIsValid,
   rosterAmendmentId,
@@ -286,6 +289,7 @@ export interface DirectorController {
   addTimelineEvent(input: NewTimelineEventInput): boolean;
   updateTimelineEvent(eventId: DirectorId, changes: Partial<NewTimelineEventInput>): boolean;
   removeTimelineEvent(eventId: DirectorId): boolean;
+  moveDayItem(itemId: DirectorId, direction: 'up' | 'down'): boolean;
   setRoundScheduledStart(roundId: DirectorId, scheduledStart: string | null): boolean;
   selectPhase(phaseId: DirectorId): void;
   selectPacket(packetId: DirectorId): void;
@@ -2082,6 +2086,9 @@ export function useDirectorController(repository = createDirectorRepository()): 
           description: input.description?.trim() || undefined,
           scheduledStart: input.scheduledStart ?? null,
           scheduledEnd: input.scheduledEnd ?? null,
+          // New events append at the end of the tournament day; the Rounds
+          // view offers "insert after" placement and keyboard reordering.
+          dayOrder: nextDayOrder(draft.rounds, draft.timeline),
           visibility: input.visibility,
           roomId: input.roomId ?? null,
           location: input.location?.trim() || undefined,
@@ -2171,6 +2178,42 @@ export function useDirectorController(repository = createDirectorRepository()): 
           type: 'tournament-updated',
           summary: `Removed schedule event “${current.title}”.`,
           entityId: eventId,
+        });
+      });
+      return true;
+    },
+    [commit],
+  );
+
+  /**
+   * Move a round or timeline event one step earlier or later in the
+   * tournament-day sequence. The reorder is a single commit assigning a dense
+   * order, so persistence, reload, and undo treat it like any other change.
+   */
+  const moveDayItem = useCallback(
+    (itemId: DirectorId, direction: 'up' | 'down'): boolean => {
+      const snapshot = stateRef.current;
+      const ordered = orderDayItems(snapshot.rounds, snapshot.timeline);
+      const index = ordered.findIndex((entry) => entry.id === itemId);
+      const target = direction === 'up' ? index - 1 : index + 1;
+      if (index < 0 || target < 0 || target >= ordered.length) return false;
+      const ids = ordered.map((entry) => entry.id);
+      [ids[index], ids[target]] = [ids[target], ids[index]];
+      const moving = ordered[index];
+      commit((draft) => {
+        const normalized = normalizeDayOrder(draft.rounds, draft.timeline, ids);
+        draft.rounds = normalized.rounds;
+        draft.timeline = normalized.timeline;
+        draft.audit.push({
+          id: newDirectorId('audit'),
+          at: isoNow(),
+          actor: 'Director',
+          type: 'tournament-updated',
+          summary:
+            moving.kind === 'round'
+              ? `Moved ${moving.round?.name ?? 'round'} ${direction === 'up' ? 'earlier' : 'later'} in the day order.`
+              : `Moved ${moving.event?.title ?? 'event'} ${direction === 'up' ? 'earlier' : 'later'} in the day order.`,
+          entityId: itemId,
         });
       });
       return true;
@@ -4292,6 +4335,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
     addTimelineEvent,
     updateTimelineEvent,
     removeTimelineEvent,
+    moveDayItem,
     setRoundScheduledStart,
     addImportedTeams,
     selectPhase,

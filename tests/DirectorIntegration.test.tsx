@@ -9,6 +9,7 @@ import {
   formatGenerationAvailability,
   generateDirectorRound,
   generateRoundRobinRound,
+  orderDayItems,
   packetUseConflicts,
   previewAdvancement,
   roundScheduleIsValid,
@@ -290,6 +291,131 @@ describe('Director integration hardening', () => {
     const untimed = structuredClone(legacy);
     (untimed.tournament as Record<string, unknown>).rules = { ...defaultRules };
     expect(normalizeDirectorState(untimed).tournament?.rules.timed).toBe(false);
+  });
+
+  test('schema v6 migration assigns the displayed day order deterministically', () => {
+    const legacy = emptyDirectorState() as unknown as Record<string, unknown>;
+    legacy.schemaVersion = 6;
+    legacy.rounds = [
+      {
+        id: 'round-2',
+        phaseId: 'phase-1',
+        name: 'Round 2',
+        number: 2,
+        revision: 1,
+        status: 'planned',
+        packetId: null,
+        scheduledGameIds: [],
+        scheduledStart: null,
+        releasedAt: null,
+        startedAt: null,
+        closedAt: null,
+      },
+      {
+        id: 'round-1',
+        phaseId: 'phase-1',
+        name: 'Round 1',
+        number: 1,
+        revision: 1,
+        status: 'planned',
+        packetId: null,
+        scheduledGameIds: [],
+        scheduledStart: null,
+        releasedAt: null,
+        startedAt: null,
+        closedAt: null,
+      },
+    ];
+    legacy.timeline = [
+      {
+        id: 'lunch',
+        type: 'lunch',
+        title: 'Lunch',
+        visibility: 'public',
+        scheduledStart: null,
+        scheduledEnd: null,
+        createdAt: '',
+        updatedAt: '',
+      },
+    ];
+    const normalized = normalizeDirectorState(legacy);
+    expect(normalized.schemaVersion).toBe(directorSchemaVersion);
+    const order = new Map(
+      [...normalized.rounds, ...normalized.timeline].map((entry) => [entry.id, entry.dayOrder]),
+    );
+    // Untimed rounds keep number order; the untimed event keeps its displayed
+    // position after them (id tiebreak), and every value is dense.
+    expect(order.get('round-1')).toBe(0);
+    expect(order.get('round-2')).toBe(1);
+    expect(order.get('lunch')).toBe(2);
+
+    // Reloading the migrated document preserves the sequence exactly.
+    const reloaded = normalizeDirectorState(
+      JSON.parse(JSON.stringify(normalized)) as Record<string, unknown>,
+    );
+    const reloadedOrder = new Map(
+      [...reloaded.rounds, ...reloaded.timeline].map((entry) => [entry.id, entry.dayOrder]),
+    );
+    expect(reloadedOrder.get('round-1')).toBe(0);
+    expect(reloadedOrder.get('round-2')).toBe(1);
+    expect(reloadedOrder.get('lunch')).toBe(2);
+  });
+
+  test('scenario A: ten-team no-time day with Lunch after round 5 survives reload', async () => {
+    const { hook } = await directorWithSetup(10);
+    act(() => {
+      for (let index = 0; index < 9; index += 1) {
+        expect(hook.result.current.generateSchedule().generated).toBe(true);
+      }
+      expect(
+        hook.result.current.addTimelineEvent({ type: 'lunch', title: 'Lunch', visibility: 'public' }),
+      ).toBe(true);
+    });
+    const lunchId = hook.result.current.state.timeline.find((entry) => entry.type === 'lunch')?.id;
+    expect(lunchId).toBeTruthy();
+    act(() => {
+      for (let index = 0; index < 4; index += 1) {
+        expect(hook.result.current.moveDayItem(lunchId as string, 'up')).toBe(true);
+      }
+    });
+
+    const dayLabels = (state: DirectorState): string[] =>
+      orderDayItems(state.rounds, state.timeline).map((item) =>
+        item.kind === 'round' && item.round ? `R${item.round.number}` : (item.event?.title ?? '?'),
+      );
+    const expected = ['R1', 'R2', 'R3', 'R4', 'R5', 'Lunch', 'R6', 'R7', 'R8', 'R9'];
+    const live = hook.result.current.state;
+    expect(dayLabels(live)).toEqual(expected);
+
+    // Full round robin: five games per round, nine games per team, no byes.
+    const games = live.scheduledGames.filter((game) => !game.bye);
+    expect(games).toHaveLength(45);
+    const appearances = new Map<string, number>();
+    for (const game of games) {
+      for (const teamId of [game.leftTeamId, game.rightTeamId]) {
+        if (teamId) appearances.set(teamId, (appearances.get(teamId) ?? 0) + 1);
+      }
+    }
+    expect([...appearances.values()]).toEqual(live.teams.map(() => 9));
+
+    // No clock times anywhere, and preflight never nags about times.
+    expect(live.rounds.every((round) => round.scheduledStart == null)).toBe(true);
+    expect(live.timeline.every((event) => event.scheduledStart == null && event.scheduledEnd == null)).toBe(
+      true,
+    );
+    const timeIssues = runPreflight(live, false, false).filter((issue) =>
+      /time|clock|timezone/i.test(issue.message),
+    );
+    expect(timeIssues).toEqual([]);
+
+    // Reloading the persisted document preserves the sequence exactly.
+    const reloaded = normalizeDirectorState(JSON.parse(JSON.stringify(live)) as Record<string, unknown>);
+    expect(dayLabels(reloaded)).toEqual(expected);
+
+    // The portable archive round-trips the sequence too.
+    const report = importArchiveBytes(exportArchiveBytes(live));
+    expect(report.ok).toBe(true);
+    expect(report.state ? dayLabels(report.state) : []).toEqual(expected);
   });
 
   test('tournament detail updates normalize persisted text and reject blank names', async () => {

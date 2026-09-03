@@ -172,7 +172,9 @@ Two `#if DEBUG` mechanisms exist because a universal link cannot work before the
 - **`qbsheetlive://t/<id>?b=<origin>`** — a custom scheme, rebuilt into the https form so the same
   parser and the same validation run.
 - **`-qblive-bootstrap`, `-qblive-team`, `-qblive-player`, `-qblive-tab`, `-qblive-reset`** — launch
-  arguments, for scripted screenshots. A simulator has no way to tap.
+  arguments, for scripted screenshots. A simulator has no way to tap. Both the app and the Clip read
+  them, because the Clip needs screenshots too and one that ignored them would produce the wrong
+  screen without saying so.
 
 Neither ships. A custom scheme is claimable by any app on the device; a universal link is not, which
 is exactly why the release build uses only the latter.
@@ -183,7 +185,58 @@ xcrun simctl launch "iPhone 17 Pro" com.qbsheet.live \
   -qblive-team team-a -qblive-tab standings
 ```
 
-## 12. App Store Connect checklist
+## 12. Simulating a tournament
+
+QBSheet Live has no data of its own, so there is nothing to look at until some backend is answering.
+`scripts/qblive-demo/` is a QBLive backend that serves a demo tournament which plays itself: rounds
+are released, games go live, scores tick up a tossup at a time, results are accepted, standings
+reorder, and a final is played between whichever two teams earned it.
+
+```bash
+./ios/scripts/simulate.sh                     # demo backend, build, install, launch
+./ios/scripts/simulate.sh --clip              # the App Clip instead of the full app
+./ios/scripts/simulate.sh --team team-96a --tab standings
+```
+
+The script exists because there is no way to do this by hand: it starts the backend, finds or boots
+a simulator, builds, installs, and launches with the `-qblive-bootstrap` argument above. It also
+falls back to any Xcode it can find when `xcode-select` points at the Command Line Tools, because
+correcting that needs a password.
+
+The backend runs on its own for the web client, a second simulator, or a phone on the same network —
+it prints a bootstrap URL for each:
+
+```bash
+npm run qblive:demo                  # 30× real time, starting just before round 1
+npm run qblive:demo -- --speed 1     # real time
+npm run qblive:demo -- --at 5h       # start with the prelims over
+npm run qblive:demo -- --no-stream    # advertise no WebSocket, so the client polls
+npm run qblive:demo -- --settings default   # Director's real defaults instead of everything on
+```
+
+The demo document is built by `scripts/qblive-demo/tournament.mjs` and published through
+`projectLiveSnapshot` — the same projection Director publishes through, with standings and
+statistics derived by `deriveTeamStandings` from the results the demo actually played. So the
+numbers agree with each other, the privacy settings are honoured by the real filter, and a
+projection change is visible in the demo the next time it runs. Events are the projection's own
+section diff, so a client's incremental apply is exercised rather than approximated.
+
+Two properties are worth knowing when using it to debug:
+
+- **The tournament is a pure function of its clock.** `--seed` fixes every tossup, so the same seed
+  always plays the same tournament, and `--at` can jump to any point in the day without the demo
+  drifting.
+- **Nothing here ships or is deployed.** It has no management API, no authentication and no
+  persistence, and it is not a QBLive backend to learn from — that is
+  `apps/qblive-backend-cloudflare`, with `npm run qblive:conformance` as the judge of whether a
+  backend is correct.
+
+`scripts/qblive-demo/tournament.test.mjs` holds the demo's own tests: a real round robin, a snapshot
+the protocol accepts at every point in the day, no round published before it is released, a live
+score that agrees with the result it becomes, and events whose sections rebuild the snapshot they
+came from.
+
+## 13. App Store Connect checklist
 
 - [ ] App ID `com.qbsheet.live` with **Associated Domains**, **Push Notifications**, **App Groups**.
 - [ ] App Clip ID `com.qbsheet.live.Clip` registered as an App Clip of the above.

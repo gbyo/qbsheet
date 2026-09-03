@@ -251,6 +251,7 @@ function projectTimeline(
       type: event.type,
       title: event.title,
       description: event.description ?? null,
+      sequence: typeof event.dayOrder === 'number' && Number.isFinite(event.dayOrder) ? event.dayOrder : null,
       scheduledStart: zonedIsoOrNull(event.scheduledStart, timeZone),
       scheduledEnd: zonedIsoOrNull(event.scheduledEnd, timeZone),
       teamIds: event.teamIds ? [...event.teamIds] : [],
@@ -259,8 +260,21 @@ function projectTimeline(
     }))
     .sort(
       (left, right) =>
-        compareOptionalTimes(left.scheduledStart, right.scheduledStart) || left.id.localeCompare(right.id),
+        compareOptionalSequence(left.sequence, right.sequence) ||
+        compareOptionalTimes(left.scheduledStart, right.scheduledStart) ||
+        left.id.localeCompare(right.id),
     );
+}
+
+/**
+ * Explicit day sequence first; items without one keep the legacy time/id
+ * order. Null sequence never means "first" — it means "predates day order".
+ */
+function compareOptionalSequence(left: number | null, right: number | null): number {
+  if (left === right) return 0;
+  if (left === null) return 1;
+  if (right === null) return -1;
+  return left - right;
 }
 
 /** Timed events first and in order; untimed events after them, in a stable order. */
@@ -291,6 +305,8 @@ function projectSchedule(
       roundId: game.roundId,
       roundName: round?.name ?? 'Round',
       roundNumber: round?.number ?? null,
+      sequence:
+        typeof round?.dayOrder === 'number' && Number.isFinite(round.dayOrder) ? round.dayOrder : null,
       phaseId: phase?.id ?? null,
       phaseName: phase?.name ?? null,
       poolId: pool?.id ?? null,
@@ -303,6 +319,7 @@ function projectSchedule(
   }
   return games.sort(
     (left, right) =>
+      compareOptionalSequence(left.sequence, right.sequence) ||
       (left.roundNumber ?? Number.MAX_SAFE_INTEGER) - (right.roundNumber ?? Number.MAX_SAFE_INTEGER) ||
       left.id.localeCompare(right.id),
   );

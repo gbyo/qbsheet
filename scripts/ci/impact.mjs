@@ -267,6 +267,11 @@ export const RULES = [
     domains: SCORER,
     why: 'writes the about/wiki build entries',
   },
+  {
+    glob: 'scripts/qblive-demo/**',
+    domains: ['scorer'],
+    why: 'the QBSheet Live demo backend; its tests are in the root Node project and nothing is built',
+  },
   { glob: 'scripts/**', domains: SCORER, why: 'an unmapped build script; assume it reaches the build' },
 
   // ---------------------------------------------------------------------------------------------

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import BrandLogo from '../../BrandLogo';
 import { Button, EmptyState, PanelBody, PanelFooter } from '../components/Controls';
 import { Icon } from '../components/Icon';
-import { navigation, labelForSection, type SectionId } from './navigation';
+import { primaryNavigation, moreNavigation, labelForSection, type SectionId } from './navigation';
 import { useDirectorController } from '../state/useDirectorController';
 import { OverviewView } from '../overview/OverviewView';
 import { TeamsView } from '../teams/TeamsView';
@@ -68,10 +68,10 @@ export default function DirectorApp() {
   const [operatorProfile, setOperatorProfile] = useState<OperatorProfile>(() => loadOperatorProfile());
   // Exactly one Director popover menu is ever open: opening one closes the other, and opening
   // an overlay (help, dialogs) closes any menu so none is stranded underneath.
-  const [openMenu, setOpenMenu] = useState<'tournament' | 'operator' | null>(null);
+  const [openMenu, setOpenMenu] = useState<'tournament' | 'operator' | 'more' | null>(null);
   const menuOpenerRef = useRef<HTMLElement | null>(null);
   const closeMenu = () => setOpenMenu(null);
-  const openMenuFrom = (name: 'tournament' | 'operator', opener: { currentTarget: HTMLElement }) => {
+  const openMenuFrom = (name: 'tournament' | 'operator' | 'more', opener: { currentTarget: HTMLElement }) => {
     menuOpenerRef.current = opener.currentTarget;
     setOpenMenu((current) => (current === name ? null : name));
   };
@@ -488,26 +488,55 @@ export default function DirectorApp() {
           )}
         </div>
         <nav className="director-nav" aria-label="Tournament sections">
-          {navigation.map((group, index) => (
-            <div className="director-nav-group" key={group.label ?? `primary-${index}`}>
-              {group.label && <p className="director-nav-label">{group.label}</p>}
-              {group.items.map((item) => (
-                <SectionLink
-                  key={item.id}
-                  section={item}
-                  active={item.id === activeSection}
-                  onSelect={navigate}
-                  count={
-                    item.id === 'results'
-                      ? resultReviewCount || undefined
-                      : item.id === 'transfers'
-                        ? transferPendingCount || undefined
-                        : undefined
-                  }
-                />
-              ))}
-            </div>
-          ))}
+          <div className="director-nav-group">
+            {primaryNavigation.map((item) => (
+              <SectionLink
+                key={item.id}
+                section={item}
+                active={item.id === activeSection}
+                onSelect={navigate}
+                count={item.id === 'results' ? resultReviewCount || undefined : undefined}
+              />
+            ))}
+          </div>
+          <div className="director-nav-group">
+            <button
+              type="button"
+              className={`director-nav-link ${moreNavigation.some((item) => item.id === activeSection) ? 'is-active' : ''}`}
+              aria-haspopup="menu"
+              aria-expanded={openMenu === 'more'}
+              aria-label={`More tournament tools${transferPendingCount ? `, ${transferPendingCount} transfers needing attention` : ''}`}
+              onClick={(event) => openMenuFrom('more', event)}
+            >
+              <Icon name="settings" />
+              <span>More</span>
+              {transferPendingCount > 0 && <span className="director-nav-count">{transferPendingCount}</span>}
+            </button>
+            {openMenu === 'more' && (
+              <DirectorMenu
+                label="More tournament tools"
+                className="director-more-menu"
+                openerRef={menuOpenerRef}
+                onClose={closeMenu}
+              >
+                {moreNavigation.map((item) => (
+                  <button
+                    key={item.id}
+                    role="menuitem"
+                    type="button"
+                    className={`director-menu-item ${item.id === activeSection ? 'is-selected' : ''}`}
+                    onClick={() => navigate(item.id)}
+                  >
+                    <Icon name={item.icon} size={14} />
+                    <span>{item.label}</span>
+                    {item.id === 'transfers' && transferPendingCount > 0 && (
+                      <small>{transferPendingCount} pending</small>
+                    )}
+                  </button>
+                ))}
+              </DirectorMenu>
+            )}
+          </div>
         </nav>
         <div className="director-sidebar-footer">
           <div className={`director-server-status is-${sidebarServer.kind}`} data-status={sidebarServer.kind}>

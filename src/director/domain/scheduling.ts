@@ -25,6 +25,7 @@ import {
   type Team as CoreTeam,
 } from '@qbsheet/tournament-core';
 import { acceptedGameRecords, deriveTeamStandings, type TeamStanding } from './stats';
+import { nextDayOrder } from '@qbsheet/tournament-domain';
 
 export interface ScheduleOptions {
   roundName?: string;
@@ -41,6 +42,12 @@ export interface ScheduleOptions {
   formatKind?: 'round-robin' | 'double-round-robin';
   roundsPerTeam?: number | null;
   seed?: number;
+  /**
+   * Day-sequence position for the generated round. `generateDirectorRound`
+   * stamps the next open position; every construction path funnels through
+   * `buildGenerationResult`, so generated rounds never land without one.
+   */
+  dayOrder?: number | null;
 }
 
 export interface ScheduleConflict {
@@ -591,6 +598,7 @@ function buildGenerationResult(
     status: 'planned',
     packetId: options.packetId ?? null,
     scheduledGameIds: games.map((game) => game.id),
+    dayOrder: options.dayOrder ?? null,
     scheduledStart: null,
     releasedAt: null,
     startedAt: null,
@@ -656,6 +664,7 @@ export function generateDirectorRound(
     | 'packetId'
     | 'manualPairings'
     | 'allowIncomplete'
+    | 'dayOrder'
   > = {},
 ): ScheduleGenerationResult {
   const format = currentFormat(state);
@@ -695,6 +704,9 @@ export function generateDirectorRound(
   const packet = currentPacket(state);
   const scheduleOptions: ScheduleOptions = {
     ...options,
+    // Generated rounds append at the end of the tournament day; the director
+    // reorders from Rounds afterwards. Explicit callers may override.
+    dayOrder: options.dayOrder ?? nextDayOrder(state.rounds, state.timeline),
     phaseId: phase.id,
     packetId: options.packetId ?? packet?.id ?? null,
     formatKind: format.kind === 'double-round-robin' ? 'double-round-robin' : 'round-robin',

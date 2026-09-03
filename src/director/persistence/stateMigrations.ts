@@ -4,6 +4,8 @@ import {
   emptyDirectorState,
   emptyLivePublication,
   fallbackTimeZone,
+  legacyDayOrder,
+  normalizeDayOrder,
   normalizeTimeZone,
   normalizeTimelineEvents,
   rosterAmendmentId,
@@ -62,6 +64,8 @@ export function migrateDirectorState(
       current = migrateV4ToV5(current);
     } else if (currentVersion === 5) {
       current = migrateV5ToV6(current);
+    } else if (currentVersion === 6) {
+      current = migrateV6ToV7(current);
     } else {
       throw new Error(`No Director migration exists for schema v${currentVersion}.`);
     }
@@ -123,6 +127,25 @@ function migrateV5ToV6(value: Record<string, unknown>): Record<string, unknown> 
       },
     };
   }
+  return next;
+}
+
+/**
+ * v7 gives the tournament day an explicit persisted sequence.
+ *
+ * Rounds and timeline events previously ordered by optional timestamps, round
+ * numbers, and finally generated ids. `legacyDayOrder` replicates exactly the
+ * order Director displayed, so migration assigns dense day positions without
+ * rearranging anything the director already sees. Every later load densifies
+ * again in `completeState`, which repairs duplicates and gaps the same way.
+ */
+function migrateV6ToV7(value: Record<string, unknown>): Record<string, unknown> {
+  const next = structuredClone(value);
+  const rounds = arrayOfRecords(next.rounds, 'rounds');
+  const timeline = arrayOfRecords(next.timeline, 'timeline');
+  const ordered = legacyDayOrder(rounds, timeline);
+  next.rounds = ordered.rounds;
+  next.timeline = ordered.timeline;
   return next;
 }
 
@@ -228,6 +251,12 @@ function completeState(value: Record<string, unknown>): DirectorState {
   };
   state.submissions = supersedeDuplicateScheduledSubmissions(state);
   state.packets = canonicalizePacketReferences(state);
+  // Densify the shared day sequence on every load: duplicates and gaps from
+  // hand-edited archives or older writers repair deterministically, and
+  // already-dense orders pass through untouched.
+  const dayOrder = normalizeDayOrder(state.rounds, state.timeline);
+  state.rounds = dayOrder.rounds;
+  state.timeline = dayOrder.timeline;
   return state;
 }
 
@@ -262,6 +291,8 @@ function normalizeRosterAmendments(value: unknown): DirectorState['qbtcpRosterAm
 function normalizeRounds(value: unknown): DirectorState['rounds'] {
   return arrayOrEmpty<DirectorState['rounds'][number]>(value, 'rounds').map((round) => ({
     ...round,
+    dayOrder:
+      typeof round.dayOrder === 'number' && Number.isFinite(round.dayOrder) ? round.dayOrder : undefined,
     scheduledStart: typeof round.scheduledStart === 'string' ? round.scheduledStart : null,
     releasedAt: typeof round.releasedAt === 'string' ? round.releasedAt : null,
     startedAt: typeof round.startedAt === 'string' ? round.startedAt : null,
