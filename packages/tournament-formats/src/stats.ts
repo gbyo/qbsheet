@@ -725,7 +725,8 @@ function slugify(value: string): string {
     value
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '') || 'item'
+      .replace(/^-+/g, '')
+      .replace(/-+$/g, '') || 'item'
   );
 }
 
