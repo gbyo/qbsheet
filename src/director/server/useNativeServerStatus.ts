@@ -5,6 +5,12 @@
  * Tournament Control all read the same snapshot, and start/stop/pairing actions write through
  * to it — so an external change, a server failure, or a local mutation becomes visible
  * everywhere instead of each surface owning a copy that can disagree.
+ *
+ * Reads are serialized and generation-checked. A once-per-second interval over a read that can
+ * take longer than a second would otherwise overlap, so a slow older read could land after a
+ * newer one and move the snapshot backwards; and a read begun before Start/Stop could land after
+ * the mutation and undo it. Only one read is ever in flight, and a read whose generation has
+ * been superseded by a mutation is discarded rather than applied.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -36,13 +42,18 @@ export function useNativeServerStatus(options: {
 }): NativeServerState {
   const { active, onPoll } = options;
   const [status, setStatus] = useState<NativeServerStatus>({ running: false });
-  // Loading is derived, never set inside the polling effect: a read is in flight, or polling
-  // is active and no read has completed yet. Async completions are the only writers.
-  const [inFlightReads, setInFlightReads] = useState(0);
+  // Loading is derived, never set inside the polling effect: a mutation is in flight, or polling
+  // is active and no read has completed yet. A slow background read deliberately does not count,
+  // so overlapping polls can never strand the Start/Stop button on "Checking server".
+  const [pendingMutations, setPendingMutations] = useState(0);
   const [everLoaded, setEverLoaded] = useState(false);
-  const loading = inFlightReads > 0 || (active && !everLoaded);
+  const loading = pendingMutations > 0 || (active && !everLoaded);
   const statusRef = useRef(status);
   const onPollRef = useRef(onPoll);
+  // One read at a time, and a generation that every mutation bumps so a read started before it
+  // cannot apply afterwards.
+  const readInFlightRef = useRef(false);
+  const generationRef = useRef(0);
   useEffect(() => {
     statusRef.current = status;
   }, [status]);
@@ -50,19 +61,29 @@ export function useNativeServerStatus(options: {
     onPollRef.current = onPoll;
   }, [onPoll]);
 
+  /** Authoritative write: supersedes any read that is already in flight. */
+  const commitStatus = useCallback((next: NativeServerStatus) => {
+    generationRef.current += 1;
+    setStatus(next);
+  }, []);
+
   const refresh = useCallback(async () => {
-    setInFlightReads((count) => count + 1);
+    if (readInFlightRef.current) return;
+    readInFlightRef.current = true;
+    const generation = generationRef.current;
     try {
       const next = await readNativeServerStatus();
-      setStatus(next);
+      if (generationRef.current === generation) setStatus(next);
     } catch (reason: unknown) {
-      setStatus({
-        running: false,
-        message: reason instanceof Error ? reason.message : 'Server status could not be read.',
-      });
+      if (generationRef.current === generation) {
+        setStatus({
+          running: false,
+          message: reason instanceof Error ? reason.message : 'Server status could not be read.',
+        });
+      }
     } finally {
+      readInFlightRef.current = false;
       setEverLoaded(true);
-      setInFlightReads((count) => Math.max(0, count - 1));
     }
   }, []);
 
@@ -83,18 +104,19 @@ export function useNativeServerStatus(options: {
   }, [active, refresh]);
 
   const toggle = useCallback(async () => {
-    setInFlightReads((count) => count + 1);
+    setPendingMutations((count) => count + 1);
     try {
       const next = statusRef.current.running ? await stopNativeServer() : await startNativeServer();
-      setStatus(next);
+      commitStatus(next);
       return next;
     } finally {
       setEverLoaded(true);
-      setInFlightReads((count) => Math.max(0, count - 1));
+      setPendingMutations((count) => Math.max(0, count - 1));
     }
-  }, []);
+  }, [commitStatus]);
 
   const addInvitation = useCallback((invitation: NativeRoomPairingInvitation) => {
+    generationRef.current += 1;
     setStatus((previous) => {
       const current = (previous.pairingInvitations ?? []).filter(
         (entry) => entry.roomId !== invitation.roomId,
@@ -111,9 +133,5 @@ export function useNativeServerStatus(options: {
     });
   }, []);
 
-  const apply = useCallback((next: NativeServerStatus) => {
-    setStatus(next);
-  }, []);
-
-  return { status, loading, refresh, toggle, addInvitation, apply };
+  return { status, loading, refresh, toggle, addInvitation, apply: commitStatus };
 }

@@ -88,14 +88,31 @@ export default function ConnectedSetup(props: {
   const codeRef = useRef(code);
   const roomIdRef = useRef(roomId);
 
+  // The mirrors are only useful if they never drift, so every write to one of these inputs goes
+  // through the matching tracked setter. A programmatic update — the launch-link fallback
+  // suggesting a room, clearing after a successful pairing — has to move the ref exactly like a
+  // keystroke does, or the stale-response guard rejects a response that is in fact current.
+  const setAddressTracked = (value: string) => {
+    addressRef.current = value;
+    setAddress(value);
+  };
+  const setCodeTracked = (value: string) => {
+    codeRef.current = value;
+    setCode(value);
+  };
+  const setRoomIdTracked = (value: string) => {
+    roomIdRef.current = value;
+    setRoomId(value);
+  };
+
   const askForCode = (connection: IControlConnection, suggestedRoomId = '') => {
     setStage(pairStage(connection));
-    setRoomId(suggestedRoomId);
+    setRoomIdTracked(suggestedRoomId);
   };
 
   const adoptRoom = (room: IPairedRoom) => {
-    setCode('');
-    setRoomId('');
+    setCodeTracked('');
+    setRoomIdTracked('');
     connectionTimeline.record('room-repaired', room.roomName);
     onPaired(room);
   };
@@ -229,8 +246,7 @@ export default function ConnectedSetup(props: {
                 placeholder="192.168.1.50:8080"
                 value={address}
                 onChange={(event) => {
-                  addressRef.current = event.target.value;
-                  setAddress(event.target.value);
+                  setAddressTracked(event.target.value);
                   setError('');
                   setUnreachable(false);
                 }}
@@ -271,8 +287,7 @@ export default function ConnectedSetup(props: {
                   className="shell-input"
                   value={roomId}
                   onChange={(event) => {
-                    roomIdRef.current = event.target.value;
-                    setRoomId(event.target.value);
+                    setRoomIdTracked(event.target.value);
                     setError('');
                   }}
                 >
@@ -297,8 +312,7 @@ export default function ConnectedSetup(props: {
               required
               value={code}
               onChange={(event) => {
-                codeRef.current = event.target.value;
-                setCode(event.target.value);
+                setCodeTracked(event.target.value);
                 setError('');
               }}
             />
