@@ -1509,6 +1509,37 @@ describe('Director integration hardening', () => {
     expect(formatGenerationAvailability(hook.result.current.state)).toMatchObject({ supported: false });
   });
 
+  test('preflight stays silent about delivery for a roomless manual tournament', async () => {
+    const { hook } = await directorWithSetup(2);
+    const roomless = structuredClone(hook.result.current.state);
+    roomless.rooms = [];
+    act(() => {
+      expect(hook.result.current.importSnapshot(roomless)).toBe(true);
+    });
+    const issueIds = runPreflight(hook.result.current.state, false, true).map((issue) => issue.id);
+    expect(issueIds).not.toContain('qbtcp-offline');
+    expect(issueIds).not.toContain('games-without-rooms');
+
+    const roomed = structuredClone(hook.result.current.state);
+    // Restore the setup room: delivery guidance returns with it.
+    roomed.rooms = [
+      {
+        id: 'room-1',
+        name: 'Room 1',
+        status: 'available',
+        moderatorId: null,
+        scorekeeperId: null,
+        equipmentId: null,
+        available: true,
+      },
+    ];
+    act(() => {
+      expect(hook.result.current.importSnapshot(roomed)).toBe(true);
+    });
+    const roomedIds = runPreflight(hook.result.current.state, false, true).map((issue) => issue.id);
+    expect(roomedIds).toContain('qbtcp-offline');
+  });
+
   test('browser preflight omits the native-only QBTCP recommendation', async () => {
     const { hook } = await directorWithSetup();
     const browserIssues = runPreflight(hook.result.current.state, false, false);
