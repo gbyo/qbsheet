@@ -102,6 +102,10 @@ export function FormatView({
     });
   };
   const phase = currentPhase(state);
+  // Progressive disclosure: one ordinary stage is the tournament itself, so
+  // stage settings and the stage list stay hidden until a second stage exists.
+  const visiblePhases = state.phases.filter((entry) => !entry.archived);
+  const singleStage = visiblePhases.length <= 1;
   const generation = formatGenerationAvailability(state);
   const scheduleCount = state.rounds.filter((round) => round.phaseId === phase?.id).length;
   const formatTypeLocked = state.rounds.length > 0;
@@ -128,7 +132,7 @@ export function FormatView({
       <PageHeader
         eyebrow="Plan"
         title="Format"
-        description="A reusable format controls phases, rounds, advancement, and tiebreakers."
+        description="A reusable format controls stages, rounds, advancement, and tiebreakers."
         actions={
           <Button
             variant="primary"
@@ -210,7 +214,7 @@ export function FormatView({
                 </FormField>
                 <FormField
                   label="Rounds per team"
-                  hint="Set a maximum for this phase; leave blank for no fixed limit."
+                  hint="Set a maximum for this stage; leave blank for no fixed limit."
                 >
                   <input
                     type="number"
@@ -438,15 +442,15 @@ export function FormatView({
         {(format.kind === 'pools' || format.kind === 'playoff-pools') && phase && (
           <PoolConfiguration state={state} phase={phase} controller={controller} onAnnounce={onAnnounce} />
         )}
-        {phase && (
+        {phase && !singleStage && (
           <PhaseConfiguration state={state} phase={phase} controller={controller} onAnnounce={onAnnounce} />
         )}
         {rules && <TiebreakerConfiguration rules={rules} controller={controller} onAnnounce={onAnnounce} />}
         <section className="director-panel">
           <div className="director-panel-heading">
             <div>
-              <p className="director-eyebrow">Phases</p>
-              <h2>Plan sequence</h2>
+              <p className="director-eyebrow">{singleStage ? 'Tournament plan' : 'Stages'}</p>
+              <h2>{singleStage ? 'Single stage' : 'Plan sequence'}</h2>
             </div>
             <Button
               variant="quiet"
@@ -454,12 +458,12 @@ export function FormatView({
                 const next = !showPhaseForm;
                 setShowPhaseForm(next);
                 if (next) {
-                  setNewPhaseName(`Phase ${state.phases.length + 1}`);
+                  setNewPhaseName(singleStage ? 'Playoffs' : `Stage ${state.phases.length + 1}`);
                   setNewPhaseKind('playoff');
                 }
               }}
             >
-              {showPhaseForm ? 'Close' : 'Add phase'}
+              {showPhaseForm ? 'Close' : singleStage ? 'Add playoff stage' : 'Add stage'}
             </Button>
           </div>
           <PanelBody>
@@ -469,22 +473,22 @@ export function FormatView({
                 onSubmit={(event) => {
                   event.preventDefault();
                   controller.addPhase(
-                    newPhaseName.trim() || `Phase ${state.phases.length + 1}`,
+                    newPhaseName.trim() || (singleStage ? 'Playoffs' : `Stage ${state.phases.length + 1}`),
                     newPhaseKind,
                   );
                   setShowPhaseForm(false);
                   setNewPhaseName('');
-                  onAnnounce('Phase added locally; saving now.');
+                  onAnnounce('Stage added locally; saving now.');
                 }}
               >
-                <FormField label="Phase name">
+                <FormField label="Stage name">
                   <input
                     value={newPhaseName}
                     onChange={(event) => setNewPhaseName(event.target.value)}
                     placeholder="Playoffs"
                   />
                 </FormField>
-                <FormField label="Phase type">
+                <FormField label="Stage type">
                   <select
                     value={newPhaseKind}
                     onChange={(event) => setNewPhaseKind(event.target.value as PhaseKind)}
@@ -497,12 +501,14 @@ export function FormatView({
                   </select>
                 </FormField>
                 <Button variant="secondary" type="submit">
-                  Save phase
+                  Save stage
                 </Button>
               </form>
             )}
-            {state.phases.length === 0 ? (
-              <p className="director-empty-copy">No phases configured.</p>
+            {singleStage ? (
+              <StageSummary state={state} />
+            ) : state.phases.length === 0 ? (
+              <p className="director-empty-copy">No stages configured.</p>
             ) : (
               <ol className="director-phase-list">
                 {state.phases.map((entry) => (
@@ -563,15 +569,30 @@ export function FormatView({
                 ))}
               </ol>
             )}
-            <p className="director-panel-footnote">
-              {scheduleCount
-                ? `${scheduleCount} round${scheduleCount === 1 ? '' : 's'} already generated. New format changes affect future rounds only.`
-                : 'Generate a round after adding teams and rooms.'}
-            </p>
+            {!singleStage && (
+              <p className="director-panel-footnote">
+                {scheduleCount
+                  ? `${scheduleCount} round${scheduleCount === 1 ? '' : 's'} already generated. New format changes affect future rounds only.`
+                  : 'Generate a round after adding teams and rooms.'}
+              </p>
+            )}
           </PanelBody>
         </section>
       </div>
     </>
+  );
+}
+
+function StageSummary({ state }: { state: DirectorState }) {
+  const roundCount = state.rounds.length;
+  const poolCount = state.pools.filter((pool) => !pool.archived).length;
+  const rounds = `${roundCount} round${roundCount === 1 ? '' : 's'}`;
+  const pools = poolCount === 0 ? 'no pools' : `${poolCount} pool${poolCount === 1 ? '' : 's'}`;
+  return (
+    <p className="director-empty-copy">
+      {rounds} · {pools}. Add a playoff stage when the field splits; rounds, pools, and advancement stay
+      editable.
+    </p>
   );
 }
 
@@ -637,7 +658,7 @@ function PhaseConfiguration({
       advancementRule,
     });
     if (!updated) {
-      onAnnounce('Phase changes were not saved; review the Director error.');
+      onAnnounce('Stage changes were not saved; review the Director error.');
       return;
     }
     setDraftState({
@@ -655,7 +676,7 @@ function PhaseConfiguration({
         advancementDirty: false,
       },
     });
-    onAnnounce(`${draft.name.trim()} phase settings updated.`);
+    onAnnounce(`${draft.name.trim()} stage settings updated.`);
   };
   const acceptedResults = state.games.some(
     (game) => game.roundId && phase.roundIds.includes(game.roundId) && game.status === 'accepted',
@@ -665,14 +686,14 @@ function PhaseConfiguration({
     <section className="director-panel">
       <div className="director-panel-heading">
         <div>
-          <p className="director-eyebrow">Selected phase</p>
-          <h2>Phase settings</h2>
+          <p className="director-eyebrow">Selected stage</p>
+          <h2>Stage settings</h2>
         </div>
         <StateLabel state={phase.status} label={phase.status} />
       </div>
       <PanelBody>
         <div className="director-form-grid director-form-grid-three">
-          <FormField label="Phase name">
+          <FormField label="Stage name">
             <input
               value={draft.name}
               onChange={(event) =>
@@ -681,7 +702,7 @@ function PhaseConfiguration({
             />
           </FormField>
           <FormField
-            label="Phase type"
+            label="Stage type"
             hint={phase.roundIds.length > 0 ? 'Type is locked after the first generated round.' : undefined}
           >
             <select
@@ -714,15 +735,15 @@ function PhaseConfiguration({
                 }))
               }
             />
-            <span>Carry over prior phase results</span>
+            <span>Carry over prior stage results</span>
           </label>
         </div>
         <div className="director-phase-advancement">
           <div>
             <p className="director-eyebrow">Advancement</p>
             <p className="director-panel-description">
-              Configure who qualifies from this phase. Director previews the decision; move teams into the
-              next phase after review.
+              Configure who qualifies from this stage. Director previews the decision; move teams into the
+              next stage after review.
             </p>
           </div>
           <label className="director-check-row">
@@ -742,7 +763,7 @@ function PhaseConfiguration({
           {advancementEnabled && (
             <div className="director-form-grid director-form-grid-two">
               <FormField
-                label={phase.poolIds.length > 0 ? 'Qualifiers per pool' : 'Qualifiers from phase'}
+                label={phase.poolIds.length > 0 ? 'Qualifiers per pool' : 'Qualifiers from stage'}
                 hint="The first team is the highest-ranked qualifier."
               >
                 <input
@@ -805,12 +826,12 @@ function PhaseConfiguration({
         )}
         {phase.advancementRule && !acceptedResults && (
           <p className="director-panel-footnote">
-            Accept at least one result in this phase to populate the advancement preview.
+            Accept at least one result in this stage to populate the advancement preview.
           </p>
         )}
         <div className="director-row-actions director-phase-save-actions">
           <Button variant="secondary" onClick={save}>
-            Save phase settings
+            Save stage settings
           </Button>
         </div>
       </PanelBody>
@@ -1078,7 +1099,7 @@ function PoolConfiguration({
   const poolSetupComplete = activePools.length > 0 && poolGeneration.supported;
   const createPools = () => {
     if (locked) {
-      onAnnounce('Pool membership is locked after a round has been generated; add a new phase instead.');
+      onAnnounce('Pool membership is locked after a round has been generated; add a new stage instead.');
       return;
     }
     const count = Number(poolCount);
@@ -1107,7 +1128,7 @@ function PoolConfiguration({
   };
   const addPool = () => {
     if (locked) {
-      onAnnounce('Pool membership is locked after a round has been generated; add a new phase instead.');
+      onAnnounce('Pool membership is locked after a round has been generated; add a new stage instead.');
       return;
     }
     const name = newPoolName.trim() || poolName(pools.length);
@@ -1136,9 +1157,9 @@ function PoolConfiguration({
       <PanelBody>
         <p className="director-panel-description">
           {playoffPools
-            ? 'Each advancing team in this phase must belong to exactly one playoff pool; confirmed teams outside the phase are valid.'
+            ? 'Each advancing team in this stage must belong to exactly one playoff pool; confirmed teams outside the stage are valid.'
             : 'Every confirmed team must belong to exactly one pool before a pool round can be generated.'}
-          {locked ? ' Membership is locked because this phase already has generated rounds.' : ''}
+          {locked ? ' Membership is locked because this stage already has generated rounds.' : ''}
         </p>
         {pools.length === 0 ? (
           <form
@@ -1175,7 +1196,7 @@ function PoolConfiguration({
             <p className="director-panel-footnote">
               {playoffPools
                 ? assignedTeamIds.size > 0
-                  ? 'Only teams assigned to these pools will play this phase; verify they are the advancing field before generating.'
+                  ? 'Only teams assigned to these pools will play this stage; verify they are the advancing field before generating.'
                   : 'Assign the advancing teams to playoff pools before generating.'
                 : unassignedCount === 0
                   ? 'All confirmed teams are assigned exactly once.'

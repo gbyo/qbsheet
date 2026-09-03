@@ -260,36 +260,47 @@ test('Director edits scoring rules without persisting an incomplete numeric fiel
   await expect(page.getByLabel('Tossup value')).toHaveValue('10');
 });
 
-test('Director configures phases, advancement, and standings order', async ({ page }) => {
+test('Director configures stages, advancement, and standings order', async ({ page }) => {
   await createTournament(page);
 
   await goToSection(page, 'Format');
 
-  await page.getByLabel('Phase name').first().fill('Preliminary rankings');
-  await page.getByLabel('Phase type').first().selectOption('preliminary');
+  // One implicit stage is the tournament itself: no stage machinery.
+  await expect(page.getByRole('heading', { name: 'Single stage' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Stage settings' })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Plan sequence' })).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Add playoff stage' }).click();
+  const stageForm = page.locator('.director-phase-add-form');
+  await expect(stageForm.getByLabel('Stage name')).toHaveValue('Playoffs');
+  await stageForm.getByLabel('Stage type').selectOption('playoff');
+  await stageForm.getByRole('button', { name: 'Save stage' }).click();
+  await expect(page.getByText('Playoffs', { exact: true })).toBeVisible();
+
+  // The second stage reveals stage navigation and settings, still pointed at
+  // the original stage. Configure advancement out of it.
+  await expect(page.getByRole('heading', { name: 'Plan sequence' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Stage settings' })).toBeVisible();
+  await page.getByLabel('Stage name').first().fill('Preliminary rankings');
+  await page.getByLabel('Stage type').first().selectOption('preliminary');
   await page.getByLabel('Use an advancement rule').check();
-  await page.getByLabel('Qualifiers from phase').fill('1');
+  await page.getByLabel('Qualifiers from stage').fill('1');
   await page.getByLabel('Allow director override for unresolved ties').check();
-  await page.getByRole('button', { name: 'Save phase settings' }).click();
-  await expect(page.getByText('Preliminary rankings phase settings updated.')).toBeVisible();
+  await page.getByRole('button', { name: 'Save stage settings' }).click();
+  await expect(page.getByText('Preliminary rankings stage settings updated.')).toBeVisible();
 
   await page.getByRole('button', { name: 'Move Overall record up' }).click();
   await expect(page.getByRole('status')).toContainText('Overall record moved up');
   await expect(page.getByRole('button', { name: 'Move Overall record down' })).toBeVisible();
 
-  await page.getByRole('button', { name: 'Add phase' }).click();
-  const phaseForm = page.locator('.director-phase-add-form');
-  await phaseForm.getByLabel('Phase name').fill('Playoffs');
-  await phaseForm.getByLabel('Phase type').selectOption('playoff');
-  await phaseForm.getByRole('button', { name: 'Save phase' }).click();
-  await expect(page.getByText('Playoffs', { exact: true })).toBeVisible();
+  // Switching stages repoints settings at the playoff stage.
   await page.getByRole('button', { name: 'Use', exact: true }).click();
-  await expect(page.getByLabel('Phase name').first()).toHaveValue('Playoffs');
-  await expect(page.getByLabel('Phase type').first()).toHaveValue('playoff');
+  await expect(page.getByLabel('Stage name').first()).toHaveValue('Playoffs');
+  await expect(page.getByLabel('Stage type').first()).toHaveValue('playoff');
 
-  // Persistence is an async queue: wait until the phase selection has landed in
+  // Persistence is an async queue: wait until the stage selection has landed in
   // IndexedDB before reloading, or the reload can win the race and restore the
-  // previous current phase.
+  // previous current stage.
   await page.waitForFunction(async () => {
     interface PersistedPhase {
       id: string;
@@ -324,7 +335,7 @@ test('Director configures phases, advancement, and standings order', async ({ pa
 
   await page.reload();
   await goToSection(page, 'Format');
-  await expect(page.getByLabel('Phase name').first()).toHaveValue('Playoffs');
+  await expect(page.getByLabel('Stage name').first()).toHaveValue('Playoffs');
   await expect(page.getByText('Preliminary rankings', { exact: true })).toBeVisible();
 });
 
