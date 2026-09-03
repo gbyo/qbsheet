@@ -282,6 +282,9 @@ export function toInterchange(state: DirectorState): DirectorTournament {
       scheduledStart: round.scheduledStart,
       releasedAt: round.releasedAt,
       startedAt: round.startedAt,
+      ...(typeof round.dayOrder === 'number' && Number.isFinite(round.dayOrder)
+        ? { dayOrder: round.dayOrder }
+        : {}),
     },
   }));
   const scheduledGames = state.scheduledGames.map((game) => ({
@@ -624,6 +627,10 @@ function fromInterchange(data: DirectorTournament): DirectorState {
     releasedAt: text(round.extensions?.releasedAt) ?? null,
     startedAt: text(round.extensions?.startedAt) ?? null,
     closedAt: round.status === 'closed' ? now : null,
+    dayOrder:
+      typeof round.extensions?.dayOrder === 'number' && Number.isFinite(round.extensions.dayOrder)
+        ? round.extensions.dayOrder
+        : undefined,
   }));
   state.scheduledGames = data.scheduledGames.map((game) => ({
     id: game.id,

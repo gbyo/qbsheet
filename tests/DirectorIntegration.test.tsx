@@ -291,6 +291,74 @@ describe('Director integration hardening', () => {
     expect(normalizeDirectorState(untimed).tournament?.rules.timed).toBe(false);
   });
 
+  test('schema v6 migration assigns the displayed day order deterministically', () => {
+    const legacy = emptyDirectorState() as unknown as Record<string, unknown>;
+    legacy.schemaVersion = 6;
+    legacy.rounds = [
+      {
+        id: 'round-2',
+        phaseId: 'phase-1',
+        name: 'Round 2',
+        number: 2,
+        revision: 1,
+        status: 'planned',
+        packetId: null,
+        scheduledGameIds: [],
+        scheduledStart: null,
+        releasedAt: null,
+        startedAt: null,
+        closedAt: null,
+      },
+      {
+        id: 'round-1',
+        phaseId: 'phase-1',
+        name: 'Round 1',
+        number: 1,
+        revision: 1,
+        status: 'planned',
+        packetId: null,
+        scheduledGameIds: [],
+        scheduledStart: null,
+        releasedAt: null,
+        startedAt: null,
+        closedAt: null,
+      },
+    ];
+    legacy.timeline = [
+      {
+        id: 'lunch',
+        type: 'lunch',
+        title: 'Lunch',
+        visibility: 'public',
+        scheduledStart: null,
+        scheduledEnd: null,
+        createdAt: '',
+        updatedAt: '',
+      },
+    ];
+    const normalized = normalizeDirectorState(legacy);
+    expect(normalized.schemaVersion).toBe(directorSchemaVersion);
+    const order = new Map(
+      [...normalized.rounds, ...normalized.timeline].map((entry) => [entry.id, entry.dayOrder]),
+    );
+    // Untimed rounds keep number order; the untimed event keeps its displayed
+    // position after them (id tiebreak), and every value is dense.
+    expect(order.get('round-1')).toBe(0);
+    expect(order.get('round-2')).toBe(1);
+    expect(order.get('lunch')).toBe(2);
+
+    // Reloading the migrated document preserves the sequence exactly.
+    const reloaded = normalizeDirectorState(
+      JSON.parse(JSON.stringify(normalized)) as Record<string, unknown>,
+    );
+    const reloadedOrder = new Map(
+      [...reloaded.rounds, ...reloaded.timeline].map((entry) => [entry.id, entry.dayOrder]),
+    );
+    expect(reloadedOrder.get('round-1')).toBe(0);
+    expect(reloadedOrder.get('round-2')).toBe(1);
+    expect(reloadedOrder.get('lunch')).toBe(2);
+  });
+
   test('tournament detail updates normalize persisted text and reject blank names', async () => {
     const { hook } = await directorWithSetup();
 

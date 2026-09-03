@@ -11,7 +11,7 @@ import type { IanaTimeZone } from './timezone.js';
 import type { TournamentTimelineEvent } from './timeline.js';
 import type { LivePublication } from './publication.js';
 
-export const directorSchemaVersion = 6;
+export const directorSchemaVersion = 7;
 
 export type {
   ArtifactClassification,
@@ -234,6 +234,12 @@ export interface Round {
   status: 'planned' | 'prepared' | 'released' | 'closed';
   packetId: DirectorId | null;
   scheduledGameIds: DirectorId[];
+  /**
+   * Explicit position in the tournament-day sequence shared with timeline
+   * events. Missing values sort last and are densified on load; see
+   * `dayOrder.ts`. Rounds keep their numeric `number` independently.
+   */
+  dayOrder?: number | null;
   /** When the round was planned to begin, if the schedule has an explicit time. */
   scheduledStart: string | null;
   /** When assignments were released to rooms. This is not a scheduled or actual start. */

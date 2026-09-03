@@ -39,6 +39,11 @@ export interface TournamentTimelineEvent {
   /** Free text for events that happen somewhere that is not a numbered room. */
   location?: string;
   visibility: TimelineVisibility;
+  /**
+   * Explicit position in the tournament-day sequence shared with rounds.
+   * Missing values sort last and are densified on load; see `dayOrder.ts`.
+   */
+  dayOrder?: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -99,6 +104,10 @@ export function normalizeTimelineEvents(value: unknown): TournamentTimelineEvent
       roomId: typeof record.roomId === 'string' ? record.roomId : null,
       location: typeof record.location === 'string' ? record.location : undefined,
       visibility,
+      dayOrder:
+        typeof record.dayOrder === 'number' && Number.isFinite(record.dayOrder)
+          ? record.dayOrder
+          : undefined,
       createdAt: typeof record.createdAt === 'string' ? record.createdAt : new Date(0).toISOString(),
       updatedAt: typeof record.updatedAt === 'string' ? record.updatedAt : new Date(0).toISOString(),
     });
