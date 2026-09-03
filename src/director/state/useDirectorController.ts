@@ -125,11 +125,20 @@ export interface NewTeamInput {
   teamLetter?: string;
   seed?: number | null;
   notes?: string;
+  players?: NewPlayerInput[];
+}
+
+export interface NewPlayerInput {
+  name: string;
+  captain?: boolean;
+  rosterNumber?: string | number;
+  notes?: string;
 }
 
 export interface NewOrganizationInput {
   name: string;
   shortName?: string;
+  city?: string;
   notes?: string;
 }
 
@@ -285,6 +294,7 @@ export interface DirectorController {
   addOrganization(input: NewOrganizationInput): boolean;
   updateOrganization(organizationId: DirectorId, changes: Partial<NewOrganizationInput>): boolean;
   setOrganizationArchived(organizationId: DirectorId, archived: boolean): boolean;
+  mergeOrganizations(sourceOrganizationId: DirectorId, targetOrganizationId: DirectorId): boolean;
   addTeam(input: NewTeamInput): boolean;
   addImportedTeams(teams: ImportedTeamInput[]): { inserted: number; skipped: number };
   updateTeam(teamId: DirectorId, changes: Partial<NewTeamInput>): boolean;
@@ -915,7 +925,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
       const snapshot = stateRef.current;
       const name = input.name.trim();
       if (!name) {
-        setError('An organization name is required.');
+        setError('A school or club name is required.');
         return false;
       }
       if (
@@ -923,7 +933,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
           (organization) => organization.name.trim().toLocaleLowerCase() === name.toLocaleLowerCase(),
         )
       ) {
-        setError(`Organization “${name}” already exists; reopen it or edit the existing record.`);
+        setError(`School / club “${name}” already exists; reopen it or edit the existing record.`);
         return false;
       }
       commit((draft) => {
@@ -933,6 +943,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
           id,
           name,
           shortName: input.shortName?.trim() || undefined,
+          city: input.city?.trim() || undefined,
           notes: input.notes?.trim() || undefined,
         });
         draft.audit.push({
@@ -940,7 +951,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
           at: now,
           actor: 'Director',
           type: 'team-changed',
-          summary: `Added organization ${name}.`,
+          summary: `Added school / club ${name}.`,
           entityId: id,
           details: { entityType: 'organization' },
         });
@@ -955,12 +966,12 @@ export function useDirectorController(repository = createDirectorRepository()): 
       const snapshot = stateRef.current;
       const current = snapshot.organizations.find((organization) => organization.id === organizationId);
       if (!current) {
-        setError('That organization is no longer in the tournament workspace.');
+        setError('That school or club is no longer in the tournament workspace.');
         return false;
       }
       const name = changes.name === undefined ? current.name : changes.name.trim();
       if (!name) {
-        setError('An organization name is required.');
+        setError('A school or club name is required.');
         return false;
       }
       if (
@@ -970,7 +981,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
             organization.name.trim().toLocaleLowerCase() === name.toLocaleLowerCase(),
         )
       ) {
-        setError(`Organization “${name}” already exists.`);
+        setError(`School / club “${name}” already exists.`);
         return false;
       }
       commit((draft) => {
@@ -978,13 +989,14 @@ export function useDirectorController(repository = createDirectorRepository()): 
         if (!organization) return;
         organization.name = name;
         if (changes.shortName !== undefined) organization.shortName = changes.shortName.trim() || undefined;
+        if (changes.city !== undefined) organization.city = changes.city.trim() || undefined;
         if (changes.notes !== undefined) organization.notes = changes.notes.trim() || undefined;
         draft.audit.push({
           id: newDirectorId('audit'),
           at: isoNow(),
           actor: 'Director',
           type: 'team-changed',
-          summary: `Updated organization ${name}.`,
+          summary: `Updated school / club ${name}.`,
           entityId: organizationId,
           details: { entityType: 'organization' },
         });
@@ -999,7 +1011,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
       const snapshot = stateRef.current;
       const current = snapshot.organizations.find((organization) => organization.id === organizationId);
       if (!current) {
-        setError('That organization is no longer in the tournament workspace.');
+        setError('That school or club is no longer in the tournament workspace.');
         return false;
       }
       if (current.archived === archived) return true;
@@ -1008,7 +1020,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         snapshot.teams.some((team) => team.organizationId === organizationId && team.status !== 'dropped')
       ) {
         setError(
-          'An organization with active teams cannot be archived; retire or reassign those teams first.',
+          'A school or club with active teams cannot be archived; retire or reassign those teams first.',
         );
         return false;
       }
@@ -1021,9 +1033,60 @@ export function useDirectorController(repository = createDirectorRepository()): 
           at: isoNow(),
           actor: 'Director',
           type: 'team-changed',
-          summary: `${archived ? 'Archived' : 'Reopened'} organization ${organization.name}.`,
+          summary: `${archived ? 'Archived' : 'Reopened'} school / club ${organization.name}.`,
           entityId: organizationId,
           details: { entityType: 'organization', archived, retainsHistory: true },
+        });
+      });
+      return true;
+    },
+    [commit],
+  );
+
+  const mergeOrganizations = useCallback(
+    (sourceOrganizationId: DirectorId, targetOrganizationId: DirectorId): boolean => {
+      const snapshot = stateRef.current;
+      if (sourceOrganizationId === targetOrganizationId) {
+        setError('Choose two different schools or clubs to merge.');
+        return false;
+      }
+      const source = snapshot.organizations.find((organization) => organization.id === sourceOrganizationId);
+      const target = snapshot.organizations.find((organization) => organization.id === targetOrganizationId);
+      if (!source || !target) {
+        setError('One of those school or club records is no longer available.');
+        return false;
+      }
+      if (target.archived) {
+        setError(`Reopen ${target.name} before merging another school or club into it.`);
+        return false;
+      }
+      const reassignedTeamCount = snapshot.teams.filter(
+        (team) => team.organizationId === sourceOrganizationId,
+      ).length;
+      commit((draft) => {
+        draft.teams
+          .filter((team) => team.organizationId === sourceOrganizationId)
+          .forEach((team) => {
+            team.organizationId = targetOrganizationId;
+            team.updatedAt = isoNow();
+          });
+        const duplicate = draft.organizations.find(
+          (organization) => organization.id === sourceOrganizationId,
+        );
+        if (duplicate) duplicate.archived = true;
+        draft.audit.push({
+          id: newDirectorId('audit'),
+          at: isoNow(),
+          actor: 'Director',
+          type: 'team-changed',
+          summary: `Merged ${source.name} into ${target.name}.`,
+          entityId: sourceOrganizationId,
+          details: {
+            entityType: 'organization',
+            mergedIntoOrganizationId: targetOrganizationId,
+            reassignedTeamCount,
+            retainsHistory: true,
+          },
         });
       });
       return true;
@@ -1055,7 +1118,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         : undefined;
       if (archivedOrganization?.archived) {
         setError(
-          `Organization “${archivedOrganization.name}” is archived; reopen it before assigning a new team.`,
+          `School / club “${archivedOrganization.name}” is archived; reopen it before assigning a new team.`,
         );
         return false;
       }
@@ -1067,13 +1130,19 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError('Seed must be a positive whole number or blank.');
         return false;
       }
+      const roster = normalizeNewPlayerInputs(input.players ?? []);
+      if (!roster.ok) {
+        setError(roster.message);
+        return false;
+      }
       commit((draft) => {
         const now = isoNow();
         let organizationId: DirectorId | null = null;
         const organizationName = input.organizationName?.trim();
         if (organizationName) {
           const existing = draft.organizations.find(
-            (organization) => organization.name.toLocaleLowerCase() === organizationName.toLocaleLowerCase(),
+            (organization) =>
+              organization.name.trim().toLocaleLowerCase() === organizationName.toLocaleLowerCase(),
           );
           organizationId = existing?.id ?? newDirectorId('organization');
           if (!existing) draft.organizations.push({ id: organizationId, name: organizationName });
@@ -1090,6 +1159,21 @@ export function useDirectorController(repository = createDirectorRepository()): 
           createdAt: now,
           updatedAt: now,
         });
+        let captainIndex = -1;
+        roster.players.forEach((player, index) => {
+          if (player.captain) captainIndex = index;
+        });
+        roster.players.forEach((player, index) => {
+          draft.players.push({
+            id: newDirectorId('player'),
+            teamId,
+            name: player.name,
+            captain: index === captainIndex,
+            active: true,
+            ...(player.rosterNumber === undefined ? {} : { rosterNumber: player.rosterNumber }),
+            ...(player.notes ? { notes: player.notes } : {}),
+          });
+        });
         draft.audit.push({
           id: newDirectorId('audit'),
           at: now,
@@ -1097,6 +1181,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
           type: 'team-changed',
           summary: `Added ${displayName}.`,
           entityId: teamId,
+          details: { initialPlayerCount: roster.players.length },
         });
       });
       return true;
@@ -1136,7 +1221,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
             const organization = draft.organizations.find(
               (candidate) =>
                 candidate.id === organizationName ||
-                candidate.name.toLocaleLowerCase() === organizationName.toLocaleLowerCase(),
+                candidate.name.trim().toLocaleLowerCase() === organizationName.toLocaleLowerCase(),
             );
             if (organization) organizationId = organization.id;
             else {
@@ -1164,7 +1249,8 @@ export function useDirectorController(repository = createDirectorRepository()): 
           teamNames.add(name.toLocaleLowerCase());
           const teamPlayerNames = new Set<string>();
           for (const sourcePlayer of input.players ?? []) {
-            const playerName = sourcePlayer.name.trim();
+            const normalizedPlayer = normalizePlayerInput(sourcePlayer);
+            const playerName = normalizedPlayer.name;
             if (!playerName || teamPlayerNames.has(playerName.toLocaleLowerCase())) continue;
             const requestedPlayerId = sourcePlayer.id?.trim();
             const playerId =
@@ -1175,10 +1261,12 @@ export function useDirectorController(repository = createDirectorRepository()): 
               id: playerId,
               teamId,
               name: playerName,
-              captain: sourcePlayer.captain ?? false,
+              captain: normalizedPlayer.captain,
               active: sourcePlayer.active ?? true,
-              rosterNumber: sourcePlayer.rosterNumber,
-              notes: sourcePlayer.notes?.trim(),
+              ...(normalizedPlayer.rosterNumber === undefined
+                ? {}
+                : { rosterNumber: normalizedPlayer.rosterNumber }),
+              ...(normalizedPlayer.notes ? { notes: normalizedPlayer.notes } : {}),
             });
             playerIds.add(playerId);
             teamPlayerNames.add(playerName.toLocaleLowerCase());
@@ -1241,7 +1329,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         : undefined;
       if (archivedOrganization?.archived && archivedOrganization.id !== current.organizationId) {
         setError(
-          `Organization “${archivedOrganization.name}” is archived; reopen it before assigning this team.`,
+          `School / club “${archivedOrganization.name}” is archived; reopen it before assigning this team.`,
         );
         return false;
       }
@@ -1255,7 +1343,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
             const existing = draft.organizations.find(
               (organization) =>
                 organization.id === organizationName ||
-                organization.name.toLocaleLowerCase() === organizationName.toLocaleLowerCase(),
+                organization.name.trim().toLocaleLowerCase() === organizationName.toLocaleLowerCase(),
             );
             if (existing) team.organizationId = existing.id;
             else {
@@ -1380,7 +1468,8 @@ export function useDirectorController(repository = createDirectorRepository()): 
       rosterNumber?: string | number,
       notes?: string,
     ): boolean => {
-      const normalizedName = name.trim();
+      const normalizedPlayer = normalizePlayerInput({ name, captain, rosterNumber, notes });
+      const normalizedName = normalizedPlayer.name;
       const snapshot = stateRef.current;
       if (!normalizedName) {
         setError('A player name is required.');
@@ -1411,10 +1500,12 @@ export function useDirectorController(repository = createDirectorRepository()): 
           id: playerId,
           teamId,
           name: normalizedName,
-          captain,
+          captain: normalizedPlayer.captain,
           active: true,
-          rosterNumber: normalizeRosterNumber(rosterNumber),
-          notes: notes?.trim() || undefined,
+          ...(normalizedPlayer.rosterNumber === undefined
+            ? {}
+            : { rosterNumber: normalizedPlayer.rosterNumber }),
+          ...(normalizedPlayer.notes ? { notes: normalizedPlayer.notes } : {}),
         });
         draft.audit.push({
           id: newDirectorId('audit'),
@@ -4844,6 +4935,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
     addOrganization,
     updateOrganization,
     setOrganizationArchived,
+    mergeOrganizations,
     addTeam,
     updateTeam,
     dropTeam,
@@ -4961,6 +5053,43 @@ function normalizeRosterNumber(value: string | number | undefined): string | num
   if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
   const trimmed = value?.trim();
   return trimmed || undefined;
+}
+
+function normalizePlayerInput(
+  input: NewPlayerInput,
+): Required<Pick<NewPlayerInput, 'name' | 'captain'>> & Pick<NewPlayerInput, 'rosterNumber' | 'notes'> {
+  return {
+    name: input.name.trim(),
+    captain: input.captain ?? false,
+    rosterNumber: normalizeRosterNumber(input.rosterNumber),
+    notes: input.notes?.trim() || undefined,
+  };
+}
+
+function normalizeNewPlayerInputs(
+  inputs: NewPlayerInput[],
+): { ok: true; players: ReturnType<typeof normalizePlayerInput>[] } | { ok: false; message: string } {
+  const players: ReturnType<typeof normalizePlayerInput>[] = [];
+  const activeNames = new Set<string>();
+  for (const [index, input] of inputs.entries()) {
+    const player = normalizePlayerInput(input);
+    if (!player.name) {
+      if (player.captain || player.rosterNumber !== undefined || player.notes) {
+        return {
+          ok: false,
+          message: `Player row ${index + 1} has roster details but no name. Enter a name or clear that row.`,
+        };
+      }
+      continue;
+    }
+    const key = player.name.toLocaleLowerCase();
+    if (activeNames.has(key)) {
+      return { ok: false, message: `“${player.name}” is already on this active roster.` };
+    }
+    activeNames.add(key);
+    players.push(player);
+  }
+  return { ok: true, players };
 }
 
 function validateTimelineEventInput(state: DirectorState, input: NewTimelineEventInput): string | null {

@@ -31,19 +31,37 @@ test('the about page introduces QBSheet and links to the real product', async ({
   const primaryNavigation = page.getByRole('navigation', { name: 'Primary navigation' });
   await expect(primaryNavigation.getByRole('link')).toHaveCount(4);
   await expect(primaryNavigation.getByRole('link', { name: 'Scorer' })).toHaveAttribute('href', '../');
+  // Both product entries are pages on this site. Director is not deployed here at all, and QBLive
+  // is served from somebody else's origin, so the navigation offers the pages that explain them
+  // rather than jumping at an application this deployment does not contain.
   await expect(primaryNavigation.getByRole('link', { name: 'Director' })).toHaveAttribute(
     'href',
-    '../director.html',
+    './director/',
   );
-  await expect(primaryNavigation.getByRole('link', { name: /^QBLive/ })).toHaveAttribute(
-    'href',
-    'https://live.qbsheet.com/',
-  );
+  await expect(primaryNavigation.getByRole('link', { name: 'QBLive' })).toHaveAttribute('href', './qblive/');
   await expect(page.getByRole('link', { name: 'View on GitHub' }).first()).toHaveAttribute(
     'href',
     'https://github.com/gbyo/qbsheet',
   );
   expect(await fits(page)).toBe(true);
+});
+
+test('the about page introduces the product family and routes to both pages', async ({ page }) => {
+  await page.goto('/about/');
+
+  await expect(page.getByRole('heading', { name: 'Three parts of a tournament day.' })).toBeVisible();
+  await page.getByRole('link', { name: 'About Director' }).click();
+  await expect(page).toHaveURL(/\/about\/director\/$/);
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Tournament control that stays with you.' }),
+  ).toBeVisible();
+
+  await page.goto('/about/');
+  await page.getByRole('link', { name: 'About QBLive' }).click();
+  await expect(page).toHaveURL(/\/about\/qblive\/$/);
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Follow the tournament as it happens.' }),
+  ).toBeVisible();
 });
 
 test('the workflow reads as three ordered stages once it has been scrolled to', async ({ page }) => {
@@ -142,4 +160,100 @@ test('the scorer welcome screen offers a quiet path to About', async ({ page }) 
   const aboutLink = page.getByRole('link', { name: 'About QBSheet' });
   await expect(aboutLink).toBeVisible();
   await expect(aboutLink).toHaveAttribute('href', 'about/');
+});
+
+/**
+ * The two product pages, as a browser receives them.
+ *
+ * The property that matters most is the negative one, and it can only be checked here: the deployed
+ * website has no Director application on it. `/director.html` was a real URL in the previous build,
+ * and a reader who bookmarked it or found it in a search result must now get a 404 from the static
+ * host rather than a tournament-control screen that cannot run a tournament.
+ */
+test.describe('the product pages', () => {
+  test('the Director page explains a desktop application and never offers to open one', async ({ page }) => {
+    await page.goto('/about/director/');
+
+    await expect(page).toHaveTitle('QBSheet Director | QBSheet');
+    await expect(
+      page.getByRole('heading', { level: 1, name: 'Tournament control that stays with you.' }),
+    ).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Director is a desktop application.' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Set up, run, collect, publish' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Local control, by design' })).toBeVisible();
+    await expect(page.locator('.about-stages > li')).toHaveCount(4);
+
+    const download = page.getByRole('link', { name: /^Download Director/ });
+    await expect(download).toHaveCount(2);
+    await expect(download.first()).toHaveAttribute('href', 'https://github.com/gbyo/qbsheet/releases');
+    await expect(page.getByRole('link', { name: /Open Director/ })).toHaveCount(0);
+
+    const primaryNavigation = page.getByRole('navigation', { name: 'Primary navigation' });
+    await expect(primaryNavigation.getByRole('link', { name: 'Director' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    await expect(primaryNavigation.getByRole('link', { name: 'Scorer' })).toHaveAttribute('href', '../../');
+    expect(await fits(page)).toBe(true);
+  });
+
+  test('the QBLive page explains the public view and opens the real application', async ({ page }) => {
+    await page.goto('/about/qblive/');
+
+    await expect(page).toHaveTitle('QBLive | QBSheet');
+    await expect(
+      page.getByRole('heading', { level: 1, name: 'Follow the tournament as it happens.' }),
+    ).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Where QBLive fits' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Five screens, one tournament' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Public, and careful about it' })).toBeVisible();
+
+    const open = page.getByRole('link', { name: /^Open QBLive/ });
+    await expect(open).toHaveCount(2);
+    for (const attribute of [
+      ['href', 'https://live.qbsheet.com/'],
+      ['target', '_blank'],
+      ['rel', 'noopener noreferrer'],
+    ] as const) {
+      await expect(open.first()).toHaveAttribute(attribute[0], attribute[1]);
+    }
+
+    const primaryNavigation = page.getByRole('navigation', { name: 'Primary navigation' });
+    await expect(primaryNavigation.getByRole('link', { name: 'QBLive' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    await expect(primaryNavigation.getByRole('link', { name: 'Director' })).toHaveAttribute(
+      'href',
+      '../director/',
+    );
+    expect(await fits(page)).toBe(true);
+  });
+
+  test.describe('without JavaScript', () => {
+    test.use({ javaScriptEnabled: false });
+
+    test('both pages are served as complete HTML', async ({ page }) => {
+      await page.goto('/about/director/');
+      await expect(page.getByRole('heading', { name: 'Director is a desktop application.' })).toBeVisible();
+      await expect(page.getByText('Plan the tournament.')).toBeVisible();
+
+      await page.goto('/about/qblive/');
+      await expect(page.getByRole('heading', { name: 'Where QBLive fits' })).toBeVisible();
+      await expect(page.getByText('Read-only, and unauthenticated')).toBeVisible();
+    });
+  });
+
+  for (const path of ['/about/director/', '/about/qblive/']) {
+    for (const width of [1280, 900, 820, 768, 390, 320]) {
+      test(`${path} fits a ${width}px viewport`, async ({ page }) => {
+        await page.setViewportSize({ width, height: 900 });
+        await page.goto(path);
+
+        await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+        await expect(page.getByRole('navigation', { name: 'Primary navigation' })).toBeVisible();
+        expect(await fits(page)).toBe(true);
+      });
+    }
+  }
 });

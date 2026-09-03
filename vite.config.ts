@@ -74,15 +74,16 @@ function buildIdentity(): IBuildIdentity {
   };
 }
 
-/** Marketing-page output is deployed beside the scorer, but is not part of its offline shell. */
+/**
+ * Marketing-page output is deployed beside the scorer, but is not part of its offline shell.
+ *
+ * There used to be two surfaces to exclude. The second was the browser Director preview at
+ * `director.html`, which this build no longer emits: Director is a desktop application, its page on
+ * this site is `about/director/`, and that is already covered by the `about/` prefix. One prefix rule
+ * is the whole of the exclusion now, which is why a page added below `about/` needs no edit here.
+ */
 export function isScorerPrecacheAsset(fileName: string): boolean {
-  return (
-    !fileName.endsWith('.map') &&
-    fileName !== 'about/index.html' &&
-    !fileName.startsWith('about/') &&
-    fileName !== 'director.html' &&
-    !fileName.startsWith('director/')
-  );
+  return !fileName.endsWith('.map') && !fileName.startsWith('about/');
 }
 
 /** The element in `about/index.html` that the rendered page is placed inside, and the only edit made to it. */
@@ -143,6 +144,8 @@ const prerenderedPages: IPrerenderedPage[] = [
   { html: 'about/index.html', module: '/src/about/About.tsx' },
   { html: 'about/scoring/index.html', module: '/src/about/Scoring.tsx' },
   { html: 'about/tournaments/index.html', module: '/src/about/Tournaments.tsx' },
+  { html: 'about/director/index.html', module: '/src/about/Director.tsx' },
+  { html: 'about/qblive/index.html', module: '/src/about/QbLive.tsx' },
   { html: 'about/self-host/index.html', module: '/src/about/SelfHost.tsx' },
   { html: 'about/faq/index.html', module: '/src/about/Faq.tsx' },
   { html: 'about/privacy/index.html', module: '/src/about/Privacy.tsx' },
@@ -183,11 +186,6 @@ function isAboutSource(path: string | null | undefined): boolean {
   return typeof path === 'string' && `/${toPosix(path)}`.includes('/src/about/');
 }
 
-/** The Director preview is a separate local-control surface, not part of the scorer's offline shell. */
-function isDirectorSource(path: string | null | undefined): boolean {
-  return typeof path === 'string' && `/${toPosix(path)}`.includes('/src/director/');
-}
-
 /**
  * Whether a chunk is marketing-page output rather than scorer output.
  *
@@ -207,13 +205,6 @@ function isAboutChunk(chunk: Rollup.PreRenderedChunk): boolean {
   const facade = chunk.facadeModuleId;
   if (typeof facade !== 'string') return false;
   return prerenderedPages.some((page) => toPosix(facade).endsWith(`/${page.html}`));
-}
-
-function isDirectorChunk(chunk: Rollup.PreRenderedChunk): boolean {
-  if (chunk.moduleIds.some(isDirectorSource)) return true;
-  const facade = chunk.facadeModuleId;
-  if (typeof facade !== 'string') return false;
-  return toPosix(facade).endsWith('/director.html');
 }
 
 /**
@@ -459,16 +450,12 @@ self.addEventListener('fetch', (event) => {
 
   const scopeUrl = new URL(self.registration.scope);
   const relativePath = url.pathname.slice(scopeUrl.pathname.length);
-  // The product page and Director preview are separate Vite entries. They are deliberately
-  // network-owned: neither should be stored as the scorer shell, served by the scorer's offline
-  // fallback, or put its own assets in the cache whose activation is coordinated around an active game.
-  if (
-    relativePath === 'about' ||
-    relativePath.startsWith('about/') ||
-    relativePath === 'director.html' ||
-    relativePath.startsWith('director/')
-  )
-    return;
+  // The marketing pages are separate Vite entries and are deliberately network-owned: none of them
+  // should be stored as the scorer shell, served by the scorer's offline fallback, or put its own
+  // assets in the cache whose activation is coordinated around an active game. Every document on
+  // this site outside the scorer sits below \`about/\`, including the Director and QBLive pages,
+  // so this one prefix is the whole rule.
+  if (relativePath === 'about' || relativePath.startsWith('about/')) return;
 
   if (request.mode === 'navigate') {
     // The application has no path routes. Only the scope root (and an explicit index.html) is a
@@ -522,11 +509,15 @@ export default defineConfig({
   build: {
     rollupOptions: {
       input: {
+        // The scorer, and then the marketing pages. There is deliberately no Director entry: the
+        // Director application is `apps/director`, built by its own Vite config into its Tauri
+        // shell, and the only Director this site serves is the page describing it.
         scorer: resolve(import.meta.dirname, 'index.html'),
-        director: resolve(import.meta.dirname, 'director.html'),
         about: resolve(import.meta.dirname, 'about/index.html'),
         'about-scoring': resolve(import.meta.dirname, 'about/scoring/index.html'),
         'about-tournaments': resolve(import.meta.dirname, 'about/tournaments/index.html'),
+        'about-director': resolve(import.meta.dirname, 'about/director/index.html'),
+        'about-qblive': resolve(import.meta.dirname, 'about/qblive/index.html'),
         'about-self-host': resolve(import.meta.dirname, 'about/self-host/index.html'),
         'about-faq': resolve(import.meta.dirname, 'about/faq/index.html'),
         'about-privacy': resolve(import.meta.dirname, 'about/privacy/index.html'),
@@ -549,29 +540,16 @@ export default defineConfig({
         // chunk carries, and a rule that catches two of the three still leaves the third inside the
         // scorer's precache list.
         entryFileNames: (chunk) =>
-          isAboutChunk(chunk)
-            ? 'about/assets/[name]-[hash].js'
-            : isDirectorChunk(chunk)
-              ? 'director/assets/[name]-[hash].js'
-              : 'assets/[name]-[hash].js',
+          isAboutChunk(chunk) ? 'about/assets/[name]-[hash].js' : 'assets/[name]-[hash].js',
         chunkFileNames: (chunk) =>
-          isAboutChunk(chunk)
-            ? 'about/assets/[name]-[hash].js'
-            : isDirectorChunk(chunk)
-              ? 'director/assets/[name]-[hash].js'
-              : 'assets/[name]-[hash].js',
+          isAboutChunk(chunk) ? 'about/assets/[name]-[hash].js' : 'assets/[name]-[hash].js',
         assetFileNames: (asset) => {
           const sourceNames = asset.originalFileNames ?? [];
           const belongsToAbout =
             // The extracted stylesheet, which has no sources to be recognised by. See `aboutChunkName`.
             asset.name === `${aboutChunkName}.css` ||
             sourceNames.some((name) => isAboutSource(name) || toPosix(name).endsWith(aboutScreenshot));
-          const belongsToDirector = asset.name === 'director.css' || sourceNames.some(isDirectorSource);
-          return belongsToAbout
-            ? 'about/assets/[name]-[hash][extname]'
-            : belongsToDirector
-              ? 'director/assets/[name]-[hash][extname]'
-              : 'assets/[name]-[hash][extname]';
+          return belongsToAbout ? 'about/assets/[name]-[hash][extname]' : 'assets/[name]-[hash][extname]';
         },
       },
     },
