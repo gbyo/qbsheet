@@ -18,7 +18,7 @@ import {
   type DirectorState,
   type TeamGameScore,
 } from '../src/director/domain';
-import { useDirectorController } from '../src/director/state/useDirectorController';
+import { useDirectorController, type StartRoundResult } from '../src/director/state/useDirectorController';
 import {
   IndexedDbDirectorRepository,
   MemoryDirectorRepository,
@@ -416,6 +416,157 @@ describe('Director integration hardening', () => {
     const report = importArchiveBytes(exportArchiveBytes(live));
     expect(report.ok).toBe(true);
     expect(report.state ? dayLabels(report.state) : []).toEqual(expected);
+  });
+
+  test('round orchestration: manual start needs no rooms, one finish closes the round', async () => {
+    const { hook } = await directorWithSetup(4);
+    act(() => {
+      expect(hook.result.current.generateSchedule().generated).toBe(true);
+    });
+    const roundId = hook.result.current.state.rounds[0].id;
+
+    // No rooms assigned, no QBTCP sessions, no USB locations: the round still
+    // starts with a single action and checkpoints first.
+    let manual: StartRoundResult | undefined;
+    await act(async () => {
+      manual = await hook.result.current.startRound(roundId);
+    });
+    expect(manual?.ok).toBe(true);
+    expect(manual?.manual).toBe(true);
+    expect(manual?.summary).toContain('manually');
+    expect(hook.result.current.state.rounds[0].status).toBe('released');
+    expect(hook.result.current.state.metadata.lastCheckpointAt).not.toBeNull();
+    expect(
+      hook.result.current.state.audit.some((event) => event.summary === `Started ${manual?.roundName}.`),
+    ).toBe(true);
+
+    // Nothing resolved yet: finish reports what remains instead of closing.
+    const unfinished = hook.result.current.finishRound(roundId);
+    expect(unfinished.finished).toBe(false);
+    expect(unfinished.remaining).toBe(2);
+    expect(hook.result.current.state.rounds[0].status).toBe('released');
+
+    const games = hook.result.current.state.scheduledGames.filter(
+      (game) => game.roundId === roundId && !game.bye,
+    );
+    act(() => {
+      for (const game of games) {
+        expect(
+          hook.result.current.addManualResult({
+            scheduledGameId: game.id,
+            scores: [score(game.leftTeamId, 100), score(game.rightTeamId ?? game.leftTeamId, 50)],
+          }),
+        ).toBe(true);
+      }
+    });
+    let done: ReturnType<typeof hook.result.current.finishRound> | undefined;
+    act(() => {
+      done = hook.result.current.finishRound(roundId);
+    });
+    expect(done?.finished).toBe(true);
+    expect(hook.result.current.state.rounds[0].status).toBe('closed');
+    expect(hook.result.current.finishRound(roundId)).toMatchObject({
+      finished: true,
+      alreadyFinished: true,
+    });
+  });
+
+  test('round orchestration: assigned rooms are enforced, delivered count is honest', async () => {
+    const { hook } = await directorWithSetup(4);
+    act(() => {
+      expect(hook.result.current.addRoom({ name: 'Room 102' })).toBe(true);
+      expect(hook.result.current.generateSchedule().generated).toBe(true);
+    });
+    const roundId = hook.result.current.state.rounds[0].id;
+    const games = hook.result.current.state.scheduledGames.filter(
+      (game) => game.roundId === roundId && !game.bye,
+    );
+    expect(games.every((game) => game.roomId !== null)).toBe(true);
+
+    let result: StartRoundResult | undefined;
+    await act(async () => {
+      result = await hook.result.current.startRound(roundId);
+    });
+    expect(result?.ok).toBe(true);
+    expect(result?.manual).not.toBe(true);
+    expect(result?.deliveredGames).toBe(2);
+    expect(result?.pendingHandoffs).toEqual([]);
+    expect(hook.result.current.state.rounds[0].status).toBe('released');
+  });
+
+  test('round orchestration: partial rooms stay manual, gaps fail only with delivery configured', async () => {
+    // One room exists, so generation assigns it to the first game only. With
+    // no QBTCP or USB configured that partial assignment stays a label: the
+    // round still starts as a manual round.
+    const partial = await directorWithSetup(4);
+    act(() => {
+      expect(partial.hook.result.current.generateSchedule().generated).toBe(true);
+    });
+    const partialRoundId = partial.hook.result.current.state.rounds[0].id;
+    let partialResult: StartRoundResult | undefined;
+    await act(async () => {
+      partialResult = await partial.hook.result.current.startRound(partialRoundId);
+    });
+    expect(partialResult?.ok).toBe(true);
+    expect(partialResult?.manual).toBe(true);
+    expect(partial.hook.result.current.state.rounds[0].status).toBe('released');
+
+    // A paired QBTCP session means electronic delivery: the roomless game now
+    // blocks the start until it has a room or a USB workflow covers it.
+    const electronic = await directorWithSetup(4);
+    act(() => {
+      expect(electronic.hook.result.current.generateSchedule().generated).toBe(true);
+    });
+    const roomId = electronic.hook.result.current.state.rooms[0].id;
+    const paired = structuredClone(electronic.hook.result.current.state);
+    paired.qbtcpSessions = [
+      {
+        roomId,
+        sessionId: 'session-1',
+        matchId: 'match-1',
+        deviceId: 'device-1',
+        operatorName: 'Scorekeeper',
+        state: 'paired',
+        resumable: true,
+        resultReceived: false,
+        progressSequence: 0,
+        lastSeenAt: '2026-09-01T11:02:00.000Z',
+        progress: null,
+        helpRequestId: null,
+      },
+    ];
+    act(() => {
+      expect(electronic.hook.result.current.importSnapshot(paired)).toBe(true);
+    });
+    const electronicRoundId = electronic.hook.result.current.state.rounds[0].id;
+    let blocked: StartRoundResult | undefined;
+    await act(async () => {
+      blocked = await electronic.hook.result.current.startRound(electronicRoundId);
+    });
+    expect(blocked?.ok).toBe(false);
+    expect(blocked?.reason).toContain('room');
+    expect(electronic.hook.result.current.state.rounds[0].status).not.toBe('released');
+
+    // Configuring the USB workflow turns that same gap into an honest
+    // physical handoff instead of a failure.
+    act(() => {
+      electronic.hook.result.current.addTransferLocation({
+        kind: 'removable-drive',
+        label: 'Samsung USB',
+        path: '/mnt/usb',
+      });
+    });
+    expect(electronic.hook.result.current.state.transfers.locations).toHaveLength(1);
+    let usb: StartRoundResult | undefined;
+    await act(async () => {
+      usb = await electronic.hook.result.current.startRound(electronicRoundId);
+    });
+    expect(usb?.ok).toBe(true);
+    expect(usb?.manual).not.toBe(true);
+    expect(usb?.deliveredGames).toBe(1);
+    expect(usb?.pendingHandoffs).toHaveLength(1);
+    expect(usb?.summary).toContain('handoff');
+    expect(electronic.hook.result.current.state.rounds[0].status).toBe('released');
   });
 
   test('tournament detail updates normalize persisted text and reject blank names', async () => {
