@@ -403,6 +403,7 @@ export default function WelcomeScreen(props: {
                     placeholder="192.168.1.50:8080"
                     value={address}
                     required
+                    disabled={addressBusy}
                     onChange={(event) => {
                       setAddress(event.target.value);
                       if (event.target.value.trim() !== '') setAddressError('');

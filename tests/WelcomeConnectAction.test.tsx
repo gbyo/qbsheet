@@ -194,3 +194,37 @@ describe('what the scanner is told about a payload', () => {
     );
   });
 });
+
+describe('the address field while connecting', () => {
+  test('the identity control is disabled until its request settles', async () => {
+    const pairing = await import('../src/app/ControlPairing');
+    let resolveRequest!: (value: never) => void;
+    const pending = new Promise<never>((resolve) => {
+      resolveRequest = resolve;
+    });
+    vi.mocked(pairing.openControl).mockReturnValueOnce(pending);
+
+    await openApp();
+    await type('192.168.1.24:3000');
+    expect(addressField()).toBeEnabled();
+
+    await act(async () => {
+      fireEvent.click(within(connectSection()).getByRole('button', { name: 'Connect' }));
+    });
+    // The in-flight request owns the address: it cannot become a different address mid-flight.
+    expect(addressField()).toBeDisabled();
+    expect(addressField()).toHaveValue('192.168.1.24:3000');
+
+    await act(async () => {
+      resolveRequest({
+        ok: false,
+        unreachable: true,
+        error: 'Tournament control could not be reached.',
+      } as never);
+      await pending.catch(() => undefined);
+    });
+    // After the failure the field is editable again and owns the error of its own address.
+    expect(addressField()).toBeEnabled();
+    expect(screen.getByRole('alert')).toHaveTextContent('Tournament control could not be reached.');
+  });
+});

@@ -7,6 +7,7 @@ import type { DirectorNavigationTarget } from '../app/navigationTarget';
 import { useNavigationHighlight } from '../app/useNavigationHighlight';
 import { Icon } from '../components/Icon';
 import { PageHeader } from '../components/PageHeader';
+import type { AnnounceInput } from '../notices';
 
 type EquipmentKind = DirectorState['equipment'][number]['kind'];
 
@@ -61,7 +62,7 @@ export function RoomsView({
   state: DirectorState;
   controller: DirectorController;
   onNavigate?: (section: SectionId) => void;
-  onAnnounce: (message: string) => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
   navigationTarget?: DirectorNavigationTarget | null;
   onClearNavigationTarget?: () => void;
 }) {
@@ -386,7 +387,7 @@ export function RoomsView({
         ) : (
           <section className="director-panel">
             <PanelBody className="director-filter-panel-body">
-              <div className="director-filter-tabs" role="tablist" aria-label="Room status">
+              <div className="director-filter-tabs" role="group" aria-label="Room status">
                 <FilterButton active={filter === 'all'} onClick={() => setFilter('all')}>
                   All <span>{state.rooms.length}</span>
                 </FilterButton>
@@ -673,7 +674,7 @@ function RoomRows({
   room: DirectorState['rooms'][number];
   controller: DirectorController;
   onNavigate?: (section: SectionId) => void;
-  onAnnounce: (message: string) => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
   navigationTarget?: DirectorNavigationTarget | null;
   onClearNavigationTarget?: () => void;
 }) {
@@ -965,7 +966,7 @@ function StaffResourceRow({
 }: {
   member: DirectorState['staff'][number];
   controller: DirectorController;
-  onAnnounce: (message: string) => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
   navigationTarget?: DirectorNavigationTarget | null;
   onClearNavigationTarget?: () => void;
 }) {
@@ -1079,7 +1080,7 @@ function EquipmentResourceRow({
 }: {
   item: DirectorState['equipment'][number];
   controller: DirectorController;
-  onAnnounce: (message: string) => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
   navigationTarget?: DirectorNavigationTarget | null;
   onClearNavigationTarget?: () => void;
 }) {
@@ -1216,8 +1217,7 @@ function FilterButton({
   return (
     <button
       type="button"
-      role="tab"
-      aria-selected={active}
+      aria-pressed={active}
       className={`director-filter-tab ${active ? 'is-active' : ''}`}
       onClick={onClick}
     >

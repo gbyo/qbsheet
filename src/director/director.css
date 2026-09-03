@@ -2179,6 +2179,28 @@ button:disabled:hover {
   color: var(--director-green);
 }
 
+.director-toast-info > svg {
+  color: var(--director-muted);
+}
+
+.director-toast-warning {
+  border-color: var(--director-amber);
+  background: var(--director-amber-soft);
+}
+
+.director-toast-warning > svg {
+  color: var(--director-amber);
+}
+
+.director-toast-error {
+  border-color: var(--director-red);
+  background: var(--director-red-soft);
+}
+
+.director-toast-error > svg {
+  color: var(--director-red);
+}
+
 .director-toast button {
   padding: 0 2px;
   margin-left: auto;
@@ -2656,7 +2678,8 @@ button:disabled:hover {
   border-color: var(--director-border-strong);
 }
 
-.director-live-choice[aria-checked='true'] {
+.director-live-choice[aria-checked='true'],
+.director-live-choice:has(input:checked) {
   border-color: var(--director-accent);
   background: var(--director-accent-soft);
 }

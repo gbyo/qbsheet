@@ -7,6 +7,7 @@ import { PageHeader } from '../components/PageHeader';
 import { importTeamsCsv, type TeamRecord } from '@qbsheet/tournament-formats';
 import type { DirectorNavigationTarget } from '../app/navigationTarget';
 import { useNavigationHighlight } from '../app/useNavigationHighlight';
+import { errorNotice, type AnnounceInput } from '../notices';
 
 export function TeamsView({
   state,
@@ -19,7 +20,7 @@ export function TeamsView({
   state: DirectorState;
   controller: DirectorController;
   search: string;
-  onAnnounce: (message: string) => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
   navigationTarget?: DirectorNavigationTarget | null;
   onClearNavigationTarget?: () => void;
 }) {
@@ -65,7 +66,7 @@ export function TeamsView({
 
   const submitTeam = () => {
     if (!displayName.trim()) {
-      onAnnounce('Enter a team name first.');
+      onAnnounce(errorNotice('Enter a team name first.'));
       return;
     }
     if (!controller.addTeam({ displayName, organizationName, teamLetter, notes })) return;
@@ -111,7 +112,9 @@ export function TeamsView({
   const importPaste = () => {
     const report = importTeamsCsv(paste);
     if (!report.ok) {
-      onAnnounce(report.errors.map((entry) => entry.message).join(' ') || 'That CSV is not valid.');
+      onAnnounce(
+        errorNotice(report.errors.map((entry) => entry.message).join(' ') || 'That CSV is not valid.'),
+      );
       return;
     }
     if (report.value.length === 0) {
@@ -147,7 +150,9 @@ export function TeamsView({
     try {
       const report = importTeamsCsv(await file.text());
       if (!report.ok) {
-        onAnnounce(report.errors.map((entry) => entry.message).join(' ') || 'That CSV is not valid.');
+        onAnnounce(
+          errorNotice(report.errors.map((entry) => entry.message).join(' ') || 'That CSV is not valid.'),
+        );
         return;
       }
       if (report.value.length === 0) {
@@ -185,13 +190,6 @@ export function TeamsView({
             </label>
             <Button variant="secondary" icon="clipboard" onClick={() => setShowPaste((value) => !value)}>
               Paste
-            </Button>
-            <Button
-              variant="secondary"
-              icon="edit"
-              onClick={() => setShowOrganizationForm((value) => !value)}
-            >
-              Organizations
             </Button>
             <Button variant="primary" icon="plus" onClick={() => setShowForm((value) => !value)}>
               Add team
@@ -488,7 +486,7 @@ function TeamRow({
   state: DirectorState;
   teamId: string;
   controller: DirectorController;
-  onAnnounce: (message: string) => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
   navigationTarget?: DirectorNavigationTarget | null;
   onClearNavigationTarget?: () => void;
 }) {
@@ -528,13 +526,13 @@ function TeamRow({
   const saveEdit = () => {
     const displayName = editDisplayName.trim();
     if (!displayName) {
-      onAnnounce('Enter a team name first.');
+      onAnnounce(errorNotice('Enter a team name first.'));
       return;
     }
     const seedText = editSeed.trim();
     const seed = seedText ? Number(seedText) : null;
     if (seed !== null && (!Number.isInteger(seed) || seed < 1)) {
-      onAnnounce('Seed must be a positive whole number or blank.');
+      onAnnounce(errorNotice('Seed must be a positive whole number or blank.'));
       return;
     }
     const updated = controller.updateTeam(team.id, {
@@ -756,7 +754,7 @@ function OrganizationRow({
   organization: DirectorState['organizations'][number];
   teamCount: number;
   controller: DirectorController;
-  onAnnounce: (message: string) => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(organization.name);
@@ -877,7 +875,7 @@ function PlayerRow({
   player: DirectorState['players'][number];
   teamName: string;
   controller: DirectorController;
-  onAnnounce: (message: string) => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
   navigationTarget?: DirectorNavigationTarget | null;
   onClearNavigationTarget?: () => void;
 }) {

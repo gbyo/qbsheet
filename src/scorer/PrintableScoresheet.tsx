@@ -276,8 +276,8 @@ export default function PrintableScoresheet(props: {
             {game.procedureExceptions.map((exception) => (
               <li key={exception.eventId}>{procedureExceptionLine(exception)}</li>
             ))}
-            {game.notes.map((note) => (
-              <li key={`${note.questionNumber}-${note.text}`}>
+            {game.notes.map((note, index) => (
+              <li key={`${note.questionNumber}-${note.text}-${index}`}>
                 Q{note.questionNumber}: {note.text}
               </li>
             ))}

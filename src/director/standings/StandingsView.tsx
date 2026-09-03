@@ -9,6 +9,7 @@ import { Button, EmptyState } from '../components/Controls';
 import { PageHeader } from '../components/PageHeader';
 import { playerStatsCsv, standingsFileStem, teamStandingsCsv } from '../format/standingsCsv';
 import { csvMediaType, downloadText } from '../format/downloadFile';
+import type { AnnounceInput } from '../notices';
 
 export function StandingsView({
   state,
@@ -16,7 +17,7 @@ export function StandingsView({
 }: {
   state: DirectorState;
   controller: DirectorController;
-  onAnnounce: (message: string) => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
 }) {
   const teamStandings = deriveTeamStandings(state);
   /*
@@ -183,12 +184,15 @@ export function StandingsView({
  * Both exports write the shared serialization, so the file a director opens has the columns the
  * table above them has. See `standingsCsv` for why that is one module rather than one per page.
  */
-function downloadTeamStandings(state: DirectorState, onAnnounce: (message: string) => void): void {
+function downloadTeamStandings(
+  state: DirectorState,
+  onAnnounce: (announcement: AnnounceInput) => void,
+): void {
   downloadText(teamStandingsCsv(state), `${standingsFileStem(state)}-standings.csv`, csvMediaType);
   onAnnounce('Team standings CSV exported.');
 }
 
-function downloadPlayerStats(state: DirectorState, onAnnounce: (message: string) => void): void {
+function downloadPlayerStats(state: DirectorState, onAnnounce: (announcement: AnnounceInput) => void): void {
   downloadText(playerStatsCsv(state), `${standingsFileStem(state)}-player-stats.csv`, csvMediaType);
   onAnnounce('Player statistics CSV exported.');
 }

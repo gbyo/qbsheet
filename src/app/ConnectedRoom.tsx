@@ -212,6 +212,8 @@ export default function ConnectedRoom(props: {
     pairingProtection,
     onForgetPairing,
     onResetDevicePreferences,
+    practiceInProgress,
+    onPractice,
     onReadiness,
     recovery,
     onRecovery = () => undefined,
@@ -658,6 +660,14 @@ export default function ConnectedRoom(props: {
       )}
 
       <div className="room-secondary-actions">
+        <button
+          type="button"
+          className="shell-button shell-button-quiet"
+          onClick={onPractice}
+          disabled={starting}
+        >
+          {practiceInProgress ? 'Resume practice' : 'Practice'}
+        </button>
         <button
           type="button"
           className="shell-button shell-button-quiet"

@@ -31,6 +31,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ScorerHost from '../scorer/ScorerHost';
 import ScorerDialog from '../scorer/ScorerDialog';
+import { useDurableRecordFlag } from '../scorer/useDurableRecordFlag';
 import { IScorerSubmitResult } from '../scorer/Scorer';
 import { IStoredGameRecord, GameStore } from '../game/GameStore';
 import { ScoreEvent } from '../scoring/ScoreEvents';
@@ -152,7 +153,10 @@ export default function ScoringScreen(props: {
   const [correctionRevision, setCorrectionRevision] = useState(0);
   /** What the last correction was, so the reopened scoresheet says what happened rather than "recovered". */
   const [correctionNotice, setCorrectionNotice] = useState('');
-  const [recordDurablyStored, setRecordDurablyStored] = useState(durable && !storageDegraded);
+  // Durability reconciliation lives in useDurableRecordFlag: pure derivation during render,
+  // never a render-phase state update and no synchronizing effect. See that hook for the
+  // degrade/recover contract.
+  const [recordDurablyStored, setRecordDurablyStored] = useDurableRecordFlag(durable, storageDegraded);
   const [repairing, setRepairing] = useState(false);
   const update = useAppUpdate();
   const rosterPackageRef = useRef(record.package);
@@ -160,15 +164,6 @@ export default function ScoringScreen(props: {
   useEffect(() => {
     rosterPackageRef.current = record.package;
   }, [record.package]);
-
-  // A store that has stopped being durable cannot still be holding this game durably. Applied when
-  // the answer changes rather than on every render, so a write that reports success against the
-  // store's own view is not overruled by a prop that has not caught up yet.
-  const [durability, setDurability] = useState({ durable, storageDegraded });
-  if (durability.durable !== durable || durability.storageDegraded !== storageDegraded) {
-    setDurability({ durable, storageDegraded });
-    if (!durable || storageDegraded) setRecordDurablyStored(false);
-  }
 
   /**
    * Whether this screen is still on the page.
@@ -270,7 +265,7 @@ export default function ScoringScreen(props: {
           if (onScreen.current) setRecordDurablyStored(false);
         });
     },
-    [record.id, store],
+    [record.id, store, setRecordDurablyStored],
   );
 
   const write = useCallback(
@@ -291,7 +286,7 @@ export default function ScoringScreen(props: {
       }
       return written;
     },
-    [record.id, record.package, store],
+    [record.id, record.package, store, setRecordDurablyStored],
   );
 
   /** Write the exact QBSheet recovery envelope without treating it as the canonical QBJ handoff. */
@@ -390,7 +385,7 @@ export default function ScoringScreen(props: {
         durablySaved: true,
       };
     },
-    [record.id, record.package, store, resultDelivery, live, runtime, onComplete],
+    [record.id, record.package, store, resultDelivery, live, runtime, onComplete, setRecordDurablyStored],
   );
 
   /**
@@ -490,7 +485,7 @@ export default function ScoringScreen(props: {
       setCorrectionNotice(summary);
       setCorrectionRevision((revision) => revision + 1);
     },
-    [record.id, record.package, store, onRecordChanged],
+    [record.id, record.package, store, onRecordChanged, setRecordDurablyStored],
   );
 
   /**

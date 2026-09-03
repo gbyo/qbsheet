@@ -132,7 +132,8 @@ export default function RecentGames(props: {
     }
     return downloadStoredGameQbj(record);
   };
-  const [retrying, setRetrying] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState<ReadonlySet<string>>(() => new Set());
+  const [downloadErrors, setDownloadErrors] = useState<Readonly<Record<string, string>>>({});
   if (records.length === 0) return null;
 
   return (
@@ -204,27 +205,58 @@ export default function RecentGames(props: {
                 <button
                   type="button"
                   className="shell-button is-primary"
-                  disabled={retrying === record.id}
+                  disabled={retrying.has(record.id)}
                   onClick={async () => {
-                    setRetrying(record.id);
+                    setRetrying((prev) => new Set(prev).add(record.id));
                     try {
                       await onRetry(record);
                     } finally {
-                      setRetrying(null);
+                      setRetrying((prev) => {
+                        if (!prev.has(record.id)) return prev;
+                        const next = new Set(prev);
+                        next.delete(record.id);
+                        return next;
+                      });
                     }
                   }}
                 >
-                  {retrying === record.id
+                  {retrying.has(record.id)
                     ? 'Trying…'
                     : record.serverDelivery === 'pending'
                       ? 'Retry sending result'
                       : 'Try again'}
                 </button>
               )}
-              <button type="button" className="recent-download" onClick={() => download(record)}>
+              <button
+                type="button"
+                className="recent-download"
+                onClick={() => {
+                  let ok = false;
+                  try {
+                    ok = download(record);
+                  } catch {
+                    ok = false;
+                  }
+                  setDownloadErrors((prev) => {
+                    if (ok) {
+                      if (!(record.id in prev)) return prev;
+                      const next = { ...prev };
+                      delete next[record.id];
+                      return next;
+                    }
+                    if (prev[record.id] === 'That QBJ file could not be produced.') return prev;
+                    return { ...prev, [record.id]: 'That QBJ file could not be produced.' };
+                  });
+                }}
+              >
                 <ControlIcon name="download" />
                 Download QBJ
               </button>
+              {downloadErrors[record.id] && (
+                <p className="recent-status-detail" role="alert">
+                  {downloadErrors[record.id]}
+                </p>
+              )}
             </div>
           </li>
         ))}

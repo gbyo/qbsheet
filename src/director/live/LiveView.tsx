@@ -28,6 +28,7 @@ import { PageHeader } from '../components/PageHeader';
 import { Icon } from '../components/Icon';
 import { qrSvg } from './qr';
 import { syncSummary } from './publication';
+import { errorNotice, type AnnounceInput } from '../notices';
 
 export interface LiveViewActions {
   enable(backend: LiveBackendDescriptor, setupToken: string | null): Promise<void>;
@@ -52,7 +53,7 @@ export function LiveView({
 }: {
   state: DirectorState;
   actions: LiveViewActions;
-  onAnnounce: (message: string) => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
 }) {
   const publication = state.live;
 
@@ -101,7 +102,7 @@ function SetupPanel({
   onAnnounce,
 }: {
   actions: LiveViewActions;
-  onAnnounce: (message: string) => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
 }) {
   const [kind, setKind] = useState<LiveBackendDescriptor['kind']>('cloudflare');
   const [origin, setOrigin] = useState('');
@@ -285,20 +286,21 @@ function BackendChoice({
   disabled: boolean;
 }) {
   return (
-    <button
-      type="button"
-      role="radio"
-      aria-checked={selected === id}
-      disabled={disabled}
-      className="director-live-choice"
-      onClick={() => onSelect(id)}
-    >
+    <label className="director-live-choice">
+      <input
+        className="director-visually-hidden-input"
+        type="radio"
+        name="qbsheet-live-backend"
+        checked={selected === id}
+        disabled={disabled}
+        onChange={() => onSelect(id)}
+      />
       <span className="director-live-choice-head">
         <strong>{title}</strong>
         <span className="director-live-badge">{badge}</span>
       </span>
       <span className="director-muted">{description}</span>
-    </button>
+    </label>
   );
 }
 
@@ -315,7 +317,7 @@ function EnabledPanels({
   state: DirectorState;
   publication: LivePublication;
   actions: LiveViewActions;
-  onAnnounce: (message: string) => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
 }) {
   const [showQr, setShowQr] = useState(false);
   const link = publication.publicUrl;
@@ -346,7 +348,7 @@ function EnabledPanels({
                       await navigator.clipboard.writeText(link);
                       onAnnounce('Public link copied.');
                     } catch {
-                      onAnnounce('Copy failed — select the link and copy manually.');
+                      onAnnounce(errorNotice('Copy failed — select the link and copy manually.'));
                     }
                   }}
                 >
@@ -666,7 +668,7 @@ function AnnouncementsPanel({
   state: DirectorState;
   publication: LivePublication;
   actions: LiveViewActions;
-  onAnnounce: (message: string) => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
 }) {
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
@@ -774,7 +776,7 @@ function LifecyclePanel({
 }: {
   publication: LivePublication;
   actions: LiveViewActions;
-  onAnnounce: (message: string) => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
 }) {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 

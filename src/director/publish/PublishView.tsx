@@ -6,13 +6,14 @@ import { exportArchiveBytes, exportQbj, exportSqbs, exportTeamCsv } from '../for
 import { playerStatsCsv, standingsFileStem, teamStandingsCsv } from '../format/standingsCsv';
 import { csvMediaType, downloadBytes, downloadText } from '../format/downloadFile';
 import { isNativeDirector, saveNativeFile } from '../platform/native';
+import type { AnnounceInput } from '../notices';
 
 export function PublishView({
   state,
   onAnnounce,
 }: {
   state: DirectorState;
-  onAnnounce: (message: string) => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
 }) {
   const hasTournament = state.tournament !== null;
   return (
@@ -161,7 +162,10 @@ function PublishAction({
   );
 }
 
-async function downloadArchive(state: DirectorState, onAnnounce: (message: string) => void): Promise<void> {
+async function downloadArchive(
+  state: DirectorState,
+  onAnnounce: (announcement: AnnounceInput) => void,
+): Promise<void> {
   try {
     const bytes = exportArchiveBytes(state);
     const name = `${standingsFileStem(state)}.qbst`;
@@ -186,7 +190,7 @@ async function downloadArchive(state: DirectorState, onAnnounce: (message: strin
     );
   }
 }
-function downloadHtml(state: DirectorState, onAnnounce: (message: string) => void): void {
+function downloadHtml(state: DirectorState, onAnnounce: (announcement: AnnounceInput) => void): void {
   const standings = deriveTeamStandings(state);
   const title = escapeHtml(state.tournament?.name ?? 'Tournament standings');
   const rows = standings
@@ -199,20 +203,26 @@ function downloadHtml(state: DirectorState, onAnnounce: (message: string) => voi
   downloadText(html, `${standingsFileStem(state)}-standings.html`, 'text/html;charset=utf-8');
   onAnnounce('Static standings HTML exported.');
 }
-function downloadTeamStandingsCsv(state: DirectorState, onAnnounce: (message: string) => void): void {
+function downloadTeamStandingsCsv(
+  state: DirectorState,
+  onAnnounce: (announcement: AnnounceInput) => void,
+): void {
   downloadText(teamStandingsCsv(state), `${standingsFileStem(state)}-standings.csv`, csvMediaType);
   onAnnounce('Team standings CSV exported.');
 }
-function downloadPlayerStatsCsv(state: DirectorState, onAnnounce: (message: string) => void): void {
+function downloadPlayerStatsCsv(
+  state: DirectorState,
+  onAnnounce: (announcement: AnnounceInput) => void,
+): void {
   downloadText(playerStatsCsv(state), `${standingsFileStem(state)}-player-stats.csv`, csvMediaType);
   onAnnounce('Player statistics CSV exported.');
 }
-function downloadTeamCsv(state: DirectorState, onAnnounce: (message: string) => void): void {
+function downloadTeamCsv(state: DirectorState, onAnnounce: (announcement: AnnounceInput) => void): void {
   // Named for what it holds. This is the roster importer's format, not a standings table.
   downloadText(exportTeamCsv(state), `${standingsFileStem(state)}-teams.csv`, csvMediaType);
   onAnnounce('Team and roster CSV exported.');
 }
-function downloadQbj(state: DirectorState, onAnnounce: (message: string) => void): void {
+function downloadQbj(state: DirectorState, onAnnounce: (announcement: AnnounceInput) => void): void {
   downloadText(
     exportQbj(state),
     `${standingsFileStem(state)}.qbj`,
@@ -220,7 +230,7 @@ function downloadQbj(state: DirectorState, onAnnounce: (message: string) => void
   );
   onAnnounce('QBJ tournament exported.');
 }
-function downloadSqbs(state: DirectorState, onAnnounce: (message: string) => void): void {
+function downloadSqbs(state: DirectorState, onAnnounce: (announcement: AnnounceInput) => void): void {
   downloadText(exportSqbs(state), `${standingsFileStem(state)}.sqbs`, 'text/plain;charset=utf-8');
   onAnnounce('SQBS roster exported.');
 }

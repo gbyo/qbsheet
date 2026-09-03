@@ -7,6 +7,7 @@ import { PageHeader } from '../components/PageHeader';
 import { importQbjText } from '../format/interchange';
 import type { DirectorNavigationTarget } from '../app/navigationTarget';
 import { useNavigationHighlight } from '../app/useNavigationHighlight';
+import type { AnnounceInput } from '../notices';
 
 export function PacketsView({
   state,
@@ -17,7 +18,7 @@ export function PacketsView({
 }: {
   state: DirectorState;
   controller: DirectorController;
-  onAnnounce: (message: string) => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
   navigationTarget?: DirectorNavigationTarget | null;
   onClearNavigationTarget?: () => void;
 }) {
@@ -250,7 +251,7 @@ function PacketRow({
   state: DirectorState;
   packet: DirectorState['packets'][number];
   controller: DirectorController;
-  onAnnounce: (message: string) => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
   detailsOpen: boolean;
   onToggleDetails: () => void;
   navigationTarget?: DirectorNavigationTarget | null;

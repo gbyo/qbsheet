@@ -11,7 +11,7 @@
  * presses its button, which is the gesture the browser needs before it permits a local-network request.
  * Pairing codes remain in memory only until the exchange consumes them.
  */
-import { FormEvent, useState } from 'react';
+import { FormEvent, useRef, useState } from 'react';
 import BrandLogo from '../BrandLogo';
 import FruityServerClient from '../integrations/fruity/FruityServerClient';
 import { IControlConnection, exchangePairingCode, openControl } from './ControlPairing';
@@ -81,6 +81,12 @@ export default function ConnectedSetup(props: {
   const [code, setCode] = useState('');
   const [roomId, setRoomId] = useState('');
   const [scanning, setScanning] = useState(false);
+  // Mirrors of the identity-bearing inputs. An async connect/pair result is applied only when the
+  // input it was started from still matches, so a response for address/code A can never advance
+  // UI that is now displaying B.
+  const addressRef = useRef(address);
+  const codeRef = useRef(code);
+  const roomIdRef = useRef(roomId);
 
   const askForCode = (connection: IControlConnection, suggestedRoomId = '') => {
     setStage(pairStage(connection));
@@ -97,11 +103,13 @@ export default function ConnectedSetup(props: {
   const connect = async (event: FormEvent) => {
     event.preventDefault();
     if (busy) return;
+    const requestedAddress = address;
     setBusy(true);
     setError('');
     setUnreachable(false);
     try {
-      const opened = await openControl(address);
+      const opened = await openControl(requestedAddress);
+      if (addressRef.current !== requestedAddress) return;
       if (!opened.ok) {
         setUnreachable(opened.unreachable);
         setError(opened.error);
@@ -109,6 +117,7 @@ export default function ConnectedSetup(props: {
       }
       askForCode(opened.value);
     } catch {
+      if (addressRef.current !== requestedAddress) return;
       setError('Tournament control could not be reached. Check the connection and try again.');
     } finally {
       setBusy(false);
@@ -118,16 +127,25 @@ export default function ConnectedSetup(props: {
   const pair = async (event: FormEvent) => {
     event.preventDefault();
     if (stage.kind !== 'pair' || busy) return;
+    const requestedCode = code;
+    const requestedRoomId = roomId;
     setBusy(true);
     setError('');
     try {
-      const paired = await exchangePairingCode(stage.client, code, roomId, existingDeviceId);
+      const paired = await exchangePairingCode(
+        stage.client,
+        requestedCode,
+        requestedRoomId,
+        existingDeviceId,
+      );
+      if (codeRef.current !== requestedCode || roomIdRef.current !== requestedRoomId) return;
       if (!paired.ok) {
         setError(paired.error);
         return;
       }
       adoptRoom(paired.value);
     } catch {
+      if (codeRef.current !== requestedCode || roomIdRef.current !== requestedRoomId) return;
       setError('This room could not be paired. Check the connection and try again.');
     } finally {
       setBusy(false);
@@ -210,7 +228,12 @@ export default function ConnectedSetup(props: {
                 spellCheck={false}
                 placeholder="192.168.1.50:8080"
                 value={address}
-                onChange={(event) => setAddress(event.target.value)}
+                onChange={(event) => {
+                  addressRef.current = event.target.value;
+                  setAddress(event.target.value);
+                  setError('');
+                  setUnreachable(false);
+                }}
               />
               <button type="submit" className="shell-button is-primary" disabled={busy || addressEmpty}>
                 {busy ? 'Connecting…' : 'Connect'}
@@ -247,7 +270,11 @@ export default function ConnectedSetup(props: {
                   id="setup-room"
                   className="shell-input"
                   value={roomId}
-                  onChange={(event) => setRoomId(event.target.value)}
+                  onChange={(event) => {
+                    roomIdRef.current = event.target.value;
+                    setRoomId(event.target.value);
+                    setError('');
+                  }}
                 >
                   <option value="">Any room</option>
                   {stage.rooms.map((room) => (
@@ -269,7 +296,11 @@ export default function ConnectedSetup(props: {
               autoComplete="off"
               required
               value={code}
-              onChange={(event) => setCode(event.target.value)}
+              onChange={(event) => {
+                codeRef.current = event.target.value;
+                setCode(event.target.value);
+                setError('');
+              }}
             />
             <button type="submit" className="shell-button is-primary" disabled={busy || code.trim() === ''}>
               {busy ? 'Pairing…' : 'Pair this room'}
