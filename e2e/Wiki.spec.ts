@@ -86,6 +86,27 @@ test('the site navigation resolves from three directories deep', async ({ page }
   await expect(page.getByRole('heading', { level: 1, name: 'Frequently asked questions' })).toBeVisible();
 });
 
+test('the product pages resolve from three directories deep', async ({ page }) => {
+  await page.goto('/about/wiki/start-here/');
+
+  // An article is the deepest document on the site, so it is where a product link written against
+  // the wrong depth fails first. Both of these are `../../` from here, not `../` and not the
+  // deployment root.
+  const nav = page.getByRole('navigation', { name: 'Primary navigation' });
+  await nav.getByRole('link', { name: 'Director' }).click();
+  await expect(page).toHaveURL(/\/about\/director\/$/);
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Tournament control that stays with you.' }),
+  ).toBeVisible();
+
+  await page.goto('/about/wiki/start-here/');
+  await nav.getByRole('link', { name: 'QBLive' }).click();
+  await expect(page).toHaveURL(/\/about\/qblive\/$/);
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Follow the tournament as it happens.' }),
+  ).toBeVisible();
+});
+
 test('the scorer is three directories up from a wiki page', async ({ page }) => {
   await page.goto('/about/wiki/start-here/');
 

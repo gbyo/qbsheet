@@ -14,8 +14,10 @@
  */
 
 import {
+  applyFinalPlacement,
   deriveTeamStandings,
   derivePlayerStandings,
+  playerPoints,
   type DirectorState,
   type PlayerStanding,
   type TeamStanding,
@@ -103,16 +105,36 @@ export interface TableNaming {
   playerName(playerId: string): string | null;
 }
 
+/**
+ * An explicit final placement reorders the overall table only. Scoped
+ * (stage/pool) tables keep their calculated order: the override answers "who
+ * finished where", not "who led the prelims".
+ */
+function finalTeamStandings(
+  state: DirectorState,
+  scope: TableScope,
+  standings: TeamStanding[],
+): TeamStanding[] {
+  if (scope.phaseId !== undefined || scope.poolId !== undefined || scope.teamIds !== undefined) {
+    return standings;
+  }
+  return applyFinalPlacement(standings, state.tournament?.finalPlacement);
+}
+
 export function buildStandingsTable(
   state: DirectorState,
   scope: TableScope,
   naming: TableNaming,
 ): QbliveDataTable {
-  const standings = deriveTeamStandings(state, undefined, {
-    phaseId: scope.phaseId,
-    poolId: scope.poolId,
-    teamIds: scope.teamIds,
-  });
+  const standings = finalTeamStandings(
+    state,
+    scope,
+    deriveTeamStandings(state, undefined, {
+      phaseId: scope.phaseId,
+      poolId: scope.poolId,
+      teamIds: scope.teamIds,
+    }),
+  );
   const rows: QbliveRow[] = standings.map((standing, index) => ({
     id: standing.teamId,
     teamId: standing.teamId,
@@ -142,11 +164,15 @@ export function buildTeamStatisticsTable(
   scope: TableScope,
   naming: TableNaming,
 ): QbliveDataTable {
-  const standings = deriveTeamStandings(state, undefined, {
-    phaseId: scope.phaseId,
-    poolId: scope.poolId,
-    teamIds: scope.teamIds,
-  });
+  const standings = finalTeamStandings(
+    state,
+    scope,
+    deriveTeamStandings(state, undefined, {
+      phaseId: scope.phaseId,
+      poolId: scope.poolId,
+      teamIds: scope.teamIds,
+    }),
+  );
   const rows: QbliveRow[] = standings.map((standing) => ({
     id: standing.teamId,
     teamId: standing.teamId,
@@ -156,7 +182,11 @@ export function buildTeamStatisticsTable(
       integer(standing.powers),
       integer(standing.gets),
       integer(standing.negs),
-      decimal(standing.bonuses > 0 ? standing.bonusPoints / standing.bonuses : 0, 2),
+      // PPB with no bonuses heard is undefined, not zero: a manual result
+      // without detail and a team that never heard a bonus both render "—".
+      standing.bonuses > 0
+        ? decimal(standing.bonusPoints / standing.bonuses, 2)
+        : { value: null, display: '—' },
       decimal(standing.gamesPlayed > 0 ? standing.pointsFor / standing.gamesPlayed : 0, 1),
     ],
   }));
@@ -193,12 +223,7 @@ export function buildPlayerStatisticsTable(
     if (name === null) continue;
     // Scored with the tournament's own values rather than the common ones, so a house format that
     // does not use powers, or values a neg differently, publishes its own arithmetic.
-    const rules = state.tournament?.rules;
-    const points =
-      standing.powers * (rules?.powerValue ?? 15) +
-      standing.gets * (rules?.tossupValue ?? 10) +
-      standing.negs * (rules?.negValue ?? -5) +
-      standing.bonusPoints;
+    const points = playerPoints(standing, state.tournament?.rules);
     rows.push({
       id: standing.playerId,
       playerId: standing.playerId,

@@ -3,9 +3,13 @@ dist/
 *.local
 .DS_Store
 playwright-report/
+playwright-report-director/
 test-results/
+test-results-director/
 .stryker-tmp/
-reports/
+# Generated report output at the repo root. Anchored: source lives under
+# src/director/reports/ and must stay committable.
+/reports/
 # Generated build/runtime state.
 **/.build/
 **/.wrangler/

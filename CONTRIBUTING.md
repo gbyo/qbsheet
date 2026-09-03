@@ -54,6 +54,23 @@ npm start
 `npm start` runs Vite, normally on `http://localhost:5173`. The application is fully usable from a QBJ
 file with no server. Open a game file and score.
 
+### Three products, three ways to run them
+
+This repository holds three applications, and the root build serves only the first of them.
+
+* **Scorer** — the root Vite application, and the whole of what the website deploys. `npm start`.
+* **Director** — the desktop application under `apps/director`, with its own Vite config and its own
+  Tauri shell. `npm run director:dev` serves its user interface on `http://127.0.0.1:1420`, and
+  `npm run director:tauri:dev` runs the real native window, which is the only place the QBTCP
+  listener and the local tournament database exist. The root build emits no Director entry: there is
+  no `director.html` and no URL on the deployed site that launches tournament control.
+* **QBSheet Live** — the participant-facing client under `apps/live-web`, deployed separately to
+  `live.qbsheet.com`. `npm run live:dev`.
+
+Director and QBLive have static marketing pages on the website, prerendered from `src/about/` to
+`/about/director/` and `/about/qblive/`. Those are pages describing an application, not the
+application.
+
 To exercise the connected path, run Fruity's Local Tournament Server, add the Vite origin to its
 QBSheet origin setting, then enter the local network address of the server in the scoresheet. The
 origin allowlist covers CORS only. Every operation on a paired room still needs a valid room or
@@ -73,7 +90,12 @@ session credential.
 | `src/persistence/` | IndexedDB store and tab claim |
 | `src/practice/` | guided practice mode |
 | `docs/` | the QBTCP and QBJ profile specifications, the `.qbg` migration, and the test-file guide |
+| `src/about/` | the prerendered marketing pages, including the Director and QBLive product pages |
+| `src/director/` | the Director user interface, consumed by `apps/director` and by nothing else |
+| `apps/director/` | the Director desktop application: its Vite config, Tauri shell, and native crate |
+| `apps/live-web/` | QBSheet Live Web, deployed separately to `live.qbsheet.com` |
 | `tests/`, `e2e/` | application and integration tests, and the Playwright torture test |
+| `e2e/director/` | the Director browser tests, run against `apps/director` by `playwright.director.config.ts` |
 | `scripts/ci/` | the change-impact classifier that routes the `CI` workflow |
 
 ## Before you open a pull request
@@ -134,7 +156,7 @@ that can reach the scoresheet does.
 | `quality` | formatting, lint, typecheck | any `.ts`, `.tsx`, `.js`, `.mjs`, `.cjs`, or `.css` file, and their configs |
 | `scorer` | the root Vitest suite, and the project-path build | `src/` outside `src/director/`, `tests/`, `index.html`, `about/`, `public/`, `wiki/` |
 | `browser` | `npm run test:browser` | anything that changes scorer runtime behaviour or its browser environment, plus `e2e/` and `playwright.config.ts` |
-| `director-web` | the Director build, its tests, and `e2e/Director.spec.ts` | `src/director/`, `apps/director/` outside `src-tauri/`, and the packages Director imports |
+| `director-ui` | the Director application build, its tests, and `e2e/director/Director.spec.ts` against `apps/director` | `src/director/`, `apps/director/` outside `src-tauri/`, `e2e/director/`, and the packages Director imports |
 | `tournament-js` | the tournament-core, -formats, and -domain suites | `packages/tournament-*/` |
 | `qblive-js` | the QBLive package suites and Live Web | only a *shared* change, because `qblive.yml` owns the QBLive paths |
 | `rust-director`, `rust-tournament-store`, `rust-qbtcp` | `cargo fmt`, `clippy`, `test` for one crate | that crate, plus `crates/qbtcp-server/` for the Director crate, which path-depends on it |

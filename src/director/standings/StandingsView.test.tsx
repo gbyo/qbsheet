@@ -7,7 +7,7 @@
  */
 import { afterEach, expect, test, vi } from 'vitest';
 import { cleanup, render, screen, within } from '@testing-library/react';
-import type { DirectorState } from '../domain';
+import { derivePlayerStandings, type DirectorState } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
 import {
   acceptedGame,
@@ -58,7 +58,8 @@ test('a twelfth-place player is on the page rather than silently dropped', () =>
 });
 
 test('the ordering is the derivation’s, and the page says how many players it is showing', () => {
-  render(<StandingsView state={tournamentWithPlayers(12)} controller={controller} onAnnounce={vi.fn()} />);
+  const state = tournamentWithPlayers(12);
+  render(<StandingsView state={state} controller={controller} onAnnounce={vi.fn()} />);
 
   const names = within(playerTable())
     .getAllByRole('row')
@@ -67,7 +68,11 @@ test('the ordering is the derivation’s, and the page says how many players it 
   // Player 0 scores the most and Player 11 the least, so their order in the table is the
   // derivation's ranking rather than the roster's insertion order.
   const generated = names.filter((name) => name?.startsWith('Player '));
-  expect(generated).toEqual(Array.from({ length: 12 }, (_, index) => `Player ${index}`));
+  const expected = derivePlayerStandings(state)
+    .filter((standing) => standing.gamesPlayed > 0)
+    .map((standing) => state.players.find((player) => player.id === standing.playerId)?.name ?? 'Unknown')
+    .filter((name) => name.startsWith('Player '));
+  expect(generated).toEqual(expected);
   expect(names).toHaveLength(14);
   expect(screen.getByText('14 players')).toBeTruthy();
 });

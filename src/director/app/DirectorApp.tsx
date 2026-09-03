@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import BrandLogo from '../../BrandLogo';
 import { Button, EmptyState, PanelBody, PanelFooter } from '../components/Controls';
 import { Icon } from '../components/Icon';
-import { navigation, labelForSection, type SectionId } from './navigation';
+import { primaryNavigation, moreNavigation, labelForSection, type SectionId } from './navigation';
 import { useDirectorController } from '../state/useDirectorController';
 import { OverviewView } from '../overview/OverviewView';
 import { TeamsView } from '../teams/TeamsView';
@@ -17,7 +17,12 @@ import { StandingsView } from '../standings/StandingsView';
 import { PublishView } from '../publish/PublishView';
 import { LiveView } from '../live/LiveView';
 import { SettingsView } from '../settings/SettingsView';
-import { importArchiveBytes, importDirectorTournament, importQbjText } from '../format/interchange';
+import {
+  importArchiveBytes,
+  importDirectorTournament,
+  importQbjText,
+  importYellowFruitText,
+} from '../format/interchange';
 import { latestRound } from '../domain';
 import { isNativeDirector, openNativeTournamentFile, type NativeServerStatus } from '../platform/native';
 import { useNativeServerStatus } from '../server/useNativeServerStatus';
@@ -68,10 +73,10 @@ export default function DirectorApp() {
   const [operatorProfile, setOperatorProfile] = useState<OperatorProfile>(() => loadOperatorProfile());
   // Exactly one Director popover menu is ever open: opening one closes the other, and opening
   // an overlay (help, dialogs) closes any menu so none is stranded underneath.
-  const [openMenu, setOpenMenu] = useState<'tournament' | 'operator' | null>(null);
+  const [openMenu, setOpenMenu] = useState<'tournament' | 'operator' | 'more' | null>(null);
   const menuOpenerRef = useRef<HTMLElement | null>(null);
   const closeMenu = () => setOpenMenu(null);
-  const openMenuFrom = (name: 'tournament' | 'operator', opener: { currentTarget: HTMLElement }) => {
+  const openMenuFrom = (name: 'tournament' | 'operator' | 'more', opener: { currentTarget: HTMLElement }) => {
     menuOpenerRef.current = opener.currentTarget;
     setOpenMenu((current) => (current === name ? null : name));
   };
@@ -268,7 +273,7 @@ export default function DirectorApp() {
       case 'standings':
         return <StandingsView state={controller.state} controller={controller} onAnnounce={announce} />;
       case 'publish':
-        return <PublishView state={controller.state} onAnnounce={announce} />;
+        return <PublishView state={controller.state} onAnnounce={announce} onNavigate={navigate} />;
       case 'live':
         return <LiveView state={controller.state} actions={controller.live} onAnnounce={announce} />;
       case 'settings':
@@ -396,7 +401,7 @@ export default function DirectorApp() {
                 Open archive…
                 <input
                   type="file"
-                  accept=".qbst,.qbj,.json"
+                  accept=".qbst,.qbj,.yft,.json"
                   className="director-visually-hidden-input"
                   onChange={(event) => {
                     closeMenu();
@@ -422,6 +427,15 @@ export default function DirectorApp() {
                           if (!controller.importSnapshot(report.state))
                             throw new Error('That QBJ file could not be imported.');
                           announce(importWarningMessage('QBJ tournament imported.', report.warnings));
+                          return;
+                        }
+                        if (extension === 'yft') {
+                          const report = importYellowFruitText(text);
+                          if (!report.ok || !report.state)
+                            throw new Error(report.errors.join(' ') || 'That YellowFruit file is not valid.');
+                          if (!controller.importSnapshot(report.state))
+                            throw new Error('That YellowFruit file could not be imported.');
+                          announce(importWarningMessage('YellowFruit tournament imported.', report.warnings));
                           return;
                         }
                         const parsed: unknown = JSON.parse(text);
@@ -488,26 +502,55 @@ export default function DirectorApp() {
           )}
         </div>
         <nav className="director-nav" aria-label="Tournament sections">
-          {navigation.map((group, index) => (
-            <div className="director-nav-group" key={group.label ?? `primary-${index}`}>
-              {group.label && <p className="director-nav-label">{group.label}</p>}
-              {group.items.map((item) => (
-                <SectionLink
-                  key={item.id}
-                  section={item}
-                  active={item.id === activeSection}
-                  onSelect={navigate}
-                  count={
-                    item.id === 'results'
-                      ? resultReviewCount || undefined
-                      : item.id === 'transfers'
-                        ? transferPendingCount || undefined
-                        : undefined
-                  }
-                />
-              ))}
-            </div>
-          ))}
+          <div className="director-nav-group">
+            {primaryNavigation.map((item) => (
+              <SectionLink
+                key={item.id}
+                section={item}
+                active={item.id === activeSection}
+                onSelect={navigate}
+                count={item.id === 'results' ? resultReviewCount || undefined : undefined}
+              />
+            ))}
+          </div>
+          <div className="director-nav-group">
+            <button
+              type="button"
+              className={`director-nav-link ${moreNavigation.some((item) => item.id === activeSection) ? 'is-active' : ''}`}
+              aria-haspopup="menu"
+              aria-expanded={openMenu === 'more'}
+              aria-label={`More tournament tools${transferPendingCount ? `, ${transferPendingCount} transfers needing attention` : ''}`}
+              onClick={(event) => openMenuFrom('more', event)}
+            >
+              <Icon name="settings" />
+              <span>More</span>
+              {transferPendingCount > 0 && <span className="director-nav-count">{transferPendingCount}</span>}
+            </button>
+            {openMenu === 'more' && (
+              <DirectorMenu
+                label="More tournament tools"
+                className="director-more-menu"
+                openerRef={menuOpenerRef}
+                onClose={closeMenu}
+              >
+                {moreNavigation.map((item) => (
+                  <button
+                    key={item.id}
+                    role="menuitem"
+                    type="button"
+                    className={`director-menu-item ${item.id === activeSection ? 'is-selected' : ''}`}
+                    onClick={() => navigate(item.id)}
+                  >
+                    <Icon name={item.icon} size={14} />
+                    <span>{item.label}</span>
+                    {item.id === 'transfers' && transferPendingCount > 0 && (
+                      <small>{transferPendingCount} pending</small>
+                    )}
+                  </button>
+                ))}
+              </DirectorMenu>
+            )}
+          </div>
         </nav>
         <div className="director-sidebar-footer">
           <div className={`director-server-status is-${sidebarServer.kind}`} data-status={sidebarServer.kind}>
@@ -945,6 +988,19 @@ function NewTournamentScreen({
         onAnnounce(importWarningMessage('QBJ tournament imported.', report.warnings));
         return;
       }
+      if (extension === 'yft') {
+        const report = importYellowFruitText(value);
+        if (!report.ok || !report.state) {
+          onAnnounce(errorNotice(report.errors.join(' ') || 'That YellowFruit file is not valid.'));
+          return;
+        }
+        if (!controller.importSnapshot(report.state)) {
+          onAnnounce(errorNotice('That YellowFruit file could not be imported.'));
+          return;
+        }
+        onAnnounce(importWarningMessage('YellowFruit tournament imported.', report.warnings));
+        return;
+      }
       const parsed: unknown = JSON.parse(value);
       if (isDirectorStateLike(parsed)) {
         if (!controller.importSnapshot(parsed)) return;
@@ -992,6 +1048,13 @@ function NewTournamentScreen({
           throw new Error(report.errors.join(' ') || 'That file is not a supported QBJ archive.');
         if (!controller.importSnapshot(report.state)) throw new Error('That QBJ file could not be imported.');
         onAnnounce(importWarningMessage('QBJ tournament imported.', report.warnings));
+      } else if (extension === 'yft') {
+        const report = importYellowFruitText(new TextDecoder().decode(bytes));
+        if (!report.ok || !report.state)
+          throw new Error(report.errors.join(' ') || 'That file is not a supported YellowFruit archive.');
+        if (!controller.importSnapshot(report.state))
+          throw new Error('That YellowFruit file could not be imported.');
+        onAnnounce(importWarningMessage('YellowFruit tournament imported.', report.warnings));
       } else if (extension === 'json') {
         const text = new TextDecoder().decode(bytes);
         const parsed: unknown = JSON.parse(text);
@@ -1014,7 +1077,7 @@ function NewTournamentScreen({
           onAnnounce(importWarningMessage('QBJ tournament imported.', report.warnings));
         }
       } else {
-        throw new Error('That file type is not supported. Choose a .qbst, .qbj, or .json file.');
+        throw new Error('That file type is not supported. Choose a .qbst, .qbj, .yft, or .json file.');
       }
     } catch (reason: unknown) {
       onAnnounce(errorNotice(reason instanceof Error ? reason.message : 'That file could not be opened.'));
@@ -1081,7 +1144,7 @@ function NewTournamentScreen({
                   <input
                     className="director-visually-hidden-input"
                     type="file"
-                    accept=".qbst,.qbj,.json"
+                    accept=".qbst,.qbj,.yft,.json"
                     onChange={(event) => {
                       void importArchive(event.target.files?.[0]);
                       event.currentTarget.value = '';

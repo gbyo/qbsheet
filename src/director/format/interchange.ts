@@ -2,27 +2,40 @@ import {
   exportDirectorArchive,
   exportQbjText,
   exportSqbsTeams,
+  exportSqbsTournamentFile,
   exportTeamsCsv,
   importDirectorArchive,
   importQbj,
+  readYellowFruitTournament,
   type DirectorTournament,
   type DirectorTournamentInput,
   type GameRecord as InterchangeGameRecord,
   type GameTeamResult,
   type JsonObject,
   type JsonValue,
+  type SqbsSideGame,
   type TeamRecord,
+  type TimelineEventRecord,
 } from '@qbsheet/tournament-formats';
 import {
+  acceptedGameRecords,
   defaultRules,
+  deriveTeamStandings,
   emptyDirectorState,
+  isTeamClassification,
   isoNow,
   latestRound,
   newDirectorId,
   normalizeTimeZone,
+  timelineEventTypes,
   type DirectorState,
+  type FinalPlacement,
   type GameRecord,
+  type TeamClassification,
   type TeamGameScore,
+  type TimelineEventType,
+  type TimelineVisibility,
+  type TournamentTimelineEvent,
 } from '../domain';
 import { normalizeDirectorState } from '../persistence/stateMigrations';
 import { scoringRulesObject } from '../transfers/assignment';
@@ -33,6 +46,7 @@ import { scoringRulesObject } from '../transfers/assignment';
  * public QBJ document while allowing a .qbst round trip to restore operational state exactly.
  */
 export const directorStateArchiveExtension = 'qbsheet:director-state' as const;
+export const directorOrganizationShortNameExtension = 'qbsheet:director-short-name' as const;
 
 export interface DirectorImportReport {
   ok: boolean;
@@ -70,6 +84,51 @@ function teamStatus(status: string | undefined): DirectorState['teams'][number][
   return 'confirmed';
 }
 
+/**
+ * Unknown timeline vocabularies fall back to neutral values instead of
+ * rejecting the file: a newer writer must not destroy an old tournament.
+ * Unknown visibility defaults to hidden so a possibly-private event is never
+ * published by accident.
+ */
+function timelineEventType(value: unknown): TimelineEventType {
+  return typeof value === 'string' && (timelineEventTypes as readonly string[]).includes(value)
+    ? (value as TimelineEventType)
+    : 'custom';
+}
+
+function timelineVisibility(value: unknown): TimelineVisibility {
+  return value === 'public' || value === 'staff' || value === 'hidden' ? value : 'hidden';
+}
+
+function restoreTimelineEvent(
+  event: TimelineEventRecord,
+  index: number,
+  now: string,
+): TournamentTimelineEvent {
+  const teamIds = Array.isArray(event.teamIds)
+    ? event.teamIds.filter((id): id is string => typeof id === 'string' && id !== '')
+    : [];
+  return {
+    id: event.id || `event_${index + 1}`,
+    type: timelineEventType(event.type),
+    title: event.title || `Event ${index + 1}`,
+    ...(typeof event.description === 'string' && event.description !== ''
+      ? { description: event.description }
+      : {}),
+    scheduledStart: typeof event.scheduledStart === 'string' ? event.scheduledStart : null,
+    scheduledEnd: typeof event.scheduledEnd === 'string' ? event.scheduledEnd : null,
+    ...(teamIds.length > 0 ? { teamIds } : {}),
+    roomId: typeof event.roomId === 'string' ? event.roomId : null,
+    ...(typeof event.location === 'string' && event.location !== '' ? { location: event.location } : {}),
+    visibility: timelineVisibility(event.visibility),
+    ...(typeof event.dayOrder === 'number' && Number.isFinite(event.dayOrder)
+      ? { dayOrder: event.dayOrder }
+      : {}),
+    createdAt: typeof event.createdAt === 'string' ? event.createdAt : now,
+    updatedAt: typeof event.updatedAt === 'string' ? event.updatedAt : now,
+  };
+}
+
 function gameStatus(status: string | undefined): GameRecord['status'] {
   switch (status) {
     case 'released':
@@ -80,6 +139,8 @@ function gameStatus(status: string | undefined): GameRecord['status'] {
     case 'accepted':
     case 'complete':
       return 'accepted';
+    case 'forfeit':
+      return 'forfeit';
     case 'rejected':
       return 'rejected';
     case 'cancelled':
@@ -108,6 +169,9 @@ function scheduleStatus(status: string | undefined): DirectorState['scheduledGam
 }
 
 function auditType(action: string): DirectorState['audit'][number]['type'] {
+  if (action === 'final-placement-set') return 'final-placement-set';
+  if (action === 'final-placement-cleared') return 'final-placement-cleared';
+  if (action === 'advancement-committed') return 'advancement-committed';
   if (action.includes('cancel')) return 'schedule-cancelled';
   if (action.includes('drop')) return 'team-dropped';
   if (action.includes('schedule') || action.includes('repair')) return 'schedule-repaired';
@@ -159,6 +223,7 @@ function resultScores(game: InterchangeGameRecord): TeamGameScore[] {
   return (game.result?.teams ?? []).map((team) => ({
     teamId: team.teamId,
     score: number(team.points) ?? 0,
+    superpowers: number(team.superpowers) ?? 0,
     powers: number(team.powers) ?? 0,
     gets: number(team.gets) ?? 0,
     negs: number(team.negs) ?? 0,
@@ -168,16 +233,64 @@ function resultScores(game: InterchangeGameRecord): TeamGameScore[] {
   }));
 }
 
+/**
+ * A structured school year survives interchange as the QBJ player grade: a
+ * plain integer grade round-trips exactly, while a foreign free-text grade is
+ * left alone rather than fabricated into a year.
+ */
+function schoolYearGrade(schoolYear: number | null | undefined): { grade: string } | Record<string, never> {
+  if (typeof schoolYear !== 'number' || !Number.isInteger(schoolYear)) return {};
+  return { grade: String(schoolYear) };
+}
+
+export function schoolYearFromGrade(grade: string | undefined): number | undefined {
+  if (grade === undefined || !/^\d{1,2}$/.test(grade.trim())) return undefined;
+  const year = Number.parseInt(grade.trim(), 10);
+  return year >= 1 && year <= 16 ? year : undefined;
+}
+
+/**
+ * Read an explicit final placement back from tournament extensions. Anything
+ * malformed yields undefined rather than a fabricated ranking; duplicates
+ * collapse to the first occurrence so a conflicting order can never be stored.
+ */
+function finalPlacementFromExtension(value: unknown): FinalPlacement | undefined {
+  if (value === null || value === undefined || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const candidate = value as Record<string, unknown>;
+  if (!Array.isArray(candidate.order)) return undefined;
+  const seen = new Set<string>();
+  const order: string[] = [];
+  for (const entry of candidate.order) {
+    if (typeof entry !== 'string' || entry === '' || seen.has(entry)) continue;
+    seen.add(entry);
+    order.push(entry);
+  }
+  if (order.length === 0) return undefined;
+  return {
+    order,
+    actor: typeof candidate.actor === 'string' ? candidate.actor : '',
+    at: typeof candidate.at === 'string' ? candidate.at : '',
+    ...(typeof candidate.reason === 'string' && candidate.reason !== '' ? { reason: candidate.reason } : {}),
+  };
+}
+
+function interchangePlayer(player: DirectorState['players'][number]): Record<string, unknown> {
+  return {
+    id: player.id,
+    name: player.name,
+    captain: player.captain,
+    ...(player.rosterNumber === undefined ? {} : { rosterNumber: player.rosterNumber }),
+    ...schoolYearGrade(player.schoolYear),
+    ...(player.notes ? { notes: player.notes } : {}),
+  };
+}
+
 function interchangeTeam(state: DirectorState, team: DirectorState['teams'][number]): TeamRecord {
-  const players = state.players
-    .filter((player) => player.teamId === team.id)
-    .map((player) => ({
-      id: player.id,
-      name: player.name,
-      captain: player.captain,
-      ...(player.rosterNumber === undefined ? {} : { rosterNumber: player.rosterNumber }),
-      ...(player.notes ? { notes: player.notes } : {}),
-    }));
+  const players = state.players.filter((player) => player.teamId === team.id).map(interchangePlayer);
+  const classifications = (team.classifications ?? []).filter(isTeamClassification);
+  const tags = (team.tags ?? []).filter((tag) => typeof tag === 'string' && tag.trim() !== '');
   const output = {
     id: team.id,
     name: team.displayName,
@@ -187,6 +300,14 @@ function interchangeTeam(state: DirectorState, team: DirectorState['teams'][numb
     ...(team.seed === null ? {} : { seed: team.seed }),
     status: team.status === 'confirmed' ? 'active' : team.status === 'waitlist' ? 'late' : 'dropped',
     ...(team.notes ? { notes: team.notes } : {}),
+    ...(classifications.length > 0 || tags.length > 0
+      ? {
+          extensions: {
+            ...(classifications.length > 0 ? { classifications } : {}),
+            ...(tags.length > 0 ? { tags } : {}),
+          },
+        }
+      : {}),
     playerIds: players.map((player) => player.id),
     players,
   };
@@ -203,17 +324,46 @@ function preservedDirectorState(data: DirectorTournament): DirectorState | undef
   return restored;
 }
 
+/**
+ * Timeline events travel twice: as a normalized `timelineEvents` collection
+ * for archive/interchange readers, and inside the tournament extensions so a
+ * plain QBJ hand-off (which has no timeline vocabulary) still carries the day
+ * order. Both carry the same records; import prefers the collection.
+ */
+function interchangeTimelineEvents(state: DirectorState): TimelineEventRecord[] {
+  return state.timeline.map((event) => ({
+    id: event.id,
+    type: event.type,
+    title: event.title,
+    ...(event.description ? { description: event.description } : {}),
+    ...(event.scheduledStart ? { scheduledStart: event.scheduledStart } : {}),
+    ...(event.scheduledEnd ? { scheduledEnd: event.scheduledEnd } : {}),
+    ...(event.teamIds && event.teamIds.length > 0 ? { teamIds: [...event.teamIds] } : {}),
+    ...(event.roomId ? { roomId: event.roomId } : {}),
+    ...(event.location ? { location: event.location } : {}),
+    visibility: event.visibility,
+    ...(typeof event.dayOrder === 'number' ? { dayOrder: event.dayOrder } : {}),
+    createdAt: event.createdAt,
+    updatedAt: event.updatedAt,
+  }));
+}
+
 function toInterchangeGame(state: DirectorState, game: GameRecord): InterchangeGameRecord {
   const scheduled = state.scheduledGames.find((entry) => entry.id === game.scheduledGameId);
+  const rules = state.tournament?.rules;
   const scores: GameTeamResult[] = game.scores.map((score) => ({
     teamId: score.teamId,
     points: score.score,
+    superpowers: score.superpowers,
     powers: score.powers,
     gets: score.gets,
     negs: score.negs,
     bonusesHeard: score.bonuses,
     bonusPoints: score.bonusPoints,
     bonusBouncebackPoints: score.bouncebacks,
+    // The forfeiting side is explicit so a re-import awards the win to the
+    // other side even when both recorded scores are zero.
+    ...(game.status === 'forfeit' && score.teamId === game.forfeitedTeamId ? { forfeitLoss: true } : {}),
   }));
   return {
     id: game.id,
@@ -232,13 +382,15 @@ function toInterchangeGame(state: DirectorState, game: GameRecord): InterchangeG
       players: game.playerStats.map((player) => ({
         playerId: player.playerId,
         teamId: player.teamId,
+        superpowers: player.superpowers,
         powers: player.powers,
         gets: player.gets,
         negs: player.negs,
         points:
-          player.powers * (state.tournament?.rules.powerValue ?? 15) +
-          player.gets * (state.tournament?.rules.tossupValue ?? 10) +
-          player.negs * (state.tournament?.rules.negValue ?? -5) +
+          player.superpowers * (rules?.superpowerValue ?? rules?.powerValue ?? 15) +
+          player.powers * (rules?.powerValue ?? 15) +
+          player.gets * (rules?.tossupValue ?? 10) +
+          player.negs * (rules?.negValue ?? -5) +
           player.bonusPoints,
         ...(player.tossupsHeard === null || player.tossupsHeard === undefined
           ? {}
@@ -282,6 +434,9 @@ export function toInterchange(state: DirectorState): DirectorTournament {
       scheduledStart: round.scheduledStart,
       releasedAt: round.releasedAt,
       startedAt: round.startedAt,
+      ...(typeof round.dayOrder === 'number' && Number.isFinite(round.dayOrder)
+        ? { dayOrder: round.dayOrder }
+        : {}),
     },
   }));
   const scheduledGames = state.scheduledGames.map((game) => ({
@@ -301,7 +456,9 @@ export function toInterchange(state: DirectorState): DirectorTournament {
       id: tournament.id,
       name: tournament.name,
       ...(tournament.date ? { date: tournament.date } : {}),
+      ...(tournament.endDate ? { endDate: tournament.endDate } : {}),
       ...(tournament.venue ? { location: tournament.venue } : {}),
+      ...(tournament.questionSet ? { questionSet: tournament.questionSet } : {}),
       notes: tournament.organizer ? `Organizer: ${tournament.organizer}` : undefined,
       extensions: {
         status: tournament.status,
@@ -312,6 +469,8 @@ export function toInterchange(state: DirectorState): DirectorTournament {
         currentPhaseId: tournament.currentPhaseId,
         currentPacketId: tournament.currentPacketId,
         currentRoundId: tournament.currentRoundId,
+        ...(tournament.finalPlacement ? { finalPlacement: jsonValue(tournament.finalPlacement) } : {}),
+        ...(state.timeline.length > 0 ? { timelineEvents: jsonValue(interchangeTimelineEvents(state)) } : {}),
         timeZone: tournament.timeZone,
         timed: tournament.rules.timed,
         regulationMinutes: tournament.rules.regulationMinutes,
@@ -325,22 +484,27 @@ export function toInterchange(state: DirectorState): DirectorTournament {
     organizations: state.organizations.map((organization) => ({
       id: organization.id,
       name: organization.name,
-      ...(organization.shortName ? { city: organization.shortName } : {}),
+      ...(organization.city ? { city: organization.city } : {}),
       ...(organization.notes ? { notes: organization.notes } : {}),
-      ...(organization.archived ? { extensions: { archived: true } } : {}),
+      ...(organization.archived || organization.shortName
+        ? {
+            extensions: {
+              ...(organization.archived ? { archived: true } : {}),
+              ...(organization.shortName
+                ? { [directorOrganizationShortNameExtension]: organization.shortName }
+                : {}),
+            },
+          }
+        : {}),
     })),
     players: state.players.map((player) => ({
-      id: player.id,
-      name: player.name,
+      ...interchangePlayer(player),
       ...(state.teams.find((team) => team.id === player.teamId)?.organizationId
         ? {
             organizationId:
               state.teams.find((team) => team.id === player.teamId)?.organizationId ?? undefined,
           }
         : {}),
-      captain: player.captain,
-      ...(player.rosterNumber === undefined ? {} : { rosterNumber: player.rosterNumber }),
-      ...(player.notes ? { notes: player.notes } : {}),
     })),
     teams: state.teams.map((team) => interchangeTeam(state, team)),
     registrations: state.teams.map((team) => ({
@@ -437,6 +601,7 @@ export function toInterchange(state: DirectorState): DirectorTournament {
       entityId: event.entityId,
       details: event.details ? jsonObject(event.details) : undefined,
     })),
+    timelineEvents: interchangeTimelineEvents(state),
     extensions: {
       archiveSchemaVersion: state.schemaVersion,
       metadata: jsonValue(state.metadata),
@@ -477,7 +642,9 @@ function fromInterchange(data: DirectorTournament): DirectorState {
     id: data.tournament.id,
     name: data.tournament.name,
     date: data.tournament.date ?? '',
+    endDate: text(data.tournament.endDate),
     venue: data.tournament.location ?? '',
+    questionSet: text(data.tournament.questionSet),
     organizer: text(data.tournament.notes)?.replace(/^Organizer:\s*/, '') ?? '',
     status,
     // An interchange document that never carried a zone gets the unambiguous one rather than this
@@ -494,6 +661,7 @@ function fromInterchange(data: DirectorTournament): DirectorState {
     currentRoundId,
     createdAt: now,
     updatedAt: now,
+    finalPlacement: finalPlacementFromExtension(tournamentExtensions.finalPlacement),
   };
   state.formats = [
     {
@@ -511,7 +679,8 @@ function fromInterchange(data: DirectorTournament): DirectorState {
   state.organizations = data.organizations.map((organization) => ({
     id: organization.id,
     name: organization.name,
-    shortName: organization.city,
+    city: organization.city,
+    shortName: text(organization.extensions?.[directorOrganizationShortNameExtension]),
     notes: organization.notes,
     ...(organization.extensions?.archived === true ? { archived: true } : {}),
   }));
@@ -519,30 +688,45 @@ function fromInterchange(data: DirectorTournament): DirectorState {
   data.teams.forEach((team) =>
     teamPlayers.set(team.id, team.playerIds ?? team.players?.map((player) => player.id) ?? []),
   );
-  state.teams = data.teams.map((team) => ({
-    id: team.id,
-    organizationId: team.organizationId ?? null,
-    displayName: team.displayName ?? team.name,
-    teamLetter: team.letter ?? '',
-    seed: team.seed ?? null,
-    status: teamStatus(team.status),
-    notes: team.notes,
-    createdAt: now,
-    updatedAt: now,
-  }));
+  state.teams = data.teams.map((team) => {
+    const extensions = team.extensions ?? {};
+    const classifications = Array.isArray(extensions.classifications)
+      ? extensions.classifications.filter(isTeamClassification)
+      : [];
+    const tags = Array.isArray(extensions.tags)
+      ? extensions.tags.filter((tag): tag is string => typeof tag === 'string' && tag.trim() !== '')
+      : [];
+    return {
+      id: team.id,
+      organizationId: team.organizationId ?? null,
+      displayName: team.displayName ?? team.name,
+      teamLetter: team.letter ?? '',
+      seed: team.seed ?? null,
+      status: teamStatus(team.status),
+      ...(classifications.length > 0 ? { classifications: classifications as TeamClassification[] } : {}),
+      ...(tags.length > 0 ? { tags } : {}),
+      notes: team.notes,
+      createdAt: now,
+      updatedAt: now,
+    };
+  });
   const teamForPlayer = new Map<string, string>();
   teamPlayers.forEach((players, teamId) =>
     players.forEach((playerId) => teamForPlayer.set(playerId, teamId)),
   );
-  state.players = data.players.map((player) => ({
-    id: player.id,
-    teamId: teamForPlayer.get(player.id) ?? '',
-    name: player.name,
-    captain: player.captain ?? false,
-    active: true,
-    rosterNumber: player.rosterNumber,
-    notes: player.notes,
-  }));
+  state.players = data.players.map((player) => {
+    const schoolYear = schoolYearFromGrade(player.grade);
+    return {
+      id: player.id,
+      teamId: teamForPlayer.get(player.id) ?? '',
+      name: player.name,
+      captain: player.captain ?? false,
+      active: true,
+      rosterNumber: player.rosterNumber,
+      ...(schoolYear === undefined ? {} : { schoolYear }),
+      notes: player.notes,
+    };
+  });
   state.rooms = data.rooms.map((room) => ({
     id: room.id,
     name: room.name,
@@ -594,6 +778,7 @@ function fromInterchange(data: DirectorTournament): DirectorState {
     advancementRule: phase.advancement
       ? {
           qualifiersPerPool: number(phase.advancement.qualifiersPerPool) ?? 1,
+          wildcards: Math.max(0, Math.floor(number(phase.advancement.wildcards) ?? 0)),
           tiebreakers: defaultRules.tiebreakers,
           manualOverrideAllowed: true,
         }
@@ -624,6 +809,10 @@ function fromInterchange(data: DirectorTournament): DirectorState {
     releasedAt: text(round.extensions?.releasedAt) ?? null,
     startedAt: text(round.extensions?.startedAt) ?? null,
     closedAt: round.status === 'closed' ? now : null,
+    dayOrder:
+      typeof round.extensions?.dayOrder === 'number' && Number.isFinite(round.extensions.dayOrder)
+        ? round.extensions.dayOrder
+        : undefined,
   }));
   state.scheduledGames = data.scheduledGames.map((game) => ({
     id: game.id,
@@ -644,11 +833,17 @@ function fromInterchange(data: DirectorTournament): DirectorState {
     scheduledGameId: game.scheduledGameId ?? game.id,
     roundId: game.roundId ?? roundById.get(game.scheduledGameId ?? '')?.id ?? '',
     packetId: game.packetId ?? null,
-    status: gameStatus(game.status),
+    status: game.result?.forfeit === true ? 'forfeit' : gameStatus(game.status),
+    ...(game.status === 'forfeit' || game.result?.forfeit === true
+      ? {
+          forfeitedTeamId: game.result?.teams?.find((team) => team.forfeitLoss === true)?.teamId ?? undefined,
+        }
+      : {}),
     scores: resultScores(game),
     playerStats: (game.result?.players ?? []).map((player) => ({
       playerId: player.playerId,
       teamId: player.teamId,
+      superpowers: player.superpowers ?? 0,
       powers: player.powers ?? 0,
       gets: player.gets ?? 0,
       negs: player.negs ?? 0,
@@ -704,6 +899,14 @@ function fromInterchange(data: DirectorTournament): DirectorState {
     entityId: event.entityId,
     details: event.details,
   }));
+  // The normalized collection wins; a plain QBJ hand-off carries the same
+  // records inside the tournament extensions instead.
+  const extensionTimeline = Array.isArray(tournamentExtensions.timelineEvents)
+    ? (tournamentExtensions.timelineEvents as unknown as TimelineEventRecord[])
+    : [];
+  const timelineSource =
+    (data.timelineEvents ?? []).length > 0 ? (data.timelineEvents ?? []) : extensionTimeline;
+  state.timeline = timelineSource.map((event, index) => restoreTimelineEvent(event, index, now));
   state.qbtcpSessions = data.qbtcpSessions.map((session) => ({
     roomId: session.roomId ?? '',
     sessionId: session.id,
@@ -759,10 +962,51 @@ function rulesFromInterchange(
   };
   const tossupValue = firstNumber(rules.tossupValue, rules.tossupPoints, answerValue('C', 'Correct'));
   if (tossupValue !== undefined) result.tossupValue = tossupValue;
+  // A stated answer-type table is definitive about which tiers exist: a table
+  // without a power row means no powers, not the default 15. Legacy flat
+  // documents without a table keep the previous default-preserving behavior.
+  const hasAnswerTable = answerTypes.length > 0;
+  const positiveValues = answerTypes
+    .map((candidate) =>
+      candidate && typeof candidate === 'object' && !Array.isArray(candidate)
+        ? number(candidate.value)
+        : undefined,
+    )
+    .filter((value): value is number => value !== undefined && value > 0)
+    .sort((left, right) => right - left);
+  const superpowerValue =
+    firstNumber(rules.superpowerValue, answerValue('SP', 'Superpower')) ??
+    (hasAnswerTable && positiveValues.length >= 3 ? positiveValues[0] : undefined);
+  if (superpowerValue !== undefined) result.superpowerValue = superpowerValue;
   const powerValue = firstNumber(rules.powerValue, rules.powerPoints, answerValue('P', 'Power'));
   if (powerValue !== undefined) result.powerValue = powerValue;
+  else if (hasAnswerTable) result.powerValue = null;
   const negValue = firstNumber(rules.negValue, rules.negPoints, answerValue('N', 'Neg'));
   if (negValue !== undefined) result.negValue = negValue;
+  else if (hasAnswerTable) {
+    const answerNumbers = answerTypes.map((candidate) =>
+      candidate && typeof candidate === 'object' && !Array.isArray(candidate)
+        ? number(candidate.value)
+        : undefined,
+    );
+    if (!answerNumbers.some((value) => value !== undefined && value < 0)) result.negValue = null;
+  }
+  const bonusFieldsPresent =
+    number(rules.maximum_bonus_score) !== undefined ||
+    number(rules.bonus_divisor) !== undefined ||
+    number(rules.points_per_bonus_part) !== undefined ||
+    number(rules.minimum_parts_per_bonus) !== undefined ||
+    number(rules.maximum_parts_per_bonus) !== undefined ||
+    rules.bonuses_bounce_back === true ||
+    answerTypes.some(
+      (candidate) =>
+        candidate &&
+        typeof candidate === 'object' &&
+        !Array.isArray(candidate) &&
+        candidate.awards_bonus === true,
+    );
+  if (typeof rules.useBonuses === 'boolean') result.useBonuses = rules.useBonuses;
+  else if (hasAnswerTable) result.useBonuses = bonusFieldsPresent;
   const bonusValue = firstNumber(rules.bonusValue, rules.bonusPoints, rules.points_per_bonus_part);
   if (bonusValue !== undefined) result.bonusValue = bonusValue;
   const tossupCount = firstNumber(
@@ -772,17 +1016,39 @@ function rulesFromInterchange(
     rules.maximum_regulation_tossup_count,
   );
   if (tossupCount !== undefined) result.tossupCount = tossupCount;
+  const maximumTossupCount = firstNumber(rules.maximumTossupCount);
+  if (maximumTossupCount !== undefined) result.maximumTossupCount = maximumTossupCount;
+  else {
+    // The canonical exporter always states the maximum; only treat it as an
+    // override when regulation is actually allowed to run long.
+    const statedMaximum = number(rules.maximum_regulation_tossup_count);
+    if (statedMaximum !== undefined && tossupValue !== undefined && statedMaximum !== tossupValue) {
+      result.maximumTossupCount = statedMaximum;
+    }
+  }
+  // For irregular bonuses the part count is the maximum; the minimum is read separately below.
   const bonusParts = firstNumber(
     rules.bonusParts,
-    rules.minimum_parts_per_bonus,
     rules.maximum_parts_per_bonus,
+    rules.minimum_parts_per_bonus,
   );
   if (bonusParts !== undefined) result.bonusParts = bonusParts;
+  const minimumBonusParts = firstNumber(rules.minimumBonusParts, rules.minimum_parts_per_bonus);
+  if (minimumBonusParts !== undefined) result.minimumBonusParts = minimumBonusParts;
+  const maximumBonusScore = firstNumber(rules.maximumBonusScore, rules.maximum_bonus_score);
+  if (maximumBonusScore !== undefined) result.maximumBonusScore = maximumBonusScore;
+  const bonusDivisor = firstNumber(rules.bonusDivisor, rules.bonus_divisor);
+  if (bonusDivisor !== undefined) result.bonusDivisor = bonusDivisor;
   if (typeof rules.bouncebacks === 'boolean') result.bouncebacks = rules.bouncebacks;
   else if (typeof rules.bonuses_bounce_back === 'boolean') result.bouncebacks = rules.bonuses_bounce_back;
   if (typeof rules.overtime === 'boolean') result.overtime = rules.overtime;
   else if (typeof rules.overtime_includes_bonuses === 'boolean')
     result.overtime = rules.overtime_includes_bonuses;
+  const overtimeTossupCount = firstNumber(rules.overtimeTossupCount, rules.minimum_overtime_question_count);
+  if (overtimeTossupCount !== undefined) result.overtimeTossupCount = overtimeTossupCount;
+  if (typeof rules.overtimeBonuses === 'boolean') result.overtimeBonuses = rules.overtimeBonuses;
+  else if (typeof rules.overtime_includes_bonuses === 'boolean')
+    result.overtimeBonuses = rules.overtime_includes_bonuses;
   if (typeof rules.timed === 'boolean') result.timed = rules.timed;
   else {
     const procedure = ['roomProcedure', 'room_procedure', 'procedure', 'regulation']
@@ -795,6 +1061,10 @@ function rulesFromInterchange(
   if (typeof rules.lightning === 'boolean') result.lightning = rules.lightning;
   else if (number(rules.lightning_count_per_team) !== undefined)
     result.lightning = number(rules.lightning_count_per_team)! > 0;
+  const lightningCountPerTeam = firstNumber(rules.lightningCountPerTeam, rules.lightning_count_per_team);
+  if (lightningCountPerTeam !== undefined) result.lightningCountPerTeam = lightningCountPerTeam;
+  const lightningDivisor = firstNumber(rules.lightningDivisor, rules.lightning_divisor);
+  if (lightningDivisor !== undefined) result.lightningDivisor = lightningDivisor;
   const maximumActivePlayers = firstNumber(
     rules.maximumActivePlayers,
     rules.maximumPlayersPerTeam,
@@ -836,6 +1106,313 @@ export function exportTeamCsv(state: DirectorState): string {
 
 export function exportSqbs(state: DirectorState): string {
   return exportSqbsTeams(toInterchange(state).teams);
+}
+
+export interface SqbsTournamentScope {
+  phaseId?: string;
+  poolId?: string;
+}
+
+export interface SqbsTournamentExport {
+  ok: boolean;
+  text: string;
+  errors: string[];
+  warnings: string[];
+  scopeLabel: string;
+  teamCount: number;
+  gameCount: number;
+}
+
+/**
+ * Full SQBS tournament export for one scope (a stage, a pool, or the entire
+ * tournament). Team order follows the canonical standings so Director, Live,
+ * CSV, HTML, and SQBS never disagree about who is first; per-game detail
+ * comes from the accepted game records. Unknown statistics stay unknown until
+ * the SQBS serializer writes its honest zeroes with warnings. Multi-stage
+ * scopes lose pool semantics (SQBS divisions describe one stage), which is
+ * reported — never silently flattened.
+ */
+export function exportSqbsTournament(
+  state: DirectorState,
+  scope: SqbsTournamentScope = {},
+): SqbsTournamentExport {
+  const fail = (
+    errors: string[],
+    warnings: string[] = [],
+    teamCount = 0,
+    gameCount = 0,
+  ): SqbsTournamentExport => ({
+    ok: false,
+    text: '',
+    errors,
+    warnings,
+    scopeLabel: sqbsScopeLabel(state, scope),
+    teamCount,
+    gameCount,
+  });
+  const rules = state.tournament?.rules ?? defaultRules;
+  const scoped = {
+    ...(scope.phaseId ? { phaseId: scope.phaseId } : {}),
+    ...(scope.poolId ? { poolId: scope.poolId } : {}),
+  };
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  const scopeRounds = state.rounds
+    .filter((round) => !scope.phaseId || round.phaseId === scope.phaseId)
+    .sort(
+      (left, right) =>
+        (left.dayOrder ?? Number.MAX_SAFE_INTEGER) - (right.dayOrder ?? Number.MAX_SAFE_INTEGER) ||
+        left.number - right.number ||
+        left.id.localeCompare(right.id),
+    );
+  const roundOrder = new Map(scopeRounds.map((round, index) => [round.id, index]));
+  const games = acceptedGameRecords(state, scoped).sort(
+    (left, right) =>
+      (roundOrder.get(left.roundId) ?? Number.MAX_SAFE_INTEGER) -
+        (roundOrder.get(right.roundId) ?? Number.MAX_SAFE_INTEGER) || left.id.localeCompare(right.id),
+  );
+  const standings = deriveTeamStandings(state, undefined, scoped);
+  const teamById = new Map(state.teams.map((team) => [team.id, team]));
+  const orderedTeams = standings
+    .map((standing) => teamById.get(standing.teamId))
+    .filter((team): team is NonNullable<typeof team> => team !== undefined);
+  if (orderedTeams.length === 0) {
+    return fail(['There are no decided games in this scope yet, so there is nothing to export.']);
+  }
+
+  // Divisions describe one stage's pools. A multi-stage scope cannot keep
+  // pool semantics; say so instead of flattening silently.
+  const scopePhases = scope.phaseId
+    ? state.phases.filter((phase) => phase.id === scope.phaseId)
+    : state.phases;
+  const livePools = (scopePhases.length === 1 ? state.pools : []).filter(
+    (pool) => !pool.archived && (!scope.phaseId || pool.phaseId === scope.phaseId),
+  );
+  let divisions: string[] = [];
+  if (scope.poolId) {
+    divisions = [];
+  } else if (livePools.length > 1) {
+    divisions = livePools.map((pool) => pool.name);
+  }
+  const divisionOf = (teamId: string): number => {
+    if (divisions.length === 0) return -1;
+    const index = livePools.findIndex((pool) => pool.teamIds.includes(teamId));
+    return index;
+  };
+  const unpooled = orderedTeams.filter((team) => divisions.length > 0 && divisionOf(team.id) < 0);
+  if (unpooled.length > 0) {
+    warnings.push(
+      `${unpooled.length} team(s) (${unpooled
+        .slice(0, 3)
+        .map((team) => team.displayName)
+        .join(
+          ', ',
+        )}${unpooled.length > 3 ? ', …' : ''}) are not in a pool and are exported without a division.`,
+    );
+  }
+
+  // Tossup point slots follow the rules; stats that use a value the rules do
+  // not define are appended (up to SQBS's four) so legacy detail survives.
+  const ruleValues = [rules.superpowerValue, rules.powerValue, rules.tossupValue, rules.negValue].filter(
+    (value): value is number => typeof value === 'number' && value !== 0,
+  );
+  const slots = [...ruleValues];
+  const slotOf = (value: number | null, label: string, gameId: string): number => {
+    if (value === null) {
+      errors.push(
+        `Game ${gameId} records ${label} tossups, but the tournament rules define no value for them.`,
+      );
+      return -1;
+    }
+    let index = slots.indexOf(value);
+    if (index < 0) {
+      if (slots.length >= 4) {
+        errors.push(
+          `Game ${gameId} uses the point value ${value}, which does not fit in SQBS's four tossup slots.`,
+        );
+        return -1;
+      }
+      warnings.push(
+        `The value ${value} appears in game detail but not in the current rules; it was added as an extra SQBS point slot.`,
+      );
+      slots.push(value);
+      index = slots.length - 1;
+    }
+    return index;
+  };
+
+  const teamIndex = new Map(orderedTeams.map((team, index) => [team.id, index]));
+  const playerIndexByTeam = new Map<string, Map<string, number>>();
+  const sqbsTeams = orderedTeams.map((team) => {
+    const roster = state.players.filter((player) => player.teamId === team.id && player.active);
+    const indexes = new Map(roster.map((player, index) => [player.id, index]));
+    playerIndexByTeam.set(team.id, indexes);
+    return {
+      name: team.displayName,
+      players: roster.map((player) =>
+        typeof player.schoolYear === 'number' ? `${player.name} (${player.schoolYear})` : player.name,
+      ),
+      divisionIndex: divisionOf(team.id),
+    };
+  });
+
+  const packetById = new Map(state.packets.map((packet) => [packet.id, packet.name]));
+  const roundById = new Map(scopeRounds.map((round) => [round.id, round]));
+  const packetNames: string[] = [];
+  for (const round of scopeRounds) {
+    if (!games.some((game) => game.roundId === round.id)) continue;
+    const packet = round.packetId ? packetById.get(round.packetId) : undefined;
+    packetNames.push(packet ?? round.name);
+  }
+
+  const sqbsGames: Array<{
+    id: number;
+    round: number;
+    left: SqbsSideGame;
+    right: SqbsSideGame;
+    tossupsHeard: number | null;
+    overtime?: boolean;
+    forfeitWinner?: 'left' | 'right' | null;
+  }> = [];
+  games.forEach((game, sequence) => {
+    if (game.scores.length !== 2) {
+      errors.push(`Game ${game.id} does not have two sides and cannot be represented in SQBS.`);
+      return;
+    }
+    const [leftScore, rightScore] = game.scores as [TeamGameScore, TeamGameScore];
+    const leftIdx = teamIndex.get(leftScore.teamId);
+    const rightIdx = teamIndex.get(rightScore.teamId);
+    if (leftIdx === undefined || rightIdx === undefined) {
+      errors.push(`Game ${game.id} involves a team outside this export scope.`);
+      return;
+    }
+    const forfeit = game.status === 'forfeit';
+    let forfeitWinner: 'left' | 'right' | null = null;
+    if (forfeit) {
+      if (game.forfeitedTeamId === leftScore.teamId) forfeitWinner = 'right';
+      else if (game.forfeitedTeamId === rightScore.teamId) forfeitWinner = 'left';
+      else if (leftScore.score !== rightScore.score) {
+        forfeitWinner = leftScore.score > rightScore.score ? 'left' : 'right';
+        warnings.push(
+          `Game ${game.id} is a forfeit that does not record which side forfeited; the higher score was treated as the winner.`,
+        );
+      } else {
+        errors.push(
+          `Game ${game.id} is a forfeit with no recorded winner (equal scores, unknown forfeiting side).`,
+        );
+        return;
+      }
+    }
+    const tossupsHeard =
+      game.playerStats.length > 0 && game.playerStats.every((stat) => stat.tossupsHeard !== null)
+        ? Math.max(...game.playerStats.map((stat) => stat.tossupsHeard as number))
+        : null;
+    const buildSide = (score: TeamGameScore, label: 'left' | 'right'): SqbsSideGame | undefined => {
+      const indexes = playerIndexByTeam.get(score.teamId) ?? new Map();
+      const players = [];
+      for (const stat of game.playerStats.filter((entry) => entry.teamId === score.teamId)) {
+        const rosterIndex = indexes.get(stat.playerId);
+        if (rosterIndex === undefined) {
+          errors.push(`Game ${game.id} credits a player who is no longer on the roster.`);
+          return undefined;
+        }
+        const tuh = stat.tossupsHeard ?? 0;
+        players.push({
+          playerIndex: rosterIndex,
+          gamesPlayed: tossupsHeard !== null && tossupsHeard > 0 ? tuh / tossupsHeard : tuh > 0 ? 1 : 0,
+          counts: [0, 0, 0, 0] as [number, number, number, number],
+          points: 0,
+        });
+        const target = players[players.length - 1]!;
+        const parts: Array<[number | null, number, string]> = [
+          [rules.superpowerValue, stat.superpowers, 'superpower'],
+          [rules.powerValue, stat.powers, 'power'],
+          [rules.tossupValue, stat.gets, 'regulation'],
+          [rules.negValue, stat.negs, 'neg'],
+        ];
+        for (const [value, count, partLabel] of parts) {
+          if (count === 0) continue;
+          const slot = slotOf(value, partLabel, game.id);
+          if (slot < 0) return undefined;
+          target.counts[slot] = count;
+        }
+        target.points =
+          (rules.superpowerValue ?? 0) * stat.superpowers +
+          (rules.powerValue ?? 0) * stat.powers +
+          rules.tossupValue * stat.gets +
+          (rules.negValue ?? 0) * stat.negs;
+      }
+      const bonusesKnown = game.detailedStats !== 'unknown';
+      return {
+        teamIndex: label === 'left' ? leftIdx : rightIdx,
+        score: score.score,
+        bonusesHeard: bonusesKnown ? score.bonuses : null,
+        bonusPoints: bonusesKnown ? score.bonusPoints : null,
+        bouncebacksHeard: rules.bouncebacks ? null : undefined,
+        bouncebackPoints: rules.bouncebacks ? score.bouncebacks : undefined,
+        players,
+      };
+    };
+    const left = buildSide(leftScore, 'left');
+    const right = buildSide(rightScore, 'right');
+    if (!left || !right) return;
+    sqbsGames.push({
+      id: sequence + 1,
+      round: roundById.get(game.roundId)?.number ?? sequence + 1,
+      left,
+      right,
+      tossupsHeard,
+      forfeitWinner,
+    });
+  });
+  if (errors.length > 0) {
+    return fail(errors, warnings, orderedTeams.length, games.length);
+  }
+
+  // A scope whose games span several stages cannot keep pool semantics:
+  // SQBS divisions describe one stage. Report it; never flatten silently.
+  const gamePhases = new Set(games.map((game) => roundById.get(game.roundId)?.phaseId ?? game.roundId));
+  const hasPools = state.pools.some((pool) => !pool.archived);
+  if (divisions.length === 0 && hasPools && gamePhases.size > 1 && !scope.poolId) {
+    warnings.push(
+      'This export covers multiple stages, so pool assignments are omitted: SQBS divisions can only describe one stage. Export each stage separately to keep its divisions.',
+    );
+  }
+
+  const exported = exportSqbsTournamentFile({
+    tournamentName: state.tournament?.name ?? 'Tournament',
+    pointValues: slots,
+    useBonuses: rules.useBonuses,
+    bouncebacks: rules.bouncebacks,
+    trackPowers: rules.powerValue !== null || rules.negValue !== null,
+    trackLightning: rules.lightning && rules.lightningCountPerTeam > 0,
+    divisions,
+    teams: sqbsTeams,
+    games: sqbsGames,
+    packetNames,
+  });
+  return {
+    ok: exported.ok,
+    text: exported.ok ? exported.value.text : '',
+    errors: exported.ok ? [] : exported.errors.map((entry) => entry.message),
+    warnings: [...warnings, ...exported.warnings.map((entry) => entry.message)],
+    scopeLabel: sqbsScopeLabel(state, scope),
+    teamCount: orderedTeams.length,
+    gameCount: sqbsGames.length,
+  };
+}
+
+function sqbsScopeLabel(state: DirectorState, scope: SqbsTournamentScope): string {
+  if (scope.poolId) {
+    const pool = state.pools.find((entry) => entry.id === scope.poolId);
+    const phase = state.phases.find((entry) => entry.id === pool?.phaseId);
+    return [phase?.name, pool?.name].filter(Boolean).join(' · ') || 'Pool';
+  }
+  if (scope.phaseId) {
+    return state.phases.find((phase) => phase.id === scope.phaseId)?.name ?? 'Stage';
+  }
+  return 'Entire tournament';
 }
 
 export function importArchiveBytes(bytes: Uint8Array): DirectorImportReport {
@@ -886,6 +1463,76 @@ export function importQbjText(value: string): DirectorImportReport {
   }
 }
 
+/**
+ * YellowFruit residue with no canonical QBJ slot, applied before
+ * fromInterchange so the rest of the pipeline stays canonical:
+ * - team reporting classifications from YfData sidecars (player-level school
+ *   flags stay in extensions; Director classifications are team-level)
+ * - final ranks stored in the file become an explicit final-placement
+ *   override attributed to the import, never a silent standings rewrite
+ */
+function applyYellowFruitResidue(data: DirectorTournament): DirectorTournament {
+  for (const team of data.teams) {
+    const sidecar = (team.extensions?.YfData ?? {}) as Record<string, unknown>;
+    const found = (
+      Array.isArray(team.extensions?.classifications) ? team.extensions.classifications : []
+    ).filter(isTeamClassification);
+    if (sidecar.isJV === true && !found.includes('junior-varsity')) found.push('junior-varsity');
+    if (sidecar.isUG === true && !found.includes('undergraduate')) found.push('undergraduate');
+    if (sidecar.isD2 === true && !found.includes('division-2')) found.push('division-2');
+    if (sidecar.isSmallSchool === true && !found.includes('small-school')) found.push('small-school');
+    if (found.length > 0) team.extensions = { ...(team.extensions ?? {}), classifications: found };
+  }
+  const extensions = data.tournament.extensions ?? {};
+  if (extensions.finalPlacement === undefined && Array.isArray(extensions.yftFinalRanks)) {
+    const order = extensions.yftFinalRanks
+      .filter(
+        (entry): entry is { rank: number; team: string } =>
+          typeof entry === 'object' &&
+          entry !== null &&
+          typeof (entry as { rank?: unknown }).rank === 'number' &&
+          typeof (entry as { team?: unknown }).team === 'string',
+      )
+      .sort((left, right) => left.rank - right.rank)
+      .map((entry) => entry.team);
+    if (order.length > 0)
+      data.tournament.extensions = {
+        ...extensions,
+        finalPlacement: {
+          order,
+          actor: 'YellowFruit import',
+          at: '',
+          reason: 'Final ranks stored in the YellowFruit file.',
+        },
+      };
+  }
+  return data;
+}
+
+export function importYellowFruitText(value: string): DirectorImportReport {
+  const report = readYellowFruitTournament(value);
+  if (!report.ok)
+    return {
+      ok: false,
+      errors: report.errors.map((entry) => entry.message),
+      warnings: report.warnings.map((entry) => entry.message),
+    };
+  try {
+    return {
+      ok: true,
+      state: fromInterchange(applyYellowFruitResidue(report.value.tournament)),
+      errors: [],
+      warnings: report.warnings.map((entry) => entry.message),
+    };
+  } catch (reason: unknown) {
+    return {
+      ok: false,
+      errors: [reason instanceof Error ? reason.message : 'The YellowFruit tournament is not valid.'],
+      warnings: report.warnings.map((entry) => entry.message),
+    };
+  }
+}
+
 export function importDirectorTournament(value: DirectorTournamentInput): DirectorState {
   return fromInterchange({
     ...value,
@@ -907,5 +1554,6 @@ export function importDirectorTournament(value: DirectorTournamentInput): Direct
     resultSubmissions: value.resultSubmissions ?? [],
     protests: value.protests ?? [],
     auditEvents: value.auditEvents ?? [],
+    timelineEvents: value.timelineEvents ?? [],
   });
 }

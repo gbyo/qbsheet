@@ -66,9 +66,10 @@ describe('the generated scorer service worker', () => {
     // Every marketing page, however deep. The rule is the `about/` prefix and not a list of files,
     // so a page added below it is outside the scorer's shell without anybody remembering to say so.
     expect(isScorerPrecacheAsset('about/self-host/index.html')).toBe(false);
-    expect(isScorerPrecacheAsset('director.html')).toBe(false);
-    expect(isScorerPrecacheAsset('director/assets/director-a1b2.js')).toBe(false);
-    expect(isScorerPrecacheAsset('director/assets/director-a1b2.css')).toBe(false);
+    // The two product pages are ordinary marketing pages and are covered by the same prefix. There
+    // is no longer a Director entry beside the scorer for a second rule to exclude.
+    expect(isScorerPrecacheAsset('about/director/index.html')).toBe(false);
+    expect(isScorerPrecacheAsset('about/qblive/index.html')).toBe(false);
   });
 
   /**
@@ -89,6 +90,8 @@ describe('the generated scorer service worker', () => {
       'about/index.html',
       'about/scoring/index.html',
       'about/tournaments/index.html',
+      'about/director/index.html',
+      'about/qblive/index.html',
       'about/self-host/index.html',
       'about/faq/index.html',
       'about/privacy/index.html',
@@ -113,17 +116,23 @@ describe('the generated scorer service worker', () => {
     expect(harness.cache.put).not.toHaveBeenCalled();
   });
 
-  test('leaves the Director preview and its assets entirely to the network', () => {
+  /**
+   * The product pages are marketing pages, and the worker has to leave them alone for the same
+   * reason it leaves the rest of `about/` alone.
+   *
+   * This test used to be about `director.html`, the browser Director build that was deployed beside
+   * the scorer. That entry is gone, and the surface it needed a rule of its own for now sits under
+   * `about/` with every other document on the site — so what is asserted here is that the pages
+   * which replaced it are covered by the prefix rule rather than by anything Director-specific.
+   */
+  test('leaves the Director and QBLive pages entirely to the network', () => {
     const harness = workerHarness({ scope: 'https://qbsheet.com/qbsheet/' });
 
-    const navigation = harness.dispatchFetch('https://qbsheet.com/qbsheet/director.html');
-    const asset = harness.dispatchFetch(
-      'https://qbsheet.com/qbsheet/director/assets/director-a1b2.js',
-      'cors',
-    );
+    const director = harness.dispatchFetch('https://qbsheet.com/qbsheet/about/director/');
+    const qblive = harness.dispatchFetch('https://qbsheet.com/qbsheet/about/qblive/');
 
-    expect(navigation.respondWith).not.toHaveBeenCalled();
-    expect(asset.respondWith).not.toHaveBeenCalled();
+    expect(director.respondWith).not.toHaveBeenCalled();
+    expect(qblive.respondWith).not.toHaveBeenCalled();
     expect(harness.fetch).not.toHaveBeenCalled();
     expect(harness.caches.open).not.toHaveBeenCalled();
     expect(harness.cache.put).not.toHaveBeenCalled();

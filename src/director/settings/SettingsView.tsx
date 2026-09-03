@@ -26,8 +26,10 @@ export function SettingsView({
     state.tournament?.id ?? '',
     state.tournament?.name ?? '',
     state.tournament?.date ?? '',
+    state.tournament?.endDate ?? '',
     state.tournament?.venue ?? '',
     state.tournament?.organizer ?? '',
+    state.tournament?.questionSet ?? '',
     state.tournament?.timeZone ?? 'UTC',
   ].join('|');
   /*
@@ -44,8 +46,10 @@ export function SettingsView({
     key: tournamentDraftKey,
     name: state.tournament?.name ?? '',
     date: state.tournament?.date ?? '',
+    endDate: state.tournament?.endDate ?? '',
     venue: state.tournament?.venue ?? '',
     organizer: state.tournament?.organizer ?? '',
+    questionSet: state.tournament?.questionSet ?? '',
     timeZone: state.tournament?.timeZone ?? 'UTC',
   });
   const details =
@@ -55,8 +59,10 @@ export function SettingsView({
           key: tournamentDraftKey,
           name: state.tournament?.name ?? '',
           date: state.tournament?.date ?? '',
+          endDate: state.tournament?.endDate ?? '',
           venue: state.tournament?.venue ?? '',
           organizer: state.tournament?.organizer ?? '',
+          questionSet: state.tournament?.questionSet ?? '',
           timeZone: state.tournament?.timeZone ?? 'UTC',
         };
   const updateDetails = (changes: Partial<Omit<typeof details, 'key'>>) =>
@@ -88,8 +94,10 @@ export function SettingsView({
       !controller.updateTournament({
         name: details.name,
         date: details.date,
+        endDate: details.endDate,
         venue: details.venue,
         organizer: details.organizer,
+        questionSet: details.questionSet,
         timeZone: details.timeZone,
       })
     ) {
@@ -141,6 +149,13 @@ export function SettingsView({
                         onChange={(event) => updateDetails({ date: event.target.value })}
                       />
                     </FormField>
+                    <FormField label="End date (optional, for multi-day events)">
+                      <input
+                        type="date"
+                        value={details.endDate}
+                        onChange={(event) => updateDetails({ endDate: event.target.value })}
+                      />
+                    </FormField>
                     <FormField label="Venue">
                       <input
                         value={details.venue}
@@ -151,6 +166,13 @@ export function SettingsView({
                       <input
                         value={details.organizer}
                         onChange={(event) => updateDetails({ organizer: event.target.value })}
+                      />
+                    </FormField>
+                    <FormField label="Question set (optional)">
+                      <input
+                        value={details.questionSet}
+                        onChange={(event) => updateDetails({ questionSet: event.target.value })}
+                        placeholder="e.g. ACF Fall 2025"
                       />
                     </FormField>
                     <FormField

@@ -96,7 +96,9 @@ export function runPreflight(
     const round = roundById.get(game.roundId);
     return !game.bye && game.roomId === null && game.status !== 'cancelled' && round?.status !== 'closed';
   });
-  if (unscheduled.length > 0) {
+  // Room guidance only matters once the tournament uses rooms at all. A manual
+  // tournament with no room records never needs this warning.
+  if (unscheduled.length > 0 && state.rooms.length > 0) {
     issues.push({
       id: 'games-without-rooms',
       severity: 'warning',
@@ -151,7 +153,9 @@ export function runPreflight(
     });
   }
   issues.push(...packetReferenceIssues(state));
-  if (nativeServerAvailable && !nativeServerReady) {
+  // QBTCP serves rooms: with no room records there is nothing to pair, so a
+  // roomless manual tournament is never nagged about the native server.
+  if (nativeServerAvailable && !nativeServerReady && state.rooms.length > 0) {
     if (state.tournament.status !== 'complete' && state.tournament.status !== 'archived') {
       issues.push({
         id: 'qbtcp-offline',

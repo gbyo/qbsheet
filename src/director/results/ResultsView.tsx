@@ -1019,6 +1019,7 @@ function ManualResult({
     const score = (teamId: string, value: string): TeamGameScore => ({
       teamId,
       score: Number(value),
+      superpowers: 0,
       powers: 0,
       gets: 0,
       negs: 0,

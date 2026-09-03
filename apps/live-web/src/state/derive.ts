@@ -47,6 +47,17 @@ export function gamesForTeam(snapshot: QbliveSnapshot, teamId: string): QbliveSc
   return snapshot.schedule.filter((game) => game.teamIds.includes(teamId));
 }
 
+/**
+ * Explicit day sequence first; sequenceless items keep legacy order.
+ * Shared with Schedule so every surface agrees about what comes next.
+ */
+export function compareOptionalSequence(left: number | null, right: number | null): number {
+  if (left === right) return 0;
+  if (left === null) return 1;
+  if (right === null) return -1;
+  return left - right;
+}
+
 export function liveGameForTeam(snapshot: QbliveSnapshot, teamId: string): QbliveLiveGame | null {
   return snapshot.liveGames.find((game) => game.teamIds.includes(teamId)) ?? null;
 }
@@ -59,8 +70,8 @@ export function resultFor(snapshot: QbliveSnapshot, gameId: string): QbliveResul
  * The team's next public commitment.
  *
  * Games and timeline events are considered together, because a team's next thing at 12:05 is lunch,
- * not the round after it. Ordering is by stated time; anything untimed sorts after everything timed
- * rather than being given a guessed position.
+ * not the round after it. Ordering is by stated time; anything untimed falls back to the explicit
+ * day sequence and sorts after everything timed rather than being given a guessed position.
  */
 export function nextEventForTeam(snapshot: QbliveSnapshot, teamId: string, now: Date): TeamNextEvent | null {
   const candidates: TeamNextEvent[] = [];
@@ -88,13 +99,15 @@ export function nextEventForTeam(snapshot: QbliveSnapshot, teamId: string, now: 
     .sort((left, right) => left.scheduledStart!.localeCompare(right.scheduledStart!));
   if (upcoming.length > 0) return upcoming[0];
 
-  // Nothing has a usable time. Fall back to the first unfinished game in round order, with no time.
+  // Nothing has a usable time. Fall back to the first unfinished game in day-sequence
+  // order, then round number, with no time.
   const untimed = candidates
     .filter((candidate) => candidate.kind === 'game')
     .sort(
       (left, right) =>
+        compareOptionalSequence(left.game!.sequence, right.game!.sequence) ||
         (left.game!.roundNumber ?? Number.MAX_SAFE_INTEGER) -
-        (right.game!.roundNumber ?? Number.MAX_SAFE_INTEGER),
+          (right.game!.roundNumber ?? Number.MAX_SAFE_INTEGER),
     );
   return untimed[0] ?? candidates[0] ?? null;
 }

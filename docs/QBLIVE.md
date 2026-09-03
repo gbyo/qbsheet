@@ -86,6 +86,11 @@ GET /qblive/v1/tournaments/{publicationId}/stream        (WebSocket upgrade)
 (vowel-free, no lookalikes), generated from a CSPRNG. It is public routing information and a
 capability to *read*, never to write.
 
+`npm run qblive:demo` serves these four routes locally from a demo tournament that plays itself,
+which is how a client is exercised without deploying a backend or running a tournament. It is a
+development affordance and not a reference implementation — see
+[`QBLIVE_IOS.md#12-simulating-a-tournament`](QBLIVE_IOS.md#12-simulating-a-tournament).
+
 ### 4.1 Manifest
 
 Small and cacheable. A client fetches it first to learn the revision and the capabilities.

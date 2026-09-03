@@ -22,16 +22,30 @@ import QBSheetLiveKit
 struct QBSheetLiveClipApp: App {
     @State private var bootstrap: QBLiveBootstrap?
 
+    /// Debug-only, and the same as the full app's: a screenshot of the Clip's Standings tab needs
+    /// the same argument as a screenshot of the app's, and a Clip that ignored it would be a
+    /// screenshot job that silently produced the wrong screen.
+    private var initialTab: String? {
+        #if DEBUG
+        DebugLaunch.initialTab
+        #else
+        nil
+        #endif
+    }
+
     var body: some Scene {
         WindowGroup {
             Group {
                 if let bootstrap {
-                    LiveRootView(bootstrap: bootstrap, presentation: .appClip)
+                    LiveRootView(bootstrap: bootstrap, presentation: .appClip, initialTab: initialTab)
                 } else {
                     NoTournamentView()
                 }
             }
             .task {
+                #if DEBUG
+                DebugLaunch.apply()
+                #endif
                 // A Clip reopened by a notification tap carries no invocation URL. The saved
                 // bootstrap is what makes that tap land on the right tournament rather than a
                 // blank screen. See `docs/QBLIVE_IOS.md#app-clip-notifications`.

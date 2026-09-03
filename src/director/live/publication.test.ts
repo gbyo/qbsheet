@@ -110,6 +110,7 @@ describe('deriving a publication', () => {
         {
           teamId: 'team-a',
           score: 300,
+          superpowers: 0,
           powers: 5,
           gets: 10,
           negs: 0,
@@ -120,6 +121,7 @@ describe('deriving a publication', () => {
         {
           teamId: 'team-c',
           score: 150,
+          superpowers: 0,
           powers: 0,
           gets: 8,
           negs: 3,

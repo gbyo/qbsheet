@@ -291,11 +291,13 @@ Filesystem access is behind a port
 ([`ports.ts`](../src/director/transfers/ports.ts)) so that platform behaviour is a property of one
 small adapter. `MemoryTransferFileSystem` lets the tests unplug a drive between two lines of code.
 
-## Browser preview
+## Outside the native shell
 
-The browser-only Director preview cannot enumerate volumes, and it does not pretend to. It says so,
-and offers drag-and-drop, a file picker, and browser downloads — which go through the same ingestion
-pipeline as everything else. Nothing is removed from the desktop app to keep the preview at parity.
+Director's user interface also runs in an ordinary browser: that is what `npm run director:dev`
+serves during development and what the browser tests drive. Outside the Tauri shell it cannot
+enumerate volumes, and it does not pretend to. It says so, and offers drag-and-drop, a file picker,
+and browser downloads — which go through the same ingestion pipeline as everything else. Nothing is
+removed from the desktop application to keep that path working.
 
 ## Where things live
 

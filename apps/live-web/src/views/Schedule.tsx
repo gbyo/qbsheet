@@ -10,7 +10,14 @@
 
 import { useMemo, useState } from 'react';
 import type { QbliveScheduledGame, QbliveSnapshot } from '@qbsheet/qblive-protocol';
-import { gamesForTeam, opponentOf, resultFor, roomName, teamName } from '../state/derive';
+import {
+  compareOptionalSequence,
+  gamesForTeam,
+  opponentOf,
+  resultFor,
+  roomName,
+  teamName,
+} from '../state/derive';
 import { formatTime } from '../state/format';
 
 export function Schedule({
@@ -42,6 +49,8 @@ export function Schedule({
     return [...bySection.entries()].sort((left, right) => {
       const leftGame = left[1][0];
       const rightGame = right[1][0];
+      const sequence = compareOptionalSequence(leftGame.sequence, rightGame.sequence);
+      if (sequence !== 0) return sequence;
       const leftNumber = leftGame.roundNumber ?? Number.MAX_SAFE_INTEGER;
       const rightNumber = rightGame.roundNumber ?? Number.MAX_SAFE_INTEGER;
       if (leftNumber !== rightNumber) return leftNumber - rightNumber;
