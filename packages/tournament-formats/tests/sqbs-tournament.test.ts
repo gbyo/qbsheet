@@ -6,11 +6,7 @@
  */
 
 import { describe, expect, test } from 'vitest';
-import {
-  exportSqbsTournamentFile,
-  parseSqbsTournamentFile,
-  type SqbsTournamentInput,
-} from '../src/sqbs';
+import { exportSqbsTournamentFile, parseSqbsTournamentFile, type SqbsTournamentInput } from '../src/sqbs';
 
 function input(): SqbsTournamentInput {
   return {

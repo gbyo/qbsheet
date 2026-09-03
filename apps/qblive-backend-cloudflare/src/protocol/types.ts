@@ -130,7 +130,8 @@ export interface QbliveTimelineEvent {
   description: string | null;
   /**
    * Explicit position in the tournament-day sequence, or null when the
-   * publisher predates day ordering. Missing decodes as null.
+   * publisher predates day ordering. Consumers sort by it first and fall
+   * back to scheduled time, so no-time tournaments still order correctly.
    */
   sequence: number | null;
   /**
@@ -156,7 +157,7 @@ export interface QbliveScheduledGame {
   roundNumber: number | null;
   /**
    * Explicit day-sequence position of this game's round, or null when the
-   * publisher predates day ordering. Missing decodes as null.
+   * publisher predates day ordering. Consumers sort by it first.
    */
   sequence: number | null;
   phaseId: QbliveId | null;

@@ -232,7 +232,10 @@ export function deriveTeamStandings(
     rightStanding.negs += right.negs;
     rightStanding.bonuses += right.bonuses;
     rightStanding.bonusPoints += right.bonusPoints;
-    if (game.status === 'forfeit' && (left.teamId === game.forfeitedTeamId || right.teamId === game.forfeitedTeamId)) {
+    if (
+      game.status === 'forfeit' &&
+      (left.teamId === game.forfeitedTeamId || right.teamId === game.forfeitedTeamId)
+    ) {
       // A forfeit is never a tie and never decided by the score line: the
       // side that did not forfeit wins, even when both scores are zero.
       if (left.teamId === game.forfeitedTeamId) {

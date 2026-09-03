@@ -201,9 +201,7 @@ export function exportSqbsTournamentFile(input: SqbsTournamentInput): FormatRepo
       }
     }
     if (game.left.teamIndex === game.right.teamIndex) {
-      errors.push(
-        error('same-team-game', `games[${game.id}]`, 'A game cannot pit a team against itself.'),
-      );
+      errors.push(error('same-team-game', `games[${game.id}]`, 'A game cannot pit a team against itself.'));
     }
   }
   if (errors.length > 0) return fail(errors, warnings);
@@ -457,10 +455,17 @@ export function parseSqbsTournamentFile(text: string): FormatReport<SqbsParsedTo
       const bonusC = nextInt(`${path}.bonuses[2]`);
       const bonusD = nextInt(`${path}.bonuses[3]`);
       if (
-        id === undefined || leftTeam === undefined || rightTeam === undefined ||
-        leftScore === undefined || rightScore === undefined || tossupsHeard === undefined ||
-        round === undefined || bonusA === undefined || bonusB === undefined ||
-        bonusC === undefined || bonusD === undefined
+        id === undefined ||
+        leftTeam === undefined ||
+        rightTeam === undefined ||
+        leftScore === undefined ||
+        rightScore === undefined ||
+        tossupsHeard === undefined ||
+        round === undefined ||
+        bonusA === undefined ||
+        bonusB === undefined ||
+        bonusC === undefined ||
+        bonusD === undefined
       ) {
         break;
       }
@@ -482,8 +487,12 @@ export function parseSqbsTournamentFile(text: string): FormatReport<SqbsParsedTo
       const leftLightning = nextInt(`${path}.leftLightning`);
       const rightLightning = nextInt(`${path}.rightLightning`);
       if (
-        overtime === undefined || leftNoBonus === undefined || rightNoBonus === undefined ||
-        forfeitFlag === undefined || leftLightning === undefined || rightLightning === undefined
+        overtime === undefined ||
+        leftNoBonus === undefined ||
+        rightNoBonus === undefined ||
+        forfeitFlag === undefined ||
+        leftLightning === undefined ||
+        rightLightning === undefined
       ) {
         break;
       }
@@ -499,12 +508,18 @@ export function parseSqbsTournamentFile(text: string): FormatReport<SqbsParsedTo
           const c3 = nextInt(`${path}.${label}[${slot}].counts[3]`);
           const slotPoints = nextInt(`${path}.${label}[${slot}].points`);
           if (
-            playerIndex === undefined || gamesPlayed === undefined || c0 === undefined ||
-            c1 === undefined || c2 === undefined || c3 === undefined || slotPoints === undefined
+            playerIndex === undefined ||
+            gamesPlayed === undefined ||
+            c0 === undefined ||
+            c1 === undefined ||
+            c2 === undefined ||
+            c3 === undefined ||
+            slotPoints === undefined
           ) {
             return undefined;
           }
-          if (playerIndex >= 0) players.push({ playerIndex, gamesPlayed, counts: [c0, c1, c2, c3], points: slotPoints });
+          if (playerIndex >= 0)
+            players.push({ playerIndex, gamesPlayed, counts: [c0, c1, c2, c3], points: slotPoints });
         }
         return {
           teamIndex,
@@ -550,8 +565,12 @@ export function parseSqbsTournamentFile(text: string): FormatReport<SqbsParsedTo
   for (let index = 0; index < 7; index += 1) next(`settings.suffix[${index}]`);
   next('settings.stylesheet');
   if (
-    bonusTracking === undefined || bonusMode === undefined || powerStats === undefined ||
-    lightning === undefined || useDivisions === undefined || tournamentName === undefined ||
+    bonusTracking === undefined ||
+    bonusMode === undefined ||
+    powerStats === undefined ||
+    lightning === undefined ||
+    useDivisions === undefined ||
+    tournamentName === undefined ||
     reportFlags.some((flag) => flag === undefined)
   ) {
     return fail(errors, warnings);
@@ -628,17 +647,28 @@ export function parseSqbsTournamentFile(text: string): FormatReport<SqbsParsedTo
 
   // Index sanity: games must reference real teams, players must reference real roster slots.
   for (const game of games) {
-    for (const [label, side] of [['left', game.left], ['right', game.right]] as const) {
+    for (const [label, side] of [
+      ['left', game.left],
+      ['right', game.right],
+    ] as const) {
       if (side.teamIndex < 0 || side.teamIndex >= teams.length) {
         errors.push(
-          error('unknown-team', `games[${game.id}]`, `The ${label} side references team index ${side.teamIndex}, but the file lists ${teams.length} teams.`),
+          error(
+            'unknown-team',
+            `games[${game.id}]`,
+            `The ${label} side references team index ${side.teamIndex}, but the file lists ${teams.length} teams.`,
+          ),
         );
       } else {
         const rosterSize = teams[side.teamIndex]!.players.length;
         for (const player of side.players) {
           if (player.playerIndex < 0 || player.playerIndex >= rosterSize) {
             errors.push(
-              error('unknown-player', `games[${game.id}]`, `Player index ${player.playerIndex} is outside the ${teams[side.teamIndex]!.name} roster (${rosterSize} players).`),
+              error(
+                'unknown-player',
+                `games[${game.id}]`,
+                `Player index ${player.playerIndex} is outside the ${teams[side.teamIndex]!.name} roster (${rosterSize} players).`,
+              ),
             );
           }
         }

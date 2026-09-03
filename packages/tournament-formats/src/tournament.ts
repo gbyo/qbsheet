@@ -953,9 +953,7 @@ function readTimelineEvents(
       ...(optionalString(raw, 'scheduledStart')
         ? { scheduledStart: optionalString(raw, 'scheduledStart') }
         : {}),
-      ...(optionalString(raw, 'scheduledEnd')
-        ? { scheduledEnd: optionalString(raw, 'scheduledEnd') }
-        : {}),
+      ...(optionalString(raw, 'scheduledEnd') ? { scheduledEnd: optionalString(raw, 'scheduledEnd') } : {}),
       ...(optionalStringArray(raw, 'teamIds', path, errors)
         ? { teamIds: optionalStringArray(raw, 'teamIds', path, errors) }
         : {}),

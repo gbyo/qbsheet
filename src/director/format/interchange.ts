@@ -91,16 +91,13 @@ function teamStatus(status: string | undefined): DirectorState['teams'][number][
  * published by accident.
  */
 function timelineEventType(value: unknown): TimelineEventType {
-  return typeof value === 'string' &&
-    (timelineEventTypes as readonly string[]).includes(value)
+  return typeof value === 'string' && (timelineEventTypes as readonly string[]).includes(value)
     ? (value as TimelineEventType)
     : 'custom';
 }
 
 function timelineVisibility(value: unknown): TimelineVisibility {
-  return value === 'public' || value === 'staff' || value === 'hidden'
-    ? value
-    : 'hidden';
+  return value === 'public' || value === 'staff' || value === 'hidden' ? value : 'hidden';
 }
 
 function restoreTimelineEvent(
@@ -275,9 +272,7 @@ function finalPlacementFromExtension(value: unknown): FinalPlacement | undefined
     order,
     actor: typeof candidate.actor === 'string' ? candidate.actor : '',
     at: typeof candidate.at === 'string' ? candidate.at : '',
-    ...(typeof candidate.reason === 'string' && candidate.reason !== ''
-      ? { reason: candidate.reason }
-      : {}),
+    ...(typeof candidate.reason === 'string' && candidate.reason !== '' ? { reason: candidate.reason } : {}),
   };
 }
 
@@ -293,9 +288,7 @@ function interchangePlayer(player: DirectorState['players'][number]): Record<str
 }
 
 function interchangeTeam(state: DirectorState, team: DirectorState['teams'][number]): TeamRecord {
-  const players = state.players
-    .filter((player) => player.teamId === team.id)
-    .map(interchangePlayer);
+  const players = state.players.filter((player) => player.teamId === team.id).map(interchangePlayer);
   const classifications = (team.classifications ?? []).filter(isTeamClassification);
   const tags = (team.tags ?? []).filter((tag) => typeof tag === 'string' && tag.trim() !== '');
   const output = {
@@ -370,9 +363,7 @@ function toInterchangeGame(state: DirectorState, game: GameRecord): InterchangeG
     bonusBouncebackPoints: score.bouncebacks,
     // The forfeiting side is explicit so a re-import awards the win to the
     // other side even when both recorded scores are zero.
-    ...(game.status === 'forfeit' && score.teamId === game.forfeitedTeamId
-      ? { forfeitLoss: true }
-      : {}),
+    ...(game.status === 'forfeit' && score.teamId === game.forfeitedTeamId ? { forfeitLoss: true } : {}),
   }));
   return {
     id: game.id,
@@ -479,9 +470,7 @@ export function toInterchange(state: DirectorState): DirectorTournament {
         currentPacketId: tournament.currentPacketId,
         currentRoundId: tournament.currentRoundId,
         ...(tournament.finalPlacement ? { finalPlacement: jsonValue(tournament.finalPlacement) } : {}),
-        ...(state.timeline.length > 0
-          ? { timelineEvents: jsonValue(interchangeTimelineEvents(state)) }
-          : {}),
+        ...(state.timeline.length > 0 ? { timelineEvents: jsonValue(interchangeTimelineEvents(state)) } : {}),
         timeZone: tournament.timeZone,
         timed: tournament.rules.timed,
         regulationMinutes: tournament.rules.regulationMinutes,
@@ -714,9 +703,7 @@ function fromInterchange(data: DirectorTournament): DirectorState {
       teamLetter: team.letter ?? '',
       seed: team.seed ?? null,
       status: teamStatus(team.status),
-      ...(classifications.length > 0
-        ? { classifications: classifications as TeamClassification[] }
-        : {}),
+      ...(classifications.length > 0 ? { classifications: classifications as TeamClassification[] } : {}),
       ...(tags.length > 0 ? { tags } : {}),
       notes: team.notes,
       createdAt: now,
@@ -849,8 +836,7 @@ function fromInterchange(data: DirectorTournament): DirectorState {
     status: game.result?.forfeit === true ? 'forfeit' : gameStatus(game.status),
     ...(game.status === 'forfeit' || game.result?.forfeit === true
       ? {
-          forfeitedTeamId:
-            game.result?.teams?.find((team) => team.forfeitLoss === true)?.teamId ?? undefined,
+          forfeitedTeamId: game.result?.teams?.find((team) => team.forfeitLoss === true)?.teamId ?? undefined,
         }
       : {}),
     scores: resultScores(game),
@@ -920,9 +906,7 @@ function fromInterchange(data: DirectorTournament): DirectorState {
     : [];
   const timelineSource =
     (data.timelineEvents ?? []).length > 0 ? (data.timelineEvents ?? []) : extensionTimeline;
-  state.timeline = timelineSource.map((event, index) =>
-    restoreTimelineEvent(event, index, now),
-  );
+  state.timeline = timelineSource.map((event, index) => restoreTimelineEvent(event, index, now));
   state.qbtcpSessions = data.qbtcpSessions.map((session) => ({
     roomId: session.roomId ?? '',
     sessionId: session.id,
@@ -1186,8 +1170,7 @@ export function exportSqbsTournament(
   const games = acceptedGameRecords(state, scoped).sort(
     (left, right) =>
       (roundOrder.get(left.roundId) ?? Number.MAX_SAFE_INTEGER) -
-        (roundOrder.get(right.roundId) ?? Number.MAX_SAFE_INTEGER) ||
-      left.id.localeCompare(right.id),
+        (roundOrder.get(right.roundId) ?? Number.MAX_SAFE_INTEGER) || left.id.localeCompare(right.id),
   );
   const standings = deriveTeamStandings(state, undefined, scoped);
   const teamById = new Map(state.teams.map((team) => [team.id, team]));
@@ -1223,7 +1206,9 @@ export function exportSqbsTournament(
       `${unpooled.length} team(s) (${unpooled
         .slice(0, 3)
         .map((team) => team.displayName)
-        .join(', ')}${unpooled.length > 3 ? ', …' : ''}) are not in a pool and are exported without a division.`,
+        .join(
+          ', ',
+        )}${unpooled.length > 3 ? ', …' : ''}) are not in a pool and are exported without a division.`,
     );
   }
 
@@ -1387,9 +1372,7 @@ export function exportSqbsTournament(
 
   // A scope whose games span several stages cannot keep pool semantics:
   // SQBS divisions describe one stage. Report it; never flatten silently.
-  const gamePhases = new Set(
-    games.map((game) => roundById.get(game.roundId)?.phaseId ?? game.roundId),
-  );
+  const gamePhases = new Set(games.map((game) => roundById.get(game.roundId)?.phaseId ?? game.roundId));
   const hasPools = state.pools.some((pool) => !pool.archived);
   if (divisions.length === 0 && hasPools && gamePhases.size > 1 && !scope.poolId) {
     warnings.push(

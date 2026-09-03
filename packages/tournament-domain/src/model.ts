@@ -33,13 +33,7 @@ export type TournamentStatus = 'draft' | 'running' | 'complete' | 'archived';
 export type TeamStatus = 'confirmed' | 'waitlist' | 'dropped';
 export type RoomStatus = 'available' | 'live' | 'finished' | 'help' | 'offline';
 export type GameStatus =
-  | 'scheduled'
-  | 'live'
-  | 'submitted'
-  | 'accepted'
-  | 'rejected'
-  | 'cancelled'
-  | 'forfeit';
+  'scheduled' | 'live' | 'submitted' | 'accepted' | 'rejected' | 'cancelled' | 'forfeit';
 export type SubmissionStatus = 'received' | 'accepted' | 'review' | 'rejected' | 'duplicate' | 'superseded';
 export type DetailedStatsStatus = 'complete' | 'incomplete' | 'unknown';
 export type StaffRole = 'moderator' | 'scorekeeper' | 'runner' | 'hq';

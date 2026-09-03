@@ -132,7 +132,10 @@ function normalizeYellowFruit(root: JsonObject): {
     tournamentClone.date = tournamentClone.start_date;
   if (asString(tournamentClone.endDate) === undefined && asString(tournamentClone.end_date) !== undefined)
     tournamentClone.endDate = tournamentClone.end_date;
-  if (asString(tournamentClone.questionSet) === undefined && asString(tournamentClone.question_set) !== undefined)
+  if (
+    asString(tournamentClone.questionSet) === undefined &&
+    asString(tournamentClone.question_set) !== undefined
+  )
     tournamentClone.questionSet = tournamentClone.question_set;
 
   // Overall seed order lives in the tournament YfData sidecar.

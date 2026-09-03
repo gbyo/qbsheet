@@ -5243,8 +5243,7 @@ function canonicalAcceptedGame(state: DirectorState, scheduledGameId: DirectorId
     // Forfeits are decided results: they resolve the scheduled game exactly
     // like accepted scores.
     return (
-      game.scheduledGameId === scheduledGameId &&
-      (game.status === 'accepted' || game.status === 'forfeit')
+      game.scheduledGameId === scheduledGameId && (game.status === 'accepted' || game.status === 'forfeit')
     );
   });
   // Corrected results retain their historical GameRecord/submission. Prefer the record with a
