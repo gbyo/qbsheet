@@ -21,7 +21,7 @@ import scoringRulesToScorekeeperFormat, { CommonRuleSets, ScoringRules } from '.
 import { IScorekeeperFormat } from '../src/scoring/ScorekeeperFormat';
 import { IRoomProcedure } from '../src/scoring/RoomProcedure';
 import { RoomConnectionState } from '../src/app/ConnectionState';
-import { IGameCorrection } from '../src/scoring/gameCorrection';
+import { GameCorrectionRefusal, IGameCorrection } from '../src/scoring/gameCorrection';
 import { ScoreEvent } from '../src/scoring/ScoreEvents';
 
 const leftTeam = { name: 'Ninety Six', players: [{ name: 'Sarah Mitchell' }, { name: 'James Robinson' }] };
@@ -232,6 +232,211 @@ describe('Game details', () => {
         (candidate) => candidate.type === 'note' && candidate.text.includes('Ninety Six A'),
       ),
     ).toBe(true);
+  });
+
+  /**
+   * What a rename does while it is being written, and what it does when the device says no.
+   *
+   * `ScoringScreen.correctGame` throws `GameCorrectionRefusal` when the journal or the record store
+   * will not take a correction. These forms used to close on the promise settling either way, so a
+   * refused rename was indistinguishable from an applied one: the editor went away, the old name was
+   * still on the scoresheet, and nothing said why.
+   */
+  describe('a rename that the device has to persist', () => {
+    /** Open the team-name editor and type a new name into it. */
+    function typeTeamName(value: string): void {
+      pressControl('Game details');
+      fireEvent.click(
+        within(screen.getByRole('dialog', { name: 'Game details' })).getAllByRole('button', {
+          name: 'Correct…',
+        })[0],
+      );
+      fireEvent.change(screen.getByLabelText('Team name'), { target: { value } });
+    }
+
+    /** Open the roster, then one player's editor, and type a new name into it. */
+    function typePlayerName(value: string): void {
+      pressControl('Game details');
+      fireEvent.click(
+        within(screen.getByRole('dialog', { name: 'Game details' })).getAllByRole('button', {
+          name: 'Correct…',
+        })[2],
+      );
+      fireEvent.click(within(screen.getByRole('dialog')).getAllByRole('button', { name: 'Correct' })[0]);
+      fireEvent.change(screen.getByLabelText('Player name'), { target: { value } });
+    }
+
+    test('a team rename says it is saving and closes only once it has', async () => {
+      let settle!: () => void;
+      const correct = vi.fn(() => new Promise<void>((resolve) => (settle = resolve)));
+      renderScorer({ procedure: oneTimeout, onCorrectGame: correct });
+      typeTeamName('Ninety Six A');
+
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+      // Mid-write: the editor is still on screen, and pressing again cannot start a second one.
+      const saving = screen.getByRole('button', { name: 'Saving…' });
+      expect(saving).toBeDisabled();
+      fireEvent.click(saving);
+      expect(correct).toHaveBeenCalledTimes(1);
+
+      settle();
+      await waitFor(() => expect(screen.queryByLabelText('Team name')).toBeNull());
+      expect(screen.getByRole('dialog', { name: 'Game details' })).toBeTruthy();
+    });
+
+    /**
+     * The ways out of the dialog, which are not the ways out of the form.
+     *
+     * Disabling Save and Cancel while a rename is in flight left Escape and the dialog's own close
+     * button untouched, and both of those reach `ScorerDialog` rather than the form inside it. A
+     * refusal that arrives after Game details has unmounted has nowhere to be shown and no field to
+     * be retried in, which is the whole guarantee this flow exists to make. See `NativeDialog`'s
+     * `dismissible`.
+     */
+    test('Escape and the close button do not take the dialog away mid-save', async () => {
+      let settle!: () => void;
+      let refuse!: (reason: Error) => void;
+      const correct = vi.fn(
+        () =>
+          new Promise<void>((resolve, reject) => {
+            settle = resolve;
+            refuse = reject;
+          }),
+      );
+      renderScorer({ procedure: oneTimeout, onCorrectGame: correct });
+      typeTeamName('Ninety Six A');
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+      const dialog = screen.getByRole('dialog', { name: /Correct Ninety Six's name/ });
+      fireEvent.keyDown(document, { key: 'Escape' });
+      expect(screen.getByRole('dialog', { name: /Correct Ninety Six's name/ })).toBe(dialog);
+      expect(screen.getByRole('button', { name: 'Saving…' })).toBeTruthy();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Close dialog' }));
+      expect(screen.getByRole('dialog', { name: /Correct Ninety Six's name/ })).toBe(dialog);
+      expect(screen.getByRole('button', { name: 'Saving…' })).toBeTruthy();
+      // Neither route started a second write.
+      expect(correct).toHaveBeenCalledTimes(1);
+
+      refuse(new Error('quota'));
+
+      await waitFor(() =>
+        expect(
+          screen.getAllByRole('alert').some((alert) => alert.textContent?.includes('Nothing has changed')),
+        ).toBe(true),
+      );
+      // Still open, still holding what was typed, and pressable again.
+      expect(screen.getByRole('dialog', { name: /Correct Ninety Six's name/ })).toBeTruthy();
+      expect((screen.getByLabelText('Team name') as HTMLInputElement).value).toBe('Ninety Six A');
+      expect(screen.getByRole('button', { name: 'Save' })).not.toBeDisabled();
+      expect(settle).toBeDefined();
+    });
+
+    test('dismissal works again as soon as the write has settled', async () => {
+      const correct = vi.fn().mockRejectedValue(new Error('quota'));
+      renderScorer({ procedure: oneTimeout, onCorrectGame: correct });
+      typeTeamName('Ninety Six A');
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).not.toBeDisabled());
+
+      fireEvent.click(screen.getByRole('button', { name: 'Close dialog' }));
+
+      await waitFor(() => expect(screen.queryByLabelText('Team name')).toBeNull());
+    });
+
+    test('a player rename is held open mid-save by the same mechanism', () => {
+      const correct = vi.fn(() => new Promise<void>(() => undefined));
+      renderScorer({ procedure: oneTimeout, onCorrectGame: correct });
+      typePlayerName('Sara Mitchell');
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+      fireEvent.keyDown(document, { key: 'Escape' });
+      fireEvent.click(screen.getByRole('button', { name: 'Close dialog' }));
+
+      expect(screen.getByRole('dialog', { name: /Correct Sarah Mitchell's name/ })).toBeTruthy();
+      expect((screen.getByLabelText('Player name') as HTMLInputElement).value).toBe('Sara Mitchell');
+      expect(correct).toHaveBeenCalledTimes(1);
+    });
+
+    test('a refused team rename keeps the editor, the typed name, and says nothing was saved', async () => {
+      const correct = vi.fn().mockRejectedValue(new Error('quota'));
+      renderScorer({ procedure: oneTimeout, onCorrectGame: correct });
+      typeTeamName('Ninety Six A');
+
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+      await waitFor(() =>
+        expect(
+          screen.getAllByRole('alert').some((alert) => alert.textContent?.includes('Nothing has changed')),
+        ).toBe(true),
+      );
+      expect((screen.getByLabelText('Team name') as HTMLInputElement).value).toBe('Ninety Six A');
+      expect(screen.getByRole('button', { name: 'Save' })).not.toBeDisabled();
+      // And the scoresheet still shows the name that was not changed.
+      expect(screen.getByLabelText('Ninety Six score')).toBeTruthy();
+    });
+
+    test('a refusal the host worded is shown in the host’s own words', async () => {
+      const correct = vi.fn().mockRejectedValue(new GameCorrectionRefusal('This device is out of space.'));
+      renderScorer({ procedure: oneTimeout, onCorrectGame: correct });
+      typeTeamName('Ninety Six A');
+
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+      await waitFor(() =>
+        expect(
+          screen
+            .getAllByRole('alert')
+            .some((alert) => alert.textContent?.includes('This device is out of space.')),
+        ).toBe(true),
+      );
+    });
+
+    test('a player rename reaches the host and then closes', async () => {
+      const correct = vi.fn();
+      renderScorer({ procedure: oneTimeout, onCorrectGame: correct });
+      typePlayerName('Sara Mitchell');
+
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+      await waitFor(() => expect(correct).toHaveBeenCalled());
+      const correction = correct.mock.calls[0][0] as IGameCorrection;
+      expect(correction.setup?.left.players).toContain('Sara Mitchell');
+      await waitFor(() => expect(screen.queryByLabelText('Player name')).toBeNull());
+    });
+
+    test('a refused player rename stays open with what was typed', async () => {
+      const correct = vi.fn().mockRejectedValue(new Error('quota'));
+      renderScorer({ procedure: oneTimeout, onCorrectGame: correct });
+      typePlayerName('Sara Mitchell');
+
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+      await waitFor(() =>
+        expect(
+          screen.getAllByRole('alert').some((alert) => alert.textContent?.includes('Nothing has changed')),
+        ).toBe(true),
+      );
+      expect((screen.getByLabelText('Player name') as HTMLInputElement).value).toBe('Sara Mitchell');
+    });
+
+    test('a refused merge stays open too, with the merge still offered', async () => {
+      const correct = vi.fn().mockRejectedValue(new Error('quota'));
+      renderScorer({ procedure: oneTimeout, onCorrectGame: correct });
+      // The other player on the same roster: renaming onto them is the merge offer.
+      typePlayerName('James Robinson');
+
+      fireEvent.click(screen.getByRole('button', { name: /same person/ }));
+
+      await waitFor(() =>
+        expect(
+          screen.getAllByRole('alert').some((alert) => alert.textContent?.includes('Nothing has changed')),
+        ).toBe(true),
+      );
+      expect((screen.getByLabelText('Player name') as HTMLInputElement).value).toBe('James Robinson');
+      expect(screen.getByRole('button', { name: /same person/ })).not.toBeDisabled();
+    });
   });
 
   test('a name that would make the two teams the same is refused while it is being typed', () => {

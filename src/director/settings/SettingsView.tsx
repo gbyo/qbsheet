@@ -6,6 +6,9 @@ import { Button, FormField, PanelBody, PanelFooter, StateLabel } from '../compon
 import { PageHeader } from '../components/PageHeader';
 import type { AnnounceInput } from '../notices';
 
+/** How many audit rows a first look at Settings draws, and how many each `Load more` adds. */
+export const auditPageSize = 100;
+
 export function SettingsView({
   state,
   controller,
@@ -29,6 +32,16 @@ export function SettingsView({
     state.tournament?.questionSet ?? '',
     state.tournament?.timeZone ?? 'UTC',
   ].join('|');
+  /*
+   * How much of the audit history is on screen.
+   *
+   * The table is newest-first over the whole history, and the history only grows: a tournament that
+   * has run all day arrives at Settings with thousands of rows, every one of which was being built
+   * and laid out before the page could paint. Nothing is dropped -- the count above the table is
+   * still `state.audit.length` -- but the rows come in pages, which is a `Load more` press for the
+   * rare director who is reading back through the morning and nothing at all for everybody else.
+   */
+  const [auditShown, setAuditShown] = useState(auditPageSize);
   const [tournamentDraft, setTournamentDraft] = useState({
     key: tournamentDraftKey,
     name: state.tournament?.name ?? '',
@@ -93,6 +106,11 @@ export function SettingsView({
     }
     onAnnounce('Tournament details updated locally; saving now.');
   };
+  /*
+   * Newest first, then the page. Slicing from the end and reversing that slice keeps the ordering
+   * identical to reversing the whole array and taking the head, without building the whole array.
+   */
+  const visibleAudit = state.audit.slice(Math.max(0, state.audit.length - auditShown)).reverse();
   return (
     <>
       <PageHeader
@@ -309,7 +327,9 @@ export function SettingsView({
               <h2>All meaningful changes</h2>
             </div>
             <span className="director-muted">
-              {state.audit.length} event{state.audit.length === 1 ? '' : 's'}
+              {visibleAudit.length === state.audit.length
+                ? `${state.audit.length} event${state.audit.length === 1 ? '' : 's'}`
+                : `${visibleAudit.length} of ${state.audit.length} events`}
             </span>
           </div>
           {state.audit.length === 0 ? (
@@ -328,7 +348,7 @@ export function SettingsView({
                   </tr>
                 </thead>
                 <tbody>
-                  {[...state.audit].reverse().map((event) => (
+                  {visibleAudit.map((event) => (
                     <tr key={event.id}>
                       <td>{new Date(event.at).toLocaleString()}</td>
                       <td>
@@ -341,6 +361,17 @@ export function SettingsView({
                 </tbody>
               </table>
             </div>
+          )}
+          {visibleAudit.length < state.audit.length && (
+            <PanelFooter>
+              <Button variant="secondary" onClick={() => setAuditShown((shown) => shown + auditPageSize)}>
+                Load more
+              </Button>
+              <span className="director-muted">
+                {state.audit.length - visibleAudit.length} earlier event
+                {state.audit.length - visibleAudit.length === 1 ? '' : 's'}
+              </span>
+            </PanelFooter>
           )}
         </section>
         <div className="director-two-column">

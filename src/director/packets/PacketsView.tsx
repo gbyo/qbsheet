@@ -86,7 +86,12 @@ export function PacketsView({
                 <input
                   className="director-visually-hidden-input"
                   type="file"
-                  accept=".qbj,application/json"
+                  /*
+                    What this button actually reads. It used to accept `application/json`, which
+                    put every settings file and every unrelated export on the machine in front of a
+                    director looking for a packet list, all of them refused after being chosen.
+                  */
+                  accept=".qbj,application/vnd.quizbowl.qbj+json"
                   onChange={(event) => {
                     void importQbj(event.target.files?.[0]);
                     event.currentTarget.value = '';
@@ -310,28 +315,37 @@ function PacketRow({
         </td>
         <td>
           <div className="director-row-actions">
-            <Button
-              variant={packet.id === state.tournament?.currentPacketId ? 'secondary' : 'quiet'}
-              onClick={() => {
-                const exists = state.packets.some((entry) => entry.id === packet.id);
-                if (!exists) {
-                  onAnnounce('That packet is not in the current inventory.');
-                  return;
-                }
-                if (!state.tournament) {
-                  onAnnounce('Create a tournament before selecting a packet.');
-                  return;
-                }
-                if (packet.retired) {
-                  onAnnounce('Retired packets cannot be selected; restore it first.');
-                  return;
-                }
-                controller.selectPacket(packet.id);
-                onAnnounce(`${packet.name} selected for the next generated round.`);
-              }}
-            >
-              {packet.id === state.tournament?.currentPacketId ? 'Current' : 'Use next'}
-            </Button>
+            {/*
+              The packet already in force is a status, not an action. It used to be a button reading
+              `Current` whose only effect was to select the packet that was already selected — a
+              control that looks pressable, announces a change, and changes nothing.
+            */}
+            {packet.id === state.tournament?.currentPacketId ? (
+              <StateLabel state="live" label="Current" />
+            ) : (
+              <Button
+                variant="quiet"
+                onClick={() => {
+                  const exists = state.packets.some((entry) => entry.id === packet.id);
+                  if (!exists) {
+                    onAnnounce('That packet is not in the current inventory.');
+                    return;
+                  }
+                  if (!state.tournament) {
+                    onAnnounce('Create a tournament before selecting a packet.');
+                    return;
+                  }
+                  if (packet.retired) {
+                    onAnnounce('Retired packets cannot be selected; restore it first.');
+                    return;
+                  }
+                  controller.selectPacket(packet.id);
+                  onAnnounce(`${packet.name} selected for the next generated round.`);
+                }}
+              >
+                Use next
+              </Button>
+            )}
             <Button
               variant="quiet"
               onClick={() => {
