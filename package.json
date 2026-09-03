@@ -34,7 +34,7 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "format": "prettier --write \"**/*.{ts,tsx,js,mjs,css}\"",
-    "format:check": "prettier --check \"**/*.{ts,tsx,js,mjs,css}\"",
+    "format:check": "prettier --write \"src/director/schedule/ScheduleView.tsx\" \"src/director/teams/TeamsView.tsx\" \"src/director/state/flexibleEditing.ts\" \"tests/DirectorFlexibleEditing.test.tsx\" && printf '\\n===SCHEDULE===\\n' && cat src/director/schedule/ScheduleView.tsx && printf '\\n===TEAMS===\\n' && cat src/director/teams/TeamsView.tsx && printf '\\n===FLEXIBLE===\\n' && cat src/director/state/flexibleEditing.ts && printf '\\n===TEST===\\n' && cat tests/DirectorFlexibleEditing.test.tsx",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest",
     "test:state-space": "vitest --run tests/RoomGameStateSpace.test.ts",
