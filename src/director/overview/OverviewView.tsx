@@ -28,7 +28,7 @@ function sectionForArea(area: PreflightIssue['area']): SectionId {
     case 'storage':
       return 'settings';
     default:
-      return 'tournament';
+      return 'schedule';
   }
 }
 
@@ -112,7 +112,7 @@ export function OverviewView({
             : 'Create a tournament to begin planning.'
         }
         actions={
-          <Button variant="primary" icon="arrow" onClick={() => onNavigate(round ? 'tournament' : 'teams')}>
+          <Button variant="primary" icon="arrow" onClick={() => onNavigate(round ? 'schedule' : 'teams')}>
             {round ? `Open ${round.name}` : 'Set up teams'}
           </Button>
         }
@@ -159,12 +159,12 @@ export function OverviewView({
                     Finish {round.name}
                   </Button>
                 ) : (
-                  <Button variant="primary" icon="chevron" onClick={() => onNavigate('tournament')}>
+                  <Button variant="primary" icon="chevron" onClick={() => onNavigate('schedule')}>
                     Open {round.name}
                   </Button>
                 ))}
-              <Button variant="quiet" icon="chevron" onClick={() => onNavigate('tournament')}>
-                Open control
+              <Button variant="quiet" icon="chevron" onClick={() => onNavigate('schedule')}>
+                Open Rounds
               </Button>
             </div>
           </section>
@@ -200,7 +200,7 @@ export function OverviewView({
                 ))}
                 {otherChecks > 0 && (
                   <li>
-                    <Button variant="quiet" onClick={() => onNavigate('tournament')}>
+                    <Button variant="quiet" onClick={() => onNavigate('schedule')}>
                       {otherChecks} more check{otherChecks === 1 ? '' : 's'} in preflight.
                     </Button>
                   </li>

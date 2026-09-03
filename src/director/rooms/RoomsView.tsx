@@ -7,7 +7,9 @@ import type { DirectorNavigationTarget } from '../app/navigationTarget';
 import { useNavigationHighlight } from '../app/useNavigationHighlight';
 import { Icon } from '../components/Icon';
 import { PageHeader } from '../components/PageHeader';
-import type { AnnounceInput } from '../notices';
+import { isNativeDirector, issueNativeRoomPairing } from '../platform/native';
+import type { NativeServerState } from '../server/useNativeServerStatus';
+import { errorNotice, type AnnounceInput } from '../notices';
 
 type EquipmentKind = DirectorState['equipment'][number]['kind'];
 
@@ -58,6 +60,7 @@ export function RoomsView({
   onAnnounce,
   navigationTarget,
   onClearNavigationTarget,
+  server: nativeServer,
 }: {
   state: DirectorState;
   controller: DirectorController;
@@ -65,7 +68,68 @@ export function RoomsView({
   onAnnounce: (announcement: AnnounceInput) => void;
   navigationTarget?: DirectorNavigationTarget | null;
   onClearNavigationTarget?: () => void;
+  /** The shared native QBTCP snapshot owned by the Director shell. Absent in tests. */
+  server?: NativeServerState;
 }) {
+  const qbtcpStatus = nativeServer?.status ?? null;
+  const qbtcpLoading = nativeServer?.loading ?? false;
+  const [pairingRoomId, setPairingRoomId] = useState<string | null>(null);
+  const nativeDirector = isNativeDirector();
+  const toggleServer = async () => {
+    if (!nativeServer) return;
+    try {
+      const next = await nativeServer.toggle();
+      onAnnounce(next.message ?? (next.running ? 'QBTCP server started.' : 'QBTCP server stopped.'));
+    } catch (reason: unknown) {
+      onAnnounce(
+        errorNotice(reason instanceof Error ? reason.message : 'The QBTCP server could not be changed.'),
+      );
+    }
+  };
+  const copyPairingLink = async (url: string, message: string) => {
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard access is unavailable.');
+      await navigator.clipboard.writeText(url);
+      onAnnounce(message);
+    } catch {
+      onAnnounce(errorNotice('The pairing link could not be copied; use the link shown in the desktop app.'));
+    }
+  };
+  const issuePairing = async (roomId: string) => {
+    if (!nativeServer) return;
+    setPairingRoomId(roomId);
+    try {
+      const invitation = await issueNativeRoomPairing(roomId);
+      nativeServer.addInvitation(invitation);
+      onAnnounce(`Pairing invitation issued for ${invitation.roomName}.`);
+    } catch (reason: unknown) {
+      onAnnounce(
+        errorNotice(
+          reason instanceof Error ? reason.message : 'A room pairing invitation could not be issued.',
+        ),
+      );
+    } finally {
+      setPairingRoomId(null);
+    }
+  };
+  const qbtcpRunning = qbtcpStatus?.running ?? false;
+  const qbtcpHasError = !qbtcpLoading && nativeDirector && !qbtcpRunning && Boolean(qbtcpStatus?.message);
+  const qbtcpStateLabel = qbtcpLoading
+    ? 'Checking'
+    : qbtcpHasError
+      ? 'Error'
+      : qbtcpRunning
+        ? 'Running'
+        : 'Stopped';
+  const qbtcpState = qbtcpLoading
+    ? 'waiting'
+    : qbtcpHasError
+      ? 'error'
+      : qbtcpRunning
+        ? 'connected'
+        : 'not-started';
+  const pairingRooms = state.rooms.filter((room) => room.available && room.status === 'available');
+  const invitations = qbtcpStatus?.pairingInvitations ?? [];
   const [showForm, setShowForm] = useState<'room' | 'staff' | 'equipment' | null>(null);
   /*
    * Three drafts, because there are three forms.
@@ -171,6 +235,146 @@ export function RoomsView({
         }
       />
       <div className="director-page-stack">
+        {nativeServer && (
+          <section className="director-panel" aria-labelledby="director-qbtcp-title">
+            <div className="director-panel-heading">
+              <div>
+                <p className="director-eyebrow">QBTCP server</p>
+                <h2 id="director-qbtcp-title">Local network</h2>
+              </div>
+              <StateLabel state={qbtcpState} label={qbtcpStateLabel} />
+            </div>
+            <div className="director-panel-body">
+              <dl className="director-detail-list director-detail-list-large">
+                <div>
+                  <dt>Address</dt>
+                  <dd className="director-mono">
+                    {qbtcpRunning && qbtcpStatus?.address
+                      ? `${qbtcpStatus.address}${qbtcpStatus.port ? `:${qbtcpStatus.port}` : ''}`
+                      : 'Not listening'}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Paired rooms</dt>
+                  <dd>{qbtcpRunning ? (qbtcpStatus?.pairedRooms ?? state.qbtcpSessions.length) : '—'}</dd>
+                </div>
+                <div>
+                  <dt>Protocol</dt>
+                  <dd>{qbtcpRunning ? (qbtcpStatus?.protocol ?? 'QBTCP v1') : '—'}</dd>
+                </div>
+              </dl>
+              {qbtcpHasError && (
+                <p className="director-error-copy" role="alert">
+                  {qbtcpStatus?.message}
+                </p>
+              )}
+              {controller.qbtcpHealth.error && (
+                <p className="director-error-copy" role="alert">
+                  {controller.qbtcpHealth.error}
+                </p>
+              )}
+              {!nativeDirector && (
+                <p className="director-panel-footnote">
+                  The browser preview can plan and score manual games. Start the Tauri Director app for the
+                  native LAN server.
+                </p>
+              )}
+            </div>
+            <div className="director-panel-footer">
+              {nativeDirector ? (
+                <Button
+                  variant={qbtcpRunning ? 'secondary' : 'primary'}
+                  icon={qbtcpRunning ? 'pause' : 'play'}
+                  disabled={qbtcpLoading}
+                  onClick={() => {
+                    void toggleServer();
+                  }}
+                >
+                  {qbtcpLoading ? 'Checking server' : qbtcpRunning ? 'Stop server' : 'Start server'}
+                </Button>
+              ) : (
+                <span className="director-muted">Desktop app required to start the LAN server</span>
+              )}
+              {!qbtcpLoading && qbtcpStatus?.pairingUrl && invitations.length <= 1 && (
+                <Button
+                  variant="quiet"
+                  onClick={() => void copyPairingLink(qbtcpStatus?.pairingUrl ?? '', 'Pairing link copied.')}
+                >
+                  Copy pairing link
+                </Button>
+              )}
+            </div>
+          </section>
+        )}
+        {nativeDirector && qbtcpRunning && (
+          <section className="director-panel director-pairing-panel" aria-labelledby="director-pairing-title">
+            <div className="director-panel-heading">
+              <div>
+                <p className="director-eyebrow">Pairing</p>
+                <h2 id="director-pairing-title">Room invitations</h2>
+              </div>
+              <StateLabel state="paired" label="Room-specific" />
+            </div>
+            <div className="director-panel-body director-panel-body-list">
+              <p className="director-panel-footnote">
+                Each invitation is scoped to one room. Codes expire after{' '}
+                {invitations[0]?.expiresInSeconds ?? 900} seconds and are not persisted in QBJ.
+              </p>
+              <ul className="director-list">
+                {pairingRooms.length === 0 ? (
+                  <li>
+                    <span>No available rooms are configured.</span>
+                  </li>
+                ) : (
+                  pairingRooms.map((room) => {
+                    const invitation = invitations.find((entry) => entry.roomId === room.id);
+                    return (
+                      <li key={room.id}>
+                        <div>
+                          <strong>{room.name}</strong>
+                          {invitation ? (
+                            <small className="director-mono">{invitation.pairingCode}</small>
+                          ) : (
+                            <small>No active invitation</small>
+                          )}
+                        </div>
+                        <div className="director-row-actions">
+                          {invitation?.pairingUrl && (
+                            <Button
+                              variant="quiet"
+                              onClick={() =>
+                                void copyPairingLink(
+                                  invitation.pairingUrl ?? '',
+                                  `${room.name} pairing link copied.`,
+                                )
+                              }
+                            >
+                              Copy link
+                            </Button>
+                          )}
+                          {invitation && !invitation.pairingUrl && (
+                            <small className="director-muted">Code only; no LAN address found</small>
+                          )}
+                          <Button
+                            variant={invitation ? 'quiet' : 'primary'}
+                            disabled={pairingRoomId !== null}
+                            onClick={() => void issuePairing(room.id)}
+                          >
+                            {pairingRoomId === room.id
+                              ? 'Issuing…'
+                              : invitation
+                                ? 'Issue new'
+                                : 'Issue pairing'}
+                          </Button>
+                        </div>
+                      </li>
+                    );
+                  })
+                )}
+              </ul>
+            </div>
+          </section>
+        )}
         {showForm === 'room' && (
           <section className="director-panel director-form-panel">
             <form

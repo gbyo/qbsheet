@@ -2,7 +2,7 @@
  * The one shared source of truth for native QBTCP server status.
  *
  * DirectorApp polls this once per second; the sidebar, the Overview preflight check, and
- * Tournament Control all read the same snapshot, and start/stop/pairing actions write through
+ * Rooms all read the same snapshot, and start/stop/pairing actions write through
  * to it — so an external change, a server failure, or a local mutation becomes visible
  * everywhere instead of each surface owning a copy that can disagree.
  *

@@ -14,6 +14,7 @@ export function PublishView({
 }: {
   state: DirectorState;
   onAnnounce: (announcement: AnnounceInput) => void;
+  onNavigate?: (section: import('../app/navigation').SectionId) => void;
 }) {
   const hasTournament = state.tournament !== null;
   return (
