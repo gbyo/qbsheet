@@ -12,13 +12,17 @@ import {
   orderDayItems,
   packetUseConflicts,
   previewAdvancement,
+  recommendTournamentPlan,
   roundScheduleIsValid,
   runPreflight,
   scheduleIsValid,
+  scoringRulePresets,
   type DirectorState,
   type TeamGameScore,
 } from '../src/director/domain';
-import { useDirectorController } from '../src/director/state/useDirectorController';
+import { scoringRulesObject } from '../src/director/transfers/assignment';
+import { readQbjScoringRules } from '../src/qbj/QbjScoringRules';
+import { useDirectorController, type StartRoundResult } from '../src/director/state/useDirectorController';
 import {
   IndexedDbDirectorRepository,
   MemoryDirectorRepository,
@@ -39,6 +43,7 @@ function score(teamId: string, value: number): TeamGameScore {
   return {
     teamId,
     score: value,
+    superpowers: 0,
     powers: 0,
     gets: 0,
     negs: 0,
@@ -223,15 +228,24 @@ describe('Director integration hardening', () => {
       rules: {
         ...structuredClone(defaultRules),
         tossupValue: 12,
+        superpowerValue: 25,
         powerValue: 20,
         negValue: -10,
         bonusValue: 15,
         tossupCount: 24,
+        maximumTossupCount: 26,
         bonusParts: 4,
+        minimumBonusParts: 2,
+        maximumBonusScore: 50,
+        bonusDivisor: 5,
         bouncebacks: true,
         overtime: false,
+        overtimeTossupCount: 3,
+        overtimeBonuses: false,
         timed: true,
         lightning: true,
+        lightningCountPerTeam: 2,
+        lightningDivisor: 5,
         maximumActivePlayers: 3,
         regulationMinutes: 30,
         tiebreakers: ['record', 'points'],
@@ -245,12 +259,27 @@ describe('Director integration hardening', () => {
     };
 
     const interchange = toInterchange(state);
+    expect(interchange.rules).toBeDefined();
+    if (!interchange.rules) return;
     expect(interchange.rules).toMatchObject({
       maximum_players_per_team: 3,
       regulation_tossup_count: 24,
+      maximum_regulation_tossup_count: 26,
+      minimum_overtime_question_count: 3,
       bonuses_bounce_back: true,
       overtime_includes_bonuses: false,
+      minimum_parts_per_bonus: 2,
+      maximum_parts_per_bonus: 4,
+      maximum_bonus_score: 50,
+      bonus_divisor: 5,
+      lightning_count_per_team: 2,
+      lightning_divisor: 5,
     });
+    expect(interchange.rules).not.toHaveProperty('points_per_bonus_part');
+    const answerValues = ((interchange.rules.answer_types ?? []) as Array<{ value?: unknown }>).map(
+      (entry) => entry.value,
+    );
+    expect(answerValues).toEqual([25, 20, 12, -10]);
     expect(interchange.rules).not.toHaveProperty('tossupValue');
     expect(interchange.tournament.extensions).toMatchObject({
       timeZone: 'America/New_York',
@@ -264,6 +293,197 @@ describe('Director integration hardening', () => {
     if (!imported.ok || !imported.state) return;
     expect(imported.state.tournament?.timeZone).toBe('America/New_York');
     expect(imported.state.tournament?.rules).toEqual(state.tournament.rules);
+  });
+
+  test('scenario H: verified presets fill the canonical model and stay editable', () => {
+    expect(scoringRulePresets.map((preset) => preset.id)).toEqual([
+      'acf',
+      'acf-powers',
+      'naqt-untimed',
+      'naqt-timed',
+    ]);
+    const byId = new Map(scoringRulePresets.map((preset) => [preset.id, preset]));
+    // Plain ACF predates power marks; official ACF events use -5 negs.
+    expect(byId.get('acf')?.rules).toMatchObject({
+      tossupValue: 10,
+      superpowerValue: null,
+      powerValue: null,
+      negValue: -5,
+      useBonuses: true,
+      bonusValue: 10,
+      bonusParts: 3,
+      bouncebacks: false,
+      overtime: true,
+      overtimeTossupCount: 1,
+      overtimeBonuses: false,
+      timed: false,
+      lightning: false,
+      maximumActivePlayers: 4,
+    });
+    expect(byId.get('acf-powers')?.rules).toMatchObject({
+      tossupValue: 10,
+      powerValue: 15,
+      negValue: -5,
+      overtimeTossupCount: 1,
+      overtimeBonuses: false,
+    });
+    expect(byId.get('naqt-untimed')?.rules).toMatchObject({
+      tossupValue: 10,
+      powerValue: 15,
+      negValue: -5,
+      useBonuses: true,
+      bouncebacks: false,
+      overtimeTossupCount: 3,
+      overtimeBonuses: false,
+      timed: false,
+      maximumActivePlayers: 4,
+    });
+    expect(byId.get('naqt-timed')?.rules).toMatchObject({
+      tossupValue: 10,
+      powerValue: 15,
+      negValue: -5,
+      timed: true,
+      tossupCount: 24,
+      regulationMinutes: 18,
+      overtimeTossupCount: 3,
+      overtimeBonuses: false,
+    });
+    // Every preset is a complete rule set the scorer accepts exactly as stated.
+    for (const preset of scoringRulePresets) {
+      const full = { ...structuredClone(defaultRules), ...preset.rules };
+      const read = readQbjScoringRules(scoringRulesObject(full, `preset-${preset.id}`), full.timed);
+      expect(read.ok).toBe(true);
+    }
+  });
+
+  test('scenario H: applying a preset then editing a field stays valid', async () => {
+    const { hook } = await directorWithSetup(4);
+    const preset = scoringRulePresets.find((entry) => entry.id === 'naqt-untimed');
+    if (!preset) throw new Error('test setup is missing the NAQT preset');
+    act(() => {
+      expect(hook.result.current.updateRules({ ...preset.rules })).toBe(true);
+    });
+    expect(hook.result.current.state.tournament?.rules).toMatchObject({
+      powerValue: 15,
+      overtimeTossupCount: 3,
+      overtimeBonuses: false,
+    });
+    // Customizing afterward is an ordinary edit, not a second mode.
+    act(() => {
+      expect(hook.result.current.updateRules({ tossupCount: 22 })).toBe(true);
+    });
+    expect(hook.result.current.state.tournament?.rules.tossupCount).toBe(22);
+    expect(hook.result.current.state.tournament?.rules.powerValue).toBe(15);
+  });
+
+  test('scoring values lock once results exist; procedure and tiebreakers stay editable', async () => {
+    const { hook } = await directorWithSetup(4);
+    act(() => {
+      expect(hook.result.current.updateRules({ tossupValue: 12 })).toBe(true);
+      expect(hook.result.current.generateSchedule().generated).toBe(true);
+    });
+    const roundId = hook.result.current.state.rounds[0].id;
+    const game = hook.result.current.state.scheduledGames.find(
+      (entry) => entry.roundId === roundId && !entry.bye,
+    );
+    if (!game) throw new Error('test setup produced no playable game');
+    act(() => {
+      expect(
+        hook.result.current.addManualResult({
+          scheduledGameId: game.id,
+          scores: [score(game.leftTeamId, 100), score(game.rightTeamId ?? game.leftTeamId, 50)],
+        }),
+      ).toBe(true);
+    });
+    expect(hook.result.current.state.games.some((entry) => entry.status === 'accepted')).toBe(true);
+
+    // Reinterpreting values are refused with a lock message; nothing changes.
+    act(() => {
+      expect(hook.result.current.updateRules({ tossupValue: 14 })).toBe(false);
+    });
+    expect(hook.result.current.error).toMatch(/locked/i);
+    expect(hook.result.current.state.tournament?.rules.tossupValue).toBe(12);
+    // Disabling bonuses first requires clearing the overtime-bonus procedure
+    // flag (a coherent combination check), and then the lock still refuses.
+    act(() => {
+      expect(hook.result.current.updateRules({ overtimeBonuses: false })).toBe(true);
+      expect(hook.result.current.updateRules({ useBonuses: false })).toBe(false);
+    });
+    expect(hook.result.current.error).toMatch(/locked/i);
+
+    // Procedure toggles and tiebreakers only affect future games.
+    act(() => {
+      expect(hook.result.current.updateRules({ bouncebacks: true })).toBe(true);
+      expect(hook.result.current.updateRules({ tiebreakers: ['record', 'points'] })).toBe(true);
+    });
+    expect(hook.result.current.state.tournament?.rules.bouncebacks).toBe(true);
+    expect(hook.result.current.state.tournament?.rules.tiebreakers).toEqual(['record', 'points']);
+  });
+
+  test('legacy scoring rules migrate with behavior-preserving defaults', () => {
+    const legacy = emptyDirectorState() as unknown as Record<string, unknown>;
+    legacy.tournament = {
+      id: 'legacy-rules',
+      name: 'Legacy event',
+      date: '',
+      venue: '',
+      organizer: '',
+      status: 'draft',
+      rules: {
+        tossupValue: 10,
+        powerValue: 15,
+        negValue: -5,
+        bonusValue: 10,
+        tossupCount: 20,
+        bonusParts: 3,
+        bouncebacks: false,
+        overtime: true,
+        timed: false,
+        lightning: false,
+        maximumActivePlayers: 4,
+        regulationMinutes: 26,
+        tiebreakers: ['record', 'points'],
+      },
+      formatId: null,
+      currentPhaseId: null,
+      currentPacketId: null,
+      currentRoundId: null,
+      createdAt: '',
+      updatedAt: '',
+    };
+    const normalized = normalizeDirectorState(legacy);
+    // Old documents gain the new fields without changing what their games meant.
+    expect(normalized.tournament?.rules).toMatchObject({
+      superpowerValue: null,
+      useBonuses: true,
+      minimumBonusParts: null,
+      maximumBonusScore: null,
+      bonusDivisor: null,
+      overtimeTossupCount: 1,
+      // Previously assignments carried overtime itself into
+      // overtime_includes_bonuses, so true carries across.
+      overtimeBonuses: true,
+      lightningCountPerTeam: 1,
+      lightningDivisor: 10,
+      maximumTossupCount: null,
+    });
+
+    const legacyNoOvertime = structuredClone(legacy);
+    ((legacyNoOvertime.tournament as Record<string, unknown>).rules as Record<string, unknown>).overtime =
+      false;
+    expect(normalizeDirectorState(legacyNoOvertime).tournament?.rules.overtimeBonuses).toBe(false);
+
+    // Explicit nulls (formats without powers or negs) survive normalization.
+    const legacyNoPowers = structuredClone(legacy);
+    const noPowerRules = (legacyNoPowers.tournament as Record<string, unknown>).rules as Record<
+      string,
+      unknown
+    >;
+    noPowerRules.powerValue = null;
+    noPowerRules.negValue = null;
+    const normalizedNoPowers = normalizeDirectorState(legacyNoPowers);
+    expect(normalizedNoPowers.tournament?.rules.powerValue).toBeNull();
+    expect(normalizedNoPowers.tournament?.rules.negValue).toBeNull();
   });
 
   test('schema v5 migration defaults timed scoring safely and preserves legacy procedure intent', () => {
@@ -418,6 +638,446 @@ describe('Director integration hardening', () => {
     expect(report.state ? dayLabels(report.state) : []).toEqual(expected);
   });
 
+  test('planner recommendations: use-this-plan builds nine rounds for ten teams', async () => {
+    const { hook } = await directorWithSetup(10);
+    const set = recommendTournamentPlan(10);
+    expect(set?.recommended.id).toBe('full-round-robin');
+
+    let applied = false;
+    act(() => {
+      applied = hook.result.current.applyTournamentPlan(set?.recommended ?? ({} as never));
+    });
+    expect(applied).toBe(true);
+    const live = hook.result.current.state;
+    expect(live.rounds.map((round) => round.number)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    expect(live.rounds.map((round) => round.dayOrder)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(live.phases).toHaveLength(1);
+    expect(live.pools).toHaveLength(0);
+    expect(live.rounds.every((round) => round.scheduledStart == null)).toBe(true);
+    const format = live.formats.find((entry) => entry.id === live.tournament?.formatId);
+    expect(format?.kind).toBe('round-robin');
+    expect(live.audit.some((event) => event.summary.includes('Applied tournament plan'))).toBe(true);
+
+    // Re-applying a different plan before play starts is a safe rebuild.
+    act(() => {
+      applied = hook.result.current.applyTournamentPlan(set?.alternatives[0] ?? ({} as never));
+    });
+    expect(applied).toBe(true);
+    expect(hook.result.current.state.rounds).toHaveLength(18);
+
+    // Once pairings exist the plan is refused rather than wiping them.
+    const paired = await directorWithSetup(10);
+    act(() => {
+      expect(paired.hook.result.current.generateSchedule().generated).toBe(true);
+    });
+    const roundsBefore = paired.hook.result.current.state.rounds.length;
+    expect(roundsBefore).toBeGreaterThan(0);
+    act(() => {
+      applied = paired.hook.result.current.applyTournamentPlan(set?.recommended ?? ({} as never));
+    });
+    expect(applied).toBe(false);
+    expect(paired.hook.result.current.state.rounds.length).toBe(roundsBefore);
+  });
+
+  test('planner recommendations: eighteen teams get pools, stages, and advancement', async () => {
+    const { hook } = await directorWithSetup(18);
+    const set = recommendTournamentPlan(18);
+    expect(set?.recommended.id).toBe('pools-playoffs');
+
+    act(() => {
+      expect(hook.result.current.applyTournamentPlan(set?.recommended ?? ({} as never))).toBe(true);
+    });
+    const live = hook.result.current.state;
+    expect(live.phases.map((phase) => phase.name)).toEqual(['Prelims', 'Playoffs']);
+
+    const prelim = live.phases[0];
+    const prelimPools = live.pools.filter((pool) => pool.phaseId === prelim.id);
+    expect(prelimPools).toHaveLength(3);
+    for (const pool of prelimPools) {
+      expect(pool.teamIds).toHaveLength(6);
+    }
+    const placed = prelimPools.flatMap((pool) => pool.teamIds).sort();
+    expect(placed).toEqual(live.teams.map((team) => team.id).sort());
+
+    expect(prelim.advancementRule?.qualifiersPerPool).toBeGreaterThan(0);
+    expect(prelim.advancementRule?.manualOverrideAllowed).toBe(true);
+
+    const playoff = live.phases[1];
+    const playoffPools = live.pools.filter((pool) => pool.phaseId === playoff.id);
+    expect(playoffPools.length).toBeGreaterThan(0);
+    expect(playoffPools.every((pool) => pool.teamIds.length === 0)).toBe(true);
+
+    const expectedNumbers = [
+      ...(set?.recommended.stages[0].roundNumbers ?? []),
+      ...(set?.recommended.stages[1].roundNumbers ?? []),
+    ];
+    expect(live.rounds.map((round) => round.number)).toEqual(expectedNumbers);
+    const dayOrders = live.rounds.map((round) => round.dayOrder ?? -1);
+    expect([...dayOrders].sort((a, b) => a - b)).toEqual(dayOrders);
+  });
+
+  test('advancement commit: wildcards rebracket into playoff pools with audit', async () => {
+    const { hook } = await directorWithSetup(18);
+    const set = recommendTournamentPlan(18);
+    act(() => {
+      expect(hook.result.current.applyTournamentPlan(set?.recommended ?? ({} as never))).toBe(true);
+    });
+    let live = hook.result.current.state;
+    const prelim = live.phases.find((phase) => phase.name === 'Prelims')!;
+    const playoff = live.phases.find((phase) => phase.name === 'Playoffs')!;
+    expect(live.tournament?.currentPhaseId).toBe(prelim.id);
+    const prelimNumbers = set?.recommended.stages[0].roundNumbers ?? [];
+    expect(prelimNumbers.length).toBeGreaterThan(0);
+
+    act(() => {
+      expect(
+        hook.result.current.updatePhase(prelim.id, {
+          advancementRule: { ...prelim.advancementRule!, wildcards: 2 },
+        }),
+      ).toBe(true);
+    });
+
+    // Play every prelim round; the left team always wins. Scores carry a
+    // per-team seed so every team's total points differ and no cutoff tie
+    // survives the points tiebreaker.
+    // Pairings append after the plan's empty placeholder rounds, so each
+    // generated round is resolved through the tournament's current round.
+    const seedOf = new Map(live.teams.map((team, index) => [team.id, index + 1]));
+    let gameIndex = 0;
+    for (let index = 0; index < prelimNumbers.length; index += 1) {
+      act(() => {
+        expect(hook.result.current.generateSchedule().generated).toBe(true);
+      });
+      live = hook.result.current.state;
+      const roundId = live.tournament?.currentRoundId;
+      expect(roundId).toBeTruthy();
+      const games = live.scheduledGames.filter(
+        (game) => game.roundId === roundId && !game.bye && game.rightTeamId,
+      );
+      expect(games.length).toBeGreaterThan(0);
+      for (const game of games) {
+        gameIndex += 1;
+        act(() => {
+          expect(
+            hook.result.current.addManualResult({
+              scheduledGameId: game.id,
+              scores: [
+                score(game.leftTeamId, 5000 + (seedOf.get(game.leftTeamId) ?? 0) * 200 + gameIndex),
+                score(game.rightTeamId!, (seedOf.get(game.rightTeamId!) ?? 0) * 200 + (gameIndex % 7)),
+              ],
+            }),
+          ).toBe(true);
+        });
+      }
+    }
+    live = hook.result.current.state;
+    const gamesBefore = live.games.length;
+
+    const decidedPrelim = live.phases.find((phase) => phase.id === prelim.id)!;
+    const preview = previewAdvancement(live, decidedPrelim);
+    expect(preview.unresolved).toHaveLength(0);
+    expect(preview.wildcards).toHaveLength(2);
+    const qualifierIds = preview.qualifiers.map((team) => team.id);
+    expect(qualifierIds).toHaveLength((prelim.advancementRule?.qualifiersPerPool ?? 0) * 3 + 2);
+
+    const playoffPools = live.pools
+      .filter((pool) => pool.phaseId === playoff.id)
+      .sort((left, right) => left.order - right.order || left.id.localeCompare(right.id));
+    expect(playoffPools.length).toBeGreaterThan(0);
+    const assignments = qualifierIds.map((teamId, index) => ({
+      teamId,
+      targetPoolId: playoffPools[index % playoffPools.length]!.id,
+    }));
+    let result: ReturnType<typeof hook.result.current.commitAdvancement>;
+    act(() => {
+      result = hook.result.current.commitAdvancement({
+        sourcePhaseId: prelim.id,
+        targetPhaseId: playoff.id,
+        assignments,
+      });
+    });
+    expect(result!.committed).toBe(true);
+    expect(result!.overridden).toHaveLength(0);
+
+    live = hook.result.current.state;
+    const placed = live.pools
+      .filter((pool) => pool.phaseId === playoff.id)
+      .flatMap((pool) => pool.teamIds)
+      .sort();
+    expect(placed).toEqual([...qualifierIds].sort());
+    // Game results are untouched by the rebracket.
+    expect(live.games.length).toBe(gamesBefore);
+    expect(
+      live.audit.some(
+        (event) =>
+          event.type === 'advancement-committed' &&
+          event.details !== undefined &&
+          (event.details as { overridden?: unknown }).overridden !== undefined,
+      ),
+    ).toBe(true);
+
+    // The portable archive round-trips the wildcard rule and the committed pools.
+    const roundTripped = importArchiveBytes(exportArchiveBytes(live));
+    expect(roundTripped.ok).toBe(true);
+    const restored = roundTripped.state!;
+    expect(restored.phases.find((phase) => phase.id === prelim.id)?.advancementRule?.wildcards).toBe(2);
+    expect(
+      restored.pools
+        .filter((pool) => pool.phaseId === playoff.id)
+        .flatMap((pool) => pool.teamIds)
+        .sort(),
+    ).toEqual([...qualifierIds].sort());
+
+    // A team outside the preview needs an explicit director reason.
+    const outsider = live.teams.find(
+      (team) => team.status === 'confirmed' && !qualifierIds.includes(team.id),
+    )!;
+    const overrideAssignments = [{ teamId: outsider.id, targetPoolId: playoffPools[0]!.id }];
+    act(() => {
+      result = hook.result.current.commitAdvancement({
+        sourcePhaseId: prelim.id,
+        targetPhaseId: playoff.id,
+        assignments: overrideAssignments,
+      });
+    });
+    expect(result!.committed).toBe(false);
+    act(() => {
+      result = hook.result.current.commitAdvancement({
+        sourcePhaseId: prelim.id,
+        targetPhaseId: playoff.id,
+        assignments: overrideAssignments,
+        reason: 'Injury replacement approved by the director.',
+      });
+    });
+    expect(result!.committed).toBe(true);
+    expect(result!.overridden).toEqual([outsider.id]);
+
+    // Once the target stage has pairings, rebracketing is refused.
+    act(() => {
+      hook.result.current.selectPhase(playoff.id);
+    });
+    act(() => {
+      expect(hook.result.current.generateSchedule().generated).toBe(true);
+    });
+    act(() => {
+      result = hook.result.current.commitAdvancement({
+        sourcePhaseId: prelim.id,
+        targetPhaseId: playoff.id,
+        assignments,
+      });
+    });
+    expect(result!.committed).toBe(false);
+    expect(result!.message).toMatch(/pairings/);
+  });
+
+  test('final placement: explicit order overrides nothing but the final ranking', async () => {
+    const { hook } = await directorWithSetup(4);
+    act(() => {
+      expect(hook.result.current.generateSchedule().generated).toBe(true);
+    });
+    const round = hook.result.current.state.rounds[0];
+    const games = hook.result.current.state.scheduledGames.filter(
+      (game) => game.roundId === round.id && !game.bye,
+    );
+    expect(games.length).toBeGreaterThan(0);
+    act(() => {
+      for (const game of games) {
+        expect(
+          hook.result.current.addManualResult({
+            scheduledGameId: game.id,
+            scores: [score(game.leftTeamId, 300), score(game.rightTeamId!, 100)],
+          }),
+        ).toBe(true);
+      }
+    });
+    const before = hook.result.current.state;
+    const calculated = deriveTeamStandings(before).map((standing) => standing.teamId);
+    expect(calculated.length).toBe(4);
+    const [first, second, third] = calculated;
+    const gamesBefore = JSON.stringify(before.games);
+
+    // Duplicates collapse and unknown teams are dropped: a conflicting order
+    // can never be stored.
+    let result: ReturnType<typeof hook.result.current.setFinalPlacement>;
+    act(() => {
+      result = hook.result.current.setFinalPlacement({
+        order: [second!, second!, 'ghost-team', third!],
+        reason: 'Head-to-head final decided it.',
+      });
+    });
+    expect(result!.applied).toBe(true);
+    const placed = hook.result.current.state;
+    expect(placed.tournament?.finalPlacement?.order).toEqual([second!, third!]);
+    expect(placed.tournament?.finalPlacement?.reason).toBe('Head-to-head final decided it.');
+    expect(typeof placed.tournament?.finalPlacement?.at).toBe('string');
+
+    // Raw games, W/L records, and the calculated order are untouched.
+    expect(JSON.stringify(placed.games)).toBe(gamesBefore);
+    expect(deriveTeamStandings(placed).map((standing) => standing.teamId)).toEqual(calculated);
+    const audit = placed.audit.find((event) => event.type === 'final-placement-set');
+    expect(audit?.details).toMatchObject({ order: [second!, third!] });
+
+    // Reset restores the calculated ranking as final.
+    act(() => {
+      expect(hook.result.current.clearFinalPlacement()).toBe(true);
+    });
+    const cleared = hook.result.current.state;
+    expect(cleared.tournament?.finalPlacement).toBeUndefined();
+    expect(cleared.audit.some((event) => event.type === 'final-placement-cleared')).toBe(true);
+    expect(first).toBe(calculated[0]);
+  });
+
+  test('round orchestration: manual start needs no rooms, one finish closes the round', async () => {
+    const { hook } = await directorWithSetup(4);
+    act(() => {
+      expect(hook.result.current.generateSchedule().generated).toBe(true);
+    });
+    const roundId = hook.result.current.state.rounds[0].id;
+
+    // No rooms assigned, no QBTCP sessions, no USB locations: the round still
+    // starts with a single action and checkpoints first.
+    let manual: StartRoundResult | undefined;
+    await act(async () => {
+      manual = await hook.result.current.startRound(roundId);
+    });
+    expect(manual?.ok).toBe(true);
+    expect(manual?.manual).toBe(true);
+    expect(manual?.summary).toContain('manually');
+    expect(hook.result.current.state.rounds[0].status).toBe('released');
+    expect(hook.result.current.state.metadata.lastCheckpointAt).not.toBeNull();
+    expect(
+      hook.result.current.state.audit.some((event) => event.summary === `Started ${manual?.roundName}.`),
+    ).toBe(true);
+
+    // Nothing resolved yet: finish reports what remains instead of closing.
+    const unfinished = hook.result.current.finishRound(roundId);
+    expect(unfinished.finished).toBe(false);
+    expect(unfinished.remaining).toBe(2);
+    expect(hook.result.current.state.rounds[0].status).toBe('released');
+
+    const games = hook.result.current.state.scheduledGames.filter(
+      (game) => game.roundId === roundId && !game.bye,
+    );
+    act(() => {
+      for (const game of games) {
+        expect(
+          hook.result.current.addManualResult({
+            scheduledGameId: game.id,
+            scores: [score(game.leftTeamId, 100), score(game.rightTeamId ?? game.leftTeamId, 50)],
+          }),
+        ).toBe(true);
+      }
+    });
+    let done: ReturnType<typeof hook.result.current.finishRound> | undefined;
+    act(() => {
+      done = hook.result.current.finishRound(roundId);
+    });
+    expect(done?.finished).toBe(true);
+    expect(hook.result.current.state.rounds[0].status).toBe('closed');
+    expect(hook.result.current.finishRound(roundId)).toMatchObject({
+      finished: true,
+      alreadyFinished: true,
+    });
+  });
+
+  test('round orchestration: assigned rooms are enforced, delivered count is honest', async () => {
+    const { hook } = await directorWithSetup(4);
+    act(() => {
+      expect(hook.result.current.addRoom({ name: 'Room 102' })).toBe(true);
+      expect(hook.result.current.generateSchedule().generated).toBe(true);
+    });
+    const roundId = hook.result.current.state.rounds[0].id;
+    const games = hook.result.current.state.scheduledGames.filter(
+      (game) => game.roundId === roundId && !game.bye,
+    );
+    expect(games.every((game) => game.roomId !== null)).toBe(true);
+
+    let result: StartRoundResult | undefined;
+    await act(async () => {
+      result = await hook.result.current.startRound(roundId);
+    });
+    expect(result?.ok).toBe(true);
+    expect(result?.manual).not.toBe(true);
+    expect(result?.deliveredGames).toBe(2);
+    expect(result?.pendingHandoffs).toEqual([]);
+    expect(hook.result.current.state.rounds[0].status).toBe('released');
+  });
+
+  test('round orchestration: partial rooms stay manual, gaps fail only with delivery configured', async () => {
+    // One room exists, so generation assigns it to the first game only. With
+    // no QBTCP or USB configured that partial assignment stays a label: the
+    // round still starts as a manual round.
+    const partial = await directorWithSetup(4);
+    act(() => {
+      expect(partial.hook.result.current.generateSchedule().generated).toBe(true);
+    });
+    const partialRoundId = partial.hook.result.current.state.rounds[0].id;
+    let partialResult: StartRoundResult | undefined;
+    await act(async () => {
+      partialResult = await partial.hook.result.current.startRound(partialRoundId);
+    });
+    expect(partialResult?.ok).toBe(true);
+    expect(partialResult?.manual).toBe(true);
+    expect(partial.hook.result.current.state.rounds[0].status).toBe('released');
+
+    // A paired QBTCP session means electronic delivery: the roomless game now
+    // blocks the start until it has a room or a USB workflow covers it.
+    const electronic = await directorWithSetup(4);
+    act(() => {
+      expect(electronic.hook.result.current.generateSchedule().generated).toBe(true);
+    });
+    const roomId = electronic.hook.result.current.state.rooms[0].id;
+    const paired = structuredClone(electronic.hook.result.current.state);
+    paired.qbtcpSessions = [
+      {
+        roomId,
+        sessionId: 'session-1',
+        matchId: 'match-1',
+        deviceId: 'device-1',
+        operatorName: 'Scorekeeper',
+        state: 'paired',
+        resumable: true,
+        resultReceived: false,
+        progressSequence: 0,
+        lastSeenAt: '2026-09-01T11:02:00.000Z',
+        progress: null,
+        helpRequestId: null,
+      },
+    ];
+    act(() => {
+      expect(electronic.hook.result.current.importSnapshot(paired)).toBe(true);
+    });
+    const electronicRoundId = electronic.hook.result.current.state.rounds[0].id;
+    let blocked: StartRoundResult | undefined;
+    await act(async () => {
+      blocked = await electronic.hook.result.current.startRound(electronicRoundId);
+    });
+    expect(blocked?.ok).toBe(false);
+    expect(blocked?.reason).toContain('room');
+    expect(electronic.hook.result.current.state.rounds[0].status).not.toBe('released');
+
+    // Configuring the USB workflow turns that same gap into an honest
+    // physical handoff instead of a failure.
+    act(() => {
+      electronic.hook.result.current.addTransferLocation({
+        kind: 'removable-drive',
+        label: 'Samsung USB',
+        path: '/mnt/usb',
+      });
+    });
+    expect(electronic.hook.result.current.state.transfers.locations).toHaveLength(1);
+    let usb: StartRoundResult | undefined;
+    await act(async () => {
+      usb = await electronic.hook.result.current.startRound(electronicRoundId);
+    });
+    expect(usb?.ok).toBe(true);
+    expect(usb?.manual).not.toBe(true);
+    expect(usb?.deliveredGames).toBe(1);
+    expect(usb?.pendingHandoffs).toHaveLength(1);
+    expect(usb?.summary).toContain('handoff');
+    expect(electronic.hook.result.current.state.rounds[0].status).toBe('released');
+  });
+
   test('tournament detail updates normalize persisted text and reject blank names', async () => {
     const { hook } = await directorWithSetup();
 
@@ -512,6 +1172,7 @@ describe('Director integration hardening', () => {
           {
             playerId: 'player-1',
             teamId: 'team-1',
+            superpowers: 0,
             powers: 2,
             gets: 3,
             negs: 1,
@@ -1358,6 +2019,37 @@ describe('Director integration hardening', () => {
     expect(formatGenerationAvailability(hook.result.current.state)).toMatchObject({ supported: false });
   });
 
+  test('preflight stays silent about delivery for a roomless manual tournament', async () => {
+    const { hook } = await directorWithSetup(2);
+    const roomless = structuredClone(hook.result.current.state);
+    roomless.rooms = [];
+    act(() => {
+      expect(hook.result.current.importSnapshot(roomless)).toBe(true);
+    });
+    const issueIds = runPreflight(hook.result.current.state, false, true).map((issue) => issue.id);
+    expect(issueIds).not.toContain('qbtcp-offline');
+    expect(issueIds).not.toContain('games-without-rooms');
+
+    const roomed = structuredClone(hook.result.current.state);
+    // Restore the setup room: delivery guidance returns with it.
+    roomed.rooms = [
+      {
+        id: 'room-1',
+        name: 'Room 1',
+        status: 'available',
+        moderatorId: null,
+        scorekeeperId: null,
+        equipmentId: null,
+        available: true,
+      },
+    ];
+    act(() => {
+      expect(hook.result.current.importSnapshot(roomed)).toBe(true);
+    });
+    const roomedIds = runPreflight(hook.result.current.state, false, true).map((issue) => issue.id);
+    expect(roomedIds).toContain('qbtcp-offline');
+  });
+
   test('browser preflight omits the native-only QBTCP recommendation', async () => {
     const { hook } = await directorWithSetup();
     const browserIssues = runPreflight(hook.result.current.state, false, false);
@@ -1555,6 +2247,7 @@ describe('Director integration hardening', () => {
           carryover: true,
           advancementRule: {
             qualifiersPerPool: 2,
+            wildcards: 0,
             tiebreakers: ['record', 'points'],
             manualOverrideAllowed: true,
           },
@@ -1573,6 +2266,7 @@ describe('Director integration hardening', () => {
       carryover: true,
       advancementRule: {
         qualifiersPerPool: 2,
+        wildcards: 0,
         tiebreakers: ['record', 'points'],
         manualOverrideAllowed: true,
       },
@@ -1584,6 +2278,7 @@ describe('Director integration hardening', () => {
         hook.result.current.updatePhase(phase.id, {
           advancementRule: {
             qualifiersPerPool: 0,
+            wildcards: 0,
             tiebreakers: ['record'],
             manualOverrideAllowed: false,
           },
@@ -2701,6 +3396,7 @@ describe('Director integration hardening', () => {
         roundIds: ['round-prelim'],
         advancementRule: {
           qualifiersPerPool: 1,
+          wildcards: 0,
           tiebreakers: defaultRules.tiebreakers,
           manualOverrideAllowed: false,
         },
@@ -2768,6 +3464,101 @@ describe('Director integration hardening', () => {
     state.rounds[1]!.scheduledGameIds = [state.scheduledGames[2]!.id];
     const preview = previewAdvancement(state, state.phases[0]!);
     expect(preview.qualifiers.map((entry) => entry.id).sort()).toEqual(['A', 'C']);
+  });
+
+  function wildcardState(options: {
+    wildcards: number;
+    bScore: number;
+    dScore: number;
+    winnerScore?: number;
+  }) {
+    const state = emptyDirectorState();
+    state.tournament = {
+      id: 'tournament-wildcard',
+      name: 'Wildcards',
+      date: '',
+      venue: '',
+      organizer: '',
+      status: 'running',
+      timeZone: 'America/New_York',
+      rules: structuredClone(defaultRules),
+      formatId: 'format-prelim',
+      currentPhaseId: 'phase-prelim',
+      currentPacketId: null,
+      currentRoundId: null,
+      createdAt: '',
+      updatedAt: '',
+    };
+    state.teams = [team('A'), team('B'), team('C'), team('D')];
+    state.phases = [
+      {
+        id: 'phase-prelim',
+        name: 'Prelim',
+        kind: 'preliminary',
+        order: 1,
+        formatId: 'format-prelim',
+        poolIds: ['pool-1', 'pool-2'],
+        roundIds: ['round-prelim'],
+        advancementRule: {
+          qualifiersPerPool: 1,
+          wildcards: options.wildcards,
+          tiebreakers: defaultRules.tiebreakers,
+          manualOverrideAllowed: true,
+        },
+        carryover: false,
+        status: 'active',
+      },
+    ];
+    state.pools = [
+      { id: 'pool-1', phaseId: 'phase-prelim', name: 'Pool 1', teamIds: ['A', 'B'], order: 1 },
+      { id: 'pool-2', phaseId: 'phase-prelim', name: 'Pool 2', teamIds: ['C', 'D'], order: 2 },
+    ];
+    state.rounds = [
+      {
+        id: 'round-prelim',
+        phaseId: 'phase-prelim',
+        name: 'Prelim round',
+        number: 1,
+        revision: 1,
+        status: 'closed',
+        packetId: null,
+        scheduledGameIds: [],
+        scheduledStart: null,
+        releasedAt: null,
+        startedAt: null,
+        closedAt: null,
+      },
+    ];
+    const winner = options.winnerScore ?? 100;
+    state.games = [
+      acceptedGame('2026-03-01', 'round-prelim', 'A', winner, 'B', options.bScore),
+      acceptedGame('2026-03-02', 'round-prelim', 'C', 10, 'D', options.dScore),
+    ];
+    state.scheduledGames = [
+      scheduledForGame(state.games[0]!, 'A', 'B', { poolId: 'pool-1' }),
+      scheduledForGame(state.games[1]!, 'C', 'D', { poolId: 'pool-2' }),
+    ];
+    state.rounds[0]!.scheduledGameIds = [state.scheduledGames[0]!.id, state.scheduledGames[1]!.id];
+    return state;
+  }
+
+  test('advancement wildcards select the best remaining team across pools', () => {
+    const state = wildcardState({ wildcards: 1, bScore: 0, dScore: 0 });
+    const preview = previewAdvancement(state, state.phases[0]!);
+    // A and C win their pools; D lost by less than B, so D is the wildcard.
+    expect(preview.qualifiers.map((entry) => entry.id).sort()).toEqual(['A', 'C', 'D']);
+    expect(preview.wildcards.map((entry) => entry.id)).toEqual(['D']);
+    expect(preview.unresolved).toHaveLength(0);
+    expect(preview.explanation.join(' ')).toMatch(/1 wildcard\(s\) selected across pools/);
+  });
+
+  test('advancement wildcard cutoff ties stay unresolved for a director decision', () => {
+    // Both losers finish 0-1 with identical points and margin.
+    const state = wildcardState({ wildcards: 1, bScore: 0, dScore: 0, winnerScore: 10 });
+    const preview = previewAdvancement(state, state.phases[0]!);
+    expect(preview.wildcards).toHaveLength(1);
+    expect(preview.unresolved).toHaveLength(1);
+    expect(preview.unresolved[0]?.reason).toMatch(/wildcard cutoff is tied/);
   });
 
   test('known old state migrates and future state is not rewritten', () => {

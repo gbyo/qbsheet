@@ -4,7 +4,8 @@ import type { DirectorState } from '../domain';
 import { Button, EmptyState, FormField, PanelBody, PanelFooter, StateLabel } from '../components/Controls';
 import { Icon } from '../components/Icon';
 import { PageHeader } from '../components/PageHeader';
-import { importTeamsCsv, type TeamRecord } from '@qbsheet/tournament-formats';
+import { importQbj, importSqbsTeams, importTeamsCsv, type TeamRecord } from '@qbsheet/tournament-formats';
+import { toImportedTeamInputs } from './teamImport';
 import type { DirectorNavigationTarget } from '../app/navigationTarget';
 import { useNavigationHighlight } from '../app/useNavigationHighlight';
 import { errorNotice, type AnnounceInput } from '../notices';
@@ -78,24 +79,7 @@ export function TeamsView({
   }, [search, state.organizations]);
 
   const addImportedRows = (teams: TeamRecord[], warningCount: number) => {
-    const result = controller.addImportedTeams(
-      teams.map((team) => ({
-        id: team.id,
-        displayName: team.displayName ?? team.name,
-        organizationId: team.organizationId,
-        teamLetter: team.letter,
-        seed: team.seed ?? null,
-        status: importedTeamStatus(team.status),
-        notes: team.notes,
-        players: team.players?.map((player) => ({
-          id: player.id,
-          name: player.name,
-          captain: player.captain,
-          rosterNumber: player.rosterNumber,
-          notes: player.notes,
-        })),
-      })),
-    );
+    const result = controller.addImportedTeams(toImportedTeamInputs(teams));
     const importedLabel = `${result.inserted} team${result.inserted === 1 ? '' : 's'}`;
     const duplicateLabel = result.skipped
       ? `; ${result.skipped} duplicate${result.skipped === 1 ? '' : 's'} skipped`
@@ -145,6 +129,48 @@ export function TeamsView({
     }
   };
 
+  const importSqbs = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      const report = importSqbsTeams(await file.text());
+      if (!report.ok) {
+        onAnnounce(
+          errorNotice(
+            report.errors.map((entry) => entry.message).join(' ') || 'That SQBS file is not valid.',
+          ),
+        );
+        return;
+      }
+      if (report.value.length === 0) {
+        onAnnounce('No teams found in that SQBS file.');
+        return;
+      }
+      addImportedRows(report.value, report.warnings.length);
+    } catch (reason: unknown) {
+      onAnnounce(reason instanceof Error ? reason.message : 'That SQBS file could not be read.');
+    }
+  };
+
+  const importQbjRoster = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      const report = importQbj(await file.text());
+      if (!report.ok) {
+        onAnnounce(
+          errorNotice(report.errors.map((entry) => entry.message).join(' ') || 'That QBJ file is not valid.'),
+        );
+        return;
+      }
+      if (report.value.tournament.teams.length === 0) {
+        onAnnounce('No teams found in that QBJ file.');
+        return;
+      }
+      addImportedRows(report.value.tournament.teams, report.warnings.length);
+    } catch (reason: unknown) {
+      onAnnounce(reason instanceof Error ? reason.message : 'That QBJ file could not be read.');
+    }
+  };
+
   return (
     <>
       <PageHeader
@@ -163,6 +189,36 @@ export function TeamsView({
                   accept=".csv,text/csv"
                   onChange={(event) => {
                     void importCsv(event.target.files?.[0]);
+                    event.currentTarget.value = '';
+                  }}
+                />
+              </span>
+            </label>
+            <label className="director-button director-button-secondary">
+              <Icon name="upload" size={15} />
+              <span>
+                Import SQBS
+                <input
+                  className="director-visually-hidden-input"
+                  type="file"
+                  accept=".sqbs,.txt,text/plain"
+                  onChange={(event) => {
+                    void importSqbs(event.target.files?.[0]);
+                    event.currentTarget.value = '';
+                  }}
+                />
+              </span>
+            </label>
+            <label className="director-button director-button-secondary">
+              <Icon name="upload" size={15} />
+              <span>
+                Import QBJ
+                <input
+                  className="director-visually-hidden-input"
+                  type="file"
+                  accept=".qbj,application/json"
+                  onChange={(event) => {
+                    void importQbjRoster(event.target.files?.[0]);
                     event.currentTarget.value = '';
                   }}
                 />
@@ -1497,17 +1553,4 @@ function organizationNameFor(state: DirectorState, organizationId: string | null
   return organizationId
     ? (state.organizations.find((organization) => organization.id === organizationId)?.name ?? '')
     : '';
-}
-
-function importedTeamStatus(status: string | undefined): 'confirmed' | 'waitlist' | 'dropped' {
-  const normalized = typeof status === 'string' ? status.trim().toLowerCase() : '';
-  if (
-    normalized === 'dropped' ||
-    normalized === 'withdrawn' ||
-    normalized === 'no-show' ||
-    normalized === 'forfeit'
-  )
-    return 'dropped';
-  if (normalized === 'late' || normalized === 'waitlist') return 'waitlist';
-  return 'confirmed';
 }

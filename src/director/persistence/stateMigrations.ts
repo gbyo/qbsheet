@@ -12,6 +12,7 @@ import {
   type DirectorState,
   type GameRecord,
   type LiveBackendDescriptor,
+  type FinalPlacement,
   type Packet,
   type Protest,
   type ResultSubmission,
@@ -326,7 +327,9 @@ function normalizeTournament(value: unknown): DirectorState['tournament'] {
     id,
     name: stringOrEmpty(value.name),
     date: stringOrEmpty(value.date),
+    endDate: optionalStoredText(value.endDate),
     venue: stringOrEmpty(value.venue),
+    questionSet: optionalStoredText(value.questionSet),
     organizer: stringOrEmpty(value.organizer),
     status: isTournamentStatus(value.status) ? value.status : 'draft',
     rules,
@@ -337,6 +340,27 @@ function normalizeTournament(value: unknown): DirectorState['tournament'] {
     timeZone: normalizeTimeZone(value.timeZone),
     createdAt: stringOrEmpty(value.createdAt),
     updatedAt: stringOrEmpty(value.updatedAt),
+    finalPlacement: normalizeFinalPlacement(value.finalPlacement),
+  };
+}
+
+function normalizeFinalPlacement(value: unknown): FinalPlacement | undefined {
+  if (value === null || value === undefined) return undefined;
+  if (!isRecord(value)) throw new Error('Director storage contains an invalid final placement.');
+  if (!Array.isArray(value.order)) throw new Error('Director storage contains an invalid final placement.');
+  const seen = new Set<string>();
+  const order: string[] = [];
+  for (const entry of value.order) {
+    if (typeof entry !== 'string' || entry === '' || seen.has(entry)) continue;
+    seen.add(entry);
+    order.push(entry);
+  }
+  if (order.length === 0) throw new Error('Director storage contains an invalid final placement.');
+  return {
+    order,
+    actor: stringOrEmpty(value.actor),
+    at: stringOrEmpty(value.at),
+    ...(typeof value.reason === 'string' && value.reason !== '' ? { reason: value.reason } : {}),
   };
 }
 
@@ -346,19 +370,43 @@ function normalizeTournamentRules(value: Record<string, unknown>): TournamentRul
   // code, while preserving each supplied value that satisfies the Director's field constraints.
   const rules = structuredClone(defaultRules);
   if (isFiniteNumber(value.tossupValue) && value.tossupValue > 0) rules.tossupValue = value.tossupValue;
-  if (isFiniteNumber(value.powerValue) && value.powerValue > 0) rules.powerValue = value.powerValue;
-  if (isFiniteNumber(value.negValue) && value.negValue <= 0) rules.negValue = value.negValue;
+  if (value.superpowerValue === null) rules.superpowerValue = null;
+  else if (isFiniteNumber(value.superpowerValue) && value.superpowerValue > 0) {
+    rules.superpowerValue = value.superpowerValue;
+  }
+  if (value.powerValue === null) rules.powerValue = null;
+  else if (isFiniteNumber(value.powerValue) && value.powerValue > 0) rules.powerValue = value.powerValue;
+  if (value.negValue === null) rules.negValue = null;
+  else if (isFiniteNumber(value.negValue) && value.negValue <= 0) rules.negValue = value.negValue;
+  if (typeof value.useBonuses === 'boolean') rules.useBonuses = value.useBonuses;
   if (isFiniteNumber(value.bonusValue) && value.bonusValue >= 0) rules.bonusValue = value.bonusValue;
   if (isIntegerAtLeast(value.tossupCount, 1)) rules.tossupCount = value.tossupCount;
   if (isIntegerAtLeast(value.bonusParts, 1)) rules.bonusParts = value.bonusParts;
+  if (value.minimumBonusParts === null) rules.minimumBonusParts = null;
+  else if (isIntegerAtLeast(value.minimumBonusParts, 1)) rules.minimumBonusParts = value.minimumBonusParts;
+  if (value.maximumBonusScore === null) rules.maximumBonusScore = null;
+  else if (isIntegerAtLeast(value.maximumBonusScore, 0)) rules.maximumBonusScore = value.maximumBonusScore;
+  if (value.bonusDivisor === null) rules.bonusDivisor = null;
+  else if (isIntegerAtLeast(value.bonusDivisor, 1)) rules.bonusDivisor = value.bonusDivisor;
   if (typeof value.bouncebacks === 'boolean') rules.bouncebacks = value.bouncebacks;
   if (typeof value.overtime === 'boolean') rules.overtime = value.overtime;
+  if (isIntegerAtLeast(value.overtimeTossupCount, 1)) rules.overtimeTossupCount = value.overtimeTossupCount;
+  if (typeof value.overtimeBonuses === 'boolean') rules.overtimeBonuses = value.overtimeBonuses;
+  else rules.overtimeBonuses = rules.overtime;
+  if (value.maximumTossupCount === null) rules.maximumTossupCount = null;
+  else if (isIntegerAtLeast(value.maximumTossupCount, 1)) {
+    rules.maximumTossupCount = value.maximumTossupCount;
+  }
   const nestedProcedure = ['roomProcedure', 'room_procedure', 'procedure', 'regulation']
     .map((key) => asRecord(value[key]))
     .find((procedure) => procedure && typeof procedure.timed === 'boolean');
   if (typeof value.timed === 'boolean') rules.timed = value.timed;
   else if (nestedProcedure && typeof nestedProcedure.timed === 'boolean') rules.timed = nestedProcedure.timed;
   if (typeof value.lightning === 'boolean') rules.lightning = value.lightning;
+  if (isIntegerAtLeast(value.lightningCountPerTeam, 1)) {
+    rules.lightningCountPerTeam = value.lightningCountPerTeam;
+  }
+  if (isIntegerAtLeast(value.lightningDivisor, 1)) rules.lightningDivisor = value.lightningDivisor;
   if (isIntegerAtLeast(value.maximumActivePlayers, 1)) {
     rules.maximumActivePlayers = value.maximumActivePlayers;
   }
@@ -596,6 +644,10 @@ function stringOrNull(value: unknown): string | null {
 
 function stringOrEmpty(value: unknown): string {
   return typeof value === 'string' ? value : '';
+}
+
+function optionalStoredText(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value : undefined;
 }
 
 function isFiniteNumber(value: unknown): value is number {

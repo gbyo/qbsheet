@@ -1,10 +1,36 @@
-import { deriveTeamStandings, latestRound, runPreflight, type DirectorState } from '../domain';
+import {
+  deriveTeamStandings,
+  latestRound,
+  runPreflight,
+  type DirectorState,
+  type PreflightIssue,
+} from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
 import { Button } from '../components/Controls';
 import { Icon } from '../components/Icon';
 import { PageHeader } from '../components/PageHeader';
 import type { SectionId } from '../app/navigation';
 import type { AnnounceInput } from '../notices';
+
+function sectionForArea(area: PreflightIssue['area']): SectionId {
+  switch (area) {
+    case 'teams':
+      return 'teams';
+    case 'format':
+      return 'format';
+    case 'schedule':
+      return 'schedule';
+    case 'rooms':
+    case 'qbtcp':
+      return 'rooms';
+    case 'packets':
+      return 'packets';
+    case 'storage':
+      return 'settings';
+    default:
+      return 'tournament';
+  }
+}
 
 export function OverviewView({
   state,
@@ -26,6 +52,9 @@ export function OverviewView({
     state.rounds.find((entry) => entry.id === tournament?.currentRoundId) ?? latestRound(state.rounds);
   const games = round ? state.scheduledGames.filter((game) => game.roundId === round.id) : [];
   const finished = games.filter((game) => game.status === 'accepted').length;
+  const complete =
+    games.length > 0 &&
+    games.every((game) => game.bye || game.status === 'accepted' || game.status === 'cancelled');
   const playing = games.filter(
     (game) => game.status === 'live' || game.status === 'released' || game.status === 'scheduled',
   ).length;
@@ -38,8 +67,15 @@ export function OverviewView({
   const blockers = issues.filter((issue) => issue.severity === 'blocker');
   const otherChecks = issues.length - blockers.length;
   const standings = deriveTeamStandings(state).slice(0, 5);
+  // Every blocker answers where it can be fixed: the attention item deep-links
+  // into the tool that owns the problem instead of dumping everything on the
+  // Tournament section.
   const attention: Array<{ id: string; text: string; section: SectionId }> = [
-    ...blockers.map((issue) => ({ id: issue.id, text: issue.message, section: 'tournament' as SectionId })),
+    ...blockers.map((issue) => ({
+      id: issue.id,
+      text: issue.message,
+      section: sectionForArea(issue.area),
+    })),
     ...(reviewCount
       ? [
           {
@@ -100,44 +136,33 @@ export function OverviewView({
               </div>
             </div>
             <div className="director-round-actions">
-              {round.status !== 'closed' && (
+              {round.status !== 'closed' && round.status !== 'released' && (
                 <Button
-                  variant="quiet"
-                  icon={
-                    round.status === 'released' ? 'pause' : round.status === 'planned' ? 'clipboard' : 'play'
-                  }
+                  variant="primary"
+                  icon="play"
                   onClick={() => {
-                    if (round.status === 'planned') {
-                      const prepared = controller.prepareRound(round.id);
-                      onAnnounce(
-                        prepared
-                          ? `${round.name} prepared.`
-                          : `${round.name} could not be prepared; review the schedule first.`,
-                      );
-                    } else if (round.status === 'prepared') {
-                      const released = controller.releaseRound(round.id);
-                      onAnnounce(
-                        released
-                          ? `${round.name} released.`
-                          : 'The round is not ready to release; review the Director error and room assignments.',
-                      );
-                    } else {
-                      const closed = controller.closeRound(round.id);
-                      onAnnounce(
-                        closed
-                          ? `${round.name} closed.`
-                          : `${round.name} could not close; accept or cancel every game first.`,
-                      );
-                    }
+                    void controller.startRound(round.id).then((result) => onAnnounce(result.summary));
                   }}
                 >
-                  {round.status === 'planned'
-                    ? 'Prepare round'
-                    : round.status === 'prepared'
-                      ? 'Release assignments'
-                      : 'Close round'}
+                  Start {round.name}
                 </Button>
               )}
+              {round.status === 'released' &&
+                (complete ? (
+                  <Button
+                    variant="primary"
+                    icon="chevron"
+                    onClick={() => {
+                      onAnnounce(controller.finishRound(round.id).summary);
+                    }}
+                  >
+                    Finish {round.name}
+                  </Button>
+                ) : (
+                  <Button variant="primary" icon="chevron" onClick={() => onNavigate('tournament')}>
+                    Open {round.name}
+                  </Button>
+                ))}
               <Button variant="quiet" icon="chevron" onClick={() => onNavigate('tournament')}>
                 Open control
               </Button>

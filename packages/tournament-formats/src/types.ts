@@ -40,7 +40,11 @@ export interface TournamentRecord extends ExtensibleRecord {
   id: string;
   name: string;
   date?: string;
+  /** Optional last day for multi-day events. Absent means single-day. */
+  endDate?: string;
   location?: string;
+  /** Optional question-set name, carried through imports/exports/reports. */
+  questionSet?: string;
   organizationId?: string;
   notes?: string;
 }
@@ -181,6 +185,8 @@ export interface GameTeamResult extends ExtensibleRecord {
   bonusPoints?: number;
   bonusBouncebackPoints?: number;
   lightningPoints?: number;
+  /** Early-buzz tier above power (for example 20-point superpowers). */
+  superpowers?: number;
   powers?: number;
   gets?: number;
   negs?: number;
@@ -195,6 +201,8 @@ export interface GamePlayerResult extends ExtensibleRecord {
   playerId: string;
   teamId: string;
   tossupsHeard?: number;
+  /** Early-buzz tier above power (for example 20-point superpowers). */
+  superpowers?: number;
   powers?: number;
   gets?: number;
   negs?: number;
@@ -311,6 +319,22 @@ export interface AuditEventRecord extends ExtensibleRecord {
   details?: JsonObject;
 }
 
+export interface TimelineEventRecord extends ExtensibleRecord {
+  id: string;
+  type: string;
+  title: string;
+  description?: string;
+  scheduledStart?: string | null;
+  scheduledEnd?: string | null;
+  teamIds?: string[];
+  roomId?: string | null;
+  location?: string;
+  visibility?: string;
+  dayOrder?: number | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface QbjPreservation extends ExtensibleRecord {
   version?: string;
   /** Objects whose types this package does not yet interpret. */
@@ -342,6 +366,7 @@ export interface DirectorTournament {
   resultSubmissions: ResultSubmissionRecord[];
   protests: ProtestRecord[];
   auditEvents: AuditEventRecord[];
+  timelineEvents: TimelineEventRecord[];
   qbj?: QbjPreservation;
   extensions?: JsonObject;
 }
@@ -381,4 +406,5 @@ export const emptyTournamentCollections = {
   resultSubmissions: [],
   protests: [],
   auditEvents: [],
+  timelineEvents: [],
 } as const;

@@ -298,6 +298,7 @@ export function privacyFixture(): DirectorState {
         {
           teamId: 'team-a',
           score: 285,
+          superpowers: 0,
           powers: 4,
           gets: 9,
           negs: 1,
@@ -308,6 +309,7 @@ export function privacyFixture(): DirectorState {
         {
           teamId: 'team-b',
           score: 190,
+          superpowers: 0,
           powers: 1,
           gets: 7,
           negs: 2,
@@ -319,6 +321,7 @@ export function privacyFixture(): DirectorState {
       playerStats: [
         {
           playerId: 'player-0-0',
+          superpowers: 0,
           teamId: 'team-a',
           powers: 3,
           gets: 4,
@@ -328,6 +331,7 @@ export function privacyFixture(): DirectorState {
         },
         {
           playerId: 'player-1-0',
+          superpowers: 0,
           teamId: 'team-b',
           powers: 1,
           gets: 3,
@@ -356,6 +360,7 @@ export function privacyFixture(): DirectorState {
         {
           teamId: 'team-c',
           score: 240,
+          superpowers: 0,
           powers: 2,
           gets: 10,
           negs: 0,
@@ -366,6 +371,7 @@ export function privacyFixture(): DirectorState {
         {
           teamId: 'team-d',
           score: 205,
+          superpowers: 0,
           powers: 2,
           gets: 8,
           negs: 1,
