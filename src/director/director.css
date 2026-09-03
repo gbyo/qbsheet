@@ -96,6 +96,7 @@ button:disabled:hover {
 }
 
 .visually-hidden,
+.director-visually-hidden,
 .director-visually-hidden-input {
   position: absolute;
   width: 1px;
@@ -1709,6 +1710,233 @@ button:disabled:hover {
   padding: 9px 0 3px;
 }
 
+/* Teams: registration and roster editing are one roomy workflow rather than controls in a cell. */
+
+.director-team-registration .director-panel-body,
+.director-team-editor {
+  display: grid;
+  gap: 22px;
+}
+
+.director-fieldset {
+  display: grid;
+  min-width: 0;
+  gap: 14px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+}
+
+.director-fieldset > legend {
+  padding: 0;
+  margin-bottom: 2px;
+  color: var(--director-ink);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.director-roster-fieldset {
+  padding-top: 20px;
+  border-top: 1px solid var(--director-border);
+}
+
+.director-team-registration-grid {
+  grid-template-columns: minmax(220px, 1.35fr) minmax(100px, 0.45fr) minmax(220px, 1.2fr);
+}
+
+.director-team-edit-grid,
+.director-school-edit-grid {
+  grid-template-columns: repeat(4, minmax(130px, 1fr));
+}
+
+.director-section-heading-inline {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.director-section-heading-inline h3,
+.director-section-heading-inline p,
+.director-add-players-form h4 {
+  margin: 0;
+}
+
+.director-section-heading-inline > p {
+  color: var(--director-muted);
+  font-size: 12px;
+}
+
+.director-secondary-details > summary {
+  width: fit-content;
+  padding: 4px 0;
+  color: var(--director-accent);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.director-secondary-details[open] > summary {
+  margin-bottom: 10px;
+}
+
+.director-roster-paste {
+  display: grid;
+  grid-template-columns: minmax(240px, 520px) auto;
+  gap: 10px;
+  align-items: end;
+  padding: 12px;
+  background: var(--director-surface-soft);
+  border: 1px solid var(--director-border);
+  border-radius: 5px;
+}
+
+.director-roster-paste .director-form-field {
+  max-width: none;
+}
+
+.director-roster-paste .director-textarea {
+  min-height: 104px;
+}
+
+.director-roster-entry {
+  display: grid;
+  gap: 7px;
+}
+
+.director-roster-entry-row {
+  display: grid;
+  grid-template-columns: 24px minmax(170px, 1.2fr) minmax(64px, 0.35fr) auto minmax(150px, 0.85fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.director-roster-entry-row input {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  padding: 7px 9px;
+  color: var(--director-ink);
+  font-size: 13px;
+  background: var(--director-surface);
+  border: 1px solid var(--director-border-strong);
+  border-radius: 4px;
+}
+
+.director-roster-entry-row input:focus {
+  border-color: #88afc8;
+  box-shadow: 0 0 0 3px rgb(20 101 156 / 10%);
+  outline: 0;
+}
+
+.director-roster-entry-number {
+  color: var(--director-faint);
+  font-size: 11px;
+  text-align: right;
+}
+
+.director-roster-captain-field {
+  white-space: nowrap;
+}
+
+.director-roster-captain-field input {
+  width: 15px;
+  min-height: 15px;
+  padding: 0;
+}
+
+.director-roster-open-action {
+  min-height: 28px;
+  color: var(--director-accent);
+  white-space: nowrap;
+}
+
+.director-team-editor-row > td {
+  padding: 18px var(--director-panel-inset);
+}
+
+.director-team-editor .director-inline-edit {
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--director-border);
+}
+
+.director-team-editor .director-form-field,
+.director-school-edit-grid .director-form-field {
+  max-width: none;
+}
+
+.director-existing-roster,
+.director-add-players-form {
+  display: grid;
+  gap: 12px;
+}
+
+.director-add-players-form {
+  padding: 15px;
+  background: var(--director-surface);
+  border: 1px solid var(--director-border);
+  border-radius: 5px;
+}
+
+.director-roster-add-actions {
+  justify-content: space-between;
+}
+
+.director-roster-player-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px 16px;
+  align-items: center;
+  padding: 11px 12px;
+  background: var(--director-surface);
+  border: 1px solid var(--director-border);
+  border-radius: 4px;
+}
+
+.director-roster-player-card.is-inactive {
+  opacity: 0.68;
+}
+
+.director-roster-player-summary strong,
+.director-roster-player-summary span,
+.director-roster-player-summary small {
+  overflow-wrap: anywhere;
+}
+
+.director-roster-player-summary span,
+.director-roster-player-summary small {
+  color: var(--director-muted);
+  font-size: 11px;
+}
+
+.director-roster-player-edit {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--director-border);
+}
+
+.director-schools-panel .director-panel-heading > div:first-child {
+  min-width: 0;
+}
+
+.director-schools-panel .director-panel-description {
+  margin-top: 4px;
+  margin-bottom: 0;
+}
+
+.director-school-table {
+  min-width: 700px;
+}
+
+.director-merge-school {
+  max-width: 560px;
+}
+
 .director-roster-list {
   display: grid;
   gap: 6px;
@@ -1735,7 +1963,7 @@ button:disabled:hover {
   gap: 2px;
 }
 
-.director-roster-player-summary > span {
+.director-roster-row .director-roster-player-summary > span {
   white-space: nowrap;
 }
 
@@ -2230,6 +2458,20 @@ button:disabled:hover {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .director-team-registration-grid,
+  .director-team-edit-grid,
+  .director-school-edit-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .director-roster-entry-row {
+    grid-template-columns: 24px minmax(180px, 1fr) minmax(70px, 0.35fr) auto;
+  }
+
+  .director-roster-notes-field {
+    grid-column: 2 / 4;
+  }
+
   .director-phase-add-form {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -2449,6 +2691,51 @@ button:disabled:hover {
   .director-form-grid-two,
   .director-form-grid-three {
     grid-template-columns: 1fr;
+  }
+
+  .director-team-registration-grid,
+  .director-team-edit-grid,
+  .director-school-edit-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .director-roster-paste {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .director-roster-entry-row {
+    grid-template-columns: 24px minmax(0, 1fr) auto;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--director-border);
+  }
+
+  .director-roster-name-field {
+    grid-column: 2 / 4;
+  }
+
+  .director-roster-number-field {
+    grid-column: 2;
+  }
+
+  .director-roster-captain-field {
+    grid-column: 3;
+  }
+
+  .director-roster-notes-field {
+    grid-column: 2 / 4;
+  }
+
+  .director-roster-entry-row > .director-roster-remove-action {
+    grid-column: 2 / 4;
+    justify-self: start;
+  }
+
+  .director-roster-player-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .director-roster-player-card > .director-row-actions {
+    justify-content: flex-start;
   }
 
   .director-packet-metadata {

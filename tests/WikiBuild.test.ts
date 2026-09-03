@@ -39,6 +39,15 @@ function javascriptFiles(directory: string): string[] {
   });
 }
 
+/** Every file the build emitted, named the way a deployment would serve it. */
+function emittedFiles(directory: string, prefix = ''): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name);
+    const served = prefix === '' ? entry.name : `${prefix}/${entry.name}`;
+    return entry.isDirectory() ? emittedFiles(path, served) : [served];
+  });
+}
+
 beforeAll(() => {
   // Keep these assertions independent of a stale or missing `dist/`, and force the relative-URL
   // mode that GitHub Pages and a copied local build both use.
@@ -78,7 +87,10 @@ describe('production wiki output', () => {
     const html = readFileSync(startHerePath, 'utf8');
 
     expect(html).toContain('<a href="../../../">Scorer</a>');
-    expect(html).toContain('<a href="../../../director.html">Director</a>');
+    expect(html).toContain('<a href="../../director/">Director</a>');
+    expect(html).toContain('<a href="../../qblive/">QBLive</a>');
+    // The website no longer has a Director application entry to link at, at any depth.
+    expect(html).not.toContain('director.html');
     // The brand mark is inlined into the markup rather than fetched, so the header draws on the
     // first paint and at whatever depth the article sits. There is no `<img>` on this page to
     // check a relative path on; the favicon and the two build assets below cover that.
@@ -145,5 +157,56 @@ describe('production client output', () => {
     expect(javascript).not.toContain('https://github.com/gbyo/qbsheet/wiki');
     expect(javascript).not.toContain('Start-here');
     expect(javascript).not.toContain('This page is for a scorekeeper');
+  });
+});
+
+/**
+ * The product boundary, asserted against the thing that gets deployed.
+ *
+ * Director is a desktop application. It used to be emitted here as well, as a browser build at
+ * `/director.html`, and a reader who found that URL could plan a tournament in something that could
+ * not run one: the QBTCP listener rooms pair with is a native service and the tournament's storage is
+ * a local database. Nothing in a unit test of a page can see that entry come back — only the bundle
+ * can — so the check lives here, where `dist/` already exists.
+ */
+describe('production product surfaces', () => {
+  test('emits no Director application entry, bundle, or asset directory', () => {
+    const files = emittedFiles(dist);
+
+    expect(files).not.toContain('director.html');
+    expect(files.filter((file) => file.startsWith('director/'))).toEqual([]);
+    // The one place the word may appear is the marketing page's own directory.
+    expect(files.filter((file) => file.includes('director')).sort()).toEqual(['about/director/index.html']);
+  });
+
+  test('emits both product pages as complete documents', () => {
+    for (const page of ['about/director/index.html', 'about/qblive/index.html']) {
+      const html = readFileSync(join(dist, page), 'utf8');
+
+      expect(html, page).toContain('<div id="about-root"><div class="about-page">');
+      expect(html, page).not.toContain('<div id="about-root"></div>');
+      expect(html, page).toContain('<header class="about-header">');
+      expect(html, page).toContain('<footer class="about-footer">');
+    }
+
+    const director = readFileSync(join(dist, 'about', 'director', 'index.html'), 'utf8');
+    expect(director).toContain('Director is a desktop application.');
+    // The page must never offer a way into an application this deployment does not contain.
+    expect(director).not.toContain('Open Director');
+
+    const qblive = readFileSync(join(dist, 'about', 'qblive', 'index.html'), 'utf8');
+    expect(qblive).toContain('https://live.qbsheet.com/');
+  });
+
+  test('ships no Director user interface in any bundle', () => {
+    const javascript = javascriptFiles(dist)
+      .map((path) => readFileSync(path, 'utf8'))
+      .join('\n');
+
+    // `director-root` is the mount point the deleted browser entry looked for, and the Director
+    // navigation labels are strings only the Director UI contains.
+    expect(javascript).not.toContain('director-root');
+    expect(javascript).not.toContain('Create or open a tournament');
+    expect(javascript).not.toContain('Opening local tournament storage');
   });
 });
