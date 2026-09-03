@@ -103,7 +103,7 @@ export function nextEventForTeam(snapshot: QbliveSnapshot, teamId: string, now: 
   // timeline events without a sequence stay out of this fallback so sequenceless games retain the
   // old round-number ordering.
   const untimed = candidates
-    .filter((candidate) => candidate.kind === 'game' || candidate.event?.sequence !== null)
+    .filter((candidate) => candidate.kind === 'game' || typeof candidate.event?.sequence === 'number')
     .sort((left, right) => {
       const sequenceOrder = compareOptionalSequence(
         left.game?.sequence ?? left.event?.sequence ?? null,
