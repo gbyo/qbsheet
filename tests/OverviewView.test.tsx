@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, test, vi } from 'vitest';
 import { defaultRules, emptyDirectorState, type DirectorState } from '../src/director/domain';
 import { OverviewView } from '../src/director/overview/OverviewView';
@@ -8,24 +8,26 @@ const controller = {
   prepareRound: vi.fn(() => true),
   releaseRound: vi.fn(() => true),
   closeRound: vi.fn(() => true),
+  startRound: vi.fn(async () => ({ ok: true, summary: 'Round 1 started.' })),
+  finishRound: vi.fn(() => ({ finished: true, summary: 'Round 1 finished.' })),
   error: null,
   saving: false,
   repositoryKind: 'indexeddb',
 } as unknown as DirectorController;
 
-function renderOverview(state: DirectorState) {
+function renderOverview(state: DirectorState, onAnnounce = vi.fn()) {
   const onNavigate = vi.fn();
   render(
     <OverviewView
       state={state}
       controller={controller}
       onNavigate={onNavigate}
-      onAnnounce={vi.fn()}
+      onAnnounce={onAnnounce}
       nativeServerReady={false}
       nativeServerAvailable={false}
     />,
   );
-  return onNavigate;
+  return { onNavigate, onAnnounce };
 }
 
 function tournamentState(): DirectorState {
@@ -64,7 +66,7 @@ function confirmedTeam(id: string, displayName: string): DirectorState['teams'][
 
 describe('OverviewView attention-first layout', () => {
   test('no tournament shows first-step guidance, not subsystem cards', () => {
-    const onNavigate = renderOverview(emptyDirectorState());
+    const { onNavigate } = renderOverview(emptyDirectorState());
 
     expect(screen.getByText('Build the tournament plan')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Add teams' }));
@@ -129,7 +131,7 @@ describe('OverviewView attention-first layout', () => {
         helpRequestId: 'help-1',
       },
     ];
-    const onNavigate = renderOverview(state);
+    const { onNavigate } = renderOverview(state);
 
     expect(screen.getByText('Add at least two confirmed teams.')).toBeTruthy();
     expect(screen.getByText('1 result needs a decision.')).toBeTruthy();
@@ -187,7 +189,7 @@ describe('OverviewView attention-first layout', () => {
       status: 'live',
       assignmentRevision: 1,
     });
-    const onNavigate = renderOverview(state);
+    const { onNavigate } = renderOverview(state);
 
     expect(screen.getByText('Round 1')).toBeTruthy();
     expect(screen.getByText(/4 of 5 results accepted/)).toBeTruthy();
@@ -198,5 +200,72 @@ describe('OverviewView attention-first layout', () => {
     expect(screen.getByText('Current leaders')).toBeTruthy();
     expect(screen.getByText('View standings')).toBeTruthy();
     expect(screen.getByText('Diagnostics')).toBeTruthy();
+  });
+
+  test('planned round offers a one-action start', async () => {
+    const state = tournamentState();
+    state.tournament!.currentRoundId = 'round-1';
+    state.rounds = [
+      {
+        id: 'round-1',
+        phaseId: 'phase-1',
+        name: 'Round 1',
+        number: 1,
+        revision: 1,
+        status: 'planned',
+        packetId: null,
+        scheduledGameIds: [],
+        scheduledStart: null,
+        releasedAt: null,
+        startedAt: null,
+        closedAt: null,
+        dayOrder: 0,
+      },
+    ];
+    const { onAnnounce } = renderOverview(state);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start Round 1' }));
+    await waitFor(() => expect(onAnnounce).toHaveBeenCalledWith('Round 1 started.'));
+  });
+
+  test('complete released round offers a one-action finish', () => {
+    const state = tournamentState();
+    state.teams = [confirmedTeam('team-1', 'Wren A'), confirmedTeam('team-2', 'Dorman')];
+    state.tournament!.currentRoundId = 'round-1';
+    state.rounds = [
+      {
+        id: 'round-1',
+        phaseId: 'phase-1',
+        name: 'Round 1',
+        number: 1,
+        revision: 1,
+        status: 'released',
+        packetId: null,
+        scheduledGameIds: ['game-1'],
+        scheduledStart: null,
+        releasedAt: null,
+        startedAt: null,
+        closedAt: null,
+        dayOrder: 0,
+      },
+    ];
+    state.scheduledGames = [
+      {
+        id: 'game-1',
+        roundId: 'round-1',
+        poolId: null,
+        roomId: null,
+        packetId: null,
+        leftTeamId: 'team-1',
+        rightTeamId: 'team-2',
+        bye: false,
+        status: 'accepted',
+        assignmentRevision: 1,
+      },
+    ];
+    const { onAnnounce } = renderOverview(state);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Finish Round 1' }));
+    expect(onAnnounce).toHaveBeenCalledWith('Round 1 finished.');
   });
 });

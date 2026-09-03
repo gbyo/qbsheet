@@ -504,6 +504,26 @@ function RoundRow({
       </div>
       <StateLabel state={entry.status} label={entry.status} />
       <div className="director-round-row-actions">
+        {(entry.status === 'planned' || entry.status === 'prepared') && (
+          <Button
+            variant="primary"
+            onClick={() => {
+              void controller.startRound(entry.id).then((result) => onAnnounce(result.summary));
+            }}
+          >
+            Start round
+          </Button>
+        )}
+        {entry.status === 'released' && (
+          <Button
+            variant="primary"
+            onClick={() => {
+              onAnnounce(controller.finishRound(entry.id).summary);
+            }}
+          >
+            Finish round
+          </Button>
+        )}
         {entry.status === 'planned' && (
           <Button
             variant="quiet"
