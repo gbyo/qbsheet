@@ -21,6 +21,8 @@ import {
   type DirectorId,
   type DirectorState,
   type AdvancementRule,
+  type FormatKind,
+  type TournamentPlanRecommendation,
   type DetailedStatsStatus,
   type GameRecord,
   type IanaTimeZone,
@@ -332,6 +334,7 @@ export interface DirectorController {
       >
     >,
   ): boolean;
+  applyTournamentPlan(plan: TournamentPlanRecommendation): boolean;
   addPhase(name: string, kind?: NonNullable<DirectorState['phases'][number]>['kind']): void;
   updatePhase(
     phaseId: DirectorId,
@@ -4533,6 +4536,125 @@ export function useDirectorController(repository = createDirectorRepository()): 
     [commit],
   );
 
+  const applyTournamentPlan = useCallback(
+    (plan: TournamentPlanRecommendation) => {
+      let applied = false;
+      commit((draft) => {
+        const tournament = draft.tournament;
+        const format = tournament
+          ? draft.formats.find((entry) => entry.id === tournament.formatId)
+          : undefined;
+        if (!tournament || !format) return;
+        // Never rewrite structure once play is underway: a round past
+        // planned, or any pairings already generated.
+        if (draft.rounds.some((round) => round.status !== 'planned')) return;
+        if (draft.scheduledGames.length > 0) return;
+        const formatKind: FormatKind =
+          plan.id === 'pools-playoffs'
+            ? 'playoff-pools'
+            : plan.id === 'double-round-robin'
+              ? 'double-round-robin'
+              : plan.id === 'swiss'
+                ? 'swiss'
+                : plan.id === 'manual'
+                  ? 'custom'
+                  : 'round-robin';
+        format.kind = formatKind;
+        format.phaseIds = [];
+        draft.phases = [];
+        draft.pools = [];
+        draft.rounds = [];
+        const activeTeams = draft.teams.filter((team) => team.status !== 'dropped');
+        // Timeline events (Lunch, breaks) survive a plan change; new rounds
+        // sequence after them so day order stays duplicate-free.
+        let dayOrder = nextDayOrder(draft.rounds, draft.timeline);
+        plan.stages.forEach((stage, stageIndex) => {
+          const phaseId = newDirectorId('phase');
+          format.phaseIds.push(phaseId);
+          const poolIds: DirectorId[] = [];
+          stage.poolNames.forEach((poolName, poolIndex) => {
+            const poolId = newDirectorId('pool');
+            poolIds.push(poolId);
+            draft.pools.push({
+              id: poolId,
+              phaseId,
+              name: poolName,
+              teamIds: [],
+              order: poolIndex + 1,
+            });
+          });
+          if (stage.assignTeams && poolIds.length > 0) {
+            // Snake distribution over seed order so pools start balanced.
+            const ordered = [...activeTeams].sort(
+              (a, b) => (a.seed ?? Number.MAX_SAFE_INTEGER) - (b.seed ?? Number.MAX_SAFE_INTEGER),
+            );
+            ordered.forEach((team, index) => {
+              const lap = Math.floor(index / poolIds.length);
+              const slot = index % poolIds.length;
+              const poolIndex = lap % 2 === 0 ? slot : poolIds.length - 1 - slot;
+              draft.pools.find((candidate) => candidate.id === poolIds[poolIndex])?.teamIds.push(team.id);
+            });
+          }
+          const nextStage = plan.stages[stageIndex + 1];
+          const advancementRule: AdvancementRule | null =
+            nextStage && stage.poolNames.length > 0 && plan.poolPlan
+              ? {
+                  qualifiersPerPool: Math.max(
+                    1,
+                    Math.floor(plan.poolPlan.divisions[0].teamCount / stage.poolNames.length),
+                  ),
+                  tiebreakers: [...tournament.rules.tiebreakers],
+                  manualOverrideAllowed: true,
+                }
+              : null;
+          draft.phases.push({
+            id: phaseId,
+            name: stage.name,
+            kind: stage.kind,
+            order: stageIndex + 1,
+            formatId: format.id,
+            poolIds,
+            roundIds: [],
+            advancementRule,
+            carryover: false,
+            status: 'planned',
+          });
+          stage.roundNumbers.forEach((roundNumber) => {
+            const roundId = newDirectorId('round');
+            draft.rounds.push({
+              id: roundId,
+              phaseId,
+              name: `Round ${roundNumber}`,
+              number: roundNumber,
+              revision: 1,
+              status: 'planned',
+              packetId: null,
+              scheduledGameIds: [],
+              dayOrder: dayOrder++,
+              scheduledStart: null,
+              releasedAt: null,
+              startedAt: null,
+              closedAt: null,
+            });
+            draft.phases.find((candidate) => candidate.id === phaseId)?.roundIds.push(roundId);
+          });
+        });
+        draft.audit.push({
+          id: newDirectorId('audit'),
+          at: isoNow(),
+          actor: 'Director',
+          type: 'format-changed',
+          summary: `Applied tournament plan: ${plan.title}.`,
+          entityId: format.id,
+          details: { plan: plan.id },
+        });
+        applied = true;
+      });
+      return applied;
+    },
+    [commit],
+  );
+
   return {
     state,
     loading,
@@ -4580,6 +4702,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
     selectPhase,
     selectPacket,
     updateFormat,
+    applyTournamentPlan,
     addPhase,
     updatePhase,
     addPool,
