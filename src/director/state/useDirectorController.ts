@@ -195,6 +195,37 @@ export interface ManualResultInput {
   note?: string;
 }
 
+export interface StartRoundResult {
+  ok: boolean;
+  roundId: DirectorId;
+  roundName: string;
+  /** The round was already released; nothing changed. */
+  alreadyStarted?: boolean;
+  /** No room-based delivery is in use, so rooms were not required. */
+  manual?: boolean;
+  /** Competitive games carrying a room assignment. */
+  deliveredGames: number;
+  /** Matchup labels still needing a physical (USB) handoff. */
+  pendingHandoffs: string[];
+  /** One honest line the UI can announce as-is. */
+  summary: string;
+  /** Set when ok is false. */
+  reason?: string;
+}
+
+export interface FinishRoundResult {
+  finished: boolean;
+  roundId: DirectorId;
+  roundName: string;
+  /** The round was already closed; nothing changed. */
+  alreadyFinished?: boolean;
+  /** Competitive games still awaiting an accepted result or cancellation. */
+  remaining?: number;
+  summary: string;
+  /** Set when finished is false. */
+  reason?: string;
+}
+
 export interface DirectorController {
   state: DirectorState;
   loading: boolean;
@@ -318,6 +349,19 @@ export interface DirectorController {
   prepareRound(roundId: DirectorId): boolean;
   releaseRound(roundId: DirectorId): boolean;
   closeRound(roundId: DirectorId): boolean;
+  /**
+   * One-action round start: validate, checkpoint, prepare, and release through
+   * whichever delivery paths the tournament actually uses. Rooms are required
+   * only when room-based delivery is in play; a manual tournament starts
+   * without them, and USB-configured games without rooms are reported as
+   * physical handoffs instead of failing the whole round.
+   */
+  startRound(roundId: DirectorId): Promise<StartRoundResult>;
+  /**
+   * One-action round finish. Closes the round only when every competitive game
+   * is accepted or deliberately cancelled; otherwise reports what remains.
+   */
+  finishRound(roundId: DirectorId): FinishRoundResult;
   cancelScheduledGame(scheduledGameId: DirectorId, reason?: string): boolean;
   addManualResult(input: ManualResultInput): boolean;
   associateSubmission(submissionId: DirectorId, scheduledGameId: DirectorId): boolean;
@@ -370,6 +414,69 @@ export interface LiveActions {
   finalize(): void;
   unpublish(): void;
   destroy(): void;
+}
+
+/**
+ * The shared prepared → released transition: activate the phase, mark the
+ * tournament running, flip scheduled games to released, and record the
+ * delivery. Used by both the manual releaseRound path and the high-level
+ * startRound orchestration so the two can never diverge.
+ *
+ * Returns the released round's name, or null when the draft round is missing
+ * or not prepared.
+ */
+function applyRoundRelease(draft: DirectorState, roundId: DirectorId): string | null {
+  const round = draft.rounds.find((entry) => entry.id === roundId);
+  if (!round || round.status !== 'prepared') return null;
+  round.status = 'released';
+  round.releasedAt = isoNow();
+  const phase = draft.phases.find((entry) => entry.id === round.phaseId);
+  if (phase && phase.status !== 'active') {
+    const previousPhaseStatus = phase.status;
+    phase.status = 'active';
+    draft.audit.push({
+      id: newDirectorId('audit'),
+      at: isoNow(),
+      actor: 'Director',
+      type: 'format-changed',
+      summary: `Phase ${phase.name} changed from ${previousPhaseStatus} to active.`,
+      entityId: phase.id,
+      details: { from: previousPhaseStatus, to: 'active', reason: 'round-released' },
+    });
+  }
+  if (draft.tournament) {
+    const previousTournamentStatus = draft.tournament.status;
+    draft.tournament.status = 'running';
+    draft.tournament.currentRoundId = roundId;
+    draft.tournament.updatedAt = isoNow();
+    if (previousTournamentStatus !== 'running') {
+      draft.audit.push({
+        id: newDirectorId('audit'),
+        at: isoNow(),
+        actor: 'Director',
+        type: 'tournament-updated',
+        summary: `Tournament lifecycle changed from ${previousTournamentStatus} to running.`,
+        entityId: draft.tournament.id,
+        details: { from: previousTournamentStatus, to: 'running', reason: 'round-released' },
+      });
+    }
+  }
+  draft.scheduledGames
+    .filter((game) => game.roundId === roundId && game.status === 'scheduled')
+    .forEach((game) => (game.status = 'released'));
+  draft.audit.push({
+    id: newDirectorId('audit'),
+    at: isoNow(),
+    actor: 'Director',
+    type: 'assignment-released',
+    summary: `Released ${round.name}.`,
+    entityId: roundId,
+  });
+  // Releasing a round is QBTCP's delivery. Recording it as a transfer keeps the unified
+  // history honest: "how did this room get its assignment" has one table with one answer,
+  // whether that answer was the network, a stick, or both.
+  recordQbtcpDelivery(draft, roundId);
+  return round.name;
 }
 
 export function useDirectorController(repository = createDirectorRepository()): DirectorController {
@@ -2804,56 +2911,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         return false;
       }
       commit((draft) => {
-        const round = draft.rounds.find((entry) => entry.id === roundId);
-        if (!round || round.status !== 'prepared') return;
-        round.status = 'released';
-        round.releasedAt = isoNow();
-        const phase = draft.phases.find((entry) => entry.id === round.phaseId);
-        if (phase && phase.status !== 'active') {
-          const previousPhaseStatus = phase.status;
-          phase.status = 'active';
-          draft.audit.push({
-            id: newDirectorId('audit'),
-            at: isoNow(),
-            actor: 'Director',
-            type: 'format-changed',
-            summary: `Phase ${phase.name} changed from ${previousPhaseStatus} to active.`,
-            entityId: phase.id,
-            details: { from: previousPhaseStatus, to: 'active', reason: 'round-released' },
-          });
-        }
-        if (draft.tournament) {
-          const previousTournamentStatus = draft.tournament.status;
-          draft.tournament.status = 'running';
-          draft.tournament.currentRoundId = roundId;
-          draft.tournament.updatedAt = isoNow();
-          if (previousTournamentStatus !== 'running') {
-            draft.audit.push({
-              id: newDirectorId('audit'),
-              at: isoNow(),
-              actor: 'Director',
-              type: 'tournament-updated',
-              summary: `Tournament lifecycle changed from ${previousTournamentStatus} to running.`,
-              entityId: draft.tournament.id,
-              details: { from: previousTournamentStatus, to: 'running', reason: 'round-released' },
-            });
-          }
-        }
-        draft.scheduledGames
-          .filter((game) => game.roundId === roundId && game.status === 'scheduled')
-          .forEach((game) => (game.status = 'released'));
-        draft.audit.push({
-          id: newDirectorId('audit'),
-          at: isoNow(),
-          actor: 'Director',
-          type: 'assignment-released',
-          summary: `Released ${round.name}.`,
-          entityId: roundId,
-        });
-        // Releasing a round is QBTCP's delivery. Recording it as a transfer keeps the unified
-        // history honest: "how did this room get its assignment" has one table with one answer,
-        // whether that answer was the network, a stick, or both.
-        recordQbtcpDelivery(draft, roundId);
+        applyRoundRelease(draft, roundId);
       });
       return true;
     },
@@ -3684,6 +3742,187 @@ export function useDirectorController(repository = createDirectorRepository()): 
     },
     [enqueuePersistence],
   );
+  const startRound = useCallback(
+    async (roundId: DirectorId): Promise<StartRoundResult> => {
+      const snapshot = stateRef.current;
+      const round = snapshot.rounds.find((entry) => entry.id === roundId);
+      const fail = (roundName: string, reason: string): StartRoundResult => {
+        setError(reason);
+        return {
+          ok: false,
+          roundId,
+          roundName,
+          deliveredGames: 0,
+          pendingHandoffs: [],
+          summary: reason,
+          reason,
+        };
+      };
+      if (!round) return fail('Unknown round', 'That round is no longer in the tournament workspace.');
+      if (round.status === 'closed') {
+        return fail(round.name, `${round.name} is already closed and cannot be started again.`);
+      }
+      const games = snapshot.scheduledGames.filter((game) => game.roundId === roundId);
+      const activeGames = games.filter((game) => !game.bye && game.status !== 'cancelled');
+      if (games.length === 0 || !roundScheduleIsValid(snapshot, roundId)) {
+        return fail(round.name, `${round.name} cannot start until every matchup is valid.`);
+      }
+      const teamName = (teamId: DirectorId | null): string =>
+        (teamId && snapshot.teams.find((team) => team.id === teamId)?.displayName) || 'Unknown team';
+      const gameLabel = (game: ScheduledGame): string =>
+        game.rightTeamId
+          ? `${teamName(game.leftTeamId)} vs ${teamName(game.rightTeamId)}`
+          : teamName(game.leftTeamId);
+      // Room-based delivery is in play when every game already carries a room,
+      // a QBTCP session is actively paired, or a transfer location is
+      // configured. A manual tournament uses none of those, so rooms stay
+      // optional even when a room record or a partial assignment exists.
+      const usbConfigured = snapshot.transfers.locations.length > 0;
+      const sessionsPaired = snapshot.qbtcpSessions.some((session) => session.state !== 'abandoned');
+      const fullyAssigned = activeGames.length > 0 && activeGames.every((game) => game.roomId !== null);
+      const roomsInPlay = sessionsPaired || usbConfigured || fullyAssigned;
+      const describe = (pending: string[], delivered: number, manual: boolean): string => {
+        if (manual && pending.length === 0) return `${round.name} started. Results can be entered manually.`;
+        if (manual)
+          return (
+            `${round.name} started. ` +
+            `${pending.length} game${pending.length === 1 ? '' : 's'} still need${pending.length === 1 ? 's' : ''} files.`
+          );
+        const base = `${round.name} started with ${delivered} room assignment${delivered === 1 ? '' : 's'}.`;
+        return pending.length === 0
+          ? base
+          : `${base} ${pending.length} still need${pending.length === 1 ? 's' : ''} a physical handoff.`;
+      };
+      if (round.status === 'released') {
+        const pending = usbConfigured
+          ? activeGames.filter((game) => game.roomId === null).map(gameLabel)
+          : [];
+        const delivered = activeGames.filter((game) => game.roomId !== null).length;
+        return {
+          ok: true,
+          roundId,
+          roundName: round.name,
+          alreadyStarted: true,
+          manual: !roomsInPlay,
+          deliveredGames: delivered,
+          pendingHandoffs: pending,
+          summary: describe(pending, delivered, !roomsInPlay),
+        };
+      }
+      if (roomsInPlay) {
+        // Every game that carries a room must carry a usable one. Games without
+        // a room are allowed only when a USB workflow exists to hand them out.
+        const roomIds = activeGames.map((game) => game.roomId);
+        const duplicateRoom = roomIds.filter(
+          (roomId, index) => roomId && roomIds.indexOf(roomId) !== index,
+        )[0];
+        const invalidRoom = activeGames.find((game) => {
+          if (!game.roomId) return !usbConfigured;
+          const room = snapshot.rooms.find((entry) => entry.id === game.roomId);
+          return !room || !room.available || room.status !== 'available';
+        });
+        const roomIdsForRound = new Set(roomIds.filter((roomId): roomId is DirectorId => roomId !== null));
+        const resourceIssues = roomAssignmentConflicts(snapshot, roomIdsForRound);
+        if (
+          !roundScheduleIsValid(snapshot, roundId) ||
+          games.length === 0 ||
+          duplicateRoom ||
+          invalidRoom ||
+          resourceIssues.length > 0
+        ) {
+          return fail(
+            round.name,
+            resourceIssues[0]?.message ??
+              (duplicateRoom
+                ? 'A room can only host one game in a round.'
+                : usbConfigured
+                  ? `${round.name} cannot start until every room game has an available room. Games without a room will need USB files.`
+                  : `${round.name} cannot start until every game has an available room.`),
+          );
+        }
+      }
+      try {
+        await checkpoint(`Before starting ${round.name}`);
+      } catch (reason: unknown) {
+        return fail(
+          round.name,
+          reason instanceof Error
+            ? `A durable checkpoint could not be written: ${reason.message}`
+            : `${round.name} could not be started until a durable checkpoint succeeds.`,
+        );
+      }
+      const pending = usbConfigured ? activeGames.filter((game) => game.roomId === null).map(gameLabel) : [];
+      const delivered = activeGames.filter((game) => game.roomId !== null).length;
+      const manual = !roomsInPlay;
+      commit((draft) => {
+        const target = draft.rounds.find((entry) => entry.id === roundId);
+        if (!target || (target.status !== 'planned' && target.status !== 'prepared')) return;
+        if (target.status === 'planned') target.status = 'prepared';
+        const releasedName = applyRoundRelease(draft, roundId);
+        if (!releasedName) return;
+        draft.audit.push({
+          id: newDirectorId('audit'),
+          at: isoNow(),
+          actor: 'Director',
+          type: 'assignment-released',
+          summary: `Started ${releasedName}.`,
+          entityId: roundId,
+          details: { manual, deliveredGames: delivered, pendingHandoffs: pending },
+        });
+      });
+      return {
+        ok: true,
+        roundId,
+        roundName: round.name,
+        manual,
+        deliveredGames: delivered,
+        pendingHandoffs: pending,
+        summary: describe(pending, delivered, manual),
+      };
+    },
+    [commit, checkpoint],
+  );
+
+  const finishRound = useCallback(
+    (roundId: DirectorId): FinishRoundResult => {
+      const snapshot = stateRef.current;
+      const round = snapshot.rounds.find((entry) => entry.id === roundId);
+      if (!round) {
+        const reason = 'That round is no longer in the tournament workspace.';
+        setError(reason);
+        return { finished: false, roundId, roundName: 'Unknown round', summary: reason, reason };
+      }
+      if (round.status === 'closed') {
+        return {
+          finished: true,
+          roundId,
+          roundName: round.name,
+          alreadyFinished: true,
+          summary: `${round.name} is already finished.`,
+        };
+      }
+      if (round.status !== 'released') {
+        const reason = `${round.name} has not started yet.`;
+        setError(reason);
+        return { finished: false, roundId, roundName: round.name, summary: reason, reason };
+      }
+      const remaining = snapshot.scheduledGames.filter(
+        (game) => game.roundId === roundId && !game.bye && !['accepted', 'cancelled'].includes(game.status),
+      ).length;
+      if (remaining > 0) {
+        const reason =
+          `${round.name} still has ${remaining} game${remaining === 1 ? '' : 's'} ` +
+          `without an accepted result.`;
+        return { finished: false, roundId, roundName: round.name, remaining, summary: reason, reason };
+      }
+      if (!closeRoundAction(roundId)) {
+        const reason = `${round.name} could not be finished.`;
+        return { finished: false, roundId, roundName: round.name, summary: reason, reason };
+      }
+      return { finished: true, roundId, roundName: round.name, summary: `${round.name} finished.` };
+    },
+    [closeRoundAction],
+  );
 
   const exportSnapshot = useCallback(() => JSON.stringify(stateRef.current, null, 2), []);
 
@@ -4260,6 +4499,8 @@ export function useDirectorController(repository = createDirectorRepository()): 
     prepareRound,
     releaseRound,
     closeRound: closeRoundAction,
+    startRound,
+    finishRound,
     cancelScheduledGame,
     addManualResult,
     associateSubmission,

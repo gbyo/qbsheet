@@ -177,10 +177,8 @@ test('Director runs a local tournament slice and reopens its result', async ({ p
   await expect(page.getByRole('heading', { level: 1, name: 'Tournament control' })).toBeVisible();
   const navigation = page.locator('nav[aria-label="Tournament sections"]');
   await navigation.getByRole('button', { name: 'Overview', exact: true }).click();
-  await page.getByRole('button', { name: 'Prepare round', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Release assignments', exact: true })).toBeVisible();
-  await goToSection(page, 'Tournament');
-  await page.getByRole('button', { name: 'Release', exact: true }).click();
+  await page.getByRole('button', { name: /^Start Round/ }).click();
+  await expect(page.getByRole('status')).toContainText('started');
 
   await page
     .locator('nav[aria-label="Tournament sections"]')
