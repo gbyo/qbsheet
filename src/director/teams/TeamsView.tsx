@@ -75,14 +75,24 @@ export function TeamsView({
     });
   }, [search, state]);
 
-  useEffect(() => {
-    if (navigationTarget?.section !== 'teams') return;
-    const teamId = navigationTarget.entityType === 'player' ? navigationTarget.parentId : navigationTarget.entityId;
-    if (teamId && state.teams.some((team) => team.id === teamId)) {
-      setTeamDialog({ mode: 'edit', teamId });
-      onClearNavigationTarget?.();
-    }
-  }, [navigationTarget, onClearNavigationTarget, state.teams]);
+  const navigationTeamId =
+    navigationTarget?.section === 'teams'
+      ? navigationTarget.entityType === 'player'
+        ? navigationTarget.parentId
+        : navigationTarget.entityId
+      : undefined;
+  const activeTeamDialog =
+    navigationTeamId && state.teams.some((team) => team.id === navigationTeamId)
+      ? { mode: 'edit' as const, teamId: navigationTeamId }
+      : teamDialog;
+  const openTeamDialog = (dialog: NonNullable<typeof teamDialog>) => {
+    onClearNavigationTarget?.();
+    setTeamDialog(dialog);
+  };
+  const closeTeamDialog = () => {
+    onClearNavigationTarget?.();
+    setTeamDialog(null);
+  };
 
   const addImportedRows = (teams: TeamRecord[], warningCount: number) => {
     const result = controller.addImportedTeams(toImportedTeamInputs(teams));
@@ -145,7 +155,7 @@ export function TeamsView({
         description={`${state.teams.length} team${state.teams.length === 1 ? '' : 's'} · changes persist locally as you work`}
         actions={
           <>
-            <Button variant="primary" icon="plus" onClick={() => setTeamDialog({ mode: 'new' })}>
+            <Button variant="primary" icon="plus" onClick={() => openTeamDialog({ mode: 'new' })}>
               Add team
             </Button>
             <span ref={(node) => { importOpenerRef.current = node; }}>
@@ -220,7 +230,7 @@ export function TeamsView({
       <div className="director-page-stack">
         {state.teams.length === 0 ? (
           <EmptyState title="No teams yet" description="Add a team or import an existing roster.">
-            <Button variant="primary" icon="plus" onClick={() => setTeamDialog({ mode: 'new' })}>
+            <Button variant="primary" icon="plus" onClick={() => openTeamDialog({ mode: 'new' })}>
               Add first team
             </Button>
           </EmptyState>
@@ -254,7 +264,7 @@ export function TeamsView({
                       state={state}
                       team={team}
                       controller={controller}
-                      onEdit={() => setTeamDialog({ mode: 'edit', teamId: team.id })}
+                      onEdit={() => openTeamDialog({ mode: 'edit', teamId: team.id })}
                       onAnnounce={onAnnounce}
                     />
                   )) : (
@@ -269,14 +279,14 @@ export function TeamsView({
         )}
       </div>
 
-      {teamDialog && (
+      {activeTeamDialog && (
         <TeamDialog
-          key={teamDialog.mode === 'edit' ? teamDialog.teamId : 'new-team'}
+          key={activeTeamDialog.mode === 'edit' ? activeTeamDialog.teamId : 'new-team'}
           state={state}
           controller={controller}
-          teamId={teamDialog.mode === 'edit' ? teamDialog.teamId : undefined}
+          teamId={activeTeamDialog.mode === 'edit' ? activeTeamDialog.teamId : undefined}
           onAnnounce={onAnnounce}
-          onClose={() => setTeamDialog(null)}
+          onClose={closeTeamDialog}
         />
       )}
       {pasteOpen && (
@@ -438,7 +448,7 @@ function TeamDialog({
       onAnnounce(errorNotice('Paste at least one player name.'));
       return;
     }
-    setPlayers((current) => [...current.filter((player) => player.id && !player.removed), ...names.map((name) => ({ ...newPlayerDraft(), name }))]);
+    setPlayers((current) => [...current.filter((player) => player.id), ...names.map((name) => ({ ...newPlayerDraft(), name }))]);
     setRosterPaste('');
   };
 
