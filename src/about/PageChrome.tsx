@@ -29,8 +29,21 @@ import BrandLogo from '../BrandLogo';
 
 export const githubUrl = 'https://github.com/gbyo/qbsheet';
 export const qbliveUrl = 'https://live.qbsheet.com/';
+/**
+ * Where a tournament director gets Director.
+ *
+ * Deliberately the releases index rather than a file name. Director is a Tauri application built per
+ * platform, and this repository publishes no installer URL of its own — `createUpdaterArtifacts` is
+ * still disabled pending a release signing key, see `apps/director/README.md`. A hand-written
+ * `Director-1.0.0.dmg` here would be a link this project cannot keep, so the page points at the page
+ * that lists whatever has actually been released and says, in the copy, that Director can also be
+ * built from source.
+ */
+export const releasesUrl = `${githubUrl}/releases`;
 export const qbjDocsUrl = `${githubUrl}/blob/main/docs/QBJ_ASSIGNMENT_PROFILE.md`;
 export const qbtcpDocsUrl = `${githubUrl}/blob/main/docs/QBTCP.md`;
+export const qbliveDocsUrl = `${githubUrl}/blob/main/docs/QBLIVE.md`;
+export const directorDocsUrl = `${githubUrl}/blob/main/apps/director/README.md`;
 export const licenseUrl = `${githubUrl}/blob/main/LICENSE`;
 export const documentationUrl = `${githubUrl}#documentation`;
 export const buildStepsUrl = `${githubUrl}#deployment`;
@@ -42,7 +55,8 @@ export const buildStepsUrl = `${githubUrl}#deployment`;
  * below it. `wiki` names the section as a whole, whose articles each sit a directory below that; see
  * `depthOf`.
  */
-export type PageSlug = '' | 'scoring' | 'tournaments' | 'self-host' | 'faq' | 'privacy' | 'wiki';
+export type PageSlug =
+  '' | 'scoring' | 'tournaments' | 'director' | 'qblive' | 'self-host' | 'faq' | 'privacy' | 'wiki';
 
 /**
  * How many directories below `about/` a document sits.
@@ -61,11 +75,6 @@ function depthOf(slug: PageSlug, nested: boolean): number {
 /** The scorer, which is one directory above `about/` whatever the document's own depth is. */
 export function scorerUrl(slug: PageSlug, nested = false): string {
   return '../'.repeat(depthOf(slug, nested) + 1);
-}
-
-/** The browser Director preview is served beside the scorer at the deployment root. */
-export function directorUrl(slug: PageSlug, nested = false): string {
-  return `${scorerUrl(slug, nested)}director.html`;
 }
 
 /**
@@ -107,6 +116,29 @@ interface INavPage {
    */
   path?: string;
 }
+
+/**
+ * The products this navigation names, which is not the same list as the pages the footer names.
+ *
+ * `Scorer` is the application itself, one directory above `about/`. Director and QBLive are *pages*,
+ * because neither application is served from this website: Director is installed on the machine
+ * running the tournament, and QBLive is served from `live.qbsheet.com` by whoever is publishing the
+ * tournament. A header link that jumped straight into either one would be describing a deployment
+ * this site does not have — which is exactly what `Director` used to do, pointing at a browser build
+ * of tournament control that the production site no longer contains.
+ *
+ * # Why these are not also in the footer
+ *
+ * The footer is this site's writing: the overview, the two audience pages, self-hosting, the
+ * questions, the wiki, the privacy notice. Director and QBLive are the other two products, and the
+ * header carries them on every page including the ones with a footer, so listing them again below
+ * would both double every product link on the site and present them as siblings of `FAQ` and
+ * `Privacy` rather than of `Scorer`. `About` remains the route back into the writing.
+ */
+const productPages: { slug: PageSlug; label: string }[] = [
+  { slug: 'director', label: 'Director' },
+  { slug: 'qblive', label: 'QBLive' },
+];
 
 const primaryPages: INavPage[] = [
   { slug: '', label: 'About' },
@@ -192,8 +224,11 @@ export function PageHeader({ slug, nested = false }: { slug: PageSlug; nested?: 
         </a>
         <nav className="about-nav" aria-label="Primary navigation">
           <a href={scorerUrl(slug, nested)}>Scorer</a>
-          <a href={directorUrl(slug, nested)}>Director</a>
-          <ExternalLink href={qbliveUrl}>QBLive</ExternalLink>
+          {productPages.map((page) => (
+            <a key={page.slug} href={pageUrl(slug, page.slug, nested)} {...current(slug, page.slug)}>
+              {page.label}
+            </a>
+          ))}
           <ExternalLink href={githubUrl}>GitHub</ExternalLink>
         </nav>
       </div>
@@ -221,47 +256,63 @@ export function PageFooter({ slug, nested = false }: { slug: PageSlug; nested?: 
 }
 
 /**
+ * An action a page closes on: a button-shaped link, and whether it leaves the site.
+ *
+ * Named as a type because there are now three shapes of page rather than one. The scorer pages act
+ * into the scorer; the self-hosting page acts into the build steps; and the two product pages act on
+ * software this website does not serve at all, so both of their actions leave.
+ */
+export interface IActionLink {
+  href: string;
+  label: string;
+  external?: boolean;
+}
+
+/** One action, rendered as a link that leaves the site or one that does not. */
+function ActionLink({ link, primary }: { link: IActionLink; primary: boolean }) {
+  const className = primary ? 'about-button is-primary' : 'about-button';
+  return link.external ? (
+    <ExternalLink className={className} href={link.href}>
+      {link.label}
+    </ExternalLink>
+  ) : (
+    <a className={className} href={link.href}>
+      {link.label}
+    </a>
+  );
+}
+
+/**
  * The two buttons every page closes on, and opens on where it has a hero worth acting from.
  *
- * `primary` is the page's own call to action, because it is not the same on all six: the self-hosting
- * page sends a reader to the build steps, and the rest send them into the scorer.
+ * `primary` is the page's own call to action, because it is not the same on every page: the
+ * self-hosting page sends a reader to the build steps, and the scorer pages send them into the
+ * scorer.
+ *
+ * `secondary` exists for the product pages, and for nothing else so far. On a page about the scorer,
+ * "Open QBSheet" beside the page's own action is exactly right — the reader is one click from the
+ * thing being described. On the Director page it would be wrong: Director is not the scorer, it is
+ * not on this website, and offering the scorer as the runner-up action to downloading it invites the
+ * misreading the whole page exists to prevent. So those pages state both of their actions, and the
+ * default — the scorer, then the repository — is untouched.
  */
 export function ActionLinks({
   slug,
   primary,
+  secondary,
   nested = false,
 }: {
   slug: PageSlug;
-  primary?: { href: string; label: string; external?: boolean };
+  primary?: IActionLink;
+  secondary?: IActionLink;
   nested?: boolean;
 }) {
+  const scorer: IActionLink = { href: scorerUrl(slug, nested), label: 'Open QBSheet' };
+  const repository: IActionLink = { href: githubUrl, label: 'View on GitHub', external: true };
   return (
     <div className="about-actions">
-      {primary === undefined ? (
-        <>
-          <a className="about-button is-primary" href={scorerUrl(slug, nested)}>
-            Open QBSheet
-          </a>
-          <ExternalLink className="about-button" href={githubUrl}>
-            View on GitHub
-          </ExternalLink>
-        </>
-      ) : (
-        <>
-          {primary.external ? (
-            <ExternalLink className="about-button is-primary" href={primary.href}>
-              {primary.label}
-            </ExternalLink>
-          ) : (
-            <a className="about-button is-primary" href={primary.href}>
-              {primary.label}
-            </a>
-          )}
-          <a className="about-button" href={scorerUrl(slug, nested)}>
-            Open QBSheet
-          </a>
-        </>
-      )}
+      <ActionLink link={primary ?? scorer} primary />
+      <ActionLink link={secondary ?? (primary === undefined ? repository : scorer)} primary={false} />
     </div>
   );
 }

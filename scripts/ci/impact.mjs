@@ -23,14 +23,18 @@
  *
  * * Nothing outside `src/director/` imports `src/director/`, and `src/director/` reaches back into
  *   the scorer tree for exactly two modules (`src/BrandLogo`, `src/qbj/ParseQbjAssignment`). So
- *   Director web code cannot change scorer runtime behaviour, and the browser torture test does not
- *   need to run for it. `e2e/Director.spec.ts` still does — the `director-web` job runs it.
+ *   Director code cannot change scorer runtime behaviour, and the browser torture test does not
+ *   need to run for it. `e2e/director/Director.spec.ts` still does — the `director-ui` job runs it,
+ *   against Director's own dev server rather than the website's.
  * * `apps/director/` is a thin Vite/Tauri shell whose `src/main.tsx` imports `src/director/`. Its
- *   build is therefore the real compile of the Director web application.
+ *   build is therefore the real compile of Director's user interface. The website emits no Director
+ *   entry at all, which is why the domain is `director-ui` rather than the `director-web` it was
+ *   called while a browser build of tournament control was deployed beside the scorer: Director uses
+ *   web technology for its Tauri window, and is not a web product.
  * * The scorer proper imports no `@qbsheet/*` workspace package. Only `src/director/` does
  *   (`tournament-core`, `tournament-domain`, `tournament-formats`, `qblive-protocol`,
  *   `qblive-projection`), which is why a tournament or QBLive package change routes to
- *   `director-web` and not to the scorer.
+ *   `director-ui` and not to the scorer.
  * * There is no Cargo workspace. Each crate has its own `Cargo.toml` and `Cargo.lock`, so the three
  *   Rust jobs are genuinely independent — with one real edge:
  *   `apps/director/src-tauri/Cargo.toml` path-depends on `crates/qbtcp-server`, so a QBTCP change
@@ -53,7 +57,7 @@ export const DOMAINS = [
   'quality',
   'scorer',
   'scorer-browser',
-  'director-web',
+  'director-ui',
   'tournament-js',
   'qblive-js',
   'rust-director',
@@ -66,7 +70,7 @@ export const DOMAIN_LABELS = {
   quality: 'Formatting, lint, and typecheck',
   scorer: 'Scorer unit and integration tests, and the project-path build',
   'scorer-browser': 'Playwright scorer torture test',
-  'director-web': 'Director frontend build and tests',
+  'director-ui': 'Director application build, unit tests, and browser UI tests',
   'tournament-js': 'Tournament core, formats, and domain packages',
   'qblive-js': 'QBSheet Live protocol, projection, activity, conformance, and Live Web',
   'rust-director': 'Director native crate (apps/director/src-tauri)',
@@ -78,7 +82,7 @@ export const DOMAIN_LABELS = {
 const ALL = DOMAINS;
 
 /** Every JavaScript domain. What a change to the root manifest or the root TypeScript config means. */
-const ALL_JS = ['quality', 'scorer', 'scorer-browser', 'director-web', 'tournament-js', 'qblive-js'];
+const ALL_JS = ['quality', 'scorer', 'scorer-browser', 'director-ui', 'tournament-js', 'qblive-js'];
 
 const SCORER = ['scorer', 'scorer-browser'];
 
@@ -142,15 +146,15 @@ export const RULES = [
     why: 'Live Web is built, tested, and size-gated by qblive.yml',
   },
   {
-    // `src/director/` imports the protocol and the projection, so Director web still has to compile.
+    // `src/director/` imports the protocol and the projection, so Director still has to compile.
     // The protocol and projection suites themselves belong to qblive.yml.
     glob: 'packages/qblive-protocol/**',
-    domains: ['director-web'],
+    domains: ['director-ui'],
     why: 'src/director/live imports @qbsheet/qblive-protocol; the protocol suite is in qblive.yml',
   },
   {
     glob: 'packages/qblive-projection/**',
-    domains: ['director-web'],
+    domains: ['director-ui'],
     why: 'src/director/live imports @qbsheet/qblive-projection; the privacy sweep is in qblive.yml',
   },
   {
@@ -170,17 +174,17 @@ export const RULES = [
   // ---------------------------------------------------------------------------------------------
   {
     glob: 'packages/tournament-core/**',
-    domains: ['tournament-js', 'director-web'],
+    domains: ['tournament-js', 'director-ui'],
     why: 'consumed by src/director and apps/director',
   },
   {
     glob: 'packages/tournament-formats/**',
-    domains: ['tournament-js', 'director-web'],
+    domains: ['tournament-js', 'director-ui'],
     why: 'consumed by src/director and apps/director',
   },
   {
     glob: 'packages/tournament-domain/**',
-    domains: ['tournament-js', 'director-web'],
+    domains: ['tournament-js', 'director-ui'],
     why: 'consumed by src/director; the QBLive side is covered by qblive.yml',
   },
   {
@@ -190,26 +194,20 @@ export const RULES = [
   },
 
   // ---------------------------------------------------------------------------------------------
-  // Director web.
+  // Director. The desktop application's user interface and the shell that hosts it. There is no
+  // `director.html` rule any more: the root website no longer has a Director entry to build.
   // ---------------------------------------------------------------------------------------------
   { glob: 'apps/director/README.md', domains: [], why: 'prose' },
   {
     glob: 'apps/director/**',
-    domains: ['director-web'],
+    domains: ['director-ui'],
     why: 'the Director Vite/Tauri shell and its frontend sources',
   },
   {
     glob: 'src/director/**',
-    domains: ['director-web'],
+    domains: ['director-ui'],
     why: 'nothing outside src/director imports src/director, so the scorer cannot be affected',
   },
-  {
-    // A root build input as well as the Director entry, so the project-path build has to run.
-    glob: 'director.html',
-    domains: ['director-web', 'scorer'],
-    why: 'the Director entry document, and an input to the root site build',
-  },
-
   // ---------------------------------------------------------------------------------------------
   // Scorer.
   // ---------------------------------------------------------------------------------------------
@@ -229,29 +227,34 @@ export const RULES = [
     why: 'the root Vitest suite, which the scorer job runs',
   },
   {
-    glob: 'e2e/Director.spec.ts',
-    domains: ['director-web'],
-    why: 'the Director browser spec, which the director-web job runs on its own',
+    glob: 'e2e/director/**',
+    domains: ['director-ui'],
+    why: 'the Director browser spec, run against apps/director by the director-ui job alone',
   },
   {
     glob: 'e2e/support/**',
-    domains: ['scorer-browser', 'director-web'],
-    why: 'shared Playwright helpers, read by both browser runs',
+    domains: ['scorer-browser'],
+    why: 'shared Playwright helpers, read by the scorer specs',
   },
   { glob: 'e2e/**', domains: ['scorer-browser'], why: 'the Playwright scorer specs' },
   {
     glob: 'playwright.config.ts',
-    domains: ['scorer-browser', 'director-web'],
-    why: 'both Playwright runs read it',
+    domains: ['scorer-browser'],
+    why: 'the scorer browser run; it ignores e2e/director entirely',
+  },
+  {
+    glob: 'playwright.director.config.ts',
+    domains: ['director-ui'],
+    why: 'the Director browser run, including the dev server it starts',
   },
   {
     glob: 'vite.config.ts',
-    domains: ['scorer', 'scorer-browser', 'director-web'],
-    why: 'the scorer build, the service worker, and the Director chunking all live here',
+    domains: ['scorer', 'scorer-browser'],
+    why: 'the scorer build, the marketing-page prerender, and the service worker all live here',
   },
   {
     glob: 'vitest.config.ts',
-    domains: ['scorer', 'director-web'],
+    domains: ['scorer', 'director-ui'],
     why: 'the root unit-test projects; it cannot reach the browser suite',
   },
   {
@@ -586,13 +589,13 @@ export function lockfileProjects(base, head) {
  */
 export const LOCKFILE_PROJECT_DOMAINS = {
   '': ALL_JS,
-  'apps/director': ['director-web'],
+  'apps/director': ['director-ui'],
   'apps/live-web': ['qblive-js'],
-  'packages/tournament-core': ['tournament-js', 'director-web'],
-  'packages/tournament-domain': ['tournament-js', 'director-web'],
-  'packages/tournament-formats': ['tournament-js', 'director-web'],
-  'packages/qblive-protocol': ['qblive-js', 'director-web'],
-  'packages/qblive-projection': ['qblive-js', 'director-web'],
+  'packages/tournament-core': ['tournament-js', 'director-ui'],
+  'packages/tournament-domain': ['tournament-js', 'director-ui'],
+  'packages/tournament-formats': ['tournament-js', 'director-ui'],
+  'packages/qblive-protocol': ['qblive-js', 'director-ui'],
+  'packages/qblive-projection': ['qblive-js', 'director-ui'],
   'packages/qblive-activity': ['qblive-js'],
   'packages/qblive-conformance': ['qblive-js'],
 };
