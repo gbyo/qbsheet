@@ -34,6 +34,7 @@
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { networkInterfaces } from 'node:os';
+import { pathToFileURL } from 'node:url';
 
 import { changedSections, pickSections, projectLiveSnapshot } from '@qbsheet/qblive-projection';
 import { parseManifest, parseSnapshot } from '@qbsheet/qblive-protocol';
@@ -420,6 +421,10 @@ export function createDemoBackend(options = {}) {
           json(response, 400, { error: 'bad-request', message: '`after` must be a revision number.' });
           return;
         }
+        if (!Number.isFinite(limit) || limit < 0) {
+          json(response, 400, { error: 'bad-request', message: '`limit` must be a non-negative number.' });
+          return;
+        }
         json(response, 200, eventPage(after, limit));
         return;
       }
@@ -551,6 +556,6 @@ async function main() {
 }
 
 // Run only when invoked directly, so the tests can import the backend without starting one.
-if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   await main();
 }
