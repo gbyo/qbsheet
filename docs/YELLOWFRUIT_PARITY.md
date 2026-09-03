@@ -90,14 +90,14 @@ PR 5 interchange + parity completion.
 
 | Capability | Class | Notes |
 |---|---|---|
-| SQBS roster import | planned (PR 5) | Parser exists in `tournament-formats`; wired into Teams import with preview, conflicts, stable identity |
-| Full SQBS tournament export | planned (PR 5) | Current helper is roster-only and must stop implying otherwise; real exporter with explicit multi-stage handling |
-| Multi-stage SQBS (per-stage files, combine warnings) | planned (PR 5) | Explicit choice with consequences stated before export |
+| SQBS roster import | implemented (PR 5) | Parser in `tournament-formats`; Teams offers Import CSV and Import SQBS through one shared mapping with stable identity; Scenario K covers same-organization teams |
+| Full SQBS tournament export | implemented (PR 5) | Canonical-engine exporter (teams, players, games, scores, detail, divisions); roster-only helper retained and labeled as such |
+| Multi-stage SQBS (per-stage files, combine warnings) | implemented (PR 5) | Publish offers per-stage scope, overall-with-warning, or each-stage-as-its-own-file; pools map to divisions within one stage |
 | QBJ single-game import (incl. Neg5/MODAQ variants) | equivalent | Multi-round batch import exists |
 | QBJ tournament export (v2, match IDs) | better | Preserved and extended (day order, classifications, final placement via safe extensions) |
 | Assignment QBJ minimality | better | Minimal assignments already; no future-pairing or private leakage |
 | MODAQ game-file import | gap | Covered by generic QBJ import where schemas overlap; no MODAQ-specific path |
-| `.yft` (YellowFruit file) import | planned (PR 5) | `.yft` is versioned JSON and robustly parseable without YellowFruit source; read-only importer with an unrepresentable-items report, only if the audit confirms safety — otherwise documented gap with QBJ/SQBS path |
+| `.yft` (YellowFruit file) import | implemented (PR 5) | Read-only importer (`tournament-formats/yft`, no YellowFruit source): metadata, scoring rules, teams/players, stages, pools, rounds, games with detail, seeds, classifications, final ranks; unrepresentable items reported, never dropped silently; verified against a real 12-team two-stage file |
 | `.yft` export | gap | Deliberate: QBSheet archive/QBJ is the modern format; no symmetry export |
 
 ## Persistence and operations
@@ -115,4 +115,8 @@ QBSheet does not reproduce: static schedule-template picker (replaced by
 consequence-showing recommendations), `.yft` as a format (read-only import at
 most), legacy QBJ 1.2-only flows, or MODAQ/NAQT-registration bootstrap. None of
 these limits a director moving from YellowFruit when CSV, SQBS, QBJ, and
-(pending PR 5) `.yft` import paths exist.
+`.yft` import paths exist. Known `.yft` import limits: schedule-template
+pairings are not carried (games come from the file), per-buzz overtime
+detail is preserved but not stat-counted, packet inventory is not stored in
+`.yft` and must be recreated, and advancement rules must be re-entered as
+Director advancement rules.

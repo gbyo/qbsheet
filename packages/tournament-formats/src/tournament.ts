@@ -25,6 +25,7 @@ import type {
   ScheduledGameRecord,
   StaffRecord,
   TeamRecord,
+  TimelineEventRecord,
   TournamentRecord,
 } from './types';
 import {
@@ -234,6 +235,23 @@ const auditKeys = new Set([
   'extensions',
   'source',
 ]);
+const timelineEventKeys = new Set([
+  'id',
+  'type',
+  'title',
+  'description',
+  'scheduledStart',
+  'scheduledEnd',
+  'teamIds',
+  'roomId',
+  'location',
+  'visibility',
+  'dayOrder',
+  'createdAt',
+  'updatedAt',
+  'extensions',
+  'source',
+]);
 const statKeys = new Set([
   'id',
   'playerId',
@@ -283,6 +301,7 @@ const collectionKeys = new Set([
   'resultSubmissions',
   'protests',
   'auditEvents',
+  'timelineEvents',
   'qbj',
   'extensions',
 ]);
@@ -913,6 +932,40 @@ function readAuditEvents(
   });
 }
 
+function readTimelineEvents(
+  value: unknown,
+  warnings: FormatWarning[],
+  errors: FormatError[],
+): TimelineEventRecord[] {
+  return objectArray(value, 'timelineEvents', errors).map((raw, index) => {
+    const path = `timelineEvents[${index}]`;
+    // Unknown event types and visibilities are preserved as text rather than
+    // rejected: a newer writer's vocabulary must not destroy an old file.
+    return {
+      id: requiredId(raw, path, errors, `event_${index + 1}`),
+      type: readRequiredString(raw, 'type', path, errors) ?? 'custom',
+      title: readRequiredString(raw, 'title', path, errors) ?? `Event ${index + 1}`,
+      ...(optionalString(raw, 'description') ? { description: optionalString(raw, 'description') } : {}),
+      ...(optionalString(raw, 'scheduledStart')
+        ? { scheduledStart: optionalString(raw, 'scheduledStart') }
+        : {}),
+      ...(optionalString(raw, 'scheduledEnd')
+        ? { scheduledEnd: optionalString(raw, 'scheduledEnd') }
+        : {}),
+      ...(optionalStringArray(raw, 'teamIds', path, errors)
+        ? { teamIds: optionalStringArray(raw, 'teamIds', path, errors) }
+        : {}),
+      ...(optionalString(raw, 'roomId') ? { roomId: optionalString(raw, 'roomId') } : {}),
+      ...(optionalString(raw, 'location') ? { location: optionalString(raw, 'location') } : {}),
+      ...(optionalString(raw, 'visibility') ? { visibility: optionalString(raw, 'visibility') } : {}),
+      ...(optionalNumber(raw, 'dayOrder') !== undefined ? { dayOrder: optionalNumber(raw, 'dayOrder') } : {}),
+      ...(optionalString(raw, 'createdAt') ? { createdAt: optionalString(raw, 'createdAt') } : {}),
+      ...(optionalString(raw, 'updatedAt') ? { updatedAt: optionalString(raw, 'updatedAt') } : {}),
+      ...sourceAndExtensions(raw, timelineEventKeys, path, warnings),
+    };
+  });
+}
+
 function duplicateIds<T extends { id: string }>(
   values: readonly T[],
   collection: string,
@@ -1093,6 +1146,7 @@ export function normalizeTournamentData(
     resultSubmissions: readSubmissions(input.resultSubmissions, warnings, errors),
     protests: readProtests(input.protests, warnings, errors),
     auditEvents: readAuditEvents(input.auditEvents, warnings, errors),
+    timelineEvents: readTimelineEvents(input.timelineEvents, warnings, errors),
     ...(qbj ? { qbj: cloneJson(qbj) as DirectorTournament['qbj'] } : {}),
     ...(extensions ? { extensions: cloneJson(extensions) } : {}),
   };
@@ -1119,6 +1173,7 @@ export function normalizeTournamentData(
     ['resultSubmissions', data.resultSubmissions],
     ['protests', data.protests],
     ['auditEvents', data.auditEvents],
+    ['timelineEvents', data.timelineEvents],
   ];
   collections.forEach(([name, values]) => duplicateIds(values, name, errors));
   validateReferences(data, warnings);
@@ -1150,6 +1205,7 @@ export function createTournamentData(
     resultSubmissions: input.resultSubmissions?.slice() ?? [],
     protests: input.protests?.slice() ?? [],
     auditEvents: input.auditEvents?.slice() ?? [],
+    timelineEvents: input.timelineEvents?.slice() ?? [],
     ...(input.rules ? { rules: cloneJson(input.rules) } : {}),
     ...(input.qbj ? { qbj: cloneJson(input.qbj as unknown as JsonValue) as DirectorTournament['qbj'] } : {}),
     ...(input.extensions ? { extensions: cloneJson(input.extensions) } : {}),

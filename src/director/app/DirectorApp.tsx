@@ -17,7 +17,12 @@ import { StandingsView } from '../standings/StandingsView';
 import { PublishView } from '../publish/PublishView';
 import { LiveView } from '../live/LiveView';
 import { SettingsView } from '../settings/SettingsView';
-import { importArchiveBytes, importDirectorTournament, importQbjText } from '../format/interchange';
+import {
+  importArchiveBytes,
+  importDirectorTournament,
+  importQbjText,
+  importYellowFruitText,
+} from '../format/interchange';
 import { latestRound } from '../domain';
 import { isNativeDirector, openNativeTournamentFile, type NativeServerStatus } from '../platform/native';
 import { useNativeServerStatus } from '../server/useNativeServerStatus';
@@ -396,7 +401,7 @@ export default function DirectorApp() {
                 Open archive…
                 <input
                   type="file"
-                  accept=".qbst,.qbj,.json"
+                  accept=".qbst,.qbj,.yft,.json"
                   className="director-visually-hidden-input"
                   onChange={(event) => {
                     closeMenu();
@@ -422,6 +427,15 @@ export default function DirectorApp() {
                           if (!controller.importSnapshot(report.state))
                             throw new Error('That QBJ file could not be imported.');
                           announce(importWarningMessage('QBJ tournament imported.', report.warnings));
+                          return;
+                        }
+                        if (extension === 'yft') {
+                          const report = importYellowFruitText(text);
+                          if (!report.ok || !report.state)
+                            throw new Error(report.errors.join(' ') || 'That YellowFruit file is not valid.');
+                          if (!controller.importSnapshot(report.state))
+                            throw new Error('That YellowFruit file could not be imported.');
+                          announce(importWarningMessage('YellowFruit tournament imported.', report.warnings));
                           return;
                         }
                         const parsed: unknown = JSON.parse(text);
@@ -974,6 +988,19 @@ function NewTournamentScreen({
         onAnnounce(importWarningMessage('QBJ tournament imported.', report.warnings));
         return;
       }
+      if (extension === 'yft') {
+        const report = importYellowFruitText(value);
+        if (!report.ok || !report.state) {
+          onAnnounce(errorNotice(report.errors.join(' ') || 'That YellowFruit file is not valid.'));
+          return;
+        }
+        if (!controller.importSnapshot(report.state)) {
+          onAnnounce(errorNotice('That YellowFruit file could not be imported.'));
+          return;
+        }
+        onAnnounce(importWarningMessage('YellowFruit tournament imported.', report.warnings));
+        return;
+      }
       const parsed: unknown = JSON.parse(value);
       if (isDirectorStateLike(parsed)) {
         if (!controller.importSnapshot(parsed)) return;
@@ -1110,7 +1137,7 @@ function NewTournamentScreen({
                   <input
                     className="director-visually-hidden-input"
                     type="file"
-                    accept=".qbst,.qbj,.json"
+                    accept=".qbst,.qbj,.yft,.json"
                     onChange={(event) => {
                       void importArchive(event.target.files?.[0]);
                       event.currentTarget.value = '';

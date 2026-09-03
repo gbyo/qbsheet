@@ -3276,7 +3276,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         if (!target || target.status === 'cancelled' || target.status === 'accepted') return;
         target.status = 'cancelled';
         for (const game of draft.games.filter((entry) => entry.scheduledGameId === scheduledGameId)) {
-          if (game.status !== 'accepted') {
+          if (game.status !== 'accepted' && game.status !== 'forfeit') {
             game.status = 'cancelled';
             game.note = [game.note, `Scheduled game cancelled: ${normalizedReason}`]
               .filter(Boolean)
@@ -5099,7 +5099,12 @@ function validateDetailedStats(
 
 function canonicalAcceptedGame(state: DirectorState, scheduledGameId: DirectorId): GameRecord | undefined {
   const candidates = state.games.filter((game) => {
-    return game.scheduledGameId === scheduledGameId && game.status === 'accepted';
+    // Forfeits are decided results: they resolve the scheduled game exactly
+    // like accepted scores.
+    return (
+      game.scheduledGameId === scheduledGameId &&
+      (game.status === 'accepted' || game.status === 'forfeit')
+    );
   });
   // Corrected results retain their historical GameRecord/submission. Prefer the record with a
   // current accepted submission over legacy accepted records that predate the submission ledger.

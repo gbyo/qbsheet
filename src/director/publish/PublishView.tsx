@@ -1,9 +1,10 @@
+import { useState } from 'react';
 import type { DirectorState } from '../domain';
 import type { SectionId } from '../app/navigation';
 import { Button, EmptyState, PanelBody } from '../components/Controls';
 import { Icon } from '../components/Icon';
 import { PageHeader } from '../components/PageHeader';
-import { exportArchiveBytes, exportQbj, exportSqbs } from '../format/interchange';
+import { exportArchiveBytes, exportQbj, exportSqbs, exportSqbsTournament } from '../format/interchange';
 import { safeReportName, saveOrDownloadBytes, saveOrDownloadText } from '../reports/downloads';
 import type { AnnounceInput } from '../notices';
 
@@ -71,9 +72,10 @@ export function PublishView({
                 icon="file"
                 onClick={() => downloadQbj(state, onAnnounce)}
               />
+              <SqbsTournamentExport state={state} onAnnounce={onAnnounce} />
               <PublishAction
                 title="SQBS roster"
-                description="Positional roster export for SQBS-compatible tools. Full tournament SQBS export lands next."
+                description="Positional roster-only export for SQBS-compatible tools."
                 action="Download SQBS"
                 icon="download"
                 onClick={() => downloadSqbs(state, onAnnounce)}
@@ -188,6 +190,85 @@ function downloadQbj(state: DirectorState, onAnnounce: (announcement: AnnounceIn
     'QBJ tournament exported',
   );
 }
+function SqbsTournamentExport({
+  state,
+  onAnnounce,
+}: {
+  state: DirectorState;
+  onAnnounce: (announcement: AnnounceInput) => void;
+}) {
+  const phases = state.phases.filter((phase) => !phase.archived);
+  const [scope, setScope] = useState<string>('overall');
+  const downloadScope = (phaseId: string | null, label: string) => {
+    const report = exportSqbsTournament(state, phaseId ? { phaseId } : {});
+    if (!report.ok || !report.text) {
+      onAnnounce(report.errors.join(' ') || 'That SQBS export is not available yet.');
+      return;
+    }
+    const suffix = phaseId ? `-${label}` : '';
+    saveOrDownloadText(
+      report.text,
+      `${safeReportName(state.tournament?.name ?? 'tournament')}${suffix}.sqbs`,
+      'text/plain;charset=utf-8',
+      onAnnounce,
+      [`SQBS ${report.scopeLabel} exported`, ...report.warnings].join(' '),
+    );
+  };
+  return (
+    <div className="director-publish-row">
+      <div className="director-publish-action-icon">
+        <Icon name="download" size={19} />
+      </div>
+      <div>
+        <h2>SQBS tournament</h2>
+        <p>
+          Full tournament statistics for SQBS.
+          {phases.length > 1
+            ? ' SQBS describes one stage at a time: export a stage, or each stage as its own file.'
+            : ' Pools export as SQBS divisions.'}
+        </p>
+        {phases.length > 1 && (
+          <label className="director-publish-scope">
+            Scope
+            <select value={scope} onChange={(event) => setScope(event.target.value)}>
+              <option value="overall">Overall (pool structure is not preserved)</option>
+              {phases.map((phase) => (
+                <option key={phase.id} value={phase.id}>
+                  {phase.name} (pools become divisions)
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+      </div>
+      <span className="director-publish-actions">
+        <Button
+          variant="secondary"
+          onClick={() => {
+            if (scope === 'overall' || phases.length <= 1) downloadScope(null, '');
+            else {
+              const phase = phases.find((entry) => entry.id === scope);
+              downloadScope(phase?.id ?? null, safeReportName(phase?.name ?? 'stage'));
+            }
+          }}
+        >
+          Download SQBS
+        </Button>
+        {phases.length > 1 && (
+          <Button
+            variant="quiet"
+            onClick={() => {
+              for (const phase of phases) downloadScope(phase.id, safeReportName(phase.name));
+            }}
+          >
+            Each stage
+          </Button>
+        )}
+      </span>
+    </div>
+  );
+}
+
 function downloadSqbs(state: DirectorState, onAnnounce: (announcement: AnnounceInput) => void): void {
   saveOrDownloadText(
     exportSqbs(state),

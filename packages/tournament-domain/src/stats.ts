@@ -91,7 +91,9 @@ export function acceptedGameRecords(
   const scheduledById = new Map(state.scheduledGames.map((game) => [game.id, game]));
   const roundById = new Map(state.rounds.map((round) => [round.id, round]));
   const accepted = state.games.filter((game) => {
-    if (game.status !== 'accepted') return false;
+    // Forfeits are decided results: they count in W/L (the non-forfeiting
+    // side wins) while recorded scores are aggregated as-entered.
+    if (game.status !== 'accepted' && game.status !== 'forfeit') return false;
     if (requestedGameIds && !requestedGameIds.has(game.scheduledGameId)) return false;
     const scheduled = scheduledById.get(game.scheduledGameId);
     // Older imported Director documents may contain accepted records before the corresponding
@@ -230,7 +232,17 @@ export function deriveTeamStandings(
     rightStanding.negs += right.negs;
     rightStanding.bonuses += right.bonuses;
     rightStanding.bonusPoints += right.bonusPoints;
-    if (left.score > right.score) {
+    if (game.status === 'forfeit' && (left.teamId === game.forfeitedTeamId || right.teamId === game.forfeitedTeamId)) {
+      // A forfeit is never a tie and never decided by the score line: the
+      // side that did not forfeit wins, even when both scores are zero.
+      if (left.teamId === game.forfeitedTeamId) {
+        rightStanding.wins += 1;
+        leftStanding.losses += 1;
+      } else {
+        leftStanding.wins += 1;
+        rightStanding.losses += 1;
+      }
+    } else if (left.score > right.score) {
       leftStanding.wins += 1;
       rightStanding.losses += 1;
     } else if (right.score > left.score) {

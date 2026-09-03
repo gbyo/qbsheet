@@ -315,6 +315,22 @@ export interface AuditEventRecord extends ExtensibleRecord {
   details?: JsonObject;
 }
 
+export interface TimelineEventRecord extends ExtensibleRecord {
+  id: string;
+  type: string;
+  title: string;
+  description?: string;
+  scheduledStart?: string | null;
+  scheduledEnd?: string | null;
+  teamIds?: string[];
+  roomId?: string | null;
+  location?: string;
+  visibility?: string;
+  dayOrder?: number | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface QbjPreservation extends ExtensibleRecord {
   version?: string;
   /** Objects whose types this package does not yet interpret. */
@@ -346,6 +362,7 @@ export interface DirectorTournament {
   resultSubmissions: ResultSubmissionRecord[];
   protests: ProtestRecord[];
   auditEvents: AuditEventRecord[];
+  timelineEvents: TimelineEventRecord[];
   qbj?: QbjPreservation;
   extensions?: JsonObject;
 }
@@ -385,4 +402,5 @@ export const emptyTournamentCollections = {
   resultSubmissions: [],
   protests: [],
   auditEvents: [],
+  timelineEvents: [],
 } as const;
