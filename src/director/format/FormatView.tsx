@@ -14,6 +14,7 @@ import type { SectionId } from '../app/navigation';
 import { poolName, recommendPoolSizes } from '@qbsheet/tournament-core';
 import { errorNotice, type AnnounceInput } from '../notices';
 import { RecommendedPlan } from './RecommendedPlan';
+import { AdvancementCommit } from './AdvancementCommit';
 
 export function FormatView({
   state,
@@ -628,6 +629,9 @@ function PhaseConfiguration({
   const qualifiersPerPool = draft.advancementDirty
     ? draft.qualifiersPerPool
     : String(phase.advancementRule?.qualifiersPerPool ?? 1);
+  const wildcards = draft.advancementDirty
+    ? draft.wildcards
+    : String(phase.advancementRule?.wildcards ?? 0);
   const manualOverrideAllowed = draft.advancementDirty
     ? draft.manualOverrideAllowed
     : (phase.advancementRule?.manualOverrideAllowed ?? false);
@@ -640,6 +644,12 @@ function PhaseConfiguration({
         onAnnounce(errorNotice('Qualifiers per pool must be a positive whole number.'));
         return;
       }
+      const rawWildcards = wildcards.trim();
+      const wildcardCount = rawWildcards === '' ? 0 : Number(rawWildcards);
+      if (!Number.isInteger(wildcardCount) || wildcardCount < 0) {
+        onAnnounce(errorNotice('Wildcards must be zero or a positive whole number.'));
+        return;
+      }
       const tiebreakers = phase.advancementRule?.tiebreakers ?? rules?.tiebreakers ?? [];
       if (tiebreakers.length === 0) {
         onAnnounce('Configure at least one standings tiebreaker before enabling advancement.');
@@ -647,6 +657,7 @@ function PhaseConfiguration({
       }
       advancementRule = {
         qualifiersPerPool: qualifiers,
+        wildcards: wildcardCount,
         tiebreakers: [...tiebreakers],
         manualOverrideAllowed,
       };
@@ -669,6 +680,7 @@ function PhaseConfiguration({
         carryover: draft.carryover,
         advancementEnabled,
         qualifiersPerPool: rawQualifiers,
+        wildcards: wildcards.trim(),
         manualOverrideAllowed,
         nameDirty: false,
         kindDirty: false,
@@ -780,6 +792,26 @@ function PhaseConfiguration({
                   }
                 />
               </FormField>
+              {phase.poolIds.length > 0 && (
+                <FormField
+                  label="Best remaining teams"
+                  hint="Wildcards: top remaining teams across pools after the per-pool qualifiers."
+                >
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={wildcards}
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        wildcards: event.target.value,
+                        advancementDirty: true,
+                      }))
+                    }
+                  />
+                </FormField>
+              )}
               <label className="director-check-row director-phase-override-field">
                 <input
                   type="checkbox"
@@ -813,7 +845,12 @@ function PhaseConfiguration({
             </div>
             <ul className="director-compact-list">
               {preview.qualifiers.map((team) => (
-                <li key={team.id}>{team.displayName}</li>
+                <li key={team.id}>
+                  {team.displayName}
+                  {preview.wildcards.some((wildcard) => wildcard.id === team.id)
+                    ? ' (wildcard)'
+                    : ''}
+                </li>
               ))}
             </ul>
             {preview.unresolved.map((tie) => (
@@ -823,6 +860,15 @@ function PhaseConfiguration({
             ))}
             <small className="director-table-subtext">{preview.explanation.at(-1)}</small>
           </div>
+        )}
+        {preview && (
+          <AdvancementCommit
+            state={state}
+            sourcePhaseId={phase.id}
+            preview={preview}
+            controller={controller}
+            onAnnounce={onAnnounce}
+          />
         )}
         {phase.advancementRule && !acceptedResults && (
           <p className="director-panel-footnote">
@@ -1375,6 +1421,7 @@ type PhaseDraft = {
   carryover: boolean;
   advancementEnabled: boolean;
   qualifiersPerPool: string;
+  wildcards: string;
   manualOverrideAllowed: boolean;
   nameDirty: boolean;
   kindDirty: boolean;
@@ -1389,6 +1436,7 @@ function phaseConfigurationKey(phase: DirectorState['phases'][number]): string {
     phase.kind,
     phase.carryover,
     phase.advancementRule?.qualifiersPerPool ?? '',
+    phase.advancementRule?.wildcards ?? '',
     phase.advancementRule?.manualOverrideAllowed ?? '',
     phase.advancementRule?.tiebreakers.join(',') ?? '',
   ].join('|');
@@ -1401,6 +1449,7 @@ function phaseDraftFor(phase: DirectorState['phases'][number]): PhaseDraft {
     carryover: phase.carryover,
     advancementEnabled: phase.advancementRule !== null,
     qualifiersPerPool: String(phase.advancementRule?.qualifiersPerPool ?? 1),
+    wildcards: String(phase.advancementRule?.wildcards ?? 0),
     manualOverrideAllowed: phase.advancementRule?.manualOverrideAllowed ?? false,
     nameDirty: false,
     kindDirty: false,
@@ -1418,6 +1467,7 @@ function reconcilePhaseDraft(draft: PhaseDraft, phase: DirectorState['phases'][n
     carryover: draft.carryoverDirty ? draft.carryover : incoming.carryover,
     advancementEnabled: draft.advancementDirty ? draft.advancementEnabled : incoming.advancementEnabled,
     qualifiersPerPool: draft.advancementDirty ? draft.qualifiersPerPool : incoming.qualifiersPerPool,
+    wildcards: draft.advancementDirty ? draft.wildcards : incoming.wildcards,
     manualOverrideAllowed: draft.advancementDirty
       ? draft.manualOverrideAllowed
       : incoming.manualOverrideAllowed,

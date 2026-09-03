@@ -378,6 +378,7 @@ export interface AuditEvent {
     | 'team-dropped'
     | 'schedule-repaired'
     | 'schedule-cancelled'
+    | 'advancement-committed'
     | 'roster-amendment'
     | 'qbtcp-help-resolved'
     | 'checkpoint-created'
@@ -390,6 +391,8 @@ export interface AuditEvent {
 
 export interface AdvancementRule {
   qualifiersPerPool: number;
+  /** Best remaining teams across pools after the per-pool qualifiers. */
+  wildcards: number;
   tiebreakers: TournamentRules['tiebreakers'];
   manualOverrideAllowed: boolean;
 }

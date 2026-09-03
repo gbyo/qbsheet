@@ -12,6 +12,7 @@ import {
   normalizeTimeZone,
   nextDayOrder,
   orderDayItems,
+  previewAdvancement,
   roomAssignmentConflicts,
   roundScheduleIsValid,
   rosterAmendmentId,
@@ -215,6 +216,28 @@ export interface StartRoundResult {
   reason?: string;
 }
 
+export interface CommitAdvancementAssignment {
+  teamId: DirectorId;
+  targetPoolId: DirectorId;
+}
+
+export interface CommitAdvancementInput {
+  sourcePhaseId: DirectorId;
+  targetPhaseId: DirectorId;
+  assignments: CommitAdvancementAssignment[];
+  /** Required when any assigned team is not a preview qualifier. */
+  reason?: string;
+}
+
+export interface CommitAdvancementResult {
+  committed: boolean;
+  /** One honest line the UI can announce as-is. */
+  message: string;
+  assigned: number;
+  /** Assigned teams that were not preview qualifiers. */
+  overridden: DirectorId[];
+}
+
 export interface FinishRoundResult {
   finished: boolean;
   roundId: DirectorId;
@@ -325,6 +348,7 @@ export interface DirectorController {
     >,
   ): boolean;
   applyTournamentPlan(plan: TournamentPlanRecommendation): boolean;
+  commitAdvancement(input: CommitAdvancementInput): CommitAdvancementResult;
   addPhase(name: string, kind?: NonNullable<DirectorState['phases'][number]>['kind']): void;
   updatePhase(
     phaseId: DirectorId,
@@ -2485,6 +2509,114 @@ export function useDirectorController(repository = createDirectorRepository()): 
     [commit],
   );
 
+  const commitAdvancement = useCallback(
+    (input: CommitAdvancementInput): CommitAdvancementResult => {
+      const fail = (message: string): CommitAdvancementResult => {
+        setError(message);
+        return { committed: false, message, assigned: 0, overridden: [] };
+      };
+      const snapshot = stateRef.current;
+      const source = snapshot.phases.find((entry) => entry.id === input.sourcePhaseId);
+      const target = snapshot.phases.find((entry) => entry.id === input.targetPhaseId);
+      if (!snapshot.tournament || !source || !target) {
+        return fail('Advancement needs a source stage and a target stage in this tournament.');
+      }
+      if (source.id === target.id) {
+        return fail('Advancement needs a different target stage.');
+      }
+      if (source.archived || target.archived) {
+        return fail('Advancement cannot move teams between archived stages.');
+      }
+      if (input.assignments.length === 0) {
+        return fail('Assign at least one team before committing advancement.');
+      }
+      const targetPoolIds = new Set(target.poolIds);
+      const seenTeams = new Set<DirectorId>();
+      for (const assignment of input.assignments) {
+        if (!targetPoolIds.has(assignment.targetPoolId)) {
+          return fail('Every assigned team needs a playoff pool in the target stage.');
+        }
+        if (seenTeams.has(assignment.teamId)) {
+          return fail('Each team can only be placed in one playoff pool.');
+        }
+        seenTeams.add(assignment.teamId);
+        const team = snapshot.teams.find((entry) => entry.id === assignment.teamId);
+        if (!team || team.status !== 'confirmed') {
+          return fail('Only confirmed teams can advance into playoff pools.');
+        }
+      }
+      const preview = previewAdvancement(snapshot, source);
+      const qualifierIds = new Set(preview.qualifiers.map((team) => team.id));
+      const overridden = input.assignments
+        .map((assignment) => assignment.teamId)
+        .filter((teamId) => !qualifierIds.has(teamId));
+      const reason = input.reason?.trim() ?? '';
+      if (overridden.length > 0) {
+        if (!source.advancementRule?.manualOverrideAllowed) {
+          return fail('This stage does not allow director overrides. Enable the override first.');
+        }
+        if (reason === '') {
+          return fail('Record a reason for each team placed outside the preview.');
+        }
+      }
+      if (preview.unresolved.length > 0 && reason === '') {
+        return fail('An advancement cutoff is tied. Record the director decision as a reason.');
+      }
+      const targetRoundIds = new Set(target.roundIds);
+      const hasPairings = snapshot.scheduledGames.some((game) => targetRoundIds.has(game.roundId));
+      if (hasPairings) {
+        return fail('The target stage already has pairings. Remove them before re-bracketing.');
+      }
+      let assigned = 0;
+      commit((draft) => {
+        const draftTarget = draft.phases.find((entry) => entry.id === input.targetPhaseId);
+        if (!draftTarget) return;
+        const byPool = new Map<DirectorId, DirectorId[]>();
+        for (const assignment of input.assignments) {
+          const list = byPool.get(assignment.targetPoolId) ?? [];
+          list.push(assignment.teamId);
+          byPool.set(assignment.targetPoolId, list);
+        }
+        for (const [poolId, teamIds] of byPool) {
+          const pool = draft.pools.find((entry) => entry.id === poolId);
+          if (pool) pool.teamIds = teamIds;
+        }
+        draft.audit.push({
+          id: newDirectorId('audit'),
+          at: isoNow(),
+          actor: 'Director',
+          type: 'advancement-committed',
+          summary: `Moved ${input.assignments.length} team${input.assignments.length === 1 ? '' : 's'} from ${source.name} to ${target.name}.`,
+          entityId: target.id,
+          details: {
+            sourcePhaseId: source.id,
+            assignments: input.assignments,
+            overridden,
+            ...(reason === '' ? {} : { reason }),
+          },
+        });
+        assigned = input.assignments.length;
+      });
+      if (assigned === 0) {
+        return fail('Advancement was not saved; review the Director error.');
+      }
+      const names = (ids: DirectorId[]): string =>
+        ids
+          .map((teamId) => snapshot.teams.find((team) => team.id === teamId)?.displayName ?? 'Team')
+          .join(', ');
+      return {
+        committed: true,
+        message:
+          overridden.length > 0
+            ? `Placed ${assigned} teams in ${target.name}, including director overrides: ${names(overridden)}.`
+            : `Placed ${assigned} teams in ${target.name}.`,
+        assigned,
+        overridden,
+      };
+    },
+    [commit],
+  );
+
   const addPool = useCallback(
     (input: NewPoolInput): boolean => {
       const snapshot = stateRef.current;
@@ -4473,6 +4605,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
         draft.phases = [];
         draft.pools = [];
         draft.rounds = [];
+        // The old phases are gone, so repoint the current stage at the first
+        // new one instead of leaving a dangling reference.
+        tournament.currentPhaseId = null;
+        tournament.currentRoundId = null;
         const activeTeams = draft.teams.filter((team) => team.status !== 'dropped');
         // Timeline events (Lunch, breaks) survive a plan change; new rounds
         // sequence after them so day order stays duplicate-free.
@@ -4512,6 +4648,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
                     1,
                     Math.floor(plan.poolPlan.divisions[0].teamCount / stage.poolNames.length),
                   ),
+                  wildcards: 0,
                   tiebreakers: [...tournament.rules.tiebreakers],
                   manualOverrideAllowed: true,
                 }
@@ -4548,6 +4685,8 @@ export function useDirectorController(repository = createDirectorRepository()): 
             draft.phases.find((candidate) => candidate.id === phaseId)?.roundIds.push(roundId);
           });
         });
+        tournament.currentPhaseId = format.phaseIds[0] ?? null;
+        tournament.updatedAt = isoNow();
         draft.audit.push({
           id: newDirectorId('audit'),
           at: isoNow(),
@@ -4613,6 +4752,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
     applyTournamentPlan,
     addPhase,
     updatePhase,
+    commitAdvancement,
     addPool,
     updatePool,
     setPhaseArchived,
@@ -5340,6 +5480,9 @@ function validateAdvancementRule(value: AdvancementRule | null | undefined): str
   if (!isRecordLike(value)) return 'Advancement settings are not valid.';
   if (!Number.isInteger(value.qualifiersPerPool) || value.qualifiersPerPool < 1) {
     return 'Qualifiers per pool must be a positive whole number.';
+  }
+  if (!Number.isInteger(value.wildcards ?? 0) || (value.wildcards ?? 0) < 0) {
+    return 'Wildcards must be zero or a positive whole number.';
   }
   if (!Array.isArray(value.tiebreakers) || value.tiebreakers.length === 0) {
     return 'Advancement needs at least one standings tiebreaker.';
