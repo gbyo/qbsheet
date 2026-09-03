@@ -95,11 +95,56 @@ function scoreDivisor(values: number[]): number {
 export function scoringRulesObject(rules: TournamentRules, id: string): Record<string, unknown> {
   const tossup = rules.tossupValue;
   const power = rules.powerValue;
+  const superpower = rules.superpowerValue;
   const neg = rules.negValue;
+  const useBonuses = rules.useBonuses;
   const bonus = Math.max(1, rules.bonusValue);
   const tossupCount = rules.tossupCount > 0 ? rules.tossupCount : 20;
+  const maximumTossups = rules.maximumTossupCount ?? tossupCount;
   const bonusParts = rules.bonusParts > 0 ? rules.bonusParts : 3;
+  const minimumParts = rules.minimumBonusParts ?? bonusParts;
+  const maximumBonusScore = rules.maximumBonusScore ?? bonus * bonusParts;
+  const bonusDivisor = rules.bonusDivisor ?? bonus;
   const maximumPlayers = rules.maximumActivePlayers > 0 ? rules.maximumActivePlayers : 4;
+  const answerTypes: Record<string, unknown>[] = [];
+  if (superpower !== null && superpower !== undefined) {
+    answerTypes.push({
+      type: 'AnswerType',
+      id: 'answer-superpower',
+      value: superpower,
+      label: 'Superpower',
+      short_label: 'SP',
+      awards_bonus: useBonuses,
+    });
+  }
+  if (power !== null && power !== undefined) {
+    answerTypes.push({
+      type: 'AnswerType',
+      id: 'answer-power',
+      value: power,
+      label: 'Power',
+      short_label: 'P',
+      awards_bonus: useBonuses,
+    });
+  }
+  answerTypes.push({
+    type: 'AnswerType',
+    id: 'answer-correct',
+    value: tossup,
+    label: 'Correct',
+    short_label: 'C',
+    awards_bonus: useBonuses,
+  });
+  if (neg !== null && neg !== undefined) {
+    answerTypes.push({
+      type: 'AnswerType',
+      id: 'answer-neg',
+      value: neg,
+      label: 'Neg',
+      short_label: 'N',
+      awards_bonus: false,
+    });
+  }
   return {
     type: 'ScoringRules',
     id,
@@ -107,43 +152,40 @@ export function scoringRulesObject(rules: TournamentRules, id: string): Record<s
     teams_per_match: 2,
     maximum_players_per_team: maximumPlayers,
     regulation_tossup_count: tossupCount,
-    maximum_regulation_tossup_count: tossupCount,
-    minimum_overtime_question_count: 1,
-    overtime_includes_bonuses: rules.overtime,
-    total_divisor: scoreDivisor([power, tossup, neg, bonus]),
-    answer_types: [
-      {
-        type: 'AnswerType',
-        id: 'answer-power',
-        value: power,
-        label: 'Power',
-        short_label: 'P',
-        awards_bonus: true,
-      },
-      {
-        type: 'AnswerType',
-        id: 'answer-correct',
-        value: tossup,
-        label: 'Correct',
-        short_label: 'C',
-        awards_bonus: true,
-      },
-      {
-        type: 'AnswerType',
-        id: 'answer-neg',
-        value: neg,
-        label: 'Neg',
-        short_label: 'N',
-        awards_bonus: false,
-      },
-    ],
-    maximum_bonus_score: bonus * bonusParts,
-    bonus_divisor: bonus,
-    minimum_parts_per_bonus: bonusParts,
-    maximum_parts_per_bonus: bonusParts,
-    points_per_bonus_part: bonus,
-    bonuses_bounce_back: rules.bouncebacks,
-    ...(rules.lightning ? { lightning_count_per_team: 1, lightning_divisor: 10 } : {}),
+    maximum_regulation_tossup_count: maximumTossups,
+    minimum_overtime_question_count: Math.max(1, rules.overtimeTossupCount),
+    overtime_includes_bonuses: useBonuses && rules.overtimeBonuses,
+    // The scorer derives this same divisor from every answer value (negs
+    // included), the bonus divisor, and the lightning divisor. Match that
+    // derivation exactly: a divisor that does not divide every value fails
+    // the shared playability check.
+    total_divisor: scoreDivisor([
+      ...(superpower !== null && superpower !== undefined ? [superpower] : []),
+      ...(power !== null && power !== undefined ? [power] : []),
+      tossup,
+      ...(neg !== null && neg !== undefined ? [neg] : []),
+      ...(useBonuses ? [bonusDivisor] : []),
+      ...(rules.lightning ? [Math.max(1, rules.lightningDivisor)] : []),
+    ]),
+    answer_types: answerTypes,
+    ...(useBonuses
+      ? {
+          maximum_bonus_score: maximumBonusScore,
+          bonus_divisor: bonusDivisor,
+          minimum_parts_per_bonus: minimumParts,
+          maximum_parts_per_bonus: bonusParts,
+          // A single per-part value is only true for regular bonuses. Omitting
+          // it for irregular shapes is what tells the scorer to take a typed total.
+          ...(minimumParts === bonusParts ? { points_per_bonus_part: bonus } : {}),
+          bonuses_bounce_back: rules.bouncebacks,
+        }
+      : {}),
+    ...(rules.lightning
+      ? {
+          lightning_count_per_team: Math.max(1, rules.lightningCountPerTeam),
+          lightning_divisor: Math.max(1, rules.lightningDivisor),
+        }
+      : {}),
   };
 }
 

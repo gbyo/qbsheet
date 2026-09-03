@@ -16,9 +16,12 @@ import {
   roundScheduleIsValid,
   runPreflight,
   scheduleIsValid,
+  scoringRulePresets,
   type DirectorState,
   type TeamGameScore,
 } from '../src/director/domain';
+import { scoringRulesObject } from '../src/director/transfers/assignment';
+import { readQbjScoringRules } from '../src/qbj/QbjScoringRules';
 import { useDirectorController, type StartRoundResult } from '../src/director/state/useDirectorController';
 import {
   IndexedDbDirectorRepository,
@@ -39,6 +42,7 @@ function score(teamId: string, value: number): TeamGameScore {
   return {
     teamId,
     score: value,
+    superpowers: 0,
     powers: 0,
     gets: 0,
     negs: 0,
@@ -223,15 +227,24 @@ describe('Director integration hardening', () => {
       rules: {
         ...structuredClone(defaultRules),
         tossupValue: 12,
+        superpowerValue: 25,
         powerValue: 20,
         negValue: -10,
         bonusValue: 15,
         tossupCount: 24,
+        maximumTossupCount: 26,
         bonusParts: 4,
+        minimumBonusParts: 2,
+        maximumBonusScore: 50,
+        bonusDivisor: 5,
         bouncebacks: true,
         overtime: false,
+        overtimeTossupCount: 3,
+        overtimeBonuses: false,
         timed: true,
         lightning: true,
+        lightningCountPerTeam: 2,
+        lightningDivisor: 5,
         maximumActivePlayers: 3,
         regulationMinutes: 30,
         tiebreakers: ['record', 'points'],
@@ -245,12 +258,27 @@ describe('Director integration hardening', () => {
     };
 
     const interchange = toInterchange(state);
+    expect(interchange.rules).toBeDefined();
+    if (!interchange.rules) return;
     expect(interchange.rules).toMatchObject({
       maximum_players_per_team: 3,
       regulation_tossup_count: 24,
+      maximum_regulation_tossup_count: 26,
+      minimum_overtime_question_count: 3,
       bonuses_bounce_back: true,
       overtime_includes_bonuses: false,
+      minimum_parts_per_bonus: 2,
+      maximum_parts_per_bonus: 4,
+      maximum_bonus_score: 50,
+      bonus_divisor: 5,
+      lightning_count_per_team: 2,
+      lightning_divisor: 5,
     });
+    expect(interchange.rules).not.toHaveProperty('points_per_bonus_part');
+    const answerValues = ((interchange.rules.answer_types ?? []) as Array<{ value?: unknown }>).map(
+      (entry) => entry.value,
+    );
+    expect(answerValues).toEqual([25, 20, 12, -10]);
     expect(interchange.rules).not.toHaveProperty('tossupValue');
     expect(interchange.tournament.extensions).toMatchObject({
       timeZone: 'America/New_York',
@@ -264,6 +292,197 @@ describe('Director integration hardening', () => {
     if (!imported.ok || !imported.state) return;
     expect(imported.state.tournament?.timeZone).toBe('America/New_York');
     expect(imported.state.tournament?.rules).toEqual(state.tournament.rules);
+  });
+
+  test('scenario H: verified presets fill the canonical model and stay editable', () => {
+    expect(scoringRulePresets.map((preset) => preset.id)).toEqual([
+      'acf',
+      'acf-powers',
+      'naqt-untimed',
+      'naqt-timed',
+    ]);
+    const byId = new Map(scoringRulePresets.map((preset) => [preset.id, preset]));
+    // Plain ACF predates power marks; official ACF events use -5 negs.
+    expect(byId.get('acf')?.rules).toMatchObject({
+      tossupValue: 10,
+      superpowerValue: null,
+      powerValue: null,
+      negValue: -5,
+      useBonuses: true,
+      bonusValue: 10,
+      bonusParts: 3,
+      bouncebacks: false,
+      overtime: true,
+      overtimeTossupCount: 1,
+      overtimeBonuses: false,
+      timed: false,
+      lightning: false,
+      maximumActivePlayers: 4,
+    });
+    expect(byId.get('acf-powers')?.rules).toMatchObject({
+      tossupValue: 10,
+      powerValue: 15,
+      negValue: -5,
+      overtimeTossupCount: 1,
+      overtimeBonuses: false,
+    });
+    expect(byId.get('naqt-untimed')?.rules).toMatchObject({
+      tossupValue: 10,
+      powerValue: 15,
+      negValue: -5,
+      useBonuses: true,
+      bouncebacks: false,
+      overtimeTossupCount: 3,
+      overtimeBonuses: false,
+      timed: false,
+      maximumActivePlayers: 4,
+    });
+    expect(byId.get('naqt-timed')?.rules).toMatchObject({
+      tossupValue: 10,
+      powerValue: 15,
+      negValue: -5,
+      timed: true,
+      tossupCount: 24,
+      regulationMinutes: 18,
+      overtimeTossupCount: 3,
+      overtimeBonuses: false,
+    });
+    // Every preset is a complete rule set the scorer accepts exactly as stated.
+    for (const preset of scoringRulePresets) {
+      const full = { ...structuredClone(defaultRules), ...preset.rules };
+      const read = readQbjScoringRules(scoringRulesObject(full, `preset-${preset.id}`), full.timed);
+      expect(read.ok).toBe(true);
+    }
+  });
+
+  test('scenario H: applying a preset then editing a field stays valid', async () => {
+    const { hook } = await directorWithSetup(4);
+    const preset = scoringRulePresets.find((entry) => entry.id === 'naqt-untimed');
+    if (!preset) throw new Error('test setup is missing the NAQT preset');
+    act(() => {
+      expect(hook.result.current.updateRules({ ...preset.rules })).toBe(true);
+    });
+    expect(hook.result.current.state.tournament?.rules).toMatchObject({
+      powerValue: 15,
+      overtimeTossupCount: 3,
+      overtimeBonuses: false,
+    });
+    // Customizing afterward is an ordinary edit, not a second mode.
+    act(() => {
+      expect(hook.result.current.updateRules({ tossupCount: 22 })).toBe(true);
+    });
+    expect(hook.result.current.state.tournament?.rules.tossupCount).toBe(22);
+    expect(hook.result.current.state.tournament?.rules.powerValue).toBe(15);
+  });
+
+  test('scoring values lock once results exist; procedure and tiebreakers stay editable', async () => {
+    const { hook } = await directorWithSetup(4);
+    act(() => {
+      expect(hook.result.current.updateRules({ tossupValue: 12 })).toBe(true);
+      expect(hook.result.current.generateSchedule().generated).toBe(true);
+    });
+    const roundId = hook.result.current.state.rounds[0].id;
+    const game = hook.result.current.state.scheduledGames.find(
+      (entry) => entry.roundId === roundId && !entry.bye,
+    );
+    if (!game) throw new Error('test setup produced no playable game');
+    act(() => {
+      expect(
+        hook.result.current.addManualResult({
+          scheduledGameId: game.id,
+          scores: [score(game.leftTeamId, 100), score(game.rightTeamId ?? game.leftTeamId, 50)],
+        }),
+      ).toBe(true);
+    });
+    expect(hook.result.current.state.games.some((entry) => entry.status === 'accepted')).toBe(true);
+
+    // Reinterpreting values are refused with a lock message; nothing changes.
+    act(() => {
+      expect(hook.result.current.updateRules({ tossupValue: 14 })).toBe(false);
+    });
+    expect(hook.result.current.error).toMatch(/locked/i);
+    expect(hook.result.current.state.tournament?.rules.tossupValue).toBe(12);
+    // Disabling bonuses first requires clearing the overtime-bonus procedure
+    // flag (a coherent combination check), and then the lock still refuses.
+    act(() => {
+      expect(hook.result.current.updateRules({ overtimeBonuses: false })).toBe(true);
+      expect(hook.result.current.updateRules({ useBonuses: false })).toBe(false);
+    });
+    expect(hook.result.current.error).toMatch(/locked/i);
+
+    // Procedure toggles and tiebreakers only affect future games.
+    act(() => {
+      expect(hook.result.current.updateRules({ bouncebacks: true })).toBe(true);
+      expect(hook.result.current.updateRules({ tiebreakers: ['record', 'points'] })).toBe(true);
+    });
+    expect(hook.result.current.state.tournament?.rules.bouncebacks).toBe(true);
+    expect(hook.result.current.state.tournament?.rules.tiebreakers).toEqual(['record', 'points']);
+  });
+
+  test('legacy scoring rules migrate with behavior-preserving defaults', () => {
+    const legacy = emptyDirectorState() as unknown as Record<string, unknown>;
+    legacy.tournament = {
+      id: 'legacy-rules',
+      name: 'Legacy event',
+      date: '',
+      venue: '',
+      organizer: '',
+      status: 'draft',
+      rules: {
+        tossupValue: 10,
+        powerValue: 15,
+        negValue: -5,
+        bonusValue: 10,
+        tossupCount: 20,
+        bonusParts: 3,
+        bouncebacks: false,
+        overtime: true,
+        timed: false,
+        lightning: false,
+        maximumActivePlayers: 4,
+        regulationMinutes: 26,
+        tiebreakers: ['record', 'points'],
+      },
+      formatId: null,
+      currentPhaseId: null,
+      currentPacketId: null,
+      currentRoundId: null,
+      createdAt: '',
+      updatedAt: '',
+    };
+    const normalized = normalizeDirectorState(legacy);
+    // Old documents gain the new fields without changing what their games meant.
+    expect(normalized.tournament?.rules).toMatchObject({
+      superpowerValue: null,
+      useBonuses: true,
+      minimumBonusParts: null,
+      maximumBonusScore: null,
+      bonusDivisor: null,
+      overtimeTossupCount: 1,
+      // Previously assignments carried overtime itself into
+      // overtime_includes_bonuses, so true carries across.
+      overtimeBonuses: true,
+      lightningCountPerTeam: 1,
+      lightningDivisor: 10,
+      maximumTossupCount: null,
+    });
+
+    const legacyNoOvertime = structuredClone(legacy);
+    ((legacyNoOvertime.tournament as Record<string, unknown>).rules as Record<string, unknown>).overtime =
+      false;
+    expect(normalizeDirectorState(legacyNoOvertime).tournament?.rules.overtimeBonuses).toBe(false);
+
+    // Explicit nulls (formats without powers or negs) survive normalization.
+    const legacyNoPowers = structuredClone(legacy);
+    const noPowerRules = (legacyNoPowers.tournament as Record<string, unknown>).rules as Record<
+      string,
+      unknown
+    >;
+    noPowerRules.powerValue = null;
+    noPowerRules.negValue = null;
+    const normalizedNoPowers = normalizeDirectorState(legacyNoPowers);
+    expect(normalizedNoPowers.tournament?.rules.powerValue).toBeNull();
+    expect(normalizedNoPowers.tournament?.rules.negValue).toBeNull();
   });
 
   test('schema v5 migration defaults timed scoring safely and preserves legacy procedure intent', () => {
@@ -895,6 +1114,7 @@ describe('Director integration hardening', () => {
           {
             playerId: 'player-1',
             teamId: 'team-1',
+            superpowers: 0,
             powers: 2,
             gets: 3,
             negs: 1,

@@ -48,16 +48,46 @@ export type FormatKind =
 
 export interface TournamentRules {
   tossupValue: number;
-  powerValue: number;
-  negValue: number;
+  /** Optional second early-buzz tier above power (for example 20 with power 15). Null means unused. */
+  superpowerValue: number | null;
+  /** Null means the format has no power mark. */
+  powerValue: number | null;
+  /** Null means the format has no interrupt penalty. */
+  negValue: number | null;
+  /** False means tossups only: no bonus structure is written to assignments or expected in results. */
+  useBonuses: boolean;
+  /** Points per bonus part for regular bonuses. */
   bonusValue: number;
   tossupCount: number;
+  /** Parts per bonus, and the maximum part count for irregular bonuses. */
   bonusParts: number;
+  /**
+   * Fewest parts a bonus can have. Null means every bonus has bonusParts parts (regular bonuses
+   * with fixed buttons in the scorer); a smaller value means irregular bonuses with a typed total.
+   */
+  minimumBonusParts: number | null;
+  /**
+   * Most a bonus can be worth. Null means bonusValue * bonusParts. Set explicitly for irregular
+   * bonuses whose parts are not all worth the same.
+   */
+  maximumBonusScore: number | null;
+  /** Bonus scoring increment override. Null means one bonus part. */
+  bonusDivisor: number | null;
   bouncebacks: boolean;
   overtime: boolean;
+  /** Tossups in the initial overtime period. 1 is sudden death. */
+  overtimeTossupCount: number;
+  /** Whether an overtime tossup earns a bonus. Always false when bonuses are disabled. */
+  overtimeBonuses: boolean;
   /** Whether the scorer should use a moderator-controlled timed regulation period. */
   timed: boolean;
   lightning: boolean;
+  /** Lightning rounds each team gets, when lightning is used. */
+  lightningCountPerTeam: number;
+  /** The increment a lightning total moves in. */
+  lightningDivisor: number;
+  /** Longest regulation can run. Null means regulation always ends at tossupCount. */
+  maximumTossupCount: number | null;
   maximumActivePlayers: number;
   regulationMinutes: number;
   tiebreakers: Array<'head-to-head' | 'record' | 'points' | 'margin' | 'powers' | 'gets' | 'playoff'>;
@@ -280,6 +310,8 @@ export interface ScheduledGame {
 export interface TeamGameScore {
   teamId: DirectorId;
   score: number;
+  /** Early-buzz tier above power (for example 20-point superpowers). Zero when the format has none. */
+  superpowers: number;
   powers: number;
   gets: number;
   negs: number;
@@ -291,6 +323,8 @@ export interface TeamGameScore {
 export interface PlayerGameStat {
   playerId: DirectorId;
   teamId: DirectorId;
+  /** Early-buzz tier above power (for example 20-point superpowers). Zero when the format has none. */
+  superpowers: number;
   powers: number;
   gets: number;
   negs: number;
@@ -493,15 +527,27 @@ export interface DirectorState {
 
 export const defaultRules: TournamentRules = {
   tossupValue: 10,
+  superpowerValue: null,
   powerValue: 15,
   negValue: -5,
+  useBonuses: true,
   bonusValue: 10,
   tossupCount: 20,
   bonusParts: 3,
+  minimumBonusParts: null,
+  maximumBonusScore: null,
+  bonusDivisor: null,
   bouncebacks: false,
   overtime: true,
+  overtimeTossupCount: 1,
+  // Matches the previous assignment behavior, which carried overtime itself
+  // into overtime_includes_bonuses.
+  overtimeBonuses: true,
   timed: false,
   lightning: false,
+  lightningCountPerTeam: 1,
+  lightningDivisor: 10,
+  maximumTossupCount: null,
   maximumActivePlayers: 4,
   regulationMinutes: 26,
   tiebreakers: ['head-to-head', 'record', 'points', 'margin', 'powers', 'gets', 'playoff'],
