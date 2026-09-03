@@ -115,6 +115,9 @@ public struct QBLiveTimelineEvent: Codable, Hashable, Sendable, Identifiable {
     public let type: Kind
     public let title: String
     public let description: String?
+    /// Explicit day-sequence position, or nil when the publisher predates day ordering.
+    /// Missing keys decode as nil, so old snapshots keep decoding.
+    public let sequence: Double?
     /// An actual scheduled time, or nil. Never an estimate; see `docs/QBLIVE.md#72-no-estimated-times`.
     public let scheduledStart: Date?
     public let scheduledEnd: Date?
@@ -137,6 +140,9 @@ public struct QBLiveScheduledGame: Codable, Hashable, Sendable, Identifiable {
     public let roundId: String
     public let roundName: String
     public let roundNumber: Double?
+    /// Explicit day-sequence position of this game's round, or nil when the
+    /// publisher predates day ordering. Missing keys decode as nil.
+    public let sequence: Double?
     public let phaseId: String?
     public let phaseName: String?
     public let poolId: String?
