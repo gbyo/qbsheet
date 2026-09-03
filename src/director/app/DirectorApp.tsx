@@ -1048,6 +1048,13 @@ function NewTournamentScreen({
           throw new Error(report.errors.join(' ') || 'That file is not a supported QBJ archive.');
         if (!controller.importSnapshot(report.state)) throw new Error('That QBJ file could not be imported.');
         onAnnounce(importWarningMessage('QBJ tournament imported.', report.warnings));
+      } else if (extension === 'yft') {
+        const report = importYellowFruitText(new TextDecoder().decode(bytes));
+        if (!report.ok || !report.state)
+          throw new Error(report.errors.join(' ') || 'That file is not a supported YellowFruit archive.');
+        if (!controller.importSnapshot(report.state))
+          throw new Error('That YellowFruit file could not be imported.');
+        onAnnounce(importWarningMessage('YellowFruit tournament imported.', report.warnings));
       } else if (extension === 'json') {
         const text = new TextDecoder().decode(bytes);
         const parsed: unknown = JSON.parse(text);
@@ -1070,7 +1077,7 @@ function NewTournamentScreen({
           onAnnounce(importWarningMessage('QBJ tournament imported.', report.warnings));
         }
       } else {
-        throw new Error('That file type is not supported. Choose a .qbst, .qbj, or .json file.');
+        throw new Error('That file type is not supported. Choose a .qbst, .qbj, .yft, or .json file.');
       }
     } catch (reason: unknown) {
       onAnnounce(errorNotice(reason instanceof Error ? reason.message : 'That file could not be opened.'));

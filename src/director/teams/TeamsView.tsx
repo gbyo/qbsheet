@@ -4,7 +4,7 @@ import type { DirectorState } from '../domain';
 import { Button, EmptyState, FormField, PanelBody, PanelFooter, StateLabel } from '../components/Controls';
 import { Icon } from '../components/Icon';
 import { PageHeader } from '../components/PageHeader';
-import { importSqbsTeams, importTeamsCsv, type TeamRecord } from '@qbsheet/tournament-formats';
+import { importQbj, importSqbsTeams, importTeamsCsv, type TeamRecord } from '@qbsheet/tournament-formats';
 import { toImportedTeamInputs } from './teamImport';
 import type { DirectorNavigationTarget } from '../app/navigationTarget';
 import { useNavigationHighlight } from '../app/useNavigationHighlight';
@@ -171,6 +171,26 @@ export function TeamsView({
     }
   };
 
+  const importQbjRoster = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      const report = importQbj(await file.text());
+      if (!report.ok) {
+        onAnnounce(
+          errorNotice(report.errors.map((entry) => entry.message).join(' ') || 'That QBJ file is not valid.'),
+        );
+        return;
+      }
+      if (report.value.tournament.teams.length === 0) {
+        onAnnounce('No teams found in that QBJ file.');
+        return;
+      }
+      addImportedRows(report.value.tournament.teams, report.warnings.length);
+    } catch (reason: unknown) {
+      onAnnounce(reason instanceof Error ? reason.message : 'That QBJ file could not be read.');
+    }
+  };
+
   return (
     <>
       <PageHeader
@@ -204,6 +224,21 @@ export function TeamsView({
                   accept=".sqbs,.txt,text/plain"
                   onChange={(event) => {
                     void importSqbs(event.target.files?.[0]);
+                    event.currentTarget.value = '';
+                  }}
+                />
+              </span>
+            </label>
+            <label className="director-button director-button-secondary">
+              <Icon name="upload" size={15} />
+              <span>
+                Import QBJ
+                <input
+                  className="director-visually-hidden-input"
+                  type="file"
+                  accept=".qbj,application/json"
+                  onChange={(event) => {
+                    void importQbjRoster(event.target.files?.[0]);
                     event.currentTarget.value = '';
                   }}
                 />
