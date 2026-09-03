@@ -83,8 +83,17 @@ test('Director layout keeps panel, table, status, and narrow-window contracts', 
   expect(teamFormInsets.actionRight).toBeGreaterThanOrEqual(12);
 
   await page.getByLabel('Display name').fill('Northview A');
-  await page.getByLabel('School / organization').fill('Northview');
+  await page.getByLabel('School / club').fill('Northview');
   await page.getByRole('button', { name: 'Save team' }).click();
+
+  await expect(page.getByTestId('director-schools-management')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Manage schools & clubs' }).click();
+  const schools = page.getByTestId('director-schools-management');
+  await expect(schools.getByRole('heading', { name: 'Schools & clubs' })).toBeVisible();
+  await schools.getByRole('button', { name: 'Edit Northview' }).click();
+  await schools.getByLabel('City').fill('Springfield');
+  await schools.getByRole('button', { name: 'Save changes' }).click();
+  await expect(schools).toContainText('Springfield');
 
   const tableContract = await page
     .locator('.director-table')
@@ -134,8 +143,13 @@ test('Director layout keeps panel, table, status, and narrow-window contracts', 
   await page.setViewportSize({ width: 520, height: 720 });
   await navigation.getByRole('button', { name: 'Settings', exact: true }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'Settings' })).toBeVisible();
-  const documentWidth = await page.evaluate(() => document.documentElement.scrollWidth);
-  expect(documentWidth).toBeLessThanOrEqual(521);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(521);
+  await navigation.getByRole('button', { name: 'Teams', exact: true }).click();
+  await page.getByRole('button', { name: 'Add team' }).click();
+  await expect(page.getByLabel('Player 1 name')).toBeVisible();
+  await page.getByRole('button', { name: 'Add player', exact: true }).click();
+  await expect(page.getByLabel('Player 6 name')).toBeFocused();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(521);
 });
 
 test('Director runs a local tournament slice and reopens its result', async ({ page }) => {
@@ -147,11 +161,11 @@ test('Director runs a local tournament slice and reopens its result', async ({ p
     .click();
   await page.getByRole('button', { name: 'Add team' }).click();
   await page.getByLabel('Display name').fill('Northview A');
-  await page.getByLabel('School / organization').fill('Northview');
+  await page.getByLabel('School / club').fill('Northview');
   await page.getByRole('button', { name: 'Save team' }).click();
   await page.getByRole('button', { name: 'Add team' }).click();
   await page.getByLabel('Display name').fill('Riverside A');
-  await page.getByLabel('School / organization').fill('Riverside');
+  await page.getByLabel('School / club').fill('Riverside');
   await page.getByRole('button', { name: 'Save team' }).click();
   await expect(page.getByText('Northview A', { exact: true })).toBeVisible();
   await expect(page.getByText('Riverside A', { exact: true })).toBeVisible();
@@ -286,13 +300,22 @@ test('Director supports keyboard search, inline edits, and audited result review
   const navigation = page.locator('nav[aria-label="Tournament sections"]');
   await navigation.getByRole('button', { name: 'Teams', exact: true }).click();
   await page.getByRole('button', { name: 'Add team' }).click();
+  await page.getByLabel('School / club').fill('Northview High');
+  await page.getByLabel('Team letter').fill('A');
+  await expect(page.getByLabel('Display name')).toHaveValue('Northview High A');
   await page.getByLabel('Display name').fill('Northview A');
-  await page.getByLabel('School / organization').fill('Northview High');
-  await page.getByLabel('Notes').fill('Late check-in requested.');
+  await page.getByText('More team details', { exact: true }).click();
+  await page.getByLabel('Team notes').fill('Late check-in requested.');
+  await page.getByRole('button', { name: 'Paste roster' }).click();
+  await page.getByLabel('Player names').fill('Alice Smith\nBob Jones\nCharlie Lee\nDana Patel');
+  await page.getByRole('button', { name: 'Use pasted roster' }).click();
+  await page.getByLabel('Player 1 captain').check();
+  await page.getByLabel('Player 1 roster number').fill('07');
   await page.getByRole('button', { name: 'Save team' }).click();
+  await expect(page.getByText('4 players', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Add team' }).click();
   await page.getByLabel('Display name').fill('Riverside A');
-  await page.getByLabel('School / organization').fill('Riverside High');
+  await page.getByLabel('School / club').fill('Riverside High');
   await page.getByRole('button', { name: 'Save team' }).click();
 
   const search = page.getByPlaceholder('Search teams, rooms, games');
@@ -307,27 +330,24 @@ test('Director supports keyboard search, inline edits, and audited result review
   const teamEditor = page.locator('.director-table-edit-row');
   await teamEditor.getByLabel('Display name').fill('Northview B');
   await teamEditor.getByLabel('Team letter').fill('B');
-  await teamEditor.getByLabel('Notes').fill('Seeded from the registration desk.');
-  await teamEditor.getByRole('button', { name: 'Save changes' }).click();
-  await expect(page.getByText('Northview B', { exact: true })).toBeVisible();
-  await expect(page.getByText('Seeded from the registration desk.', { exact: true })).toBeVisible();
-
+  await teamEditor.getByLabel('Team notes').fill('Seeded from the registration desk.');
+  await teamEditor.getByRole('button', { name: 'Save team details' }).click();
+  await expect(
+    page.locator('tr').filter({ hasText: 'Northview B' }).first().getByText('Northview B', { exact: true }),
+  ).toBeVisible();
   const northviewRow = page.locator('tr').filter({ hasText: 'Northview B' }).first();
-  await northviewRow.getByText('0 players', { exact: true }).click();
-  await page.getByLabel('Add player to Northview B').fill('Ada Lovelace');
-  await northviewRow.getByLabel('Captain').check();
-  await page.getByRole('button', { name: 'Add', exact: true }).click();
-  await northviewRow.getByRole('button', { name: 'Edit Ada Lovelace' }).click();
+  await expect(northviewRow.getByText('Seeded from the registration desk.', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Edit Alice Smith' }).click();
   const playerEditor = page.locator('.director-roster-player-edit');
-  await playerEditor.getByLabel('Roster number').fill('07');
+  await playerEditor.getByLabel('Roster number').fill('08');
   await playerEditor.getByLabel('Notes').fill('Late arrival.');
   await playerEditor.getByRole('button', { name: 'Save player' }).click();
-  await expect(northviewRow).toContainText('Roster 07');
-  await expect(northviewRow).toContainText('Late arrival.');
-  await northviewRow.getByRole('button', { name: 'Remove Ada Lovelace from Northview B' }).click();
-  await expect(northviewRow).toContainText('0 active · 1 inactive');
-  await northviewRow.getByRole('button', { name: 'Restore Ada Lovelace to Northview B' }).click();
-  await expect(northviewRow).toContainText('1 player');
+  await expect(page.locator('.director-team-editor')).toContainText('No. 08');
+  await expect(page.locator('.director-team-editor')).toContainText('Late arrival.');
+  await page.getByRole('button', { name: 'Remove Alice Smith from Northview B' }).click();
+  await expect(northviewRow).toContainText('3 active · 1 inactive');
+  await page.getByRole('button', { name: 'Restore Alice Smith to Northview B' }).click();
+  await expect(northviewRow).toContainText('4 players');
 
   await navigation.getByRole('button', { name: 'Format', exact: true }).click();
   await page.getByRole('button', { name: 'Generate next round' }).click();
@@ -370,16 +390,15 @@ test('Director opens every indexed search entity at its exact operational target
   await navigation.getByRole('button', { name: 'Teams', exact: true }).click();
   await page.getByRole('button', { name: 'Add team' }).click();
   await page.getByLabel('Display name').fill('Northview A');
-  await page.getByLabel('School / organization').fill('Northview High');
+  await page.getByLabel('School / club').fill('Northview High');
+  await page.getByLabel('Player 1 name').fill('Ada Lovelace');
   await page.getByRole('button', { name: 'Save team' }).click();
   await page.getByRole('button', { name: 'Add team' }).click();
   await page.getByLabel('Display name').fill('Riverside A');
   await page.getByRole('button', { name: 'Save team' }).click();
 
   const northviewRow = page.locator('tr').filter({ hasText: 'Northview A' }).first();
-  await northviewRow.getByText('0 players', { exact: true }).click();
-  await page.getByLabel('Add player to Northview A').fill('Ada Lovelace');
-  await northviewRow.getByRole('button', { name: 'Add', exact: true }).click();
+  await expect(northviewRow.getByText('1 player', { exact: true })).toBeVisible();
 
   await navigation.getByRole('button', { name: 'Rooms & staff', exact: true }).click();
   await page.getByRole('button', { name: 'Add room' }).click();
@@ -410,12 +429,15 @@ test('Director opens every indexed search entity at its exact operational target
 
   await select('Ada Lovelace', 'Ada Lovelace');
   const selectedPlayer = page
-    .locator('li[data-director-navigation-id]')
+    .locator('[data-director-navigation-id]')
     .filter({ hasText: 'Ada Lovelace' })
     .first();
   await expect(selectedPlayer).toHaveClass(/is-navigation-target/);
-  await expect(selectedPlayer).toBeFocused();
-  await expect(northviewRow.locator('details')).toHaveAttribute('open', '');
+  await expect(selectedPlayer.locator('[data-director-navigation-focus]')).toBeFocused();
+  await expect(northviewRow.getByRole('button', { name: '1 player' })).toHaveAttribute(
+    'aria-expanded',
+    'true',
+  );
 
   await select('Room 101', 'Room 101');
   const selectedRoom = page
