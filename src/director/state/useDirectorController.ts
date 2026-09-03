@@ -2901,13 +2901,46 @@ export function useDirectorController(repository = createDirectorRepository()): 
 
   const updateRules = useCallback(
     (changes: Partial<NonNullable<DirectorState['tournament']>['rules']>): boolean => {
-      if (!stateRef.current.tournament) {
+      const snapshot = stateRef.current;
+      if (!snapshot.tournament) {
         setError('Create a tournament before editing scoring rules.');
         return false;
       }
-      const validationError = validateDirectorRuleChanges(changes);
+      const merged = { ...snapshot.tournament.rules, ...changes };
+      const validationError = validateDirectorRuleChanges(changes, merged);
       if (validationError) {
         setError(validationError);
+        return false;
+      }
+      // Point values, bonus shapes, and game lengths reinterpret games that
+      // already exist: an accepted result scored under different values must
+      // keep its original meaning, so those fields lock once play starts.
+      // Procedure toggles (overtime, timers, lightning, bouncebacks) and
+      // tiebreakers only affect future games and stay editable.
+      const reinterpreted = (
+        [
+          'tossupValue',
+          'superpowerValue',
+          'powerValue',
+          'negValue',
+          'useBonuses',
+          'bonusValue',
+          'tossupCount',
+          'maximumTossupCount',
+          'bonusParts',
+          'minimumBonusParts',
+          'maximumBonusScore',
+          'bonusDivisor',
+          'maximumActivePlayers',
+        ] as const
+      ).some((key) => changes[key] !== undefined);
+      const acceptedCount = snapshot.games.filter((game) => game.status === 'accepted').length;
+      if (reinterpreted && acceptedCount > 0) {
+        setError(
+          `Scoring values are locked: ${acceptedCount} accepted result${acceptedCount === 1 ? '' : 's'} ` +
+            'already use them, and changing point values now would reinterpret those games. ' +
+            'To run a different format, start a new tournament.',
+        );
         return false;
       }
       commit((draft) => {
@@ -5630,6 +5663,7 @@ function validateAdvancementRule(value: AdvancementRule | null | undefined): str
 
 function validateDirectorRuleChanges(
   changes: Partial<NonNullable<DirectorState['tournament']>['rules']>,
+  merged: NonNullable<DirectorState['tournament']>['rules'],
 ): string | null {
   if (
     changes.tossupValue !== undefined &&
@@ -5637,14 +5671,52 @@ function validateDirectorRuleChanges(
   ) {
     return 'Tossup value must be a finite positive number.';
   }
-  if (changes.powerValue !== undefined && (!Number.isFinite(changes.powerValue) || changes.powerValue <= 0)) {
+  if (changes.tossupValue !== undefined && !Number.isInteger(changes.tossupValue)) {
+    return 'Tossup value must be a whole number.';
+  }
+  if (
+    changes.superpowerValue !== undefined &&
+    changes.superpowerValue !== null &&
+    (!Number.isFinite(changes.superpowerValue) || changes.superpowerValue <= 0)
+  ) {
+    return 'Superpower value must be a finite positive number.';
+  }
+  if (
+    changes.superpowerValue !== undefined &&
+    changes.superpowerValue !== null &&
+    !Number.isInteger(changes.superpowerValue)
+  ) {
+    return 'Superpower value must be a whole number.';
+  }
+  if (
+    changes.powerValue !== undefined &&
+    changes.powerValue !== null &&
+    (!Number.isFinite(changes.powerValue) || changes.powerValue <= 0)
+  ) {
     return 'Power value must be a finite positive number.';
   }
-  if (changes.negValue !== undefined && (!Number.isFinite(changes.negValue) || changes.negValue > 0)) {
+  if (
+    changes.powerValue !== undefined &&
+    changes.powerValue !== null &&
+    !Number.isInteger(changes.powerValue)
+  ) {
+    return 'Power value must be a whole number.';
+  }
+  if (
+    changes.negValue !== undefined &&
+    changes.negValue !== null &&
+    (!Number.isFinite(changes.negValue) || changes.negValue > 0)
+  ) {
     return 'Neg value must be a finite number of zero or less.';
+  }
+  if (changes.negValue !== undefined && changes.negValue !== null && !Number.isInteger(changes.negValue)) {
+    return 'Neg value must be a whole number.';
   }
   if (changes.bonusValue !== undefined && (!Number.isFinite(changes.bonusValue) || changes.bonusValue < 0)) {
     return 'Bonus value must be a finite non-negative number.';
+  }
+  if (changes.bonusValue !== undefined && !Number.isInteger(changes.bonusValue)) {
+    return 'Bonus value must be a whole number.';
   }
   if (
     changes.tossupCount !== undefined &&
@@ -5652,8 +5724,54 @@ function validateDirectorRuleChanges(
   ) {
     return 'Tossups must be a positive whole number.';
   }
+  if (
+    changes.maximumTossupCount !== undefined &&
+    changes.maximumTossupCount !== null &&
+    (!Number.isInteger(changes.maximumTossupCount) || changes.maximumTossupCount < 1)
+  ) {
+    return 'Maximum tossups must be a positive whole number.';
+  }
   if (changes.bonusParts !== undefined && (!Number.isInteger(changes.bonusParts) || changes.bonusParts < 1)) {
     return 'Bonus parts must be a positive whole number.';
+  }
+  if (
+    changes.minimumBonusParts !== undefined &&
+    changes.minimumBonusParts !== null &&
+    (!Number.isInteger(changes.minimumBonusParts) || changes.minimumBonusParts < 1)
+  ) {
+    return 'Minimum bonus parts must be a positive whole number.';
+  }
+  if (
+    changes.maximumBonusScore !== undefined &&
+    changes.maximumBonusScore !== null &&
+    (!Number.isInteger(changes.maximumBonusScore) || changes.maximumBonusScore < 0)
+  ) {
+    return 'Maximum bonus score must be a non-negative whole number.';
+  }
+  if (
+    changes.bonusDivisor !== undefined &&
+    changes.bonusDivisor !== null &&
+    (!Number.isInteger(changes.bonusDivisor) || changes.bonusDivisor < 1)
+  ) {
+    return 'Bonus divisor must be a positive whole number.';
+  }
+  if (
+    changes.overtimeTossupCount !== undefined &&
+    (!Number.isInteger(changes.overtimeTossupCount) || changes.overtimeTossupCount < 1)
+  ) {
+    return 'Overtime tossups must be a positive whole number.';
+  }
+  if (
+    changes.lightningCountPerTeam !== undefined &&
+    (!Number.isInteger(changes.lightningCountPerTeam) || changes.lightningCountPerTeam < 1)
+  ) {
+    return 'Lightning rounds per team must be a positive whole number.';
+  }
+  if (
+    changes.lightningDivisor !== undefined &&
+    (!Number.isInteger(changes.lightningDivisor) || changes.lightningDivisor < 1)
+  ) {
+    return 'Lightning divisor must be a positive whole number.';
   }
   if (
     changes.maximumActivePlayers !== undefined &&
@@ -5666,6 +5784,53 @@ function validateDirectorRuleChanges(
     (!Number.isFinite(changes.regulationMinutes) || changes.regulationMinutes <= 0)
   ) {
     return 'Regulation minutes must be a finite positive number.';
+  }
+  // Tier ordering is checked against the merged rules so a single edit is
+  // judged in the context it would land in. Edits that touch no scoring
+  // value (tiebreakers, display toggles) never trigger these, so legacy
+  // documents stay editable outside the scoring section.
+  const scoringKeys = [
+    'tossupValue',
+    'superpowerValue',
+    'powerValue',
+    'negValue',
+    'useBonuses',
+    'bonusValue',
+    'tossupCount',
+    'maximumTossupCount',
+    'bonusParts',
+    'minimumBonusParts',
+    'maximumBonusScore',
+    'bonusDivisor',
+    'overtime',
+    'overtimeTossupCount',
+    'overtimeBonuses',
+  ] as const;
+  if (scoringKeys.some((key) => changes[key] !== undefined)) {
+    if (merged.superpowerValue !== null && merged.powerValue !== null) {
+      if (merged.superpowerValue <= merged.powerValue) {
+        return 'Superpower must be worth more than power.';
+      }
+    }
+    if (merged.superpowerValue !== null && merged.superpowerValue <= merged.tossupValue) {
+      return 'Superpower must be worth more than the tossup value.';
+    }
+    if (merged.powerValue !== null && merged.powerValue <= merged.tossupValue) {
+      return 'Power must be worth more than the tossup value.';
+    }
+    const minimumParts = merged.minimumBonusParts ?? merged.bonusParts;
+    if (minimumParts > merged.bonusParts) {
+      return 'Minimum bonus parts cannot exceed bonus parts.';
+    }
+    if (merged.maximumTossupCount !== null && merged.maximumTossupCount < merged.tossupCount) {
+      return 'Maximum tossups cannot be fewer than regulation tossups.';
+    }
+    if (merged.overtimeBonuses && !merged.overtime) {
+      return 'Overtime bonuses require overtime play.';
+    }
+    if (merged.overtimeBonuses && !merged.useBonuses) {
+      return 'Overtime bonuses require bonuses.';
+    }
   }
   if (changes.tiebreakers !== undefined) {
     if (changes.tiebreakers.length === 0) return 'Configure at least one standings tiebreaker.';

@@ -3,6 +3,7 @@ import {
   currentPhase,
   formatGenerationAvailability,
   previewAdvancement,
+  scoringRulePresets,
   type AdvancementRule,
   type DirectorState,
   type PhaseKind,
@@ -42,6 +43,9 @@ export function FormatView({
         ? roundsDraftState.value
         : (format?.roundsPerTeam?.toString() ?? '');
   const rules = state.tournament?.rules;
+  const acceptedResultCount = state.games.filter((game) => game.status === 'accepted').length;
+  const scoringValuesLocked = acceptedResultCount > 0;
+  const [showMoreRules, setShowMoreRules] = useState(false);
   const scoringRuleDraftKey = scoringRuleKey(state.tournament?.id, rules);
   const [scoringRuleDraftState, setScoringRuleDraftState] = useState(() => ({
     key: scoringRuleDraftKey,
@@ -59,10 +63,30 @@ export function FormatView({
       values: update(scoringRuleDrafts),
     });
   };
+  // Nullable scoring fields (second tiers, overrides) treat a blank input as
+  // "unused" rather than zero: a missing power mark is not a 0-point power.
+  const nullableScoringKeys: ReadonlySet<ScoringRuleKey> = new Set([
+    'superpowerValue',
+    'powerValue',
+    'negValue',
+    'maximumTossupCount',
+    'minimumBonusParts',
+    'maximumBonusScore',
+    'bonusDivisor',
+  ]);
   const commitScoringRule = (key: ScoringRuleKey, label: string): void => {
     const raw = scoringRuleDrafts[key].trim();
     if (!raw) {
-      onAnnounce(errorNotice(`${label} must be a number.`));
+      if (!nullableScoringKeys.has(key)) {
+        onAnnounce(errorNotice(`${label} must be a number.`));
+        return;
+      }
+      const cleared = controller.updateRules({
+        [key]: null,
+      } as Partial<NonNullable<DirectorState['tournament']>['rules']>);
+      if (!cleared) {
+        onAnnounce('Scoring rule was not saved; review the Director error.');
+      }
       return;
     }
     const value = Number(raw);
@@ -70,7 +94,11 @@ export function FormatView({
       onAnnounce(errorNotice(`${label} must be a finite number.`));
       return;
     }
-    controller.updateRules({ [key]: value } as Partial<NonNullable<DirectorState['tournament']>['rules']>);
+    if (
+      !controller.updateRules({ [key]: value } as Partial<NonNullable<DirectorState['tournament']>['rules']>)
+    ) {
+      onAnnounce(`${label} was not saved; review the Director error.`);
+    }
   };
   const commitRoundsPerTeam = (): void => {
     if (!format) return;
@@ -283,12 +311,39 @@ export function FormatView({
               </span>
             </div>
             <PanelBody>
+              <div className="director-row-actions" role="group" aria-label="Rule presets">
+                {scoringRulePresets.map((preset) => (
+                  <span key={preset.id} title={preset.description}>
+                    <Button
+                      variant="quiet"
+                      disabled={scoringValuesLocked}
+                      onClick={() => {
+                        if (!controller.updateRules({ ...preset.rules })) {
+                          onAnnounce(`${preset.name} was not applied; review the Director error.`);
+                          return;
+                        }
+                        onAnnounce(`${preset.name} rules applied. Adjust any field afterward.`);
+                      }}
+                    >
+                      {preset.name}
+                    </Button>
+                  </span>
+                ))}
+              </div>
+              {scoringValuesLocked && (
+                <p className="director-panel-footnote" role="note">
+                  Scoring values are locked: {acceptedResultCount} accepted result
+                  {acceptedResultCount === 1 ? '' : 's'} already use{acceptedResultCount === 1 ? 's' : ''}{' '}
+                  them. Overtime, timers, lightning, bouncebacks, and tiebreakers stay editable.
+                </p>
+              )}
               <div className="director-form-grid">
                 <FormField label="Tossup value">
                   <input
                     type="number"
                     min="1"
                     step="1"
+                    disabled={scoringValuesLocked}
                     value={scoringRuleDrafts.tossupValue}
                     onChange={(event) =>
                       updateScoringRuleDrafts((current) => ({
@@ -299,11 +354,12 @@ export function FormatView({
                     onBlur={() => commitScoringRule('tossupValue', 'Tossup value')}
                   />
                 </FormField>
-                <FormField label="Power value">
+                <FormField label="Power value" hint="Blank means no power mark.">
                   <input
                     type="number"
                     min="1"
                     step="1"
+                    disabled={scoringValuesLocked}
                     value={scoringRuleDrafts.powerValue}
                     onChange={(event) =>
                       updateScoringRuleDrafts((current) => ({
@@ -314,11 +370,12 @@ export function FormatView({
                     onBlur={() => commitScoringRule('powerValue', 'Power value')}
                   />
                 </FormField>
-                <FormField label="Neg value">
+                <FormField label="Neg value" hint="Blank means no interrupt penalty.">
                   <input
                     type="number"
                     max="0"
                     step="1"
+                    disabled={scoringValuesLocked}
                     value={scoringRuleDrafts.negValue}
                     onChange={(event) =>
                       updateScoringRuleDrafts((current) => ({
@@ -334,6 +391,7 @@ export function FormatView({
                     type="number"
                     min="0"
                     step="1"
+                    disabled={scoringValuesLocked}
                     value={scoringRuleDrafts.bonusValue}
                     onChange={(event) =>
                       updateScoringRuleDrafts((current) => ({
@@ -349,6 +407,7 @@ export function FormatView({
                     type="number"
                     min="1"
                     step="1"
+                    disabled={scoringValuesLocked}
                     value={scoringRuleDrafts.tossupCount}
                     onChange={(event) =>
                       updateScoringRuleDrafts((current) => ({
@@ -364,6 +423,7 @@ export function FormatView({
                     type="number"
                     min="1"
                     step="1"
+                    disabled={scoringValuesLocked}
                     value={scoringRuleDrafts.bonusParts}
                     onChange={(event) =>
                       updateScoringRuleDrafts((current) => ({
@@ -379,6 +439,7 @@ export function FormatView({
                     type="number"
                     min="1"
                     step="1"
+                    disabled={scoringValuesLocked}
                     value={scoringRuleDrafts.maximumActivePlayers}
                     onChange={(event) =>
                       updateScoringRuleDrafts((current) => ({
@@ -390,7 +451,153 @@ export function FormatView({
                   />
                 </FormField>
               </div>
+              <div className="director-row-actions">
+                <Button variant="quiet" onClick={() => setShowMoreRules((current) => !current)}>
+                  {showMoreRules ? 'Fewer scoring rules' : 'More scoring rules'}
+                </Button>
+              </div>
+              {showMoreRules && (
+                <div className="director-form-grid">
+                  <FormField label="Superpower value" hint="Blank means no second tier.">
+                    <input
+                      type="number"
+                      min="1"
+                      step="1"
+                      disabled={scoringValuesLocked}
+                      value={scoringRuleDrafts.superpowerValue}
+                      onChange={(event) =>
+                        updateScoringRuleDrafts((current) => ({
+                          ...current,
+                          superpowerValue: event.target.value,
+                        }))
+                      }
+                      onBlur={() => commitScoringRule('superpowerValue', 'Superpower value')}
+                    />
+                  </FormField>
+                  <FormField label="Maximum tossups" hint="Blank means regulation ends at Tossups.">
+                    <input
+                      type="number"
+                      min="1"
+                      step="1"
+                      disabled={scoringValuesLocked}
+                      value={scoringRuleDrafts.maximumTossupCount}
+                      onChange={(event) =>
+                        updateScoringRuleDrafts((current) => ({
+                          ...current,
+                          maximumTossupCount: event.target.value,
+                        }))
+                      }
+                      onBlur={() => commitScoringRule('maximumTossupCount', 'Maximum tossups')}
+                    />
+                  </FormField>
+                  <FormField
+                    label="Minimum bonus parts"
+                    hint="Blank means every bonus has Bonus parts. Smaller means irregular bonuses."
+                  >
+                    <input
+                      type="number"
+                      min="1"
+                      step="1"
+                      disabled={scoringValuesLocked}
+                      value={scoringRuleDrafts.minimumBonusParts}
+                      onChange={(event) =>
+                        updateScoringRuleDrafts((current) => ({
+                          ...current,
+                          minimumBonusParts: event.target.value,
+                        }))
+                      }
+                      onBlur={() => commitScoringRule('minimumBonusParts', 'Minimum bonus parts')}
+                    />
+                  </FormField>
+                  <FormField label="Maximum bonus score" hint="Blank means Bonus value times Bonus parts.">
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      disabled={scoringValuesLocked}
+                      value={scoringRuleDrafts.maximumBonusScore}
+                      onChange={(event) =>
+                        updateScoringRuleDrafts((current) => ({
+                          ...current,
+                          maximumBonusScore: event.target.value,
+                        }))
+                      }
+                      onBlur={() => commitScoringRule('maximumBonusScore', 'Maximum bonus score')}
+                    />
+                  </FormField>
+                  <FormField label="Bonus divisor" hint="Blank means one bonus part.">
+                    <input
+                      type="number"
+                      min="1"
+                      step="1"
+                      disabled={scoringValuesLocked}
+                      value={scoringRuleDrafts.bonusDivisor}
+                      onChange={(event) =>
+                        updateScoringRuleDrafts((current) => ({
+                          ...current,
+                          bonusDivisor: event.target.value,
+                        }))
+                      }
+                      onBlur={() => commitScoringRule('bonusDivisor', 'Bonus divisor')}
+                    />
+                  </FormField>
+                  <FormField label="Overtime tossups" hint="1 is sudden death.">
+                    <input
+                      type="number"
+                      min="1"
+                      step="1"
+                      value={scoringRuleDrafts.overtimeTossupCount}
+                      onChange={(event) =>
+                        updateScoringRuleDrafts((current) => ({
+                          ...current,
+                          overtimeTossupCount: event.target.value,
+                        }))
+                      }
+                      onBlur={() => commitScoringRule('overtimeTossupCount', 'Overtime tossups')}
+                    />
+                  </FormField>
+                  <FormField label="Lightning rounds per team">
+                    <input
+                      type="number"
+                      min="1"
+                      step="1"
+                      value={scoringRuleDrafts.lightningCountPerTeam}
+                      onChange={(event) =>
+                        updateScoringRuleDrafts((current) => ({
+                          ...current,
+                          lightningCountPerTeam: event.target.value,
+                        }))
+                      }
+                      onBlur={() => commitScoringRule('lightningCountPerTeam', 'Lightning rounds per team')}
+                    />
+                  </FormField>
+                  <FormField label="Lightning divisor">
+                    <input
+                      type="number"
+                      min="1"
+                      step="1"
+                      value={scoringRuleDrafts.lightningDivisor}
+                      onChange={(event) =>
+                        updateScoringRuleDrafts((current) => ({
+                          ...current,
+                          lightningDivisor: event.target.value,
+                        }))
+                      }
+                      onBlur={() => commitScoringRule('lightningDivisor', 'Lightning divisor')}
+                    />
+                  </FormField>
+                </div>
+              )}
               <div className="director-check-group">
+                <label className="director-check-row">
+                  <input
+                    type="checkbox"
+                    checked={state.tournament?.rules.useBonuses ?? true}
+                    disabled={scoringValuesLocked}
+                    onChange={(event) => controller.updateRules({ useBonuses: event.target.checked })}
+                  />
+                  <span>Use bonuses</span>
+                </label>
                 <label className="director-check-row">
                   <input
                     type="checkbox"
@@ -406,6 +613,14 @@ export function FormatView({
                     onChange={(event) => controller.updateRules({ overtime: event.target.checked })}
                   />
                   <span>Use overtime when tied</span>
+                </label>
+                <label className="director-check-row">
+                  <input
+                    type="checkbox"
+                    checked={state.tournament?.rules.overtimeBonuses ?? false}
+                    onChange={(event) => controller.updateRules({ overtimeBonuses: event.target.checked })}
+                  />
+                  <span>Overtime tossups earn bonuses</span>
                 </label>
                 <label className="director-check-row">
                   <input
@@ -1526,11 +1741,19 @@ function formatDescription(kind: string): string {
 
 type ScoringRuleKey =
   | 'tossupValue'
+  | 'superpowerValue'
   | 'powerValue'
   | 'negValue'
   | 'bonusValue'
   | 'tossupCount'
+  | 'maximumTossupCount'
   | 'bonusParts'
+  | 'minimumBonusParts'
+  | 'maximumBonusScore'
+  | 'bonusDivisor'
+  | 'overtimeTossupCount'
+  | 'lightningCountPerTeam'
+  | 'lightningDivisor'
   | 'maximumActivePlayers';
 
 type ScoringRuleDrafts = Record<ScoringRuleKey, string>;
@@ -1542,11 +1765,19 @@ function scoringRuleKey(
   return [
     tournamentId ?? '',
     rules?.tossupValue ?? '',
+    rules?.superpowerValue ?? '',
     rules?.powerValue ?? '',
     rules?.negValue ?? '',
     rules?.bonusValue ?? '',
     rules?.tossupCount ?? '',
+    rules?.maximumTossupCount ?? '',
     rules?.bonusParts ?? '',
+    rules?.minimumBonusParts ?? '',
+    rules?.maximumBonusScore ?? '',
+    rules?.bonusDivisor ?? '',
+    rules?.overtimeTossupCount ?? '',
+    rules?.lightningCountPerTeam ?? '',
+    rules?.lightningDivisor ?? '',
     rules?.maximumActivePlayers ?? '',
   ].join('|');
 }
@@ -1556,11 +1787,19 @@ function scoringRuleDraftsFor(
 ): ScoringRuleDrafts {
   return {
     tossupValue: String(rules?.tossupValue ?? 10),
-    powerValue: String(rules?.powerValue ?? 15),
-    negValue: String(rules?.negValue ?? -5),
+    superpowerValue: rules?.superpowerValue == null ? '' : String(rules.superpowerValue),
+    powerValue: rules?.powerValue == null ? '' : String(rules.powerValue),
+    negValue: rules?.negValue == null ? '' : String(rules.negValue),
     bonusValue: String(rules?.bonusValue ?? 10),
     tossupCount: String(rules?.tossupCount ?? 20),
+    maximumTossupCount: rules?.maximumTossupCount == null ? '' : String(rules.maximumTossupCount),
     bonusParts: String(rules?.bonusParts ?? 3),
+    minimumBonusParts: rules?.minimumBonusParts == null ? '' : String(rules.minimumBonusParts),
+    maximumBonusScore: rules?.maximumBonusScore == null ? '' : String(rules.maximumBonusScore),
+    bonusDivisor: rules?.bonusDivisor == null ? '' : String(rules.bonusDivisor),
+    overtimeTossupCount: String(rules?.overtimeTossupCount ?? 1),
+    lightningCountPerTeam: String(rules?.lightningCountPerTeam ?? 1),
+    lightningDivisor: String(rules?.lightningDivisor ?? 10),
     maximumActivePlayers: String(rules?.maximumActivePlayers ?? 4),
   };
 }

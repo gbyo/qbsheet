@@ -160,6 +160,7 @@ function resultScores(game: InterchangeGameRecord): TeamGameScore[] {
   return (game.result?.teams ?? []).map((team) => ({
     teamId: team.teamId,
     score: number(team.points) ?? 0,
+    superpowers: number(team.superpowers) ?? 0,
     powers: number(team.powers) ?? 0,
     gets: number(team.gets) ?? 0,
     negs: number(team.negs) ?? 0,
@@ -206,9 +207,11 @@ function preservedDirectorState(data: DirectorTournament): DirectorState | undef
 
 function toInterchangeGame(state: DirectorState, game: GameRecord): InterchangeGameRecord {
   const scheduled = state.scheduledGames.find((entry) => entry.id === game.scheduledGameId);
+  const rules = state.tournament?.rules;
   const scores: GameTeamResult[] = game.scores.map((score) => ({
     teamId: score.teamId,
     points: score.score,
+    superpowers: score.superpowers,
     powers: score.powers,
     gets: score.gets,
     negs: score.negs,
@@ -233,13 +236,15 @@ function toInterchangeGame(state: DirectorState, game: GameRecord): InterchangeG
       players: game.playerStats.map((player) => ({
         playerId: player.playerId,
         teamId: player.teamId,
+        superpowers: player.superpowers,
         powers: player.powers,
         gets: player.gets,
         negs: player.negs,
         points:
-          player.powers * (state.tournament?.rules.powerValue ?? 15) +
-          player.gets * (state.tournament?.rules.tossupValue ?? 10) +
-          player.negs * (state.tournament?.rules.negValue ?? -5) +
+          player.superpowers * (rules?.superpowerValue ?? rules?.powerValue ?? 15) +
+          player.powers * (rules?.powerValue ?? 15) +
+          player.gets * (rules?.tossupValue ?? 10) +
+          player.negs * (rules?.negValue ?? -5) +
           player.bonusPoints,
         ...(player.tossupsHeard === null || player.tossupsHeard === undefined
           ? {}
@@ -668,6 +673,7 @@ function fromInterchange(data: DirectorTournament): DirectorState {
     playerStats: (game.result?.players ?? []).map((player) => ({
       playerId: player.playerId,
       teamId: player.teamId,
+      superpowers: player.superpowers ?? 0,
       powers: player.powers ?? 0,
       gets: player.gets ?? 0,
       negs: player.negs ?? 0,
@@ -778,10 +784,51 @@ function rulesFromInterchange(
   };
   const tossupValue = firstNumber(rules.tossupValue, rules.tossupPoints, answerValue('C', 'Correct'));
   if (tossupValue !== undefined) result.tossupValue = tossupValue;
+  // A stated answer-type table is definitive about which tiers exist: a table
+  // without a power row means no powers, not the default 15. Legacy flat
+  // documents without a table keep the previous default-preserving behavior.
+  const hasAnswerTable = answerTypes.length > 0;
+  const positiveValues = answerTypes
+    .map((candidate) =>
+      candidate && typeof candidate === 'object' && !Array.isArray(candidate)
+        ? number(candidate.value)
+        : undefined,
+    )
+    .filter((value): value is number => value !== undefined && value > 0)
+    .sort((left, right) => right - left);
+  const superpowerValue =
+    firstNumber(rules.superpowerValue, answerValue('SP', 'Superpower')) ??
+    (hasAnswerTable && positiveValues.length >= 3 ? positiveValues[0] : undefined);
+  if (superpowerValue !== undefined) result.superpowerValue = superpowerValue;
   const powerValue = firstNumber(rules.powerValue, rules.powerPoints, answerValue('P', 'Power'));
   if (powerValue !== undefined) result.powerValue = powerValue;
+  else if (hasAnswerTable) result.powerValue = null;
   const negValue = firstNumber(rules.negValue, rules.negPoints, answerValue('N', 'Neg'));
   if (negValue !== undefined) result.negValue = negValue;
+  else if (hasAnswerTable) {
+    const answerNumbers = answerTypes.map((candidate) =>
+      candidate && typeof candidate === 'object' && !Array.isArray(candidate)
+        ? number(candidate.value)
+        : undefined,
+    );
+    if (!answerNumbers.some((value) => value !== undefined && value < 0)) result.negValue = null;
+  }
+  const bonusFieldsPresent =
+    number(rules.maximum_bonus_score) !== undefined ||
+    number(rules.bonus_divisor) !== undefined ||
+    number(rules.points_per_bonus_part) !== undefined ||
+    number(rules.minimum_parts_per_bonus) !== undefined ||
+    number(rules.maximum_parts_per_bonus) !== undefined ||
+    rules.bonuses_bounce_back === true ||
+    answerTypes.some(
+      (candidate) =>
+        candidate &&
+        typeof candidate === 'object' &&
+        !Array.isArray(candidate) &&
+        candidate.awards_bonus === true,
+    );
+  if (typeof rules.useBonuses === 'boolean') result.useBonuses = rules.useBonuses;
+  else if (hasAnswerTable) result.useBonuses = bonusFieldsPresent;
   const bonusValue = firstNumber(rules.bonusValue, rules.bonusPoints, rules.points_per_bonus_part);
   if (bonusValue !== undefined) result.bonusValue = bonusValue;
   const tossupCount = firstNumber(
@@ -791,17 +838,39 @@ function rulesFromInterchange(
     rules.maximum_regulation_tossup_count,
   );
   if (tossupCount !== undefined) result.tossupCount = tossupCount;
+  const maximumTossupCount = firstNumber(rules.maximumTossupCount);
+  if (maximumTossupCount !== undefined) result.maximumTossupCount = maximumTossupCount;
+  else {
+    // The canonical exporter always states the maximum; only treat it as an
+    // override when regulation is actually allowed to run long.
+    const statedMaximum = number(rules.maximum_regulation_tossup_count);
+    if (statedMaximum !== undefined && tossupValue !== undefined && statedMaximum !== tossupValue) {
+      result.maximumTossupCount = statedMaximum;
+    }
+  }
+  // For irregular bonuses the part count is the maximum; the minimum is read separately below.
   const bonusParts = firstNumber(
     rules.bonusParts,
-    rules.minimum_parts_per_bonus,
     rules.maximum_parts_per_bonus,
+    rules.minimum_parts_per_bonus,
   );
   if (bonusParts !== undefined) result.bonusParts = bonusParts;
+  const minimumBonusParts = firstNumber(rules.minimumBonusParts, rules.minimum_parts_per_bonus);
+  if (minimumBonusParts !== undefined) result.minimumBonusParts = minimumBonusParts;
+  const maximumBonusScore = firstNumber(rules.maximumBonusScore, rules.maximum_bonus_score);
+  if (maximumBonusScore !== undefined) result.maximumBonusScore = maximumBonusScore;
+  const bonusDivisor = firstNumber(rules.bonusDivisor, rules.bonus_divisor);
+  if (bonusDivisor !== undefined) result.bonusDivisor = bonusDivisor;
   if (typeof rules.bouncebacks === 'boolean') result.bouncebacks = rules.bouncebacks;
   else if (typeof rules.bonuses_bounce_back === 'boolean') result.bouncebacks = rules.bonuses_bounce_back;
   if (typeof rules.overtime === 'boolean') result.overtime = rules.overtime;
   else if (typeof rules.overtime_includes_bonuses === 'boolean')
     result.overtime = rules.overtime_includes_bonuses;
+  const overtimeTossupCount = firstNumber(rules.overtimeTossupCount, rules.minimum_overtime_question_count);
+  if (overtimeTossupCount !== undefined) result.overtimeTossupCount = overtimeTossupCount;
+  if (typeof rules.overtimeBonuses === 'boolean') result.overtimeBonuses = rules.overtimeBonuses;
+  else if (typeof rules.overtime_includes_bonuses === 'boolean')
+    result.overtimeBonuses = rules.overtime_includes_bonuses;
   if (typeof rules.timed === 'boolean') result.timed = rules.timed;
   else {
     const procedure = ['roomProcedure', 'room_procedure', 'procedure', 'regulation']
@@ -814,6 +883,10 @@ function rulesFromInterchange(
   if (typeof rules.lightning === 'boolean') result.lightning = rules.lightning;
   else if (number(rules.lightning_count_per_team) !== undefined)
     result.lightning = number(rules.lightning_count_per_team)! > 0;
+  const lightningCountPerTeam = firstNumber(rules.lightningCountPerTeam, rules.lightning_count_per_team);
+  if (lightningCountPerTeam !== undefined) result.lightningCountPerTeam = lightningCountPerTeam;
+  const lightningDivisor = firstNumber(rules.lightningDivisor, rules.lightning_divisor);
+  if (lightningDivisor !== undefined) result.lightningDivisor = lightningDivisor;
   const maximumActivePlayers = firstNumber(
     rules.maximumActivePlayers,
     rules.maximumPlayersPerTeam,
