@@ -5,7 +5,9 @@ dist/
 **/target/
 coverage/
 playwright-report/
+playwright-report-director/
 test-results/
+test-results-director/
 .stryker-tmp/
 package-lock.json
 

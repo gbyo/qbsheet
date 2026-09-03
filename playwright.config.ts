@@ -6,6 +6,9 @@ const browserChannel = process.env.CI ? 'chrome' : undefined;
 
 export default defineConfig({
   testDir: './e2e',
+  // Director is a separate application on a separate port, and its spec drives its own dev server
+  // rather than this one. See `playwright.director.config.ts`.
+  testIgnore: ['director/**'],
   fullyParallel: false,
   workers: 1,
   retries: 0,
