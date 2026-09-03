@@ -870,6 +870,63 @@ describe('Director integration hardening', () => {
     expect(result!.message).toMatch(/pairings/);
   });
 
+  test('final placement: explicit order overrides nothing but the final ranking', async () => {
+    const { hook } = await directorWithSetup(4);
+    act(() => {
+      expect(hook.result.current.generateSchedule().generated).toBe(true);
+    });
+    const round = hook.result.current.state.rounds[0];
+    const games = hook.result.current.state.scheduledGames.filter(
+      (game) => game.roundId === round.id && !game.bye,
+    );
+    expect(games.length).toBeGreaterThan(0);
+    act(() => {
+      for (const game of games) {
+        expect(
+          hook.result.current.addManualResult({
+            scheduledGameId: game.id,
+            scores: [score(game.leftTeamId, 300), score(game.rightTeamId!, 100)],
+          }),
+        ).toBe(true);
+      }
+    });
+    const before = hook.result.current.state;
+    const calculated = deriveTeamStandings(before).map((standing) => standing.teamId);
+    expect(calculated.length).toBe(4);
+    const [first, second, third] = calculated;
+    const gamesBefore = JSON.stringify(before.games);
+
+    // Duplicates collapse and unknown teams are dropped: a conflicting order
+    // can never be stored.
+    let result: ReturnType<typeof hook.result.current.setFinalPlacement>;
+    act(() => {
+      result = hook.result.current.setFinalPlacement({
+        order: [second!, second!, 'ghost-team', third!],
+        reason: 'Head-to-head final decided it.',
+      });
+    });
+    expect(result!.applied).toBe(true);
+    const placed = hook.result.current.state;
+    expect(placed.tournament?.finalPlacement?.order).toEqual([second!, third!]);
+    expect(placed.tournament?.finalPlacement?.reason).toBe('Head-to-head final decided it.');
+    expect(typeof placed.tournament?.finalPlacement?.at).toBe('string');
+
+    // Raw games, W/L records, and the calculated order are untouched.
+    expect(JSON.stringify(placed.games)).toBe(gamesBefore);
+    expect(deriveTeamStandings(placed).map((standing) => standing.teamId)).toEqual(calculated);
+    const audit = placed.audit.find((event) => event.type === 'final-placement-set');
+    expect(audit?.details).toMatchObject({ order: [second!, third!] });
+
+    // Reset restores the calculated ranking as final.
+    act(() => {
+      expect(hook.result.current.clearFinalPlacement()).toBe(true);
+    });
+    const cleared = hook.result.current.state;
+    expect(cleared.tournament?.finalPlacement).toBeUndefined();
+    expect(cleared.audit.some((event) => event.type === 'final-placement-cleared')).toBe(true);
+    expect(first).toBe(calculated[0]);
+  });
+
   test('round orchestration: manual start needs no rooms, one finish closes the round', async () => {
     const { hook } = await directorWithSetup(4);
     act(() => {

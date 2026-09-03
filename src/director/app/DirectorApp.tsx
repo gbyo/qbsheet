@@ -268,7 +268,7 @@ export default function DirectorApp() {
       case 'standings':
         return <StandingsView state={controller.state} controller={controller} onAnnounce={announce} />;
       case 'publish':
-        return <PublishView state={controller.state} onAnnounce={announce} />;
+        return <PublishView state={controller.state} onAnnounce={announce} onNavigate={navigate} />;
       case 'live':
         return <LiveView state={controller.state} actions={controller.live} onAnnounce={announce} />;
       case 'settings':
