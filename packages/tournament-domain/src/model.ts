@@ -113,6 +113,8 @@ export interface Tournament {
   currentPhaseId: DirectorId | null;
   currentPacketId: DirectorId | null;
   currentRoundId: DirectorId | null;
+  /** Explicit final ranking for final outputs. Absent means calculated standings are final. */
+  finalPlacement?: FinalPlacement;
   createdAt: string;
   updatedAt: string;
 }
@@ -136,7 +138,28 @@ export interface Player {
   captain: boolean;
   active: boolean;
   rosterNumber?: string | number;
+  /** Structured school year/grade (for example 10 for a sophomore), distinct from freeform notes. */
+  schoolYear?: number | null;
   notes?: string;
+}
+
+/** Built-in reporting classifications. Generalized grouping beyond these belongs in Team.tags. */
+export type TeamClassification = 'small-school' | 'junior-varsity' | 'undergraduate' | 'division-2';
+
+export const teamClassifications: readonly TeamClassification[] = [
+  'small-school',
+  'junior-varsity',
+  'undergraduate',
+  'division-2',
+];
+
+export function isTeamClassification(value: unknown): value is TeamClassification {
+  return (
+    value === 'small-school' ||
+    value === 'junior-varsity' ||
+    value === 'undergraduate' ||
+    value === 'division-2'
+  );
 }
 
 export interface Team {
@@ -146,9 +169,26 @@ export interface Team {
   teamLetter: string;
   seed: number | null;
   status: TeamStatus;
+  /** Reporting classifications (Small School, JV, …). Only the ones a tournament uses are shown. */
+  classifications?: TeamClassification[];
+  /** Generalized grouping tags beyond the built-in classifications. */
+  tags?: string[];
   notes?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * An explicit final ranking that overrides calculated standings for final
+ * outputs only. Raw scores, W/L records, and mid-tournament standings are
+ * never rewritten: the calculated order stays recoverable by ignoring this.
+ */
+export interface FinalPlacement {
+  /** Team ids from first place down. Teams not listed keep calculated order after the listed ones. */
+  order: DirectorId[];
+  actor: string;
+  at: string;
+  reason?: string;
 }
 
 export interface StaffMember {
@@ -416,6 +456,8 @@ export interface AuditEvent {
     | 'schedule-repaired'
     | 'schedule-cancelled'
     | 'advancement-committed'
+    | 'final-placement-set'
+    | 'final-placement-cleared'
     | 'roster-amendment'
     | 'qbtcp-help-resolved'
     | 'checkpoint-created'

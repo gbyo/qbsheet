@@ -12,6 +12,7 @@ import {
   type DirectorState,
   type GameRecord,
   type LiveBackendDescriptor,
+  type FinalPlacement,
   type Packet,
   type Protest,
   type ResultSubmission,
@@ -337,6 +338,27 @@ function normalizeTournament(value: unknown): DirectorState['tournament'] {
     timeZone: normalizeTimeZone(value.timeZone),
     createdAt: stringOrEmpty(value.createdAt),
     updatedAt: stringOrEmpty(value.updatedAt),
+    finalPlacement: normalizeFinalPlacement(value.finalPlacement),
+  };
+}
+
+function normalizeFinalPlacement(value: unknown): FinalPlacement | undefined {
+  if (value === null || value === undefined) return undefined;
+  if (!isRecord(value)) throw new Error('Director storage contains an invalid final placement.');
+  if (!Array.isArray(value.order)) throw new Error('Director storage contains an invalid final placement.');
+  const seen = new Set<string>();
+  const order: string[] = [];
+  for (const entry of value.order) {
+    if (typeof entry !== 'string' || entry === '' || seen.has(entry)) continue;
+    seen.add(entry);
+    order.push(entry);
+  }
+  if (order.length === 0) throw new Error('Director storage contains an invalid final placement.');
+  return {
+    order,
+    actor: stringOrEmpty(value.actor),
+    at: stringOrEmpty(value.at),
+    ...(typeof value.reason === 'string' && value.reason !== '' ? { reason: value.reason } : {}),
   };
 }
 
