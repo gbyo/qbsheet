@@ -2,15 +2,14 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import BrandLogo from '../../BrandLogo';
 import { Button, EmptyState, PanelBody, PanelFooter } from '../components/Controls';
 import { Icon } from '../components/Icon';
-import { primaryNavigation, moreNavigation, labelForSection, type SectionId } from './navigation';
+import { canonicalSection, labelForSection, navigationGroups, type SectionId } from './navigation';
 import { useDirectorController } from '../state/useDirectorController';
 import { OverviewView } from '../overview/OverviewView';
 import { TeamsView } from '../teams/TeamsView';
 import { FormatView } from '../format/FormatView';
-import { ScheduleView } from '../schedule/ScheduleView';
+import { RoundsView } from '../schedule/RoundsView';
 import { RoomsView } from '../rooms/RoomsView';
 import { PacketsView } from '../packets/PacketsView';
-import { TournamentView } from '../tournament/TournamentView';
 import { ResultsView } from '../results/ResultsView';
 import { TransfersView } from '../transfers/TransfersView';
 import { StandingsView } from '../standings/StandingsView';
@@ -49,8 +48,8 @@ export default function DirectorApp() {
   const [searchActiveIndex, setSearchActiveIndex] = useState(-1);
   const [announcement, setAnnouncement] = useState<DirectorNotice | null>(null);
   const announce = (input: AnnounceInput) => setAnnouncement(toDirectorNotice(input));
-  // The one shared native QBTCP snapshot: sidebar, Overview preflight, and Tournament Control
-  // all read this same state, and Tournament Control writes through to it. Polling depends on
+  // The one shared native QBTCP snapshot: sidebar, Overview preflight, and Rooms
+  // all read this same state, and Rooms writes through to it. Polling depends on
   // the tournament lifecycle identity (presence + id), not the whole immutable tournament
   // object, so a normal commit never restarts the interval while switching tournaments resets it.
   const nativeServer = useNativeServerStatus({
@@ -73,16 +72,17 @@ export default function DirectorApp() {
   const [operatorProfile, setOperatorProfile] = useState<OperatorProfile>(() => loadOperatorProfile());
   // Exactly one Director popover menu is ever open: opening one closes the other, and opening
   // an overlay (help, dialogs) closes any menu so none is stranded underneath.
-  const [openMenu, setOpenMenu] = useState<'tournament' | 'operator' | 'more' | null>(null);
+  const [openMenu, setOpenMenu] = useState<'tournament' | 'operator' | null>(null);
   const menuOpenerRef = useRef<HTMLElement | null>(null);
   const closeMenu = () => setOpenMenu(null);
-  const openMenuFrom = (name: 'tournament' | 'operator' | 'more', opener: { currentTarget: HTMLElement }) => {
+  const openMenuFrom = (name: 'tournament' | 'operator', opener: { currentTarget: HTMLElement }) => {
     menuOpenerRef.current = opener.currentTarget;
     setOpenMenu((current) => (current === name ? null : name));
   };
   const [operatorDialogOpen, setOperatorDialogOpen] = useState(false);
   const [navigationTarget, setNavigationTarget] = useState<DirectorNavigationTarget | null>(null);
   const [newTournamentOpen, setNewTournamentOpen] = useState(false);
+  const [tournamentDetailsOpen, setTournamentDetailsOpen] = useState(false);
   const tournamentButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -132,9 +132,13 @@ export default function DirectorApp() {
 
   const navigate = (section: SectionId, target?: DirectorNavigationTarget | null) => {
     setOpenMenu(null);
-    setActiveSection(section);
+    setActiveSection(canonicalSection(section));
     setAnnouncement(null);
-    if (target) setNavigationTarget(target);
+    if (target)
+      setNavigationTarget({
+        ...target,
+        section: canonicalSection(target.section),
+      });
   };
   const selectSearchResult = (result: SearchResult) => {
     const target: DirectorNavigationTarget = {
@@ -216,7 +220,17 @@ export default function DirectorApp() {
           />
         );
       case 'schedule':
-        return <ScheduleView state={controller.state} controller={controller} onAnnounce={announce} />;
+      case 'tournament':
+        return (
+          <RoundsView
+            state={controller.state}
+            controller={controller}
+            onNavigate={navigate}
+            onAnnounce={announce}
+            navigationTarget={navigationTarget}
+            onClearNavigationTarget={clearTarget}
+          />
+        );
       case 'rooms':
         return (
           <RoomsView
@@ -226,6 +240,7 @@ export default function DirectorApp() {
             onAnnounce={announce}
             navigationTarget={navigationTarget}
             onClearNavigationTarget={clearTarget}
+            server={nativeServer}
           />
         );
       case 'packets':
@@ -233,21 +248,10 @@ export default function DirectorApp() {
           <PacketsView
             state={controller.state}
             controller={controller}
-            onAnnounce={announce}
-            navigationTarget={navigationTarget}
-            onClearNavigationTarget={clearTarget}
-          />
-        );
-      case 'tournament':
-        return (
-          <TournamentView
-            state={controller.state}
-            controller={controller}
             onNavigate={navigate}
             onAnnounce={announce}
             navigationTarget={navigationTarget}
             onClearNavigationTarget={clearTarget}
-            server={nativeServer}
           />
         );
       case 'transfers':
@@ -392,6 +396,17 @@ export default function DirectorApp() {
                 className="director-menu-item"
                 onClick={() => {
                   closeMenu();
+                  setTournamentDetailsOpen(true);
+                }}
+              >
+                Tournament details…
+              </button>
+              <button
+                role="menuitem"
+                type="button"
+                className="director-menu-item"
+                onClick={() => {
+                  closeMenu();
                   setNewTournamentOpen(true);
                 }}
               >
@@ -502,55 +517,28 @@ export default function DirectorApp() {
           )}
         </div>
         <nav className="director-nav" aria-label="Tournament sections">
-          <div className="director-nav-group">
-            {primaryNavigation.map((item) => (
-              <SectionLink
-                key={item.id}
-                section={item}
-                active={item.id === activeSection}
-                onSelect={navigate}
-                count={item.id === 'results' ? resultReviewCount || undefined : undefined}
-              />
-            ))}
-          </div>
-          <div className="director-nav-group">
-            <button
-              type="button"
-              className={`director-nav-link ${moreNavigation.some((item) => item.id === activeSection) ? 'is-active' : ''}`}
-              aria-haspopup="menu"
-              aria-expanded={openMenu === 'more'}
-              aria-label={`More tournament tools${transferPendingCount ? `, ${transferPendingCount} transfers needing attention` : ''}`}
-              onClick={(event) => openMenuFrom('more', event)}
-            >
-              <Icon name="settings" />
-              <span>More</span>
-              {transferPendingCount > 0 && <span className="director-nav-count">{transferPendingCount}</span>}
-            </button>
-            {openMenu === 'more' && (
-              <DirectorMenu
-                label="More tournament tools"
-                className="director-more-menu"
-                openerRef={menuOpenerRef}
-                onClose={closeMenu}
-              >
-                {moreNavigation.map((item) => (
-                  <button
-                    key={item.id}
-                    role="menuitem"
-                    type="button"
-                    className={`director-menu-item ${item.id === activeSection ? 'is-selected' : ''}`}
-                    onClick={() => navigate(item.id)}
-                  >
-                    <Icon name={item.icon} size={14} />
-                    <span>{item.label}</span>
-                    {item.id === 'transfers' && transferPendingCount > 0 && (
-                      <small>{transferPendingCount} pending</small>
-                    )}
-                  </button>
-                ))}
-              </DirectorMenu>
-            )}
-          </div>
+          {navigationGroups.map((group) => (
+            <div className="director-nav-group" key={group.label}>
+              <p className="director-nav-label" aria-hidden="true">
+                {group.label}
+              </p>
+              {group.items.map((item) => (
+                <SectionLink
+                  key={item.id}
+                  section={item}
+                  active={item.id === activeSection}
+                  onSelect={navigate}
+                  count={
+                    item.id === 'results'
+                      ? resultReviewCount || undefined
+                      : item.id === 'transfers'
+                        ? transferPendingCount || undefined
+                        : undefined
+                  }
+                />
+              ))}
+            </div>
+          ))}
         </nav>
         <div className="director-sidebar-footer">
           <div className={`director-server-status is-${sidebarServer.kind}`} data-status={sidebarServer.kind}>
@@ -758,6 +746,16 @@ export default function DirectorApp() {
           }}
         />
       )}
+      {tournamentDetailsOpen && (
+        <TournamentDetailsDialog
+          controller={controller}
+          onClose={() => setTournamentDetailsOpen(false)}
+          onSaved={() => {
+            setTournamentDetailsOpen(false);
+            announce('Tournament details updated locally; saving now.');
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -834,6 +832,133 @@ function NewTournamentDialog({
         <div className="director-form-actions" style={{ marginTop: 16 }}>
           <Button variant="primary" type="submit" disabled={!name.trim()}>
             Create tournament
+          </Button>
+          <Button variant="secondary" type="button" onClick={onClose}>
+            Cancel
+          </Button>
+        </div>
+      </form>
+    </dialog>
+  );
+}
+
+function TournamentDetailsDialog({
+  controller,
+  onClose,
+  onSaved,
+}: {
+  controller: ReturnType<typeof useDirectorController>;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const tournament = controller.state.tournament;
+  const [name, setName] = useState(tournament?.name ?? '');
+  const [date, setDate] = useState(tournament?.date ?? '');
+  const [endDate, setEndDate] = useState(tournament?.endDate ?? '');
+  const [venue, setVenue] = useState(tournament?.venue ?? '');
+  const [organizer, setOrganizer] = useState(tournament?.organizer ?? '');
+  const [questionSet, setQuestionSet] = useState(tournament?.questionSet ?? '');
+  const [timeZone, setTimeZone] = useState(tournament?.timeZone ?? 'UTC');
+  const [error, setError] = useState<string | null>(null);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const firstFieldRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    if (!dialog.open) dialog.showModal();
+    firstFieldRef.current?.focus();
+    const cancel = (event: Event) => {
+      event.preventDefault();
+      onClose();
+    };
+    dialog.addEventListener('cancel', cancel);
+    return () => dialog.removeEventListener('cancel', cancel);
+  }, [onClose]);
+  if (!tournament) return null;
+  const save = () => {
+    if (!name.trim()) {
+      setError('Enter a tournament name first.');
+      return;
+    }
+    const saved = controller.updateTournament({
+      name: name.trim(),
+      date,
+      endDate,
+      venue,
+      organizer,
+      questionSet,
+      timeZone,
+    });
+    if (!saved) {
+      setError('Tournament details were not updated; review the Director error.');
+      return;
+    }
+    onSaved();
+  };
+  return (
+    <dialog
+      ref={dialogRef}
+      className="director-operator-dialog"
+      aria-labelledby="tournament-details-dialog-title"
+    >
+      <div className="director-help-dialog-header">
+        <h2 id="tournament-details-dialog-title">Tournament details</h2>
+        <button type="button" className="director-button director-button-secondary" onClick={onClose}>
+          Cancel
+        </button>
+      </div>
+      <p className="director-panel-footnote">
+        Tournament identity — date, venue, question set, timezone. Operator, storage, and diagnostics live
+        under App settings.
+      </p>
+      {error && (
+        <p className="director-error-copy" role="alert">
+          {error}
+        </p>
+      )}
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          save();
+        }}
+      >
+        <div className="director-form-grid director-form-grid-single" style={{ marginTop: 16 }}>
+          <label className="director-form-field">
+            <span>Tournament name</span>
+            <input ref={firstFieldRef} value={name} onChange={(event) => setName(event.target.value)} />
+          </label>
+          <label className="director-form-field">
+            <span>Date</span>
+            <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+          </label>
+          <label className="director-form-field">
+            <span>End date (optional, for multi-day events)</span>
+            <input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} />
+          </label>
+          <label className="director-form-field">
+            <span>Venue</span>
+            <input value={venue} onChange={(event) => setVenue(event.target.value)} />
+          </label>
+          <label className="director-form-field">
+            <span>Organizer</span>
+            <input value={organizer} onChange={(event) => setOrganizer(event.target.value)} />
+          </label>
+          <label className="director-form-field">
+            <span>Question set (optional)</span>
+            <input
+              value={questionSet}
+              onChange={(event) => setQuestionSet(event.target.value)}
+              placeholder="e.g. ACF Fall 2025"
+            />
+          </label>
+          <label className="director-form-field">
+            <span>Tournament timezone</span>
+            <input value={timeZone} onChange={(event) => setTimeZone(event.target.value)} />
+          </label>
+        </div>
+        <div className="director-form-actions" style={{ marginTop: 16 }}>
+          <Button variant="primary" type="submit" disabled={!name.trim()}>
+            Save details
           </Button>
           <Button variant="secondary" type="button" onClick={onClose}>
             Cancel
@@ -1287,7 +1412,7 @@ function searchTournament(
     if (matches([round.name, round.number, round.status])) {
       results.push({
         id: round.id,
-        section: 'tournament',
+        section: 'schedule',
         label: round.name,
         detail: `Round ${round.number} · ${round.status}`,
         entityType: 'round',

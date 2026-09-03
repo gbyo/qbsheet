@@ -30,14 +30,11 @@ async function createTournament(page: Page) {
 }
 
 async function goToSection(page: Page, name: string) {
+  // Every destination lives directly in the grouped sidebar; there is no
+  // generic More menu to fall back through.
   const navigation = page.locator('nav[aria-label="Tournament sections"]');
-  const primary = navigation.getByRole('button', { name, exact: true });
-  if ((await primary.count()) > 0) {
-    await primary.click();
-    return;
-  }
-  await navigation.getByRole('button', { name: /More tournament tools/ }).click();
-  await page.getByRole('menuitem', { name, exact: true }).click();
+  await expect(navigation.getByRole('button', { name: /More/ })).toHaveCount(0);
+  await navigation.getByRole('button', { name, exact: true }).click();
 }
 
 test('Director starts with an empty, persisted tournament workspace', async ({ page }) => {
@@ -205,9 +202,7 @@ test('Director runs a local tournament slice and reopens its result', async ({ p
 
   await goToSection(page, 'Format');
   await page.getByRole('button', { name: 'Generate next round' }).click();
-  await expect(page.getByRole('heading', { level: 1, name: 'Tournament control' })).toBeVisible();
-  const navigation = page.locator('nav[aria-label="Tournament sections"]');
-  await navigation.getByRole('button', { name: 'Overview', exact: true }).click();
+  await expect(page.getByRole('heading', { level: 1, name: 'Tournament day' })).toBeVisible();
   await page.getByRole('button', { name: /^Start Round/ }).click();
   await expect(page.getByRole('status')).toContainText('started');
 
@@ -396,9 +391,9 @@ test('Director supports keyboard search, inline edits, and audited result review
 
   await goToSection(page, 'Format');
   await page.getByRole('button', { name: 'Generate next round' }).click();
-  await expect(page.getByRole('heading', { level: 1, name: 'Tournament control' })).toBeVisible();
-  await page.getByRole('button', { name: 'Prepare', exact: true }).click();
-  await page.getByRole('button', { name: 'Release', exact: true }).click();
+  await expect(page.getByRole('heading', { level: 1, name: 'Tournament day' })).toBeVisible();
+  await page.getByRole('button', { name: /^Start Round/ }).click();
+  await expect(page.getByRole('status')).toContainText('started');
 
   await navigation.getByRole('button', { name: /Results/ }).click();
   await page.getByRole('button', { name: 'Enter result' }).click();
@@ -500,9 +495,9 @@ test('Director opens every indexed search entity at its exact operational target
 
   await goToSection(page, 'Format');
   await page.getByRole('button', { name: 'Generate next round' }).click();
-  await expect(page.getByRole('heading', { level: 1, name: 'Tournament control' })).toBeVisible();
-  await page.getByRole('button', { name: 'Prepare', exact: true }).click();
-  await page.getByRole('button', { name: 'Release', exact: true }).click();
+  await expect(page.getByRole('heading', { level: 1, name: 'Tournament day' })).toBeVisible();
+  await page.getByRole('button', { name: /^Start Round/ }).click();
+  await expect(page.getByRole('status')).toContainText('started');
 
   await navigation.getByRole('button', { name: /Results/ }).click();
   const gameId = await page
@@ -631,6 +626,6 @@ test('Director configures a pool format before generating its first round', asyn
   await expect(page.getByRole('button', { name: 'Generate next round' })).toBeEnabled();
 
   await page.getByRole('button', { name: 'Generate next round' }).click();
-  await expect(page.getByRole('heading', { level: 1, name: 'Tournament control' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: 'Tournament day' })).toBeVisible();
   await expect(page.getByText('Round 1', { exact: true })).toBeVisible();
 });

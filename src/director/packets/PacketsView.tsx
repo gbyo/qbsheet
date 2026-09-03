@@ -12,12 +12,14 @@ import type { AnnounceInput } from '../notices';
 export function PacketsView({
   state,
   controller,
+  onNavigate,
   onAnnounce,
   navigationTarget,
   onClearNavigationTarget,
 }: {
   state: DirectorState;
   controller: DirectorController;
+  onNavigate?: (section: import('../app/navigation').SectionId) => void;
   onAnnounce: (announcement: AnnounceInput) => void;
   navigationTarget?: DirectorNavigationTarget | null;
   onClearNavigationTarget?: () => void;
@@ -229,6 +231,7 @@ export function PacketsView({
               <PacketDetails
                 state={state}
                 packet={state.packets.find((entry) => entry.id === detailsPacketId)}
+                onNavigate={onNavigate}
               />
             )}
           </section>
@@ -429,11 +432,19 @@ function PacketRow({
 function PacketDetails({
   state,
   packet,
+  onNavigate,
 }: {
   state: DirectorState;
   packet: DirectorState['packets'][number] | undefined;
+  onNavigate?: (
+    section: import('../app/navigation').SectionId,
+    target?: import('../app/navigationTarget').DirectorNavigationTarget | null,
+  ) => void;
 }) {
   if (!packet) return null;
+  const usingRounds = packet.assignedRoundIds
+    .map((roundId) => state.rounds.find((entry) => entry.id === roundId))
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== undefined);
   const scheduledById = new Map(state.scheduledGames.map((game) => [game.id, game]));
   const recordsById = new Map(state.games.map((game) => [game.id, game]));
   const assignments = packet.assignedGameIds.map((assignmentId) => {
@@ -470,7 +481,28 @@ function PacketDetails({
           </div>
           <div>
             <dt>Round assignments</dt>
-            <dd>{packet.assignedRoundIds.length || 'None'}</dd>
+            <dd>
+              {usingRounds.length === 0
+                ? 'None'
+                : usingRounds.map((round, index) => (
+                    <span key={round.id}>
+                      {index > 0 ? ', ' : ''}
+                      <button
+                        type="button"
+                        className="director-inline-action"
+                        onClick={() =>
+                          onNavigate?.('schedule', {
+                            section: 'schedule',
+                            entityType: 'round',
+                            entityId: round.id,
+                          })
+                        }
+                      >
+                        {round.name}
+                      </button>
+                    </span>
+                  ))}
+            </dd>
           </div>
           <div>
             <dt>Game assignments</dt>

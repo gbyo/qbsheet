@@ -175,7 +175,7 @@ export function FormatView({
                     ? `Round generated with warnings: ${result.conflicts.join(' ')}`
                     : 'Round generated locally; saving now.',
                 );
-                onNavigate('tournament');
+                onNavigate('schedule');
               } else {
                 onAnnounce(
                   result.conflicts.join(' ') ||
@@ -1249,7 +1249,7 @@ function ManualRoundBuilder({
         ? 'Manual Swiss override created; review and prepare the round before release.'
         : 'Manual round created; review and prepare the round before release.',
     );
-    onNavigate('tournament');
+    onNavigate('schedule');
   };
   return (
     <section className="director-panel">
