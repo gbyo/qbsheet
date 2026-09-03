@@ -54,6 +54,12 @@ describe('Director flexible editing', () => {
         .every((game) => game.status === 'cancelled'),
     ).toBe(true);
 
+    const auditCount = hook.result.current.state.audit.length;
+    act(() => {
+      expect(dropTeamFlexibly(hook.result.current, team.id)).toBe(false);
+    });
+    expect(hook.result.current.state.audit).toHaveLength(auditCount);
+
     act(() => {
       expect(hook.result.current.restoreTeam(team.id)).toBe(true);
       expect(dropTeamFlexibly(hook.result.current, team.id)).toBe(true);
