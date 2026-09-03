@@ -228,6 +228,25 @@ describe('OverviewView attention-first layout', () => {
     await waitFor(() => expect(onAnnounce).toHaveBeenCalledWith('Round 1 started.'));
   });
 
+  test('blockers deep-link into the tool that owns them', () => {
+    const state = tournamentState();
+    state.rooms = [
+      {
+        id: 'room-1',
+        name: 'Room 1',
+        status: 'available',
+        moderatorId: 'ghost',
+        scorekeeperId: null,
+        equipmentId: null,
+        available: true,
+      },
+    ];
+    const { onNavigate } = renderOverview(state);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Room 1 references a missing moderator.' }));
+    expect(onNavigate).toHaveBeenCalledWith('rooms');
+  });
+
   test('complete released round offers a one-action finish', () => {
     const state = tournamentState();
     state.teams = [confirmedTeam('team-1', 'Wren A'), confirmedTeam('team-2', 'Dorman')];

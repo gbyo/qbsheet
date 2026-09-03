@@ -1,10 +1,36 @@
-import { deriveTeamStandings, latestRound, runPreflight, type DirectorState } from '../domain';
+import {
+  deriveTeamStandings,
+  latestRound,
+  runPreflight,
+  type DirectorState,
+  type PreflightIssue,
+} from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
 import { Button } from '../components/Controls';
 import { Icon } from '../components/Icon';
 import { PageHeader } from '../components/PageHeader';
 import type { SectionId } from '../app/navigation';
 import type { AnnounceInput } from '../notices';
+
+function sectionForArea(area: PreflightIssue['area']): SectionId {
+  switch (area) {
+    case 'teams':
+      return 'teams';
+    case 'format':
+      return 'format';
+    case 'schedule':
+      return 'schedule';
+    case 'rooms':
+    case 'qbtcp':
+      return 'rooms';
+    case 'packets':
+      return 'packets';
+    case 'storage':
+      return 'settings';
+    default:
+      return 'tournament';
+  }
+}
 
 export function OverviewView({
   state,
@@ -41,8 +67,15 @@ export function OverviewView({
   const blockers = issues.filter((issue) => issue.severity === 'blocker');
   const otherChecks = issues.length - blockers.length;
   const standings = deriveTeamStandings(state).slice(0, 5);
+  // Every blocker answers where it can be fixed: the attention item deep-links
+  // into the tool that owns the problem instead of dumping everything on the
+  // Tournament section.
   const attention: Array<{ id: string; text: string; section: SectionId }> = [
-    ...blockers.map((issue) => ({ id: issue.id, text: issue.message, section: 'tournament' as SectionId })),
+    ...blockers.map((issue) => ({
+      id: issue.id,
+      text: issue.message,
+      section: sectionForArea(issue.area),
+    })),
     ...(reviewCount
       ? [
           {
