@@ -19,15 +19,11 @@ import { DirectorMenu } from '../components/DirectorMenu';
 import { PageHeader } from '../components/PageHeader';
 import { errorNotice, type AnnounceInput } from '../notices';
 
-/** One-click day events. Anything else uses the full event form. */
 const quickEventTypes: TimelineEventType[] = ['lunch', 'break', 'check-in', 'awards'];
-
-const eventTypeOptions: Array<{ value: TimelineEventType; label: string }> = timelineEventTypes.map(
-  (type) => ({
-    value: type,
-    label: timelineEventTypeLabel(type),
-  }),
-);
+const eventTypeOptions: Array<{ value: TimelineEventType; label: string }> = timelineEventTypes.map((type) => ({
+  value: type,
+  label: timelineEventTypeLabel(type),
+}));
 
 export function ScheduleView({
   state,
@@ -47,16 +43,13 @@ export function ScheduleView({
   const quickAddEvent = (type: TimelineEventType) => {
     const title = timelineEventTypeLabel(type);
     if (controller.addTimelineEvent({ type, title, visibility: 'public' })) {
-      onAnnounce(`${title} added at the end of the day. Reorder it with the move buttons.`);
+      onAnnounce(`${title} added at the end of the day. Reorder it whenever you need to.`);
     } else {
-      onAnnounce(
-        errorNotice(`The ${title.toLowerCase()} event could not be saved; review the Director error.`),
-      );
+      onAnnounce(errorNotice(`The ${title.toLowerCase()} event could not be saved; review the Director error.`));
     }
     setShowQuickAdd(false);
   };
-  // The tournament day in its explicit persisted order. Timestamps never decide
-  // placement; see `packages/tournament-domain/src/dayOrder.ts`.
+
   const orderedItems: OrderedDayItem[] = useMemo(
     () => orderDayItems(state.rounds, state.timeline),
     [state.rounds, state.timeline],
@@ -67,18 +60,13 @@ export function ScheduleView({
       state.timeline.some((event) => event.scheduledStart || event.scheduledEnd),
     [state.rounds, state.timeline],
   );
+
   if (!tournament) {
     return (
       <>
-        <PageHeader
-          eyebrow="Plan"
-          title="Schedule"
-          description="A tournament is required before the day can be planned."
-        />
+        <PageHeader eyebrow="Plan" title="Schedule" description="A tournament is required before the day can be planned." />
         <section className="director-panel">
-          <PanelBody>
-            <p className="director-empty-copy">Create a tournament from the Overview page first.</p>
-          </PanelBody>
+          <PanelBody><p className="director-empty-copy">Create a tournament from the Overview page first.</p></PanelBody>
         </section>
       </>
     );
@@ -90,7 +78,7 @@ export function ScheduleView({
         title="Rounds"
         description={
           hasTimes
-            ? `Tournament day in ${timeZoneLabel(tournament.timeZone)}. Planned times are stored as absolute instants and stay fixed when this file moves computers.`
+            ? `Tournament day in ${timeZoneLabel(tournament.timeZone)}. Planned times stay fixed if this file moves computers.`
             : 'The order of the day, top to bottom. Times are optional — add them only where they matter.'
         }
         actions={
@@ -100,20 +88,12 @@ export function ScheduleView({
               icon="plus"
               onClick={() => {
                 const result = controller.generateSchedule();
-                onAnnounce(
-                  result.generated
-                    ? 'Round added at the end of the day.'
-                    : result.conflicts.join(' ') || 'The round could not be generated.',
-                );
+                onAnnounce(result.generated ? 'Round added at the end of the day.' : result.conflicts.join(' ') || 'The round could not be generated.');
               }}
             >
               Add round
             </Button>
-            <span
-              ref={(node) => {
-                quickAddOpenerRef.current = node;
-              }}
-            >
+            <span ref={(node) => { quickAddOpenerRef.current = node; }}>
               <Button
                 variant="secondary"
                 aria-haspopup="menu"
@@ -124,19 +104,16 @@ export function ScheduleView({
               </Button>
             </span>
             {showQuickAdd && (
-              <DirectorMenu
-                label="Add day event"
-                openerRef={quickAddOpenerRef}
-                onClose={() => setShowQuickAdd(false)}
-              >
+              <DirectorMenu label="Add day event" openerRef={quickAddOpenerRef} onClose={() => setShowQuickAdd(false)}>
                 {quickEventTypes.map((type) => (
-                  <button key={type} role="menuitem" type="button" onClick={() => quickAddEvent(type)}>
+                  <button key={type} role="menuitem" type="button" className="director-menu-item" onClick={() => quickAddEvent(type)}>
                     {timelineEventTypeLabel(type)}
                   </button>
                 ))}
                 <button
                   role="menuitem"
                   type="button"
+                  className="director-menu-item"
                   onClick={() => {
                     setShowQuickAdd(false);
                     setEditingId(null);
@@ -150,14 +127,11 @@ export function ScheduleView({
           </>
         }
       />
+
       <div className="director-page-stack">
         <section className="director-panel" aria-label="Tournament day">
           <div className="director-panel-heading">
-            <div>
-              <h2>
-                {orderedItems.length} day item{orderedItems.length === 1 ? '' : 's'}
-              </h2>
-            </div>
+            <div><h2>{orderedItems.length} day item{orderedItems.length === 1 ? '' : 's'}</h2></div>
             {hasTimes && <StateLabel state="info" label={timeZoneLabel(tournament.timeZone)} />}
           </div>
           <PanelBody>
@@ -186,14 +160,10 @@ export function ScheduleView({
                       key={item.id}
                       state={state}
                       event={item.event}
-                      onEdit={() => {
-                        setEditingId(item.id);
-                        setShowForm(true);
-                      }}
+                      onEdit={() => { setEditingId(item.id); setShowForm(true); }}
                       onDelete={() => {
                         if (!confirm(`Remove “${item.event?.title}” from the day?`)) return;
-                        if (controller.removeTimelineEvent(item.id))
-                          onAnnounce(`${item.event?.title} removed.`);
+                        if (controller.removeTimelineEvent(item.id)) onAnnounce(`${item.event?.title} removed.`);
                       }}
                       {...moveProps}
                     />
@@ -203,6 +173,7 @@ export function ScheduleView({
             )}
           </PanelBody>
         </section>
+
         {showForm && (
           <TimelineEventForm
             key={editingId ?? 'new'}
@@ -210,10 +181,7 @@ export function ScheduleView({
             event={editingId ? state.timeline.find((entry) => entry.id === editingId) : undefined}
             controller={controller}
             onAnnounce={onAnnounce}
-            onClose={() => {
-              setShowForm(false);
-              setEditingId(null);
-            }}
+            onClose={() => { setShowForm(false); setEditingId(null); }}
           />
         )}
       </div>
@@ -244,10 +212,17 @@ function RoundScheduleRow({
   const [value, setValue] = useState(isoToZonedDateTimeInput(round.scheduledStart, timeZone));
   const [draftKey, setDraftKey] = useState(`${round.id}|${round.scheduledStart ?? ''}`);
   const [editingTime, setEditingTime] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const openerRef = useRef<HTMLElement | null>(null);
   const currentKey = `${round.id}|${round.scheduledStart ?? ''}`;
-  const displayedValue =
-    draftKey === currentKey ? value : isoToZonedDateTimeInput(round.scheduledStart, timeZone);
-  const gameCount = state.scheduledGames.filter((game) => game.roundId === round.id && !game.bye).length;
+  const displayedValue = draftKey === currentKey ? value : isoToZonedDateTimeInput(round.scheduledStart, timeZone);
+  const scheduled = state.scheduledGames.filter((game) => game.roundId === round.id);
+  const gameCount = scheduled.filter((game) => !game.bye).length;
+  const scheduledIds = new Set(scheduled.map((game) => game.id));
+  const resultCount = state.games.filter(
+    (game) => scheduledIds.has(game.scheduledGameId) && (game.status === 'accepted' || game.status === 'forfeit'),
+  ).length;
+
   const save = () => {
     const localValue = displayedValue;
     const iso = localValue ? zonedDateTimeInputToIso(localValue, timeZone) : null;
@@ -257,29 +232,64 @@ function RoundScheduleRow({
     }
     if (controller.setRoundScheduledStart(round.id, iso)) onAnnounce(`${round.name} planned time updated.`);
   };
+
+  const remove = async () => {
+    const consequence = resultCount
+      ? ` This also removes ${resultCount} accepted result${resultCount === 1 ? '' : 's'} and their submissions.`
+      : gameCount
+        ? ` This also removes ${gameCount} scheduled game${gameCount === 1 ? '' : 's'}.`
+        : '';
+    if (!confirm(`Delete ${round.name}?${consequence} A recovery checkpoint will be created first.`)) return;
+    await controller.checkpoint(`Before deleting ${round.name}`);
+    if (!controller.removeRound(round.id)) {
+      onAnnounce(errorNotice(`${round.name} could not be removed; review the Director error.`));
+      return;
+    }
+    onAnnounce(`${round.name} removed${resultCount ? ` with ${resultCount} result${resultCount === 1 ? '' : 's'}` : ''}. A recovery checkpoint was saved first.`);
+  };
+
   const showTimeControl = round.scheduledStart || editingTime;
   return (
     <li className="director-schedule-item">
-      <div className="director-schedule-marker" aria-hidden="true">
-        R
-      </div>
+      <div className="director-schedule-marker" aria-hidden="true">R</div>
       <div className="director-schedule-item-main">
         <div className="director-schedule-item-heading">
           <div>
             <strong>{round.name}</strong>
-            <small>
-              {gameCount} competitive game{gameCount === 1 ? '' : 's'} · {round.status}
-            </small>
+            <small>{gameCount} competitive game{gameCount === 1 ? '' : 's'} · {round.status}</small>
           </div>
           <div className="director-row-actions">
             <StateLabel state={round.status} />
-            <DayMoveButtons
-              label={round.name}
-              position={position}
-              total={total}
-              onMoveUp={onMoveUp}
-              onMoveDown={onMoveDown}
-            />
+            <span ref={(node) => { openerRef.current = node; }}>
+              <button
+                type="button"
+                className="director-button director-button-quiet director-table-action"
+                aria-label={`Actions for ${round.name}`}
+                aria-haspopup="menu"
+                aria-expanded={menuOpen}
+                onClick={() => setMenuOpen((open) => !open)}
+              >
+                <span aria-hidden="true">•••</span>
+              </button>
+            </span>
+            {menuOpen && (
+              <DirectorMenu label={`Actions for ${round.name}`} openerRef={openerRef} onClose={() => setMenuOpen(false)}>
+                {round.status !== 'released' && round.status !== 'closed' && (
+                  <button type="button" role="menuitem" className="director-menu-item" onClick={() => { setMenuOpen(false); setEditingTime(true); }}>
+                    {round.scheduledStart ? 'Edit planned time' : 'Set planned time'}
+                  </button>
+                )}
+                <button type="button" role="menuitem" className="director-menu-item" disabled={position <= 1} onClick={() => { setMenuOpen(false); onMoveUp(); }}>
+                  Move earlier
+                </button>
+                <button type="button" role="menuitem" className="director-menu-item" disabled={position >= total} onClick={() => { setMenuOpen(false); onMoveDown(); }}>
+                  Move later
+                </button>
+                <button type="button" role="menuitem" className="director-menu-item" onClick={() => { setMenuOpen(false); void remove(); }}>
+                  Delete round…
+                </button>
+              </DirectorMenu>
+            )}
           </div>
         </div>
         <div className="director-schedule-round-controls">
@@ -289,21 +299,11 @@ function RoundScheduleRow({
                 type="datetime-local"
                 value={displayedValue}
                 disabled={round.status === 'released' || round.status === 'closed'}
-                onChange={(event) => {
-                  setDraftKey(currentKey);
-                  setValue(event.target.value);
-                }}
+                onChange={(event) => { setDraftKey(currentKey); setValue(event.target.value); }}
                 onBlur={save}
               />
             </FormField>
-          ) : (
-            round.status !== 'released' &&
-            round.status !== 'closed' && (
-              <Button variant="quiet" onClick={() => setEditingTime(true)}>
-                Set time
-              </Button>
-            )
-          )}
+          ) : null}
           {round.releasedAt && <small>Released {formatTimestamp(round.releasedAt, timeZone)}</small>}
           {round.startedAt && <small>Started {formatTimestamp(round.startedAt, timeZone)}</small>}
         </div>
@@ -327,22 +327,8 @@ function DayMoveButtons({
 }) {
   return (
     <div className="director-row-actions" role="group" aria-label={`Reorder ${label}`}>
-      <Button
-        variant="quiet"
-        disabled={position <= 1}
-        aria-label={`Move ${label} earlier`}
-        onClick={onMoveUp}
-      >
-        ↑ Up
-      </Button>
-      <Button
-        variant="quiet"
-        disabled={position >= total}
-        aria-label={`Move ${label} later`}
-        onClick={onMoveDown}
-      >
-        ↓ Down
-      </Button>
+      <Button variant="quiet" disabled={position <= 1} aria-label={`Move ${label} earlier`} onClick={onMoveUp}>↑ Up</Button>
+      <Button variant="quiet" disabled={position >= total} aria-label={`Move ${label} later`} onClick={onMoveDown}>↓ Down</Button>
     </div>
   );
 }
@@ -367,52 +353,29 @@ function TimelineEventRow({
   onMoveDown: () => void;
 }) {
   const timeZone = state.tournament?.timeZone ?? 'UTC';
-  const location = event.roomId
-    ? (state.rooms.find((room) => room.id === event.roomId)?.name ?? event.roomId)
-    : event.location;
+  const location = event.roomId ? (state.rooms.find((room) => room.id === event.roomId)?.name ?? event.roomId) : event.location;
   return (
     <li className="director-schedule-item">
-      <div className="director-schedule-marker" aria-hidden="true">
-        {timelineEventTypeLabel(event.type).slice(0, 1)}
-      </div>
+      <div className="director-schedule-marker" aria-hidden="true">{timelineEventTypeLabel(event.type).slice(0, 1)}</div>
       <div className="director-schedule-item-main">
         <div className="director-schedule-item-heading">
           <div>
             <strong>{event.title}</strong>
-            <small>
-              {timelineEventTypeLabel(event.type)} · {event.visibility}
-              {location ? ` · ${location}` : ''}
-            </small>
+            <small>{timelineEventTypeLabel(event.type)} · {event.visibility}{location ? ` · ${location}` : ''}</small>
           </div>
           <div className="director-row-actions">
-            <DayMoveButtons
-              label={event.title}
-              position={position}
-              total={total}
-              onMoveUp={onMoveUp}
-              onMoveDown={onMoveDown}
-            />
-            <Button variant="quiet" icon="edit" onClick={onEdit}>
-              Edit
-            </Button>
-            <Button variant="quiet" icon="x" onClick={onDelete}>
-              Remove
-            </Button>
+            <DayMoveButtons label={event.title} position={position} total={total} onMoveUp={onMoveUp} onMoveDown={onMoveDown} />
+            <Button variant="quiet" icon="edit" onClick={onEdit}>Edit</Button>
+            <Button variant="quiet" icon="x" onClick={onDelete}>Remove</Button>
           </div>
         </div>
         {event.description ? <p>{event.description}</p> : null}
         <small className="director-table-subtext">
           {[
             event.scheduledStart ? formatTimestamp(event.scheduledStart, timeZone) : null,
-            event.scheduledStart && event.scheduledEnd
-              ? `– ${formatTimestamp(event.scheduledEnd, timeZone)}`
-              : null,
-            event.teamIds?.length
-              ? `${event.teamIds.length} targeted team${event.teamIds.length === 1 ? '' : 's'}`
-              : 'All teams',
-          ]
-            .filter(Boolean)
-            .join(' · ')}
+            event.scheduledStart && event.scheduledEnd ? `– ${formatTimestamp(event.scheduledEnd, timeZone)}` : null,
+            event.teamIds?.length ? `${event.teamIds.length} targeted team${event.teamIds.length === 1 ? '' : 's'}` : 'All teams',
+          ].filter(Boolean).join(' · ')}
         </small>
       </div>
     </li>
@@ -442,17 +405,12 @@ function TimelineEventForm({
   const [roomId, setRoomId] = useState(event?.roomId ?? '');
   const [location, setLocation] = useState(event?.location ?? '');
   const [teamIds, setTeamIds] = useState<string[]>(event?.teamIds ?? []);
+
   const save = () => {
     const scheduledStart = start ? zonedDateTimeInputToIso(start, timeZone) : null;
     const scheduledEnd = end ? zonedDateTimeInputToIso(end, timeZone) : null;
-    if (start && !scheduledStart) {
-      onAnnounce('The event start is not a valid time in the tournament timezone.');
-      return;
-    }
-    if (end && !scheduledEnd) {
-      onAnnounce('The event end is not a valid time in the tournament timezone.');
-      return;
-    }
+    if (start && !scheduledStart) { onAnnounce('The event start is not a valid time in the tournament timezone.'); return; }
+    if (end && !scheduledEnd) { onAnnounce('The event end is not a valid time in the tournament timezone.'); return; }
     const input: NewTimelineEventInput = {
       type,
       title,
@@ -464,9 +422,7 @@ function TimelineEventForm({
       location,
       teamIds,
     };
-    const saved = event
-      ? controller.updateTimelineEvent(event.id, input)
-      : controller.addTimelineEvent(input);
+    const saved = event ? controller.updateTimelineEvent(event.id, input) : controller.addTimelineEvent(input);
     if (!saved) {
       onAnnounce(errorNotice('The schedule event could not be saved; review the Director error.'));
       return;
@@ -474,123 +430,59 @@ function TimelineEventForm({
     onAnnounce(event ? `${title.trim()} updated.` : `${title.trim()} added to the schedule.`);
     onClose();
   };
+
   return (
     <section className="director-panel director-form-panel">
       <div className="director-panel-heading">
-        <div>
-          <p className="director-eyebrow">{event ? 'Edit event' : 'New event'}</p>
-          <h2>Schedule details</h2>
-        </div>
-        <Button variant="quiet" icon="x" onClick={onClose}>
-          Close
-        </Button>
+        <div><p className="director-eyebrow">{event ? 'Edit event' : 'New event'}</p><h2>Schedule details</h2></div>
+        <Button variant="quiet" icon="x" onClick={onClose}>Close</Button>
       </div>
       <PanelBody>
-        <form
-          onSubmit={(eventObject) => {
-            eventObject.preventDefault();
-            save();
-          }}
-        >
+        <form onSubmit={(eventObject) => { eventObject.preventDefault(); save(); }}>
           <div className="director-form-grid director-form-grid-three">
             <FormField label="Event type">
-              <select
-                value={type}
-                onChange={(eventObject) => setType(eventObject.target.value as TimelineEventType)}
-              >
-                {eventTypeOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
+              <select value={type} onChange={(eventObject) => setType(eventObject.target.value as TimelineEventType)}>
+                {eventTypeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
             </FormField>
-            <FormField label="Title">
-              <input value={title} onChange={(eventObject) => setTitle(eventObject.target.value)} required />
-            </FormField>
+            <FormField label="Title"><input value={title} onChange={(eventObject) => setTitle(eventObject.target.value)} required /></FormField>
             <FormField label="Visibility">
-              <select
-                value={visibility}
-                onChange={(eventObject) => setVisibility(eventObject.target.value as TimelineVisibility)}
-              >
-                <option value="public">Public</option>
-                <option value="staff">Staff</option>
-                <option value="hidden">Hidden</option>
+              <select value={visibility} onChange={(eventObject) => setVisibility(eventObject.target.value as TimelineVisibility)}>
+                <option value="public">Public</option><option value="staff">Staff</option><option value="hidden">Hidden</option>
               </select>
             </FormField>
           </div>
           <div className="director-form-grid director-form-grid-two">
-            <FormField label="Start ({timeZone})">
-              <input
-                type="datetime-local"
-                value={start}
-                onChange={(eventObject) => setStart(eventObject.target.value)}
-              />
-            </FormField>
-            <FormField label="End ({timeZone})">
-              <input
-                type="datetime-local"
-                value={end}
-                onChange={(eventObject) => setEnd(eventObject.target.value)}
-              />
-            </FormField>
+            <FormField label={`Start (${timeZone})`}><input type="datetime-local" value={start} onChange={(eventObject) => setStart(eventObject.target.value)} /></FormField>
+            <FormField label={`End (${timeZone})`}><input type="datetime-local" value={end} onChange={(eventObject) => setEnd(eventObject.target.value)} /></FormField>
             <FormField label="Room">
               <select value={roomId} onChange={(eventObject) => setRoomId(eventObject.target.value)}>
                 <option value="">No numbered room</option>
-                {state.rooms.map((room) => (
-                  <option key={room.id} value={room.id}>
-                    {room.name}
-                  </option>
-                ))}
+                {state.rooms.map((room) => <option key={room.id} value={room.id}>{room.name}</option>)}
               </select>
             </FormField>
-            <FormField label="Other location">
-              <input
-                value={location}
-                onChange={(eventObject) => setLocation(eventObject.target.value)}
-                placeholder="Lobby, auditorium…"
-              />
-            </FormField>
+            <FormField label="Other location"><input value={location} onChange={(eventObject) => setLocation(eventObject.target.value)} placeholder="Lobby, auditorium…" /></FormField>
           </div>
-          <FormField label="Description">
-            <textarea
-              className="director-textarea"
-              rows={2}
-              value={description}
-              onChange={(eventObject) => setDescription(eventObject.target.value)}
-            />
-          </FormField>
+          <FormField label="Description"><textarea className="director-textarea" rows={2} value={description} onChange={(eventObject) => setDescription(eventObject.target.value)} /></FormField>
           <fieldset className="director-resource-role-field">
             <legend>Target teams</legend>
             <div className="director-check-group">
-              {state.teams
-                .filter((team) => team.status !== 'dropped')
-                .map((team) => (
-                  <label className="director-check-row" key={team.id}>
-                    <input
-                      type="checkbox"
-                      checked={teamIds.includes(team.id)}
-                      onChange={(eventObject) =>
-                        setTeamIds((current) =>
-                          eventObject.target.checked
-                            ? [...current, team.id]
-                            : current.filter((id) => id !== team.id),
-                        )
-                      }
-                    />
-                    <span>{team.displayName}</span>
-                  </label>
-                ))}
+              {state.teams.filter((team) => team.status !== 'dropped').map((team) => (
+                <label className="director-check-row" key={team.id}>
+                  <input
+                    type="checkbox"
+                    checked={teamIds.includes(team.id)}
+                    onChange={(eventObject) => setTeamIds((current) => eventObject.target.checked ? [...current, team.id] : current.filter((id) => id !== team.id))}
+                  />
+                  <span>{team.displayName}</span>
+                </label>
+              ))}
             </div>
             <small>Leave every team unchecked to target the whole tournament.</small>
           </fieldset>
           <div className="director-row-actions">
-            <Button variant="primary" type="submit">
-              {event ? 'Save changes' : 'Add event'}
-            </Button>
-            <Button variant="quiet" onClick={onClose}>
-              Cancel
-            </Button>
+            <Button variant="primary" type="submit">{event ? 'Save changes' : 'Add event'}</Button>
+            <Button variant="quiet" onClick={onClose}>Cancel</Button>
           </div>
         </form>
       </PanelBody>
@@ -601,12 +493,7 @@ function TimelineEventForm({
 function formatTimestamp(value: string, timeZone: string): string {
   const instant = new Date(value);
   if (Number.isNaN(instant.getTime())) return 'Invalid time';
-  return new Intl.DateTimeFormat(undefined, {
-    timeZone,
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(instant);
+  return new Intl.DateTimeFormat(undefined, { timeZone, dateStyle: 'medium', timeStyle: 'short' }).format(instant);
 }
 
-// Keep this exported for focused tests and future settings UI without duplicating the runtime list.
 export const scheduleTimeZoneOptions = availableTimeZones;
