@@ -13,7 +13,8 @@ export function dropTeamFlexibly(
   reason = 'Dropped by director',
 ): boolean {
   const current = controller.state.teams.find((team) => team.id === teamId);
-  if (!current || current.status === 'dropped') return controller.dropTeam(teamId, reason);
+  if (!current) return controller.dropTeam(teamId, reason);
+  if (current.status === 'dropped') return false;
 
   const next = structuredClone(controller.state) as DirectorState;
   const team = next.teams.find((entry) => entry.id === teamId);
