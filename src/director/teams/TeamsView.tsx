@@ -377,7 +377,9 @@ function NewTeamForm({
       onAnnounce(errorNotice('Paste at least one player name.'));
       return;
     }
-    setPlayers([...parsed, ...blankRoster(Math.max(0, 5 - parsed.length))]);
+    const firstCaptain = parsed.findIndex((player) => player.captain);
+    const exclusive = parsed.map((player, index) => ({ ...player, captain: index === firstCaptain }));
+    setPlayers([...exclusive, ...blankRoster(Math.max(0, 5 - exclusive.length))]);
     setRosterPaste('');
     setShowRosterPaste(false);
     onAnnounce(`${parsed.length} player${parsed.length === 1 ? '' : 's'} added to the editable roster.`);
