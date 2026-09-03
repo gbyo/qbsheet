@@ -55,8 +55,7 @@ export function previewAdvancement(state: DirectorState, phase: Phase): Advancem
   const rankedRemaining = [...remaining].sort((left, right) =>
     compareWildcardStandings(left, right, remaining, phaseWideGames, tiebreakers),
   );
-  const wildcardStandings =
-    wildcardCount > 0 ? rankedRemaining.slice(0, Math.max(0, wildcardCount)) : [];
+  const wildcardStandings = wildcardCount > 0 ? rankedRemaining.slice(0, Math.max(0, wildcardCount)) : [];
   if (wildcardStandings.length > 0 && wildcardStandings.length < rankedRemaining.length) {
     const cutoffTies = unresolvedCutoffTeams(
       rankedRemaining,
@@ -73,12 +72,8 @@ export function previewAdvancement(state: DirectorState, phase: Phase): Advancem
   }
   const toTeam = (standing: TeamStanding): Team | undefined =>
     state.teams.find((team) => team.id === standing.teamId);
-  const wildcardTeams = wildcardStandings
-    .map(toTeam)
-    .filter((team): team is Team => team !== undefined);
-  const qualifierTeams = qualifiedStandings
-    .map(toTeam)
-    .filter((team): team is Team => team !== undefined);
+  const wildcardTeams = wildcardStandings.map(toTeam).filter((team): team is Team => team !== undefined);
+  const qualifierTeams = qualifiedStandings.map(toTeam).filter((team): team is Team => team !== undefined);
   const wildcardGames = new Set(wildcardStandings.map((standing) => standing.gamesPlayed));
   return {
     phaseId: phase.id,
@@ -117,8 +112,7 @@ function compareWildcardStandings(
 ): number {
   const order = configuredTiebreakers ?? ['record', 'points', 'margin', 'powers', 'gets'];
   for (const key of order) {
-    const difference =
-      criterionValue(right, key, group, games) - criterionValue(left, key, group, games);
+    const difference = criterionValue(right, key, group, games) - criterionValue(left, key, group, games);
     if (difference !== 0) return difference;
   }
   return left.teamId.localeCompare(right.teamId);

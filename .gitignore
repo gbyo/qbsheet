@@ -5,7 +5,9 @@ dist/
 playwright-report/
 test-results/
 .stryker-tmp/
-reports/
+# Generated report output at the repo root. Anchored: source lives under
+# src/director/reports/ and must stay committable.
+/reports/
 # Generated build/runtime state.
 **/.build/
 **/.wrangler/

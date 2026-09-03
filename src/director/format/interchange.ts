@@ -214,9 +214,7 @@ function finalPlacementFromExtension(value: unknown): FinalPlacement | undefined
     order,
     actor: typeof candidate.actor === 'string' ? candidate.actor : '',
     at: typeof candidate.at === 'string' ? candidate.at : '',
-    ...(typeof candidate.reason === 'string' && candidate.reason !== ''
-      ? { reason: candidate.reason }
-      : {}),
+    ...(typeof candidate.reason === 'string' && candidate.reason !== '' ? { reason: candidate.reason } : {}),
   };
 }
 
@@ -232,9 +230,7 @@ function interchangePlayer(player: DirectorState['players'][number]): Record<str
 }
 
 function interchangeTeam(state: DirectorState, team: DirectorState['teams'][number]): TeamRecord {
-  const players = state.players
-    .filter((player) => player.teamId === team.id)
-    .map(interchangePlayer);
+  const players = state.players.filter((player) => player.teamId === team.id).map(interchangePlayer);
   const classifications = (team.classifications ?? []).filter(isTeamClassification);
   const tags = (team.tags ?? []).filter((tag) => typeof tag === 'string' && tag.trim() !== '');
   const output = {
@@ -606,9 +602,7 @@ function fromInterchange(data: DirectorTournament): DirectorState {
       teamLetter: team.letter ?? '',
       seed: team.seed ?? null,
       status: teamStatus(team.status),
-      ...(classifications.length > 0
-        ? { classifications: classifications as TeamClassification[] }
-        : {}),
+      ...(classifications.length > 0 ? { classifications: classifications as TeamClassification[] } : {}),
       ...(tags.length > 0 ? { tags } : {}),
       notes: team.notes,
       createdAt: now,
