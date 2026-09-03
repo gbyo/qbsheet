@@ -279,7 +279,17 @@ export default function GameDetailsDialog(props: IGameDetailsDialogProps) {
   if (editing.kind === 'team') {
     const side = editing.side;
     return (
-      <ScorerDialog key="team" title={`Correct ${game[side].name}'s name`} onClose={onClose}>
+      /*
+        Not dismissible while the write is in flight. Disabling the form's own controls was not
+        enough: Escape and the close button reach the dialog rather than the form, and a Game
+        details that has unmounted has nowhere to show the refusal that arrives after it.
+      */
+      <ScorerDialog
+        key="team"
+        title={`Correct ${game[side].name}'s name`}
+        onClose={onClose}
+        dismissible={!saving}
+      >
         <p className="scorer-dialog-note">
           Every question already recorded stays with this team. The tournament&apos;s own identity for them is
           kept, so the result still matches their schedule entry.
@@ -304,7 +314,7 @@ export default function GameDetailsDialog(props: IGameDetailsDialogProps) {
   if (editing.kind === 'player') {
     const { side, player } = editing;
     return (
-      <ScorerDialog key="player" title={`Correct ${player}'s name`} onClose={onClose}>
+      <ScorerDialog key="player" title={`Correct ${player}'s name`} onClose={onClose} dismissible={!saving}>
         <p className="scorer-dialog-note">
           Everything {player} has already been credited with follows the new name. Their tossups heard do not
           change.

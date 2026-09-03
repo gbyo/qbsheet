@@ -285,6 +285,80 @@ describe('Game details', () => {
       expect(screen.getByRole('dialog', { name: 'Game details' })).toBeTruthy();
     });
 
+    /**
+     * The ways out of the dialog, which are not the ways out of the form.
+     *
+     * Disabling Save and Cancel while a rename is in flight left Escape and the dialog's own close
+     * button untouched, and both of those reach `ScorerDialog` rather than the form inside it. A
+     * refusal that arrives after Game details has unmounted has nowhere to be shown and no field to
+     * be retried in, which is the whole guarantee this flow exists to make. See `NativeDialog`'s
+     * `dismissible`.
+     */
+    test('Escape and the close button do not take the dialog away mid-save', async () => {
+      let settle!: () => void;
+      let refuse!: (reason: Error) => void;
+      const correct = vi.fn(
+        () =>
+          new Promise<void>((resolve, reject) => {
+            settle = resolve;
+            refuse = reject;
+          }),
+      );
+      renderScorer({ procedure: oneTimeout, onCorrectGame: correct });
+      typeTeamName('Ninety Six A');
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+      const dialog = screen.getByRole('dialog', { name: /Correct Ninety Six's name/ });
+      fireEvent.keyDown(document, { key: 'Escape' });
+      expect(screen.getByRole('dialog', { name: /Correct Ninety Six's name/ })).toBe(dialog);
+      expect(screen.getByRole('button', { name: 'Saving…' })).toBeTruthy();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Close dialog' }));
+      expect(screen.getByRole('dialog', { name: /Correct Ninety Six's name/ })).toBe(dialog);
+      expect(screen.getByRole('button', { name: 'Saving…' })).toBeTruthy();
+      // Neither route started a second write.
+      expect(correct).toHaveBeenCalledTimes(1);
+
+      refuse(new Error('quota'));
+
+      await waitFor(() =>
+        expect(
+          screen.getAllByRole('alert').some((alert) => alert.textContent?.includes('Nothing has changed')),
+        ).toBe(true),
+      );
+      // Still open, still holding what was typed, and pressable again.
+      expect(screen.getByRole('dialog', { name: /Correct Ninety Six's name/ })).toBeTruthy();
+      expect((screen.getByLabelText('Team name') as HTMLInputElement).value).toBe('Ninety Six A');
+      expect(screen.getByRole('button', { name: 'Save' })).not.toBeDisabled();
+      expect(settle).toBeDefined();
+    });
+
+    test('dismissal works again as soon as the write has settled', async () => {
+      const correct = vi.fn().mockRejectedValue(new Error('quota'));
+      renderScorer({ procedure: oneTimeout, onCorrectGame: correct });
+      typeTeamName('Ninety Six A');
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).not.toBeDisabled());
+
+      fireEvent.click(screen.getByRole('button', { name: 'Close dialog' }));
+
+      await waitFor(() => expect(screen.queryByLabelText('Team name')).toBeNull());
+    });
+
+    test('a player rename is held open mid-save by the same mechanism', () => {
+      const correct = vi.fn(() => new Promise<void>(() => undefined));
+      renderScorer({ procedure: oneTimeout, onCorrectGame: correct });
+      typePlayerName('Sara Mitchell');
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+      fireEvent.keyDown(document, { key: 'Escape' });
+      fireEvent.click(screen.getByRole('button', { name: 'Close dialog' }));
+
+      expect(screen.getByRole('dialog', { name: /Correct Sarah Mitchell's name/ })).toBeTruthy();
+      expect((screen.getByLabelText('Player name') as HTMLInputElement).value).toBe('Sara Mitchell');
+      expect(correct).toHaveBeenCalledTimes(1);
+    });
+
     test('a refused team rename keeps the editor, the typed name, and says nothing was saved', async () => {
       const correct = vi.fn().mockRejectedValue(new Error('quota'));
       renderScorer({ procedure: oneTimeout, onCorrectGame: correct });

@@ -13,8 +13,20 @@ export default function NativeDialog(props: {
   children: ReactNode;
   className?: string;
   bodyClassName?: string;
+  /**
+   * Whether the three ways out — Escape, the close button, the platform's own close request — are
+   * available right now. Defaults to true, which is every dialog in the application except one that
+   * is mid-write.
+   *
+   * A dialog holding an operation that can still fail has nowhere to put the failure once it has
+   * gone; see the rename editors in `GameDetailsDialog`. Refusing to close is not a modal trap
+   * because the operation it is waiting on always settles: the same press works a moment later.
+   * It is expressed here rather than in each caller so that "cannot be dismissed" means one thing
+   * and covers every route out, including the ones no component-level handler ever sees.
+   */
+  dismissible?: boolean;
 }) {
-  const { title, onClose, children, className = '', bodyClassName = '' } = props;
+  const { title, onClose, children, className = '', bodyClassName = '', dismissible = true } = props;
   const panel = useRef<HTMLDialogElement>(null);
   // Kept current by a committed effect. Every reader is an event — Escape, the close button, the
   // dialog's own close event — so none of them can run before the effect that last wrote this.
@@ -22,6 +34,12 @@ export default function NativeDialog(props: {
   useEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
+  // Read by the document-level Escape listener, which is installed once and must see the current
+  // answer rather than the one that was true when the dialog opened.
+  const dismissibleRef = useRef(dismissible);
+  useEffect(() => {
+    dismissibleRef.current = dismissible;
+  }, [dismissible]);
 
   useEffect(() => {
     const dialog = panel.current;
@@ -29,7 +47,10 @@ export default function NativeDialog(props: {
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented || !dialog.open) return;
+      // Swallowed either way: preventing the default is what stops the platform closing the dialog
+      // out from under a write, and it is also what stops a second handler acting on the same key.
       event.preventDefault();
+      if (!dismissibleRef.current) return;
       if (typeof dialog.close === 'function') dialog.close();
       else onCloseRef.current();
     };
@@ -59,6 +80,13 @@ export default function NativeDialog(props: {
       ref={panel}
       className={`scorer-dialog ${className}`.trim()}
       aria-label={title}
+      /*
+       * The platform's own close request — Escape where the browser handles it itself, and the
+       * things that are not a key press at all. Cancelling it is the only way to refuse those.
+       */
+      onCancel={(cancelEvent) => {
+        if (!dismissible) cancelEvent.preventDefault();
+      }}
       onClose={() => onCloseRef.current()}
     >
       <div className="scorer-dialog-head">
@@ -67,6 +95,7 @@ export default function NativeDialog(props: {
           type="button"
           className="scorer-action scorer-dialog-close"
           aria-label="Close dialog"
+          disabled={!dismissible}
           onClick={() =>
             typeof panel.current?.close === 'function' ? panel.current.close() : onCloseRef.current()
           }

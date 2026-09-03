@@ -12,12 +12,17 @@ export interface IScorerDialogProps {
   onClose: () => void;
   children: ReactNode;
   wide?: boolean;
+  /**
+   * False while this dialog is holding an operation that can still fail, which closes every route
+   * out — Escape, the close button, the platform's own close request. See `NativeDialog`.
+   */
+  dismissible?: boolean;
 }
 
 export default function ScorerDialog(props: IScorerDialogProps) {
-  const { title, onClose, children, wide = false } = props;
+  const { title, onClose, children, wide = false, dismissible = true } = props;
   return (
-    <NativeDialog title={title} onClose={onClose} className={wide ? 'is-wide' : ''}>
+    <NativeDialog title={title} onClose={onClose} className={wide ? 'is-wide' : ''} dismissible={dismissible}>
       {children}
     </NativeDialog>
   );

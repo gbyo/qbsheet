@@ -7,9 +7,10 @@
  * rooms that had not reported were buried in two hundred that had.
  */
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { DirectorState } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
+import type { DirectorNavigationTarget } from '../app/navigationTarget';
 import { acceptedGame, playedTournament, scheduledGame, score } from '../../../tests/directorFixtures';
 import { ResultsView } from './ResultsView';
 
@@ -127,6 +128,119 @@ describe('the scheduled games panel', () => {
     // And back again, so the default is a filter rather than a one-way door.
     fireEvent.click(screen.getByRole('button', { name: 'Show only unresolved' }));
     expect(scheduleRows()).toHaveLength(1);
+  });
+});
+
+/**
+ * A destination that survives arriving at it.
+ *
+ * `useNavigationHighlight` is a one-shot: it focuses the row and then clears the target, which is a
+ * render later. A panel that filtered on the live target alone therefore revealed an accepted or
+ * cancelled game, focused it, and removed it from the table in the same gesture — the row vanishing
+ * out from under the focus that had just landed on it.
+ */
+describe('being navigated to a settled scheduled game', () => {
+  function stateWithSettledTarget(): DirectorState {
+    const state = playedTournament();
+    state.scheduledGames.push(scheduledGame('scheduled-live', 'team-a', 'team-b', { status: 'live' }));
+    return state;
+  }
+
+  const target: DirectorNavigationTarget = {
+    section: 'results',
+    entityType: 'game',
+    entityId: 'scheduled-1',
+  };
+
+  function scheduleRowIds(): string[] {
+    const panel = screen.getByText('Scheduled games').closest('.director-panel') as HTMLElement;
+    return within(panel)
+      .getAllByRole('row')
+      .slice(1)
+      .map((row) => row.getAttribute('data-director-navigation-id') ?? '');
+  }
+
+  /** Run the highlight hook's animation frame, which is what clears the one-shot target. */
+  async function settleNavigation(): Promise<void> {
+    await act(async () => {
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+    });
+  }
+
+  test('the row stays after the one-shot target has been cleared', async () => {
+    const state = stateWithSettledTarget();
+    // The real parent clears its own target when the hook asks; this stands in for that.
+    let current: DirectorNavigationTarget | null = target;
+    const clear = vi.fn(() => {
+      current = null;
+    });
+    const view = render(
+      <ResultsView
+        state={state}
+        controller={controllerWith()}
+        onAnnounce={vi.fn()}
+        navigationTarget={current}
+        onClearNavigationTarget={clear}
+      />,
+    );
+    expect(scheduleRowIds()).toContain('scheduled-1');
+
+    await settleNavigation();
+    expect(clear).toHaveBeenCalled();
+    view.rerender(
+      <ResultsView
+        state={state}
+        controller={controllerWith()}
+        onAnnounce={vi.fn()}
+        navigationTarget={current}
+        onClearNavigationTarget={clear}
+      />,
+    );
+
+    // Still there, beside the game that was unresolved all along.
+    expect(scheduleRowIds()).toEqual(['scheduled-1', 'scheduled-live']);
+  });
+
+  test('the existing control still returns the panel to unresolved only', async () => {
+    const state = stateWithSettledTarget();
+    let current: DirectorNavigationTarget | null = target;
+    const clear = vi.fn(() => {
+      current = null;
+    });
+    const view = render(
+      <ResultsView
+        state={state}
+        controller={controllerWith()}
+        onAnnounce={vi.fn()}
+        navigationTarget={current}
+        onClearNavigationTarget={clear}
+      />,
+    );
+    await settleNavigation();
+    view.rerender(
+      <ResultsView
+        state={state}
+        controller={controllerWith()}
+        onAnnounce={vi.fn()}
+        navigationTarget={current}
+        onClearNavigationTarget={clear}
+      />,
+    );
+
+    // The control names the state the panel is actually in, which is not "unresolved only".
+    fireEvent.click(screen.getByRole('button', { name: 'Show only unresolved' }));
+
+    expect(scheduleRowIds()).toEqual(['scheduled-live']);
+    expect(screen.getByRole('button', { name: 'Show all scheduled games' })).toBeTruthy();
+  });
+
+  test('with no navigation target the panel is unresolved only, as before', () => {
+    render(
+      <ResultsView state={stateWithSettledTarget()} controller={controllerWith()} onAnnounce={vi.fn()} />,
+    );
+
+    expect(scheduleRowIds()).toEqual(['scheduled-live']);
+    expect(screen.getByRole('button', { name: 'Show all scheduled games' })).toBeTruthy();
   });
 });
 

@@ -182,13 +182,46 @@ function ScheduledGamesPanel({
     navigationTarget?.section === 'results' && navigationTarget.entityType === 'game'
       ? navigationTarget.entityId
       : undefined;
+  /*
+   * The settled game a search or a cross-page link sent somebody to, kept after the arrow that
+   * pointed at it has gone.
+   *
+   * `useNavigationHighlight` is a one-shot: it focuses the destination and then calls
+   * `onClearNavigationTarget`, which is a render later. Filtering on `navigationTarget` alone meant
+   * an accepted or cancelled game appeared, took focus, and was removed from the table in the same
+   * gesture -- the destination vanishing on arrival, with the keyboard focus that had just landed
+   * on it going with it. So the reveal is latched here instead, and released when the director
+   * changes what the panel is showing.
+   */
+  const [revealed, setRevealed] = useState<{ from?: string; id?: string }>({});
+  /*
+   * Adjusted during the render that first sees the target rather than from an effect, so the row is
+   * already in the table on the render the highlight hook goes looking for it. `from` records which
+   * target the latch came from, so releasing the latch cannot immediately re-latch the same one.
+   */
+  if (targetGameId !== undefined && revealed.from !== targetGameId) {
+    setRevealed({ from: targetGameId, id: targetGameId });
+  }
+  const settled = (game: DirectorState['scheduledGames'][number]) =>
+    game.status === 'accepted' || game.status === 'cancelled';
   const scheduled = state.scheduledGames.filter((game) => !game.bye);
-  const unresolvedCount = scheduled.filter((game) => !['accepted', 'cancelled'].includes(game.status)).length;
-  const games = showAll
-    ? scheduled
-    : scheduled.filter(
-        (game) => game.id === targetGameId || !['accepted', 'cancelled'].includes(game.status),
-      );
+  const unresolvedCount = scheduled.filter((game) => !settled(game)).length;
+  const games = showAll ? scheduled : scheduled.filter((game) => !settled(game) || game.id === revealed.id);
+  /*
+   * Whether the table currently holds anything beyond the unresolved games, which is what the one
+   * control has to offer to undo. A latched destination counts: leaving the button reading "Show
+   * all" while a settled row is on screen would describe a state the panel is not in.
+   */
+  const showingSettled = showAll || games.some(settled);
+  const toggleShowAll = () => {
+    if (showingSettled) {
+      setShowAll(false);
+      // `from` is kept: releasing the latch must not re-latch the target it came from.
+      setRevealed((current) => ({ ...current, id: undefined }));
+      return;
+    }
+    setShowAll(true);
+  };
   return (
     <section className="director-panel">
       <div className="director-panel-heading">
@@ -200,8 +233,8 @@ function ScheduledGamesPanel({
           <span className="director-muted">
             {unresolvedCount} unresolved of {scheduled.length}
           </span>
-          <Button variant="quiet" onClick={() => setShowAll((value) => !value)}>
-            {showAll ? 'Show only unresolved' : 'Show all scheduled games'}
+          <Button variant="quiet" onClick={toggleShowAll}>
+            {showingSettled ? 'Show only unresolved' : 'Show all scheduled games'}
           </Button>
         </div>
       </div>
