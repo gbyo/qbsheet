@@ -106,7 +106,10 @@ test('Director layout keeps panel, table, status, and narrow-window contracts', 
   await expect(page.getByText('Bring the spare buzzer.', { exact: true })).toBeVisible();
   await expect(page.locator('.director-filter-tabs')).toBeVisible();
   await expect(page.locator('.director-server-status')).toHaveAttribute('data-status', 'unavailable');
-  await page.getByRole('tab', { name: /Offline/ }).click();
+  const offlineFilter = page.getByRole('button', { name: /Offline/ });
+  await expect(offlineFilter).toHaveAttribute('aria-pressed', 'false');
+  await offlineFilter.click();
+  await expect(offlineFilter).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByText('No rooms match this filter.', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Show all rooms' }).click();
   await expect(page.getByText('Room 101', { exact: true })).toBeVisible();
@@ -218,7 +221,7 @@ test('Director edits scoring rules without persisting an incomplete numeric fiel
   const tossupValue = page.getByLabel('Tossup value');
   await tossupValue.fill('');
   await tossupValue.blur();
-  await expect(page.getByRole('status').last()).toContainText('Tossup value must be a number.');
+  await expect(page.getByRole('alert').last()).toContainText('Tossup value must be a number.');
 
   await page.reload();
   await navigation.getByRole('button', { name: 'Format', exact: true }).click();

@@ -12,6 +12,7 @@ import { Button, FormField, PanelBody, StateLabel } from '../components/Controls
 import { PageHeader } from '../components/PageHeader';
 import type { SectionId } from '../app/navigation';
 import { poolName, recommendPoolSizes } from '@qbsheet/tournament-core';
+import { errorNotice, type AnnounceInput } from '../notices';
 
 export function FormatView({
   state,
@@ -22,7 +23,7 @@ export function FormatView({
   state: DirectorState;
   controller: DirectorController;
   onNavigate: (section: SectionId) => void;
-  onAnnounce: (message: string) => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
 }) {
   const formatId = state.tournament?.formatId;
   const format = formatId ? state.formats.find((entry) => entry.id === formatId) : undefined;
@@ -59,12 +60,12 @@ export function FormatView({
   const commitScoringRule = (key: ScoringRuleKey, label: string): void => {
     const raw = scoringRuleDrafts[key].trim();
     if (!raw) {
-      onAnnounce(`${label} must be a number.`);
+      onAnnounce(errorNotice(`${label} must be a number.`));
       return;
     }
     const value = Number(raw);
     if (!Number.isFinite(value)) {
-      onAnnounce(`${label} must be a finite number.`);
+      onAnnounce(errorNotice(`${label} must be a finite number.`));
       return;
     }
     controller.updateRules({ [key]: value } as Partial<NonNullable<DirectorState['tournament']>['rules']>);
@@ -74,7 +75,9 @@ export function FormatView({
     const raw = roundsPerTeam.trim();
     const value = raw ? Number(raw) : null;
     if ((value !== null && !Number.isInteger(value)) || (value !== null && (value < 1 || value > 99))) {
-      onAnnounce('Rounds per team must be a whole number from 1 to 99, or blank for no fixed limit.');
+      onAnnounce(
+        errorNotice('Rounds per team must be a whole number from 1 to 99, or blank for no fixed limit.'),
+      );
       setRoundsDraftState({
         key: roundsDraftKey,
         value: format.roundsPerTeam?.toString() ?? '',
@@ -574,7 +577,7 @@ function PhaseConfiguration({
   state: DirectorState;
   phase: DirectorState['phases'][number];
   controller: DirectorController;
-  onAnnounce: (message: string) => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
 }) {
   const rules = state.tournament?.rules;
   const draftKey = phaseConfigurationKey(phase);
@@ -606,7 +609,7 @@ function PhaseConfiguration({
     if (advancementEnabled) {
       const qualifiers = Number(rawQualifiers);
       if (!rawQualifiers || !Number.isInteger(qualifiers) || qualifiers < 1) {
-        onAnnounce('Qualifiers per pool must be a positive whole number.');
+        onAnnounce(errorNotice('Qualifiers per pool must be a positive whole number.'));
         return;
       }
       const tiebreakers = phase.advancementRule?.tiebreakers ?? rules?.tiebreakers ?? [];
@@ -815,7 +818,7 @@ function TiebreakerConfiguration({
 }: {
   rules: NonNullable<DirectorState['tournament']>['rules'];
   controller: DirectorController;
-  onAnnounce: (message: string) => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
 }) {
   const move = (index: number, direction: -1 | 1) => {
     const targetIndex = index + direction;
@@ -898,7 +901,7 @@ function ManualRoundBuilder({
   controller: DirectorController;
   mode: 'custom' | 'swiss';
   onNavigate: (section: SectionId) => void;
-  onAnnounce: (message: string) => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
 }) {
   const teams = state.teams
     .filter((team) => team.status === 'confirmed')
@@ -953,7 +956,7 @@ function ManualRoundBuilder({
       manualPairings: pairings,
     });
     if (!result.generated) {
-      onAnnounce(result.conflicts.join(' ') || 'The manual round was not valid.');
+      onAnnounce(errorNotice(result.conflicts.join(' ') || 'The manual round was not valid.'));
       return;
     }
     onAnnounce(
@@ -1042,7 +1045,7 @@ function PoolConfiguration({
   state: DirectorState;
   phase: DirectorState['phases'][number];
   controller: DirectorController;
-  onAnnounce: (message: string) => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
 }) {
   const pools = state.pools
     .filter((pool) => phase.poolIds.includes(pool.id))
@@ -1223,7 +1226,7 @@ function PoolEditor({
   teams: DirectorState['teams'];
   locked: boolean;
   controller: DirectorController;
-  onAnnounce: (message: string) => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
 }) {
   const [draft, setDraft] = useState(() => ({
     name: pool.name,

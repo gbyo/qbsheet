@@ -97,7 +97,8 @@ describe('pending-result delivery', () => {
       />,
     );
 
-    expect(screen.getByRole('button', { name: 'Done' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Done' })).toBeNull();
+    expect(screen.getByText(/before finishing\./)).toBeInTheDocument();
     const back = screen.getByRole('button', { name: 'Review score' });
     expect(back).toBeEnabled();
     fireEvent.click(back);
@@ -113,7 +114,7 @@ describe('pending-result delivery', () => {
     );
 
     expect(screen.getByText(/QBSheet will keep trying automatically while it is open/)).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Done' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Done' })).toBeNull();
     expect(screen.getByRole('button', { name: /^Download QBJ$/ })).toBeTruthy();
   });
 

@@ -93,8 +93,8 @@ export function NotesDialog(props: {
     <ScorerDialog title="Notes" onClose={onClose}>
       {existing.length > 0 && (
         <ul className="scorer-note-list">
-          {existing.map((note) => (
-            <li key={`${note.questionNumber}-${note.text}`}>
+          {existing.map((note, index) => (
+            <li key={`${note.questionNumber}-${note.text}-${index}`}>
               <span className="scorer-note-q">Q{note.questionNumber}</span>
               {note.flagged && <span className="scorer-note-flag">Flagged</span>}
               <span>{note.text}</span>

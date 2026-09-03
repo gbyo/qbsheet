@@ -33,6 +33,7 @@ import type { TransferLocation } from './model';
 import { initializeExchange, planAssignments, prepareAssignments, type PrepareReport } from './prepare';
 import { collectFromLocation, filesFromDataTransfer, readBrowserFiles } from './service';
 import type { ImportSummary } from './state';
+import { errorNotice, type AnnounceInput } from '../notices';
 
 /** Shown when a drive with recognisable QBSheet data appears. Restrained, non-blocking, dismissible. */
 export interface DriveNotice {
@@ -42,12 +43,52 @@ export interface DriveNotice {
   assignmentCount: number;
 }
 
+/** Operation keys for the Transfers concurrency-safe busy state. */
+export function scanOperation(locationId: DirectorId): string {
+  return `scan:${locationId}`;
+}
+
+/** Operation keys for the Transfers concurrency-safe busy state. */
+export function prepareOperation(locationId: DirectorId): string {
+  return `prepare:${locationId}`;
+}
+
+export const importFilesOperation = 'import:files';
+export const importDropOperation = 'import:drop';
+
+/**
+ * Tracks in-flight async operations as a set of keys rather than a single boolean, so the
+ * first completion can never mark a still-running operation idle. Rendered busy state derives
+ * from set membership; each operation removes only its own key.
+ */
+export function useActiveOperations() {
+  const [active, setActive] = useState<ReadonlySet<string>>(() => new Set());
+  const begin = useCallback((operation: string) => {
+    setActive((previous) => {
+      if (previous.has(operation)) return previous;
+      return new Set(previous).add(operation);
+    });
+  }, []);
+  const end = useCallback((operation: string) => {
+    setActive((previous) => {
+      if (!previous.has(operation)) return previous;
+      const next = new Set(previous);
+      next.delete(operation);
+      return next;
+    });
+  }, []);
+  const isActive = useCallback((operation: string) => active.has(operation), [active]);
+  return { active, busy: active.size > 0, begin, end, isActive };
+}
+
 export interface TransfersRuntime {
   native: boolean;
   limitation?: string;
   notice: DriveNotice | null;
   dismissNotice(): void;
   busy: boolean;
+  /** True while the given scan/prepare/import operation is in flight. */
+  isOperationActive(operation: string): boolean;
   /** The last thing that happened, for the page's own status line. */
   status: string;
   addFolder(): Promise<void>;
@@ -91,11 +132,13 @@ export function describeSummary(summary: ImportSummary): string {
 export function useTransfers(
   state: DirectorState,
   controller: DirectorController,
-  onAnnounce: (message: string) => void,
+  onAnnounce: (announcement: AnnounceInput) => void,
 ): TransfersRuntime {
   const platform = useMemo(() => createTransferPlatform(), []);
   const [notice, setNotice] = useState<DriveNotice | null>(null);
-  const [busy, setBusy] = useState(false);
+  const operations = useActiveOperations();
+  const { begin: beginOperation, end: endOperation } = operations;
+  const busy = operations.busy;
   const [status, setStatus] = useState('');
   const controllerRef = useRef(controller);
   const stateRef = useRef(state);
@@ -263,7 +306,7 @@ export function useTransfers(
       });
       onAnnounce(`${chosen.name} added and being watched.`);
     } catch (reason: unknown) {
-      onAnnounce(reason instanceof Error ? reason.message : 'That folder could not be added.');
+      onAnnounce(errorNotice(reason instanceof Error ? reason.message : 'That folder could not be added.'));
     }
   }, [onAnnounce, platform.native]);
 
@@ -281,7 +324,8 @@ export function useTransfers(
     async (locationId: DirectorId) => {
       const location = stateRef.current.transfers.locations.find((entry) => entry.id === locationId);
       if (!location) return null;
-      setBusy(true);
+      const operation = scanOperation(locationId);
+      beginOperation(operation);
       try {
         const summary = await runScan(location);
         if (summary) {
@@ -290,10 +334,10 @@ export function useTransfers(
         }
         return summary;
       } finally {
-        setBusy(false);
+        endOperation(operation);
       }
     },
-    [onAnnounce, runScan],
+    [beginOperation, endOperation, onAnnounce, runScan],
   );
 
   const prepareTo = useCallback(
@@ -302,10 +346,11 @@ export function useTransfers(
       const location = stateRef.current.transfers.locations.find((entry) => entry.id === locationId);
       if (!fileSystem || !location) return null;
       if (location.readOnly) {
-        onAnnounce(`${location.label} is read-only. Nothing was written.`);
+        onAnnounce(errorNotice(`${location.label} is read-only. Nothing was written.`));
         return null;
       }
-      setBusy(true);
+      const operation = prepareOperation(locationId);
+      beginOperation(operation);
       try {
         const report = await prepareAssignments(stateRef.current, fileSystem, {
           basePath: location.path,
@@ -325,13 +370,13 @@ export function useTransfers(
         return report;
       } catch (reason: unknown) {
         const message = reason instanceof Error ? reason.message : 'The files could not be written.';
-        onAnnounce(message);
+        onAnnounce(errorNotice(message));
         return null;
       } finally {
-        setBusy(false);
+        endOperation(operation);
       }
     },
-    [buildLabel, onAnnounce, platform.fileSystem],
+    [beginOperation, buildLabel, endOperation, onAnnounce, platform.fileSystem],
   );
 
   const initializeLocation = useCallback(
@@ -353,7 +398,7 @@ export function useTransfers(
   const importFiles = useCallback(
     async (files: readonly File[], label = 'Chosen files') => {
       if (files.length === 0) return emptySummary;
-      setBusy(true);
+      beginOperation(importFilesOperation);
       try {
         const inputs = await readBrowserFiles(files, { sourceKind: 'file-picker', sourceLabel: label });
         const summary = controllerRef.current.importTransferDocuments(inputs);
@@ -361,10 +406,10 @@ export function useTransfers(
         onAnnounce(describeSummary(summary));
         return summary;
       } finally {
-        setBusy(false);
+        endOperation(importFilesOperation);
       }
     },
-    [onAnnounce],
+    [beginOperation, endOperation, onAnnounce],
   );
 
   const importDataTransfer = useCallback(
@@ -374,7 +419,7 @@ export function useTransfers(
         onAnnounce('Drop QBJ files. Other file types are not read.');
         return null;
       }
-      setBusy(true);
+      beginOperation(importDropOperation);
       try {
         const inputs = await readBrowserFiles(files, {
           sourceKind: 'drop',
@@ -385,10 +430,10 @@ export function useTransfers(
         onAnnounce(describeSummary(summary));
         return summary;
       } finally {
-        setBusy(false);
+        endOperation(importDropOperation);
       }
     },
-    [onAnnounce],
+    [beginOperation, endOperation, onAnnounce],
   );
 
   /**
@@ -445,6 +490,7 @@ export function useTransfers(
     notice,
     dismissNotice: () => setNotice(null),
     busy,
+    isOperationActive: operations.isActive,
     status,
     addFolder,
     removeLocation,

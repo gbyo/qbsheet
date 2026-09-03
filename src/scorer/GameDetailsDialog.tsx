@@ -414,8 +414,8 @@ export default function GameDetailsDialog(props: IGameDetailsDialogProps) {
         <section className="scorer-detail-interventions" aria-label="Interventions">
           <h3 className="scorer-dialog-subhead">What has been changed or allowed</h3>
           <ul className="scorer-note-list">
-            {corrections.map((note) => (
-              <li key={`${note.questionNumber}-${note.text}`}>
+            {corrections.map((note, index) => (
+              <li key={`${note.questionNumber}-${note.text}-${index}`}>
                 <span className="scorer-note-q">Q{note.questionNumber}</span>
                 <span>{correctionSentence(note.text)}</span>
               </li>

@@ -74,3 +74,53 @@ test('Connect stays tied to the unresolved claim beyond 1.5 seconds and cannot s
   expect(screen.getByRole('alert')).toHaveTextContent('The held claim failed.');
   expect(screen.getByRole('button', { name: 'Connect and test' })).toBeEnabled();
 });
+
+test('backend choices are native radios in one group with keyboard support', () => {
+  const actions: LiveViewActions = {
+    enable: vi.fn(),
+    disable: vi.fn(),
+    updateSettings: vi.fn(),
+    publishAnnouncement: vi.fn(),
+    withdrawAnnouncement: vi.fn(),
+    finalize: vi.fn(),
+    unpublish: vi.fn(),
+    destroy: vi.fn(),
+  };
+  render(<LiveView state={stateWithTournament()} actions={actions} onAnnounce={vi.fn()} />);
+
+  const radios = screen.getAllByRole('radio');
+  expect(radios).toHaveLength(3);
+  const names = radios.map((radio) => (radio as HTMLInputElement).name);
+  expect(new Set(names).size).toBe(1);
+  // The default backend is checked and announced.
+  expect(screen.getByRole('radio', { name: /Set up with Cloudflare/ })).toBeChecked();
+
+  // Native inputs: focusing and activating a radio selects it with no custom key handling.
+  (screen.getByRole('radio', { name: /Connect a custom server/ }) as HTMLElement).focus();
+  fireEvent.click(screen.getByRole('radio', { name: /Connect a custom server/ }));
+  expect(screen.getByRole('radio', { name: /Connect a custom server/ })).toBeChecked();
+  expect(screen.getByRole('radio', { name: /Set up with Cloudflare/ })).not.toBeChecked();
+});
+
+test('backend radios disable while the connection submits', () => {
+  const actions: LiveViewActions = {
+    enable: vi.fn(() => new Promise<void>(() => {})),
+    disable: vi.fn(),
+    updateSettings: vi.fn(),
+    publishAnnouncement: vi.fn(),
+    withdrawAnnouncement: vi.fn(),
+    finalize: vi.fn(),
+    unpublish: vi.fn(),
+    destroy: vi.fn(),
+  };
+  render(<LiveView state={stateWithTournament()} actions={actions} onAnnounce={vi.fn()} />);
+  fireEvent.change(screen.getByPlaceholderText('https://…'), {
+    target: { value: 'https://backend.example' },
+  });
+  const token = document.querySelector('input[type="password"]');
+  fireEvent.change(token!, { target: { value: 'one-time-token' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Connect and test' }));
+  for (const radio of screen.getAllByRole('radio')) {
+    expect(radio).toBeDisabled();
+  }
+});

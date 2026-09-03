@@ -305,16 +305,15 @@ export default function CompletionScreen(props: {
     </button>
   );
 
+  // While leaving is blocked the one required action above is the only primary button: no
+  // redundant disabled duplicate of it. The unmet requirement stays as concise status text.
   const lockedContinuation = !canLeave ? (
     <div className="completion-locked">
-      <p className="shell-hint">
+      <p className="shell-hint" role="status">
         {stage === 'needs-download'
           ? `Download the QBJ${requiresHandoffAcknowledgement ? ' and confirm the handoff' : ''} before finishing.`
           : 'Confirm the handoff before finishing.'}
       </p>
-      <button type="button" className="shell-button" disabled onClick={() => void onHome()}>
-        {continueLabel}
-      </button>
     </div>
   ) : null;
 

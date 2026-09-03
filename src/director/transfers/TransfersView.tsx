@@ -28,7 +28,8 @@ import { currentOperationalRound, type AssignmentSelection } from './assignment'
 import { describeWarning } from './ingest';
 import { transportLabel, type IncomingArtifact, type TransferLocation } from './model';
 import { planAssignments } from './prepare';
-import { useTransfers } from './useTransfers';
+import { prepareOperation, scanOperation, useTransfers } from './useTransfers';
+import type { AnnounceInput } from '../notices';
 
 export function TransfersView({
   state,
@@ -39,7 +40,7 @@ export function TransfersView({
   state: DirectorState;
   controller: DirectorController;
   onNavigate: (section: SectionId) => void;
-  onAnnounce: (message: string) => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
 }) {
   const transfers = useTransfers(state, controller, onAnnounce);
   const [dropActive, setDropActive] = useState(false);
@@ -179,7 +180,8 @@ export function TransfersView({
                     key={location.id}
                     location={location}
                     advice={transfers.cloudAdviceFor(location)}
-                    busy={transfers.busy}
+                    scanBusy={transfers.isOperationActive(scanOperation(location.id))}
+                    prepareBusy={transfers.isOperationActive(prepareOperation(location.id))}
                     onScan={() => void transfers.scanLocation(location.id)}
                     onPrepare={() => void transfers.prepareTo(location.id, selection)}
                     onInitialize={() => void transfers.initializeLocation(location.id)}
@@ -188,6 +190,13 @@ export function TransfersView({
                   />
                 ))}
               </ul>
+            </div>
+          )}
+          {transfers.status !== '' && (
+            <div className="director-panel-body">
+              <p className="director-panel-footnote" role="status">
+                Last action: {transfers.status}
+              </p>
             </div>
           )}
         </section>
@@ -279,7 +288,7 @@ export function TransfersView({
             </Button>
           </div>
           <div className="director-panel-body">
-            <div className="director-filter-tabs" role="tablist" aria-label="Which games to prepare">
+            <div className="director-filter-tabs" role="group" aria-label="Which games to prepare">
               <SelectionTab
                 active={selectionKind === 'current-round'}
                 onClick={() => setSelectionKind('current-round')}
@@ -325,7 +334,10 @@ export function TransfersView({
                     key={location.id}
                     variant="primary"
                     icon="upload"
-                    disabled={transfers.busy || plan.assignments.length === 0}
+                    disabled={
+                      transfers.isOperationActive(prepareOperation(location.id)) ||
+                      plan.assignments.length === 0
+                    }
                     onClick={() => void transfers.prepareTo(location.id, selection)}
                   >
                     {location.kind === 'removable-drive' ? 'Prepare USB' : 'Prepare files'} · {location.label}
@@ -370,7 +382,8 @@ export function TransfersView({
 function LocationRow({
   location,
   advice,
-  busy,
+  scanBusy,
+  prepareBusy,
   onScan,
   onPrepare,
   onInitialize,
@@ -379,7 +392,8 @@ function LocationRow({
 }: {
   location: TransferLocation;
   advice?: string;
-  busy: boolean;
+  scanBusy: boolean;
+  prepareBusy: boolean;
   onScan: () => void;
   onPrepare: () => void;
   onInitialize: () => void;
@@ -415,8 +429,8 @@ function LocationRow({
       <div className="director-round-row-actions">
         {location.connected && (
           <>
-            <Button variant="quiet" disabled={busy} onClick={onScan}>
-              Scan
+            <Button variant="quiet" disabled={scanBusy} onClick={onScan}>
+              {scanBusy ? 'Scanning…' : 'Scan'}
             </Button>
             <Button variant="quiet" onClick={() => onWatch(!location.watching)}>
               {location.watching ? 'Stop watching' : 'Watch'}
@@ -426,8 +440,8 @@ function LocationRow({
                 <Button variant="quiet" onClick={onInitialize}>
                   Set up
                 </Button>
-                <Button variant="secondary" disabled={busy} onClick={onPrepare}>
-                  Prepare
+                <Button variant="secondary" disabled={prepareBusy} onClick={onPrepare}>
+                  {prepareBusy ? 'Preparing…' : 'Prepare'}
                 </Button>
               </>
             )}
@@ -550,8 +564,7 @@ function SelectionTab({
   return (
     <button
       type="button"
-      role="tab"
-      aria-selected={active}
+      aria-pressed={active}
       className={`director-filter-tab ${active ? 'is-active' : ''}`}
       onClick={onClick}
     >

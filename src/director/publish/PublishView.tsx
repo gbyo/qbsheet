@@ -4,13 +4,14 @@ import { Icon } from '../components/Icon';
 import { PageHeader } from '../components/PageHeader';
 import { exportArchiveBytes, exportQbj, exportSqbs, exportTeamCsv } from '../format/interchange';
 import { isNativeDirector, saveNativeFile } from '../platform/native';
+import type { AnnounceInput } from '../notices';
 
 export function PublishView({
   state,
   onAnnounce,
 }: {
   state: DirectorState;
-  onAnnounce: (message: string) => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
 }) {
   const hasTournament = state.tournament !== null;
   return (
@@ -152,7 +153,10 @@ function PublishAction({
   );
 }
 
-async function downloadArchive(state: DirectorState, onAnnounce: (message: string) => void): Promise<void> {
+async function downloadArchive(
+  state: DirectorState,
+  onAnnounce: (announcement: AnnounceInput) => void,
+): Promise<void> {
   try {
     const bytes = exportArchiveBytes(state);
     const name = `${safeName(state.tournament?.name ?? 'tournament')}.qbst`;
@@ -177,7 +181,7 @@ async function downloadArchive(state: DirectorState, onAnnounce: (message: strin
     );
   }
 }
-function downloadHtml(state: DirectorState, onAnnounce: (message: string) => void): void {
+function downloadHtml(state: DirectorState, onAnnounce: (announcement: AnnounceInput) => void): void {
   const standings = deriveTeamStandings(state);
   const title = escapeHtml(state.tournament?.name ?? 'Tournament standings');
   const rows = standings
@@ -194,7 +198,7 @@ function downloadHtml(state: DirectorState, onAnnounce: (message: string) => voi
   );
   onAnnounce('Static standings HTML exported.');
 }
-function downloadCsv(state: DirectorState, onAnnounce: (message: string) => void): void {
+function downloadCsv(state: DirectorState, onAnnounce: (announcement: AnnounceInput) => void): void {
   const rows = exportTeamCsv(state);
   download(
     rows,
@@ -203,7 +207,7 @@ function downloadCsv(state: DirectorState, onAnnounce: (message: string) => void
   );
   onAnnounce('Team and roster CSV exported.');
 }
-function downloadQbj(state: DirectorState, onAnnounce: (message: string) => void): void {
+function downloadQbj(state: DirectorState, onAnnounce: (announcement: AnnounceInput) => void): void {
   download(
     exportQbj(state),
     `${safeName(state.tournament?.name ?? 'tournament')}.qbj`,
@@ -211,7 +215,7 @@ function downloadQbj(state: DirectorState, onAnnounce: (message: string) => void
   );
   onAnnounce('QBJ tournament exported.');
 }
-function downloadSqbs(state: DirectorState, onAnnounce: (message: string) => void): void {
+function downloadSqbs(state: DirectorState, onAnnounce: (announcement: AnnounceInput) => void): void {
   download(
     exportSqbs(state),
     `${safeName(state.tournament?.name ?? 'tournament')}.sqbs`,
