@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { DirectorState, ProtestScoreAdjustment, TeamGameScore } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
 import { Button, FormField, StateLabel } from '../components/Controls';
@@ -184,30 +184,25 @@ function ScheduledGamesPanel({
       ? navigationTarget.entityId
       : undefined;
   /*
-   * The settled game a search or a cross-page link sent somebody to, kept after the arrow that
-   * pointed at it has gone.
+   * Keep the last navigation-revealed game visible after the one-shot highlight clears its target.
    *
-   * `useNavigationHighlight` is a one-shot: it focuses the destination and then calls
-   * `onClearNavigationTarget`, which is a render later. Filtering on `navigationTarget` alone meant
-   * an accepted or cancelled game appeared, took focus, and was removed from the table in the same
-   * gesture -- the destination vanishing on arrival, with the keyboard focus that had just landed
-   * on it going with it. So the reveal is latched here instead, and released when the director
-   * changes what the panel is showing.
+   * The live target participates in the filter immediately, so the row exists on the render where
+   * `useNavigationHighlight` looks for it. This effect then persists that reveal before the hook's
+   * animation-frame clear. Once the target is actually gone, navigating to the same id again is a
+   * new episode and can reveal it again; there is no remembered "last id" suppressing the retry.
    */
-  const [revealed, setRevealed] = useState<{ from?: string; id?: string }>({});
-  /*
-   * Adjusted during the render that first sees the target rather than from an effect, so the row is
-   * already in the table on the render the highlight hook goes looking for it. `from` records which
-   * target the latch came from, so releasing the latch cannot immediately re-latch the same one.
-   */
-  if (targetGameId !== undefined && revealed.from !== targetGameId) {
-    setRevealed({ from: targetGameId, id: targetGameId });
-  }
+  const [revealedGameId, setRevealedGameId] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    if (targetGameId !== undefined) setRevealedGameId(targetGameId);
+  }, [targetGameId]);
   const settled = (game: DirectorState['scheduledGames'][number]) =>
     game.status === 'accepted' || game.status === 'cancelled';
   const scheduled = state.scheduledGames.filter((game) => !game.bye);
   const unresolvedCount = scheduled.filter((game) => !settled(game)).length;
-  const games = showAll ? scheduled : scheduled.filter((game) => !settled(game) || game.id === revealed.id);
+  const visibleTargetGameId = targetGameId ?? revealedGameId;
+  const games = showAll
+    ? scheduled
+    : scheduled.filter((game) => !settled(game) || game.id === visibleTargetGameId);
   /*
    * Whether the table currently holds anything beyond the unresolved games, which is what the one
    * control has to offer to undo. A latched destination counts: leaving the button reading "Show
@@ -217,8 +212,7 @@ function ScheduledGamesPanel({
   const toggleShowAll = () => {
     if (showingSettled) {
       setShowAll(false);
-      // `from` is kept: releasing the latch must not re-latch the target it came from.
-      setRevealed((current) => ({ ...current, id: undefined }));
+      setRevealedGameId(undefined);
       return;
     }
     setShowAll(true);
