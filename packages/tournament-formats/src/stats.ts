@@ -129,10 +129,7 @@ interface MutableTeamStats extends Omit<
   organizationId?: string;
 }
 
-type MutablePlayerStats = Omit<
-  PlayerStatsRow,
-  'rank' | 'ppg' | 'pptuh' | 'ppb' | 'tossupsHeard'
-> & {
+type MutablePlayerStats = Omit<PlayerStatsRow, 'rank' | 'ppg' | 'pptuh' | 'ppb' | 'tossupsHeard'> & {
   tossupsHeard: number;
   /** Tracks known-ness while aggregating; the row exposes nullable tossupsHeard instead. */
   tossupsHeardKnown: boolean;
@@ -724,7 +721,12 @@ const reportNav: readonly ReportLink[] = [
 ];
 
 function slugify(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'item';
+  return (
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'item'
+  );
 }
 
 function teamAnchor(row: TeamStatsRow): string {
@@ -749,11 +751,7 @@ const reportStyle = [
   '@media print{body{max-width:none}section{break-inside:avoid}}',
 ].join('');
 
-function reportPage(
-  snapshot: StatsSnapshot,
-  title: string,
-  body: string,
-): string {
+function reportPage(snapshot: StatsSnapshot, title: string, body: string): string {
   const nav = `<nav aria-label="Stat reports"><ul>${reportNav
     .map((link) => `<li><a href="${link.href}">${htmlEscape(link.label)}</a></li>`)
     .join('')}</ul></nav>`;
@@ -783,7 +781,9 @@ function scopeNote(snapshot: StatsSnapshot): string {
   return `<p class="meta">Scope: ${htmlEscape(scope)} · ${snapshot.teams.length} teams · ${snapshot.games.length} games.${htmlEscape(finalNote)}</p>`;
 }
 
-function gamesByRound(snapshot: StatsSnapshot): { roundId: string; roundName: string; games: GameStatsRow[] }[] {
+function gamesByRound(
+  snapshot: StatsSnapshot,
+): { roundId: string; roundName: string; games: GameStatsRow[] }[] {
   const groups = new Map<string, { roundId: string; roundName: string; games: GameStatsRow[] }>();
   for (const game of snapshot.games) {
     const key = game.roundId ?? game.gameId;
@@ -835,7 +835,7 @@ export function buildStatReportBundle(snapshot: StatsSnapshot): StatReportPage[]
     .map(
       (row) =>
         `<tr><td class="num">${row.rank}</td><td><a href="playerdetail.html#${playerAnchor(row)}">${htmlEscape(row.playerName)}</a></td>` +
-        `<td><a href="teamdetail.html#${teamAnchor(teamById.get(row.teamId) ?? { rank: 0, teamId: row.teamId } as TeamStatsRow)}">${htmlEscape(row.teamName)}</a></td>` +
+        `<td><a href="teamdetail.html#${teamAnchor(teamById.get(row.teamId) ?? ({ rank: 0, teamId: row.teamId } as TeamStatsRow))}">${htmlEscape(row.teamName)}</a></td>` +
         `${showGrades ? cell(typeof row.schoolYear === 'number' ? row.schoolYear : '—', true) : ''}` +
         `<td class="num">${row.gamesPlayed}</td>${numCell(row.tossupsHeard)}` +
         `${showSuperpowers ? cell(row.superpowers, true) : ''}<td class="num">${row.powers}</td><td class="num">${row.gets}</td><td class="num">${row.negs}</td>` +
@@ -860,8 +860,7 @@ export function buildStatReportBundle(snapshot: StatsSnapshot): StatReportPage[]
         `<td>${game.detail === 'partial' ? 'Partial stats' : 'Complete'}</td></tr>`,
     )
     .join('');
-  const gamesTable =
-    `<div class="table-wrap"><table><caption>Games</caption><thead><tr><th scope="col">Round</th><th scope="col">Matchup</th><th scope="col" class="num">Score</th><th scope="col">Detail</th></tr></thead><tbody>${gamesRows}</tbody></table></div>`;
+  const gamesTable = `<div class="table-wrap"><table><caption>Games</caption><thead><tr><th scope="col">Round</th><th scope="col">Matchup</th><th scope="col" class="num">Score</th><th scope="col">Detail</th></tr></thead><tbody>${gamesRows}</tbody></table></div>`;
 
   const roundsSections = gamesByRound(snapshot)
     .map(
@@ -890,12 +889,11 @@ export function buildStatReportBundle(snapshot: StatsSnapshot): StatReportPage[]
   const playerSections = snapshot.players
     .map((row) => {
       const log = snapshot.games.filter(
-        (game) =>
-          game.teamOneId === row.teamId || game.teamTwoId === row.teamId,
+        (game) => game.teamOneId === row.teamId || game.teamTwoId === row.teamId,
       );
       return (
         `<section id="${playerAnchor(row)}" aria-label="${htmlEscape(row.playerName)}"><h2>${htmlEscape(row.playerName)}</h2>` +
-        `<p><a href="teamdetail.html#${teamAnchor(teamById.get(row.teamId) ?? { rank: 0, teamId: row.teamId } as TeamStatsRow)}">${htmlEscape(row.teamName)}</a>` +
+        `<p><a href="teamdetail.html#${teamAnchor(teamById.get(row.teamId) ?? ({ rank: 0, teamId: row.teamId } as TeamStatsRow))}">${htmlEscape(row.teamName)}</a>` +
         `${typeof row.schoolYear === 'number' ? ` · Grade ${row.schoolYear}` : ''} · ${row.gamesPlayed} games · ` +
         `${row.tossupsHeard === null ? 'TUH —' : `${row.tossupsHeard} TUH`} · ${row.powers}/${row.gets}/${row.negs} · ${row.points} pts · ${row.ppg.toFixed(1)} PPG · ` +
         `${row.pptuh === null ? 'PPTUH —' : `${row.pptuh.toFixed(2)} PPTUH`}</p>` +
