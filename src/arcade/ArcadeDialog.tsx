@@ -43,9 +43,9 @@ const entries: IArcadeEntry[] = [
   { id: 'snake', name: 'Snake', summary: 'Collect tossup cards without hitting a wall or your tail.' },
 ];
 
-export default function ArcadeDialog(props: { onClose: () => void }) {
+export default function ArcadeDialog(props: { onClose: () => void; initialGame?: ArcadeGameChoice }) {
   const { onClose } = props;
-  const [game, setGame] = useState<ArcadeGameChoice | null>(null);
+  const [game, setGame] = useState<ArcadeGameChoice | null>(props.initialGame ?? null);
   const picker = useRef<HTMLDivElement>(null);
   const back = useRef<HTMLButtonElement>(null);
   /** The card to come back to. Held past the return to the picker, which is the point of it. */
@@ -100,7 +100,13 @@ export default function ArcadeDialog(props: { onClose: () => void }) {
         </div>
       ) : (
         <div className="arcade-play">
-          <button ref={back} type="button" className="arcade-back" onClick={() => setGame(null)}>
+          <button
+            data-dialog-autofocus
+            ref={back}
+            type="button"
+            className="arcade-back"
+            onClick={() => setGame(null)}
+          >
             <span aria-hidden="true">←</span> Back to Arcade
           </button>
           {chosen.id === 'qbbird' ? <QBBird /> : <Snake />}

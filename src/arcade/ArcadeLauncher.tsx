@@ -25,9 +25,10 @@
  * closed state have one implementation between them.
  */
 import { useEffect, useState, type ComponentType } from 'react';
+import type { ArcadeGameChoice } from './ArcadeDialog';
 import ScorerDialog from '../scorer/ScorerDialog';
 
-type ArcadeComponent = ComponentType<{ onClose: () => void }>;
+type ArcadeComponent = ComponentType<{ onClose: () => void; initialGame?: ArcadeGameChoice }>;
 
 /**
  * The resolved module, kept for the life of the page.
@@ -43,7 +44,11 @@ export function resetArcadeModuleCache(): void {
   loaded = null;
 }
 
-export default function ArcadeLauncher(props: { open: boolean; onClose: () => void }) {
+export default function ArcadeLauncher(props: {
+  open: boolean;
+  onClose: () => void;
+  initialGame?: ArcadeGameChoice;
+}) {
   const { open, onClose } = props;
   /*
    * Both of these are wrapped in a function on purpose, and neither is optional.
@@ -75,7 +80,7 @@ export default function ArcadeLauncher(props: { open: boolean; onClose: () => vo
 
   if (!open) return null;
 
-  if (Arcade !== null) return <Arcade onClose={onClose} />;
+  if (Arcade !== null) return <Arcade onClose={onClose} initialGame={props.initialGame} />;
 
   return (
     <ScorerDialog title="Arcade" onClose={onClose}>

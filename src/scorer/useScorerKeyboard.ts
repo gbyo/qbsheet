@@ -46,6 +46,8 @@ export interface IScorerKeyboardInput {
   onNoBuzz: () => void;
   onUndo: () => void;
   onRedo: () => void;
+  /** Optional hidden command surface; shares every typing/dialog guard above. */
+  onCommands?: () => void;
   /**
    * A seat is chosen and the sequence is waiting on its action key.
    *
@@ -128,9 +130,23 @@ export default function useScorerKeyboard(input: IScorerKeyboardInput): void {
       const current = latest.current;
 
       // A held key. The browser repeats it, and a resting finger must not record multiple actions.
-      if (event.repeat) return;
+      if (event.repeat || event.isComposing || event.defaultPrevented) return;
       if (keystrokeBelongsToControl(event)) {
         clearPending();
+        return;
+      }
+
+      if (
+        event.key === '?' &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        !current.dialogOpen &&
+        current.onCommands
+      ) {
+        clearPending();
+        event.preventDefault();
+        current.onCommands();
         return;
       }
 

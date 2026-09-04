@@ -16,18 +16,40 @@
  * Still `aria-hidden` with the name beside it in text, exactly as before. It is a wordmark, so a
  * screen reader that announced both would say "QBSheet QBSheet".
  */
-export default function BrandLogo(props: { className?: string }) {
+import { useEffect, useId, useState } from 'react';
+
+export default function BrandLogo(props: { className?: string; rainbow?: boolean }) {
+  const gradient = useId();
+  const [hidden, setHidden] = useState(false);
+  useEffect(() => {
+    if (!props.rainbow) return;
+    const visibility = () => setHidden(document.hidden);
+    visibility();
+    document.addEventListener('visibilitychange', visibility);
+    return () => document.removeEventListener('visibilitychange', visibility);
+  }, [props.rainbow]);
   return (
     <>
       <svg
         className={props.className}
         viewBox="0 0 626 155"
         xmlns="http://www.w3.org/2000/svg"
-        fill="currentColor"
+        fill={props.rainbow ? `url(#${gradient})` : 'currentColor'}
+        data-rainbow={props.rainbow || undefined}
+        data-paused={hidden || undefined}
         role="presentation"
         aria-hidden="true"
         focusable="false"
       >
+        {props.rainbow && (
+          <defs>
+            <linearGradient id={gradient} x1="0" x2="626" y1="0" y2="155" gradientUnits="userSpaceOnUse">
+              <stop className="logo-rainbow-stop" offset="0%" />
+              <stop className="logo-rainbow-stop" offset="50%" />
+              <stop className="logo-rainbow-stop" offset="100%" />
+            </linearGradient>
+          </defs>
+        )}
         <g transform="matrix(1,0,0,1,-47.199885,-105.619013)">
           <g transform="matrix(1.333333,0,0,1.333333,0,0.000005)">
             <g transform="matrix(1,0,0,1,30.446789,169.558006)">
