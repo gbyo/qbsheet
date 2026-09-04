@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { IDBFactory } from 'fake-indexeddb';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
+  DirectorPersistenceError,
   IndexedDbDirectorRepository,
   MemoryDirectorRepository,
   TauriDirectorRepository,
@@ -161,5 +162,100 @@ test('restoring an enabled publication queues a full snapshot above the current 
     revision: 101,
     state: 'pending',
   });
+  hook.unmount();
+});
+
+test('the localStorage fallback bounds retained points per tournament and reports a full quota', async () => {
+  vi.stubGlobal('indexedDB', undefined);
+  const repository = new IndexedDbDirectorRepository();
+  const base = normalizeDirectorState(directorFixture());
+  const other = structuredClone(base);
+  other.tournament!.id = 'other-tournament';
+  await repository.checkpoint(other, 'Other event');
+  for (let index = 0; index < 20; index++) {
+    const state = structuredClone(base);
+    state.teams[0].displayName = `Revision ${index}`;
+    await repository.checkpoint(state, `Point ${index}`);
+  }
+  const points = await repository.listCheckpoints(base.tournament!.id);
+  // Bounded, newest kept, and another tournament's history untouched.
+  expect(points).toHaveLength(12);
+  expect(points[0].reason).toBe('Point 19');
+  expect(points.at(-1)!.reason).toBe('Point 8');
+  expect(await repository.listCheckpoints('other-tournament')).toHaveLength(1);
+  expect((await repository.readCheckpoint(base.tournament!.id, points[0].id)).teams[0].displayName).toBe(
+    'Revision 19',
+  );
+
+  /*
+   * Replace the whole `Storage`, rather than spying on `setItem`.
+   *
+   * jsdom's `localStorage` is a proxy that treats a property definition as a stored key, so a
+   * spy on the method is silently ignored there and the test would pass for the wrong reason
+   * in one environment and fail in the other. Swapping the object works in both.
+   */
+  const original = Object.getOwnPropertyDescriptor(window, 'localStorage');
+  Object.defineProperty(window, 'localStorage', {
+    configurable: true,
+    writable: true,
+    value: {
+      length: 0,
+      key: () => null,
+      getItem: () => null,
+      removeItem: () => undefined,
+      clear: () => undefined,
+      setItem: () => {
+        throw new DOMException('exceeded the quota', 'QuotaExceededError');
+      },
+    } satisfies Storage,
+  });
+  try {
+    // A raw DOMException here would reach `startRound` and refuse a round without a reason.
+    await expect(repository.checkpoint(base, 'No room')).rejects.toThrow(DirectorPersistenceError);
+  } finally {
+    // jsdom defines `localStorage` as a prototype accessor, so there may be no own descriptor to
+    // put back — deleting the shadowing property is what restores it there.
+    if (original) Object.defineProperty(window, 'localStorage', original);
+    else delete (window as { localStorage?: Storage }).localStorage;
+  }
+  // Fail here rather than corrupting every later test if the swap did not come back.
+  localStorage.setItem('qbsheet.recovery.probe', 'restored');
+  expect(localStorage.getItem('qbsheet.recovery.probe')).toBe('restored');
+});
+
+test('a mutation attempted while the document is being replaced reports failure', async () => {
+  const repository = new MemoryDirectorRepository();
+  await repository.save(normalizeDirectorState(directorFixture()));
+  const hook = renderHook(() => useDirectorController(repository));
+  await waitFor(() => expect(hook.result.current.loading).toBe(false));
+  const before = structuredClone(hook.result.current.state);
+  await act(async () => {
+    await hook.result.current.checkpoint('Morning');
+  });
+  const point = hook.result.current.checkpoints[0];
+
+  // Hold the restore open inside the transition, then act as a stray click would.
+  let releaseRestore = () => {};
+  const real = repository.restoreCheckpoint.bind(repository);
+  vi.spyOn(repository, 'restoreCheckpoint').mockImplementationOnce(async (current, id) => {
+    await new Promise<void>((resolve) => {
+      releaseRestore = resolve;
+    });
+    return real(current, id);
+  });
+  let restored: Promise<boolean> | undefined;
+  act(() => {
+    restored = hook.result.current.restoreCheckpoint(point.id);
+  });
+  await waitFor(() => expect(hook.result.current.recovering).toBe(true));
+  act(() => {
+    expect(hook.result.current.updateTournament({ venue: 'Late edit' })).toBe(false);
+  });
+  expect(hook.result.current.error).toMatch(/being restored/);
+  await act(async () => {
+    releaseRestore();
+    expect(await restored!).toBe(true);
+  });
+  expect(hook.result.current.state.tournament!.venue).toBe(before.tournament!.venue);
   hook.unmount();
 });

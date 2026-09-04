@@ -17,6 +17,8 @@ const metadataStoreName = 'app-metadata';
 const currentMetadataKey = 'current-tournament-id';
 const localStorageKey = 'qbsheet.director.state.v1';
 const localLibraryKey = 'qbsheet.director.library.v1';
+/** Recovery points retained per tournament when only `localStorage` is available. */
+const localRecoveryPointLimit = 12;
 
 export interface TournamentCatalogEntry {
   id: string;
@@ -37,9 +39,18 @@ export interface DirectorCheckpoint {
 
 interface CheckpointRecord extends DirectorCheckpoint {
   state: DirectorState;
+  /**
+   * Write order within this store, so listing is deterministic.
+   *
+   * `createdAt` has millisecond resolution and IndexedDB returns an index query ordered by
+   * primary key — a random id — so two points written in the same millisecond would list in
+   * an arbitrary order, and Settings reads the first entry as "latest recovery point". The
+   * native store gets this from `rowid DESC`; the browser stores get it from here.
+   */
+  sequence: number;
 }
 
-function recoveryPoint(state: DirectorState, reason: string): CheckpointRecord {
+function recoveryPoint(state: DirectorState, reason: string, sequence: number): CheckpointRecord {
   if (!state.tournament)
     throw new DirectorPersistenceError('Open a tournament before creating a recovery point.');
   return {
@@ -48,11 +59,25 @@ function recoveryPoint(state: DirectorState, reason: string): CheckpointRecord {
     createdAt: new Date().toISOString(),
     reason: reason.trim() || 'Manual recovery point',
     schemaVersion: state.schemaVersion,
+    sequence,
     state: structuredClone(state),
   };
 }
 
-function checkpointMetadata({ state: _state, ...metadata }: CheckpointRecord): DirectorCheckpoint {
+function nextSequence(records: readonly CheckpointRecord[]): number {
+  return records.reduce((highest, entry) => Math.max(highest, entry.sequence ?? 0), 0) + 1;
+}
+
+/** Newest first: write order decides, and the timestamp is only the tie-break for legacy rows. */
+function byNewestFirst(left: CheckpointRecord, right: CheckpointRecord): number {
+  return (right.sequence ?? 0) - (left.sequence ?? 0) || right.createdAt.localeCompare(left.createdAt);
+}
+
+function checkpointMetadata({
+  state: _state,
+  sequence: _sequence,
+  ...metadata
+}: CheckpointRecord): DirectorCheckpoint {
   return metadata;
 }
 
@@ -204,14 +229,11 @@ export class IndexedDbDirectorRepository implements DirectorRepository {
   }
 
   async checkpoint(state: DirectorState, reason: string): Promise<void> {
-    const record = recoveryPoint(state, reason);
+    const existing = state.tournament ? await this.checkpointRecords(state.tournament.id) : [];
+    const record = recoveryPoint(state, reason, nextSequence(existing));
     const database = await this.database();
     if (!database) {
-      const library = this.readLocalLibrary();
-      library.checkpoints.push(record);
-      library.documents[record.tournamentId] = structuredClone(state);
-      library.currentId = record.tournamentId;
-      localStorage.setItem(localLibraryKey, JSON.stringify(library));
+      this.saveLocalRecovery(record, state);
       return;
     }
     await this.ensureMigrated(database);
@@ -221,7 +243,7 @@ export class IndexedDbDirectorRepository implements DirectorRepository {
   async listCheckpoints(tournamentId: string): Promise<DirectorCheckpoint[]> {
     return (await this.checkpointRecords(tournamentId))
       .filter((entry) => entry.tournamentId === tournamentId)
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .sort(byNewestFirst)
       .map(checkpointMetadata);
   }
 
@@ -236,14 +258,14 @@ export class IndexedDbDirectorRepository implements DirectorRepository {
     const records = await this.checkpointRecords(current.tournament!.id);
     const record = records.find((entry) => entry.id === checkpointId);
     const restored = restoredState(record, current.tournament!.id);
-    const before = recoveryPoint(current, `Before restoring checkpoint from ${record!.createdAt}`);
+    const before = recoveryPoint(
+      current,
+      `Before restoring checkpoint from ${record!.createdAt}`,
+      nextSequence(records),
+    );
     const database = await this.database();
     if (!database) {
-      const library = this.readLocalLibrary();
-      library.checkpoints.push(before);
-      library.documents[before.tournamentId] = restored;
-      library.currentId = before.tournamentId;
-      localStorage.setItem(localLibraryKey, JSON.stringify(library));
+      this.saveLocalRecovery(before, restored);
     } else {
       await this.writeRecovery(database, before, restored);
     }
@@ -264,6 +286,36 @@ export class IndexedDbDirectorRepository implements DirectorRepository {
       request.onsuccess = () => resolve(request.result as CheckpointRecord[]);
       request.onerror = () => reject(request.error);
     });
+  }
+
+  /**
+   * The localStorage fallback for a browser without IndexedDB.
+   *
+   * `localStorage` has a finite quota and every recovery point holds a whole tournament, so the
+   * retained history is bounded here rather than left to grow until a round start fails. The
+   * newest points are the ones a director reaches for; the oldest are dropped first, and the
+   * quota failure itself is reported as a `DirectorPersistenceError` like every other write, so
+   * `startRound` refuses the round with a sentence instead of a raw `DOMException`.
+   */
+  private saveLocalRecovery(record: CheckpointRecord, active: DirectorState): void {
+    const library = this.readLocalLibrary();
+    library.checkpoints = [
+      ...library.checkpoints.filter((entry) => entry.tournamentId !== record.tournamentId),
+      ...library.checkpoints
+        .filter((entry) => entry.tournamentId === record.tournamentId)
+        .slice(-(localRecoveryPointLimit - 1)),
+      record,
+    ];
+    library.documents[record.tournamentId] = structuredClone(active);
+    library.currentId = record.tournamentId;
+    try {
+      localStorage.setItem(localLibraryKey, JSON.stringify(library));
+    } catch (reason: unknown) {
+      throw new DirectorPersistenceError(
+        'This browser has no room left for another recovery point. Export a portable archive and clear older tournaments.',
+        { cause: reason },
+      );
+    }
   }
 
   private async writeRecovery(
@@ -393,7 +445,10 @@ export class IndexedDbDirectorRepository implements DirectorRepository {
               transaction.objectStore(checkpointsStoreName).put(record),
             );
             transaction.oncomplete = () => resolve();
-            transaction.onerror = () => reject(transaction.error);
+            transaction.onerror = () =>
+              reject(transaction.error ?? new Error('Recovery points could not be migrated.'));
+            transaction.onabort = () =>
+              reject(transaction.error ?? new Error('Recovery point migration was aborted.'));
           });
         }
         const localDocuments = Object.values(localLibrary.documents);
@@ -615,14 +670,14 @@ export class MemoryDirectorRepository implements DirectorRepository {
   }
 
   async checkpoint(state: DirectorState, reason: string): Promise<void> {
-    this.checkpoints.push(recoveryPoint(state, reason));
+    this.checkpoints.push(recoveryPoint(state, reason, nextSequence(this.checkpoints)));
     await this.save(state);
   }
 
   async listCheckpoints(tournamentId: string): Promise<DirectorCheckpoint[]> {
     return this.checkpoints
       .filter((entry) => entry.tournamentId === tournamentId)
-      .reverse()
+      .sort(byNewestFirst)
       .map(checkpointMetadata);
   }
 
@@ -636,7 +691,13 @@ export class MemoryDirectorRepository implements DirectorRepository {
   async restoreCheckpoint(current: DirectorState, checkpointId: string): Promise<DirectorState> {
     const record = this.checkpoints.find((entry) => entry.id === checkpointId);
     const restored = restoredState(record, current.tournament!.id);
-    this.checkpoints.push(recoveryPoint(current, `Before restoring checkpoint from ${record!.createdAt}`));
+    this.checkpoints.push(
+      recoveryPoint(
+        current,
+        `Before restoring checkpoint from ${record!.createdAt}`,
+        nextSequence(this.checkpoints),
+      ),
+    );
     await this.save(restored);
     return restored;
   }

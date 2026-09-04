@@ -489,16 +489,14 @@ function RoundWorkspaceRow({
             onMoveUp={onMoveUp}
             onMoveDown={onMoveDown}
           />
-          {
-            <button
-              type="button"
-              className="director-inline-action"
-              aria-expanded={showAdvanced}
-              onClick={() => setShowAdvanced((open) => !open)}
-            >
-              {showAdvanced ? 'Hide details' : isComplete ? 'Details' : 'Details & recovery'}
-            </button>
-          }
+          <button
+            type="button"
+            className="director-inline-action"
+            aria-expanded={showAdvanced}
+            onClick={() => setShowAdvanced((open) => !open)}
+          >
+            {showAdvanced ? 'Hide details' : isComplete ? 'Details' : 'Details & recovery'}
+          </button>
         </div>
         {assigningPacket && !isActive && !isComplete && (
           <FormField label={`Packet for ${round.name}`}>
@@ -671,14 +669,30 @@ function RoundAdvancedDetails({
         <Button
           variant="danger"
           onClick={async () => {
-            if (!confirm(`Remove ${round.name} and its games? A recovery point will be created first.`))
+            // Removing a round discards its games, submissions, protests and any accepted
+            // results, for a closed round as much as a planned one. Say so before asking.
+            if (
+              !confirm(
+                `Remove ${round.name}, its games and any accepted results? A recovery point will be created first.`,
+              )
+            )
               return;
-            const removed = await removeRoundFlexibly(controller, round.id);
-            onAnnounce(
-              removed
-                ? `${round.name} removed. Restore it from Settings → Recovery if needed.`
-                : errorNotice('The round was not removed; review the Director error.'),
-            );
+            try {
+              const removed = await removeRoundFlexibly(controller, round.id);
+              onAnnounce(
+                removed
+                  ? `${round.name} removed. Restore it from Settings → Recovery if needed.`
+                  : errorNotice('The round was not removed; review the Director error.'),
+              );
+            } catch (reason: unknown) {
+              onAnnounce(
+                errorNotice(
+                  reason instanceof Error
+                    ? `${round.name} was not removed: ${reason.message}`
+                    : `${round.name} was not removed.`,
+                ),
+              );
+            }
           }}
         >
           Remove round

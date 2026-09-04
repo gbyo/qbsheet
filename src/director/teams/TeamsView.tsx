@@ -453,10 +453,22 @@ function TeamRow({
                     (game.leftTeamId === team.id || game.rightTeamId === team.id)
                   );
                 }).length;
-                const changed =
-                  team.status === 'dropped'
-                    ? controller.restoreTeam(team.id)
-                    : await dropTeamFlexibly(controller, team.id);
+                let changed = false;
+                try {
+                  changed =
+                    team.status === 'dropped'
+                      ? controller.restoreTeam(team.id)
+                      : await dropTeamFlexibly(controller, team.id);
+                } catch (reason: unknown) {
+                  onAnnounce(
+                    errorNotice(
+                      reason instanceof Error
+                        ? `Team status was not changed: ${reason.message}`
+                        : 'Team status was not changed.',
+                    ),
+                  );
+                  return;
+                }
                 if (!changed) {
                   onAnnounce(errorNotice('Team status was not changed; review the Director error.'));
                   return;

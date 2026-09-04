@@ -682,8 +682,19 @@ export function useDirectorController(repository = createDirectorRepository()): 
    * that it needs publishing. See `docs/QBLIVE.md#8-the-durable-outbox`.
    */
   const commit = useCallback(
-    (mutator: (draft: DirectorState) => void) => {
-      if (documentTransitionRef.current) return;
+    (mutator: (draft: DirectorState) => void): boolean => {
+      /*
+       * A commit dropped mid-recovery is a failure, and says so.
+       *
+       * `restoreCheckpoint` and `editTournamentSnapshot` replace the whole document, and they
+       * await storage while doing it. A click that lands inside that window cannot be applied
+       * to a document that is about to be discarded — but it must not be reported as saved
+       * either, so every caller that returns a success boolean returns this one.
+       */
+      if (documentTransitionRef.current) {
+        setError('The tournament is being restored. Wait for recovery to finish, then try again.');
+        return false;
+      }
       const next = structuredClone(stateRef.current);
       const auditStart = next.audit.length;
       mutator(next);
@@ -703,6 +714,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
       stateRef.current = next;
       setState(next);
       void persist(next, revision).catch(() => undefined);
+      return true;
     },
     [persist],
   );
@@ -728,7 +740,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError(`Cannot change a ${current.status} tournament to ${status}.`);
         return false;
       }
-      commit((draft) => {
+      return commit((draft) => {
         if (!draft.tournament) return;
         const from = draft.tournament.status;
         draft.tournament.status = status;
@@ -743,7 +755,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           details: { from, to: status },
         });
       });
-      return true;
     },
     [commit],
   );
@@ -945,7 +956,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError('Choose a recognized IANA tournament timezone.');
         return false;
       }
-      commit((draft) => {
+      return commit((draft) => {
         if (!draft.tournament) return;
         Object.assign(draft.tournament, normalized, { updatedAt: isoNow() });
         draft.audit.push({
@@ -957,7 +968,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           entityId: draft.tournament.id,
         });
       });
-      return true;
     },
     [commit],
   );
@@ -978,7 +988,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError(`School / club “${name}” already exists; reopen it or edit the existing record.`);
         return false;
       }
-      commit((draft) => {
+      return commit((draft) => {
         const now = isoNow();
         const id = newDirectorId('organization');
         draft.organizations.push({
@@ -998,7 +1008,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           details: { entityType: 'organization' },
         });
       });
-      return true;
     },
     [commit],
   );
@@ -1026,7 +1035,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError(`School / club “${name}” already exists.`);
         return false;
       }
-      commit((draft) => {
+      return commit((draft) => {
         const organization = draft.organizations.find((entry) => entry.id === organizationId);
         if (!organization) return;
         organization.name = name;
@@ -1043,7 +1052,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           details: { entityType: 'organization' },
         });
       });
-      return true;
     },
     [commit],
   );
@@ -1066,7 +1074,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         );
         return false;
       }
-      commit((draft) => {
+      return commit((draft) => {
         const organization = draft.organizations.find((entry) => entry.id === organizationId);
         if (!organization) return;
         organization.archived = archived || undefined;
@@ -1080,7 +1088,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           details: { entityType: 'organization', archived, retainsHistory: true },
         });
       });
-      return true;
     },
     [commit],
   );
@@ -1105,7 +1112,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
       const reassignedTeamCount = snapshot.teams.filter(
         (team) => team.organizationId === sourceOrganizationId,
       ).length;
-      commit((draft) => {
+      return commit((draft) => {
         draft.teams
           .filter((team) => team.organizationId === sourceOrganizationId)
           .forEach((team) => {
@@ -1131,7 +1138,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           },
         });
       });
-      return true;
     },
     [commit],
   );
@@ -1177,7 +1183,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError(roster.message);
         return false;
       }
-      commit((draft) => {
+      return commit((draft) => {
         const now = isoNow();
         let organizationId: DirectorId | null = null;
         const organizationName = input.organizationName?.trim();
@@ -1226,7 +1232,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           details: { initialPlayerCount: roster.players.length },
         });
       });
-      return true;
     },
     [commit],
   );
@@ -1375,7 +1380,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         );
         return false;
       }
-      commit((draft) => {
+      return commit((draft) => {
         const team = draft.teams.find((entry) => entry.id === teamId);
         if (!team) return;
         if (changes.organizationName !== undefined) {
@@ -1409,7 +1414,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           entityId: teamId,
         });
       });
-      return true;
     },
     [commit],
   );
@@ -1440,7 +1444,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError(`Finish or repair ${openRound.name} before dropping this team.`);
         return false;
       }
-      commit((draft) => {
+      return commit((draft) => {
         const team = draft.teams.find((entry) => entry.id === teamId);
         if (!team) return;
         team.status = 'dropped';
@@ -1456,7 +1460,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           details: { reason },
         });
       });
-      return true;
     },
     [commit],
   );
@@ -1483,7 +1486,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError(`Team “${current.displayName}” already exists.`);
         return false;
       }
-      commit((draft) => {
+      return commit((draft) => {
         const team = draft.teams.find((entry) => entry.id === teamId);
         if (!team) return;
         team.status = 'confirmed';
@@ -1497,7 +1500,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           entityId: teamId,
         });
       });
-      return true;
     },
     [commit],
   );
@@ -1532,7 +1534,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError(`“${normalizedName}” is already on this active roster.`);
         return false;
       }
-      commit((draft) => {
+      return commit((draft) => {
         const playerId = newDirectorId('player');
         if (captain)
           draft.players
@@ -1558,7 +1560,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           entityId: playerId,
         });
       });
-      return true;
     },
     [commit],
   );
@@ -1595,7 +1596,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError(`“${name}” is already on this active roster.`);
         return false;
       }
-      commit((draft) => {
+      return commit((draft) => {
         const player = draft.players.find((entry) => entry.id === playerId);
         if (!player) return;
         const shouldBeActive = changes.active ?? player.active;
@@ -1627,7 +1628,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           entityId: playerId,
         });
       });
-      return true;
     },
     [commit],
   );
@@ -1643,7 +1643,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError(`${current.name} is already inactive.`);
         return false;
       }
-      commit((draft) => {
+      return commit((draft) => {
         const player = draft.players.find((entry) => entry.id === playerId);
         if (!player) return;
         player.active = false;
@@ -1656,7 +1656,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           entityId: playerId,
         });
       });
-      return true;
     },
     [commit],
   );
@@ -1699,7 +1698,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError('That player is already on the canonical roster; map the amendment to the existing player.');
         return false;
       }
-      commit((draft) => {
+      return commit((draft) => {
         const target = draft.qbtcpRosterAmendments.find((entry) => entry.id === amendmentId);
         if (!target || target.status !== 'pending') return;
         const now = isoNow();
@@ -1727,7 +1726,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           details: { decision: 'approved-new', playerId, teamId: team.id },
         });
       });
-      return true;
     },
     [commit],
   );
@@ -1750,7 +1748,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError('The selected player is not on the team named by the amendment.');
         return false;
       }
-      commit((draft) => {
+      return commit((draft) => {
         const target = draft.qbtcpRosterAmendments.find((entry) => entry.id === amendmentId);
         if (!target || target.status !== 'pending') return;
         const now = isoNow();
@@ -1769,7 +1767,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           details: { decision: 'mapped-existing', playerId },
         });
       });
-      return true;
     },
     [commit],
   );
@@ -1781,7 +1778,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError('Only a pending roster amendment can be rejected.');
         return false;
       }
-      commit((draft) => {
+      return commit((draft) => {
         const target = draft.qbtcpRosterAmendments.find((entry) => entry.id === amendmentId);
         if (!target || target.status !== 'pending') return;
         const now = isoNow();
@@ -1800,7 +1797,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           details: { decision: 'rejected', reason: target.decisionReason },
         });
       });
-      return true;
     },
     [commit],
   );
@@ -1816,7 +1812,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError(`Room “${name}” already exists.`);
         return false;
       }
-      commit((draft) => {
+      return commit((draft) => {
         const roomId = newDirectorId('room');
         draft.rooms.push({
           id: roomId,
@@ -1841,7 +1837,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           entityId: roomId,
         });
       });
-      return true;
     },
     [commit],
   );
@@ -1874,7 +1869,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError(`Room “${name}” already exists.`);
         return false;
       }
-      commit((draft) => {
+      return commit((draft) => {
         const room = draft.rooms.find((entry) => entry.id === roomId);
         if (!room) return;
         Object.assign(room, changes);
@@ -1899,7 +1894,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           entityId: roomId,
         });
       });
-      return true;
     },
     [commit],
   );
@@ -1919,7 +1913,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError(`Staff member “${name}” already exists.`);
         return false;
       }
-      commit((draft) => {
+      return commit((draft) => {
         const staffId = newDirectorId('staff');
         draft.staff.push({
           id: staffId,
@@ -1937,7 +1931,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           entityId: staffId,
         });
       });
-      return true;
     },
     [commit],
   );
@@ -1971,7 +1964,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError(`Staff member “${name}” already exists.`);
         return false;
       }
-      commit((draft) => {
+      return commit((draft) => {
         const member = draft.staff.find((entry) => entry.id === staffId);
         if (!member) return;
         member.name = name;
@@ -1987,7 +1980,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           entityId: staffId,
         });
       });
-      return true;
     },
     [commit],
   );
@@ -2007,7 +1999,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError(`Equipment resource “${name}” already exists.`);
         return false;
       }
-      commit((draft) => {
+      return commit((draft) => {
         const equipmentId = newDirectorId('equipment');
         draft.equipment.push({
           id: equipmentId,
@@ -2025,7 +2017,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           entityId: equipmentId,
         });
       });
-      return true;
     },
     [commit],
   );
@@ -2054,7 +2045,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError(`Equipment resource “${name}” already exists.`);
         return false;
       }
-      commit((draft) => {
+      return commit((draft) => {
         const item = draft.equipment.find((entry) => entry.id === equipmentId);
         if (!item) return;
         item.name = name;
@@ -2070,7 +2061,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           entityId: equipmentId,
         });
       });
-      return true;
     },
     [commit],
   );
@@ -2095,7 +2085,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError(`Packet “${normalizedName}” already exists.`);
         return false;
       }
-      commit((draft) => {
+      return commit((draft) => {
         const packetId = newDirectorId('packet');
         draft.packets.push({
           id: packetId,
@@ -2121,7 +2111,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           entityId: packetId,
         });
       });
-      return true;
     },
     [commit],
   );
@@ -2204,7 +2193,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError(`Packet “${name}” already exists.`);
         return false;
       }
-      commit((draft) => {
+      return commit((draft) => {
         const packet = draft.packets.find((entry) => entry.id === packetId);
         if (!packet) return;
         packet.name = name;
@@ -2223,7 +2212,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           entityId: packetId,
         });
       });
-      return true;
     },
     [commit],
   );
@@ -2237,7 +2225,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         return false;
       }
       if (current.retired === retired) return true;
-      commit((draft) => {
+      return commit((draft) => {
         const packet = draft.packets.find((entry) => entry.id === packetId);
         if (!packet) return;
         packet.retired = retired || undefined;
@@ -2256,7 +2244,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           details: { retired, retainsHistory: true },
         });
       });
-      return true;
     },
     [commit],
   );
@@ -2268,7 +2255,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError(validationError);
         return false;
       }
-      commit((draft) => {
+      return commit((draft) => {
         const now = isoNow();
         const event: TournamentTimelineEvent = {
           id: newDirectorId('timeline'),
@@ -2298,7 +2285,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           details: { eventType: event.type, visibility: event.visibility },
         });
       });
-      return true;
     },
     [commit],
   );
@@ -2327,7 +2313,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError(validationError);
         return false;
       }
-      commit((draft) => {
+      return commit((draft) => {
         const event = draft.timeline.find((entry) => entry.id === eventId);
         if (!event) return;
         Object.assign(event, {
@@ -2348,7 +2334,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           details: { eventType: event.type, visibility: event.visibility },
         });
       });
-      return true;
     },
     [commit],
   );
@@ -2360,7 +2345,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError('That schedule event is no longer in the tournament.');
         return false;
       }
-      commit((draft) => {
+      return commit((draft) => {
         draft.timeline = draft.timeline.filter((event) => event.id !== eventId);
         draft.audit.push({
           id: newDirectorId('audit'),
@@ -2371,7 +2356,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           entityId: eventId,
         });
       });
-      return true;
     },
     [commit],
   );
@@ -2391,7 +2375,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
       const ids = ordered.map((entry) => entry.id);
       [ids[index], ids[target]] = [ids[target], ids[index]];
       const moving = ordered[index];
-      commit((draft) => {
+      return commit((draft) => {
         const normalized = normalizeDayOrder(draft.rounds, draft.timeline, ids);
         draft.rounds = normalized.rounds;
         draft.timeline = normalized.timeline;
@@ -2407,7 +2391,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           entityId: itemId,
         });
       });
-      return true;
     },
     [commit],
   );
@@ -2427,7 +2410,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError('The planned round start is not a valid timestamp.');
         return false;
       }
-      commit((draft) => {
+      return commit((draft) => {
         const target = draft.rounds.find((entry) => entry.id === roundId);
         if (!target) return;
         const previousStart = target.scheduledStart;
@@ -2453,7 +2436,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           details: { scheduledStart },
         });
       });
-      return true;
     },
     [commit],
   );
@@ -2494,7 +2476,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         ...changes,
         ...(changes.name !== undefined ? { name: changes.name.trim() } : {}),
       };
-      commit((draft) => {
+      return commit((draft) => {
         const formatId = draft.tournament?.formatId;
         const format = formatId ? draft.formats.find((entry) => entry.id === formatId) : undefined;
         if (!format) return;
@@ -2508,7 +2490,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           entityId: format.id,
         });
       });
-      return true;
     },
     [commit],
   );
@@ -2580,7 +2561,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError(advancementError);
         return false;
       }
-      commit((draft) => {
+      return commit((draft) => {
         const target = draft.phases.find((entry) => entry.id === phaseId);
         if (!target) return;
         if (changes.name !== undefined) target.name = changes.name.trim();
@@ -2600,7 +2581,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           entityId: target.id,
         });
       });
-      return true;
     },
     [commit],
   );
@@ -2623,7 +2603,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError('A phase with an open round cannot be archived; close or repair its rounds first.');
         return false;
       }
-      commit((draft) => {
+      return commit((draft) => {
         const target = draft.phases.find((entry) => entry.id === phaseId);
         if (!target) return;
         target.archived = archived || undefined;
@@ -2652,7 +2632,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           details: { archived, retainsHistory: true },
         });
       });
-      return true;
     },
     [commit],
   );
@@ -2827,7 +2806,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
       return false;
     }
     if (!snapshot.tournament.finalPlacement) return true;
-    commit((draft) => {
+    return commit((draft) => {
       if (!draft.tournament) return;
       draft.tournament.finalPlacement = undefined;
       draft.audit.push({
@@ -2838,7 +2817,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
         summary: 'Cleared the explicit final placement. Calculated standings are final again.',
       });
     });
-    return true;
   }, [commit]);
 
   const addPool = useCallback(
@@ -2889,7 +2867,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError('Each team can belong to only one pool in a phase.');
         return false;
       }
-      commit((draft) => {
+      return commit((draft) => {
         const poolId = newDirectorId('pool');
         draft.pools.push({
           id: poolId,
@@ -2910,7 +2888,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           details: { phaseId: phase.id, teamCount: teamIds.length },
         });
       });
-      return true;
     },
     [commit],
   );
@@ -2972,7 +2949,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
           return false;
         }
       }
-      commit((draft) => {
+      return commit((draft) => {
         const target = draft.pools.find((entry) => entry.id === poolId);
         if (!target) return;
         target.name = name;
@@ -2987,7 +2964,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           details: { phaseId: phase.id, teamCount: teamIds.length },
         });
       });
-      return true;
     },
     [commit],
   );
@@ -3013,7 +2989,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError('A pool with an open scheduled game cannot be archived; close or cancel that game first.');
         return false;
       }
-      commit((draft) => {
+      return commit((draft) => {
         const target = draft.pools.find((entry) => entry.id === poolId);
         if (!target) return;
         target.archived = archived || undefined;
@@ -3027,7 +3003,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           details: { archived, retainsHistory: true, phaseId: phase.id },
         });
       });
-      return true;
     },
     [commit],
   );
@@ -3076,7 +3051,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         );
         return false;
       }
-      commit((draft) => {
+      return commit((draft) => {
         if (!draft.tournament) return;
         draft.tournament.rules = {
           ...draft.tournament.rules,
@@ -3093,7 +3068,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           entityId: draft.tournament.id,
         });
       });
-      return true;
     },
     [commit],
   );
@@ -3249,7 +3223,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError('This round cannot be prepared until every matchup is valid.');
         return false;
       }
-      commit((draft) => {
+      return commit((draft) => {
         const target = draft.rounds.find((entry) => entry.id === roundId);
         if (!target || target.status !== 'planned') return;
         target.status = 'prepared';
@@ -3262,7 +3236,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           entityId: roundId,
         });
       });
-      return true;
     },
     [commit],
   );
@@ -3302,10 +3275,9 @@ export function useDirectorController(repository = createDirectorRepository()): 
         );
         return false;
       }
-      commit((draft) => {
+      return commit((draft) => {
         applyRoundRelease(draft, roundId);
       });
-      return true;
     },
     [commit],
   );
@@ -3329,7 +3301,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError('Every game must have an accepted result or be cancelled before the round closes.');
         return false;
       }
-      commit((draft) => {
+      return commit((draft) => {
         const target = draft.rounds.find((entry) => entry.id === roundId);
         if (!target || target.status !== 'released') return;
         Object.assign(target, closeRound(target));
@@ -3376,7 +3348,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           entityId: roundId,
         });
       });
-      return true;
     },
     [commit],
   );
@@ -3404,7 +3375,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         return false;
       }
       const normalizedReason = reason.trim() || 'Cancelled by director';
-      commit((draft) => {
+      return commit((draft) => {
         const target = draft.scheduledGames.find((game) => game.id === scheduledGameId);
         if (!target || target.status === 'cancelled' || target.status === 'accepted') return;
         target.status = 'cancelled';
@@ -3436,7 +3407,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           details: { reason: normalizedReason, roundId: target.roundId },
         });
       });
-      return true;
     },
     [commit],
   );
@@ -3462,7 +3432,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         );
         return false;
       }
-      commit((draft) => {
+      return commit((draft) => {
         const target = draft.scheduledGames.find((game) => game.id === input.scheduledGameId);
         if (!target || target.bye) return;
         const gameId = newDirectorId('game-record');
@@ -3507,7 +3477,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           details: { scheduledGameId: target.id, detailedStats: game.detailedStats },
         });
       });
-      return true;
     },
     [commit],
   );
@@ -3551,7 +3520,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
       if (!parsed || parsed.scores.length < 2) warnings.add(ingestWarnings.statisticsWarning);
       warnings.add(ingestWarnings.directorAssociation);
 
-      commit((draft) => {
+      return commit((draft) => {
         const targetSubmission = draft.submissions.find((entry) => entry.id === submissionId);
         const targetGame = targetSubmission
           ? draft.games.find((entry) => entry.id === targetSubmission.gameId)
@@ -3602,7 +3571,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           },
         });
       });
-      return true;
     },
     [commit],
   );
@@ -3671,7 +3639,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError('An identical result is already accepted for this scheduled game.');
         return false;
       }
-      commit((draft) => {
+      return commit((draft) => {
         const target = draft.submissions.find((entry) => entry.id === submissionId);
         const targetGame = target ? draft.games.find((entry) => entry.id === target.gameId) : undefined;
         const targetScheduled = targetGame
@@ -3738,7 +3706,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           details: { scheduledGameId: targetScheduled.id },
         });
       });
-      return true;
     },
     [commit],
   );
@@ -3748,7 +3715,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
       const snapshot = stateRef.current;
       const submission = snapshot.submissions.find((entry) => entry.id === submissionId);
       if (!submission || (submission.status !== 'received' && submission.status !== 'review')) return false;
-      commit((draft) => {
+      return commit((draft) => {
         const submission = draft.submissions.find((entry) => entry.id === submissionId);
         if (!submission || (submission.status !== 'received' && submission.status !== 'review')) return;
         submission.status = 'rejected';
@@ -3779,7 +3746,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           details: { reason, scheduledGameId: scheduled?.id },
         });
       });
-      return true;
     },
     [commit],
   );
@@ -3810,7 +3776,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError('Only the current canonical accepted result can be corrected.');
         return false;
       }
-      commit((draft) => {
+      return commit((draft) => {
         applyAcceptedResultCorrection(
           draft,
           gameId,
@@ -3820,7 +3786,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           'accepted-result-correction',
         );
       });
-      return true;
     },
     [commit],
   );
@@ -3850,7 +3815,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError('A protest description is required.');
         return false;
       }
-      commit((draft) => {
+      return commit((draft) => {
         const protestId = newDirectorId('protest');
         const now = isoNow();
         draft.protests.push({
@@ -3871,7 +3836,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           entityId: protestId,
         });
       });
-      return true;
     },
     [commit],
   );
@@ -3920,7 +3884,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
           return false;
         }
       }
-      commit((draft) => {
+      return commit((draft) => {
         const target = draft.protests.find((entry) => entry.id === protestId);
         if (!target) return;
         let correctionSubmissionId: DirectorId | undefined;
@@ -3958,7 +3922,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
           details: { scoreAdjustment: adjustment, correctionSubmissionId },
         });
       });
-      return true;
     },
     [commit],
   );
@@ -4011,7 +3974,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
       try {
         const resolved = await resolveNativeQbtcpHelp(helpId);
         const actor = operatorDisplayName(loadOperatorProfile());
-        commit((draft) => {
+        return commit((draft) => {
           const request = draft.qbtcpHelpRequests.find((entry) => entry.id === helpId);
           if (!request) return;
           request.status = 'resolved';
@@ -4031,7 +3994,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
             details: { roomId: request.roomId, category: request.category },
           });
         });
-        return true;
       } catch (reason: unknown) {
         setError(reason instanceof Error ? reason.message : 'The QBTCP help request could not be resolved.');
         return false;
@@ -4153,8 +4115,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
       documentEpochRef.current += 1;
       setRecovering(true);
       try {
-        await qbtcpSyncInFlightRef.current;
-        await liveDrainInFlightRef.current;
+        // Settle, never adopt. A QBTCP read or a Live drain that rejected in the background
+        // is why a director is reaching for recovery; letting its rejection propagate here
+        // would refuse the restore that fixes it.
+        await Promise.allSettled([qbtcpSyncInFlightRef.current, liveDrainInFlightRef.current]);
         await persistenceQueueRef.current;
         const current = structuredClone(stateRef.current);
         const restored = await repositoryRef.current.restoreCheckpoint(current, checkpointId);
@@ -4217,8 +4181,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
       documentEpochRef.current += 1;
       setRecovering(true);
       try {
-        await qbtcpSyncInFlightRef.current;
-        await liveDrainInFlightRef.current;
+        // Settle, never adopt. A QBTCP read or a Live drain that rejected in the background
+        // is why a director is reaching for recovery; letting its rejection propagate here
+        // would refuse the restore that fixes it.
+        await Promise.allSettled([qbtcpSyncInFlightRef.current, liveDrainInFlightRef.current]);
         await persistenceQueueRef.current;
         await repositoryRef.current.checkpoint(before, reason);
         const next = normalizeDirectorState(value);
@@ -5047,6 +5013,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
   const applyTournamentPlan = useCallback(
     (plan: TournamentPlanRecommendation) => {
       let applied = false;
+      let pairingReason: string | null = null;
       commit((draft) => {
         const tournament = draft.tournament;
         const format = tournament
@@ -5154,11 +5121,29 @@ export function useDirectorController(repository = createDirectorRepository()): 
         });
         tournament.currentPhaseId = format.phaseIds[0] ?? null;
         if (format.kind === 'round-robin' || format.kind === 'double-round-robin') {
-          draft.scheduledGames = generatePlannedRoundRobinGames(draft);
-          for (const round of draft.rounds)
-            round.scheduledGameIds = draft.scheduledGames
-              .filter((game) => game.roundId === round.id)
-              .map((game) => game.id);
+          /*
+           * Materializing the rotation is a convenience, not the plan.
+           *
+           * The canonical scheduler refuses to pair fewer than two confirmed teams, and this
+           * mutator runs synchronously inside `commit`, so throwing here would abandon the
+           * structure the director just applied and break the boolean contract of the action.
+           * The structure is kept, the pairings stay empty and editable, and the reason is
+           * reported separately from the persistence status line.
+           */
+          try {
+            draft.scheduledGames = generatePlannedRoundRobinGames(draft);
+            for (const round of draft.rounds)
+              round.scheduledGameIds = draft.scheduledGames
+                .filter((game) => game.roundId === round.id)
+                .map((game) => game.id);
+          } catch (reason: unknown) {
+            draft.scheduledGames = [];
+            for (const round of draft.rounds) round.scheduledGameIds = [];
+            pairingReason =
+              reason instanceof Error
+                ? reason.message
+                : 'The pairings could not be generated; add them from Rounds.';
+          }
           tournament.currentRoundId = draft.rounds[0]?.id ?? null;
         }
         tournament.updatedAt = isoNow();
@@ -5169,7 +5154,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
           type: 'format-changed',
           summary: `Applied tournament plan: ${plan.title}.`,
           entityId: format.id,
-          details: { plan: plan.id },
+          details: { plan: plan.id, ...(pairingReason ? { pairingsDeferred: pairingReason } : {}) },
         });
         applied = true;
       });
