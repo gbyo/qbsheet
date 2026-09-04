@@ -80,12 +80,29 @@ public extension QBLiveSnapshot {
             .sorted { $0.scheduledStart! < $1.scheduledStart! }
         if let soonest = timed.first { return soonest }
 
-        // Nothing has a usable time. The first unfinished game in day-sequence order,
-        // then round number, shown with no time.
-        return candidates
-            .filter { $0.game != nil }
-            .sorted { compareDayOrder($0.game, $1.game) }
-            .first ?? candidates.first
+        // Nothing has a usable time. Compare explicitly sequenced games and events together.
+        // Legacy timeline events without a sequence stay out of this fallback so sequenceless
+        // games retain their round-number ordering.
+        let untimed = candidates
+            .filter { $0.game != nil || $0.event?.sequence != nil }
+            .sorted { left, right in
+                let leftSequence = left.game?.sequence ?? left.event?.sequence
+                let rightSequence = right.game?.sequence ?? right.event?.sequence
+                switch (leftSequence, rightSequence) {
+                case let (leftSequence?, rightSequence?) where leftSequence != rightSequence:
+                    return leftSequence < rightSequence
+                case (_?, nil):
+                    return true
+                case (nil, _?):
+                    return false
+                default:
+                    if let leftGame = left.game, let rightGame = right.game {
+                        return compareDayOrder(leftGame, rightGame)
+                    }
+                    return false
+                }
+            }
+        return untimed.first ?? candidates.first
     }
 
     func recentResults(for teamId: String, limit: Int = 4) -> [QBLiveResult] {

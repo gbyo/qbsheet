@@ -99,16 +99,25 @@ export function nextEventForTeam(snapshot: QbliveSnapshot, teamId: string, now: 
     .sort((left, right) => left.scheduledStart!.localeCompare(right.scheduledStart!));
   if (upcoming.length > 0) return upcoming[0];
 
-  // Nothing has a usable time. Fall back to the first unfinished game in day-sequence
-  // order, then round number, with no time.
+  // Nothing has a usable time. Compare explicitly sequenced games and events together. Legacy
+  // timeline events without a sequence stay out of this fallback so sequenceless games retain the
+  // old round-number ordering.
   const untimed = candidates
-    .filter((candidate) => candidate.kind === 'game')
-    .sort(
-      (left, right) =>
-        compareOptionalSequence(left.game!.sequence, right.game!.sequence) ||
-        (left.game!.roundNumber ?? Number.MAX_SAFE_INTEGER) -
-          (right.game!.roundNumber ?? Number.MAX_SAFE_INTEGER),
-    );
+    .filter((candidate) => candidate.kind === 'game' || typeof candidate.event?.sequence === 'number')
+    .sort((left, right) => {
+      const sequenceOrder = compareOptionalSequence(
+        left.game?.sequence ?? left.event?.sequence ?? null,
+        right.game?.sequence ?? right.event?.sequence ?? null,
+      );
+      if (sequenceOrder !== 0) return sequenceOrder;
+      if (left.game && right.game) {
+        return (
+          (left.game.roundNumber ?? Number.MAX_SAFE_INTEGER) -
+          (right.game.roundNumber ?? Number.MAX_SAFE_INTEGER)
+        );
+      }
+      return 0;
+    });
   return untimed[0] ?? candidates[0] ?? null;
 }
 

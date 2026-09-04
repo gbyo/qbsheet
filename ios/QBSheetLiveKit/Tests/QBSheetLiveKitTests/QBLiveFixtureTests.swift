@@ -46,6 +46,64 @@ struct QBLiveFixtureTests {
         #expect(utc.component(.hour, from: start) == 16)
     }
 
+    @Test("an untimed event between rounds wins by published sequence")
+    func untimedEventUsesPublishedSequence() throws {
+        var object = try #require(
+            try JSONSerialization.jsonObject(with: Self.fixture("snapshot-default")) as? [String: Any]
+        )
+        let sourceSchedule = try #require(object["schedule"] as? [[String: Any]])
+
+        var before = sourceSchedule[0]
+        before["id"] = "game-before"
+        before["roundId"] = "round-before"
+        before["roundName"] = "Round 2"
+        before["roundNumber"] = 2
+        before["sequence"] = 1
+        before["scheduledStart"] = NSNull()
+        before["state"] = "upcoming"
+
+        var after = sourceSchedule[2]
+        after["id"] = "game-after"
+        after["roundId"] = "round-after"
+        after["roundName"] = "Round 3"
+        after["roundNumber"] = 3
+        after["sequence"] = 3
+        after["scheduledStart"] = NSNull()
+        after["state"] = "upcoming"
+
+        object["schedule"] = [before, after]
+        object["liveGames"] = []
+        object["timeline"] = [[
+            "id": "event-between",
+            "type": "lunch",
+            "title": "Lunch",
+            "description": NSNull(),
+            "sequence": 2,
+            "scheduledStart": NSNull(),
+            "scheduledEnd": NSNull(),
+            "teamIds": ["team-a"],
+            "roomId": NSNull(),
+            "location": NSNull(),
+        ]]
+
+        // The earliest sequence wins whatever kind it is, so an unfinished Round 2 still comes
+        // before Lunch. Asserting this direction too is what stops the fix over-correcting into
+        // "events first".
+        let data = try JSONSerialization.data(withJSONObject: object)
+        let snapshot = try QBLiveCoding.decoder.decode(QBLiveSnapshot.self, from: data)
+        let beforeLunch = try #require(snapshot.nextEvent(for: "team-a"))
+        #expect(beforeLunch.game?.id == "game-before")
+
+        // Once Round 2 is played, Lunch is next — not Round 3. This is the regression: an untimed
+        // event used to be dropped from the fallback entirely, so Round 3 won on round number.
+        before["state"] = "final"
+        object["schedule"] = [before, after]
+        let played = try JSONSerialization.data(withJSONObject: object)
+        let afterRound = try QBLiveCoding.decoder.decode(QBLiveSnapshot.self, from: played)
+        let next = try #require(afterRound.nextEvent(for: "team-a"))
+        #expect(next.event?.id == "event-between")
+    }
+
     @Test("a timestamp with no offset is rejected rather than assumed to be UTC")
     func bareTimestampRejected() {
         #expect(QBLiveCoding.parseTimestamp("2026-09-05T13:30:00") == nil)

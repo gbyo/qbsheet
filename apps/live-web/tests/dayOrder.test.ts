@@ -59,4 +59,56 @@ describe('sequence-first next event', () => {
     const next = nextEventForTeam(snapshot, 'team-a', new Date('2026-09-05T14:00:00Z'));
     expect(next?.game?.id).toBe('game-2');
   });
+
+  /*
+   * Lunch sits between two rounds, and the day order has to say so.
+   *
+   * A sequenced timeline event used to be dropped from this fallback altogether, so a team that
+   * had finished Round 2 was told Round 3 was next and walked past lunch. The Swift client pins
+   * the same behaviour against the same fixture in `QBLiveFixtureTests.untimedEventUsesPublishedSequence`.
+   */
+  function withLunchBetweenRounds(): QbliveSnapshot {
+    const snapshot = untimedSnapshot();
+    snapshot.schedule = [
+      game('game-before', 'round-before', 'Round 2', 2, 1),
+      game('game-after', 'round-after', 'Round 3', 3, 3),
+    ];
+    snapshot.timeline = [
+      {
+        id: 'event-between',
+        type: 'lunch',
+        title: 'Lunch',
+        description: null,
+        sequence: 2,
+        scheduledStart: null,
+        scheduledEnd: null,
+        teamIds: ['team-a'],
+        roomId: null,
+        location: null,
+      },
+    ];
+    return snapshot;
+  }
+
+  test('an unfinished earlier round still comes before a sequenced event', () => {
+    const next = nextEventForTeam(withLunchBetweenRounds(), 'team-a', new Date('2026-09-05T14:00:00Z'));
+    expect(next?.kind).toBe('game');
+    expect(next?.game?.id).toBe('game-before');
+  });
+
+  test('once that round is played the sequenced event is next, not the later round', () => {
+    const snapshot = withLunchBetweenRounds();
+    snapshot.schedule[0].state = 'final';
+    const next = nextEventForTeam(snapshot, 'team-a', new Date('2026-09-05T14:00:00Z'));
+    expect(next?.kind).toBe('event');
+    expect(next?.event?.id).toBe('event-between');
+  });
+
+  test('a legacy event with no sequence stays out of the untimed fallback', () => {
+    const snapshot = withLunchBetweenRounds();
+    snapshot.schedule[0].state = 'final';
+    snapshot.timeline[0].sequence = null;
+    const next = nextEventForTeam(snapshot, 'team-a', new Date('2026-09-05T14:00:00Z'));
+    expect(next?.game?.id).toBe('game-after');
+  });
 });
