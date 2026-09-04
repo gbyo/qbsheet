@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useRef, useState } from 'react';
+import { FormEvent, ReactNode, useEffect, useRef, useState } from 'react';
 import {
   keyboardActionLabels,
   keyboardActionNames,
@@ -20,14 +20,19 @@ import { buildLabel } from '../pwa/BuildVersion';
 import NativeDialog from './NativeDialog';
 import {
   effectiveExternalBackupStatus,
-  externalBackupActionLabel,
   externalBackupStateLabel,
   localCheckpointStateLabel,
   recoverySavedAtLabel,
   safeRecoveryFolderName,
   supportsExternalBackup,
 } from './DeviceReadiness';
-import type { IRecoveryUi, RecoveryAction, RecoveryActionResult } from './DeviceReadiness';
+import type {
+  IExternalBackupStatus,
+  ILocalCheckpointStatus,
+  IRecoveryUi,
+  RecoveryAction,
+  RecoveryActionResult,
+} from './DeviceReadiness';
 
 export interface ISettingsConnection {
   /** Human-facing room label only. Never a room id. */
@@ -36,13 +41,32 @@ export interface ISettingsConnection {
   address?: string;
 }
 
-type SettingsView = 'settings' | 'scorekeeper' | 'shortcuts' | 'recovery' | 'forget' | 'reset';
+/**
+ * Root Settings is a summary and a set of doors; every subview is one room behind one of them.
+ *
+ * `settings` is the overview. Everything else is reached from it, holds the controls and the
+ * explanation for one topic, and returns to it. `forget` and `reset` are the two destructive
+ * confirmations, and each belongs to the subview that offers it rather than to the root.
+ */
+type SettingsView =
+  | 'settings'
+  | 'scorekeeper'
+  | 'appearance'
+  | 'shortcuts'
+  | 'connection'
+  | 'recovery'
+  | 'forget'
+  | 'advanced'
+  | 'reset';
 
 function dialogTitle(view: SettingsView, firstRun: boolean): string {
   if (view === 'scorekeeper') return firstRun ? 'Who is scoring?' : 'Scorekeeper';
+  if (view === 'appearance') return 'Appearance';
   if (view === 'shortcuts') return 'Keyboard shortcuts';
+  if (view === 'connection') return 'Tournament connection';
   if (view === 'recovery') return 'Recovery';
   if (view === 'forget') return 'Forget tournament pairing?';
+  if (view === 'advanced') return 'Advanced';
   if (view === 'reset') return 'Reset device preferences?';
   return 'Settings';
 }
@@ -50,6 +74,78 @@ function dialogTitle(view: SettingsView, firstRun: boolean): string {
 /** Fixed display order, lightest-touch first, so the list reads as an escalation rather than a set. */
 const appearanceOrder: Appearance[] = ['system', 'light', 'dark'];
 const textSizeOrder: TextSize[] = ['standard', 'comfortable', 'large'];
+
+/**
+ * The one-line truth about recovery, for the root row.
+ *
+ * Composed from the same labels the Recovery view and Device Readiness use, so there is one place
+ * that decides what a state is called and this is not a second opinion about it. The optional
+ * external layer is left out entirely when the browser cannot do it: "Protected" is the whole story
+ * on that device, and naming an unsupported feature on the overview would only invite a question the
+ * subview already answers.
+ */
+function recoverySummary(
+  localCheckpoints: ILocalCheckpointStatus,
+  externalBackup: IExternalBackupStatus,
+): string {
+  const local = localCheckpointStateLabel(localCheckpoints.state);
+  if (externalBackup.state === 'unsupported') return local;
+  if (externalBackup.state === 'ready') {
+    return `${local} · ${safeRecoveryFolderName(externalBackup.folderName)}`;
+  }
+  return `${local} · ${externalBackupStateLabel(externalBackup.state)}`;
+}
+
+/**
+ * One row of the overview: what the setting is, what it currently says, and a way in.
+ *
+ * The whole row is the button. A small `Edit` or `View` beside a label is a second thing to aim at
+ * on a Chromebook trackpad and reads as a separate control to a screen reader, when the row already
+ * is the control; the accessible name comes out as "Appearance, Match device · Standard", which is
+ * both the label and the answer without a live region or a title attribute.
+ */
+function SettingsNavigationRow(props: {
+  label: string;
+  value?: string;
+  autofocus?: boolean;
+  onClick: () => void;
+}) {
+  const { label, value, autofocus = false, onClick } = props;
+  return (
+    <button
+      type="button"
+      className="settings-navigation-row"
+      {...(autofocus ? { 'data-dialog-autofocus': true, 'data-settings-view-autofocus': true } : {})}
+      onClick={onClick}
+    >
+      <span className="settings-navigation-label">{label}</span>
+      {value !== undefined && <span className="settings-navigation-value">{value}</span>}
+      <span className="settings-navigation-chevron" aria-hidden="true">
+        ›
+      </span>
+    </button>
+  );
+}
+
+/** A subview's way back, and the last thing in its tab order for the same reason Back is last. */
+function BackToSettings(props: { onClick: () => void }) {
+  return (
+    <button type="button" className="shell-button" data-settings-view-autofocus onClick={props.onClick}>
+      Back to Settings
+    </button>
+  );
+}
+
+function SettingsSection(props: { id: string; title: string; children: ReactNode }) {
+  return (
+    <section className="settings-section" aria-labelledby={props.id}>
+      <h3 id={props.id} className="settings-section-title">
+        {props.title}
+      </h3>
+      {props.children}
+    </section>
+  );
+}
 
 /**
  * One labelled row of mutually exclusive choices.
@@ -109,15 +205,6 @@ export default function SettingsDialog(props: {
   onResetDevicePreferences: () => void;
   onReadiness: () => void;
   /**
-   * Open the arcade.
-   *
-   * A callback and not a dialog rendered here, for the same reason `onReadiness` is one: Settings is
-   * a native modal, the arcade is a native modal, and a screen that hosts one can host the other.
-   * The host closes this and opens that, so there is one arcade in the application and Settings holds
-   * none of its state. Optional, so a caller compiled against an older build still type-checks.
-   */
-  onArcade?: () => void;
-  /**
    * Retained as an optional compatibility prop for callers compiled against older builds. General
    * scoring navigation now lives on Welcome/ConnectedRoom, not in Settings.
    */
@@ -143,7 +230,6 @@ export default function SettingsDialog(props: {
     onResetDevicePreferences,
     onReadiness,
     recovery,
-    onArcade,
     onChangeTournament,
     onClose,
     initialView = 'settings',
@@ -216,15 +302,25 @@ export default function SettingsDialog(props: {
     }
   };
 
-  const openRecoveryStatus = () => {
-    if (recovery?.onViewRecoveryStatus) {
-      onClose();
-      recovery.onViewRecoveryStatus();
-      return;
-    }
+  /**
+   * The Settings-owned recovery management view.
+   *
+   * Deliberately not the host's Recovery Mode: this is where the external-backup actions live, and a
+   * device that also offers a full recovery screen must not lose them the moment that callback is
+   * supplied. Opening the host screen is `openFullRecoveryStatus`, and only the button that says so
+   * does it.
+   */
+  const openRecoveryView = () => {
     setRecoveryMessage(null);
     setConfirmingExternalBackupRemoval(false);
     setView('recovery');
+  };
+
+  /** The host's fuller Recovery Mode, which replaces this dialog rather than stacking on it. */
+  const openFullRecoveryStatus = () => {
+    if (!recovery?.onViewRecoveryStatus) return;
+    onClose();
+    recovery.onViewRecoveryStatus();
   };
 
   return (
@@ -237,73 +333,24 @@ export default function SettingsDialog(props: {
                 {acknowledgement}
               </p>
             )}
-            {recoveryMessage && (
-              <p
-                className={recoveryMessage.kind === 'fail' ? 'shell-warning' : 'settings-acknowledgement'}
-                role={recoveryMessage.kind === 'fail' ? 'alert' : 'status'}
-              >
-                {recoveryMessage.text}
-              </p>
-            )}
 
-            <section className="settings-section" aria-labelledby="settings-scorekeeper-heading">
-              <h3 id="settings-scorekeeper-heading" className="settings-section-title">
-                Scorekeeper
-              </h3>
-              <div className="settings-row">
-                <div>
-                  <span className="settings-row-label">Scorekeeper</span>
-                  <span className="settings-row-detail">
-                    {operatorName.trim() === '' ? 'Not set' : operatorName}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  className="settings-action"
-                  data-dialog-autofocus
-                  data-settings-view-autofocus
-                  onClick={openScorekeeper}
-                >
-                  {operatorName.trim() === '' ? 'Set name' : 'Edit'}
-                </button>
-              </div>
-            </section>
-
-            <section className="settings-section" aria-labelledby="settings-display-heading">
-              <h3 id="settings-display-heading" className="settings-section-title">
-                Display
-              </h3>
-              {/*
-                Radio groups rather than switches or a select. Three named states each, all of them
-                worth seeing at once, and a scorekeeper changing these is usually doing it because
-                the screen is hard to read -- which is the worst moment to hide two of the three
-                choices behind a dropdown they have to open to compare.
-              */}
-              <ChoiceRow
-                name="settings-appearance"
+            <SettingsSection id="settings-general-heading" title="General">
+              <SettingsNavigationRow
+                label="Scorekeeper"
+                value={operatorName.trim() === '' ? 'Not set' : operatorName}
+                autofocus
+                onClick={openScorekeeper}
+              />
+              <SettingsNavigationRow
                 label="Appearance"
-                detail="Match device follows this Chromebook's own setting"
-                value={appearance}
-                options={appearanceOrder.map((option) => ({
-                  value: option,
-                  label: appearanceLabels[option],
-                }))}
-                onChange={(next) => setAppearance(next)}
+                value={`${appearanceLabels[appearance]} · ${textSizeLabels[textSize]}`}
+                onClick={() => setView('appearance')}
               />
-              <ChoiceRow
-                name="settings-text-size"
-                label="Text size"
-                detail="Scales on top of this browser's own font size"
-                value={textSize}
-                options={textSizeOrder.map((option) => ({ value: option, label: textSizeLabels[option] }))}
-                onChange={(next) => setTextSize(next)}
-              />
-            </section>
+            </SettingsSection>
 
-            <section className="settings-section" aria-labelledby="settings-scoring-heading">
-              <h3 id="settings-scoring-heading" className="settings-section-title">
-                Scoring
-              </h3>
+            <SettingsSection id="settings-scoring-heading" title="Scoring">
+              {/* Not a navigation row: it holds a switch, and a button that contains a control is a
+                  target that does two different things depending on where it was pressed. */}
               <div className="settings-row">
                 <div>
                   <span className="settings-row-label">Keyboard scoring</span>
@@ -320,189 +367,39 @@ export default function SettingsDialog(props: {
                   <span className="settings-switch-track" aria-hidden="true" />
                 </label>
               </div>
-              <div className="settings-row">
-                <span className="settings-row-label">Keyboard shortcuts</span>
-                <button type="button" className="settings-action" onClick={() => setView('shortcuts')}>
-                  View
-                </button>
-              </div>
-            </section>
-
-            <section className="settings-section" aria-labelledby="settings-recovery-heading">
-              <h3 id="settings-recovery-heading" className="settings-section-title">
-                Recovery
-              </h3>
-              <div className="settings-row">
-                <div>
-                  <span className="settings-row-label">Automatic protection</span>
-                  <span className="settings-row-detail">
-                    {localCheckpoints.message ??
-                      'QBSheet keeps the instant journal, durable game copy and rolling checkpoints automatically.'}
-                  </span>
-                </div>
-                <span
-                  className={`settings-row-status is-${localCheckpoints.state === 'protected' ? 'pass' : localCheckpoints.state === 'unknown' ? 'info' : 'warn'}`}
-                >
-                  {localCheckpointStateLabel(localCheckpoints.state)}
-                </span>
-              </div>
-              <div className="settings-row">
-                <div>
-                  <span className="settings-row-label">External backup</span>
-                  <span className="settings-row-detail">
-                    {externalBackup.state === 'ready'
-                      ? `${safeRecoveryFolderName(externalBackup.folderName)} · ${recoverySavedAtLabel(externalBackup.lastSavedAt)}`
-                      : externalBackupStateLabel(externalBackup.state)}
-                  </span>
-                </div>
-                {externalBackupActionLabel(externalBackup.state) &&
-                  (externalBackup.state === 'not-configured'
-                    ? recovery?.onSetupExternalBackup
-                    : externalBackup.state === 'ready'
-                      ? recovery?.onManageExternalBackup || true
-                      : externalBackup.state === 'needs-permission' ||
-                          externalBackup.state === 'folder-unavailable'
-                        ? recovery?.onReconnectExternalBackup
-                        : recovery?.onReconnectExternalBackup || recovery?.onSetupExternalBackup) && (
-                    <button
-                      type="button"
-                      className="settings-action"
-                      disabled={recoveryAction !== null}
-                      onClick={() => {
-                        if (externalBackup.state === 'ready' && recovery?.onManageExternalBackup) {
-                          void runRecoveryAction(
-                            'external-backup',
-                            recovery.onManageExternalBackup,
-                            'External backup settings opened.',
-                            'QBSheet could not open external backup settings.',
-                          );
-                          return;
-                        }
-                        if (externalBackup.state === 'ready') {
-                          openRecoveryStatus();
-                          return;
-                        }
-                        const action =
-                          externalBackup.state === 'not-configured'
-                            ? recovery?.onSetupExternalBackup
-                            : (recovery?.onReconnectExternalBackup ?? recovery?.onSetupExternalBackup);
-                        void runRecoveryAction(
-                          'external-backup',
-                          action,
-                          externalBackup.state === 'not-configured'
-                            ? 'External backup setup completed.'
-                            : 'External backup reconnected.',
-                          'QBSheet could not update external backup. Local protection is still active.',
-                        );
-                      }}
-                    >
-                      {recoveryAction === 'external-backup'
-                        ? 'Working…'
-                        : externalBackupActionLabel(externalBackup.state)}
-                    </button>
-                  )}
-              </div>
-              <button type="button" className="settings-navigation-row" onClick={openRecoveryStatus}>
-                <span>View recovery status</span>
-                <span aria-hidden="true">›</span>
-              </button>
-            </section>
+              {keyboardEnabled && (
+                <SettingsNavigationRow label="Keyboard shortcuts" onClick={() => setView('shortcuts')} />
+              )}
+            </SettingsSection>
 
             {connection && (
-              <section className="settings-section" aria-labelledby="settings-connection-heading">
-                <h3 id="settings-connection-heading" className="settings-section-title">
-                  Tournament connection
-                </h3>
-                <dl className="settings-facts">
-                  <div>
-                    <dt>Room</dt>
-                    <dd>{connection.roomName}</dd>
-                  </div>
-                  <div>
-                    <dt>Tournament control</dt>
-                    <dd className="settings-address">{connection.address ?? 'Address unavailable'}</dd>
-                  </div>
-                </dl>
-                {onChangeTournament && (
-                  <>
-                    <button
-                      type="button"
-                      className="settings-inline-action"
-                      disabled={pairingProtection !== undefined}
-                      aria-describedby={
-                        pairingProtection ? 'settings-change-tournament-protection' : undefined
-                      }
-                      onClick={() => {
-                        onClose();
-                        onChangeTournament();
-                      }}
-                    >
-                      Change tournament…
-                    </button>
-                    {pairingProtection && (
-                      <p id="settings-change-tournament-protection" className="shell-hint">
-                        {pairingProtection}
-                      </p>
-                    )}
-                  </>
-                )}
-                <button type="button" className="settings-inline-action" onClick={() => setView('forget')}>
-                  Forget pairing…
-                </button>
-              </section>
+              <SettingsSection id="settings-tournament-heading" title="Tournament">
+                <SettingsNavigationRow
+                  label="Tournament connection"
+                  value={connection.roomName}
+                  onClick={() => setView('connection')}
+                />
+              </SettingsSection>
             )}
 
-            <section className="settings-section" aria-labelledby="settings-device-heading">
-              <h3 id="settings-device-heading" className="settings-section-title">
-                Device
-              </h3>
-              <button
-                type="button"
-                className="settings-navigation-row"
+            <SettingsSection id="settings-data-heading" title={'Data & device'}>
+              <SettingsNavigationRow
+                label="Recovery"
+                value={recoverySummary(localCheckpoints, externalBackup)}
+                onClick={openRecoveryView}
+              />
+              <SettingsNavigationRow
+                label="Check this device"
                 onClick={() => {
                   onClose();
                   onReadiness();
                 }}
-              >
-                <span>Check this device</span>
-                <span aria-hidden="true">›</span>
-              </button>
-            </section>
+              />
+            </SettingsSection>
 
-            {onArcade && (
-              <section className="settings-section" aria-labelledby="settings-arcade-heading">
-                <h3 id="settings-arcade-heading" className="settings-section-title">
-                  Arcade
-                </h3>
-                <div className="settings-row">
-                  <div>
-                    <span className="settings-row-label">Take a break</span>
-                    <span className="settings-row-detail">QBBird and Snake</span>
-                  </div>
-                  <button
-                    type="button"
-                    className="settings-action"
-                    onClick={() => {
-                      // Closed first: two native modals open at once is a stack nobody asked for, and
-                      // the way back is the arcade's own close. This is what "Check this device" does.
-                      onClose();
-                      onArcade();
-                    }}
-                  >
-                    Play
-                  </button>
-                </div>
-              </section>
-            )}
-
-            <section className="settings-section" aria-labelledby="settings-advanced-heading">
-              <h3 id="settings-advanced-heading" className="settings-section-title">
-                Advanced
-              </h3>
-              <button type="button" className="settings-inline-action" onClick={() => setView('reset')}>
-                Reset device preferences…
-              </button>
-            </section>
+            <SettingsSection id="settings-advanced-heading" title="Advanced">
+              <SettingsNavigationRow label="Advanced" onClick={() => setView('advanced')} />
+            </SettingsSection>
 
             <footer className="settings-build">QBSheet {buildLabel()}</footer>
           </>
@@ -538,6 +435,41 @@ export default function SettingsDialog(props: {
               </button>
             </div>
           </form>
+        )}
+
+        {view === 'appearance' && (
+          <div className="settings-detail-view">
+            {/*
+              Radio groups rather than switches or a select. Three named states each, all of them
+              worth seeing at once, and a scorekeeper changing these is usually doing it because
+              the screen is hard to read -- which is the worst moment to hide two of the three
+              choices behind a dropdown they have to open to compare.
+            */}
+            <ChoiceRow
+              name="settings-appearance"
+              label="Appearance"
+              detail="Match device follows this Chromebook's own setting"
+              value={appearance}
+              options={appearanceOrder.map((option) => ({
+                value: option,
+                label: appearanceLabels[option],
+              }))}
+              onChange={(next) => setAppearance(next)}
+            />
+            <ChoiceRow
+              name="settings-text-size"
+              label="Text size"
+              detail="Scales on top of this browser's own font size"
+              value={textSize}
+              options={textSizeOrder.map((option) => ({ value: option, label: textSizeLabels[option] }))}
+              onChange={(next) => setTextSize(next)}
+            />
+            <p className="settings-detail-note">
+              Both are remembered on this device only, and take effect everywhere in QBSheet as soon as they
+              are chosen.
+            </p>
+            <BackToSettings onClick={() => setView('settings')} />
+          </div>
         )}
 
         {view === 'recovery' && (
@@ -624,6 +556,23 @@ export default function SettingsDialog(props: {
                   {recoveryAction === 'external-backup' ? 'Working…' : 'Change folder…'}
                 </button>
               )}
+              {externalBackup.state === 'ready' && recovery?.onManageExternalBackup && (
+                <button
+                  type="button"
+                  className="shell-button"
+                  disabled={recoveryAction !== null}
+                  onClick={() =>
+                    void runRecoveryAction(
+                      'external-backup',
+                      recovery.onManageExternalBackup,
+                      'External backup settings opened.',
+                      'QBSheet could not open external backup settings.',
+                    )
+                  }
+                >
+                  {recoveryAction === 'external-backup' ? 'Working…' : 'Manage external backup…'}
+                </button>
+              )}
               {(externalBackup.state === 'needs-permission' ||
                 externalBackup.state === 'folder-unavailable' ||
                 externalBackup.state === 'failed') &&
@@ -693,22 +642,17 @@ export default function SettingsDialog(props: {
             </div>
 
             {recovery?.onViewRecoveryStatus && (
-              <button type="button" className="settings-inline-action" onClick={openRecoveryStatus}>
+              <button type="button" className="settings-inline-action" onClick={openFullRecoveryStatus}>
                 Open full recovery status
               </button>
             )}
-            <button
-              type="button"
-              className="shell-button"
-              data-settings-view-autofocus
+            <BackToSettings
               onClick={() => {
                 setRecoveryMessage(null);
                 setConfirmingExternalBackupRemoval(false);
                 setView('settings');
               }}
-            >
-              Back to Settings
-            </button>
+            />
           </div>
         )}
 
@@ -760,14 +704,47 @@ export default function SettingsDialog(props: {
               Exact rulings and point values depend on the tournament format. The live scorer’s contextual map
               is authoritative.
             </p>
-            <button
-              type="button"
-              className="shell-button"
-              data-settings-view-autofocus
-              onClick={() => setView('settings')}
-            >
-              Back to Settings
+            <BackToSettings onClick={() => setView('settings')} />
+          </div>
+        )}
+
+        {view === 'connection' && connection && (
+          <div className="settings-detail-view">
+            <dl className="settings-facts">
+              <div>
+                <dt>Room</dt>
+                <dd>{connection.roomName}</dd>
+              </div>
+              <div>
+                <dt>Tournament control</dt>
+                <dd className="settings-address">{connection.address ?? 'Address unavailable'}</dd>
+              </div>
+            </dl>
+            {onChangeTournament && (
+              <>
+                <button
+                  type="button"
+                  className="settings-inline-action"
+                  disabled={pairingProtection !== undefined}
+                  aria-describedby={pairingProtection ? 'settings-change-tournament-protection' : undefined}
+                  onClick={() => {
+                    onClose();
+                    onChangeTournament();
+                  }}
+                >
+                  Change tournament…
+                </button>
+                {pairingProtection && (
+                  <p id="settings-change-tournament-protection" className="shell-hint">
+                    {pairingProtection}
+                  </p>
+                )}
+              </>
+            )}
+            <button type="button" className="settings-inline-action" onClick={() => setView('forget')}>
+              Forget pairing…
             </button>
+            <BackToSettings onClick={() => setView('settings')} />
           </div>
         )}
 
@@ -793,6 +770,8 @@ export default function SettingsDialog(props: {
                 disabled={pairingProtection !== undefined}
                 onClick={() => {
                   onForgetPairing();
+                  // Root, not the connection view: the pairing this device had is gone, and the
+                  // subview that described it has nothing left to describe.
                   setView('settings');
                   setAcknowledgement('Tournament pairing forgotten.');
                 }}
@@ -803,11 +782,23 @@ export default function SettingsDialog(props: {
                 type="button"
                 className="shell-button"
                 data-settings-view-autofocus={pairingProtection !== undefined ? true : undefined}
-                onClick={() => setView('settings')}
+                onClick={() => setView('connection')}
               >
                 Cancel
               </button>
             </div>
+          </div>
+        )}
+
+        {view === 'advanced' && (
+          <div className="settings-detail-view">
+            <p className="settings-detail-intro">
+              Infrequent device-level actions. Nothing here deletes a saved game.
+            </p>
+            <button type="button" className="settings-inline-action" onClick={() => setView('reset')}>
+              Reset device preferences…
+            </button>
+            <BackToSettings onClick={() => setView('settings')} />
           </div>
         )}
 
@@ -841,7 +832,7 @@ export default function SettingsDialog(props: {
                 type="button"
                 className="shell-button"
                 data-settings-view-autofocus={pairingProtection !== undefined ? true : undefined}
-                onClick={() => setView('settings')}
+                onClick={() => setView('advanced')}
               >
                 Cancel
               </button>

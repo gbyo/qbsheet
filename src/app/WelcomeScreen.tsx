@@ -76,6 +76,7 @@ import NativeDialog from './NativeDialog';
 import QrScannerDialog from './QrScannerDialog';
 import { IPairingLaunchIntent, readScannedPairingCode } from './PairingLaunch';
 import { readOperatorNameAsked, writeOperatorNameAsked } from './OperatorIdentity';
+import { readArcadePromoDismissed, writeArcadePromoDismissed } from './ArcadePromo';
 import SettingsDialog, { ISettingsConnection } from './SettingsDialog';
 import type { IRecoveryUi } from './DeviceReadiness';
 import ArcadeLauncher from '../arcade/ArcadeLauncher';
@@ -209,8 +210,16 @@ export default function WelcomeScreen(props: {
   } | null>(null);
   const [settingsView, setSettingsView] = useState<'settings' | 'scorekeeper' | null>(null);
   const [scanning, setScanning] = useState(false);
-  // Settings closes as this opens; the arcade is the only modal on screen while it is up.
+  /**
+   * The homepage's casual way into the arcade, and the only one this screen has.
+   *
+   * Held here rather than inside the banner because `ArcadeLauncher` is a modal and this screen is
+   * the thing it covers; the banner is a button and holds nothing. Device Settings used to open the
+   * arcade from here too, and does not any more -- a preferences screen is not a feature launcher.
+   */
   const [arcadeOpen, setArcadeOpen] = useState(false);
+  /** Read once at mount: a scorekeeper who dismissed this should not see it flash on every load. */
+  const [arcadePromoDismissed, setArcadePromoDismissed] = useState(() => readArcadePromoDismissed());
   /**
    * The first-load ask, decided once at mount.
    *
@@ -340,6 +349,43 @@ export default function WelcomeScreen(props: {
       )}
 
       <UpdateNotice presentation={unfinished.length === 0 ? 'hero' : 'compact'} />
+
+      {/*
+        The one loud thing on this page, and deliberately not loud enough to matter.
+
+        Below every warning and the update notice, and rendered only when nothing is unfinished: a
+        device that reloaded mid-round has a Resume button to find, and an animated advertisement
+        beside it would be the application competing with the scorekeeper's actual problem. It is
+        promotional content and not an announcement, so it carries no `role` and no live region --
+        opening the homepage should not make a screen reader read out an advertisement.
+      */}
+      {unfinished.length === 0 && !arcadePromoDismissed && (
+        <section className="arcade-promo" aria-labelledby="arcade-promo-heading">
+          <span className="arcade-promo-decoration" aria-hidden="true" />
+          <div className="arcade-promo-copy">
+            <h2 id="arcade-promo-heading" className="arcade-promo-heading">
+              Want a break?
+            </h2>
+            <p className="arcade-promo-detail">QBBird and Snake are waiting.</p>
+          </div>
+          <div className="arcade-promo-controls">
+            <button type="button" className="arcade-promo-action" onClick={() => setArcadeOpen(true)}>
+              Play Arcade
+            </button>
+            <button
+              type="button"
+              className="arcade-promo-dismiss"
+              aria-label="Dismiss Arcade suggestion"
+              onClick={() => {
+                setArcadePromoDismissed(true);
+                writeArcadePromoDismissed();
+              }}
+            >
+              <span aria-hidden="true">×</span>
+            </button>
+          </div>
+        </section>
+      )}
 
       {unfinished.length > 0 && (
         <section className="shell-section">
@@ -523,7 +569,6 @@ export default function WelcomeScreen(props: {
           onResetDevicePreferences={onResetDevicePreferences}
           onReadiness={onReadiness}
           recovery={recovery}
-          onArcade={() => setArcadeOpen(true)}
           onClose={closeSettings}
         />
       )}

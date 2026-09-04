@@ -42,6 +42,19 @@
     --room-warning-bg: var(--room-surface);
     --room-error-bg: var(--room-surface);
     --room-info-bg: var(--room-surface);
+
+    /*
+     * The arcade banner keeps its identity and loses its wash, like every other tinted surface here.
+     * A promotion is the last thing entitled to a low-saturation ground on a screen somebody asked
+     * for more contrast on; the border, the bold heading and a darker CTA carry it instead.
+     */
+    --arcade-promo-band-a: var(--room-surface);
+    --arcade-promo-band-b: var(--room-surface);
+    --arcade-promo-band-c: var(--room-surface);
+    --arcade-promo-border: #4a4e55;
+    --arcade-promo-accent: #4c1c78;
+    --arcade-promo-accent-hover: #38125b;
+    --arcade-promo-dot: #4a4e55;
   }
 
   @media (prefers-color-scheme: dark) {
@@ -53,6 +66,13 @@
       --room-success: #a9e6bd;
       --room-warning: #f5cd8d;
       --room-error: #ffb3ad;
+      --arcade-promo-band-a: var(--room-surface);
+      --arcade-promo-band-b: var(--room-surface);
+      --arcade-promo-band-c: var(--room-surface);
+      --arcade-promo-border: #c3c8d0;
+      --arcade-promo-accent: #dcbcff;
+      --arcade-promo-accent-hover: #eddaff;
+      --arcade-promo-dot: #c3c8d0;
     }
   }
 
@@ -64,9 +84,17 @@
     --room-success: #a9e6bd;
     --room-warning: #f5cd8d;
     --room-error: #ffb3ad;
+    --arcade-promo-band-a: var(--room-surface);
+    --arcade-promo-band-b: var(--room-surface);
+    --arcade-promo-band-c: var(--room-surface);
+    --arcade-promo-border: #c3c8d0;
+    --arcade-promo-accent: #dcbcff;
+    --arcade-promo-accent-hover: #eddaff;
+    --arcade-promo-dot: #c3c8d0;
   }
 
   /* With the grounds gone, these need an edge or they are loose text on a page. */
+  .arcade-promo,
   .scorer-banner,
   .scorer-question-errors,
   .scorer-question-intro,
@@ -126,8 +154,16 @@
   .arcade-card,
   .arcade-primary,
   .arcade-pad-key,
-  .arcade-board {
+  .arcade-board,
+  /* The homepage promotion for the same arcade. Its ground is a gradient, which is one of the first
+     things Forced Colors discards, so the edge is all it has left. */
+  .arcade-promo {
     border: 1px solid CanvasText;
+  }
+
+  /* Dots drawn as radial gradients, which composite to nothing once the ground is system-chosen. */
+  .arcade-promo-decoration {
+    display: none;
   }
 
   /* Selected is a fill here, and a fill is what Forced Colors takes. */

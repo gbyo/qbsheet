@@ -11,14 +11,43 @@
 import { expect, test, type Page } from '@playwright/test';
 import { chooseScoringLayout } from './support/scoringLayout';
 
-/** Open the arcade the way Settings does, from the front door. */
-async function openArcadeFromSettings(page: Page): Promise<void> {
+/**
+ * The homepage's promotional banner, which is the casual door into the arcade.
+ *
+ * Device Settings used to be a door and is not any more, so the cases below that only need *an*
+ * arcade come through here — it is one click from a cold load, and it is the route a room waiting
+ * between rounds actually takes. The Game-menu route is exercised separately, further down, because
+ * both entry points are supported and only one of them is on a live scoresheet.
+ */
+async function openArcadeFromHomepage(page: Page): Promise<void> {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Settings' }).click();
-  const settings = page.getByRole('dialog', { name: 'Settings' });
-  await expect(settings.getByRole('heading', { name: 'Arcade' })).toBeVisible();
-  await settings.getByRole('button', { name: 'Play' }).click();
-  await expect(settings).toBeHidden();
+  const promo = page.getByRole('heading', { name: 'Want a break?' }).locator('..').locator('..');
+  await expect(promo).toBeVisible();
+  await page.getByRole('button', { name: 'Play Arcade' }).click();
+  await expect(page.getByRole('button', { name: /QBBird/ })).toBeVisible();
+}
+
+/**
+ * A scoresheet with something on it, which is the arcade's other door.
+ *
+ * Factored out because it is six form fields that none of these tests are about.
+ */
+async function startGame(page: Page, label = 'Arcade break'): Promise<void> {
+  await page.getByRole('button', { name: 'Create game' }).click();
+  await page.getByLabel('Game label').fill(label);
+  await page.getByLabel('Left team name').fill('Ninety Six');
+  await page.getByLabel('Right team name').fill('Greenwood');
+  await page.getByLabel('Ninety Six players').fill('Sarah\nJames');
+  await page.getByLabel('Greenwood players').fill('Emma\nJordan');
+  await page.getByLabel('Players playing at once').fill('2');
+  await page.getByRole('button', { name: 'Start game', exact: true }).click();
+  await chooseScoringLayout(page);
+}
+
+/** Take a break from the scoresheet the way a scorekeeper does, and wait for the chunk to land. */
+async function takeABreak(page: Page): Promise<void> {
+  await page.getByRole('button', { name: 'Game', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Take a break…' }).click();
   await expect(page.getByRole('button', { name: /QBBird/ })).toBeVisible();
 }
 
@@ -68,7 +97,7 @@ async function boardSignature(page: Page, label: RegExp): Promise<string> {
 }
 
 test('the picker offers both games, and each one draws a real board', async ({ page }) => {
-  await openArcadeFromSettings(page);
+  await openArcadeFromHomepage(page);
 
   const dialog = page.getByRole('dialog', { name: 'Arcade' });
   await expect(dialog.getByRole('button', { name: /QBBird/ })).toBeVisible();
@@ -95,7 +124,7 @@ test('the picker offers both games, and each one draws a real board', async ({ p
 });
 
 test('Space flaps the bird and does not scroll the dialog it is inside', async ({ page }) => {
-  await openArcadeFromSettings(page);
+  await openArcadeFromHomepage(page);
   await page.getByRole('button', { name: /QBBird/ }).click();
 
   const board = page.getByLabel(/QBBird play area/);
@@ -135,7 +164,7 @@ test('the arcade fetches nothing from off this origin, and nothing at all once i
     if (!request.url().startsWith('http://127.0.0.1:4173')) external.push(request.url());
   });
 
-  await openArcadeFromSettings(page);
+  await openArcadeFromHomepage(page);
 
   /*
    * From here, nothing the arcade does may be a data request.
@@ -168,15 +197,7 @@ test('the arcade fetches nothing from off this origin, and nothing at all once i
 
 test('a game reached from the scoresheet leaves the scoresheet exactly as it was', async ({ page }) => {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Create game' }).click();
-  await page.getByLabel('Game label').fill('Arcade break');
-  await page.getByLabel('Left team name').fill('Ninety Six');
-  await page.getByLabel('Right team name').fill('Greenwood');
-  await page.getByLabel('Ninety Six players').fill('Sarah\nJames');
-  await page.getByLabel('Greenwood players').fill('Emma\nJordan');
-  await page.getByLabel('Players playing at once').fill('2');
-  await page.getByRole('button', { name: 'Start game', exact: true }).click();
-  await chooseScoringLayout(page);
+  await startGame(page);
 
   // Score one tossup, so there is something on the sheet that could be disturbed.
   await page.getByRole('button', { name: 'Sarah Correct', exact: true }).click();
@@ -188,8 +209,7 @@ test('a game reached from the scoresheet leaves the scoresheet exactly as it was
   await expect(page.getByText('Sarah Correct recorded.')).toBeHidden();
   const before = await sheet.innerText();
 
-  await page.getByRole('button', { name: 'Game' }).click();
-  await page.getByRole('menuitem', { name: 'Take a break…' }).click();
+  await takeABreak(page);
   await page.getByRole('button', { name: /Snake/ }).click();
   const board = page.getByLabel(/Snake play area/);
   await board.click();
@@ -206,18 +226,93 @@ test('a game reached from the scoresheet leaves the scoresheet exactly as it was
   expect(await sheet.innerText()).toBe(before);
 });
 
+test.describe('the homepage banner', () => {
+  test('it is dismissible, stays dismissed across a reload, and keeps the Game menu intact', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await expect(page.getByRole('heading', { name: 'Want a break?' })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Dismiss Arcade suggestion' }).click();
+    await expect(page.getByRole('heading', { name: 'Want a break?' })).toBeHidden();
+    expect(await page.evaluate(() => window.localStorage.getItem('qbsheet.arcade-promo.dismissed.v1'))).toBe(
+      '1',
+    );
+
+    await page.reload();
+    await expect(page.getByRole('heading', { name: 'Want a break?' })).toBeHidden();
+
+    // The arcade itself is untouched: the scoresheet's own entry still opens it.
+    await startGame(page);
+    await takeABreak(page);
+    await expect(page.getByRole('dialog', { name: 'Arcade' })).toBeVisible();
+  });
+
+  test('an unfinished game takes the banner off the homepage entirely', async ({ page }) => {
+    await page.goto('/');
+    await startGame(page, 'Interrupted');
+    await page.getByRole('button', { name: 'Sarah Correct', exact: true }).click();
+
+    // A device that reloaded mid-round: Resume is the only thing that should be competing for
+    // attention here.
+    await page.goto('/');
+    await expect(page.getByRole('button', { name: 'Resume' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Want a break?' })).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Play Arcade' })).toBeHidden();
+  });
+
+  test.describe('on a phone', () => {
+    test.use({ viewport: { width: 320, height: 568 } });
+
+    test('the banner wraps rather than pushing the page sideways', async ({ page }) => {
+      await page.goto('/');
+      const promo = page.locator('.arcade-promo');
+      await expect(promo).toBeVisible();
+
+      const layout = await promo.evaluate((element) => ({
+        right: element.getBoundingClientRect().right,
+        scrollWidth: element.scrollWidth,
+        clientWidth: element.clientWidth,
+        documentScrollWidth: document.documentElement.scrollWidth,
+        documentClientWidth: document.documentElement.clientWidth,
+      }));
+      expect(layout.right).toBeLessThanOrEqual(320);
+      expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth);
+      // Nothing in it pushed the page itself sideways either.
+      expect(layout.documentScrollWidth).toBeLessThanOrEqual(layout.documentClientWidth);
+
+      // Both controls are still real, reachable targets rather than a squeezed row.
+      await expect(page.getByRole('button', { name: 'Play Arcade' })).toBeInViewport();
+      await expect(page.getByRole('button', { name: 'Dismiss Arcade suggestion' })).toBeInViewport();
+      await page.getByRole('button', { name: 'Play Arcade' }).click();
+      await expect(page.getByRole('button', { name: /QBBird/ })).toBeVisible();
+    });
+  });
+});
+
 test.describe('dark mode', () => {
   test('the board is drawn in the appearance the scorekeeper chose', async ({ page }) => {
-    await openArcadeFromSettings(page);
+    await openArcadeFromHomepage(page);
     await page.getByRole('button', { name: /Snake/ }).click();
     const light = await boardState(page, /Snake play area/);
 
+    // Back to the home screen, where device Settings lives. Appearance is a subview of it now, so
+    // the choice is made one door in, and then the banner is used again.
     await page.getByRole('button', { name: 'Back to Arcade' }).click();
     await page.getByRole('button', { name: 'Close dialog' }).click();
     await page.getByRole('button', { name: 'Settings' }).click();
+    await page
+      .getByRole('dialog', { name: 'Settings' })
+      .getByRole('button', { name: /^Appearance/ })
+      .click();
     // The radio itself is `visually-hidden`; the label is what a person presses. See `ChoiceRow`.
-    await page.getByRole('dialog', { name: 'Settings' }).getByText('Dark', { exact: true }).click();
-    await page.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name: 'Play' }).click();
+    await page.getByRole('dialog', { name: 'Appearance' }).getByText('Dark', { exact: true }).click();
+    await page
+      .getByRole('dialog', { name: 'Appearance' })
+      .getByRole('button', { name: 'Close dialog' })
+      .click();
+
+    await page.getByRole('button', { name: 'Play Arcade' }).click();
     await page.getByRole('button', { name: /Snake/ }).click();
     const dark = await boardState(page, /Snake play area/);
 
@@ -231,7 +326,7 @@ test.describe('on a phone', () => {
   test.use({ viewport: { width: 320, height: 568 } });
 
   test('the arcade fits the viewport and the controls stay reachable', async ({ page }) => {
-    await openArcadeFromSettings(page);
+    await openArcadeFromHomepage(page);
     await page.getByRole('button', { name: /QBBird/ }).click();
 
     const dialog = page.getByRole('dialog', { name: 'QBBird' });

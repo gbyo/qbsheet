@@ -17,12 +17,11 @@
  * The failure branch below is for the one case that remains: a device whose cache predates this
  * feature and which is offline now. It says so, in the dialog, and nothing else changes.
  *
- * # Why this component and not three copies of the import
+ * # Why this component and not two copies of the import
  *
- * Three hosts open the arcade — the scoresheet's Game menu, and Settings from each of the two
- * screens that render it. Putting the load here means those hosts render one element and hold one
- * boolean, and the loading state, the failure message and the closed state have one implementation
- * between them.
+ * Two hosts open the arcade — the homepage's promotional banner, and the scoresheet's Game menu.
+ * Putting the load here means those hosts render one element and hold one boolean, and the loading
+ * state, the failure message and the closed state have one implementation between them.
  */
 import { useEffect, useState, type ComponentType } from 'react';
 import ScorerDialog from '../scorer/ScorerDialog';

@@ -95,6 +95,24 @@
    */
   --room-inverted-key: rgb(255 255 255 / 18%);
   --room-inverted-success: #7fd39b;
+
+  /*
+   * The arcade promotion, and the only place in QBSheet allowed to be this bright.
+   *
+   * Named for the arcade rather than for a state on purpose: these are decoration, and borrowing
+   * `--room-success` or `--room-warning` for a bit of fun would make an advertisement look like a
+   * ruling. The three bands are washes light enough to keep `--room-text` above 4.5:1 on any of
+   * them, because the heading is real text on a moving ground and has to stay readable at every
+   * frame of it.
+   */
+  --arcade-promo-band-a: #f3e6ff;
+  --arcade-promo-band-b: #e2f2ff;
+  --arcade-promo-band-c: #ffeede;
+  --arcade-promo-border: #d3c0ea;
+  --arcade-promo-accent: #6d28a8;
+  --arcade-promo-accent-hover: #571f87;
+  --arcade-promo-on-accent: #ffffff;
+  --arcade-promo-dot: rgb(109 40 168 / 22%);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -139,6 +157,15 @@
 
     --room-inverted-key: rgb(0 0 0 / 14%);
     --room-inverted-success: #1e6b32;
+
+    --arcade-promo-band-a: #241a3a;
+    --arcade-promo-band-b: #13273a;
+    --arcade-promo-band-c: #2c2015;
+    --arcade-promo-border: #453564;
+    --arcade-promo-accent: #cfa6f5;
+    --arcade-promo-accent-hover: #e2c6ff;
+    --arcade-promo-on-accent: #1b1024;
+    --arcade-promo-dot: rgb(207 166 245 / 26%);
   }
 }
 
@@ -175,6 +202,15 @@
 
   --room-inverted-key: rgb(0 0 0 / 14%);
   --room-inverted-success: #1e6b32;
+
+  --arcade-promo-band-a: #241a3a;
+  --arcade-promo-band-b: #13273a;
+  --arcade-promo-band-c: #2c2015;
+  --arcade-promo-border: #453564;
+  --arcade-promo-accent: #cfa6f5;
+  --arcade-promo-accent-hover: #e2c6ff;
+  --arcade-promo-on-accent: #1b1024;
+  --arcade-promo-dot: rgb(207 166 245 / 26%);
 }
 
 /*
@@ -800,6 +836,209 @@ body:has(.welcome-shell .update-notice-hero) {
 
 /* #endregion */
 
+/* #region Arcade promotion */
+
+/*
+ * The homepage's arcade banner, which is on purpose the least QBSheet-looking thing in QBSheet.
+ *
+ * Everything else on this page is flat, quiet and grey because it is about a game somebody is
+ * responsible for. This is about a bird. It gets a colour wash and a little movement so it reads as
+ * an aside rather than as another row of the same list -- and it stays inside the house rules that
+ * matter: no shadow, no card stack, the same 3px radius, the same rem type, and no asset fetched
+ * from anywhere.
+ *
+ * The movement is a background and two dots. Nothing here animates a property that can reflow, so a
+ * banner mid-animation occupies exactly the box a still one does.
+ */
+.arcade-promo {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 16px;
+  overflow: hidden;
+  /*
+   * The same 16px the sections above and below breathe with. `.welcome-shell` zeroes the header's
+   * own bottom margin and lets each section's padding do the spacing, so without a top margin here
+   * the banner butts straight up against the rule under the logo. Ordinary block siblings, so this
+   * collapses against a warning's bottom margin rather than doubling it.
+   */
+  margin: 16px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--arcade-promo-border);
+  border-radius: 3px;
+  /*
+   * Three washes on a ground twice the width of the banner, slid slowly from one end to the other.
+   * `background-position` is not a layout property and not a repaint of anything above it, and at
+   * this duration the change is below the threshold at which it reads as motion at all -- which is
+   * the intent: alive, not animated.
+   */
+  background-image: linear-gradient(
+    100deg,
+    var(--arcade-promo-band-a),
+    var(--arcade-promo-band-b),
+    var(--arcade-promo-band-c),
+    var(--arcade-promo-band-a)
+  );
+  background-size: 220% 100%;
+  background-position: 0% 50%;
+  animation: qbsheet-arcade-promo-drift 38s linear infinite;
+}
+
+@keyframes qbsheet-arcade-promo-drift {
+  to {
+    background-position: 200% 50%;
+  }
+}
+
+/*
+ * The arcade, drawn as two dots and nothing else.
+ *
+ * A radial-gradient pair rather than an image, a sprite or an icon font: the rule the arcade is
+ * built under is that it fetches nothing, and a decoration advertising it should not be the one
+ * thing on the page that does. They drift a few pixels each, out of phase, on a `transform` -- which
+ * composites and cannot move the text beside it.
+ */
+.arcade-promo-decoration {
+  position: absolute;
+  top: -14px;
+  right: 96px;
+  width: 120px;
+  height: 120px;
+  pointer-events: none;
+  background-image:
+    radial-gradient(circle at 22% 30%, var(--arcade-promo-dot) 0 7px, transparent 8px),
+    radial-gradient(circle at 74% 66%, var(--arcade-promo-dot) 0 4px, transparent 5px),
+    radial-gradient(circle at 46% 88%, var(--arcade-promo-dot) 0 3px, transparent 4px);
+  animation: qbsheet-arcade-promo-float 14s ease-in-out infinite alternate;
+}
+
+@keyframes qbsheet-arcade-promo-float {
+  to {
+    transform: translate3d(-6px, 5px, 0);
+  }
+}
+
+.arcade-promo-copy {
+  position: relative;
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.arcade-promo-heading {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--room-text);
+}
+
+.arcade-promo-detail {
+  margin: 2px 0 0;
+  font-size: 0.8125rem;
+  color: var(--room-muted);
+}
+
+/* Wraps to its own line under the copy on a phone, which is what `flex-wrap` above is for. */
+.arcade-promo-controls {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.arcade-promo-action {
+  padding: 8px 14px;
+  font: inherit;
+  font-weight: 600;
+  color: var(--arcade-promo-on-accent);
+  background: var(--arcade-promo-accent);
+  border: 1px solid var(--arcade-promo-accent);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.arcade-promo-action:hover {
+  background: var(--arcade-promo-accent-hover);
+  border-color: var(--arcade-promo-accent-hover);
+}
+
+.arcade-promo-dismiss {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  font: inherit;
+  font-size: 1.125rem;
+  line-height: 1;
+  color: var(--room-muted);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.arcade-promo-dismiss:hover {
+  color: var(--room-text);
+  border-color: var(--arcade-promo-border);
+}
+
+/* Above the decoration, which is absolutely positioned and would otherwise clip the ring. */
+.arcade-promo-action:focus-visible,
+.arcade-promo-dismiss:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid var(--room-text);
+  outline-offset: 2px;
+}
+
+/*
+ * Asked for stillness, and given something that was worth looking at while it was still.
+ *
+ * `motion.css` already reduces every duration to nothing globally, which would leave this banner
+ * frozen at whatever frame the gradient happened to be on. Naming it here instead sets the ground
+ * back to the position the animation starts from and takes the drifting dots off the page, so what
+ * remains is a deliberate picture rather than a paused one.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .arcade-promo {
+    background-size: 100% 100%;
+    background-position: 0% 50%;
+    animation: none;
+  }
+
+  .arcade-promo-decoration {
+    animation: none;
+  }
+}
+
+@media (max-width: 520px) {
+  /* The controls take their own line, and the CTA takes the width rather than crowding the ×. */
+  .arcade-promo-controls {
+    flex: 1 0 100%;
+  }
+
+  .arcade-promo-action {
+    flex: 1 1 auto;
+  }
+
+  /*
+   * Out from under the copy, which now runs the full width of the banner -- but not past its right
+   * edge. `overflow: hidden` would clip a bleed, and the page would not scroll either way, but an
+   * absolutely positioned child sticking out still counts towards the banner's own `scrollWidth`,
+   * and "no horizontal overflow at 320px" is a claim worth being able to measure.
+   */
+  .arcade-promo-decoration {
+    top: -20px;
+    right: 8px;
+  }
+}
+
+/* #endregion */
+
 /* #region Resume, recent, final */
 
 .resume-card {
@@ -995,7 +1234,7 @@ body:has(.welcome-shell .update-notice-hero) {
 }
 
 .settings-section {
-  padding: 14px 0;
+  padding: 10px 0;
   border-bottom: 1px solid var(--room-border);
 }
 
@@ -1017,12 +1256,15 @@ body:has(.welcome-shell .update-notice-hero) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  min-height: 46px;
-  padding: 7px 0;
+  gap: 12px;
+  min-height: 42px;
+  padding: 6px 0;
 }
 
-.settings-row + .settings-row {
+.settings-row + .settings-row,
+.settings-row + .settings-navigation-row,
+.settings-navigation-row + .settings-row,
+.settings-navigation-row + .settings-navigation-row {
   border-top: 1px solid var(--room-surface-sunken);
 }
 
@@ -1163,8 +1405,14 @@ body:has(.welcome-shell .update-notice-hero) {
   font-size: 0.75rem;
 }
 
+/*
+ * A full-width row that is entirely the target: label on the left, the current value quietly on the
+ * right, and the chevron that says there is more behind it. The value wraps under the label on a
+ * narrow phone or at a raised text size rather than pushing the chevron off the edge.
+ */
 .settings-navigation-row {
   width: 100%;
+  flex-wrap: wrap;
   padding-right: 2px;
   font: inherit;
   font-weight: 500;
@@ -1175,7 +1423,25 @@ body:has(.welcome-shell .update-notice-hero) {
   text-align: left;
 }
 
-.settings-navigation-row span:last-child {
+.settings-navigation-label {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.settings-navigation-value {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-left: auto;
+  color: var(--room-muted);
+  font-size: 0.8125rem;
+  font-weight: 400;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.settings-navigation-chevron {
+  flex: 0 0 auto;
   color: var(--room-muted);
   font-size: 1.375rem;
   line-height: 1;
@@ -1205,6 +1471,19 @@ body:has(.welcome-shell .update-notice-hero) {
 .settings-detail-note {
   color: var(--room-muted);
   font-size: 0.8125rem;
+}
+
+/*
+ * A subview's own actions read as a column. Only direct children: the recovery view keeps its
+ * external-backup buttons inside `.shell-modal-actions`, which is a row on purpose.
+ */
+.settings-detail-view > .settings-inline-action {
+  display: block;
+  margin-top: 12px;
+}
+
+.settings-detail-view > .shell-button {
+  margin-top: 16px;
 }
 
 .settings-recovery-confirmation {
