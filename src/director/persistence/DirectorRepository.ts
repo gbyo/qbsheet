@@ -17,6 +17,8 @@ const metadataStoreName = 'app-metadata';
 const currentMetadataKey = 'current-tournament-id';
 const localStorageKey = 'qbsheet.director.state.v1';
 const localLibraryKey = 'qbsheet.director.library.v1';
+/** Recovery points retained per tournament when only `localStorage` is available. */
+const localRecoveryPointLimit = 12;
 
 export interface TournamentCatalogEntry {
   id: string;
@@ -207,11 +209,7 @@ export class IndexedDbDirectorRepository implements DirectorRepository {
     const record = recoveryPoint(state, reason);
     const database = await this.database();
     if (!database) {
-      const library = this.readLocalLibrary();
-      library.checkpoints.push(record);
-      library.documents[record.tournamentId] = structuredClone(state);
-      library.currentId = record.tournamentId;
-      localStorage.setItem(localLibraryKey, JSON.stringify(library));
+      this.saveLocalRecovery(record, state);
       return;
     }
     await this.ensureMigrated(database);
@@ -239,11 +237,7 @@ export class IndexedDbDirectorRepository implements DirectorRepository {
     const before = recoveryPoint(current, `Before restoring checkpoint from ${record!.createdAt}`);
     const database = await this.database();
     if (!database) {
-      const library = this.readLocalLibrary();
-      library.checkpoints.push(before);
-      library.documents[before.tournamentId] = restored;
-      library.currentId = before.tournamentId;
-      localStorage.setItem(localLibraryKey, JSON.stringify(library));
+      this.saveLocalRecovery(before, restored);
     } else {
       await this.writeRecovery(database, before, restored);
     }
@@ -264,6 +258,36 @@ export class IndexedDbDirectorRepository implements DirectorRepository {
       request.onsuccess = () => resolve(request.result as CheckpointRecord[]);
       request.onerror = () => reject(request.error);
     });
+  }
+
+  /**
+   * The localStorage fallback for a browser without IndexedDB.
+   *
+   * `localStorage` has a finite quota and every recovery point holds a whole tournament, so the
+   * retained history is bounded here rather than left to grow until a round start fails. The
+   * newest points are the ones a director reaches for; the oldest are dropped first, and the
+   * quota failure itself is reported as a `DirectorPersistenceError` like every other write, so
+   * `startRound` refuses the round with a sentence instead of a raw `DOMException`.
+   */
+  private saveLocalRecovery(record: CheckpointRecord, active: DirectorState): void {
+    const library = this.readLocalLibrary();
+    library.checkpoints = [
+      ...library.checkpoints.filter((entry) => entry.tournamentId !== record.tournamentId),
+      ...library.checkpoints
+        .filter((entry) => entry.tournamentId === record.tournamentId)
+        .slice(-(localRecoveryPointLimit - 1)),
+      record,
+    ];
+    library.documents[record.tournamentId] = structuredClone(active);
+    library.currentId = record.tournamentId;
+    try {
+      localStorage.setItem(localLibraryKey, JSON.stringify(library));
+    } catch (reason: unknown) {
+      throw new DirectorPersistenceError(
+        'This browser has no room left for another recovery point. Export a portable archive and clear older tournaments.',
+        { cause: reason },
+      );
+    }
   }
 
   private async writeRecovery(
@@ -393,7 +417,10 @@ export class IndexedDbDirectorRepository implements DirectorRepository {
               transaction.objectStore(checkpointsStoreName).put(record),
             );
             transaction.oncomplete = () => resolve();
-            transaction.onerror = () => reject(transaction.error);
+            transaction.onerror = () =>
+              reject(transaction.error ?? new Error('Recovery points could not be migrated.'));
+            transaction.onabort = () =>
+              reject(transaction.error ?? new Error('Recovery point migration was aborted.'));
           });
         }
         const localDocuments = Object.values(localLibrary.documents);

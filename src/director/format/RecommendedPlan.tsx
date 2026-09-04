@@ -23,7 +23,14 @@ export function RecommendedPlan({
   onNavigate: (section: SectionId) => void;
   onAnnounce: (announcement: AnnounceInput) => void;
 }) {
-  const activeTeamCount = state.teams.filter((team) => team.status !== 'dropped').length;
+  /*
+   * Count the teams the pairing engine will actually accept.
+   *
+   * A recommendation sized on every non-dropped team offered a plan for ten waitlisted teams
+   * that the canonical scheduler then refused to pair, because it schedules confirmed teams
+   * only. The plan and the pairings now agree about who is playing.
+   */
+  const activeTeamCount = state.teams.filter((team) => team.status === 'confirmed').length;
   const planApplicable =
     state.rounds.every((round) => round.status === 'planned') && state.scheduledGames.length === 0;
   const planSet = activeTeamCount >= 2 && planApplicable ? recommendTournamentPlan(activeTeamCount) : null;

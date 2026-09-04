@@ -281,7 +281,9 @@ pub async fn director_restore_checkpoint(
     if running {
         let document = match &outcome {
             Ok(document) => Some(document.clone()),
-            Err(_) => store.load_state().map_err(CommandError::store)?,
+            // A failed restore must still hand the server a document. Propagating a load
+            // failure here would exit before `start_with_store` and leave QBTCP stopped.
+            Err(_) => store.load_state().ok().flatten(),
         };
         if let Err(error) = server
             .start_with_store(document, std::sync::Arc::new((*store).clone()))
