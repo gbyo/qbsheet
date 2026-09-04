@@ -1,6 +1,7 @@
 /** Device preferences only. Never included in game recovery, tournament data, or QBJ. */
 export const secretStorageKey = 'qbsheet.scorer.secrets.v1';
 const rainbowKey = 'qbsheet.scorer.rainbow.v1';
+export const rainbowChangeEvent = 'qbsheet:rainbow-change';
 export const secretIds = ['rainbow-logo', 'dvd', 'dvd-corner', 'qbbird-command', 'snake-command'] as const;
 export type SecretId = (typeof secretIds)[number];
 
@@ -37,6 +38,7 @@ export function saveRainbow(): void {
   } catch {
     /* Optional preference. */
   }
+  window.dispatchEvent(new Event(rainbowChangeEvent));
 }
 
 /** An eight-second rolling window; evaluating clicks needs no background timer. */
