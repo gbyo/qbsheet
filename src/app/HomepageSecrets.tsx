@@ -5,6 +5,7 @@ import {
   loadRainbow,
   loadSecrets,
   logoClickSequence,
+  rainbowChangeEvent,
   saveRainbow,
 } from '../scorer/secrets/secretState';
 import { logoHoldDurationMs } from '../scorer/secrets/useLogoSecret';
@@ -58,6 +59,12 @@ export default function HomepageSecrets() {
     setOpen(true);
     popLogo();
   }, [popLogo]);
+
+  useEffect(() => {
+    const onRainbowChange = () => setRainbow(loadRainbow());
+    window.addEventListener(rainbowChangeEvent, onRainbowChange);
+    return () => window.removeEventListener(rainbowChangeEvent, onRainbowChange);
+  }, []);
 
   useEffect(() => {
     const syncLogo = () => {
