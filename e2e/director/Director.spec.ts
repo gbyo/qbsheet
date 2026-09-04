@@ -678,9 +678,16 @@ test('ten-team release rehearsal: rounds, lunch, assignments, one-action start, 
   await goToSection(page, 'Rounds');
   const last = page.locator('.director-round').last();
   await last.getByRole('button', { name: 'Details & recovery' }).click();
-  page.once('dialog', (dialog) => dialog.accept());
+  let removalConfirmation = '';
+  page.once('dialog', async (dialog) => {
+    removalConfirmation = dialog.message();
+    await dialog.accept();
+  });
   await last.getByRole('button', { name: /Remove round/i }).click();
   await expect(page.locator('.director-round')).toHaveCount(8);
+  // Removing a round discards accepted results too, and the confirmation has to say so.
+  expect(removalConfirmation).toContain('any accepted results');
+  expect(removalConfirmation).toContain('A recovery point will be created first.');
   await goToSection(page, 'Settings');
   // Accept first and assert afterwards. A handler that throws before `accept()` leaves the
   // modal up, and the click that opened it hangs until the test times out on the wrong thing.
