@@ -187,12 +187,40 @@ test('the localStorage fallback bounds retained points per tournament and report
     'Revision 19',
   );
 
-  const setItem = vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
-    throw new DOMException('exceeded the quota', 'QuotaExceededError');
+  /*
+   * Replace the whole `Storage`, rather than spying on `setItem`.
+   *
+   * jsdom's `localStorage` is a proxy that treats a property definition as a stored key, so a
+   * spy on the method is silently ignored there and the test would pass for the wrong reason
+   * in one environment and fail in the other. Swapping the object works in both.
+   */
+  const original = Object.getOwnPropertyDescriptor(window, 'localStorage');
+  Object.defineProperty(window, 'localStorage', {
+    configurable: true,
+    writable: true,
+    value: {
+      length: 0,
+      key: () => null,
+      getItem: () => null,
+      removeItem: () => undefined,
+      clear: () => undefined,
+      setItem: () => {
+        throw new DOMException('exceeded the quota', 'QuotaExceededError');
+      },
+    } satisfies Storage,
   });
-  // A raw DOMException here would reach `startRound` and refuse a round without a reason.
-  await expect(repository.checkpoint(base, 'No room')).rejects.toThrow(DirectorPersistenceError);
-  setItem.mockRestore();
+  try {
+    // A raw DOMException here would reach `startRound` and refuse a round without a reason.
+    await expect(repository.checkpoint(base, 'No room')).rejects.toThrow(DirectorPersistenceError);
+  } finally {
+    // jsdom defines `localStorage` as a prototype accessor, so there may be no own descriptor to
+    // put back — deleting the shadowing property is what restores it there.
+    if (original) Object.defineProperty(window, 'localStorage', original);
+    else delete (window as { localStorage?: Storage }).localStorage;
+  }
+  // Fail here rather than corrupting every later test if the swap did not come back.
+  localStorage.setItem('qbsheet.recovery.probe', 'restored');
+  expect(localStorage.getItem('qbsheet.recovery.probe')).toBe('restored');
 });
 
 test('a mutation attempted while the document is being replaced reports failure', async () => {
