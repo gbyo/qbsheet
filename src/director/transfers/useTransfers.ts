@@ -309,13 +309,17 @@ export function useTransfers(
     try {
       const chosen = await chooseTransferFolder();
       if (!chosen) return;
-      controllerRef.current.addTransferLocation({
+      const added = controllerRef.current.addTransferLocation({
         kind: 'folder',
         label: chosen.name,
         path: chosen.path,
         watching: true,
       });
-      onAnnounce(`${chosen.name} added and being watched.`);
+      onAnnounce(
+        added
+          ? `${chosen.name} added and being watched.`
+          : errorNotice('The folder could not be added; review the Director error.'),
+      );
     } catch (reason: unknown) {
       onAnnounce(errorNotice(reason instanceof Error ? reason.message : 'That folder could not be added.'));
     }

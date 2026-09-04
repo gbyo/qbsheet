@@ -437,7 +437,7 @@ export interface DirectorController {
   resolveQbtcpHelp(helpId: DirectorId): Promise<boolean>;
   qbtcpHealth: { lastSuccessfulAt: string | null; error: string | null };
   /** Add or re-adopt a place assignments can be written to and results read from. */
-  addTransferLocation(input: AddLocationInput): void;
+  addTransferLocation(input: AddLocationInput): boolean;
   removeTransferLocation(locationId: DirectorId): void;
   setTransferWatching(locationId: DirectorId, watching: boolean): void;
   /** Reconcile known removable locations against what the platform currently sees. */
