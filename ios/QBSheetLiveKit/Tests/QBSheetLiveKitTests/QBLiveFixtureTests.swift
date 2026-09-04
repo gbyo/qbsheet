@@ -86,9 +86,21 @@ struct QBLiveFixtureTests {
             "location": NSNull(),
         ]]
 
+        // The earliest sequence wins whatever kind it is, so an unfinished Round 2 still comes
+        // before Lunch. Asserting this direction too is what stops the fix over-correcting into
+        // "events first".
         let data = try JSONSerialization.data(withJSONObject: object)
         let snapshot = try QBLiveCoding.decoder.decode(QBLiveSnapshot.self, from: data)
-        let next = try #require(snapshot.nextEvent(for: "team-a"))
+        let beforeLunch = try #require(snapshot.nextEvent(for: "team-a"))
+        #expect(beforeLunch.game?.id == "game-before")
+
+        // Once Round 2 is played, Lunch is next — not Round 3. This is the regression: an untimed
+        // event used to be dropped from the fallback entirely, so Round 3 won on round number.
+        before["state"] = "final"
+        object["schedule"] = [before, after]
+        let played = try JSONSerialization.data(withJSONObject: object)
+        let afterRound = try QBLiveCoding.decoder.decode(QBLiveSnapshot.self, from: played)
+        let next = try #require(afterRound.nextEvent(for: "team-a"))
         #expect(next.event?.id == "event-between")
     }
 
