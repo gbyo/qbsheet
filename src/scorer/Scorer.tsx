@@ -2585,7 +2585,12 @@ export default function Scorer(props: IScorerProps) {
             ref={logoOrigin}
             className="scorer-brand scorer-secret-logo"
             aria-label="QBSheet"
-            onPointerDown={(event) => event.preventDefault()}
+            onMouseDown={(event) => event.preventDefault()}
+            onPointerDown={logoSecret.beginHold}
+            onPointerUp={logoSecret.endHold}
+            onPointerCancel={logoSecret.endHold}
+            onPointerLeave={logoSecret.endHold}
+            onContextMenu={(event) => event.preventDefault()}
             onClick={logoSecret.click}
           >
             <span

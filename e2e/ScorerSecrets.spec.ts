@@ -58,6 +58,22 @@ test('logo discovery, commands, games, and DVD stay outside scoring', async ({ p
   expect(gameAfter).toEqual(gameBefore);
 });
 
+test('pressing and holding the logo unlocks on pointer devices', async ({ page }) => {
+  await startGame(page);
+  const logo = page.getByRole('button', { name: 'QBSheet', exact: true });
+  await logo.dispatchEvent('pointerdown', {
+    pointerId: 1,
+    pointerType: 'touch',
+    isPrimary: true,
+  });
+  await expect(page.getByRole('dialog', { name: 'You found it.' })).toBeVisible();
+  await logo.dispatchEvent('pointerup', {
+    pointerId: 1,
+    pointerType: 'touch',
+    isPrimary: true,
+  });
+});
+
 test('power decorates the committed score and undo removes the effect', async ({ page }) => {
   await startGame(page);
   await page.getByRole('button', { name: 'Sarah Mitchell Power', exact: true }).click();
