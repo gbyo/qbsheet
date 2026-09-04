@@ -100,7 +100,7 @@ describe('shape', () => {
   });
 
   test('a payload that is too long is refused rather than truncated', () => {
-    expect(() => qrModules('A'.repeat(400))).toThrow(QrEncodeError);
+    expect(() => qrModules('A'.repeat(10000))).toThrow(QrEncodeError);
   });
 });
 

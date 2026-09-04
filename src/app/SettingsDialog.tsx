@@ -795,6 +795,24 @@ export default function SettingsDialog(props: {
             <p className="settings-detail-intro">
               Infrequent device-level actions. Nothing here deletes a saved game.
             </p>
+            <div className="settings-row">
+              <div>
+                <span className="settings-row-label">Game package creator</span>
+                <span className="settings-row-detail">
+                  Create a QR code with teams, players, and game settings
+                </span>
+              </div>
+              {/* A separate page rather than a view: it is its own tool, and it opens in its own tab. */}
+              <a
+                className="shell-button"
+                href="./game-package-creator/index.html"
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="Open game package creator"
+              >
+                Open
+              </a>
+            </div>
             <button type="button" className="settings-inline-action" onClick={() => setView('reset')}>
               Reset device preferences…
             </button>

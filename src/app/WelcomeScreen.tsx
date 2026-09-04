@@ -74,7 +74,10 @@ import { IQbsheetBackup } from '../scorer/QBSheetBackup';
 import RecentGames from './RecentGames';
 import NativeDialog from './NativeDialog';
 import QrScannerDialog from './QrScannerDialog';
-import { IPairingLaunchIntent, readScannedPairingCode } from './PairingLaunch';
+import { IManualGameInput } from '../game/ManualGame';
+import PortableGameReview, { PortableGameActions } from './PortableGameReview';
+import { readScannedQbsheetCode } from './ScannedQbsheetCode';
+import { IPairingLaunchIntent } from './PairingLaunch';
 import { readOperatorNameAsked, writeOperatorNameAsked } from './OperatorIdentity';
 import ArcadePromo from './ArcadePromo';
 import SettingsDialog, { ISettingsConnection } from './SettingsDialog';
@@ -128,48 +131,50 @@ export function greetingName(name: string): string {
   return name.trim().split(/\s+/)[0] ?? '';
 }
 
-export default function WelcomeScreen(props: {
-  records: IStoredGameRecord[];
-  /** Games found in storage that this build declined to open. Never empty silently. */
-  unreadable: IUnreadableRecord[];
-  notice: string;
-  durable: boolean;
-  storageDegraded?: boolean;
-  storageError?: string;
-  /** Optional device identity carried into results and connected presence. */
-  operatorName?: string;
-  onOperatorNameChange?: (value: string) => void;
-  /** The room this device is paired with, when a pairing is held. */
-  pairedRoom: IPairedRoom | null;
-  /** Display-safe connection facts for Settings. Contains no ids, tokens, codes, or credentials. */
-  settingsConnection: ISettingsConnection | null;
-  pairingProtection?: string;
-  onForgetPairing: () => void;
-  onResetDevicePreferences: () => void;
-  practiceInProgress: boolean;
-  onReadiness: () => void;
-  recovery?: IRecoveryUi;
-  onRecovery: () => void;
-  onPractice: () => void;
-  /** Into the hand-entered setup form. Creates nothing until that form is submitted. */
-  onCreateGame: () => void;
-  /** Back into the room this device is already paired with. No address, no code. */
-  onOpenRoom: () => void;
-  onConnect: (baseUrl: string) => Promise<ControlOpenResult>;
-  /**
-   * A pairing link this device just read off a QR code.
-   *
-   * Carries a short bootstrap code, so it goes straight out of this component to the connection flow
-   * and is never held in state here, never rendered, and never written anywhere. See `PairingLaunch`.
-   */
-  onPairingLaunch: (intent: IPairingLaunchIntent) => void;
-  onOpenPackage: (packageValue: IGamePackage, attempt?: number) => void | Promise<void>;
-  onOpenBackup: (backup: IQbsheetBackup) => void | Promise<void>;
-  onOpenRecord: (record: IStoredGameRecord) => void | Promise<void>;
-  onRetryResult: (recordId: string) => void | Promise<void>;
-  canRetryResult: (record: IStoredGameRecord) => boolean;
-  onFindExisting: (identity: string) => Promise<IStoredGameRecord[]>;
-}) {
+export default function WelcomeScreen(
+  props: PortableGameActions & {
+    records: IStoredGameRecord[];
+    /** Games found in storage that this build declined to open. Never empty silently. */
+    unreadable: IUnreadableRecord[];
+    notice: string;
+    durable: boolean;
+    storageDegraded?: boolean;
+    storageError?: string;
+    /** Optional device identity carried into results and connected presence. */
+    operatorName?: string;
+    onOperatorNameChange?: (value: string) => void;
+    /** The room this device is paired with, when a pairing is held. */
+    pairedRoom: IPairedRoom | null;
+    /** Display-safe connection facts for Settings. Contains no ids, tokens, codes, or credentials. */
+    settingsConnection: ISettingsConnection | null;
+    pairingProtection?: string;
+    onForgetPairing: () => void;
+    onResetDevicePreferences: () => void;
+    practiceInProgress: boolean;
+    onReadiness: () => void;
+    recovery?: IRecoveryUi;
+    onRecovery: () => void;
+    onPractice: () => void;
+    /** Into the hand-entered setup form. Creates nothing until that form is submitted. */
+    onCreateGame: () => void;
+    /** Back into the room this device is already paired with. No address, no code. */
+    onOpenRoom: () => void;
+    onConnect: (baseUrl: string) => Promise<ControlOpenResult>;
+    /**
+     * A pairing link this device just read off a QR code.
+     *
+     * Carries a short bootstrap code, so it goes straight out of this component to the connection flow
+     * and is never held in state here, never rendered, and never written anywhere. See `PairingLaunch`.
+     */
+    onPairingLaunch: (intent: IPairingLaunchIntent) => void;
+    onOpenPackage: (packageValue: IGamePackage, attempt?: number) => void | Promise<void>;
+    onOpenBackup: (backup: IQbsheetBackup) => void | Promise<void>;
+    onOpenRecord: (record: IStoredGameRecord) => void | Promise<void>;
+    onRetryResult: (recordId: string) => void | Promise<void>;
+    canRetryResult: (record: IStoredGameRecord) => boolean;
+    onFindExisting: (identity: string) => Promise<IStoredGameRecord[]>;
+  },
+) {
   const {
     records,
     unreadable,
@@ -210,12 +215,14 @@ export default function WelcomeScreen(props: {
   } | null>(null);
   const [settingsView, setSettingsView] = useState<'settings' | 'scorekeeper' | null>(null);
   const [scanning, setScanning] = useState(false);
+  const [portableInput, setPortableInput] = useState<IManualGameInput | null>(null);
   /**
-   * The homepage's casual way into the arcade, and the only one this screen has.
+   * The homepage's casual way into the arcade, opened by the promotional banner below.
    *
-   * Held here rather than inside the banner because `ArcadeLauncher` is a modal and this screen is
-   * the thing it covers; the banner is a button and holds nothing. Device Settings used to open the
-   * arcade from here too, and does not any more -- a preferences screen is not a feature launcher.
+   * Held here rather than inside `ArcadePromo` because the banner is conditional and this is not:
+   * the arcade must not vanish because the screen underneath it stopped offering the suggestion.
+   * Device Settings used to open the arcade from here too, and does not any more -- a preferences
+   * screen is not a feature launcher.
    */
   const [arcadeOpen, setArcadeOpen] = useState(false);
   /**
@@ -546,10 +553,18 @@ export default function WelcomeScreen(props: {
 
       <ArcadeLauncher open={arcadeOpen} onClose={() => setArcadeOpen(false)} />
 
+      {portableInput && (
+        <PortableGameReview
+          input={portableInput}
+          onCancel={() => setPortableInput(null)}
+          onStartManualGame={props.onStartManualGame}
+          onEditManualGame={props.onEditManualGame}
+        />
+      )}
       {scanning && (
         <QrScannerDialog
           onClose={() => setScanning(false)}
-          onDecoded={(text) => readScannedPairingCode(text, setScanning, onPairingLaunch)}
+          onDecoded={(text) => readScannedQbsheetCode(text, setScanning, onPairingLaunch, setPortableInput)}
         />
       )}
 

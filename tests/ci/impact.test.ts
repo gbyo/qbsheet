@@ -90,6 +90,16 @@ describe('a scorer change keeps the whole scorer safety net', () => {
     expect(affected(['wiki/Start-here.md'])).toEqual(['scorer', 'scorer-browser']);
   });
 
+  it('routes the standalone game-package entry and editor to the scorer checks', () => {
+    // Name the entry directly so this also catches an untracked new document before git add.
+    expect(affected(['game-package-creator/index.html'])).toEqual(['scorer', 'scorer-browser']);
+    expect(affected(['src/game-package-creator/GamePackageCreator.tsx'])).toEqual([
+      'quality',
+      'scorer',
+      'scorer-browser',
+    ]);
+  });
+
   it('runs the browser suite for Playwright configuration and the shared browser helpers', () => {
     expect(affected(['playwright.config.ts'])).toContain('scorer-browser');
     expect(affected(['e2e/support/scoringLayout.ts'])).toContain('scorer-browser');

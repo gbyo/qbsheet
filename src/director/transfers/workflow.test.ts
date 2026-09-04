@@ -23,7 +23,7 @@
 import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { defineGame, readQbjText, scoreableWithoutChoice } from '../../qbj/ParseQbjAssignment';
 import { deriveTeamStandings } from '../domain/stats';
 import { isoNow, newDirectorId, type DirectorState } from '../domain/model';
@@ -196,9 +196,18 @@ describe('a tournament day, from an empty drive to updated standings', () => {
         { mountPoint: usb, name: 'SanDisk Ultra', removable: true, readOnly: false },
         { mountPoint: root, name: 'Macintosh HD', removable: false, readOnly: false },
       ]);
-      const appeared = syncRemovableVolumes(state, await fileSystem.listVolumes());
+      const volumes = await fileSystem.listVolumes();
+      // A legitimate location UUID can contain the same digits as a later score.
+      const uuid = vi.spyOn(crypto, 'randomUUID').mockReturnValueOnce('200d43dd-4967-467f-b853-f0325b812a16');
+      let appeared: ReturnType<typeof syncRemovableVolumes>;
+      try {
+        appeared = syncRemovableVolumes(state, volumes);
+      } finally {
+        uuid.mockRestore();
+      }
       expect(appeared.appeared.map((location) => location.label)).toEqual(['SanDisk Ultra']);
       const usbLocation = state.transfers.locations[0];
+      expect(usbLocation.id).toContain('325');
 
       // Step 5: prepare the round's assignments onto it.
       const prepared = await prepareAssignments(state, fileSystem, {
@@ -375,7 +384,8 @@ describe('a tournament day, from an empty drive to updated standings', () => {
       expect(history).toContain('Prepared 4 assignments on SanDisk Ultra');
       const eventPayloads = state.transfers.events.map(({ id: _id, at: _at, ...event }) => event);
       expect(JSON.stringify(eventPayloads)).not.toContain('match_teams');
-      expect(JSON.stringify(eventPayloads)).not.toContain('325');
+      // Assert score fields are absent; score digits can legitimately appear in IDs or paths.
+      expect(JSON.stringify(eventPayloads)).not.toMatch(/"(?:score|points)":/);
       expect(maxScanFileBytes).toBeGreaterThan(0);
     } finally {
       globalThis.fetch = originalFetch;
