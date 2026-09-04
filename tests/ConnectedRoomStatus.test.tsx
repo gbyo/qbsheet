@@ -167,6 +167,23 @@ describe('the waiting room’s arcade banner', () => {
     expect(screen.queryByRole('heading', promoHeading)).toBeNull();
   });
 
+  test('a room that cannot reach tournament control is not offered a break', async () => {
+    renderRoom();
+    await settle();
+    expect(screen.getByRole('heading', promoHeading)).toBeInTheDocument();
+
+    answer = async () => ({ ok: false as const, error: 'Tournament control could not be reached.' });
+    await poll();
+
+    // The recovery sections render below this point, so a banner here would sit on top of one.
+    expect(screen.getByRole('button', { name: 'Try now' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', promoHeading)).toBeNull();
+
+    answer = ok(assignmentOf());
+    await poll();
+    expect(screen.getByRole('heading', promoHeading)).toBeInTheDocument();
+  });
+
   test('a game waiting to be resumed keeps the whole banner off the screen', async () => {
     renderRoom({ resumeRecord: { package: validPackage(), events: [] } as never });
     await settle();

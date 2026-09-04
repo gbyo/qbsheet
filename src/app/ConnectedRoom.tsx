@@ -513,8 +513,9 @@ export default function ConnectedRoom(props: {
    * Nothing to resume, nothing to start, and tournament control either silent or explicitly holding
    * this room -- the twenty minutes between rounds this feature exists for. Deliberately false while
    * an assignment is in flight but incomplete, while `blocked` carries a message from control, and
-   * while either credential problem is on screen: each of those is something the room has to read,
-   * and none of them is a break.
+   * while any of the three connection problems is on screen: each of those is something the room has
+   * to read, and none of them is a break. The recovery sections that carry those messages render
+   * below this point, so the alternative would be an animated advertisement sitting on top of one.
    */
   const awaitingNextGame =
     !resumeRecord &&
@@ -522,6 +523,7 @@ export default function ConnectedRoom(props: {
     !starting &&
     (assignment === null || assignment.state === 'none' || assignment.state === 'held') &&
     forbidden === '' &&
+    !pollFailed &&
     !roomCredentialProblem;
 
   return (

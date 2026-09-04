@@ -24,10 +24,10 @@ A small promotional banner — **Want a break?** — is the casual door, and it 
 screens where somebody has time on their hands. `ArcadePromo.tsx` is the banner and the one key it
 remembers; the two hosts decide when it is offered:
 
-| Screen              | Offered when                                                                                      |
-| ------------------- | ------------------------------------------------------------------------------------------------- |
-| `WelcomeScreen.tsx` | there is no unfinished game                                                                       |
-| `ConnectedRoom.tsx` | nothing to resume, nothing startable, and tournament control is either silent or holding the room |
+| Screen              | Offered when                                                                                                                       |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `WelcomeScreen.tsx` | there is no unfinished game                                                                                                        |
+| `ConnectedRoom.tsx` | nothing to resume, nothing startable, no connection problem on screen, and tournament control is either silent or holding the room |
 
 Both conditions say the same thing: an animated advertisement must never sit beside a Resume button,
 a startable assignment, or a message the room has to read. On the homepage it goes above Start
