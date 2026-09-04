@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { ButtonHTMLAttributes, ReactNode } from 'react';
 import { Icon, type IconName } from './Icon';
 
 type PanelRegionProps = {
@@ -10,28 +10,25 @@ function panelRegionClass(base: string, className: string): string {
   return [base, className].filter(Boolean).join(' ');
 }
 
+type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
+  variant?: 'primary' | 'secondary' | 'quiet' | 'danger';
+  icon?: IconName;
+};
+
 export function Button({
   children,
-  onClick,
   variant = 'secondary',
   icon,
   className = '',
   type = 'button',
   disabled = false,
-}: {
-  children: ReactNode;
-  onClick?: () => void;
-  variant?: 'primary' | 'secondary' | 'quiet' | 'danger';
-  icon?: IconName;
-  className?: string;
-  type?: 'button' | 'submit';
-  disabled?: boolean;
-}) {
+  ...buttonProps
+}: ButtonProps) {
   return (
     <button
+      {...buttonProps}
       type={type}
       className={`director-button director-button-${variant} ${className}`}
-      onClick={onClick}
       disabled={disabled}
     >
       {icon && <Icon name={icon} size={15} />}

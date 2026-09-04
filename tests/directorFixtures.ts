@@ -88,6 +88,7 @@ export function score(teamId: string, value: number, extra: Partial<TeamGameScor
   return {
     teamId,
     score: value,
+    superpowers: 0,
     powers: 0,
     gets: 0,
     negs: 0,
@@ -103,7 +104,17 @@ export function playerStat(
   teamId: string,
   extra: Partial<PlayerGameStat> = {},
 ): PlayerGameStat {
-  return { playerId, teamId, powers: 0, gets: 0, negs: 0, bonusPoints: 0, tossupsHeard: 20, ...extra };
+  return {
+    playerId,
+    teamId,
+    superpowers: 0,
+    powers: 0,
+    gets: 0,
+    negs: 0,
+    bonusPoints: 0,
+    tossupsHeard: 20,
+    ...extra,
+  };
 }
 
 export function scheduledGame(

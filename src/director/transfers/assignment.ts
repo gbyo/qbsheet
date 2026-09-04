@@ -26,7 +26,7 @@
  * builder provably cannot leak" is a property of today's builder.
  */
 import {
-  latestRound,
+  orderDayItems,
   type DirectorId,
   type DirectorState,
   type Round,
@@ -363,9 +363,16 @@ export type AssignmentSelection =
   | { kind: 'unconnected-rooms'; roundId?: DirectorId };
 
 export function currentOperationalRound(state: DirectorState): Round | undefined {
-  const selected = state.rounds.find((round) => round.id === state.tournament?.currentRoundId);
-  if (selected && selected.status !== 'closed') return selected;
-  return latestRound(state.rounds.filter((round) => round.status !== 'closed')) ?? undefined;
+  const rounds = orderDayItems(state.rounds, state.timeline).flatMap((item) =>
+    item.round ? [item.round] : [],
+  );
+  const selected = rounds.find((round) => round.id === state.tournament?.currentRoundId);
+  // An actively running round wins. Otherwise the next round in the persisted day
+  // order is useful; generating all nine rounds must not make Round 9 current.
+  if (selected?.status === 'released') return selected;
+  return (
+    rounds.find((round) => round.status === 'released') ?? rounds.find((round) => round.status !== 'closed')
+  );
 }
 
 /**

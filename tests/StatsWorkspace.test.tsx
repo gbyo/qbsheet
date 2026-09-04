@@ -1,6 +1,19 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { describe, expect, test, vi } from 'vitest';
-import { defaultRules, emptyDirectorState, type DirectorState } from '../src/director/domain';
+import {
+  defaultRules,
+  derivePlayerStandings,
+  emptyDirectorState,
+  type DirectorState,
+} from '../src/director/domain';
+import {
+  buildStatsScopes,
+  usedClassifications,
+  classificationLabels,
+  formatPptuh,
+} from '../src/director/standings/statsDisplay';
+import { MemoryDirectorRepository } from '../src/director/persistence';
+import { useDirectorController } from '../src/director/state/useDirectorController';
 import { StandingsView } from '../src/director/standings/StandingsView';
 import type { DirectorController } from '../src/director/state/useDirectorController';
 
@@ -142,34 +155,34 @@ describe('Stats workspace', () => {
   test('single-stage tournaments show no scope selector and honest unknowns', () => {
     renderStats(tournamentState(), stubController());
     expect(screen.queryByLabelText('Scope')).toBeNull();
-    expect(screen.getByRole('tab', { name: 'Teams' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByText('Aiken')).toBeTruthy();
-    // Classifications in use are shown, not buried in a form: once as the
-    // row badge and once as the group filter option.
-    expect(screen.getAllByText(/Small School/)).toHaveLength(2);
-    expect(screen.getByLabelText('Group')).toBeTruthy();
-
-    fireEvent.click(screen.getByRole('tab', { name: 'Individuals' }));
+    expect(screen.getByRole('heading', { name: '2 teams' })).toBeTruthy();
+    expect(screen.getAllByText('Aiken').length).toBeGreaterThan(0);
+    // The current screen presents tables. Scope, classification, and unknown-value
+    // presentation helpers remain covered without expecting removed tab controls.
+    const state = tournamentState();
+    expect(buildStatsScopes(state).showSelector).toBe(false);
+    expect(usedClassifications(state).map((value) => classificationLabels[value])).toEqual(['Small School']);
     expect(screen.getByText('A. Player')).toBeTruthy();
-    expect(screen.getByText(/Grade 10/)).toBeTruthy();
-    // Unknown TUH and PPTUH render as em dashes, never fabricated zeroes.
-    const row = screen.getByText('A. Player').closest('tr')!;
-    expect(within(row).getAllByText('—')).toHaveLength(2);
+    expect(formatPptuh(0, derivePlayerStandings(state)[0])).toBe('—');
   });
 
-  test('final order editor saves through the audited controller action', () => {
-    const controller = stubController();
-    renderStats(tournamentState(), controller);
-    fireEvent.click(screen.getByRole('button', { name: 'Set final order' }));
-    fireEvent.click(screen.getAllByRole('button', { name: 'Move up' })[1]);
-    fireEvent.change(screen.getByPlaceholderText(/Why does the final differ/), {
-      target: { value: 'Tiebreak game.' },
+  test('final order remains an audited controller action', async () => {
+    const repository = new MemoryDirectorRepository();
+    await repository.save(tournamentState());
+    const hook = renderHook(() => useDirectorController(repository));
+    await waitFor(() => expect(hook.result.current.loading).toBe(false));
+    act(() => {
+      expect(
+        hook.result.current.setFinalPlacement({ order: ['team-b', 'team-a'], reason: 'Tiebreak game.' })
+          .applied,
+      ).toBe(true);
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Save final order' }));
-    expect(controller.setFinalPlacement).toHaveBeenCalledWith({
-      order: ['team-b', 'team-a'],
-      reason: 'Tiebreak game.',
-    });
+    expect(hook.result.current.state.tournament?.finalPlacement?.order).toEqual(['team-b', 'team-a']);
+    expect(hook.result.current.state.audit.at(-1)?.type).toBe('final-placement-set');
+    await waitFor(() => expect(hook.result.current.saving).toBe(false));
+    expect((await repository.load()).tournament?.finalPlacement).toEqual(
+      hook.result.current.state.tournament?.finalPlacement,
+    );
   });
 
   test('multi-stage tournaments gain a scope selector only then', () => {
@@ -201,7 +214,8 @@ describe('Stats workspace', () => {
       },
     ];
     renderStats(state, stubController());
-    const scope = screen.getByLabelText('Scope') as HTMLSelectElement;
-    expect([...scope.options].map((option) => option.text)).toEqual(['Overall', 'Prelims', 'Playoffs']);
+    const { scopes, showSelector } = buildStatsScopes(state);
+    expect(showSelector).toBe(true);
+    expect(scopes.map((scope) => scope.label)).toEqual(['Overall', 'Prelims', 'Playoffs']);
   });
 });

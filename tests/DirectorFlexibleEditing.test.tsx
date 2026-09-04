@@ -41,8 +41,8 @@ describe('Director flexible editing', () => {
     );
     expect(affected.length).toBeGreaterThan(0);
 
-    act(() => {
-      expect(dropTeamFlexibly(hook.result.current, team.id)).toBe(true);
+    await act(async () => {
+      expect(await dropTeamFlexibly(hook.result.current, team.id)).toBe(true);
     });
     expect(hook.result.current.state.teams.find((entry) => entry.id === team.id)).toMatchObject({
       status: 'dropped',
@@ -54,11 +54,21 @@ describe('Director flexible editing', () => {
         .every((game) => game.status === 'cancelled'),
     ).toBe(true);
 
+    const auditCount = hook.result.current.state.audit.length;
+    await act(async () => {
+      expect(await dropTeamFlexibly(hook.result.current, team.id)).toBe(false);
+    });
+    expect(hook.result.current.state.audit).toHaveLength(auditCount);
+
     act(() => {
       expect(hook.result.current.restoreTeam(team.id)).toBe(true);
-      expect(dropTeamFlexibly(hook.result.current, team.id)).toBe(true);
     });
-    expect(hook.result.current.state.teams.find((entry) => entry.id === team.id)?.notes).toBe('Arriving by bus');
+    await act(async () => {
+      expect(await dropTeamFlexibly(hook.result.current, team.id)).toBe(true);
+    });
+    expect(hook.result.current.state.teams.find((entry) => entry.id === team.id)?.notes).toBe(
+      'Arriving by bus',
+    );
   });
 
   test('round removal cleans schedule and phase references', async () => {
@@ -74,12 +84,16 @@ describe('Director flexible editing', () => {
       .map((game) => game.id);
     expect(scheduledIds.length).toBeGreaterThan(0);
 
-    act(() => {
-      expect(removeRoundFlexibly(hook.result.current, round.id)).toBe(true);
+    await act(async () => {
+      expect(await removeRoundFlexibly(hook.result.current, round.id)).toBe(true);
     });
     expect(hook.result.current.state.rounds.some((entry) => entry.id === round.id)).toBe(false);
-    expect(hook.result.current.state.scheduledGames.some((game) => scheduledIds.includes(game.id))).toBe(false);
+    expect(hook.result.current.state.scheduledGames.some((game) => scheduledIds.includes(game.id))).toBe(
+      false,
+    );
     expect(hook.result.current.state.phases.some((phase) => phase.roundIds.includes(round.id))).toBe(false);
-    expect(hook.result.current.state.packets.some((packet) => packet.assignedRoundIds.includes(round.id))).toBe(false);
+    expect(
+      hook.result.current.state.packets.some((packet) => packet.assignedRoundIds.includes(round.id)),
+    ).toBe(false);
   });
 });

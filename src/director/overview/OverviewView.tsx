@@ -1,6 +1,8 @@
+import { useState } from 'react';
 import {
   deriveTeamStandings,
   latestRound,
+  orderDayItems,
   runPreflight,
   type DirectorState,
   type PreflightIssue,
@@ -10,6 +12,7 @@ import { Button } from '../components/Controls';
 import { Icon } from '../components/Icon';
 import { PageHeader } from '../components/PageHeader';
 import type { SectionId } from '../app/navigation';
+import { currentOperationalRound } from '../transfers/assignment';
 import type { AnnounceInput } from '../notices';
 
 function sectionForArea(area: PreflightIssue['area']): SectionId {
@@ -28,7 +31,7 @@ function sectionForArea(area: PreflightIssue['area']): SectionId {
     case 'storage':
       return 'settings';
     default:
-      return 'schedule';
+      return 'settings';
   }
 }
 
@@ -48,24 +51,31 @@ export function OverviewView({
   nativeServerAvailable?: boolean;
 }) {
   const tournament = state.tournament;
-  const round =
-    state.rounds.find((entry) => entry.id === tournament?.currentRoundId) ?? latestRound(state.rounds);
-  const games = round ? state.scheduledGames.filter((game) => game.roundId === round.id) : [];
+  const round = currentOperationalRound(state) ?? latestRound(state.rounds);
+  const games = round ? state.scheduledGames.filter((game) => game.roundId === round.id && !game.bye) : [];
   const finished = games.filter((game) => game.status === 'accepted').length;
   const complete =
     games.length > 0 &&
     games.every((game) => game.bye || game.status === 'accepted' || game.status === 'cancelled');
-  const playing = games.filter(
-    (game) => game.status === 'live' || game.status === 'released' || game.status === 'scheduled',
-  ).length;
+  const playing = games.filter((game) => !game.bye && game.status === 'live').length;
   const reviewCount = state.submissions.filter(
     (submission) => submission.status === 'review' || submission.status === 'received',
   ).length;
   const openProtests = state.protests.filter((protest) => protest.status === 'open').length;
-  const helpSessions = state.qbtcpSessions.filter((session) => session.helpRequestId);
+  const helpRequests = state.qbtcpHelpRequests.filter((request) => request.status === 'open');
+  const helpSessions = state.qbtcpSessions.filter(
+    (session) =>
+      session.state !== 'abandoned' &&
+      session.helpRequestId &&
+      !state.qbtcpHelpRequests.some((request) => request.id === session.helpRequestId),
+  );
+  const dayItems = orderDayItems(state.rounds, state.timeline);
+  const roundIndex = dayItems.findIndex((item) => item.id === round?.id);
+  const preceding = roundIndex > 0 ? dayItems[roundIndex - 1] : undefined;
+  const nextEvent = round?.status !== 'released' && preceding?.kind === 'event' ? preceding.event : undefined;
   const issues = runPreflight(state, nativeServerReady, nativeServerAvailable);
   const blockers = issues.filter((issue) => issue.severity === 'blocker');
-  const otherChecks = issues.length - blockers.length;
+  const [showAllAttention, setShowAllAttention] = useState(false);
   const standings = deriveTeamStandings(state).slice(0, 5);
   // Every blocker answers where it can be fixed: the attention item deep-links
   // into the tool that owns the problem instead of dumping everything on the
@@ -94,11 +104,26 @@ export function OverviewView({
           },
         ]
       : []),
+    ...helpRequests.map((request) => ({
+      id: request.id,
+      text: `${request.roomName} requested help.`,
+      section: 'rooms' as SectionId,
+    })),
+    ...(controller.error
+      ? [{ id: 'storage-error', text: controller.error, section: 'settings' as SectionId }]
+      : []),
     ...helpSessions.map((session) => ({
       id: `help-${session.roomId}`,
       text: `${state.rooms.find((room) => room.id === session.roomId)?.name ?? 'A room'} requested help.`,
       section: 'rooms' as SectionId,
     })),
+    ...issues
+      .filter((issue) => issue.severity !== 'blocker')
+      .map((issue) => ({
+        id: issue.id,
+        text: issue.message,
+        section: sectionForArea(issue.area),
+      })),
   ];
 
   return (
@@ -124,6 +149,11 @@ export function OverviewView({
             <div className="director-round-heading">
               <div className="director-round-number">{String(round.number).padStart(2, '0')}</div>
               <div>
+                {nextEvent && (
+                  <p>
+                    Up next: {nextEvent.title} · then {round.name}
+                  </p>
+                )}
                 <h2 id="director-current-round-title">{round.name}</h2>
                 <p>
                   {finished} of {games.length} result{games.length === 1 ? '' : 's'} accepted
@@ -191,17 +221,17 @@ export function OverviewView({
             <div>
               <h2 id="director-attention-title">Needs attention</h2>
               <ul className="director-compact-list">
-                {attention.slice(0, 5).map((item) => (
+                {(showAllAttention ? attention : attention.slice(0, 5)).map((item) => (
                   <li key={item.id}>
                     <Button variant="quiet" onClick={() => onNavigate(item.section)}>
                       {item.text}
                     </Button>
                   </li>
                 ))}
-                {otherChecks > 0 && (
+                {attention.length > 5 && (
                   <li>
-                    <Button variant="quiet" onClick={() => onNavigate('schedule')}>
-                      {otherChecks} more check{otherChecks === 1 ? '' : 's'} in preflight.
+                    <Button variant="quiet" onClick={() => setShowAllAttention((value) => !value)}>
+                      {showAllAttention ? 'Show fewer checks' : `${attention.length - 5} more checks`}
                     </Button>
                   </li>
                 )}

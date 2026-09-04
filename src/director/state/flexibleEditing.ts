@@ -4,18 +4,19 @@ import type { DirectorController } from './useDirectorController';
 /**
  * Apply Director edits that intentionally change already-planned tournament structure.
  *
- * These helpers use the controller's supported snapshot import path so normalization,
+ * These helpers use the controller's recovery-protected structural edit path so normalization,
  * persistence, publication, and recovery still run through the ordinary controller stack.
  */
-export function dropTeamFlexibly(
+export async function dropTeamFlexibly(
   controller: DirectorController,
   teamId: DirectorId,
   reason = 'Dropped by director',
-): boolean {
-  const current = controller.state.teams.find((team) => team.id === teamId);
-  if (!current || current.status === 'dropped') return controller.dropTeam(teamId, reason);
+): Promise<boolean> {
+  const next = JSON.parse(controller.exportSnapshot()) as DirectorState;
+  const current = next.teams.find((team) => team.id === teamId);
+  if (!current) return controller.dropTeam(teamId, reason);
+  if (current.status === 'dropped') return false;
 
-  const next = structuredClone(controller.state) as DirectorState;
   const team = next.teams.find((entry) => entry.id === teamId);
   if (!team) return false;
 
@@ -65,14 +66,17 @@ export function dropTeamFlexibly(
     entityId: team.id,
     details: { reason: normalizedReason, cancelledScheduledGameIds },
   });
-  return controller.importSnapshot(next);
+  return controller.editTournamentSnapshot(next, `Before dropping ${current.displayName}`);
 }
 
-export function removeRoundFlexibly(controller: DirectorController, roundId: DirectorId): boolean {
-  const current = controller.state.rounds.find((round) => round.id === roundId);
+export async function removeRoundFlexibly(
+  controller: DirectorController,
+  roundId: DirectorId,
+): Promise<boolean> {
+  const next = JSON.parse(controller.exportSnapshot()) as DirectorState;
+  const current = next.rounds.find((round) => round.id === roundId);
   if (!current) return false;
 
-  const next = structuredClone(controller.state) as DirectorState;
   const scheduledIds = new Set(
     next.scheduledGames.filter((game) => game.roundId === roundId).map((game) => game.id),
   );
@@ -123,5 +127,5 @@ export function removeRoundFlexibly(controller: DirectorController, roundId: Dir
     entityId: roundId,
     details: { removedScheduledGames: scheduledIds.size, removedResults: acceptedResultCount },
   });
-  return controller.importSnapshot(next);
+  return controller.editTournamentSnapshot(next, `Before removing ${current.name}`);
 }

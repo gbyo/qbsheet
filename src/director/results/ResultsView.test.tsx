@@ -262,3 +262,26 @@ test('open protests are counted where a director is already looking', () => {
   // The panel itself is still there with the protest in it.
   expect(screen.getByText('Answer was equivalent', { exact: false })).toBeTruthy();
 });
+
+test('round navigation scopes manual entry to that round even when an earlier round is unresolved', () => {
+  const state = playedTournament();
+  state.rounds.push({ ...state.rounds[0], id: 'round-2', name: 'Round 2', number: 2 });
+  state.scheduledGames = [
+    scheduledGame('earlier', 'team-a', 'team-b', { status: 'released' }),
+    scheduledGame('requested', 'team-a', 'team-b', { roundId: 'round-2', status: 'released' }),
+  ];
+  const controller = controllerWith({ addManualResult: vi.fn(() => true) });
+  render(
+    <ResultsView
+      state={state}
+      controller={controller}
+      onAnnounce={vi.fn()}
+      navigationTarget={{ section: 'results', entityType: 'round', entityId: 'round-2' }}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Enter result' }));
+  const game = screen.getByRole('combobox', { name: 'Scheduled game' });
+  expect(game).toHaveValue('requested');
+  expect(within(game).getAllByRole('option')).toHaveLength(1);
+  expect(screen.getByText('Awaiting result')).toBeTruthy();
+});

@@ -102,7 +102,7 @@ export function runPreflight(
     issues.push({
       id: 'games-without-rooms',
       severity: 'warning',
-      area: 'schedule',
+      area: 'rooms',
       message: `${unscheduled.length} scheduled game(s) do not have a room.`,
     });
   }
@@ -155,7 +155,11 @@ export function runPreflight(
   issues.push(...packetReferenceIssues(state));
   // QBTCP serves rooms: with no room records there is nothing to pair, so a
   // roomless manual tournament is never nagged about the native server.
-  if (nativeServerAvailable && !nativeServerReady && state.rooms.length > 0) {
+  if (
+    nativeServerAvailable &&
+    !nativeServerReady &&
+    (state.qbtcpSessions.length > 0 || state.qbtcpHelpRequests.length > 0)
+  ) {
     if (state.tournament.status !== 'complete' && state.tournament.status !== 'archived') {
       issues.push({
         id: 'qbtcp-offline',
