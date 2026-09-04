@@ -280,7 +280,7 @@ pub async fn director_restore_checkpoint(
     let outcome = store.restore_checkpoint(&current, &checkpoint_id, &restored);
     if running {
         let document = match &outcome {
-            Ok(document) => document.clone(),
+            Ok(document) => Some(document.clone()),
             Err(_) => store.load_state().map_err(CommandError::store)?,
         };
         if let Err(error) = server
