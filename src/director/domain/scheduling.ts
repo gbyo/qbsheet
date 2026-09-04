@@ -1162,6 +1162,7 @@ function generateSingleEliminationRound(
     status: 'planned',
     packetId: options.packetId ?? null,
     scheduledGameIds: games.map((game) => game.id),
+    dayOrder: options.dayOrder ?? null,
     scheduledStart: null,
     releasedAt: null,
     startedAt: null,
@@ -1432,4 +1433,40 @@ export function scheduleIsValid(
 
 export function closeRound(round: Round, at = isoNow()): Round {
   return { ...round, status: 'closed', closedAt: at };
+}
+
+/** Fill the ordinary round-robin plan with the canonical scheduler's complete rotation. */
+export function generatePlannedRoundRobinGames(state: DirectorState): ScheduledGame[] {
+  const format = currentFormat(state);
+  const phase = currentPhase(state);
+  if (!format || !phase || (format.kind !== 'round-robin' && format.kind !== 'double-round-robin')) return [];
+  const rounds = state.rounds
+    .filter((round) => round.phaseId === phase.id)
+    .sort((a, b) => a.number - b.number);
+  const generated = generateRoundRobinSchedule({
+    phaseId: phase.id,
+    teams: state.teams.filter((team) => team.status === 'confirmed').map(toCoreTeam),
+    rounds: rounds.map((round) => ({ id: round.id, number: round.number })),
+    roomIds: state.rooms
+      .filter((room) => room.available && room.status === 'available')
+      .map((room) => room.id),
+    repetitions: format.kind === 'double-round-robin' ? 2 : 1,
+    rematchPolicy: format.kind === 'double-round-robin' ? 'allow' : 'forbid',
+    requireRoomAssignments: false,
+    idFactory: { game: () => newDirectorId('game') },
+  });
+  if (generated.issues.some((issue) => issue.severity === 'error'))
+    throw new Error(generated.issues.map((issue) => issue.message).join(' '));
+  return generated.games.map((game) => ({
+    id: game.id,
+    roundId: game.roundId,
+    poolId: game.poolId,
+    roomId: game.kind === 'bye' ? null : game.roomId,
+    packetId: null,
+    leftTeamId: game.kind === 'bye' ? game.byeTeamId : game.teamAId,
+    rightTeamId: game.kind === 'bye' ? null : game.teamBId,
+    bye: game.kind === 'bye',
+    status: 'scheduled',
+    assignmentRevision: 1,
+  }));
 }

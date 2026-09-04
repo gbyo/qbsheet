@@ -133,6 +133,7 @@ export function useTransfers(
   state: DirectorState,
   controller: DirectorController,
   onAnnounce: (announcement: AnnounceInput) => void,
+  enabled = true,
 ): TransfersRuntime {
   const platform = useMemo(() => createTransferPlatform(), []);
   const [notice, setNotice] = useState<DriveNotice | null>(null);
@@ -142,6 +143,8 @@ export function useTransfers(
   const [status, setStatus] = useState('');
   const controllerRef = useRef(controller);
   const stateRef = useRef(state);
+  const preparingRef = useRef(new Set<string>());
+  const scope = `${state.tournament?.id ?? ''}:${controller.documentEpoch ?? 0}`;
   const scanningRef = useRef(new Set<string>());
   const announcedRef = useRef(new Set<string>());
 
@@ -160,13 +163,13 @@ export function useTransfers(
   // persisted, so a location the director has not opened this session can be re-authorized here
   // without the application ever holding a standing grant to anything wider.
   useEffect(() => {
-    if (!platform.native) return;
+    if (!platform.native || !enabled) return;
     let active = true;
     void (async () => {
       for (const location of stateRef.current.transfers.locations) {
         if (!active) return;
         const outcome = await authorizeTransferRoot(location.path);
-        if (!outcome.ok && location.kind === 'folder')
+        if (active && !outcome.ok && location.kind === 'folder')
           controllerRef.current.noteTransferScan(location.id, {
             at: new Date().toISOString(),
             message: outcome.message,
@@ -177,13 +180,13 @@ export function useTransfers(
       active = false;
     };
     // Deliberately once per mount: this is startup re-adoption, not a reaction to location edits.
-  }, [platform.native]);
+  }, [platform.native, enabled, scope]);
 
   // Volume enumeration on a slow timer. `syncTransferVolumes` writes nothing when nothing moved, so
   // a quiet tournament day costs one enumeration every few seconds and no state churn at all.
   useEffect(() => {
     const source = platform.volumes;
-    if (!source) return;
+    if (!source || !enabled) return;
     let active = true;
     const poll = async () => {
       try {
@@ -200,7 +203,7 @@ export function useTransfers(
       active = false;
       window.clearInterval(interval);
     };
-  }, [platform.volumes]);
+  }, [platform.volumes, enabled, scope]);
 
   const runScan = useCallback(
     async (
@@ -208,7 +211,9 @@ export function useTransfers(
       options: { announce?: boolean } = {},
     ): Promise<ImportSummary | null> => {
       const fileSystem = platform.fileSystem;
-      if (!fileSystem || !location.connected) return null;
+      if (!fileSystem || !location.connected || controllerRef.current.recovering) return null;
+      const tournamentId = stateRef.current.tournament?.id;
+      const epoch = controllerRef.current.documentEpoch;
       if (scanningRef.current.has(location.id)) return null;
       scanningRef.current.add(location.id);
       try {
@@ -218,6 +223,12 @@ export function useTransfers(
           includeRoot: location.kind === 'removable-drive',
           includeAssignments: true,
         });
+        if (
+          controllerRef.current.recovering ||
+          stateRef.current.tournament?.id !== tournamentId ||
+          controllerRef.current.documentEpoch !== epoch
+        )
+          return null;
         controllerRef.current.noteTransferScan(location.id, {
           at: new Date().toISOString(),
           ...(report.error ? { message: report.error } : {}),
@@ -239,7 +250,7 @@ export function useTransfers(
   // Watched locations, on their own slower timer. Only locations the director marked as watched are
   // read; a connected drive that nobody asked to watch is left alone.
   useEffect(() => {
-    if (!platform.fileSystem) return;
+    if (!platform.fileSystem || !enabled) return;
     let active = true;
     const tick = async () => {
       const watched = stateRef.current.transfers.locations.filter(
@@ -255,13 +266,13 @@ export function useTransfers(
       active = false;
       window.clearInterval(interval);
     };
-  }, [platform.fileSystem, runScan]);
+  }, [platform.fileSystem, runScan, enabled, scope]);
 
   // A drive that appears and has QBSheet data on it earns one quiet line. A drive that does not is
   // somebody's photo stick and earns nothing.
   useEffect(() => {
     const fileSystem = platform.fileSystem;
-    if (!fileSystem) return;
+    if (!fileSystem || !enabled) return;
     let active = true;
     void (async () => {
       for (const location of state.transfers.locations) {
@@ -288,7 +299,7 @@ export function useTransfers(
     return () => {
       active = false;
     };
-  }, [platform.fileSystem, runScan, state.transfers.locations]);
+  }, [platform.fileSystem, runScan, state.transfers.locations, enabled, scope]);
 
   const addFolder = useCallback(async () => {
     if (!platform.native) {
@@ -344,12 +355,20 @@ export function useTransfers(
     async (locationId: DirectorId, selection: AssignmentSelection) => {
       const fileSystem = platform.fileSystem;
       const location = stateRef.current.transfers.locations.find((entry) => entry.id === locationId);
-      if (!fileSystem || !location) return null;
+      if (!fileSystem || !location || controllerRef.current.recovering) return null;
+      if (!location.connected) {
+        onAnnounce(errorNotice(`${location.label} is no longer connected. Nothing was written.`));
+        return null;
+      }
+      if (preparingRef.current.has(locationId)) return null;
       if (location.readOnly) {
         onAnnounce(errorNotice(`${location.label} is read-only. Nothing was written.`));
         return null;
       }
       const operation = prepareOperation(locationId);
+      preparingRef.current.add(locationId);
+      const tournamentId = stateRef.current.tournament?.id;
+      const epoch = controllerRef.current.documentEpoch;
       beginOperation(operation);
       try {
         const report = await prepareAssignments(stateRef.current, fileSystem, {
@@ -359,20 +378,35 @@ export function useTransfers(
           directorBuild: buildLabel,
           groupByRound: selection.kind === 'released',
         });
+        if (
+          controllerRef.current.recovering ||
+          stateRef.current.tournament?.id !== tournamentId ||
+          controllerRef.current.documentEpoch !== epoch
+        )
+          return null;
         controllerRef.current.recordPreparedAssignments({
           report,
           transportKind: location.kind === 'removable-drive' ? 'removable-drive' : 'folder',
           destinationLabel: location.label,
           locationId: location.id,
         });
-        setStatus(report.message);
-        onAnnounce(report.message);
+        const round =
+          selection.kind === 'round'
+            ? stateRef.current.rounds.find((entry) => entry.id === selection.roundId)
+            : undefined;
+        const message =
+          round && report.ok && report.failures.length === 0
+            ? `${round.name} copied to ${location.label} — eject normally.`
+            : report.message;
+        setStatus(message);
+        onAnnounce(report.ok && report.failures.length === 0 ? message : errorNotice(message));
         return report;
       } catch (reason: unknown) {
         const message = reason instanceof Error ? reason.message : 'The files could not be written.';
         onAnnounce(errorNotice(message));
         return null;
       } finally {
+        preparingRef.current.delete(locationId);
         endOperation(operation);
       }
     },

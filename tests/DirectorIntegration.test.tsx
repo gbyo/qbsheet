@@ -658,12 +658,14 @@ describe('Director integration hardening', () => {
     expect(format?.kind).toBe('round-robin');
     expect(live.audit.some((event) => event.summary.includes('Applied tournament plan'))).toBe(true);
 
-    // Re-applying a different plan before play starts is a safe rebuild.
+    expect(live.scheduledGames).toHaveLength(45);
+    expect(live.rounds.every((round) => round.scheduledGameIds.length === 5)).toBe(true);
+    // The recommendation now creates real pairings, so a second plan cannot wipe them.
     act(() => {
       applied = hook.result.current.applyTournamentPlan(set?.alternatives[0] ?? ({} as never));
     });
-    expect(applied).toBe(true);
-    expect(hook.result.current.state.rounds).toHaveLength(18);
+    expect(applied).toBe(false);
+    expect(hook.result.current.state.rounds).toHaveLength(9);
 
     // Once pairings exist the plan is refused rather than wiping them.
     const paired = await directorWithSetup(10);
@@ -1003,7 +1005,7 @@ describe('Director integration hardening', () => {
     expect(hook.result.current.state.rounds[0].status).toBe('released');
   });
 
-  test('round orchestration: partial rooms stay manual, gaps fail only with delivery configured', async () => {
+  test('round orchestration: optional rooms allow manual games alongside QBTCP and USB', async () => {
     // One room exists, so generation assigns it to the first game only. With
     // no QBTCP or USB configured that partial assignment stays a label: the
     // round still starts as a manual round.
@@ -1020,8 +1022,7 @@ describe('Director integration hardening', () => {
     expect(partialResult?.manual).toBe(true);
     expect(partial.hook.result.current.state.rounds[0].status).toBe('released');
 
-    // A paired QBTCP session means electronic delivery: the roomless game now
-    // blocks the start until it has a room or a USB workflow covers it.
+    // Pairing a QBTCP room must not prevent the other game from using manual results.
     const electronic = await directorWithSetup(4);
     act(() => {
       expect(electronic.hook.result.current.generateSchedule().generated).toBe(true);
@@ -1052,12 +1053,11 @@ describe('Director integration hardening', () => {
     await act(async () => {
       blocked = await electronic.hook.result.current.startRound(electronicRoundId);
     });
-    expect(blocked?.ok).toBe(false);
-    expect(blocked?.reason).toContain('room');
-    expect(electronic.hook.result.current.state.rounds[0].status).not.toBe('released');
+    expect(blocked?.ok).toBe(true);
+    expect(blocked?.summary).toContain('1 game can be entered manually.');
+    expect(electronic.hook.result.current.state.rounds[0].status).toBe('released');
 
-    // Configuring the USB workflow turns that same gap into an honest
-    // physical handoff instead of a failure.
+    // Configuring USB identifies the outstanding physical handoff on an already-started round.
     act(() => {
       electronic.hook.result.current.addTransferLocation({
         kind: 'removable-drive',
@@ -2031,7 +2031,7 @@ describe('Director integration hardening', () => {
     expect(issueIds).not.toContain('games-without-rooms');
 
     const roomed = structuredClone(hook.result.current.state);
-    // Restore the setup room: delivery guidance returns with it.
+    // Room records alone do not opt the tournament into QBTCP.
     roomed.rooms = [
       {
         id: 'room-1',
@@ -2047,13 +2047,25 @@ describe('Director integration hardening', () => {
       expect(hook.result.current.importSnapshot(roomed)).toBe(true);
     });
     const roomedIds = runPreflight(hook.result.current.state, false, true).map((issue) => issue.id);
-    expect(roomedIds).toContain('qbtcp-offline');
+    expect(roomedIds).not.toContain('qbtcp-offline');
   });
 
   test('browser preflight omits the native-only QBTCP recommendation', async () => {
     const { hook } = await directorWithSetup();
-    const browserIssues = runPreflight(hook.result.current.state, false, false);
-    const nativeIssues = runPreflight(hook.result.current.state, false, true);
+    const state = structuredClone(hook.result.current.state);
+    state.qbtcpHelpRequests.push({
+      id: 'help',
+      deviceId: 'device',
+      roomId: state.rooms[0].id,
+      roomName: 'Room 1',
+      category: 'other',
+      message: 'Help',
+      status: 'open',
+      createdAt: '',
+      updatedAt: '',
+    });
+    const browserIssues = runPreflight(state, false, false);
+    const nativeIssues = runPreflight(state, false, true);
 
     expect(browserIssues.some((issue) => issue.id === 'qbtcp-offline')).toBe(false);
     expect(nativeIssues.some((issue) => issue.id === 'qbtcp-offline')).toBe(true);

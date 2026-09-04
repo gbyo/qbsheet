@@ -30,11 +30,13 @@ async function createTournament(page: Page) {
 }
 
 async function goToSection(page: Page, name: string) {
-  // Every destination lives directly in the grouped sidebar; there is no
-  // generic More menu to fall back through.
+  // Tournament tools remain in the sidebar. App settings use the existing operator menu.
   const navigation = page.locator('nav[aria-label="Tournament sections"]');
   await expect(navigation.getByRole('button', { name: /More/ })).toHaveCount(0);
-  await navigation.getByRole('button', { name, exact: true }).click();
+  if (name === 'Settings') {
+    await page.getByRole('button', { name: /^Operator:/ }).click();
+    await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
+  } else await navigation.getByRole('button', { name, exact: true }).click();
 }
 
 test('Director starts with an empty, persisted tournament workspace', async ({ page }) => {
@@ -71,7 +73,7 @@ test('Director layout keeps panel, table, status, and narrow-window contracts', 
   await navigation.getByRole('button', { name: 'Teams', exact: true }).click();
   await page.getByRole('button', { name: 'Add team' }).click();
 
-  const teamForm = page.locator('.director-form-panel').first();
+  const teamForm = page.getByRole('dialog');
   await expect(teamForm.locator('.director-panel-body')).toBeVisible();
   await expect(teamForm.locator('.director-panel-footer')).toBeVisible();
   const teamFormInsets = await teamForm.evaluate((panel) => {
@@ -93,16 +95,17 @@ test('Director layout keeps panel, table, status, and narrow-window contracts', 
 
   await page.getByLabel('Display name').fill('Northview A');
   await page.getByLabel('School / club').fill('Northview');
-  await page.getByRole('button', { name: 'Save team' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Add team', exact: true }).click();
 
-  await expect(page.getByTestId('director-schools-management')).toHaveCount(0);
-  await page.getByRole('button', { name: 'Manage schools & clubs' }).click();
-  const schools = page.getByTestId('director-schools-management');
-  await expect(schools.getByRole('heading', { name: 'Schools & clubs' })).toBeVisible();
-  await schools.getByRole('button', { name: 'Edit Northview' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Schools & clubs', exact: true }).click();
+  const schools = page.getByRole('dialog', { name: 'Schools & clubs' });
   await schools.getByLabel('City').fill('Springfield');
-  await schools.getByRole('button', { name: 'Save changes' }).click();
-  await expect(schools).toContainText('Springfield');
+  await schools.getByRole('button', { name: 'Save', exact: true }).click();
+  await schools.getByRole('button', { name: 'Done' }).click();
+  await page.getByRole('button', { name: 'Schools & clubs', exact: true }).click();
+  await expect(schools.getByLabel('City')).toHaveValue('Springfield');
+  await schools.getByRole('button', { name: 'Done' }).click();
 
   const tableContract = await page
     .locator('.director-table')
@@ -149,8 +152,8 @@ test('Director layout keeps panel, table, status, and narrow-window contracts', 
   await page.getByRole('button', { name: 'Show all rooms' }).click();
   await expect(page.getByText('Room 101', { exact: true })).toBeVisible();
 
-  await page.setViewportSize({ width: 520, height: 720 });
   await goToSection(page, 'Settings');
+  await page.setViewportSize({ width: 520, height: 720 });
   await expect(page.getByRole('heading', { level: 1, name: 'Settings' })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(521);
   await navigation.getByRole('button', { name: 'Teams', exact: true }).click();
@@ -171,11 +174,11 @@ test('Director runs a local tournament slice and reopens its result', async ({ p
   await page.getByRole('button', { name: 'Add team' }).click();
   await page.getByLabel('Display name').fill('Northview A');
   await page.getByLabel('School / club').fill('Northview');
-  await page.getByRole('button', { name: 'Save team' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Add team', exact: true }).click();
   await page.getByRole('button', { name: 'Add team' }).click();
   await page.getByLabel('Display name').fill('Riverside A');
   await page.getByLabel('School / club').fill('Riverside');
-  await page.getByRole('button', { name: 'Save team' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Add team', exact: true }).click();
   await expect(page.getByText('Northview A', { exact: true })).toBeVisible();
   await expect(page.getByText('Riverside A', { exact: true })).toBeVisible();
 
@@ -344,19 +347,18 @@ test('Director supports keyboard search, inline edits, and audited result review
   await page.getByLabel('Team letter').fill('A');
   await expect(page.getByLabel('Display name')).toHaveValue('Northview High A');
   await page.getByLabel('Display name').fill('Northview A');
-  await page.getByText('More team details', { exact: true }).click();
-  await page.getByLabel('Team notes').fill('Late check-in requested.');
-  await page.getByRole('button', { name: 'Paste roster' }).click();
-  await page.getByLabel('Player names').fill('Alice Smith\nBob Jones\nCharlie Lee\nDana Patel');
-  await page.getByRole('button', { name: 'Use pasted roster' }).click();
-  await page.getByLabel('Player 1 captain').check();
-  await page.getByLabel('Player 1 roster number').fill('07');
-  await page.getByRole('button', { name: 'Save team' }).click();
+  const teamDialog = page.getByRole('dialog');
+  await teamDialog.getByLabel('Notes', { exact: true }).fill('Late check-in requested.');
+  await teamDialog.getByLabel('Paste player names').fill('Alice Smith\nBob Jones\nCharlie Lee\nDana Patel');
+  await teamDialog.getByRole('button', { name: 'Add pasted names' }).click();
+  await teamDialog.locator('.director-roster-entry-row').nth(5).getByLabel('Captain').check();
+  await teamDialog.locator('.director-roster-entry-row').nth(5).getByLabel('Roster number').fill('07');
+  await teamDialog.getByRole('button', { name: 'Add team', exact: true }).click();
   await expect(page.getByText('4 players', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Add team' }).click();
   await page.getByLabel('Display name').fill('Riverside A');
   await page.getByLabel('School / club').fill('Riverside High');
-  await page.getByRole('button', { name: 'Save team' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Add team', exact: true }).click();
 
   const search = page.getByPlaceholder('Search teams, rooms, games');
   await search.fill('Northview');
@@ -366,27 +368,29 @@ test('Director supports keyboard search, inline edits, and audited result review
   await expect(search).toHaveValue('');
   await expect(page.getByRole('heading', { level: 1, name: 'Teams' })).toBeVisible();
 
-  await page.getByRole('button', { name: 'Edit Northview A' }).click();
-  const teamEditor = page.locator('.director-table-edit-row');
+  const teamEditor = page.getByRole('dialog');
   await teamEditor.getByLabel('Display name').fill('Northview B');
   await teamEditor.getByLabel('Team letter').fill('B');
-  await teamEditor.getByLabel('Team notes').fill('Seeded from the registration desk.');
-  await teamEditor.getByRole('button', { name: 'Save team details' }).click();
-  await expect(
-    page.locator('tr').filter({ hasText: 'Northview B' }).first().getByText('Northview B', { exact: true }),
-  ).toBeVisible();
-  const northviewRow = page.locator('tr').filter({ hasText: 'Northview B' }).first();
-  await expect(northviewRow.getByText('Seeded from the registration desk.', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Edit Alice Smith' }).click();
-  const playerEditor = page.locator('.director-roster-player-edit');
+  await teamEditor.getByLabel('Notes', { exact: true }).fill('Seeded from the registration desk.');
+  const playerEditor = teamEditor.locator('.director-roster-entry-row').first();
+  await expect(playerEditor.getByLabel('Player 1 name')).toHaveValue('Alice Smith');
   await playerEditor.getByLabel('Roster number').fill('08');
-  await playerEditor.getByLabel('Notes').fill('Late arrival.');
-  await playerEditor.getByRole('button', { name: 'Save player' }).click();
-  await expect(page.locator('.director-team-editor')).toContainText('No. 08');
-  await expect(page.locator('.director-team-editor')).toContainText('Late arrival.');
-  await page.getByRole('button', { name: 'Remove Alice Smith from Northview B' }).click();
-  await expect(northviewRow).toContainText('3 active · 1 inactive');
-  await page.getByRole('button', { name: 'Restore Alice Smith to Northview B' }).click();
+  await playerEditor.getByLabel('Player notes').fill('Late arrival.');
+  await playerEditor.getByLabel('Active', { exact: true }).uncheck();
+  await teamEditor.getByRole('button', { name: 'Save changes' }).click();
+  const northviewRow = page.locator('tr').filter({ hasText: 'Northview B' }).first();
+  await expect(northviewRow).toContainText('3 players');
+  await search.fill('Northview B');
+  await search.press('ArrowDown');
+  await search.press('Enter');
+  await expect(teamEditor.getByLabel('Notes', { exact: true })).toHaveValue(
+    'Seeded from the registration desk.',
+  );
+  await expect(playerEditor.getByLabel('Roster number')).toHaveValue('08');
+  await expect(playerEditor.getByLabel('Player notes')).toHaveValue('Late arrival.');
+  await expect(playerEditor.getByLabel('Active', { exact: true })).not.toBeChecked();
+  await playerEditor.getByLabel('Active', { exact: true }).check();
+  await teamEditor.getByRole('button', { name: 'Save changes' }).click();
   await expect(northviewRow).toContainText('4 players');
 
   await goToSection(page, 'Format');
@@ -432,10 +436,10 @@ test('Director opens every indexed search entity at its exact operational target
   await page.getByLabel('Display name').fill('Northview A');
   await page.getByLabel('School / club').fill('Northview High');
   await page.getByLabel('Player 1 name').fill('Ada Lovelace');
-  await page.getByRole('button', { name: 'Save team' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Add team', exact: true }).click();
   await page.getByRole('button', { name: 'Add team' }).click();
   await page.getByLabel('Display name').fill('Riverside A');
-  await page.getByRole('button', { name: 'Save team' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Add team', exact: true }).click();
 
   const northviewRow = page.locator('tr').filter({ hasText: 'Northview A' }).first();
   await expect(northviewRow.getByText('1 player', { exact: true })).toBeVisible();
@@ -460,24 +464,13 @@ test('Director opens every indexed search entity at its exact operational target
   };
 
   await select('Northview A', 'Northview A');
-  const selectedTeam = page
-    .locator('tr[data-director-navigation-id]')
-    .filter({ hasText: 'Northview A' })
-    .first();
-  await expect(selectedTeam).toHaveClass(/is-navigation-target/);
-  await expect(selectedTeam.locator('[data-director-navigation-focus]')).toBeFocused();
-
+  const selectedTeam = page.getByRole('dialog');
+  await expect(selectedTeam.getByLabel('Display name')).toHaveValue('Northview A');
+  await selectedTeam.getByRole('button', { name: 'Cancel' }).click();
   await select('Ada Lovelace', 'Ada Lovelace');
-  const selectedPlayer = page
-    .locator('[data-director-navigation-id]')
-    .filter({ hasText: 'Ada Lovelace' })
-    .first();
-  await expect(selectedPlayer).toHaveClass(/is-navigation-target/);
-  await expect(selectedPlayer.locator('[data-director-navigation-focus]')).toBeFocused();
-  await expect(northviewRow.getByRole('button', { name: '1 player' })).toHaveAttribute(
-    'aria-expanded',
-    'true',
-  );
+  await expect(selectedTeam.getByLabel('Display name')).toHaveValue('Northview A');
+  await expect(selectedTeam.getByLabel('Player 1 name')).toHaveValue('Ada Lovelace');
+  await selectedTeam.getByRole('button', { name: 'Cancel' }).click();
 
   await select('Room 101', 'Room 101');
   const selectedRoom = page
@@ -606,7 +599,7 @@ test('Director configures a pool format before generating its first round', asyn
   for (const team of ['Northview A', 'Riverside A', 'Lakeside A', 'Hillcrest A']) {
     await page.getByRole('button', { name: 'Add team' }).click();
     await page.getByLabel('Display name').fill(team);
-    await page.getByRole('button', { name: 'Save team' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Add team', exact: true }).click();
   }
 
   await goToSection(page, 'Rooms & staff');
@@ -628,4 +621,85 @@ test('Director configures a pool format before generating its first round', asyn
   await page.getByRole('button', { name: 'Generate next round' }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'Tournament day' })).toBeVisible();
   await expect(page.getByText('Round 1', { exact: true })).toBeVisible();
+});
+
+test('ten-team release rehearsal: rounds, lunch, assignments, one-action start, recovery and reload', async ({
+  page,
+}, testInfo) => {
+  await createTournament(page);
+  await goToSection(page, 'Teams');
+  for (let number = 1; number <= 10; number++) {
+    await page.getByRole('button', { name: 'Add team', exact: true }).click();
+    const dialog = page.getByRole('dialog');
+    await dialog.getByLabel('Display name').fill(`Team ${number}`);
+    await dialog.getByRole('button', { name: 'Add team', exact: true }).click();
+  }
+  await goToSection(page, 'Format');
+  await page.getByRole('button', { name: 'Use this plan', exact: true }).click();
+  await expect(page.locator('.director-round')).toHaveCount(9);
+  await expect(page.getByRole('button', { name: /Put Round .* on USB/ })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Add event', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Lunch', exact: true }).click();
+  for (let move = 0; move < 4; move++) await page.getByRole('button', { name: 'Move Lunch earlier' }).click();
+  const dayOrder = () => page.locator('.director-day-sequence > li').allTextContents();
+  await page.screenshot({ path: testInfo.outputPath('morning-rounds.png'), fullPage: true });
+  await goToSection(page, 'Packets');
+  await page.getByRole('button', { name: 'Add packet' }).click();
+  await page.getByLabel('Packet name').fill('Morning packet');
+  await page.getByRole('button', { name: 'Save packet' }).click();
+  await goToSection(page, 'Rooms & staff');
+  await page.getByRole('button', { name: 'Add room' }).click();
+  await page.getByLabel('Room name').fill('USB room');
+  await page.getByRole('button', { name: 'Save room' }).click();
+  await goToSection(page, 'Rounds');
+  const first = page.locator('.director-round').first();
+  await first.getByRole('button', { name: 'Assign packet' }).click();
+  await first.getByLabel('Packet for Round 1').selectOption({ label: 'Morning packet' });
+  await expect(first).toContainText('Packet: Morning packet');
+  await first.getByRole('button', { name: 'Assign rooms' }).click();
+  await first.locator('select').first().selectOption({ label: 'USB room' });
+  await first.getByRole('button', { name: 'Save rooms' }).click();
+  await expect(first).toContainText('USB room');
+  await first.getByRole('button', { name: 'Start Round 1', exact: true }).click();
+  await expect(first).toContainText('5 results outstanding');
+  await expect(first.getByRole('button', { name: 'Finish Round 1' })).toHaveCount(0);
+  const ordered = await dayOrder();
+  expect(ordered).toHaveLength(10);
+  expect(ordered[4]).toContain('Round 5');
+  expect(ordered[5]).toContain('Lunch');
+  expect(ordered[6]).toContain('Round 6');
+  await first.getByRole('button', { name: '5 results outstanding · Open Results' }).click();
+  await expect(page.getByRole('combobox', { name: 'Round', exact: true })).not.toHaveValue('');
+  await expect(page.locator('[data-director-navigation-id]')).toHaveCount(5);
+  await goToSection(page, 'Settings');
+  const recovery = page.getByRole('region', { name: 'Recovery' });
+  await recovery.getByRole('button', { name: 'Create recovery point' }).click();
+  await expect(recovery.getByText('Manual recovery point')).toBeVisible();
+  await goToSection(page, 'Rounds');
+  const last = page.locator('.director-round').last();
+  await last.getByRole('button', { name: 'Details & recovery' }).click();
+  page.once('dialog', (dialog) => dialog.accept());
+  await last.getByRole('button', { name: /Remove round/i }).click();
+  await expect(page.locator('.director-round')).toHaveCount(8);
+  await goToSection(page, 'Settings');
+  page.once('dialog', async (dialog) => {
+    expect(dialog.message()).toContain('A recovery point of the current state will be created first.');
+    await dialog.accept();
+  });
+  await recovery
+    .locator('li')
+    .filter({ hasText: 'Manual recovery point' })
+    .getByRole('button', { name: 'Restore', exact: true })
+    .click();
+  await expect(recovery.getByText(/Before restoring checkpoint from/)).toBeVisible();
+  await page.reload();
+  await goToSection(page, 'Rounds');
+  await expect(page.locator('.director-round')).toHaveCount(9);
+  await expect(page.locator('.director-round').first()).toContainText('5 results outstanding');
+  const restored = await dayOrder();
+  expect(restored[5]).toContain('Lunch');
+  await page.screenshot({ path: testInfo.outputPath('restored-rounds.png'), fullPage: true });
+  await goToSection(page, 'Settings');
+  await expect(recovery.getByText('Manual recovery point')).toBeVisible();
+  await expect(recovery.getByText(/Before restoring checkpoint from/)).toBeVisible();
 });

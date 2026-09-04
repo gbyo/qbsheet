@@ -20,6 +20,9 @@ import { DirectorMenu } from '../components/DirectorMenu';
 import type { SectionId } from '../app/navigation';
 import type { DirectorNavigationTarget } from '../app/navigationTarget';
 import { useNavigationHighlight } from '../app/useNavigationHighlight';
+import { prepareOperation, type TransfersRuntime } from '../transfers/useTransfers';
+import { removeRoundFlexibly } from '../state/flexibleEditing';
+import { currentOperationalRound } from '../transfers/assignment';
 import { errorNotice, type AnnounceInput } from '../notices';
 
 /** One-click day events. Anything else uses the full event form. */
@@ -28,6 +31,7 @@ const quickEventTypes: TimelineEventType[] = ['lunch', 'break', 'check-in', 'awa
 type Navigate = (section: SectionId, target?: DirectorNavigationTarget | null) => void;
 
 export function RoundsView({
+  transfers,
   state,
   controller,
   onNavigate,
@@ -35,6 +39,7 @@ export function RoundsView({
   navigationTarget,
   onClearNavigationTarget,
 }: {
+  transfers?: TransfersRuntime;
   state: DirectorState;
   controller: DirectorController;
   onNavigate?: Navigate;
@@ -65,8 +70,7 @@ export function RoundsView({
     () => orderDayItems(state.rounds, state.timeline),
     [state.rounds, state.timeline],
   );
-  const activeRound =
-    state.rounds.find((entry) => entry.id === tournament?.currentRoundId) ?? latestRound(state.rounds);
+  const activeRound = currentOperationalRound(state) ?? latestRound(state.rounds);
   const activeGames = activeRound
     ? state.scheduledGames.filter((game) => game.roundId === activeRound.id && !game.bye)
     : [];
@@ -178,6 +182,7 @@ export function RoundsView({
             };
             return item.kind === 'round' && item.round ? (
               <RoundWorkspaceRow
+                transfers={transfers}
                 key={item.id}
                 state={state}
                 round={item.round}
@@ -227,11 +232,12 @@ export function RoundsView({
 /** Friendly operational wording; the storage state machine stays out of the normal path. */
 function friendlyRoundStatus(status: string, accepted: number, total: number): string {
   if (status === 'closed') return 'complete';
-  if (status === 'released') return total > 0 ? `${accepted} of ${total} results in` : 'active';
+  if (status === 'released') return `active · ${accepted} of ${total} results in`;
   return total > 0 ? `${total} game${total === 1 ? '' : 's'} · ready` : 'ready';
 }
 
 function RoundWorkspaceRow({
+  transfers,
   state,
   round,
   controller,
@@ -244,6 +250,7 @@ function RoundWorkspaceRow({
   onMoveUp,
   onMoveDown,
 }: {
+  transfers?: TransfersRuntime;
   state: DirectorState;
   round: DirectorState['rounds'][number];
   controller: DirectorController;
@@ -256,11 +263,28 @@ function RoundWorkspaceRow({
   onMoveUp: () => void;
   onMoveDown: () => void;
 }) {
+  const [assigningPacket, setAssigningPacket] = useState(false);
+  const [assigningRooms, setAssigningRooms] = useState(false);
+  const [roomDraft, setRoomDraft] = useState<Record<string, string | null>>({});
+  const [choosingDrive, setChoosingDrive] = useState(false);
+  const driveOpenerRef = useRef<HTMLElement | null>(null);
+  const drives = transfers?.native
+    ? state.transfers.locations.filter(
+        (location) => location.kind === 'removable-drive' && location.connected && !location.readOnly,
+      )
+    : [];
   const [starting, setStarting] = useState(false);
   const [finishing, setFinishing] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const games = state.scheduledGames.filter((game) => game.roundId === round.id && !game.bye);
+  const returned = state.submissions.filter(
+    (submission) =>
+      (submission.status === 'review' || submission.status === 'received') &&
+      state.games.some((game) => game.id === submission.gameId && game.roundId === round.id),
+  );
+  const openResults = () =>
+    onNavigate('results', { section: 'results', entityType: 'round', entityId: round.id });
   const accepted = games.filter((game) => game.status === 'accepted').length;
   const unresolved = games.filter((game) => game.status !== 'accepted' && game.status !== 'cancelled').length;
   const packetName = round.packetId
@@ -330,7 +354,7 @@ function RoundWorkspaceRow({
         </div>
         <p className="director-round-context">
           {[
-            packetName ? `Packet: ${packetName}` : null,
+            packetName ? `Packet: ${packetName}` : games.length > 0 ? 'No packet assigned' : null,
             roomIds.length > 0
               ? `${roomIds.length} room${roomIds.length === 1 ? '' : 's'}${roomNames.length > 0 ? ` · ${roomNames.slice(0, 3).join(', ')}${roomNames.length > 3 ? '…' : ''}` : ''}`
               : state.rooms.length > 0
@@ -343,8 +367,15 @@ function RoundWorkspaceRow({
         </p>
         {!isComplete && unresolved > 0 && isActive && (
           <p className="director-round-progress">
-            <button type="button" className="director-inline-action" onClick={() => onNavigate('results')}>
-              {unresolved} result{unresolved === 1 ? '' : 's'} still playing or awaiting review — open Results
+            <button type="button" className="director-inline-action" onClick={openResults}>
+              {unresolved} result{unresolved === 1 ? '' : 's'} outstanding · Open Results
+            </button>
+          </p>
+        )}
+        {returned.length > 0 && (
+          <p className="director-round-progress">
+            <button type="button" className="director-inline-action" onClick={openResults}>
+              {returned.length} result{returned.length === 1 ? '' : 's'} returned · Review
             </button>
           </p>
         )}
@@ -369,26 +400,88 @@ function RoundWorkspaceRow({
               {starting ? `Starting ${round.name}…` : `Start ${round.name}`}
             </Button>
           )}
-          {isActive && (
+          {isActive && unresolved === 0 && games.length > 0 && (
             <Button variant="primary" icon="chevron" disabled={finishing} onClick={finish}>
               {finishing ? `Finishing ${round.name}…` : `Finish ${round.name}`}
             </Button>
           )}
-          {packetName == null && !isComplete && (
-            <Button variant="quiet" onClick={() => onNavigate('packets')}>
+          {packetName == null && !isComplete && !isActive && (
+            <Button
+              variant="quiet"
+              onClick={() =>
+                state.packets.some((packet) => !packet.retired)
+                  ? setAssigningPacket((value) => !value)
+                  : onNavigate('packets')
+              }
+            >
               Assign packet
             </Button>
           )}
-          {roomIds.length === 0 && !isComplete && state.rooms.length > 0 && (
-            <Button variant="quiet" onClick={() => onNavigate('rooms')}>
-              Assign rooms
-            </Button>
-          )}
+          {games.some((game) => game.roomId === null) &&
+            !isComplete &&
+            !isActive &&
+            state.rooms.length > 0 && (
+              <Button
+                variant="quiet"
+                onClick={() => {
+                  setRoomDraft(Object.fromEntries(games.map((game) => [game.id, game.roomId])));
+                  setAssigningRooms((value) => !value);
+                }}
+              >
+                Assign rooms
+              </Button>
+            )}
           {isActive && (
-            <Button variant="quiet" onClick={() => onNavigate('results')}>
+            <Button variant="quiet" onClick={openResults}>
               Open results
             </Button>
           )}
+          {!isComplete &&
+            games.some((game) => game.status !== 'cancelled') &&
+            drives.length > 0 &&
+            transfers && (
+              <span
+                ref={(node) => {
+                  driveOpenerRef.current = node;
+                }}
+              >
+                <Button
+                  variant="secondary"
+                  disabled={drives.every((drive) => transfers.isOperationActive(prepareOperation(drive.id)))}
+                  aria-haspopup={drives.length > 1 ? 'menu' : undefined}
+                  aria-expanded={drives.length > 1 ? choosingDrive : undefined}
+                  onClick={() => {
+                    if (drives.length === 1)
+                      void transfers.prepareTo(drives[0].id, { kind: 'round', roundId: round.id });
+                    else setChoosingDrive((value) => !value);
+                  }}
+                >
+                  Put {round.name} on USB
+                </Button>
+                {choosingDrive && (
+                  <DirectorMenu
+                    label={`USB for ${round.name}`}
+                    openerRef={driveOpenerRef}
+                    onClose={() => setChoosingDrive(false)}
+                  >
+                    {drives.map((drive) => (
+                      <button
+                        key={drive.id}
+                        type="button"
+                        role="menuitem"
+                        disabled={transfers.isOperationActive(prepareOperation(drive.id))}
+                        onClick={() => {
+                          setChoosingDrive(false);
+                          void transfers.prepareTo(drive.id, { kind: 'round', roundId: round.id });
+                        }}
+                      >
+                        {drive.label}
+                      </button>
+                    ))}
+                  </DirectorMenu>
+                )}
+              </span>
+            )}
           <DayMoveButtons
             label={round.name}
             position={position}
@@ -396,18 +489,88 @@ function RoundWorkspaceRow({
             onMoveUp={onMoveUp}
             onMoveDown={onMoveDown}
           />
-          {!isComplete && (
+          {
             <button
               type="button"
               className="director-inline-action"
               aria-expanded={showAdvanced}
               onClick={() => setShowAdvanced((open) => !open)}
             >
-              {showAdvanced ? 'Hide details' : 'Details & recovery'}
+              {showAdvanced ? 'Hide details' : isComplete ? 'Details' : 'Details & recovery'}
             </button>
-          )}
+          }
         </div>
-        {showAdvanced && !isComplete && (
+        {assigningPacket && !isActive && !isComplete && (
+          <FormField label={`Packet for ${round.name}`}>
+            <select
+              value={round.packetId ?? ''}
+              onChange={(event) => {
+                void controller.setRoundPacket(round.id, event.target.value || null).then((saved) => {
+                  if (saved) {
+                    setAssigningPacket(false);
+                    onAnnounce(`Packet assigned to ${round.name}.`);
+                  } else onAnnounce(errorNotice('The packet could not be assigned.'));
+                });
+              }}
+            >
+              <option value="">Choose packet</option>
+              {state.packets
+                .filter((packet) => !packet.retired)
+                .map((packet) => (
+                  <option key={packet.id} value={packet.id}>
+                    {packet.name}
+                  </option>
+                ))}
+            </select>
+          </FormField>
+        )}
+        {assigningRooms && !isActive && !isComplete && (
+          <div className="director-round-advanced">
+            {games
+              .filter((game) => game.status !== 'cancelled')
+              .map((game) => (
+                <FormField
+                  key={game.id}
+                  label={`${state.teams.find((team) => team.id === game.leftTeamId)?.displayName} vs ${state.teams.find((team) => team.id === game.rightTeamId)?.displayName}`}
+                >
+                  <select
+                    value={roomDraft[game.id] ?? ''}
+                    onChange={(event) =>
+                      setRoomDraft((draft) => ({ ...draft, [game.id]: event.target.value || null }))
+                    }
+                  >
+                    <option value="">No room</option>
+                    {state.rooms
+                      .filter((room) => room.available && room.status === 'available')
+                      .map((room) => (
+                        <option key={room.id} value={room.id}>
+                          {room.name}
+                        </option>
+                      ))}
+                  </select>
+                </FormField>
+              ))}
+            <Button
+              onClick={() => {
+                void controller.assignRoundRooms(round.id, roomDraft).then((saved) => {
+                  if (saved) {
+                    setAssigningRooms(false);
+                    onAnnounce(`Rooms assigned to ${round.name}.`);
+                  } else
+                    onAnnounce(
+                      errorNotice('Rooms could not be assigned; choose available rooms without duplicates.'),
+                    );
+                });
+              }}
+            >
+              Save rooms
+            </Button>
+            <Button variant="quiet" onClick={() => setAssigningRooms(false)}>
+              Cancel
+            </Button>
+          </div>
+        )}
+        {showAdvanced && (
           <RoundAdvancedDetails
             state={state}
             roundId={round.id}
@@ -505,6 +668,21 @@ function RoundAdvancedDetails({
             Close
           </Button>
         )}
+        <Button
+          variant="danger"
+          onClick={async () => {
+            if (!confirm(`Remove ${round.name} and its games? A recovery point will be created first.`))
+              return;
+            const removed = await removeRoundFlexibly(controller, round.id);
+            onAnnounce(
+              removed
+                ? `${round.name} removed. Restore it from Settings → Recovery if needed.`
+                : errorNotice('The round was not removed; review the Director error.'),
+            );
+          }}
+        >
+          Remove round
+        </Button>
         <Button variant="quiet" icon="upload" onClick={() => onNavigate('transfers')}>
           Assignment files
         </Button>

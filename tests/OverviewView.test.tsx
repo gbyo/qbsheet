@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, test, vi } from 'vitest';
 import { defaultRules, emptyDirectorState, type DirectorState } from '../src/director/domain';
+import { directorFixture } from '../src/director/transfers/testFixtures';
 import { OverviewView } from '../src/director/overview/OverviewView';
 import type { DirectorController } from '../src/director/state/useDirectorController';
 
@@ -194,8 +195,8 @@ describe('OverviewView attention-first layout', () => {
     expect(screen.getByText('Round 1')).toBeTruthy();
     expect(screen.getByText(/4 of 5 results accepted/)).toBeTruthy();
     expect(screen.getByText(/1 still playing/)).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Open control' }));
-    expect(onNavigate).toHaveBeenCalledWith('tournament');
+    fireEvent.click(screen.getByRole('button', { name: 'Open Rounds' }));
+    expect(onNavigate).toHaveBeenCalledWith('schedule');
 
     expect(screen.getByText('Current leaders')).toBeTruthy();
     expect(screen.getByText('View standings')).toBeTruthy();
@@ -287,4 +288,58 @@ describe('OverviewView attention-first layout', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Finish Round 1' }));
     expect(onAnnounce).toHaveBeenCalledWith('Round 1 finished.');
   });
+});
+
+test('Overview distinguishes live, unresolved, accepted and cancelled games', () => {
+  const state = directorFixture();
+  const round = state.rounds[0];
+  round.status = 'released';
+  state.tournament!.currentRoundId = round.id;
+  const template = state.scheduledGames[0];
+  state.scheduledGames = (['live', 'scheduled', 'submitted', 'accepted', 'cancelled'] as const).map(
+    (status, index) => ({ ...template, id: `count-${index}`, roundId: round.id, status }),
+  );
+  renderOverview(state);
+  expect(screen.getByText('1 of 5 results accepted · 1 still playing')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: `Finish ${round.name}` })).toBeNull();
+});
+
+test('Overview overflow counts every remaining attention item and help records are not doubled', () => {
+  const state = directorFixture();
+  state.qbtcpHelpRequests = Array.from({ length: 8 }, (_, index) => ({
+    id: `help-${index}`,
+    roomId: `room-${index}`,
+    roomName: `Room ${index}`,
+    deviceId: `device-${index}`,
+    category: 'other' as const,
+    message: 'Assistance',
+    status: 'open' as const,
+    createdAt: '2026-09-05T11:00:00Z',
+    updatedAt: '2026-09-05T11:00:00Z',
+  }));
+  state.qbtcpSessions = [
+    {
+      roomId: 'room-0',
+      sessionId: 'session-0',
+      matchId: undefined,
+      deviceId: 'device-0',
+      operatorName: '',
+      state: 'live',
+      resumable: true,
+      resultReceived: false,
+      progressSequence: 0,
+      lastSeenAt: '',
+      progress: null,
+      helpRequestId: 'help-0',
+    },
+  ];
+  const { onNavigate } = renderOverview(state);
+  const overflow = screen.getByRole('button', { name: /more checks/ });
+  const count = Number(overflow.textContent!.match(/\d+/)![0]);
+  fireEvent.click(overflow);
+  const attention = screen.getByRole('heading', { name: 'Needs attention' }).parentElement!;
+  expect(attention.querySelectorAll('li')).toHaveLength(5 + count + 1);
+  expect(screen.getAllByText('Room 0 requested help.')).toHaveLength(1);
+  fireEvent.click(screen.getByRole('button', { name: 'Room 7 requested help.' }));
+  expect(onNavigate).toHaveBeenLastCalledWith('rooms');
 });

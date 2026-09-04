@@ -9,7 +9,7 @@ use serde::Serialize;
 use serde_json::{json, Map, Value};
 use thiserror::Error;
 
-const SCHEMA_VERSION: i64 = 7;
+const SCHEMA_VERSION: i64 = 8;
 const MAX_STATE_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Debug, Error)]
@@ -28,6 +28,8 @@ pub enum StoreError {
     Poisoned,
     #[error("Director state must be a JSON object")]
     InvalidStateShape,
+    #[error("Recovery point is missing, incompatible, or belongs to a different tournament")]
+    InvalidCheckpoint,
     #[error("Director state is too large")]
     StateTooLarge,
     #[error("Director state could not be serialized: {0}")]
@@ -61,6 +63,16 @@ pub struct TournamentCatalogEntry {
     pub status: String,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DirectorCheckpoint {
+    pub id: String,
+    pub tournament_id: String,
+    pub created_at: String,
+    pub reason: String,
+    pub schema_version: i64,
 }
 
 #[derive(Clone)]
@@ -108,7 +120,11 @@ impl DirectorStore {
 
     pub fn checkpoint(&self, reason: &str) -> Result<StoreStatus, StoreError> {
         let connection = self.connection.lock().map_err(|_| StoreError::Poisoned)?;
-        let checkpoint_id = format!("checkpoint-{}-{}", unix_timestamp_ms(), std::process::id());
+        let checkpoint_id = format!(
+            "checkpoint-{}-{}",
+            unix_timestamp_ms(),
+            CHECKPOINT_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        );
         connection.execute(
             "INSERT INTO audit_events (id, entity_type, entity_id, action, payload_json)
              VALUES (?1, 'application', 'director', 'checkpoint', ?2)",
@@ -198,7 +214,9 @@ impl DirectorStore {
         let mut statement = connection.prepare(
             "SELECT id, tournament_id, session_id, room_id, match_id, fingerprint,
                     raw_payload, qbj_json, received_at, review_required, warnings_json, conflict_with
-             FROM qbtcp_results WHERE tournament_id = ?1 ORDER BY received_at, id",
+             FROM qbtcp_results WHERE tournament_id = ?1
+             AND NOT EXISTS (SELECT 1 FROM qbtcp_recovery_exclusions x WHERE x.tournament_id = qbtcp_results.tournament_id AND x.result_id = qbtcp_results.id)
+             ORDER BY received_at, id",
         )?;
         let rows = statement.query_map(params![tournament_id], |row| {
             let qbj_json: String = row.get(7)?;
@@ -310,7 +328,7 @@ impl DirectorStore {
         Ok(crate::live::read_publication(&connection)?)
     }
 
-    /// Save state and record the operation checkpoint atomically before flushing the WAL.
+    /// Persist a historical document snapshot and the active document atomically.
     pub fn checkpoint_state(&self, state: &Value, reason: &str) -> Result<StoreStatus, StoreError> {
         let state_json = encode_state(state)?;
         let connection = self.connection.lock().map_err(|_| StoreError::Poisoned)?;
@@ -321,7 +339,12 @@ impl DirectorStore {
         if let Some(tournament_id) = tournament_id_from_state(state) {
             set_current_tournament_id(&transaction, &tournament_id)?;
         }
-        let checkpoint_id = format!("checkpoint-{}-{}", unix_timestamp_ms(), std::process::id());
+        insert_checkpoint(&transaction, state, reason)?;
+        let checkpoint_id = format!(
+            "checkpoint-{}-{}",
+            unix_timestamp_ms(),
+            CHECKPOINT_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        );
         transaction.execute(
             "INSERT INTO audit_events (id, entity_type, entity_id, action, payload_json)
              VALUES (?1, 'application', 'director', 'checkpoint', ?2)",
@@ -334,6 +357,131 @@ impl DirectorStore {
         connection.execute_batch("PRAGMA wal_checkpoint(PASSIVE);")?;
         status_for(&connection, &self.database_path)
     }
+    pub fn list_checkpoints(
+        &self,
+        tournament_id: &str,
+    ) -> Result<Vec<DirectorCheckpoint>, StoreError> {
+        let connection = self.connection.lock().map_err(|_| StoreError::Poisoned)?;
+        let mut statement = connection.prepare(
+            "SELECT id, tournament_id, created_at, reason, schema_version FROM director_checkpoints
+             WHERE tournament_id = ?1 ORDER BY rowid DESC",
+        )?;
+        let rows = statement.query_map(params![tournament_id], |row| {
+            Ok(DirectorCheckpoint {
+                id: row.get(0)?,
+                tournament_id: row.get(1)?,
+                created_at: row.get(2)?,
+                reason: row.get(3)?,
+                schema_version: row.get(4)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StoreError::from)
+    }
+
+    pub fn read_checkpoint(
+        &self,
+        tournament_id: &str,
+        checkpoint_id: &str,
+    ) -> Result<Value, StoreError> {
+        let connection = self.connection.lock().map_err(|_| StoreError::Poisoned)?;
+        read_checkpoint(&connection, tournament_id, checkpoint_id).map(|(state, _)| state)
+    }
+
+    /// The recovery point of current state and restored document commit together. Normalized
+    /// tables are rebuilt through the same path as ordinary saves, never independently patched.
+    pub fn restore_checkpoint(
+        &self,
+        current: &Value,
+        checkpoint_id: &str,
+        restored: &Value,
+    ) -> Result<Value, StoreError> {
+        let tournament_id =
+            tournament_id_from_state(current).ok_or(StoreError::InvalidCheckpoint)?;
+        let state_json = encode_state(restored)?;
+        let connection = self.connection.lock().map_err(|_| StoreError::Poisoned)?;
+        let transaction = connection.unchecked_transaction()?;
+        let (snapshot, created_at) = read_checkpoint(&transaction, &tournament_id, checkpoint_id)?;
+        // Frontend validation may migrate older documents, but may never restore another event
+        // or an unsupported future version. For current-version snapshots require exact identity.
+        if tournament_id_from_state(restored).as_deref() != Some(tournament_id.as_str())
+            || snapshot.get("schemaVersion").and_then(Value::as_i64)
+                > restored.get("schemaVersion").and_then(Value::as_i64)
+            || (snapshot.get("schemaVersion") == restored.get("schemaVersion")
+                && snapshot != *restored)
+        {
+            return Err(StoreError::InvalidCheckpoint);
+        }
+        insert_checkpoint(
+            &transaction,
+            current,
+            &format!("Before restoring checkpoint from {created_at}"),
+        )?;
+        // Retain raw received packets, but do not replay post-checkpoint results into a
+        // restored tournament on the next QBTCP poll or app restart.
+        transaction.execute(
+            "DELETE FROM qbtcp_recovery_exclusions WHERE tournament_id = ?1",
+            params![tournament_id],
+        )?;
+        transaction.execute(
+            "INSERT INTO qbtcp_recovery_exclusions(tournament_id, result_id)
+             SELECT tournament_id, id FROM qbtcp_results WHERE tournament_id = ?1
+             AND id NOT IN (SELECT value FROM json_each(
+               (SELECT native_result_ids_json FROM director_checkpoints WHERE id = ?2)))",
+            params![tournament_id, checkpoint_id],
+        )?;
+
+        upsert_state(&transaction, &state_json)?;
+        sync_normalized_state(&transaction, restored)?;
+        upsert_tournament_document(&transaction, restored, &state_json)?;
+        set_current_tournament_id(&transaction, &tournament_id)?;
+        transaction.commit()?;
+        Ok(restored.clone())
+    }
+}
+
+static CHECKPOINT_SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn insert_checkpoint(
+    connection: &Connection,
+    state: &Value,
+    reason: &str,
+) -> Result<(), StoreError> {
+    let tournament_id = tournament_id_from_state(state).ok_or(StoreError::InvalidCheckpoint)?;
+    let state_json = encode_state(state)?;
+    let schema_version = state
+        .get("schemaVersion")
+        .and_then(Value::as_i64)
+        .ok_or(StoreError::InvalidCheckpoint)?;
+    connection.execute(
+        "INSERT INTO director_checkpoints (id, tournament_id, reason, state_json, schema_version, storage_version, native_result_ids_json)
+         VALUES (lower(hex(randomblob(16))), ?1, ?2, ?3, ?4, ?5,
+           (SELECT json_group_array(id) FROM qbtcp_results WHERE tournament_id = ?1 AND NOT EXISTS
+             (SELECT 1 FROM qbtcp_recovery_exclusions x WHERE x.tournament_id = ?1 AND x.result_id = qbtcp_results.id)))",
+        params![tournament_id, reason, state_json, schema_version, SCHEMA_VERSION],
+    )?;
+    Ok(())
+}
+
+fn read_checkpoint(
+    connection: &Connection,
+    tournament_id: &str,
+    checkpoint_id: &str,
+) -> Result<(Value, String), StoreError> {
+    let row: Option<(String, String, i64, i64)> = connection.query_row(
+        "SELECT state_json, created_at, schema_version, storage_version FROM director_checkpoints
+         WHERE id = ?1 AND tournament_id = ?2", params![checkpoint_id, tournament_id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+    ).optional()?;
+    let (text, at, schema_version, storage_version) = row.ok_or(StoreError::InvalidCheckpoint)?;
+    let state: Value = serde_json::from_str(&text).map_err(StoreError::DecodeState)?;
+    if state.get("schemaVersion").and_then(Value::as_i64) != Some(schema_version)
+        || storage_version > SCHEMA_VERSION
+        || tournament_id_from_state(&state).as_deref() != Some(tournament_id)
+    {
+        return Err(StoreError::InvalidCheckpoint);
+    }
+    Ok((state, at))
 }
 
 fn encode_state(state: &Value) -> Result<String, StoreError> {
@@ -1763,6 +1911,24 @@ fn migrate(connection: &mut Connection) -> Result<(), StoreError> {
         )?;
     }
 
+    if current < 8 {
+        transaction.execute_batch(
+            "CREATE TABLE director_checkpoints (
+                id TEXT PRIMARY KEY,
+                tournament_id TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                reason TEXT NOT NULL,
+                state_json TEXT NOT NULL,
+                schema_version INTEGER NOT NULL,
+                native_result_ids_json TEXT NOT NULL DEFAULT '[]',
+                storage_version INTEGER NOT NULL
+            );
+            CREATE INDEX director_checkpoints_tournament ON director_checkpoints(tournament_id);
+            CREATE TABLE qbtcp_recovery_exclusions (tournament_id TEXT NOT NULL, result_id TEXT NOT NULL, PRIMARY KEY(tournament_id, result_id));
+            INSERT INTO schema_migrations(version) VALUES (8);"
+        )?;
+    }
+
     transaction.commit()?;
     Ok(())
 }
@@ -1884,6 +2050,84 @@ mod tests {
     }
 
     #[test]
+    fn recovery_points_restore_exact_documents_survive_restart_and_are_scoped() {
+        let path = temporary_database_path("real-recovery");
+        let before = json!({"schemaVersion": 7, "tournament": {"id": "event-a", "name": "Saturday"},
+            "teams": [{"id": "team-1", "displayName": "Original"}], "rounds": [],
+            "submissions": [{"id": "submission-1", "gameId": "game-1", "status": "review", "rawSubmission": {"score": 100}}],
+            "transfers": {"version": 1, "locations": [], "artifacts": [], "assignments": [], "events": []}});
+        let store = DirectorStore::open(path.clone()).unwrap();
+        store.checkpoint_state(&before, "Morning setup").unwrap();
+        let point = store.list_checkpoints("event-a").unwrap().remove(0);
+        let mut changed = before.clone();
+        changed["teams"][0]["displayName"] = json!("Mistake");
+        store.save_state(&changed).unwrap();
+        let mut other = before.clone();
+        other["tournament"]["id"] = json!("event-b");
+        store.checkpoint_state(&other, "Other event").unwrap();
+        assert!(store
+            .restore_checkpoint(&other, &point.id, &before)
+            .is_err());
+        assert_eq!(store.list_checkpoints("event-b").unwrap().len(), 1);
+        store.save_state(&changed).unwrap();
+        drop(store);
+        let store = DirectorStore::open(path.clone()).unwrap();
+        assert_eq!(store.read_checkpoint("event-a", &point.id).unwrap(), before);
+        assert_eq!(
+            store
+                .restore_checkpoint(&changed, &point.id, &before)
+                .unwrap(),
+            before
+        );
+        assert_eq!(store.load_state().unwrap(), Some(before.clone()));
+        let points = store.list_checkpoints("event-a").unwrap();
+        assert_eq!(points.len(), 2);
+        assert!(points[0]
+            .reason
+            .starts_with("Before restoring checkpoint from"));
+        assert_eq!(
+            store.read_checkpoint("event-a", &points[0].id).unwrap(),
+            changed
+        );
+        let connection = store.connection.lock().unwrap();
+        let name: String = connection
+            .query_row(
+                "SELECT display_name FROM teams WHERE id = 'team-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(name, "Original");
+        drop(connection);
+        drop(store);
+        let store = DirectorStore::open(path.clone()).unwrap();
+        assert_eq!(store.load_state().unwrap(), Some(before));
+        assert_eq!(store.list_checkpoints("event-a").unwrap().len(), 2);
+        drop(store);
+        cleanup(&path);
+    }
+
+    #[test]
+    fn v7_upgrade_adds_recovery_storage_without_inventing_historical_snapshots() {
+        let path = temporary_database_path("recovery-migration");
+        let store = DirectorStore::open(path.clone()).unwrap();
+        let document =
+            json!({"schemaVersion": 7, "tournament": {"id": "event", "name": "Existing"}});
+        store.save_state(&document).unwrap();
+        store.connection.lock().unwrap().execute_batch("DROP TABLE director_checkpoints; DROP TABLE qbtcp_recovery_exclusions; DELETE FROM schema_migrations WHERE version = 8;").unwrap();
+        drop(store);
+        let store = DirectorStore::open(path.clone()).unwrap();
+        assert_eq!(store.load_state().unwrap(), Some(document.clone()));
+        assert!(store.list_checkpoints("event").unwrap().is_empty());
+        store
+            .checkpoint_state(&document, "First real recovery point")
+            .unwrap();
+        assert_eq!(store.list_checkpoints("event").unwrap().len(), 1);
+        drop(store);
+        cleanup(&path);
+    }
+
+    #[test]
     fn state_round_trip_is_transactional_and_reopens() {
         let path = temporary_database_path("state");
         let store = DirectorStore::open(path.clone()).expect("database opens");
@@ -1990,7 +2234,9 @@ mod tests {
             connection
                 .execute_batch(
                     "
-                    DELETE FROM schema_migrations WHERE version IN (6, 7);
+                    DELETE FROM schema_migrations WHERE version >= 6;
+                    DROP TABLE IF EXISTS director_checkpoints;
+                    DROP TABLE IF EXISTS qbtcp_recovery_exclusions;
                     DROP INDEX IF EXISTS tournament_documents_recent_idx;
                     DROP TABLE IF EXISTS tournament_documents;
                     ALTER TABLE tournaments DROP COLUMN date;
@@ -2148,6 +2394,35 @@ mod tests {
         assert_eq!(results[0].warnings, vec!["late-after-abandon".to_owned()]);
         assert_eq!(results[0].conflict_with.as_deref(), Some("result-0"));
 
+        // A pending raw native submission belongs to a checkpoint even before the frontend
+        // imports it. Later submissions survive physically, but cannot leak into an old restore.
+        let state =
+            json!({"schemaVersion": 2, "tournament": {"id": "tournament-1", "name": "Test"}});
+        store
+            .checkpoint_state(&state, "One pending native result")
+            .unwrap();
+        let point = store.list_checkpoints("tournament-1").unwrap().remove(0);
+        let mut later = disposition.clone();
+        later.result_id = "result-2".to_owned();
+        store
+            .save_qbtcp_result("tournament-1", &later, &submission)
+            .unwrap();
+        store.restore_checkpoint(&state, &point.id, &state).unwrap();
+        assert_eq!(store.load_qbtcp_results("tournament-1").unwrap().len(), 1);
+        let undo = store
+            .list_checkpoints("tournament-1")
+            .unwrap()
+            .into_iter()
+            .find(|entry| entry.id != point.id)
+            .unwrap();
+        drop(store);
+        let store = DirectorStore::open(path.clone()).unwrap();
+        assert_eq!(
+            store.load_qbtcp_results("tournament-1").unwrap()[0].id,
+            "result-1"
+        );
+        store.restore_checkpoint(&state, &undo.id, &state).unwrap();
+        assert_eq!(store.load_qbtcp_results("tournament-1").unwrap().len(), 2);
         drop(store);
         cleanup(&path);
     }

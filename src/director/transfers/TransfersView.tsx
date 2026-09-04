@@ -28,21 +28,21 @@ import { currentOperationalRound, type AssignmentSelection } from './assignment'
 import { describeWarning } from './ingest';
 import { transportLabel, type IncomingArtifact, type TransferLocation } from './model';
 import { planAssignments } from './prepare';
-import { prepareOperation, scanOperation, useTransfers } from './useTransfers';
+import { prepareOperation, scanOperation, type TransfersRuntime } from './useTransfers';
 import type { AnnounceInput } from '../notices';
 
 export function TransfersView({
+  transfers,
   state,
   controller,
   onNavigate,
-  onAnnounce,
 }: {
+  transfers: TransfersRuntime;
   state: DirectorState;
   controller: DirectorController;
   onNavigate: (section: SectionId) => void;
   onAnnounce: (announcement: AnnounceInput) => void;
 }) {
-  const transfers = useTransfers(state, controller, onAnnounce);
   const [dropActive, setDropActive] = useState(false);
   const [selectionKind, setSelectionKind] = useState<'current-round' | 'released' | 'unconnected-rooms'>(
     'current-round',

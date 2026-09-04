@@ -285,41 +285,93 @@ export function SettingsView({
                     </dd>
                   </div>
                   <div>
-                    <dt>Last checkpoint</dt>
-                    <dd>
-                      {state.metadata.lastCheckpointAt
-                        ? new Date(state.metadata.lastCheckpointAt).toLocaleString()
-                        : 'Not yet'}
-                    </dd>
-                  </div>
-                  <div>
                     <dt>Schema</dt>
                     <dd>Director v{state.schemaVersion}</dd>
                   </div>
                 </dl>
                 {controller.error && <p className="director-error-copy">{controller.error}</p>}
               </PanelBody>
-              <PanelFooter>
-                <Button
-                  variant="secondary"
-                  icon="clipboard"
-                  onClick={() => {
-                    void controller
-                      .checkpoint('manual settings checkpoint')
-                      .then(() => onAnnounce('Checkpoint created.'))
-                      .catch((reason: unknown) =>
-                        onAnnounce(
-                          reason instanceof Error ? reason.message : 'Checkpoint could not be saved.',
-                        ),
-                      );
-                  }}
-                >
-                  Create checkpoint
-                </Button>
-              </PanelFooter>
             </section>
           </div>
         </div>
+        <section className="director-panel" aria-label="Recovery">
+          <div className="director-panel-heading">
+            <div>
+              <h2>Recovery</h2>
+              <p className="director-muted">
+                Latest recovery point:{' '}
+                {controller.checkpoints?.[0]
+                  ? new Date(controller.checkpoints[0].createdAt).toLocaleString()
+                  : 'None yet'}
+              </p>
+            </div>
+            <Button
+              disabled={!state.tournament || controller.recovering}
+              onClick={() => {
+                void controller
+                  .checkpoint('Manual recovery point')
+                  .then(() => onAnnounce('Recovery point created.'))
+                  .catch((reason: unknown) =>
+                    onAnnounce(
+                      reason instanceof Error ? reason.message : 'Recovery point could not be saved.',
+                    ),
+                  );
+              }}
+            >
+              Create recovery point
+            </Button>
+          </div>
+          <PanelBody>
+            <p>
+              Recovery points preserve this tournament, including rounds, results, and transfer history.
+              Restoring replaces the open tournament. Operator settings and credentials stay unchanged.
+            </p>
+            <p className="director-muted">
+              {controller.repositoryKind === 'tauri-sqlite'
+                ? 'Stored in the local SQLite database. Keep a portable archive separately for loss of the computer or disk.'
+                : controller.repositoryKind === 'memory'
+                  ? 'Memory only: recovery points disappear when this session ends.'
+                  : 'Stored in this browser profile. Clearing browser data removes both the tournament and its recovery points.'}
+            </p>
+            {(controller.checkpoints ?? []).length === 0 ? (
+              <p>No recovery points yet.</p>
+            ) : (
+              <ul className="director-list">
+                {(controller.checkpoints ?? []).slice(0, 10).map((entry) => (
+                  <li key={entry.id}>
+                    <span>
+                      <strong>{entry.reason}</strong>
+                      <br />
+                      <time dateTime={entry.createdAt}>{new Date(entry.createdAt).toLocaleString()}</time>
+                    </span>
+                    <Button
+                      disabled={controller.recovering}
+                      onClick={() => {
+                        if (
+                          !confirm(
+                            `Restore tournament to the checkpoint from ${new Date(entry.createdAt).toLocaleString()}? A recovery point of the current state will be created first.`,
+                          )
+                        )
+                          return;
+                        void controller
+                          .restoreCheckpoint(entry.id)
+                          .then((restored) =>
+                            onAnnounce(
+                              restored
+                                ? 'Tournament restored. The previous state is also available in Recovery.'
+                                : 'The tournament could not be restored; review the Director error.',
+                            ),
+                          );
+                      }}
+                    >
+                      Restore
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </PanelBody>
+        </section>
         <section className="director-panel">
           <div className="director-panel-heading">
             <div>
@@ -384,7 +436,7 @@ export function SettingsView({
             </div>
             <PanelBody>
               <p>
-                Director checkpoints the active tournament locally. Browser preview uses IndexedDB; the
+                Director stores tournament recovery points locally. Browser preview uses browser storage; the
                 desktop app uses SQLite. Portable archives contain tournament data only, not the operator
                 profile or Live credential.
               </p>

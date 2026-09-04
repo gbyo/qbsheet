@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import BrandLogo from '../../BrandLogo';
 import { Button, EmptyState, PanelBody, PanelFooter } from '../components/Controls';
 import { Icon } from '../components/Icon';
@@ -11,6 +11,7 @@ import { RoundsView } from '../schedule/RoundsView';
 import { RoomsView } from '../rooms/RoomsView';
 import { PacketsView } from '../packets/PacketsView';
 import { ResultsView } from '../results/ResultsView';
+import { useTransfers } from '../transfers/useTransfers';
 import { TransfersView } from '../transfers/TransfersView';
 import { StandingsView } from '../standings/StandingsView';
 import { PublishView } from '../publish/PublishView';
@@ -23,6 +24,7 @@ import {
   importYellowFruitText,
 } from '../format/interchange';
 import { latestRound } from '../domain';
+import { currentOperationalRound } from '../transfers/assignment';
 import { isNativeDirector, openNativeTournamentFile, type NativeServerStatus } from '../platform/native';
 import { useNativeServerStatus } from '../server/useNativeServerStatus';
 import { DirectorToast } from '../components/DirectorToast';
@@ -47,7 +49,11 @@ export default function DirectorApp() {
   const [search, setSearch] = useState('');
   const [searchActiveIndex, setSearchActiveIndex] = useState(-1);
   const [announcement, setAnnouncement] = useState<DirectorNotice | null>(null);
-  const announce = (input: AnnounceInput) => setAnnouncement(toDirectorNotice(input));
+  const announce = useCallback(
+    (input: AnnounceInput) => setAnnouncement(toDirectorNotice(input)),
+    [setAnnouncement],
+  );
+  const transfers = useTransfers(state, controller, announce, !loading && !controller.recovering);
   // The one shared native QBTCP snapshot: sidebar, Overview preflight, and Rooms
   // all read this same state, and Rooms writes through to it. Polling depends on
   // the tournament lifecycle identity (presence + id), not the whole immutable tournament
@@ -100,6 +106,12 @@ export default function DirectorApp() {
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
   }, [activeSection]);
 
+  if (controller.recovering)
+    return (
+      <div className="director-loading" role="status">
+        Saving tournament recovery…
+      </div>
+    );
   if (loading) return <div className="director-loading">Opening local tournament storage…</div>;
   if (!state.tournament)
     return (
@@ -134,11 +146,7 @@ export default function DirectorApp() {
     setOpenMenu(null);
     setActiveSection(canonicalSection(section));
     setAnnouncement(null);
-    if (target)
-      setNavigationTarget({
-        ...target,
-        section: canonicalSection(target.section),
-      });
+    setNavigationTarget(target ? { ...target, section: canonicalSection(target.section) } : null);
   };
   const selectSearchResult = (result: SearchResult) => {
     const target: DirectorNavigationTarget = {
@@ -223,6 +231,7 @@ export default function DirectorApp() {
       case 'tournament':
         return (
           <RoundsView
+            transfers={transfers}
             state={controller.state}
             controller={controller}
             onNavigate={navigate}
@@ -257,6 +266,7 @@ export default function DirectorApp() {
       case 'transfers':
         return (
           <TransfersView
+            transfers={transfers}
             state={controller.state}
             controller={controller}
             onNavigate={navigate}
@@ -319,7 +329,7 @@ export default function DirectorApp() {
             <span>
               {statusLabel(tournament.status)}
               {controller.state.rounds.length
-                ? ` · Round ${latestRound(controller.state.rounds)?.number ?? 0}`
+                ? ` · Round ${(currentOperationalRound(controller.state) ?? latestRound(controller.state.rounds))?.number ?? 0}`
                 : ''}
             </span>
             <Icon name="chevron" size={14} />

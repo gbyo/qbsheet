@@ -1,8 +1,15 @@
-import { emptyDirectorState, type DirectorState, type TournamentStatus } from '../domain';
+import {
+  directorSchemaVersion,
+  newDirectorId,
+  emptyDirectorState,
+  type DirectorState,
+  type TournamentStatus,
+} from '../domain';
 import { normalizeDirectorState } from './stateMigrations';
 
 const databaseName = 'qbsheet-director';
-const databaseVersion = 2;
+const databaseVersion = 3;
+const checkpointsStoreName = 'recovery-points';
 const stateStoreName = 'tournament-state';
 const stateKey = 'current';
 const documentsStoreName = 'tournament-documents';
@@ -20,11 +27,61 @@ export interface TournamentCatalogEntry {
   updatedAt: string;
 }
 
+export interface DirectorCheckpoint {
+  id: string;
+  tournamentId: string;
+  createdAt: string;
+  reason: string;
+  schemaVersion: number;
+}
+
+interface CheckpointRecord extends DirectorCheckpoint {
+  state: DirectorState;
+}
+
+function recoveryPoint(state: DirectorState, reason: string): CheckpointRecord {
+  if (!state.tournament)
+    throw new DirectorPersistenceError('Open a tournament before creating a recovery point.');
+  return {
+    id: newDirectorId('checkpoint'),
+    tournamentId: state.tournament.id,
+    createdAt: new Date().toISOString(),
+    reason: reason.trim() || 'Manual recovery point',
+    schemaVersion: state.schemaVersion,
+    state: structuredClone(state),
+  };
+}
+
+function checkpointMetadata({ state: _state, ...metadata }: CheckpointRecord): DirectorCheckpoint {
+  return metadata;
+}
+
+function restoredState(record: CheckpointRecord | undefined, tournamentId: string): DirectorState {
+  if (!record || record.tournamentId !== tournamentId || record.state.tournament?.id !== tournamentId)
+    throw new DirectorPersistenceError('That recovery point does not belong to the open tournament.');
+  if (record.schemaVersion !== record.state.schemaVersion)
+    throw new DirectorPersistenceError('Recovery point version metadata does not match its document.');
+  return decodeCheckpoint(record.state);
+}
+
+function decodeCheckpoint(value: unknown): DirectorState {
+  const normalized = normalizeDirectorState(value);
+  // Current snapshots preserve every document field exactly; migration is needed only
+  // for an older schema. Normalization still validates future versions and shapes.
+  return (value as DirectorState).schemaVersion === directorSchemaVersion
+    ? structuredClone(value as DirectorState)
+    : normalized;
+}
+
 export interface DirectorRepository {
   readonly kind: 'tauri-sqlite' | 'indexeddb' | 'memory';
   load(): Promise<DirectorState>;
   save(state: DirectorState): Promise<void>;
   checkpoint(state: DirectorState, reason: string): Promise<void>;
+  listCheckpoints?(tournamentId: string): Promise<DirectorCheckpoint[]>;
+  readCheckpoint?(tournamentId: string, checkpointId: string): Promise<DirectorState>;
+  /** Atomically preserve current state before replacing the active document. */
+  restoreCheckpoint?(current: DirectorState, checkpointId: string): Promise<DirectorState>;
   /** Optional so narrow test repositories remain valid while native/browser stores grow a catalog. */
   listTournaments?(): Promise<TournamentCatalogEntry[]>;
   openTournament?(id: string): Promise<DirectorState>;
@@ -69,6 +126,24 @@ export class TauriDirectorRepository implements DirectorRepository {
 
   async checkpoint(state: DirectorState, reason: string): Promise<void> {
     await this.bridge.invoke('director_checkpoint', { state, reason });
+  }
+
+  async listCheckpoints(tournamentId: string): Promise<DirectorCheckpoint[]> {
+    return (await this.bridge.invoke('director_list_checkpoints', { tournamentId })) as DirectorCheckpoint[];
+  }
+
+  async readCheckpoint(tournamentId: string, checkpointId: string): Promise<DirectorState> {
+    return decodeCheckpoint(
+      await this.bridge.invoke('director_read_checkpoint', { tournamentId, checkpointId }),
+    );
+  }
+
+  async restoreCheckpoint(current: DirectorState, checkpointId: string): Promise<DirectorState> {
+    // Validate/migrate through the same document decoder before any native mutation.
+    const restored = await this.readCheckpoint(current.tournament!.id, checkpointId);
+    return decodeCheckpoint(
+      await this.bridge.invoke('director_restore_checkpoint', { current, checkpointId, restored }),
+    );
   }
 
   async listTournaments(): Promise<TournamentCatalogEntry[]> {
@@ -128,8 +203,88 @@ export class IndexedDbDirectorRepository implements DirectorRepository {
     await this.saveDocument(state, true);
   }
 
-  async checkpoint(state: DirectorState, _reason: string): Promise<void> {
-    await this.save(state);
+  async checkpoint(state: DirectorState, reason: string): Promise<void> {
+    const record = recoveryPoint(state, reason);
+    const database = await this.database();
+    if (!database) {
+      const library = this.readLocalLibrary();
+      library.checkpoints.push(record);
+      library.documents[record.tournamentId] = structuredClone(state);
+      library.currentId = record.tournamentId;
+      localStorage.setItem(localLibraryKey, JSON.stringify(library));
+      return;
+    }
+    await this.ensureMigrated(database);
+    await this.writeRecovery(database, record, state);
+  }
+
+  async listCheckpoints(tournamentId: string): Promise<DirectorCheckpoint[]> {
+    return (await this.checkpointRecords(tournamentId))
+      .filter((entry) => entry.tournamentId === tournamentId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .map(checkpointMetadata);
+  }
+
+  async readCheckpoint(tournamentId: string, checkpointId: string): Promise<DirectorState> {
+    return restoredState(
+      (await this.checkpointRecords(tournamentId)).find((entry) => entry.id === checkpointId),
+      tournamentId,
+    );
+  }
+
+  async restoreCheckpoint(current: DirectorState, checkpointId: string): Promise<DirectorState> {
+    const records = await this.checkpointRecords(current.tournament!.id);
+    const record = records.find((entry) => entry.id === checkpointId);
+    const restored = restoredState(record, current.tournament!.id);
+    const before = recoveryPoint(current, `Before restoring checkpoint from ${record!.createdAt}`);
+    const database = await this.database();
+    if (!database) {
+      const library = this.readLocalLibrary();
+      library.checkpoints.push(before);
+      library.documents[before.tournamentId] = restored;
+      library.currentId = before.tournamentId;
+      localStorage.setItem(localLibraryKey, JSON.stringify(library));
+    } else {
+      await this.writeRecovery(database, before, restored);
+    }
+    return restored;
+  }
+
+  private async checkpointRecords(tournamentId: string): Promise<CheckpointRecord[]> {
+    const database = await this.database();
+    if (!database)
+      return this.readLocalLibrary().checkpoints.filter((entry) => entry.tournamentId === tournamentId);
+    await this.ensureMigrated(database);
+    return new Promise((resolve, reject) => {
+      const request = database
+        .transaction(checkpointsStoreName)
+        .objectStore(checkpointsStoreName)
+        .index('tournamentId')
+        .getAll(tournamentId);
+      request.onsuccess = () => resolve(request.result as CheckpointRecord[]);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  private async writeRecovery(
+    database: IDBDatabase,
+    record: CheckpointRecord,
+    active: DirectorState,
+  ): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(
+        [checkpointsStoreName, documentsStoreName, metadataStoreName],
+        'readwrite',
+      );
+      transaction.objectStore(checkpointsStoreName).add(record);
+      transaction.objectStore(documentsStoreName).put({ id: active.tournament!.id, state: active });
+      transaction
+        .objectStore(metadataStoreName)
+        .put({ key: currentMetadataKey, value: active.tournament!.id });
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error ?? new Error('Recovery write was aborted.'));
+    });
   }
 
   async listTournaments(): Promise<TournamentCatalogEntry[]> {
@@ -231,6 +386,16 @@ export class IndexedDbDirectorRepository implements DirectorRepository {
         // the localStorage fallback. Move every document, not only its selected entry, so making
         // IndexedDB available again cannot silently discard inactive tournaments.
         const localLibrary = this.readLocalLibrary();
+        if (localLibrary.checkpoints.length) {
+          await new Promise<void>((resolve, reject) => {
+            const transaction = database.transaction(checkpointsStoreName, 'readwrite');
+            localLibrary.checkpoints.forEach((record) =>
+              transaction.objectStore(checkpointsStoreName).put(record),
+            );
+            transaction.oncomplete = () => resolve();
+            transaction.onerror = () => reject(transaction.error);
+          });
+        }
         const localDocuments = Object.values(localLibrary.documents);
         if (localDocuments.length > 0) {
           let activated = false;
@@ -357,15 +522,20 @@ export class IndexedDbDirectorRepository implements DirectorRepository {
     }
   }
 
-  private readLocalLibrary(): { currentId: string | null; documents: Record<string, unknown> } {
-    if (typeof localStorage === 'undefined') return { currentId: null, documents: {} };
+  private readLocalLibrary(): {
+    currentId: string | null;
+    documents: Record<string, unknown>;
+    checkpoints: CheckpointRecord[];
+  } {
+    if (typeof localStorage === 'undefined') return { currentId: null, documents: {}, checkpoints: [] };
     const raw = localStorage.getItem(localLibraryKey);
-    if (!raw) return { currentId: null, documents: {} };
+    if (!raw) return { currentId: null, documents: {}, checkpoints: [] };
     const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') return { currentId: null, documents: {} };
+    if (!parsed || typeof parsed !== 'object') return { currentId: null, documents: {}, checkpoints: [] };
     const value = parsed as Record<string, unknown>;
     const documents = value.documents;
     return {
+      checkpoints: Array.isArray(value.checkpoints) ? (value.checkpoints as CheckpointRecord[]) : [],
       currentId: typeof value.currentId === 'string' ? value.currentId : null,
       documents: documents && typeof documents === 'object' ? (documents as Record<string, unknown>) : {},
     };
@@ -434,6 +604,7 @@ export class MemoryDirectorRepository implements DirectorRepository {
   readonly kind = 'memory' as const;
   private state = emptyDirectorState();
   private documents = new Map<string, DirectorState>();
+  private checkpoints: CheckpointRecord[] = [];
 
   async load(): Promise<DirectorState> {
     return structuredClone(this.state);
@@ -443,8 +614,31 @@ export class MemoryDirectorRepository implements DirectorRepository {
     await this.saveDocument(state, true);
   }
 
-  async checkpoint(state: DirectorState, _reason: string): Promise<void> {
+  async checkpoint(state: DirectorState, reason: string): Promise<void> {
+    this.checkpoints.push(recoveryPoint(state, reason));
     await this.save(state);
+  }
+
+  async listCheckpoints(tournamentId: string): Promise<DirectorCheckpoint[]> {
+    return this.checkpoints
+      .filter((entry) => entry.tournamentId === tournamentId)
+      .reverse()
+      .map(checkpointMetadata);
+  }
+
+  async readCheckpoint(tournamentId: string, checkpointId: string): Promise<DirectorState> {
+    return restoredState(
+      this.checkpoints.find((entry) => entry.id === checkpointId),
+      tournamentId,
+    );
+  }
+
+  async restoreCheckpoint(current: DirectorState, checkpointId: string): Promise<DirectorState> {
+    const record = this.checkpoints.find((entry) => entry.id === checkpointId);
+    const restored = restoredState(record, current.tournament!.id);
+    this.checkpoints.push(recoveryPoint(current, `Before restoring checkpoint from ${record!.createdAt}`));
+    await this.save(restored);
+    return restored;
   }
 
   async listTournaments(): Promise<TournamentCatalogEntry[]> {
@@ -499,6 +693,11 @@ function openDatabase(): Promise<IDBDatabase | null> {
       return;
     }
     request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains(checkpointsStoreName)) {
+        request.result
+          .createObjectStore(checkpointsStoreName, { keyPath: 'id' })
+          .createIndex('tournamentId', 'tournamentId');
+      }
       const database = request.result;
       if (!database.objectStoreNames.contains(stateStoreName)) database.createObjectStore(stateStoreName);
       if (!database.objectStoreNames.contains(documentsStoreName)) {

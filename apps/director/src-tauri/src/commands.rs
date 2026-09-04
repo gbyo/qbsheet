@@ -243,6 +243,59 @@ pub fn director_save_document(
 }
 
 #[tauri::command]
+pub fn director_list_checkpoints(
+    tournament_id: String,
+    store: State<'_, DirectorStore>,
+) -> Result<Vec<crate::store::DirectorCheckpoint>, CommandError> {
+    store
+        .list_checkpoints(&tournament_id)
+        .map_err(CommandError::store)
+}
+
+#[tauri::command]
+pub fn director_read_checkpoint(
+    tournament_id: String,
+    checkpoint_id: String,
+    store: State<'_, DirectorStore>,
+) -> Result<Value, CommandError> {
+    store
+        .read_checkpoint(&tournament_id, &checkpoint_id)
+        .map_err(CommandError::store)
+}
+
+#[tauri::command]
+pub async fn director_restore_checkpoint(
+    current: Value,
+    checkpoint_id: String,
+    restored: Value,
+    store: State<'_, DirectorStore>,
+    server: State<'_, ServerRuntime>,
+) -> Result<Value, CommandError> {
+    // Stop live sessions before replacing their authoritative assignments. New pairing
+    // invitations after restart belong to the restored tournament, never stale sessions.
+    let running = server.status().running;
+    if running {
+        server.stop();
+    }
+    let outcome = store.restore_checkpoint(&current, &checkpoint_id, &restored);
+    if running {
+        let document = match &outcome {
+            Ok(document) => Some(document.clone()),
+            Err(_) => store.load_state().map_err(CommandError::store)?,
+        };
+        if let Err(error) = server
+            .start_with_store(document, std::sync::Arc::new((*store).clone()))
+            .await
+        {
+            // Storage has already committed. Report server availability through its status;
+            // returning a restore failure would leave the UI on the old document.
+            eprintln!("QBTCP restart after recovery failed: {error}");
+        }
+    }
+    outcome.map_err(CommandError::store)
+}
+
+#[tauri::command]
 pub fn director_checkpoint(
     state: Value,
     reason: String,

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { DirectorState, ProtestScoreAdjustment, TeamGameScore } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
 import { Button, FormField, StateLabel } from '../components/Controls';
@@ -26,20 +26,35 @@ export function ResultsView({
 }) {
   const [filter, setFilter] = useState<'all' | 'review' | 'accepted' | 'rejected'>('all');
   const [showManual, setShowManual] = useState(false);
+  const [roundFilter, setRoundFilter] = useState('');
+  const targetedRoundId =
+    navigationTarget?.section === 'results' && navigationTarget.entityType === 'round'
+      ? navigationTarget.entityId
+      : undefined;
+  const roundId = targetedRoundId ?? roundFilter;
+
   const submissions = useMemo(() => {
     const targetSubmissionId =
       navigationTarget?.section === 'results' && navigationTarget.entityType === 'submission'
         ? navigationTarget.entityId
         : undefined;
-    return state.submissions.filter(
-      (submission) =>
-        submission.id === targetSubmissionId ||
-        filter === 'all' ||
-        (filter === 'review'
-          ? submission.status === 'review' || submission.status === 'received'
-          : submission.status === filter),
-    );
-  }, [filter, navigationTarget, state.submissions]);
+    return state.submissions
+      .filter(
+        (submission) =>
+          submission.id === targetSubmissionId ||
+          ((!roundId ||
+            state.games.some((game) => game.id === submission.gameId && game.roundId === roundId)) &&
+            (filter === 'all' ||
+              (filter === 'review'
+                ? submission.status === 'review' || submission.status === 'received'
+                : submission.status === filter))),
+      )
+      .sort(
+        (left, right) =>
+          Number(right.status === 'review' || right.status === 'received') -
+          Number(left.status === 'review' || left.status === 'received'),
+      );
+  }, [filter, navigationTarget, roundId, state.games, state.submissions]);
   const reviewCount = state.submissions.filter(
     (submission) => submission.status === 'review' || submission.status === 'received',
   ).length;
@@ -68,6 +83,7 @@ export function ResultsView({
       <div className="director-page-stack">
         {showManual && (
           <ManualResult
+            roundId={roundId}
             state={state}
             controller={controller}
             onSuccess={() => setShowManual(false)}
@@ -76,6 +92,22 @@ export function ResultsView({
         )}
         <section className="director-panel">
           <div className="director-panel-body director-panel-filter">
+            <FormField label="Round">
+              <select
+                value={roundId}
+                onChange={(event) => {
+                  setRoundFilter(event.target.value);
+                  onClearNavigationTarget?.();
+                }}
+              >
+                <option value="">All rounds</option>
+                {state.rounds.map((round) => (
+                  <option key={round.id} value={round.id}>
+                    {round.name}
+                  </option>
+                ))}
+              </select>
+            </FormField>
             <div className="director-filter-tabs" role="group" aria-label="Result status">
               <FilterButton active={filter === 'all'} onClick={() => setFilter('all')}>
                 All <span>{state.submissions.length}</span>
@@ -141,6 +173,7 @@ export function ResultsView({
         </section>
         {state.scheduledGames.some((game) => !game.bye) && (
           <ScheduledGamesPanel
+            roundId={roundId}
             state={state}
             controller={controller}
             onAnnounce={onAnnounce}
@@ -157,12 +190,14 @@ export function ResultsView({
 }
 
 function ScheduledGamesPanel({
+  roundId,
   state,
   controller,
   onAnnounce,
   navigationTarget,
   onClearNavigationTarget,
 }: {
+  roundId?: string;
   state: DirectorState;
   controller: DirectorController;
   onAnnounce: (announcement: AnnounceInput) => void;
@@ -183,23 +218,19 @@ function ScheduledGamesPanel({
     navigationTarget?.section === 'results' && navigationTarget.entityType === 'game'
       ? navigationTarget.entityId
       : undefined;
-  /*
-   * Keep the last navigation-revealed game visible after the one-shot highlight clears its target.
-   *
-   * The live target participates in the filter immediately, so the row exists on the render where
-   * `useNavigationHighlight` looks for it. This effect then persists that reveal before the hook's
-   * animation-frame clear. Once the target is actually gone, navigating to the same id again is a
-   * new episode and can reveal it again; there is no remembered "last id" suppressing the retry.
-   */
-  const [revealedGameId, setRevealedGameId] = useState<string | undefined>(undefined);
-  useEffect(() => {
-    if (targetGameId !== undefined) setRevealedGameId(targetGameId);
-  }, [targetGameId]);
+  // Remember navigation during render, including its clearing, so repeating the same
+  // destination is a new reveal. No effect is needed to synchronize UI state.
+  const [reveal, setReveal] = useState({ target: targetGameId, gameId: targetGameId });
+  if (reveal.target !== targetGameId) {
+    setReveal({ target: targetGameId, gameId: targetGameId ?? reveal.gameId });
+  }
   const settled = (game: DirectorState['scheduledGames'][number]) =>
     game.status === 'accepted' || game.status === 'cancelled';
-  const scheduled = state.scheduledGames.filter((game) => !game.bye);
+  const scheduled = state.scheduledGames.filter(
+    (game) => !game.bye && (!roundId || game.roundId === roundId || game.id === targetGameId),
+  );
   const unresolvedCount = scheduled.filter((game) => !settled(game)).length;
-  const visibleTargetGameId = targetGameId ?? revealedGameId;
+  const visibleTargetGameId = targetGameId ?? reveal.gameId;
   const games = showAll
     ? scheduled
     : scheduled.filter((game) => !settled(game) || game.id === visibleTargetGameId);
@@ -212,7 +243,8 @@ function ScheduledGamesPanel({
   const toggleShowAll = () => {
     if (showingSettled) {
       setShowAll(false);
-      setRevealedGameId(undefined);
+      setReveal({ target: targetGameId, gameId: undefined });
+      onClearNavigationTarget?.();
       return;
     }
     setShowAll(true);
@@ -325,7 +357,19 @@ function ScheduledGameRow({
       <td>{round?.name ?? 'Unknown round'}</td>
       <td>{room?.name ?? 'Unassigned'}</td>
       <td>
-        <StateLabel state={game.status} label={game.status} />
+        <StateLabel
+          state={game.status}
+          label={
+            {
+              scheduled: 'Not started',
+              released: 'Awaiting result',
+              live: 'Playing',
+              submitted: 'Review',
+              accepted: 'Accepted',
+              cancelled: 'Cancelled',
+            }[game.status]
+          }
+        />
       </td>
       <td>
         {canCancel && (
@@ -977,6 +1021,7 @@ function ProtestRuling({
 }
 
 function ManualResult({
+  roundId,
   state,
   controller,
   onSuccess,
@@ -984,6 +1029,7 @@ function ManualResult({
   navigationTarget: _navigationTarget,
   onClearNavigationTarget: _onClearNavigationTarget,
 }: {
+  roundId?: string;
   state: DirectorState;
   controller: DirectorController;
   onSuccess: () => void;
@@ -992,7 +1038,8 @@ function ManualResult({
   onClearNavigationTarget?: () => void;
 }) {
   const choices = state.scheduledGames.filter(
-    (game) => !game.bye && !['accepted', 'cancelled'].includes(game.status),
+    (game) =>
+      !game.bye && (!roundId || game.roundId === roundId) && !['accepted', 'cancelled'].includes(game.status),
   );
   const [gameId, setGameId] = useState(choices[0]?.id ?? '');
   const effectiveGameId = choices.some((game) => game.id === gameId) ? gameId : (choices[0]?.id ?? '');

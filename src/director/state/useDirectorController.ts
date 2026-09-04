@@ -4,6 +4,7 @@ import {
   defaultRules,
   emptyDirectorState,
   generateDirectorRound,
+  generatePlannedRoundRobinGames,
   isoNow,
   newDirectorId,
   hostTimeZone,
@@ -42,6 +43,7 @@ import {
   createDirectorRepository,
   normalizeDirectorState,
   type DirectorRepository,
+  type DirectorCheckpoint,
   type TournamentCatalogEntry,
 } from '../persistence';
 import { loadOperatorProfile, operatorDisplayName } from '../operator/operatorProfile';
@@ -362,6 +364,8 @@ export interface DirectorController {
   updateTimelineEvent(eventId: DirectorId, changes: Partial<NewTimelineEventInput>): boolean;
   removeTimelineEvent(eventId: DirectorId): boolean;
   moveDayItem(itemId: DirectorId, direction: 'up' | 'down'): boolean;
+  setRoundPacket(roundId: DirectorId, packetId: DirectorId | null): Promise<boolean>;
+  assignRoundRooms(roundId: DirectorId, assignments: Record<DirectorId, DirectorId | null>): Promise<boolean>;
   setRoundScheduledStart(roundId: DirectorId, scheduledStart: string | null): boolean;
   selectPhase(phaseId: DirectorId): void;
   selectPacket(packetId: DirectorId): void;
@@ -449,6 +453,11 @@ export interface DirectorController {
   importTransferDocuments(inputs: ImportInput[]): ImportSummary;
   dismissTransferArtifact(artifactId: DirectorId): void;
   checkpoint(reason: string): Promise<void>;
+  checkpoints: DirectorCheckpoint[];
+  recovering: boolean;
+  documentEpoch: number;
+  restoreCheckpoint(checkpointId: string): Promise<boolean>;
+  editTournamentSnapshot(value: DirectorState, reason: string): Promise<boolean>;
   exportSnapshot(): string;
   importSnapshot(value: unknown): boolean;
   /** QBSheet Live. Everything here is optional; the tournament runs identically without it. */
@@ -540,6 +549,11 @@ export function useDirectorController(repository = createDirectorRepository()): 
   const [state, setState] = useState<DirectorState>(emptyDirectorState);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [checkpoints, setCheckpoints] = useState<DirectorCheckpoint[]>([]);
+  const [recovering, setRecovering] = useState(false);
+  const [documentEpoch, setDocumentEpoch] = useState(0);
+  const documentTransitionRef = useRef(false);
+  const documentEpochRef = useRef(0);
   const [error, setError] = useState<string | null>(null);
   const [tournaments, setTournaments] = useState<TournamentCatalogEntry[]>([]);
   const [qbtcpHealth, setQbtcpHealth] = useState<{
@@ -589,6 +603,21 @@ export function useDirectorController(repository = createDirectorRepository()): 
       active = false;
     };
   }, []);
+
+  const refreshCheckpoints = useCallback(async () => {
+    const tournamentId = stateRef.current.tournament?.id;
+    const entries =
+      tournamentId && repositoryRef.current.listCheckpoints
+        ? await repositoryRef.current.listCheckpoints(tournamentId)
+        : [];
+    if (stateRef.current.tournament?.id === tournamentId) setCheckpoints(entries);
+  }, []);
+
+  useEffect(() => {
+    void refreshCheckpoints().catch((reason: unknown) =>
+      setError(reason instanceof Error ? reason.message : 'Recovery points could not be read.'),
+    );
+  }, [state.tournament?.id, refreshCheckpoints]);
 
   const enqueuePersistence = useCallback(
     (
@@ -654,6 +683,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
    */
   const commit = useCallback(
     (mutator: (draft: DirectorState) => void) => {
+      if (documentTransitionRef.current) return;
       const next = structuredClone(stateRef.current);
       const auditStart = next.audit.length;
       mutator(next);
@@ -3937,9 +3967,12 @@ export function useDirectorController(repository = createDirectorRepository()): 
     // The app polls every second. Do not allow a slow local-network read to overlap the next poll:
     // an older response could otherwise arrive after a newer one and reopen a cancelled help
     // request or apply stale operational metadata.
+    if (documentTransitionRef.current) return Promise.resolve();
     if (qbtcpSyncInFlightRef.current) return qbtcpSyncInFlightRef.current;
+    const epoch = documentEpochRef.current;
     const task = (async () => {
       const read = await readNativeServerSnapshot();
+      if (documentTransitionRef.current || epoch !== documentEpochRef.current) return;
       if (read.status === 'error') {
         setQbtcpHealth((previous) => ({ ...previous, error: read.message }));
         return;
@@ -4082,7 +4115,9 @@ export function useDirectorController(repository = createDirectorRepository()): 
 
   const checkpoint = useCallback(
     async (reason: string) => {
-      const next = structuredClone(stateRef.current);
+      if (documentTransitionRef.current) throw new Error('Wait for tournament recovery to finish.');
+      const snapshot = structuredClone(stateRef.current);
+      const next = structuredClone(snapshot);
       const now = isoNow();
       next.metadata.lastCheckpointAt = now;
       next.audit.push({
@@ -4099,14 +4134,203 @@ export function useDirectorController(repository = createDirectorRepository()): 
       setState(next);
       await enqueuePersistence(next, revision, async (persisted) => {
         persisted.metadata.lastSavedAt = isoNow();
-        await repositoryRef.current.checkpoint(persisted, reason);
+        await repositoryRef.current.checkpoint(snapshot, reason);
+        await repositoryRef.current.save(persisted);
+        await refreshCheckpoints();
       });
     },
-    [enqueuePersistence],
+    [enqueuePersistence, refreshCheckpoints],
   );
+
+  const restoreCheckpoint = useCallback(
+    async (checkpointId: string): Promise<boolean> => {
+      if (documentTransitionRef.current) return false;
+      if (!repositoryRef.current.restoreCheckpoint) {
+        setError('This storage backend does not support recovery points.');
+        return false;
+      }
+      documentTransitionRef.current = true;
+      documentEpochRef.current += 1;
+      setRecovering(true);
+      try {
+        await qbtcpSyncInFlightRef.current;
+        await liveDrainInFlightRef.current;
+        await persistenceQueueRef.current;
+        const current = structuredClone(stateRef.current);
+        const restored = await repositoryRef.current.restoreCheckpoint(current, checkpointId);
+        // Transport projections cannot rewind a published revision or replay an old outbox.
+        // Recovery restores the tournament; the next publication is a full current snapshot.
+        if (restored.live?.settings.enabled) {
+          const samePublication = current.live?.publicationId === restored.live.publicationId;
+          restored.live.outbox = [];
+          restored.live.sync.localRevision = Math.max(
+            restored.live.sync.localRevision,
+            samePublication ? current.live!.sync.localRevision : 0,
+            samePublication ? current.live!.sync.acknowledgedRevision : 0,
+          );
+          const derived = derivePublication(restored, null);
+          if (derived.live) restored.live = derived.live;
+        }
+        if (current.live?.backend?.kind === 'local') {
+          await clearLocalLive(false).catch(() => undefined);
+          await stopLocalLiveServer().catch(() => undefined);
+        }
+        stateRevisionRef.current += 1;
+        stateRef.current = restored;
+        setState(restored);
+        publishedSnapshotRef.current = null;
+        liveClientRef.current = null;
+        localServerPublicationRef.current = null;
+        setQbtcpHealth({ lastSuccessfulAt: null, error: null });
+        setError(null);
+        if (restored.live?.settings.enabled) {
+          // The restore already committed. A projection-save failure must not leave the UI on
+          // the discarded document or misreport that the tournament itself was not restored.
+          await repositoryRef.current.save(restored).catch((reason: unknown) => {
+            setError(reason instanceof Error ? reason.message : 'Restored, but Live could not be refreshed.');
+          });
+        }
+        await refreshCheckpoints();
+        await refreshTournaments();
+        return true;
+      } catch (reason: unknown) {
+        setError(reason instanceof Error ? reason.message : 'The recovery point could not be restored.');
+        return false;
+      } finally {
+        documentTransitionRef.current = false;
+        setDocumentEpoch(documentEpochRef.current);
+        setRecovering(false);
+      }
+    },
+    [refreshCheckpoints, refreshTournaments],
+  );
+
+  const editTournamentSnapshot = useCallback(
+    async (value: DirectorState, reason: string): Promise<boolean> => {
+      if (documentTransitionRef.current) return false;
+      const before = structuredClone(stateRef.current);
+      if (!before.tournament || value.tournament?.id !== before.tournament.id) {
+        setError('Structural edits must belong to the open tournament.');
+        return false;
+      }
+      documentTransitionRef.current = true;
+      documentEpochRef.current += 1;
+      setRecovering(true);
+      try {
+        await qbtcpSyncInFlightRef.current;
+        await liveDrainInFlightRef.current;
+        await persistenceQueueRef.current;
+        await repositoryRef.current.checkpoint(before, reason);
+        const next = normalizeDirectorState(value);
+        next.metadata.lastCheckpointAt = isoNow();
+        next.metadata.lastSavedAt = isoNow();
+        if (next.live?.settings.enabled) {
+          const derived = derivePublication(next, publishedSnapshotRef.current);
+          if (derived.live) next.live = derived.live;
+          publishedSnapshotRef.current = derived.snapshot;
+        }
+        await repositoryRef.current.save(next);
+        stateRevisionRef.current += 1;
+        stateRef.current = next;
+        setState(next);
+        setError(null);
+        await refreshCheckpoints();
+        await refreshTournaments();
+        return true;
+      } catch (reason: unknown) {
+        setError(reason instanceof Error ? reason.message : 'The edit could not be saved.');
+        return false;
+      } finally {
+        documentTransitionRef.current = false;
+        setDocumentEpoch(documentEpochRef.current);
+        setRecovering(false);
+      }
+    },
+    [refreshCheckpoints, refreshTournaments],
+  );
+
+  const setRoundPacket = useCallback(
+    async (roundId: DirectorId, packetId: DirectorId | null) => {
+      const next = structuredClone(stateRef.current);
+      const round = next.rounds.find((entry) => entry.id === roundId);
+      if (!round || round.status === 'released' || round.status === 'closed') return false;
+      if (packetId && !next.packets.some((packet) => packet.id === packetId && !packet.retired)) return false;
+      if (round.packetId === packetId) return true;
+      round.packetId = packetId;
+      round.revision += 1;
+      const games = next.scheduledGames.filter((game) => game.roundId === roundId);
+      for (const game of games) {
+        game.packetId = packetId;
+        game.assignmentRevision += 1;
+      }
+      const ids = new Set(games.map((game) => game.id));
+      for (const packet of next.packets) {
+        packet.assignedRoundIds = packet.assignedRoundIds.filter((id) => id !== roundId);
+        packet.assignedGameIds = packet.assignedGameIds.filter((id) => !ids.has(id));
+        if (packet.id === packetId) {
+          packet.assignedRoundIds.push(roundId);
+          packet.assignedGameIds.push(...games.filter((game) => !game.bye).map((game) => game.id));
+        }
+      }
+      next.audit.push({
+        id: newDirectorId('audit'),
+        at: isoNow(),
+        actor: operatorDisplayName(loadOperatorProfile()),
+        type: 'packet-changed',
+        summary: `Assigned packet for ${round.name}.`,
+        entityId: roundId,
+      });
+      return editTournamentSnapshot(next, `Before changing packet for ${round.name}`);
+    },
+    [editTournamentSnapshot],
+  );
+
+  const assignRoundRooms = useCallback(
+    async (roundId: DirectorId, assignments: Record<DirectorId, DirectorId | null>) => {
+      const next = structuredClone(stateRef.current);
+      const round = next.rounds.find((entry) => entry.id === roundId);
+      if (!round || round.status === 'released' || round.status === 'closed') return false;
+      const games = next.scheduledGames.filter(
+        (game) => game.roundId === roundId && !game.bye && game.status !== 'cancelled',
+      );
+      const selected = games.map((game) =>
+        assignments[game.id] === undefined ? game.roomId : assignments[game.id],
+      );
+      const roomIds = selected.filter((id): id is string => id !== null);
+      if (
+        new Set(roomIds).size !== roomIds.length ||
+        roomIds.some(
+          (id) => !next.rooms.some((room) => room.id === id && room.available && room.status === 'available'),
+        )
+      ) {
+        setError('Choose available rooms, with no room hosting two games in the same round.');
+        return false;
+      }
+      if (games.every((game, index) => game.roomId === selected[index])) return true;
+      games.forEach((game, index) => {
+        if (game.roomId !== selected[index]) {
+          game.roomId = selected[index];
+          game.assignmentRevision += 1;
+        }
+      });
+      round.revision += 1;
+      next.audit.push({
+        id: newDirectorId('audit'),
+        at: isoNow(),
+        actor: operatorDisplayName(loadOperatorProfile()),
+        type: 'room-changed',
+        summary: `Assigned rooms for ${round.name}.`,
+        entityId: roundId,
+      });
+      return editTournamentSnapshot(next, `Before changing rooms for ${round.name}`);
+    },
+    [editTournamentSnapshot],
+  );
+
   const startRound = useCallback(
     async (roundId: DirectorId): Promise<StartRoundResult> => {
       const snapshot = stateRef.current;
+      const epoch = documentEpochRef.current;
       const round = snapshot.rounds.find((entry) => entry.id === roundId);
       const fail = (roundName: string, reason: string): StartRoundResult => {
         setError(reason);
@@ -4151,9 +4375,12 @@ export function useDirectorController(repository = createDirectorRepository()): 
             `${pending.length} game${pending.length === 1 ? '' : 's'} still need${pending.length === 1 ? 's' : ''} files.`
           );
         const base = `${round.name} started with ${delivered} room assignment${delivered === 1 ? '' : 's'}.`;
-        return pending.length === 0
-          ? base
-          : `${base} ${pending.length} still need${pending.length === 1 ? 's' : ''} a physical handoff.`;
+        const manualGames = !usbConfigured ? activeGames.filter((game) => game.roomId === null).length : 0;
+        return pending.length > 0
+          ? `${base} ${pending.length} still need${pending.length === 1 ? 's' : ''} a physical handoff.`
+          : manualGames > 0
+            ? `${base} ${manualGames} game${manualGames === 1 ? '' : 's'} can be entered manually.`
+            : base;
       };
       if (round.status === 'released') {
         const pending = usbConfigured
@@ -4172,14 +4399,14 @@ export function useDirectorController(repository = createDirectorRepository()): 
         };
       }
       if (roomsInPlay) {
-        // Every game that carries a room must carry a usable one. Games without
-        // a room are allowed only when a USB workflow exists to hand them out.
+        // Assigned rooms must be usable. A roomless manual game remains valid alongside
+        // QBTCP or USB rooms; one transport never makes the others mandatory.
         const roomIds = activeGames.map((game) => game.roomId);
         const duplicateRoom = roomIds.filter(
           (roomId, index) => roomId && roomIds.indexOf(roomId) !== index,
         )[0];
         const invalidRoom = activeGames.find((game) => {
-          if (!game.roomId) return !usbConfigured;
+          if (!game.roomId) return false;
           const room = snapshot.rooms.find((entry) => entry.id === game.roomId);
           return !room || !room.available || room.status !== 'available';
         });
@@ -4209,9 +4436,20 @@ export function useDirectorController(repository = createDirectorRepository()): 
         return fail(
           round.name,
           reason instanceof Error
-            ? `A durable checkpoint could not be written: ${reason.message}`
-            : `${round.name} could not be started until a durable checkpoint succeeds.`,
+            ? `A recovery point could not be written: ${reason.message}`
+            : `${round.name} could not be started until a recovery point is saved.`,
         );
+      }
+      if (
+        stateRef.current.tournament?.id !== snapshot.tournament?.id ||
+        !stateRef.current.rounds.some(
+          (entry) =>
+            entry.id === roundId && entry.revision === round.revision && entry.status === round.status,
+        ) ||
+        documentEpochRef.current !== epoch ||
+        documentTransitionRef.current
+      ) {
+        return fail(round.name, 'The tournament changed while starting the round. Try again.');
       }
       const pending = usbConfigured ? activeGames.filter((game) => game.roomId === null).map(gameLabel) : [];
       const delivered = activeGames.filter((game) => game.roomId !== null).length;
@@ -4372,6 +4610,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
    * and must not fail because of it — see `docs/QBLIVE.md#8-the-durable-outbox`.
    */
   const drainLiveOutbox = useCallback(async (): Promise<void> => {
+    if (documentTransitionRef.current) return;
     if (liveDrainInFlightRef.current) return liveDrainInFlightRef.current;
     const task = (async () => {
       const initialPublication = stateRef.current.live;
@@ -4601,6 +4840,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
     };
   }, [
     localPublicationId,
+    documentEpoch,
     localPublicationEnabled,
     localPublicationBackendKind,
     localPublicationLifecycle,
@@ -4913,6 +5153,14 @@ export function useDirectorController(repository = createDirectorRepository()): 
           });
         });
         tournament.currentPhaseId = format.phaseIds[0] ?? null;
+        if (format.kind === 'round-robin' || format.kind === 'double-round-robin') {
+          draft.scheduledGames = generatePlannedRoundRobinGames(draft);
+          for (const round of draft.rounds)
+            round.scheduledGameIds = draft.scheduledGames
+              .filter((game) => game.roundId === round.id)
+              .map((game) => game.id);
+          tournament.currentRoundId = draft.rounds[0]?.id ?? null;
+        }
         tournament.updatedAt = isoNow();
         draft.audit.push({
           id: newDirectorId('audit'),
@@ -4973,6 +5221,8 @@ export function useDirectorController(repository = createDirectorRepository()): 
     removeTimelineEvent,
     moveDayItem,
     setRoundScheduledStart,
+    setRoundPacket,
+    assignRoundRooms,
     addImportedTeams,
     selectPhase,
     selectPacket,
@@ -5014,6 +5264,11 @@ export function useDirectorController(repository = createDirectorRepository()): 
     importTransferDocuments: importTransferDocumentsAction,
     dismissTransferArtifact: dismissTransferArtifactAction,
     checkpoint,
+    checkpoints,
+    recovering,
+    documentEpoch,
+    restoreCheckpoint,
+    editTournamentSnapshot,
     exportSnapshot,
     importSnapshot,
     live,
