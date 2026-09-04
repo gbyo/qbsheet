@@ -1,3 +1,4 @@
+import ScoreValue, { ScoreReaction } from './secrets/ScoreReaction';
 /**
  * The two teams as the room is actually sitting.
  *
@@ -81,6 +82,7 @@ export interface ITableViewProps {
   format: IScorekeeperFormat;
   /** Already display-mapped. Left here is the team on the left of the screen. */
   teams: Record<LeftOrRight, IDerivedTeam>;
+  reactions?: ReadonlyMap<IDerivedTeam, ScoreReaction>;
   /** Who is in each seat, in the room's own order. The same derivation the keyboard addresses. */
   seatedPlayers: Record<LeftOrRight, readonly string[]>;
   /** False while the other team is on a bonus, during a timeout, or once the game is over. */
@@ -167,6 +169,7 @@ export default function TableView(props: ITableViewProps) {
   const {
     format,
     teams,
+    reactions,
     seatedPlayers,
     scoringEnabled,
     eligible,
@@ -343,6 +346,7 @@ export default function TableView(props: ITableViewProps) {
             key={side}
             side={side}
             team={teams[side]}
+            reaction={reactions?.get(teams[side])}
             seats={seatedPlayers[side]}
             scoringEnabled={scoringEnabled}
             eligible={eligible(side)}
@@ -384,6 +388,7 @@ export default function TableView(props: ITableViewProps) {
 interface ITableTeamProps {
   side: LeftOrRight;
   team: IDerivedTeam;
+  reaction?: ScoreReaction;
   seats: readonly string[];
   scoringEnabled: boolean;
   eligible: boolean;
@@ -410,6 +415,7 @@ function TableTeam(props: ITableTeamProps) {
   const {
     side,
     team,
+    reaction,
     seats,
     scoringEnabled,
     eligible,
@@ -454,24 +460,6 @@ function TableTeam(props: ITableTeamProps) {
     return () => window.clearTimeout(timer);
   }, [landed]);
 
-  /*
-   * Which way the score last moved, recorded when it moves. The same derivation `TeamPanel` uses,
-   * and deliberately the same motion: one scoreboard should not roll two different ways depending on
-   * which layout is drawing it.
-   */
-  const [scoreMotion, setScoreMotion] = useState({
-    points: team.points,
-    direction: 'is-up',
-    started: false,
-  });
-  if (scoreMotion.points !== team.points) {
-    setScoreMotion({
-      points: team.points,
-      direction: team.points < scoreMotion.points ? 'is-down' : 'is-up',
-      started: true,
-    });
-  }
-
   return (
     <section className="scorer-table-team" aria-label={team.name}>
       <header className="scorer-table-team-head">
@@ -479,12 +467,7 @@ function TableTeam(props: ITableTeamProps) {
           {team.name}
         </h2>
         <p className="scorer-team-score" aria-label={`${team.name} score`}>
-          <span
-            key={team.points}
-            className={`scorer-team-score-value${scoreMotion.started ? ` ${scoreMotion.direction}` : ''}`}
-          >
-            {team.points}
-          </span>
+          <ScoreValue team={team} reaction={reaction} />
         </p>
       </header>
       {timeoutsUsed !== undefined && timeoutsPerTeam !== undefined && timeoutsPerTeam > 0 && (

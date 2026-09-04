@@ -20,6 +20,12 @@
  */
 import { CSSProperties, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import BrandLogo from '../BrandLogo';
+import CommandLauncher from './secrets/CommandLauncher';
+import DvdOverlay from './secrets/DvdOverlay';
+import SecretPanel from './secrets/SecretPanel';
+import useScorerReactions from './secrets/useScorerReactions';
+import useScorerSecrets from './secrets/useScorerSecrets';
+import './secrets/secrets.css';
 import { LeftOrRight } from '../scoring/types';
 import {
   ControlRequestState,
@@ -710,6 +716,20 @@ export default function Scorer(props: IScorerProps) {
     [recovery, saved],
   );
 
+  const {
+    surface: secretSurface,
+    dvd: dvdMode,
+    discoveries,
+    origin: logoOrigin,
+    logo: logoSecret,
+    close: closeSecretSurface,
+    closeDvd,
+    corner: noteDvdCorner,
+    openCommands,
+    command: runSecretCommand,
+    interaction: noteSecretInteraction,
+  } = useScorerSecrets();
+
   const [dialog, setDialog] = useState<OpenDialog>(null);
   /**
    * What the procedure dialog was opened about.
@@ -925,6 +945,11 @@ export default function Scorer(props: IScorerProps) {
   const displaySideState = useDisplaySideMapping(gameKey);
 
   const game = useMemo(() => deriveGame(format, setup, events.events), [format, setup, events.events]);
+  const {
+    accepted: noteAcceptedForReaction,
+    historyMessage: reactionHistoryMessage,
+    reactions: scoreReactions,
+  } = useScorerReactions(game, events.events, format);
   const displaySideMapping = displaySideState.mapping;
   const displayedTeams = useMemo(
     () => ({
@@ -1283,9 +1308,14 @@ export default function Scorer(props: IScorerProps) {
   const record = useCallback(
     (...added: ScoreEvent[]) => {
       if (submitting) return false;
-      return events.append(...added);
+      const accepted = events.append(...added);
+      if (accepted) {
+        noteAcceptedForReaction(added);
+        noteSecretInteraction();
+      }
+      return accepted;
     },
-    [events, submitting],
+    [events, submitting, noteAcceptedForReaction, noteSecretInteraction],
   );
 
   /**
@@ -1552,7 +1582,8 @@ export default function Scorer(props: IScorerProps) {
     const frame = events.undo();
     if (!frame || frame.length === 0) return;
     const questionNumber = frameQuestion(frame);
-    acknowledge(`Undid ${frameDescription(frame, format, game)}`, questionNumber);
+    const playful = reactionHistoryMessage('undo');
+    acknowledge(playful || `Undid ${frameDescription(frame, format, game)}`, questionNumber);
     if (questionNumber !== undefined) {
       setRecentMotion({
         questionNumber,
@@ -1561,18 +1592,20 @@ export default function Scorer(props: IScorerProps) {
         snapshot: game.questions.find((question) => question.questionNumber === questionNumber),
       });
     }
-  }, [acknowledge, events, format, game, nextTransientToken, submitting]);
+  }, [acknowledge, events, format, game, nextTransientToken, submitting, reactionHistoryMessage]);
 
   const redoWithFeedback = useCallback(() => {
     if (submitting) return;
     const frame = events.redo();
     if (!frame || frame.length === 0) return;
     const questionNumber = frameQuestion(frame);
-    acknowledge(`Redid ${frameDescription(frame, format, game)}`, questionNumber);
+    const playful = reactionHistoryMessage('redo');
+    const ordinary = `Redid ${frameDescription(frame, format, game)}`;
+    acknowledge(playful ? `${ordinary} ${playful}` : ordinary, questionNumber);
     if (questionNumber !== undefined) {
       setRecentMotion({ questionNumber, kind: 'redo', token: nextTransientToken() });
     }
-  }, [acknowledge, events, format, game, nextTransientToken, submitting]);
+  }, [acknowledge, events, format, game, nextTransientToken, submitting, reactionHistoryMessage]);
 
   const benchFor = (team: LeftOrRight): string[] => {
     const derivedTeam = team === 'left' ? game.left : game.right;
@@ -1743,7 +1776,7 @@ export default function Scorer(props: IScorerProps) {
    * back for one has to stand back for it: the keyboard layer, the ruling picker, the legend.
    */
   const layoutChooserOpen = layoutPromptOpen || dialog === 'scoring-layout';
-  const anyDialogOpen = dialog !== null || layoutPromptOpen;
+  const anyDialogOpen = dialog !== null || layoutPromptOpen || secretSurface !== null;
 
   /**
    * The layout question, answered.
@@ -1805,6 +1838,7 @@ export default function Scorer(props: IScorerProps) {
     onNoBuzz: recordNoBuzz,
     onUndo: undoWithFeedback,
     onRedo: redoWithFeedback,
+    onCommands: openCommands,
     onSeatArmed: (seat) =>
       setKeyStatus({
         kind: 'armed',
@@ -2546,9 +2580,24 @@ export default function Scorer(props: IScorerProps) {
     <div className="scorer">
       <header className="scorer-header">
         <div className="scorer-header-brand">
-          <div className="scorer-brand" aria-label="QBSheet">
-            <BrandLogo className="scorer-brand-logo" />
-          </div>
+          <button
+            type="button"
+            ref={logoOrigin}
+            className="scorer-brand scorer-secret-logo"
+            aria-label="QBSheet"
+            onPointerDown={(event) => event.preventDefault()}
+            onClick={logoSecret.click}
+          >
+            <span
+              key={logoSecret.reaction}
+              className={
+                logoSecret.reaction ? (logoSecret.micro ? 'logo-micro' : 'logo-discovered') : undefined
+              }
+              style={dvdMode && !anyDialogOpen ? { opacity: 0 } : undefined}
+            >
+              <BrandLogo className="scorer-brand-logo" rainbow={logoSecret.rainbow} />
+            </span>
+          </button>
           <div className="scorer-header-main">
             <h1 className="scorer-tournament">{tournamentName}</h1>
             <p className="scorer-context">
@@ -2789,6 +2838,7 @@ export default function Scorer(props: IScorerProps) {
                 key="table"
                 format={format}
                 teams={displayedTeams}
+                reactions={scoreReactions}
                 seatedPlayers={seatedPlayers}
                 scoringEnabled={scoringEnabled}
                 eligible={displayedEligible}
@@ -2852,6 +2902,7 @@ export default function Scorer(props: IScorerProps) {
                   key={displaySideMapping.left}
                   format={format}
                   team={displayedTeams.left}
+                  reaction={scoreReactions.get(displayedTeams.left)}
                   seatOrder={seating.seating[displaySideMapping.left]}
                   flashSeat={keyEcho?.side === 'left' ? keyEcho.seat : undefined}
                   scoringEnabled={scoringEnabled}
@@ -2877,6 +2928,7 @@ export default function Scorer(props: IScorerProps) {
                   key={displaySideMapping.right}
                   format={format}
                   team={displayedTeams.right}
+                  reaction={scoreReactions.get(displayedTeams.right)}
                   seatOrder={seating.seating[displaySideMapping.right]}
                   flashSeat={keyEcho?.side === 'right' ? keyEcho.seat : undefined}
                   scoringEnabled={scoringEnabled}
@@ -3629,6 +3681,25 @@ export default function Scorer(props: IScorerProps) {
         reloading Chromebook never fetches. See `ArcadeLauncher`.
       */}
       <ArcadeLauncher open={dialog === 'arcade'} onClose={() => setDialog(null)} />
+      {secretSurface === 'commands' && (
+        <CommandLauncher onCommand={runSecretCommand} onClose={closeSecretSurface} />
+      )}
+      {secretSurface === 'stats' && (
+        <SecretPanel
+          game={game}
+          format={format}
+          discoveries={discoveries.length}
+          onClose={closeSecretSurface}
+        />
+      )}
+      {dvdMode && !anyDialogOpen && (
+        <DvdOverlay origin={logoOrigin} onClose={closeDvd} onCorner={noteDvdCorner} />
+      )}
+      <ArcadeLauncher
+        open={secretSurface === 'qbbird' || secretSurface === 'snake'}
+        initialGame={secretSurface === 'qbbird' || secretSurface === 'snake' ? secretSurface : undefined}
+        onClose={closeSecretSurface}
+      />
     </div>
   );
 }
