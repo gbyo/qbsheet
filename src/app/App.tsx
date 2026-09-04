@@ -52,7 +52,7 @@ import {
 import { IUnreadableRecord } from '../game/GameRecordUpgrade';
 import { IGamePackage, gamePackageIdentity, gamePackageLabel } from '../game/GamePackage';
 import { IGameDefinition, isManualGame } from '../game/GameDefinition';
-import { newManualRecordIdentity } from '../game/ManualGame';
+import { IManualGameInput, newManualRecordIdentity } from '../game/ManualGame';
 import { openRecordStore } from '../persistence/GameDatabase';
 import { claimGame, IGameClaim, newTabId } from '../persistence/TabClaim';
 import { IGameSetup } from '../scoring/deriveGame';
@@ -209,7 +209,7 @@ export type Screen =
    * Holds no record. Nothing is created until the form validates and Start game is pressed, at which
    * point what it produces is an ordinary definition and this screen is done. See `ManualGameSetup`.
    */
-  | { kind: 'create' }
+  | { kind: 'create'; initialInput?: IManualGameInput }
   | { kind: 'scoring'; recordId: string }
   | { kind: 'completed'; recordId: string; acceptedJustNow?: boolean }
   /** Another live tab on this device is already scoring the game that was asked for. */
@@ -1277,6 +1277,8 @@ export default function App() {
         launch={screen.launch ?? null}
         existingDeviceId={connection?.deviceId}
         onPaired={onPaired}
+        onStartManualGame={createManualGame}
+        onEditManualGame={(initialInput) => setScreen({ kind: 'create', initialInput })}
         onPairingLaunch={(intent) => beginPairingLaunch(intent, screen.returnTo)}
         onOtherScoring={() => setScreen({ kind: 'home' })}
         onCancel={() =>
@@ -1368,7 +1370,13 @@ export default function App() {
   }
 
   if (screen.kind === 'create') {
-    return <ManualGameSetup onStart={createManualGame} onCancel={() => setScreen({ kind: 'home' })} />;
+    return (
+      <ManualGameSetup
+        initialInput={screen.initialInput}
+        onStart={createManualGame}
+        onCancel={() => setScreen({ kind: 'home' })}
+      />
+    );
   }
 
   if (screen.kind === 'duplicate' && current) {
@@ -1454,6 +1462,8 @@ export default function App() {
         setScreen({ kind: 'practice' });
       }}
       onCreateGame={() => setScreen({ kind: 'create' })}
+      onStartManualGame={createManualGame}
+      onEditManualGame={(initialInput) => setScreen({ kind: 'create', initialInput })}
       onOpenRoom={() => setScreen({ kind: 'room' })}
       onConnect={async (baseUrl): Promise<ControlOpenResult> => {
         const opened = await openControl(baseUrl);
