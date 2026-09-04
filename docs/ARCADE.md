@@ -20,24 +20,39 @@ document is mostly a list of the ways they are kept that way.
 
 Two entry points, one arcade.
 
-The homepage offers a small promotional banner — **Want a break?** — which is the casual door, for a
-room that is waiting rather than scoring. It is in `WelcomeScreen.tsx`, it renders only when there is
-no unfinished game (a device that reloaded mid-round has a Resume button to find, and an animated
-advertisement must not compete with it), and it is dismissible: `ArcadePromo.ts` owns the one key,
-`qbsheet.arcade-promo.dismissed.v1`, which is versioned so a later promotion can decide to be seen
-again. Dismissing it hides the banner and nothing else — the arcade itself is unaffected.
+A small promotional banner — **Want a break?** — is the casual door, and it appears on the two
+screens where somebody has time on their hands. `ArcadePromo.tsx` is the banner and the one key it
+remembers; the two hosts decide when it is offered:
+
+| Screen              | Offered when                                                                                      |
+| ------------------- | ------------------------------------------------------------------------------------------------- |
+| `WelcomeScreen.tsx` | there is no unfinished game                                                                       |
+| `ConnectedRoom.tsx` | nothing to resume, nothing startable, and tournament control is either silent or holding the room |
+
+Both conditions say the same thing: an animated advertisement must never sit beside a Resume button,
+a startable assignment, or a message the room has to read. On the homepage it goes above Start
+scoring; in a room it goes _under_ the assignment card, because what that room is watching is the
+state of its next game.
+
+Each host holds `arcadeOpen` and renders `ArcadeLauncher` itself, outside the condition. That is not
+tidiness: a room polls, and an assignment arriving while somebody is mid-game would otherwise unmount
+the banner and take the arcade down with it.
+
+It is dismissible, under `qbsheet.arcade-promo.dismissed.v1` — versioned so a later promotion can
+decide to be seen again. Dismissing it hides the banner on both screens and nothing else; the arcade
+itself is unaffected.
 
 The scoresheet's Game menu offers **Take a break…** through the same `dialog` state as every other
-infrequent action (see `scorerMenu.ts` and `Scorer.tsx`). That is the door for a scorekeeper already
-sitting in front of a game.
+infrequent action (see `scorerMenu.ts` and `Scorer.tsx`). That is the other door, for a scorekeeper
+already sitting in front of a game.
 
 Both render `ArcadeLauncher`, and there is no second implementation of anything for either. Device
 Settings used to be a third door; it is not any more, because a preferences screen is not a feature
 launcher.
 
-The banner is also the one place in QBSheet allowed to be colourful and to move. It is a CSS
-gradient and two radial-gradient dots — no image, no sprite, no font, nothing fetched — it animates
-only `background-position` and a `transform`, so it can never move the page around it, and
+The banner is also the one place in QBSheet allowed to be colourful and to move. It is a CSS gradient
+and two radial-gradient dots — no image, no sprite, no font, nothing fetched — and it animates only
+`background-position` and a `transform`, so it can never move the page around it.
 `prefers-reduced-motion: reduce` returns it to a deliberate still picture rather than a paused one.
 Its colours are `--arcade-promo-*` tokens with light, dark and raised-contrast values of their own,
 so it never borrows the palette that means "warning" or "success".

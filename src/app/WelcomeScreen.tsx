@@ -76,7 +76,7 @@ import NativeDialog from './NativeDialog';
 import QrScannerDialog from './QrScannerDialog';
 import { IPairingLaunchIntent, readScannedPairingCode } from './PairingLaunch';
 import { readOperatorNameAsked, writeOperatorNameAsked } from './OperatorIdentity';
-import { readArcadePromoDismissed, writeArcadePromoDismissed } from './ArcadePromo';
+import ArcadePromo from './ArcadePromo';
 import SettingsDialog, { ISettingsConnection } from './SettingsDialog';
 import type { IRecoveryUi } from './DeviceReadiness';
 import ArcadeLauncher from '../arcade/ArcadeLauncher';
@@ -218,8 +218,6 @@ export default function WelcomeScreen(props: {
    * arcade from here too, and does not any more -- a preferences screen is not a feature launcher.
    */
   const [arcadeOpen, setArcadeOpen] = useState(false);
-  /** Read once at mount: a scorekeeper who dismissed this should not see it flash on every load. */
-  const [arcadePromoDismissed, setArcadePromoDismissed] = useState(() => readArcadePromoDismissed());
   /**
    * The first-load ask, decided once at mount.
    *
@@ -355,37 +353,10 @@ export default function WelcomeScreen(props: {
 
         Below every warning and the update notice, and rendered only when nothing is unfinished: a
         device that reloaded mid-round has a Resume button to find, and an animated advertisement
-        beside it would be the application competing with the scorekeeper's actual problem. It is
-        promotional content and not an announcement, so it carries no `role` and no live region --
-        opening the homepage should not make a screen reader read out an advertisement.
+        beside it would be the application competing with the scorekeeper's actual problem. The
+        launcher below is outside this condition on purpose; see `ArcadePromo`.
       */}
-      {unfinished.length === 0 && !arcadePromoDismissed && (
-        <section className="arcade-promo" aria-labelledby="arcade-promo-heading">
-          <span className="arcade-promo-decoration" aria-hidden="true" />
-          <div className="arcade-promo-copy">
-            <h2 id="arcade-promo-heading" className="arcade-promo-heading">
-              Want a break?
-            </h2>
-            <p className="arcade-promo-detail">QBBird and Snake are waiting.</p>
-          </div>
-          <div className="arcade-promo-controls">
-            <button type="button" className="arcade-promo-action" onClick={() => setArcadeOpen(true)}>
-              Play Arcade
-            </button>
-            <button
-              type="button"
-              className="arcade-promo-dismiss"
-              aria-label="Dismiss Arcade suggestion"
-              onClick={() => {
-                setArcadePromoDismissed(true);
-                writeArcadePromoDismissed();
-              }}
-            >
-              <span aria-hidden="true">×</span>
-            </button>
-          </div>
-        </section>
-      )}
+      {unfinished.length === 0 && <ArcadePromo onPlay={() => setArcadeOpen(true)} />}
 
       {unfinished.length > 0 && (
         <section className="shell-section">
