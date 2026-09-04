@@ -19,10 +19,10 @@
  *
  * # Why this component and not three copies of the import
  *
- * Three hosts open the arcade — the scoresheet's Game menu, and Settings from each of the two
- * screens that render it. Putting the load here means those hosts render one element and hold one
- * boolean, and the loading state, the failure message and the closed state have one implementation
- * between them.
+ * Three screens open the arcade — the homepage and a waiting paired room, both through the same
+ * promotional banner, and the scoresheet through its Game menu. Putting the load here means those
+ * hosts render one element and hold one boolean, and the loading state, the failure message and the
+ * closed state have one implementation between them.
  */
 import { useEffect, useState, type ComponentType } from 'react';
 import ScorerDialog from '../scorer/ScorerDialog';

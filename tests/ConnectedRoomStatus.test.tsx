@@ -131,6 +131,103 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+describe('the waiting room’s arcade banner', () => {
+  const promoHeading = { name: 'Want a break?' } as const;
+
+  test('a room with nothing to do is offered a break, and a held room still is', async () => {
+    renderRoom();
+    await settle();
+
+    expect(screen.getByText('Waiting for the next assignment.')).toBeInTheDocument();
+    expect(screen.getByRole('heading', promoHeading)).toBeInTheDocument();
+    // Under the assignment card, which is what this room is actually watching.
+    const assignment = document.querySelector('.room-assignment') as HTMLElement;
+    const promo = screen.getByRole('heading', promoHeading).closest('section') as HTMLElement;
+    expect(assignment.compareDocumentPosition(promo) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    // Tournament control pausing new starts is the same twenty minutes by another name.
+    answer = ok(assignmentOf({ state: 'held' }));
+    await poll();
+    expect(screen.getByRole('heading', promoHeading)).toBeInTheDocument();
+  });
+
+  test('anything the room has to act on takes it away again', async () => {
+    renderRoom();
+    await settle();
+    expect(screen.getByRole('heading', promoHeading)).toBeInTheDocument();
+
+    answer = ok(assignmentOf({ state: 'assigned', scheduledMatchId: 'match-5', definition }));
+    await poll();
+    expect(screen.getByRole('button', { name: 'Start scoring' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', promoHeading)).toBeNull();
+
+    // And an incomplete assignment is work in flight, not a break.
+    answer = ok(assignmentOf({ state: 'assigned', scheduledMatchId: 'match-6' }));
+    await poll();
+    expect(screen.queryByRole('heading', promoHeading)).toBeNull();
+  });
+
+  test('a room that cannot reach tournament control is not offered a break', async () => {
+    renderRoom();
+    await settle();
+    expect(screen.getByRole('heading', promoHeading)).toBeInTheDocument();
+
+    answer = async () => ({ ok: false as const, error: 'Tournament control could not be reached.' });
+    await poll();
+
+    // The recovery sections render below this point, so a banner here would sit on top of one.
+    expect(screen.getByRole('button', { name: 'Try now' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', promoHeading)).toBeNull();
+
+    answer = ok(assignmentOf());
+    await poll();
+    expect(screen.getByRole('heading', promoHeading)).toBeInTheDocument();
+  });
+
+  test('a game waiting to be resumed keeps the whole banner off the screen', async () => {
+    renderRoom({ resumeRecord: { package: validPackage(), events: [] } as never });
+    await settle();
+
+    expect(screen.getByRole('button', { name: 'Resume scoring' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', promoHeading)).toBeNull();
+  });
+
+  test('an assignment arriving mid-game takes the banner, not the arcade', async () => {
+    renderRoom();
+    await settle();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Play Arcade' }));
+    expect(screen.getByRole('dialog', { name: 'Arcade' })).toBeInTheDocument();
+
+    answer = ok(assignmentOf({ state: 'assigned', scheduledMatchId: 'match-5', definition }));
+    await poll();
+
+    // The banner is gone because the room has a game again; the dialog over it is still the
+    // scorekeeper's, and closes when they close it.
+    expect(screen.queryByRole('heading', promoHeading)).toBeNull();
+    expect(screen.getByRole('dialog', { name: 'Arcade' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close dialog' }));
+    expect(screen.queryByRole('dialog', { name: 'Arcade' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Start scoring' })).toBeInTheDocument();
+  });
+
+  test('dismissing it in the room keeps it dismissed, and takes nothing else away', async () => {
+    renderRoom();
+    await settle();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss Arcade suggestion' }));
+    expect(screen.queryByRole('heading', promoHeading)).toBeNull();
+    expect(window.localStorage.getItem('qbsheet.arcade-promo.dismissed.v1')).toBe('1');
+    expect(screen.getByText('Waiting for the next assignment.')).toBeInTheDocument();
+
+    cleanup();
+    renderRoom();
+    await settle();
+    expect(screen.queryByRole('heading', promoHeading)).toBeNull();
+  });
+});
+
 describe('the established room', () => {
   test('keeps the update notice in its compact presentation', async () => {
     renderRoom();

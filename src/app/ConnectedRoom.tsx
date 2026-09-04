@@ -26,8 +26,9 @@ import { connectionTimeline } from './ConnectionTimeline';
 import { HelpRequestCategory, HelpRequestResult } from './HelpRequests';
 import AssignmentProblemDialog, { assignmentLine } from './AssignmentProblemDialog';
 import SettingsDialog, { ISettingsConnection } from './SettingsDialog';
-import type { IRecoveryUi } from './DeviceReadiness';
+import ArcadePromo from './ArcadePromo';
 import ArcadeLauncher from '../arcade/ArcadeLauncher';
+import type { IRecoveryUi } from './DeviceReadiness';
 import NativeDialog from './NativeDialog';
 import { exchangePairingCode } from './ControlPairing';
 import UpdateNotice from '../pwa/UpdateNotice';
@@ -234,7 +235,12 @@ export default function ConnectedRoom(props: {
   const [lastSuccessfulCheckAt, setLastSuccessfulCheckAt] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [settingsOpen, setSettingsOpen] = useState(false);
-  // Settings closes as this opens; the arcade is the only modal on screen while it is up.
+  /**
+   * The arcade, opened from the waiting-room banner.
+   *
+   * Held here rather than in `ArcadePromo` because this screen polls: an assignment arriving while
+   * somebody is mid-game takes the banner off the page, and the arcade must not go with it.
+   */
   const [arcadeOpen, setArcadeOpen] = useState(false);
   const [problemAssignment, setProblemAssignment] = useState<{
     packageValue: IGameDefinition;
@@ -501,6 +507,24 @@ export default function ConnectedRoom(props: {
   const healthyConnection =
     lastSuccessfulCheckAt !== null && !pollFailed && forbidden === '' && !roomCredentialProblem;
   const state = stateLine(assignment, busy);
+  /**
+   * A room with genuinely nothing to do, which is the only state the arcade banner belongs in.
+   *
+   * Nothing to resume, nothing to start, and tournament control either silent or explicitly holding
+   * this room -- the twenty minutes between rounds this feature exists for. Deliberately false while
+   * an assignment is in flight but incomplete, while `blocked` carries a message from control, and
+   * while any of the three connection problems is on screen: each of those is something the room has
+   * to read, and none of them is a break. The recovery sections that carry those messages render
+   * below this point, so the alternative would be an animated advertisement sitting on top of one.
+   */
+  const awaitingNextGame =
+    !resumeRecord &&
+    !startable &&
+    !starting &&
+    (assignment === null || assignment.state === 'none' || assignment.state === 'held') &&
+    forbidden === '' &&
+    !pollFailed &&
+    !roomCredentialProblem;
 
   return (
     <main className="shell connected-room-shell">
@@ -659,6 +683,12 @@ export default function ConnectedRoom(props: {
         </section>
       )}
 
+      {/*
+        Under the assignment card rather than over it. What this room is watching is the state of its
+        next game, and a banner above that would push the one thing it is here for down the page.
+      */}
+      {awaitingNextGame && <ArcadePromo onPlay={() => setArcadeOpen(true)} />}
+
       <div className="room-secondary-actions">
         <button
           type="button"
@@ -746,7 +776,6 @@ export default function ConnectedRoom(props: {
           onReadiness={onReadiness}
           recovery={recovery}
           onChangeTournament={onChangeTournament}
-          onArcade={() => setArcadeOpen(true)}
           onClose={() => setSettingsOpen(false)}
         />
       )}

@@ -27,11 +27,18 @@ test('standalone creator opens separately, restores its draft, and downloads a w
 }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  // The creator lives behind the Advanced row, with the other infrequent device-level actions.
+  await page
+    .getByRole('dialog', { name: 'Settings', exact: true })
+    .getByRole('button', { name: 'Advanced', exact: true })
+    .click();
+  const advanced = page.getByRole('dialog', { name: 'Advanced', exact: true });
   const popupPromise = page.waitForEvent('popup');
-  await page.getByRole('link', { name: 'Open game package creator' }).click();
+  await advanced.getByRole('link', { name: 'Open game package creator' }).click();
   const creator = await popupPromise;
   await expect(creator.getByRole('heading', { name: 'Game package creator' })).toBeVisible();
-  await expect(page.getByRole('dialog', { name: 'Settings', exact: true })).toBeVisible();
+  // A separate tab, so the Settings dialog this was opened from is untouched behind it.
+  await expect(advanced).toBeVisible();
   const input = portableInput();
   await creator.getByLabel('Left team name').fill(input.left.name);
   await creator.getByLabel(`${input.left.name} players`, { exact: true }).fill(input.left.players);

@@ -13,6 +13,12 @@ import {
   writeOperatorNameAsked,
 } from '../src/app/OperatorIdentity';
 import SettingsDialog from '../src/app/SettingsDialog';
+import {
+  loadAppearance,
+  loadTextSize,
+  resetDisplayPreferences,
+  setAppearance,
+} from '../src/app/displayPreference';
 import { ResultDeliveryCapabilityStore } from '../src/app/ResultDeliveryCapability';
 import { gameRecordVersion, GameStore, IStoredGameRecord } from '../src/game/GameStore';
 import { openRecordStore } from '../src/persistence/GameDatabase';
@@ -123,9 +129,22 @@ async function openSettings(): Promise<HTMLElement> {
   return screen.getByRole('dialog', { name: 'Settings' });
 }
 
+/**
+ * Follow one of the root's navigation rows into the subview behind it.
+ *
+ * The rows are matched by a leading-label pattern because the whole row is the button now: its
+ * accessible name is the label followed by whatever the current value happens to be.
+ */
+function openSettingsView(label: string, title: string): HTMLElement {
+  const dialog = screen.getByRole('dialog', { name: 'Settings' });
+  fireEvent.click(within(dialog).getByRole('button', { name: new RegExp(`^${label}`) }));
+  return screen.getByRole('dialog', { name: title });
+}
+
 beforeEach(() => {
   setKeyboardEnabled(false);
   resetKeyboardPreference();
+  resetDisplayPreferences();
 });
 
 describe('homepage Settings entry and scorekeeper identity', () => {
@@ -135,8 +154,50 @@ describe('homepage Settings entry and scorekeeper identity', () => {
 
     const dialog = await openSettings();
     expect(within(dialog).getByText('Scoring')).toBeInTheDocument();
-    expect(within(dialog).getByText('Device')).toBeInTheDocument();
+    expect(within(dialog).getByText('Data & device')).toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: 'Scorekeeper' })).toBeNull();
+  });
+
+  test('the root is a summary and a set of doors, with the detail behind them rather than on it', async () => {
+    writeOperatorName('Gibson Bell');
+    writeOperatorNameAsked();
+    await openApp();
+
+    const dialog = await openSettings();
+    for (const name of [
+      'Scorekeeper Gibson Bell',
+      'Appearance Match device · Standard',
+      'Recovery Protected',
+      'Check this device',
+      'Advanced',
+    ]) {
+      expect(within(dialog).getByRole('button', { name })).toBeInTheDocument();
+    }
+    expect(within(dialog).getByRole('switch', { name: 'Keyboard scoring' })).toBeInTheDocument();
+
+    // Everything those rows lead to has left the root: the two display controls, the recovery
+    // explanation and its management actions, and the destructive reset.
+    expect(within(dialog).queryByRole('radiogroup', { name: 'Appearance' })).toBeNull();
+    expect(within(dialog).queryByRole('radiogroup', { name: 'Text size' })).toBeNull();
+    expect(within(dialog).queryByText('Automatic protection')).toBeNull();
+    expect(within(dialog).queryByText('External backup')).toBeNull();
+    expect(within(dialog).queryByRole('button', { name: /^View recovery status/ })).toBeNull();
+    expect(within(dialog).queryByRole('button', { name: 'Reset device preferences…' })).toBeNull();
+  });
+
+  test('the Scorekeeper row is the whole target, and still the one focus lands on', async () => {
+    writeOperatorNameAsked();
+    await openApp();
+
+    const dialog = await openSettings();
+    const row = within(dialog).getByRole('button', { name: 'Scorekeeper Not set' });
+    expect(row).toHaveFocus();
+    // Not a label with a small button beside it.
+    expect(within(dialog).queryByRole('button', { name: 'Set name' })).toBeNull();
+    expect(within(dialog).queryByRole('button', { name: 'Edit' })).toBeNull();
+
+    fireEvent.click(row);
+    expect(screen.getByRole('dialog', { name: 'Scorekeeper' })).toBeInTheDocument();
   });
 
   test('practice stays on the homepage and is not hidden in Settings', async () => {
@@ -224,9 +285,22 @@ describe('shared keyboard preference and generic reference', () => {
     expect(keyboardEnabled()).toBe(true);
   });
 
+  test('the shortcut reference appears only once keyboard scoring is on', () => {
+    render(<SettingsDialog {...defaultSettingsProps()} />);
+    const dialog = screen.getByRole('dialog', { name: 'Settings' });
+    expect(within(dialog).queryByRole('button', { name: 'Keyboard shortcuts' })).toBeNull();
+
+    fireEvent.click(within(dialog).getByRole('switch', { name: 'Keyboard scoring' }));
+    expect(within(dialog).getByRole('button', { name: 'Keyboard shortcuts' })).toBeInTheDocument();
+
+    act(() => setKeyboardEnabled(false));
+    expect(within(dialog).queryByRole('button', { name: 'Keyboard shortcuts' })).toBeNull();
+  });
+
   test('the reference uses canonical keys and seats without claiming fixed point values', () => {
     render(<SettingsDialog {...defaultSettingsProps()} />);
-    fireEvent.click(screen.getByRole('button', { name: 'View' }));
+    fireEvent.click(screen.getByRole('switch', { name: 'Keyboard scoring' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Keyboard shortcuts' }));
     const dialog = screen.getByRole('dialog', { name: 'Keyboard shortcuts' });
 
     expect(dialog).toHaveTextContent(keyboardSeatNumbers.left.join(', '));
@@ -238,6 +312,9 @@ describe('shared keyboard preference and generic reference', () => {
     expect(dialog).toHaveTextContent(keyboardShortcutLabels.redo);
     expect(dialog).toHaveTextContent(/point values depend on the tournament format/i);
     expect(dialog.textContent).not.toMatch(/[+-]\d+\s*(?:points?)?/i);
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Back to Settings' }));
+    expect(screen.getByRole('dialog', { name: 'Settings' })).toBeInTheDocument();
   });
 
   test('the existing in-game Game menu reads and changes the same Settings preference', async () => {
@@ -257,6 +334,50 @@ describe('shared keyboard preference and generic reference', () => {
   });
 });
 
+describe('appearance and text size', () => {
+  test('both controls moved into Appearance, and the root row answers with their current values', () => {
+    render(<SettingsDialog {...defaultSettingsProps()} />);
+    const root = screen.getByRole('dialog', { name: 'Settings' });
+    expect(
+      within(root).getByRole('button', { name: 'Appearance Match device · Standard' }),
+    ).toBeInTheDocument();
+    // No separate root row for text size: it belongs with appearance, behind one door.
+    expect(within(root).queryByRole('button', { name: /^Text size/ })).toBeNull();
+
+    fireEvent.click(within(root).getByRole('button', { name: /^Appearance/ }));
+    const view = screen.getByRole('dialog', { name: 'Appearance' });
+    const appearanceGroup = within(view).getByRole('radiogroup', { name: 'Appearance' });
+    const textSizeGroup = within(view).getByRole('radiogroup', { name: 'Text size' });
+    expect(within(appearanceGroup).getByRole('radio', { name: 'Match device' })).toBeChecked();
+    expect(within(textSizeGroup).getByRole('radio', { name: 'Standard' })).toBeChecked();
+
+    // Real radios and the existing preference API, not a reimplementation of either.
+    fireEvent.click(within(appearanceGroup).getByRole('radio', { name: 'Dark' }));
+    fireEvent.click(within(textSizeGroup).getByRole('radio', { name: 'Large' }));
+    expect(loadAppearance()).toBe('dark');
+    expect(loadTextSize()).toBe('large');
+
+    fireEvent.click(within(view).getByRole('button', { name: 'Back to Settings' }));
+    expect(
+      within(screen.getByRole('dialog', { name: 'Settings' })).getByRole('button', {
+        name: 'Appearance Dark · Large',
+      }),
+    ).toBeInTheDocument();
+  });
+
+  test('the root summary follows a preference changed anywhere else, without a reopen', () => {
+    render(<SettingsDialog {...defaultSettingsProps()} />);
+    const root = screen.getByRole('dialog', { name: 'Settings' });
+    expect(
+      within(root).getByRole('button', { name: 'Appearance Match device · Standard' }),
+    ).toBeInTheDocument();
+
+    act(() => setAppearance('light'));
+
+    expect(within(root).getByRole('button', { name: 'Appearance Light · Standard' })).toBeInTheDocument();
+  });
+});
+
 describe('tournament connection safety', () => {
   test('the section appears only when paired and App exposes only a sanitized address', async () => {
     writeOperatorNameAsked();
@@ -271,9 +392,18 @@ describe('tournament connection safety', () => {
     });
     await openApp();
     dialog = await openSettings();
-    expect(within(dialog).getByText('Tournament connection')).toBeInTheDocument();
-    expect(within(dialog).getByText('Room 204')).toBeInTheDocument();
-    expect(within(dialog).getByText('http://192.168.1.20:8787/control')).toBeInTheDocument();
+    // The root says which room and nothing else: the address and the management actions are behind
+    // the row, not on the overview.
+    expect(
+      within(dialog).getByRole('button', { name: 'Tournament connection Room 204' }),
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByText('http://192.168.1.20:8787/control')).toBeNull();
+    expect(within(dialog).queryByRole('button', { name: 'Forget pairing…' })).toBeNull();
+    expect(within(dialog).queryByRole('button', { name: 'Change tournament…' })).toBeNull();
+
+    const view = openSettingsView('Tournament connection', 'Tournament connection');
+    expect(within(view).getByText('Room 204')).toBeInTheDocument();
+    expect(within(view).getByText('http://192.168.1.20:8787/control')).toBeInTheDocument();
     for (const secret of [
       'url-user',
       'url-password',
@@ -294,12 +424,21 @@ describe('tournament connection safety', () => {
     const saved = await seedGame({ completed: true });
     rememberConnection({ sessionId: undefined, sessionToken: undefined });
     await openApp();
-    const dialog = await openSettings();
+    await openSettings();
 
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Forget pairing…' }));
+    let view = openSettingsView('Tournament connection', 'Tournament connection');
+    fireEvent.click(within(view).getByRole('button', { name: 'Forget pairing…' }));
     expect(readConnection()).not.toBeNull();
-    const confirmation = screen.getByRole('dialog', { name: 'Forget tournament pairing?' });
+    let confirmation = screen.getByRole('dialog', { name: 'Forget tournament pairing?' });
     expect(confirmation).toHaveTextContent('Saved games are not deleted');
+
+    // Cancel goes back where it was asked from, not all the way out to the root.
+    fireEvent.click(within(confirmation).getByRole('button', { name: 'Cancel' }));
+    view = screen.getByRole('dialog', { name: 'Tournament connection' });
+    expect(readConnection()).not.toBeNull();
+
+    fireEvent.click(within(view).getByRole('button', { name: 'Forget pairing…' }));
+    confirmation = screen.getByRole('dialog', { name: 'Forget tournament pairing?' });
     fireEvent.click(within(confirmation).getByRole('button', { name: 'Forget Room 204' }));
 
     expect(readConnection()).toBeNull();
@@ -317,8 +456,9 @@ describe('tournament connection safety', () => {
     const unfinished = await seedGame({ connected: true });
     rememberConnection({ gameRecordId: unfinished.id });
     await openApp();
-    const dialog = await openSettings();
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Forget pairing…' }));
+    await openSettings();
+    const view = openSettingsView('Tournament connection', 'Tournament connection');
+    fireEvent.click(within(view).getByRole('button', { name: 'Forget pairing…' }));
 
     const confirmation = screen.getByRole('dialog', { name: 'Forget tournament pairing?' });
     expect(within(confirmation).getByRole('alert')).toHaveTextContent(
@@ -341,8 +481,9 @@ describe('tournament connection safety', () => {
     await openApp();
 
     expect(screen.getByRole('alert')).toHaveTextContent(/newer version|cannot be opened/i);
-    const dialog = await openSettings();
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Forget pairing…' }));
+    await openSettings();
+    const view = openSettingsView('Tournament connection', 'Tournament connection');
+    fireEvent.click(within(view).getByRole('button', { name: 'Forget pairing…' }));
 
     const confirmation = screen.getByRole('dialog', { name: 'Forget tournament pairing?' });
     expect(within(confirmation).getByRole('alert')).toHaveTextContent(/cannot change Room 204/i);
@@ -385,16 +526,19 @@ describe('device navigation, reset, build identity, and dialog behavior', () => 
     window.localStorage.setItem('qbsheet.unrelated-sentinel', 'keep');
 
     await openApp();
-    let dialog = await openSettings();
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Reset device preferences…' }));
+    await openSettings();
+    let advanced = openSettingsView('Advanced', 'Advanced');
+    fireEvent.click(within(advanced).getByRole('button', { name: 'Reset device preferences…' }));
     let confirmation = screen.getByRole('dialog', { name: 'Reset device preferences?' });
     expect(confirmation).toHaveTextContent('Saved games are not deleted');
+
+    // Cancel returns to Advanced, which is where the action was offered.
     fireEvent.click(within(confirmation).getByRole('button', { name: 'Cancel' }));
+    advanced = screen.getByRole('dialog', { name: 'Advanced' });
     expect(readOperatorName()).toBe('Gibson Bell');
     expect(readConnection()).not.toBeNull();
 
-    dialog = screen.getByRole('dialog', { name: 'Settings' });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Reset device preferences…' }));
+    fireEvent.click(within(advanced).getByRole('button', { name: 'Reset device preferences…' }));
     confirmation = screen.getByRole('dialog', { name: 'Reset device preferences?' });
     fireEvent.click(within(confirmation).getByRole('button', { name: 'Reset preferences' }));
 
@@ -425,8 +569,9 @@ describe('device navigation, reset, build identity, and dialog behavior', () => 
     const unfinished = await seedGame({ connected: true });
     rememberConnection({ gameRecordId: unfinished.id });
     await openApp();
-    const dialog = await openSettings();
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Reset device preferences…' }));
+    await openSettings();
+    const advanced = openSettingsView('Advanced', 'Advanced');
+    fireEvent.click(within(advanced).getByRole('button', { name: 'Reset device preferences…' }));
 
     const confirmation = screen.getByRole('dialog', { name: 'Reset device preferences?' });
     expect(within(confirmation).getByRole('button', { name: 'Reset preferences' })).toBeDisabled();
@@ -454,32 +599,47 @@ describe('device navigation, reset, build identity, and dialog behavior', () => 
     expect(cog).toHaveFocus();
   });
 
-  test('all Settings actions remain reachable in the narrow layout', () => {
+  test('every Settings action remains reachable in the narrow layout, through its own row', () => {
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 320 });
+    setKeyboardEnabled(true);
     render(
       <SettingsDialog
         {...defaultSettingsProps({ connection: { roomName: 'Room 204', address: connection.baseUrl } })}
       />,
     );
     const dialog = screen.getByRole('dialog', { name: 'Settings' });
-    expect(within(dialog).getByRole('button', { name: /Set name/ })).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Scorekeeper Not set' })).toBeInTheDocument();
     expect(within(dialog).getByRole('switch', { name: 'Keyboard scoring' })).toBeInTheDocument();
-    expect(within(dialog).getByRole('button', { name: 'View' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Keyboard shortcuts' })).toBeInTheDocument();
     expect(within(dialog).queryByRole('button', { name: 'Practice scoring' })).toBeNull();
-    expect(within(dialog).getByRole('button', { name: 'Forget pairing…' })).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Check this device' })).toBeInTheDocument();
-    expect(within(dialog).getByRole('button', { name: 'Reset device preferences…' })).toBeInTheDocument();
+
+    expect(
+      within(openSettingsView('Tournament connection', 'Tournament connection')).getByRole('button', {
+        name: 'Forget pairing…',
+      }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Back to Settings' }));
+    expect(
+      within(openSettingsView('Advanced', 'Advanced')).getByRole('button', {
+        name: 'Reset device preferences…',
+      }),
+    ).toBeInTheDocument();
   });
 });
 
 test('Advanced opens the standalone creator relative to the scorer in a separate tab', () => {
   render(<SettingsDialog {...defaultSettingsProps()} />);
-  const link = screen.getByRole('link', { name: 'Open game package creator' });
+  // Behind the Advanced row now, beside the other infrequent action, rather than on the root.
+  expect(screen.queryByRole('link', { name: 'Open game package creator' })).toBeNull();
+  const advanced = openSettingsView('Advanced', 'Advanced');
+
+  const link = within(advanced).getByRole('link', { name: 'Open game package creator' });
   expect(link).toHaveAttribute('href', './game-package-creator/index.html');
   expect(link).toHaveAttribute('target', '_blank');
   expect(link).toHaveAttribute('rel', 'noopener noreferrer');
   expect(new URL(link.getAttribute('href')!, 'https://example.org/project/index.html').pathname).toBe(
     '/project/game-package-creator/index.html',
   );
-  expect(screen.getByRole('button', { name: 'Reset device preferences…' })).toBeInTheDocument();
+  expect(within(advanced).getByRole('button', { name: 'Reset device preferences…' })).toBeInTheDocument();
 });

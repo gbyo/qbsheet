@@ -79,6 +79,7 @@ import PortableGameReview, { PortableGameActions } from './PortableGameReview';
 import { readScannedQbsheetCode } from './ScannedQbsheetCode';
 import { IPairingLaunchIntent } from './PairingLaunch';
 import { readOperatorNameAsked, writeOperatorNameAsked } from './OperatorIdentity';
+import ArcadePromo from './ArcadePromo';
 import SettingsDialog, { ISettingsConnection } from './SettingsDialog';
 import type { IRecoveryUi } from './DeviceReadiness';
 import ArcadeLauncher from '../arcade/ArcadeLauncher';
@@ -215,7 +216,14 @@ export default function WelcomeScreen(
   const [settingsView, setSettingsView] = useState<'settings' | 'scorekeeper' | null>(null);
   const [scanning, setScanning] = useState(false);
   const [portableInput, setPortableInput] = useState<IManualGameInput | null>(null);
-  // Settings closes as this opens; the arcade is the only modal on screen while it is up.
+  /**
+   * The homepage's casual way into the arcade, opened by the promotional banner below.
+   *
+   * Held here rather than inside `ArcadePromo` because the banner is conditional and this is not:
+   * the arcade must not vanish because the screen underneath it stopped offering the suggestion.
+   * Device Settings used to open the arcade from here too, and does not any more -- a preferences
+   * screen is not a feature launcher.
+   */
   const [arcadeOpen, setArcadeOpen] = useState(false);
   /**
    * The first-load ask, decided once at mount.
@@ -346,6 +354,16 @@ export default function WelcomeScreen(
       )}
 
       <UpdateNotice presentation={unfinished.length === 0 ? 'hero' : 'compact'} />
+
+      {/*
+        The one loud thing on this page, and deliberately not loud enough to matter.
+
+        Below every warning and the update notice, and rendered only when nothing is unfinished: a
+        device that reloaded mid-round has a Resume button to find, and an animated advertisement
+        beside it would be the application competing with the scorekeeper's actual problem. The
+        launcher below is outside this condition on purpose; see `ArcadePromo`.
+      */}
+      {unfinished.length === 0 && <ArcadePromo onPlay={() => setArcadeOpen(true)} />}
 
       {unfinished.length > 0 && (
         <section className="shell-section">
@@ -529,7 +547,6 @@ export default function WelcomeScreen(
           onResetDevicePreferences={onResetDevicePreferences}
           onReadiness={onReadiness}
           recovery={recovery}
-          onArcade={() => setArcadeOpen(true)}
           onClose={closeSettings}
         />
       )}

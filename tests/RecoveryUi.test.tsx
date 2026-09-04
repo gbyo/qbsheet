@@ -32,6 +32,18 @@ function defaultSettingsProps(overrides: Partial<React.ComponentProps<typeof Set
   };
 }
 
+/**
+ * The root Recovery row, and the Settings-owned view behind it.
+ *
+ * Everything the section used to spell out on the overview now lives here, so every case below goes
+ * through the door first rather than reaching past it.
+ */
+function openRecoveryView(): HTMLElement {
+  const settings = screen.getByRole('dialog', { name: 'Settings' });
+  fireEvent.click(within(settings).getByRole('button', { name: /^Recovery/ }));
+  return screen.getByRole('dialog', { name: 'Recovery' });
+}
+
 async function openReadiness(recovery?: IRecoveryUi): Promise<void> {
   await act(async () => {
     render(<DeviceReadiness durable recovery={recovery} onBack={() => undefined} />);
@@ -65,19 +77,27 @@ describe('Settings recovery section', () => {
       />,
     );
 
+    // The root carries one compact, truthful summary and nothing else about recovery.
     const dialog = screen.getByRole('dialog', { name: 'Settings' });
-    expect(within(dialog).getByText('Recovery')).toBeInTheDocument();
-    expect(within(dialog).getByText('Automatic protection')).toBeInTheDocument();
-    expect(within(dialog).getByText('Protected')).toBeInTheDocument();
-    expect(within(dialog).getByText('External backup')).toBeInTheDocument();
-    expect(within(dialog).getByText('Not configured')).toBeInTheDocument();
     expect(
-      within(dialog).queryByRole('switch', { name: /local protection|automatic protection/i }),
-    ).toBeNull();
+      within(dialog).getByRole('button', { name: 'Recovery Protected · Not configured' }),
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByText('Automatic protection')).toBeNull();
+    expect(within(dialog).queryByRole('button', { name: 'Set up external backup…' })).toBeNull();
 
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Set up external backup…' }));
+    const view = openRecoveryView();
+    expect(within(view).getByText('Automatic protection')).toBeInTheDocument();
+    expect(within(view).getByText(/^Protected/)).toBeInTheDocument();
+    expect(within(view).getByText('External backup')).toBeInTheDocument();
+    expect(within(view).getByText('Not configured')).toBeInTheDocument();
+    expect(within(view).queryByRole('switch', { name: /local protection|automatic protection/i })).toBeNull();
+
+    fireEvent.click(within(view).getByRole('button', { name: 'Set up external backup…' }));
     expect(setup).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(within(view).getByRole('button', { name: 'Back to Settings' }));
+    expect(screen.getByRole('dialog', { name: 'Settings' })).toBeInTheDocument();
   });
 
   test('opens a status view for management and never removes files when configuration is stopped', async () => {
@@ -93,8 +113,10 @@ describe('Settings recovery section', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Manage external backup…' }));
-    const recoveryDialog = screen.getByRole('dialog', { name: 'Recovery' });
+    // The folder is named on the root row, and dated inside the view.
+    expect(screen.getByRole('button', { name: 'Recovery Protected · QBSheet Backups' })).toBeInTheDocument();
+
+    const recoveryDialog = openRecoveryView();
     expect(recoveryDialog).toHaveTextContent('QBSheet Backups');
     expect(recoveryDialog).toHaveTextContent('Saved just now');
 
@@ -118,11 +140,13 @@ describe('Settings recovery section', () => {
     );
 
     expect(reconnect).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: 'Reconnect external backup' }));
+    const view = openRecoveryView();
+    expect(reconnect).not.toHaveBeenCalled();
+    fireEvent.click(within(view).getByRole('button', { name: 'Allow access' }));
     expect(reconnect).toHaveBeenCalledTimes(1);
   });
 
-  test('offers the host Recovery Mode entry without inspecting it on mount', () => {
+  test('the root row opens the Settings view even when a host Recovery Mode is on offer', () => {
     const viewRecovery = vi.fn();
     const close = vi.fn();
     render(
@@ -136,7 +160,28 @@ describe('Settings recovery section', () => {
     );
 
     expect(viewRecovery).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: 'View recovery status' }));
+    const view = openRecoveryView();
+    // The row is a way into recovery management, not a shortcut past it.
+    expect(close).not.toHaveBeenCalled();
+    expect(viewRecovery).not.toHaveBeenCalled();
+    expect(within(view).getByText('Automatic protection')).toBeInTheDocument();
+  });
+
+  test('the host Recovery Mode is entered only by the button that says so', () => {
+    const viewRecovery = vi.fn();
+    const close = vi.fn();
+    render(
+      <SettingsDialog
+        {...defaultSettingsProps({ onClose: close })}
+        recovery={{
+          externalBackup: { state: 'unsupported' },
+          onViewRecoveryStatus: viewRecovery,
+        }}
+      />,
+    );
+
+    const view = openRecoveryView();
+    fireEvent.click(within(view).getByRole('button', { name: 'Open full recovery status' }));
     expect(close).toHaveBeenCalledTimes(1);
     expect(viewRecovery).toHaveBeenCalledTimes(1);
   });
@@ -154,8 +199,29 @@ describe('Settings recovery section', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Reconnect external backup' }));
+    fireEvent.click(within(openRecoveryView()).getByRole('button', { name: 'Allow access' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('The folder is read-only.');
+  });
+
+  test('a folder change stays available beside the removal confirmation', async () => {
+    setPickerSupport(true);
+    const setup = vi.fn();
+    render(
+      <SettingsDialog
+        {...defaultSettingsProps()}
+        recovery={{
+          externalBackup: { state: 'ready', folderName: 'QBSheet Backups', lastSavedAt: Date.now() },
+          onSetupExternalBackup: setup,
+        }}
+      />,
+    );
+
+    const view = openRecoveryView();
+    fireEvent.click(within(view).getByRole('button', { name: 'Change folder…' }));
+    expect(setup).toHaveBeenCalledTimes(1);
+    await waitFor(() =>
+      expect(within(view).getByRole('status')).toHaveTextContent('External backup folder changed.'),
+    );
   });
 });
 
