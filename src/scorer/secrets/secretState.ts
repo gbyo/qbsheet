@@ -38,7 +38,7 @@ export function saveRainbow(): void {
   } catch {
     /* Optional preference. */
   }
-  window.dispatchEvent(new Event(rainbowChangeEvent));
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event(rainbowChangeEvent));
 }
 
 /** An eight-second rolling window; evaluating clicks needs no background timer. */
