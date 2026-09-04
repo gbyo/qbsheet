@@ -1,0 +1,30 @@
+.game-package-creator .shell-header svg {
+  width: 180px;
+  max-height: 50px;
+}
+
+.game-package-qr {
+  display: block;
+  width: min(100%, 640px);
+  height: auto;
+  margin: 1rem auto;
+}
+
+@media print {
+  .game-package-creator {
+    max-width: none;
+    margin: 0;
+    color: #000;
+    background: #fff;
+  }
+
+  .game-package-creator .package-controls,
+  .game-package-creator .shell-subtitle {
+    display: none;
+  }
+
+  .game-package-qr {
+    width: 145mm;
+    break-inside: avoid;
+  }
+}

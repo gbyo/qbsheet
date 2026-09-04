@@ -213,6 +213,11 @@ export const RULES = [
   // ---------------------------------------------------------------------------------------------
   { glob: 'src/**', domains: SCORER, why: 'scorer runtime source' },
   { glob: 'index.html', domains: SCORER, why: 'the scorer entry document' },
+  {
+    glob: 'game-package-creator/**',
+    domains: SCORER,
+    why: 'the standalone game-package page, built by Vite and opened by the scorer browser suite',
+  },
   { glob: 'about/**', domains: SCORER, why: 'prerendered product pages, opened by the browser suite' },
   { glob: 'public/**', domains: SCORER, why: 'served assets, the manifest, and the offline shell' },
   {

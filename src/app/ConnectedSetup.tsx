@@ -16,9 +16,12 @@ import BrandLogo from '../BrandLogo';
 import FruityServerClient from '../integrations/fruity/FruityServerClient';
 import { IControlConnection, exchangePairingCode, openControl } from './ControlPairing';
 import { IPairedRoom } from './ConnectedSession';
-import { IPairingLaunchIntent, readScannedPairingCode } from './PairingLaunch';
+import { IPairingLaunchIntent } from './PairingLaunch';
 import { connectionTimeline } from './ConnectionTimeline';
 import QrScannerDialog from './QrScannerDialog';
+import { IManualGameInput } from '../game/ManualGame';
+import PortableGameReview, { PortableGameActions } from './PortableGameReview';
+import { readScannedQbsheetCode } from './ScannedQbsheetCode';
 import ControlIcon from '../scorer/ControlIcon';
 import UpdateNotice from '../pwa/UpdateNotice';
 
@@ -44,19 +47,21 @@ function pairStage(connection: IControlConnection): Extract<Stage, { kind: 'pair
   };
 }
 
-export default function ConnectedSetup(props: {
-  initialBaseUrl: string;
-  /** A successful address submission from Home, so the same gesture can continue to pairing. */
-  initialConnection?: IControlConnection | null;
-  launch?: IPairingLaunchIntent | null;
-  /** Preserve the device identity when replacing a pairing. */
-  existingDeviceId?: string;
-  onPaired: (room: IPairedRoom) => void;
-  onPairingLaunch: (intent: IPairingLaunchIntent) => void;
-  onOtherScoring?: () => void;
-  /** Back is appropriate here because no operational room has been established in this flow. */
-  onCancel: () => void;
-}) {
+export default function ConnectedSetup(
+  props: PortableGameActions & {
+    initialBaseUrl: string;
+    /** A successful address submission from Home, so the same gesture can continue to pairing. */
+    initialConnection?: IControlConnection | null;
+    launch?: IPairingLaunchIntent | null;
+    /** Preserve the device identity when replacing a pairing. */
+    existingDeviceId?: string;
+    onPaired: (room: IPairedRoom) => void;
+    onPairingLaunch: (intent: IPairingLaunchIntent) => void;
+    onOtherScoring?: () => void;
+    /** Back is appropriate here because no operational room has been established in this flow. */
+    onCancel: () => void;
+  },
+) {
   const {
     initialBaseUrl,
     initialConnection = null,
@@ -81,6 +86,7 @@ export default function ConnectedSetup(props: {
   const [code, setCode] = useState('');
   const [roomId, setRoomId] = useState('');
   const [scanning, setScanning] = useState(false);
+  const [portableInput, setPortableInput] = useState<IManualGameInput | null>(null);
   // Mirrors of the identity-bearing inputs. An async connect/pair result is applied only when the
   // input it was started from still matches, so a response for address/code A can never advance
   // UI that is now displaying B.
@@ -202,6 +208,18 @@ export default function ConnectedSetup(props: {
 
   const addressEmpty = address.trim() === '';
 
+  const scanButton = (
+    <button
+      type="button"
+      className="shell-button welcome-scan-button"
+      onClick={() => setScanning(true)}
+      disabled={busy}
+    >
+      <ControlIcon name="qr" />
+      Scan QR
+    </button>
+  );
+
   return (
     <main className="shell">
       <header className="shell-header">
@@ -254,15 +272,7 @@ export default function ConnectedSetup(props: {
               <button type="submit" className="shell-button is-primary" disabled={busy || addressEmpty}>
                 {busy ? 'Connecting…' : 'Connect'}
               </button>
-              <button
-                type="button"
-                className="shell-button welcome-scan-button"
-                onClick={() => setScanning(true)}
-                disabled={busy}
-              >
-                <ControlIcon name="qr" />
-                Scan QR
-              </button>
+              {scanButton}
             </div>
           </form>
         </section>
@@ -319,6 +329,7 @@ export default function ConnectedSetup(props: {
             <button type="submit" className="shell-button is-primary" disabled={busy || code.trim() === ''}>
               {busy ? 'Pairing…' : 'Pair this room'}
             </button>
+            {scanButton}
           </form>
         </section>
       )}
@@ -351,10 +362,18 @@ export default function ConnectedSetup(props: {
         </button>
       </div>
 
+      {portableInput && (
+        <PortableGameReview
+          input={portableInput}
+          onCancel={() => setPortableInput(null)}
+          onStartManualGame={props.onStartManualGame}
+          onEditManualGame={props.onEditManualGame}
+        />
+      )}
       {scanning && (
         <QrScannerDialog
           onClose={() => setScanning(false)}
-          onDecoded={(text) => readScannedPairingCode(text, setScanning, onPairingLaunch)}
+          onDecoded={(text) => readScannedQbsheetCode(text, setScanning, onPairingLaunch, setPortableInput)}
         />
       )}
     </main>

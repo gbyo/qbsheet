@@ -471,3 +471,15 @@ describe('device navigation, reset, build identity, and dialog behavior', () => 
     expect(within(dialog).getByRole('button', { name: 'Reset device preferences…' })).toBeInTheDocument();
   });
 });
+
+test('Advanced opens the standalone creator relative to the scorer in a separate tab', () => {
+  render(<SettingsDialog {...defaultSettingsProps()} />);
+  const link = screen.getByRole('link', { name: 'Open game package creator' });
+  expect(link).toHaveAttribute('href', './game-package-creator/index.html');
+  expect(link).toHaveAttribute('target', '_blank');
+  expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+  expect(new URL(link.getAttribute('href')!, 'https://example.org/project/index.html').pathname).toBe(
+    '/project/game-package-creator/index.html',
+  );
+  expect(screen.getByRole('button', { name: 'Reset device preferences…' })).toBeInTheDocument();
+});

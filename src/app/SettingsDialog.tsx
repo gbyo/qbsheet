@@ -499,6 +499,21 @@ export default function SettingsDialog(props: {
               <h3 id="settings-advanced-heading" className="settings-section-title">
                 Advanced
               </h3>
+              <div className="settings-row">
+                <div>
+                  <strong>Game package creator</strong>
+                  <p className="shell-hint">Create a QR code with teams, players, and game settings</p>
+                </div>
+                <a
+                  className="shell-button"
+                  href="./game-package-creator/index.html"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="Open game package creator"
+                >
+                  Open
+                </a>
+              </div>
               <button type="button" className="settings-inline-action" onClick={() => setView('reset')}>
                 Reset device preferences…
               </button>

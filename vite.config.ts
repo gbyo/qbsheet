@@ -74,16 +74,13 @@ function buildIdentity(): IBuildIdentity {
   };
 }
 
-/**
- * Marketing-page output is deployed beside the scorer, but is not part of its offline shell.
- *
- * There used to be two surfaces to exclude. The second was the browser Director preview at
- * `director.html`, which this build no longer emits: Director is a desktop application, its page on
- * this site is `about/director/`, and that is already covered by the `about/` prefix. One prefix rule
- * is the whole of the exclusion now, which is why a page added below `about/` needs no edit here.
- */
+/** Separate documents own their page-only assets; shared scorer assets remain available offline. */
 export function isScorerPrecacheAsset(fileName: string): boolean {
-  return !fileName.endsWith('.map') && !fileName.startsWith('about/');
+  return (
+    !fileName.endsWith('.map') &&
+    !fileName.startsWith('about/') &&
+    !fileName.startsWith('game-package-creator/')
+  );
 }
 
 /** The element in `about/index.html` that the rendered page is placed inside, and the only edit made to it. */
@@ -453,9 +450,8 @@ self.addEventListener('fetch', (event) => {
   // The marketing pages are separate Vite entries and are deliberately network-owned: none of them
   // should be stored as the scorer shell, served by the scorer's offline fallback, or put its own
   // assets in the cache whose activation is coordinated around an active game. Every document on
-  // this site outside the scorer sits below \`about/\`, including the Director and QBLive pages,
-  // so this one prefix is the whole rule.
-  if (relativePath === 'about' || relativePath.startsWith('about/')) return;
+  // the standalone surfaces is excluded by its own prefix, including the creator.
+  if (relativePath === 'about' || relativePath.startsWith('about/') || relativePath === 'game-package-creator' || relativePath.startsWith('game-package-creator/')) return;
 
   if (request.mode === 'navigate') {
     // The application has no path routes. Only the scope root (and an explicit index.html) is a
@@ -513,6 +509,7 @@ export default defineConfig({
         // Director application is `apps/director`, built by its own Vite config into its Tauri
         // shell, and the only Director this site serves is the page describing it.
         scorer: resolve(import.meta.dirname, 'index.html'),
+        'game-package-creator': resolve(import.meta.dirname, 'game-package-creator/index.html'),
         about: resolve(import.meta.dirname, 'about/index.html'),
         'about-scoring': resolve(import.meta.dirname, 'about/scoring/index.html'),
         'about-tournaments': resolve(import.meta.dirname, 'about/tournaments/index.html'),
@@ -540,16 +537,29 @@ export default defineConfig({
         // chunk carries, and a rule that catches two of the three still leaves the third inside the
         // scorer's precache list.
         entryFileNames: (chunk) =>
-          isAboutChunk(chunk) ? 'about/assets/[name]-[hash].js' : 'assets/[name]-[hash].js',
+          isAboutChunk(chunk)
+            ? 'about/assets/[name]-[hash].js'
+            : chunk.name === 'game-package-creator'
+              ? 'game-package-creator/assets/[name]-[hash].js'
+              : 'assets/[name]-[hash].js',
         chunkFileNames: (chunk) =>
-          isAboutChunk(chunk) ? 'about/assets/[name]-[hash].js' : 'assets/[name]-[hash].js',
+          isAboutChunk(chunk)
+            ? 'about/assets/[name]-[hash].js'
+            : chunk.name === 'game-package-creator'
+              ? 'game-package-creator/assets/[name]-[hash].js'
+              : 'assets/[name]-[hash].js',
         assetFileNames: (asset) => {
           const sourceNames = asset.originalFileNames ?? [];
           const belongsToAbout =
             // The extracted stylesheet, which has no sources to be recognised by. See `aboutChunkName`.
             asset.name === `${aboutChunkName}.css` ||
             sourceNames.some((name) => isAboutSource(name) || toPosix(name).endsWith(aboutScreenshot));
-          return belongsToAbout ? 'about/assets/[name]-[hash][extname]' : 'assets/[name]-[hash][extname]';
+          return belongsToAbout
+            ? 'about/assets/[name]-[hash][extname]'
+            : asset.name === 'game-package-creator.css' ||
+                sourceNames.some((name) => toPosix(name).includes('src/game-package-creator/'))
+              ? 'game-package-creator/assets/[name]-[hash][extname]'
+              : 'assets/[name]-[hash][extname]';
         },
       },
     },
