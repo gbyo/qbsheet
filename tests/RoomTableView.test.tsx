@@ -274,7 +274,8 @@ describe('the ruling picker', () => {
     renderTable();
     openPicker('Ninety Six', 'Maycie');
 
-    fireEvent.mouseDown(document.body);
+    // The picker watches `pointerdown`, the one event a mouse press and a touch both raise once.
+    fireEvent.pointerDown(document.body);
 
     expect(screen.queryByRole('dialog')).toBeNull();
   });
