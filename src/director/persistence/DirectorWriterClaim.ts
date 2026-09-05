@@ -197,7 +197,7 @@ async function claimWithBroadcastChannel(
     }
     if (message.kind === 'candidate') {
       candidates.add(message.tabId);
-      if (claimed && message.tabId < tabId) lose();
+      if (claimed) post({ kind: 'heartbeat', scope, tabId });
       return;
     }
     if (message.kind === 'claim') {

@@ -82,6 +82,15 @@ describe('Director writer claims', () => {
     expect(first.lost.aborted).toBe(false);
   });
 
+  test('a live holder keeps ownership when a lower-id contender probes it', async () => {
+    const first = await claim('tournament-a', 'document-a', 'zeta');
+    const second = await claim('tournament-a', 'document-a', 'alpha');
+
+    expect(first.held).toBe(true);
+    expect(first.lost.aborted).toBe(false);
+    expect(second.held).toBe(false);
+  });
+
   test('reclaims a fallback claim after the holder stops responding', async () => {
     const holderChannel = new BroadcastChannel(directorWriterChannelName('tournament-a', 'document-a'));
     const first = await claimDirectorWriter({
