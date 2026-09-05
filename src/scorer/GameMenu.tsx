@@ -83,6 +83,14 @@ export default function GameMenu(props: { items: IGameMenuItem[]; label?: string
     ]?.focus();
   };
 
+  /*
+   * Keep an open menu focusable after its entries change.
+   *
+   * Scorer menu data is rebuilt on every score update, so this runs constantly while the menu is
+   * open. It leaves an enabled, focused entry alone: refocusing then would steal a keyboard user's
+   * position. It acts only when the entry holding focus has stopped existing or become disabled,
+   * which otherwise drops focus to the document with the menu still open.
+   */
   useEffect(() => {
     if (!open) return;
 
@@ -150,6 +158,13 @@ export default function GameMenu(props: { items: IGameMenuItem[]; label?: string
         >
           {items.map((item, index) => (
             <Fragment key={item.label}>
+              {/*
+                A rule, and nothing that can be reached. `role="separator"` is what tells assistive
+                technology this is a grouping mark rather than a thing to do, and it is deliberately
+                outside the `menuItems` refs below: arrow keys, Home and End walk the entries only,
+                because a menu that made somebody press Down twice to get past a line would have made
+                the line a control.
+              */}
               {item.groupLabel && (
                 <li role="presentation" className="scorer-menu-group-label">
                   {item.groupLabel}

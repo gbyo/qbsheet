@@ -24,6 +24,8 @@ describe('GameMenu focus and pointer ordering', () => {
     const endGameItem = screen.getByRole('menuitem', { name: 'End game early…' });
     expect(document.activeElement).toBe(notes);
 
+    // Safari on macOS can blur the focused button with no relatedTarget while a different menu
+    // button is being clicked. Closing synchronously here unmounts that second button before click.
     fireEvent.mouseDown(endGameItem);
     fireEvent.blur(notes, { relatedTarget: null });
 
