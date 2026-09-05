@@ -74,12 +74,18 @@ test('pressing and holding the logo unlocks on pointer devices', async ({ page }
   });
 });
 
-test('power decorates the committed score and undo removes the effect', async ({ page }) => {
+test('power decorates the committed score without replaying the ordinary roll animation', async ({ page }) => {
   await startGame(page);
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.getByRole('button', { name: 'Sarah Mitchell Power', exact: true }).click();
-  await expect(page.locator('.score-reaction[data-power="true"]')).toContainText('15');
+  const powerReaction = page.locator('.score-reaction[data-power="true"]');
+  const scoreValue = page.getByLabel('Ninety Six score').locator('.scorer-team-score-value');
+  await expect(powerReaction).toContainText('15');
+  await expect(powerReaction).toHaveCount(0);
+  expect(await scoreValue.evaluate((element) => getComputedStyle(element).animationName)).not.toBe(
+    'scorer-score-roll-up',
+  );
   await page.keyboard.press('ControlOrMeta+z');
-  await expect(page.locator('.score-reaction[data-power="true"]')).toHaveCount(0);
   await expect(page.getByLabel('Ninety Six score')).toContainText('0');
 });
 
