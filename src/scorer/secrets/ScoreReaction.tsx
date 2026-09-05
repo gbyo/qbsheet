@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { IDerivedTeam } from '../../scoring/deriveGame';
 
 export interface ScoreReaction {
@@ -10,12 +10,17 @@ export interface ScoreReaction {
 /** Shared by the table and scoresheet. Existing number motion remains the ordinary response. */
 export default function ScoreValue({ team, reaction }: { team: IDerivedTeam; reaction?: ScoreReaction }) {
   const [motion, setMotion] = useState({ points: team.points, direction: 'is-up', started: false });
+  const [decoratedPoints, setDecoratedPoints] = useState<number | null>(null);
   if (motion.points !== team.points)
     setMotion({
       points: team.points,
       direction: team.points < motion.points ? 'is-down' : 'is-up',
       started: true,
     });
+  useEffect(() => {
+    if (reaction?.token) setDecoratedPoints(team.points);
+  }, [reaction?.token, team.points]);
+  const ordinaryMotion = motion.started && !reaction && decoratedPoints !== team.points;
   return (
     <span
       className="score-reaction"
@@ -25,7 +30,7 @@ export default function ScoreValue({ team, reaction }: { team: IDerivedTeam; rea
     >
       <span
         key={reaction?.token ?? team.points}
-        className={`scorer-team-score-value${motion.started ? ` ${motion.direction}` : ''}`}
+        className={`scorer-team-score-value${ordinaryMotion ? ` ${motion.direction}` : ''}`}
       >
         {team.points}
       </span>
