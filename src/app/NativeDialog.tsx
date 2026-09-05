@@ -70,7 +70,8 @@ export default function NativeDialog(props: {
 
     return () => {
       document.removeEventListener('keydown', onKeyDown);
-      if (dialog.open) dialog.close?.();
+      // Unmounting is already the parent's decision to remove this dialog. Calling `close()` here can
+      // emit a native `close` event and turn that teardown into a second `onClose` request.
       opener?.focus();
     };
   }, []);
