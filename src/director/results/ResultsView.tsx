@@ -205,6 +205,7 @@ function ScheduledGamesPanel({
   onClearNavigationTarget?: () => void;
 }) {
   const [confirmCancelId, setConfirmCancelId] = useState<string | null>(null);
+  const [confirmForfeitId, setConfirmForfeitId] = useState<string | null>(null);
   /*
    * By default, the games that still want something from a director.
    *
@@ -299,6 +300,9 @@ function ScheduledGamesPanel({
                   confirming={confirmCancelId === game.id}
                   onConfirmCancel={() => setConfirmCancelId(null)}
                   onRequestCancel={() => setConfirmCancelId(game.id)}
+                  forfeiting={confirmForfeitId === game.id}
+                  onCancelForfeit={() => setConfirmForfeitId(null)}
+                  onRequestForfeit={() => setConfirmForfeitId(game.id)}
                 />
               ))}
             </tbody>
@@ -319,6 +323,9 @@ function ScheduledGameRow({
   confirming,
   onConfirmCancel,
   onRequestCancel,
+  forfeiting,
+  onCancelForfeit,
+  onRequestForfeit,
 }: {
   state: DirectorState;
   game: DirectorState['scheduledGames'][number];
@@ -329,6 +336,9 @@ function ScheduledGameRow({
   confirming: boolean;
   onConfirmCancel: () => void;
   onRequestCancel: () => void;
+  forfeiting: boolean;
+  onCancelForfeit: () => void;
+  onRequestForfeit: () => void;
 }) {
   const round = state.rounds.find((entry) => entry.id === game.roundId);
   const room = game.roomId ? state.rooms.find((entry) => entry.id === game.roomId) : undefined;
@@ -339,7 +349,8 @@ function ScheduledGameRow({
     game.id,
     onClearNavigationTarget,
   );
-  const canCancel = !['accepted', 'cancelled'].includes(game.status);
+  const canCancel = !['accepted', 'cancelled'].includes(game.status) && !game.bracketKey;
+  const canForfeit = !['accepted', 'cancelled'].includes(game.status) && Boolean(game.rightTeamId);
   return (
     <tr
       tabIndex={-1}
@@ -372,34 +383,91 @@ function ScheduledGameRow({
         />
       </td>
       <td>
-        {canCancel && (
-          <div className="director-row-actions">
-            {confirming ? (
-              <>
-                <Button
-                  variant="danger"
-                  onClick={() => {
-                    const cancelled = controller.cancelScheduledGame(game.id);
-                    if (cancelled) {
-                      onConfirmCancel();
-                      onAnnounce('Scheduled game cancelled; the round can now close without it.');
-                    } else {
-                      onAnnounce(errorNotice('The game was not cancelled; review the Director error.'));
-                    }
-                  }}
-                >
-                  Confirm cancel
-                </Button>
-                <Button variant="quiet" onClick={onConfirmCancel}>
-                  Keep game
-                </Button>
-              </>
-            ) : (
-              <Button variant="quiet" onClick={onRequestCancel}>
-                Cancel game
-              </Button>
-            )}
-          </div>
+        {game.bracketKey && game.status === 'cancelled' ? (
+          <small className="director-table-subtext">
+            Cancelled elimination: generate a replacement or record an explicit administrative resolution
+            before closing the phase.
+          </small>
+        ) : (
+          (canCancel || canForfeit) && (
+            <div className="director-row-actions">
+              {forfeiting ? (
+                <>
+                  <Button
+                    variant="danger"
+                    onClick={() => {
+                      const forfeited = controller.recordForfeit(game.id, game.leftTeamId);
+                      if (forfeited) {
+                        onCancelForfeit();
+                        onAnnounce(
+                          `${teamLabel(state, game.leftTeamId)} recorded as forfeiting; the bracket can advance.`,
+                        );
+                      } else {
+                        onAnnounce(errorNotice('The forfeit was not recorded; review the Director error.'));
+                      }
+                    }}
+                  >
+                    {teamLabel(state, game.leftTeamId)} forfeits
+                  </Button>
+                  <Button
+                    variant="danger"
+                    onClick={() => {
+                      const forfeited = controller.recordForfeit(game.id, game.rightTeamId as string);
+                      if (forfeited) {
+                        onCancelForfeit();
+                        onAnnounce(
+                          `${teamLabel(state, game.rightTeamId)} recorded as forfeiting; the bracket can advance.`,
+                        );
+                      } else {
+                        onAnnounce(errorNotice('The forfeit was not recorded; review the Director error.'));
+                      }
+                    }}
+                  >
+                    {teamLabel(state, game.rightTeamId)} forfeits
+                  </Button>
+                  <Button variant="quiet" onClick={onCancelForfeit}>
+                    Keep game
+                  </Button>
+                </>
+              ) : confirming ? (
+                <>
+                  <Button
+                    variant="danger"
+                    onClick={() => {
+                      const cancelled = controller.cancelScheduledGame(game.id);
+                      if (cancelled) {
+                        onConfirmCancel();
+                        onAnnounce('Scheduled game cancelled; the round can now close without it.');
+                      } else {
+                        onAnnounce(errorNotice('The game was not cancelled; review the Director error.'));
+                      }
+                    }}
+                  >
+                    Confirm cancel
+                  </Button>
+                  <Button variant="quiet" onClick={onConfirmCancel}>
+                    Keep game
+                  </Button>
+                </>
+              ) : (
+                <>
+                  {canCancel && (
+                    <Button variant="quiet" onClick={onRequestCancel}>
+                      Cancel game
+                    </Button>
+                  )}
+                  {canForfeit && (
+                    <Button variant="quiet" onClick={onRequestForfeit}>
+                      Record forfeit
+                    </Button>
+                  )}
+                  {game.bracketKey && (
+                    <small className="director-table-subtext">Elimination games need a winner.</small>
+                  )}
+                </>
+              )}
+            </div>
+          )
         )}
       </td>
     </tr>

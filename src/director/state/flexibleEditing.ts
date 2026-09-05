@@ -1,4 +1,11 @@
-import { isoNow, newDirectorId, type DirectorId, type DirectorState } from '../domain';
+import {
+  isoNow,
+  plannedEliminationGameForTeam,
+  newDirectorId,
+  unresolvedScheduledGameForTeam,
+  type DirectorId,
+  type DirectorState,
+} from '../domain';
 import type { DirectorController } from './useDirectorController';
 
 /**
@@ -19,6 +26,24 @@ export async function dropTeamFlexibly(
 
   const team = next.teams.find((entry) => entry.id === teamId);
   if (!team) return false;
+
+  const operationalGame = unresolvedScheduledGameForTeam(next, teamId);
+  if (operationalGame) {
+    // Flexible editing may reconcile future schedule intent, but cannot bypass the lifecycle
+    // guard used by the normal team-drop operation.
+    controller.dropTeam(teamId, reason);
+    return false;
+  }
+  const plannedElimination = plannedEliminationGameForTeam(next, teamId);
+  if (plannedElimination) {
+    // Route through the authoritative cancellation guard so the Director returns the same
+    // replacement/forfeit guidance as an explicit cancellation, without mutating this snapshot.
+    controller.cancelScheduledGame(
+      plannedElimination.id,
+      'A planned elimination game needs an explicit bracket resolution before a team can be dropped.',
+    );
+    return false;
+  }
 
   const now = isoNow();
   const normalizedReason = reason.trim() || 'Dropped by director';

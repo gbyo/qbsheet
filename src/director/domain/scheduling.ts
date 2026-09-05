@@ -1084,7 +1084,9 @@ function generateSingleEliminationRound(
 
   const resolved = resolveBracketState(state, bracket);
   const existingKeys = new Set(
-    state.scheduledGames.flatMap((game) => (game.bracketKey ? [game.bracketKey] : [])),
+    state.scheduledGames.flatMap((game) =>
+      game.status !== 'cancelled' && game.bracketKey ? [game.bracketKey] : [],
+    ),
   );
   const firstReadyRound = resolved.games
     .filter((game) => game.ready && !existingKeys.has(game.key))
@@ -1111,7 +1113,18 @@ function generateSingleEliminationRound(
   }
   const roundIndex = firstReadyRound ?? byeCandidates[0]!.roundIndex;
   const roundNumber = bracket.roundNumbers[roundIndex] ?? nextRoundNumber(state);
-  const roundId = bracket.roundIds[String(roundIndex)] ?? `bracket-round-${phaseId}-${roundIndex + 1}`;
+  const configuredRoundId = bracket.roundIds[String(roundIndex)];
+  const configuredRound = configuredRoundId
+    ? state.rounds.find((candidate) => candidate.id === configuredRoundId)
+    : undefined;
+  const defaultRoundId = `bracket-round-${phaseId}-${roundIndex + 1}`;
+  const roundId =
+    configuredRound && configuredRound.status !== 'planned'
+      ? newDirectorId('bracket-round')
+      : (configuredRoundId ??
+        (state.rounds.some((candidate) => candidate.id === defaultRoundId)
+          ? newDirectorId('bracket-round')
+          : defaultRoundId));
   bracket.roundIds[String(roundIndex)] = roundId;
   const availableRooms = assignableRoomIds(state);
   let roomIndex = 0;
@@ -1119,8 +1132,14 @@ function generateSingleEliminationRound(
   for (const resolvedGame of resolved.games.filter(
     (game) => game.roundIndex === roundIndex && game.ready && !existingKeys.has(game.key),
   )) {
+    const deterministicGameId = `bracket-game-${phaseId}-${resolvedGame.key}`;
+    const hasPriorScheduledGame = state.scheduledGames.some(
+      (candidate) =>
+        candidate.id === deterministicGameId ||
+        (candidate.bracketKey === resolvedGame.key && candidate.status === 'cancelled'),
+    );
     const game: ScheduledGame = {
-      id: `bracket-game-${phaseId}-${resolvedGame.key}`,
+      id: hasPriorScheduledGame ? newDirectorId('bracket-game') : deterministicGameId,
       roundId,
       poolId: null,
       roomId: availableRooms[roomIndex++] ?? null,
@@ -1496,17 +1515,124 @@ export function scheduleGameCount(games: ScheduledGame[]): number {
   return games.filter((game) => !game.bye && game.status !== 'cancelled').length;
 }
 
-export function roomHasUnresolvedLiveWork(state: DirectorState, roomId: DirectorId): boolean {
+/**
+ * A scheduled game occupies a room until its operational work is explicitly resolved. Planned
+ * work is intent for a future round; released/live/submitted work can still resume or produce a
+ * result and therefore must keep the room reserved.
+ */
+export function scheduledGameHasUnresolvedWork(state: DirectorState, game: ScheduledGame): boolean {
+  const gameIds = new Set(
+    state.games.filter((record) => record.scheduledGameId === game.id).map((record) => record.id),
+  );
+  if (
+    state.games.some(
+      (record) =>
+        record.scheduledGameId === game.id && (record.status === 'live' || record.status === 'submitted'),
+    ) ||
+    state.submissions.some(
+      (submission) =>
+        gameIds.has(submission.gameId) &&
+        (submission.status === 'received' || submission.status === 'review'),
+    )
+  ) {
+    return true;
+  }
+  if (game.bye || game.status === 'accepted' || game.status === 'cancelled') return false;
+  if (game.status === 'released' || game.status === 'live' || game.status === 'submitted') return true;
+  return state.qbtcpSessions.some(
+    (session) => session.matchId === game.id && qbtcpSessionHasUnresolvedWork(state, session),
+  );
+}
+
+export function qbtcpSessionHasUnresolvedWork(
+  state: DirectorState,
+  session: DirectorState['qbtcpSessions'][number],
+): boolean {
+  const scheduled = session.matchId
+    ? state.scheduledGames.find((game) => game.id === session.matchId)
+    : undefined;
+  if (scheduled && (scheduled.status === 'accepted' || scheduled.status === 'cancelled')) return false;
   return (
-    state.qbtcpSessions.some((session) => session.roomId === roomId && session.state === 'live') ||
-    state.scheduledGames.some((game) => game.roomId === roomId && !game.bye && game.status === 'live')
+    session.state === 'paired' ||
+    session.state === 'assigned' ||
+    session.state === 'live' ||
+    session.state === 'result-received' ||
+    (session.state === 'abandoned' && session.resumable === true)
+  );
+}
+
+export function roomHasUnresolvedWork(state: DirectorState, roomId: DirectorId): boolean {
+  return (
+    state.scheduledGames.some(
+      (game) => game.roomId === roomId && scheduledGameHasUnresolvedWork(state, game),
+    ) ||
+    state.qbtcpSessions.some(
+      (session) => session.roomId === roomId && qbtcpSessionHasUnresolvedWork(state, session),
+    )
+  );
+}
+
+/** @deprecated Use roomHasUnresolvedWork; retained for callers outside the Director package. */
+export function roomHasUnresolvedLiveWork(state: DirectorState, roomId: DirectorId): boolean {
+  return roomHasUnresolvedWork(state, roomId);
+}
+
+export function unresolvedScheduledGameForTeam(
+  state: DirectorState,
+  teamId: DirectorId,
+): ScheduledGame | undefined {
+  return state.scheduledGames.find(
+    (game) =>
+      (game.leftTeamId === teamId || game.rightTeamId === teamId) &&
+      scheduledGameHasUnresolvedWork(state, game),
+  );
+}
+
+/** A planned elimination slot has no result to resolve, so it is not room occupancy yet. It is
+ * nevertheless unsafe to cancel through a structural team edit: doing so would strand the bracket
+ * without an authoritative winner. */
+export function plannedEliminationGameForTeam(
+  state: DirectorState,
+  teamId: DirectorId,
+): ScheduledGame | undefined {
+  return state.scheduledGames.find(
+    (game) =>
+      game.status === 'scheduled' &&
+      Boolean(game.bracketKey) &&
+      (game.leftTeamId === teamId || game.rightTeamId === teamId),
   );
 }
 
 export function roomIsAssignable(state: DirectorState, roomId: DirectorId): boolean {
   const room = state.rooms.find((entry) => entry.id === roomId);
   return Boolean(
-    room && room.available && room.status === 'available' && !roomHasUnresolvedLiveWork(state, roomId),
+    room && room.available && room.status === 'available' && !roomHasUnresolvedWork(state, roomId),
+  );
+}
+
+/**
+ * Validate an assignment that already belongs to a scheduled game. The game's own paired/live
+ * session is expected occupancy; only unrelated unresolved work makes the assignment conflicting.
+ * New assignments must continue to use roomIsAssignable so they cannot claim an occupied room.
+ */
+export function roomAssignmentIsValid(
+  state: DirectorState,
+  roomId: DirectorId,
+  scheduledGameId: DirectorId,
+): boolean {
+  const room = state.rooms.find((entry) => entry.id === roomId);
+  if (!room || !room.available || room.status !== 'available') return false;
+  return (
+    !state.scheduledGames.some(
+      (game) =>
+        game.id !== scheduledGameId && game.roomId === roomId && scheduledGameHasUnresolvedWork(state, game),
+    ) &&
+    !state.qbtcpSessions.some(
+      (session) =>
+        session.roomId === roomId &&
+        session.matchId !== scheduledGameId &&
+        qbtcpSessionHasUnresolvedWork(state, session),
+    )
   );
 }
 

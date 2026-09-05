@@ -14,13 +14,16 @@ import {
   nextDayOrder,
   orderDayItems,
   phaseCanComplete,
+  plannedEliminationGameForTeam,
   previewAdvancement,
   roomAssignmentConflicts,
-  roomHasUnresolvedLiveWork,
+  roomAssignmentIsValid,
+  roomHasUnresolvedWork,
   resolveDirectorBracket,
   roomIsAssignable,
   roundScheduleIsValid,
   rosterAmendmentId,
+  unresolvedScheduledGameForTeam,
   type TimelineEventType,
   type TimelineVisibility,
   type TournamentTimelineEvent,
@@ -50,6 +53,7 @@ import {
   type DirectorCheckpoint,
   type TournamentCatalogEntry,
 } from '../persistence';
+import { claimDirectorWriter, type DirectorWriterClaim } from '../persistence/DirectorWriterClaim';
 import { loadOperatorProfile, operatorDisplayName } from '../operator/operatorProfile';
 import {
   composeAnnouncement,
@@ -104,6 +108,7 @@ import type { TransferVolume } from '../transfers/ports';
 import {
   readNativeServerSnapshot,
   resolveNativeQbtcpHelp,
+  isNativeDirector,
   type NativeHelpSnapshot,
   type NativeProgressSnapshot,
   type NativeRosterAmendmentSnapshot,
@@ -279,11 +284,21 @@ export interface FinishRoundResult {
   reason?: string;
 }
 
+export interface DirectorPersistenceHealth {
+  status: 'saved' | 'saving' | 'failed';
+  revision: number;
+  durableRevision: number;
+  error: string | null;
+}
+
 export interface DirectorController {
   state: DirectorState;
   loading: boolean;
   saving: boolean;
   error: string | null;
+  persistence: DirectorPersistenceHealth;
+  retryPersistence(): Promise<boolean>;
+  writerStatus: 'native' | 'held' | 'checking' | 'blocked' | 'unavailable';
   repositoryKind: DirectorRepository['kind'];
   tournaments: TournamentCatalogEntry[];
   refreshTournaments(): Promise<void>;
@@ -426,6 +441,7 @@ export interface DirectorController {
    */
   finishRound(roundId: DirectorId): FinishRoundResult;
   cancelScheduledGame(scheduledGameId: DirectorId, reason?: string): boolean;
+  recordForfeit(scheduledGameId: DirectorId, forfeitedTeamId: DirectorId, reason?: string): boolean;
   addManualResult(input: ManualResultInput): boolean;
   associateSubmission(submissionId: DirectorId, scheduledGameId: DirectorId): boolean;
   acceptSubmission(submissionId: DirectorId, actor?: string): boolean;
@@ -552,7 +568,17 @@ export function useDirectorController(repository = createDirectorRepository()): 
   const [repositoryKind] = useState(() => repository.kind);
   const [state, setState] = useState<DirectorState>(emptyDirectorState);
   const [loading, setLoading] = useState(true);
+  const [storageReady, setStorageReady] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [persistence, setPersistence] = useState<DirectorPersistenceHealth>({
+    status: 'saved',
+    revision: 0,
+    durableRevision: 0,
+    error: null,
+  });
+  const [writerStatus, setWriterStatus] = useState<DirectorController['writerStatus']>(() =>
+    isNativeDirector() ? 'native' : 'checking',
+  );
   const [checkpoints, setCheckpoints] = useState<DirectorCheckpoint[]>([]);
   const [recovering, setRecovering] = useState(false);
   const [documentEpoch, setDocumentEpoch] = useState(0);
@@ -566,8 +592,26 @@ export function useDirectorController(repository = createDirectorRepository()): 
   }>({ lastSuccessfulAt: null, error: null });
   const stateRef = useRef<DirectorState>(emptyDirectorState());
   const stateRevisionRef = useRef(0);
+  const durableRevisionRef = useRef(0);
   const persistenceQueueRef = useRef(Promise.resolve());
   const persistenceSequenceRef = useRef(0);
+  const writerClaimRef = useRef<DirectorWriterClaim | null>(null);
+  const writerStatusRef = useRef<DirectorController['writerStatus']>(writerStatus);
+  const writerGraceDocumentRef = useRef<DirectorId | null>(null);
+  // Every queued whole-document write captures this epoch. Releasing a claim or changing the
+  // active document advances it, so a task that was queued while this tab was authoritative
+  // cannot write after another tab has taken ownership.
+  const writerEpochRef = useRef(0);
+  const writerReadyWaitersRef = useRef(
+    new Map<
+      DirectorId,
+      {
+        promise: Promise<void>;
+        resolve: () => void;
+        reject: (reason: unknown) => void;
+      }
+    >(),
+  );
   const qbtcpSyncInFlightRef = useRef<Promise<void> | null>(null);
   /**
    * The last public snapshot Director derived.
@@ -581,6 +625,78 @@ export function useDirectorController(repository = createDirectorRepository()): 
   const liveDrainInFlightRef = useRef<Promise<void> | null>(null);
   const localServerPublicationRef = useRef<string | null>(null);
 
+  const settleWriterReady = useCallback((tournamentId: DirectorId, reason?: unknown) => {
+    const waiter = writerReadyWaitersRef.current.get(tournamentId);
+    if (!waiter) return;
+    writerReadyWaitersRef.current.delete(tournamentId);
+    if (reason === undefined) waiter.resolve();
+    else waiter.reject(reason);
+  }, []);
+
+  const waitForWriterReady = useCallback((tournamentId: DirectorId): Promise<void> => {
+    if (isNativeDirector()) return Promise.resolve();
+    const claim = writerClaimRef.current;
+    if (claim?.held && !claim.lost.aborted && stateRef.current.tournament?.id === tournamentId) {
+      return Promise.resolve();
+    }
+    if (writerStatusRef.current === 'blocked' || writerStatusRef.current === 'unavailable') {
+      return Promise.reject(new Error('This Director tab no longer owns the tournament write lock.'));
+    }
+    const existing = writerReadyWaitersRef.current.get(tournamentId);
+    if (existing) return existing.promise;
+    let resolve!: () => void;
+    let reject!: (reason: unknown) => void;
+    const promise = new Promise<void>((resolvePromise, rejectPromise) => {
+      resolve = resolvePromise;
+      reject = rejectPromise;
+    });
+    writerReadyWaitersRef.current.set(tournamentId, { promise, resolve, reject });
+    return promise;
+  }, []);
+
+  const captureWriteAuthority = useCallback((snapshot: DirectorState) => {
+    const tournamentId = snapshot.tournament?.id ?? null;
+    return {
+      tournamentId,
+      claim: writerClaimRef.current,
+      epoch: writerEpochRef.current,
+      grace: tournamentId !== null && writerGraceDocumentRef.current === tournamentId,
+    };
+  }, []);
+
+  const assertWriteAuthority = useCallback(
+    (authority: ReturnType<typeof captureWriteAuthority>, snapshot: DirectorState): void => {
+      if (isNativeDirector() || !authority.tournamentId) return;
+      if (snapshot.tournament?.id !== authority.tournamentId) {
+        throw new Error('The tournament changed before this Director write could be saved.');
+      }
+      if (stateRef.current.tournament?.id !== authority.tournamentId) {
+        throw new Error('The tournament changed before this Director write could be saved.');
+      }
+      if (writerEpochRef.current !== authority.epoch) {
+        throw new Error(
+          'Director write ownership changed before this save completed. The change remains in memory; retry it in the active tab.',
+        );
+      }
+      if (authority.claim) {
+        if (writerClaimRef.current !== authority.claim || authority.claim.lost.aborted) {
+          throw new Error(
+            'Director write ownership changed before this save completed. The change remains in memory; retry it in the active tab.',
+          );
+        }
+        return;
+      }
+      // A newly created/imported document is allowed to queue while its scoped claim is being
+      // acquired. It must not write until that claim is actually held.
+      if (!authority.grace || !writerClaimRef.current?.held || writerClaimRef.current.lost.aborted) {
+        throw new Error(
+          'This Director tab has not acquired the tournament write lock. The change remains in memory; retry it when the tab is writable.',
+        );
+      }
+    },
+    [captureWriteAuthority],
+  );
+
   useEffect(() => {
     let active = true;
     void repositoryRef.current
@@ -589,8 +705,15 @@ export function useDirectorController(repository = createDirectorRepository()): 
         if (!active) return;
         stateRef.current = loaded;
         stateRevisionRef.current += 1;
+        durableRevisionRef.current = stateRevisionRef.current;
+        setPersistence({
+          status: 'saved',
+          revision: stateRevisionRef.current,
+          durableRevision: durableRevisionRef.current,
+          error: null,
+        });
         setState(loaded);
-        setLoading(false);
+        setStorageReady(true);
         if (repositoryRef.current.listTournaments) {
           void repositoryRef.current
             .listTournaments()
@@ -601,11 +724,144 @@ export function useDirectorController(repository = createDirectorRepository()): 
       .catch((reason: unknown) => {
         if (!active) return;
         setError(reason instanceof Error ? reason.message : 'Director storage could not be opened.');
+        setStorageReady(true);
         setLoading(false);
       });
     return () => {
       active = false;
     };
+  }, []);
+
+  useEffect(() => {
+    writerStatusRef.current = writerStatus;
+  }, [writerStatus]);
+
+  useEffect(() => {
+    if (!storageReady) return;
+    const tournamentId = state.tournament?.id;
+    const native = isNativeDirector();
+    if (writerClaimRef.current) {
+      writerEpochRef.current += 1;
+      writerClaimRef.current.release();
+      writerClaimRef.current = null;
+    }
+    if (native) {
+      writerStatusRef.current = 'native';
+      setWriterStatus('native');
+      setLoading(false);
+      return;
+    }
+    // A new-document screen has no shared document to contend for. Acquire a scoped claim as
+    // soon as the tournament receives an identity.
+    if (!tournamentId) {
+      writerStatusRef.current = 'held';
+      setWriterStatus('held');
+      setLoading(false);
+      return;
+    }
+    let active = true;
+    let acquired: DirectorWriterClaim | null = null;
+    const claimCancellation = new AbortController();
+    writerStatusRef.current = 'checking';
+    setWriterStatus('checking');
+    void claimDirectorWriter({
+      tournamentId,
+      documentId: tournamentId,
+      signal: claimCancellation.signal,
+    })
+      .then((claim) => {
+        if (!active) {
+          claim.release();
+          return;
+        }
+        acquired = claim;
+        if (!claim.held) {
+          if (writerGraceDocumentRef.current === tournamentId) writerGraceDocumentRef.current = null;
+          const reason = new Error(
+            claim.mode === 'unavailable'
+              ? 'This browser cannot safely coordinate Director tabs.'
+              : 'Another Director tab is editing this tournament.',
+          );
+          settleWriterReady(tournamentId, reason);
+          writerStatusRef.current = claim.mode === 'unavailable' ? 'unavailable' : 'blocked';
+          setWriterStatus(claim.mode === 'unavailable' ? 'unavailable' : 'blocked');
+          setLoading(false);
+          return;
+        }
+        writerClaimRef.current = claim;
+        settleWriterReady(tournamentId);
+        if (writerGraceDocumentRef.current === tournamentId) writerGraceDocumentRef.current = null;
+        writerStatusRef.current = 'held';
+        setWriterStatus('held');
+        setLoading(false);
+        const onLost = () => {
+          if (!active || writerClaimRef.current !== claim) return;
+          writerEpochRef.current += 1;
+          writerClaimRef.current = null;
+          if (writerGraceDocumentRef.current === tournamentId) writerGraceDocumentRef.current = null;
+          settleWriterReady(
+            tournamentId,
+            new Error(
+              'Another Director tab took the write lock for this tournament. The change remains in memory; retry it there.',
+            ),
+          );
+          writerStatusRef.current = 'blocked';
+          setWriterStatus('blocked');
+          setError(
+            'Another Director tab took the write lock for this tournament. This tab is now read-only.',
+          );
+        };
+        claim.lost.addEventListener('abort', onLost, { once: true });
+      })
+      .catch(() => {
+        if (active) {
+          settleWriterReady(
+            tournamentId,
+            new Error('This browser could not establish a safe Director write lock.'),
+          );
+          writerStatusRef.current = 'unavailable';
+          setWriterStatus('unavailable');
+          setLoading(false);
+        }
+      });
+    return () => {
+      active = false;
+      claimCancellation.abort();
+      if (writerClaimRef.current === acquired) {
+        writerEpochRef.current += 1;
+        writerClaimRef.current = null;
+        settleWriterReady(
+          tournamentId,
+          new Error('The Director write lock was released before this save could start.'),
+        );
+      }
+      acquired?.release();
+      if (writerGraceDocumentRef.current === tournamentId) {
+        writerGraceDocumentRef.current = null;
+        settleWriterReady(
+          tournamentId,
+          new Error('The Director write lock was released before this save could start.'),
+        );
+      }
+    };
+  }, [settleWriterReady, state.tournament?.id, storageReady]);
+
+  const ensureWriter = useCallback((): boolean => {
+    if (isNativeDirector() || !stateRef.current.tournament?.id) return true;
+    if (
+      writerClaimRef.current?.held ||
+      writerStatusRef.current === 'held' ||
+      writerGraceDocumentRef.current === stateRef.current.tournament?.id
+    )
+      return true;
+    setError(
+      writerStatusRef.current === 'checking'
+        ? 'Checking whether this tournament is open in another Director tab. Try again in a moment.'
+        : writerStatusRef.current === 'unavailable'
+          ? 'This browser cannot safely coordinate Director tabs, so this tournament is read-only here.'
+          : 'Another Director tab is editing this tournament. Close it or use that tab to make changes.',
+    );
+    return false;
   }, []);
 
   const refreshCheckpoints = useCallback(async () => {
@@ -629,17 +885,44 @@ export function useDirectorController(repository = createDirectorRepository()): 
       revision: number,
       operation: (persisted: DirectorState) => Promise<void>,
     ): Promise<void> => {
+      const authority = captureWriteAuthority(snapshot);
       const sequence = persistenceSequenceRef.current + 1;
       persistenceSequenceRef.current = sequence;
+      setPersistence((previous) => ({
+        status: 'saving',
+        revision: Math.max(previous.revision, revision),
+        durableRevision: durableRevisionRef.current,
+        error: previous.error,
+      }));
       const task = persistenceQueueRef.current.then(async () => {
+        if (authority.grace && authority.tournamentId && !authority.claim) {
+          await waitForWriterReady(authority.tournamentId);
+        }
+        assertWriteAuthority(authority, snapshot);
         const persisted = structuredClone(snapshot);
         await operation(persisted);
-        // A successful queued write clears a previous failure even when this revision is no
-        // longer current. A newer queued write will set the error again if it fails.
-        setError(null);
+        durableRevisionRef.current = Math.max(durableRevisionRef.current, revision);
         if (stateRevisionRef.current === revision) {
+          setPersistence({
+            status: 'saved',
+            revision,
+            durableRevision: durableRevisionRef.current,
+            error: null,
+          });
           stateRef.current = persisted;
           setState(persisted);
+        } else {
+          // An older success cannot clear a newer failed/unsaved revision.
+          setPersistence((previous) =>
+            previous.revision > revision
+              ? previous
+              : {
+                  status: 'saving',
+                  revision: stateRevisionRef.current,
+                  durableRevision: durableRevisionRef.current,
+                  error: previous.error,
+                },
+          );
         }
       });
       persistenceQueueRef.current = task.then(
@@ -649,14 +932,23 @@ export function useDirectorController(repository = createDirectorRepository()): 
       setSaving(true);
       void task
         .then(undefined, (reason: unknown) => {
-          setError(reason instanceof Error ? reason.message : 'Director storage could not be saved.');
+          const message = reason instanceof Error ? reason.message : 'Director storage could not be saved.';
+          if (stateRevisionRef.current === revision) {
+            setError(message);
+            setPersistence({
+              status: 'failed',
+              revision,
+              durableRevision: durableRevisionRef.current,
+              error: message,
+            });
+          }
         })
         .finally(() => {
           if (persistenceSequenceRef.current === sequence) setSaving(false);
         });
       return task;
     },
-    [],
+    [assertWriteAuthority, captureWriteAuthority, waitForWriterReady],
   );
 
   const persist = useCallback(
@@ -665,12 +957,37 @@ export function useDirectorController(repository = createDirectorRepository()): 
         persisted.metadata.lastSavedAt = isoNow();
         await repositoryRef.current.save(persisted);
         if (repositoryRef.current.listTournaments) {
-          const catalog = await repositoryRef.current.listTournaments();
-          setTournaments(catalog);
+          try {
+            const catalog = await repositoryRef.current.listTournaments();
+            setTournaments(catalog);
+          } catch (reason: unknown) {
+            // The document write is already durable. Keep that health separate from a catalog
+            // refresh failure so the UI does not ask the director to retry a save that succeeded.
+            if (stateRevisionRef.current === revision) {
+              setError(
+                reason instanceof Error
+                  ? `Tournament saved, but the tournament list could not be refreshed: ${reason.message}`
+                  : 'Tournament saved, but the tournament list could not be refreshed.',
+              );
+            }
+          }
         }
       }),
     [enqueuePersistence],
   );
+
+  const retryPersistence = useCallback(async (): Promise<boolean> => {
+    if (!ensureWriter()) return false;
+    const snapshot = structuredClone(stateRef.current);
+    const revision = stateRevisionRef.current;
+    try {
+      await persist(snapshot, revision);
+      setError(null);
+      return true;
+    } catch {
+      return false;
+    }
+  }, [ensureWriter, persist]);
 
   /**
    * Apply a mutation, derive the public projection, and persist both together.
@@ -699,9 +1016,29 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError('The tournament is being restored. Wait for recovery to finish, then try again.');
         return false;
       }
+      if (!ensureWriter()) return false;
+      // A validated user mutation supersedes an older operational error. Persistence completions
+      // deliberately do not clear this channel: a late save from a previous mutation must not
+      // erase guidance for a newly blocked action.
+      setError(null);
+      const previousTournamentId = stateRef.current.tournament?.id;
       const next = structuredClone(stateRef.current);
       const auditStart = next.audit.length;
       mutator(next);
+      if (next.tournament && next.tournament.id !== previousTournamentId) {
+        writerEpochRef.current += 1;
+        if (previousTournamentId) {
+          settleWriterReady(
+            previousTournamentId,
+            new Error('The active tournament changed before this Director save could start.'),
+          );
+        }
+        writerClaimRef.current?.release();
+        writerClaimRef.current = null;
+        writerStatusRef.current = isNativeDirector() ? 'native' : 'checking';
+        setWriterStatus(writerStatusRef.current);
+        writerGraceDocumentRef.current = next.tournament.id;
+      }
       const actor = operatorDisplayName(loadOperatorProfile());
       for (const event of next.audit.slice(auditStart)) {
         if (event.actor === 'Director') event.actor = actor;
@@ -720,7 +1057,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
       void persist(next, revision).catch(() => undefined);
       return true;
     },
-    [persist],
+    [ensureWriter, persist, settleWriterReady],
   );
 
   const setTournamentStatus = useCallback(
@@ -780,6 +1117,13 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError('This storage backend does not support multiple tournaments.');
         return false;
       }
+      if (documentTransitionRef.current) {
+        setError('The tournament is already changing. Wait for that operation to finish.');
+        return false;
+      }
+      documentTransitionRef.current = true;
+      documentEpochRef.current += 1;
+      setRecovering(true);
       try {
         // All writes queued before the switch belong to the outgoing document. Waiting here prevents
         // a late save from racing the incoming document selection.
@@ -789,7 +1133,27 @@ export function useDirectorController(repository = createDirectorRepository()): 
           await stopLocalLiveServer().catch(() => undefined);
         }
         const loaded = await open(tournamentId);
+        const previousTournamentId = stateRef.current.tournament?.id;
+        writerEpochRef.current += 1;
+        if (previousTournamentId) {
+          settleWriterReady(
+            previousTournamentId,
+            new Error('The active tournament changed before this Director save could start.'),
+          );
+        }
+        writerClaimRef.current?.release();
+        writerClaimRef.current = null;
+        writerGraceDocumentRef.current = null;
+        writerStatusRef.current = isNativeDirector() ? 'native' : 'checking';
+        setWriterStatus(writerStatusRef.current);
         stateRevisionRef.current += 1;
+        durableRevisionRef.current = stateRevisionRef.current;
+        setPersistence({
+          status: 'saved',
+          revision: stateRevisionRef.current,
+          durableRevision: durableRevisionRef.current,
+          error: null,
+        });
         stateRef.current = loaded;
         setState(loaded);
         publishedSnapshotRef.current = null;
@@ -801,9 +1165,13 @@ export function useDirectorController(repository = createDirectorRepository()): 
       } catch (reason: unknown) {
         setError(reason instanceof Error ? reason.message : 'The selected tournament could not be opened.');
         return false;
+      } finally {
+        documentTransitionRef.current = false;
+        setDocumentEpoch(documentEpochRef.current);
+        setRecovering(false);
       }
     },
-    [refreshTournaments],
+    [refreshTournaments, settleWriterReady],
   );
 
   const updateCatalogTournamentStatus = useCallback(
@@ -818,8 +1186,29 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError('This storage backend does not support editing inactive tournaments.');
         return false;
       }
+      let catalogClaim: DirectorWriterClaim | null = null;
+      const assertCatalogClaim = () => {
+        if (!isNativeDirector() && (!catalogClaim?.held || catalogClaim.lost.aborted)) {
+          throw new Error('Another Director tab took the write lock before this catalog change was saved.');
+        }
+      };
       try {
+        if (!isNativeDirector()) {
+          catalogClaim = await claimDirectorWriter({
+            tournamentId,
+            documentId: tournamentId,
+          });
+          if (!catalogClaim.held) {
+            setError(
+              catalogClaim.mode === 'unavailable'
+                ? 'This browser cannot safely coordinate multiple Director tabs, so that tournament is read-only here.'
+                : 'Another Director tab is editing that tournament. Close it or make the change there first.',
+            );
+            return false;
+          }
+        }
         await persistenceQueueRef.current;
+        assertCatalogClaim();
         const document = await read(tournamentId);
         if (!document.tournament) throw new Error('The selected catalog document has no tournament.');
         if (document.tournament.status === status) return true;
@@ -833,12 +1222,15 @@ export function useDirectorController(repository = createDirectorRepository()): 
           summary,
           entityId: tournamentId,
         });
+        assertCatalogClaim();
         await saveDocument(document, false);
         await refreshTournaments();
         return true;
       } catch (reason: unknown) {
         setError(reason instanceof Error ? reason.message : 'The tournament status could not be saved.');
         return false;
+      } finally {
+        catalogClaim?.release();
       }
     },
     [refreshTournaments, setTournamentStatus],
@@ -1432,6 +1824,24 @@ export function useDirectorController(repository = createDirectorRepository()): 
       }
       if (current.status === 'dropped') {
         setError('That team is already dropped.');
+        return false;
+      }
+      const operationalGame = unresolvedScheduledGameForTeam(snapshot, teamId);
+      if (operationalGame) {
+        const round = snapshot.rounds.find((entry) => entry.id === operationalGame.roundId);
+        setError(
+          `Resolve ${round?.name ?? 'the current game'} before dropping ${current.displayName}. ` +
+            'Accept the result, record a forfeit, or cancel/replay it through the recovery workflow.',
+        );
+        return false;
+      }
+      const plannedElimination = plannedEliminationGameForTeam(snapshot, teamId);
+      if (plannedElimination) {
+        setError(
+          'Resolve the planned elimination game before dropping ' +
+            current.displayName +
+            '. Record a forfeit, play it, or use an explicit administrative bracket resolution.',
+        );
         return false;
       }
       const openRound = snapshot.rounds.find(
@@ -3259,7 +3669,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
       const invalidRoom = activeGames.find((game) => {
         if (!game.roomId) return true;
         const room = snapshot.rooms.find((entry) => entry.id === game.roomId);
-        return !room || !roomIsAssignable(snapshot, game.roomId);
+        return !room || !roomAssignmentIsValid(snapshot, game.roomId, game.id);
       });
       const roomIdsForRound = new Set(roomIds.filter((roomId): roomId is DirectorId => roomId !== null));
       const resourceIssues = roomAssignmentConflicts(snapshot, roomIdsForRound);
@@ -3296,6 +3706,27 @@ export function useDirectorController(repository = createDirectorRepository()): 
       }
       if (!roundScheduleIsValid(snapshot, roundId)) {
         setError('This round contains an invalid matchup or round membership and cannot be closed.');
+        return false;
+      }
+      const resolvedBracket = snapshot.tournament?.formatId
+        ? resolveDirectorBracket(snapshot, snapshot.tournament.formatId)
+        : null;
+      const cancelledBracketGame = snapshot.scheduledGames.find((game) => {
+        if (game.roundId !== roundId || !game.bracketKey || game.status !== 'cancelled') return false;
+        // A legacy cancelled row may be followed by an explicit replacement. Allow the old
+        // historical row to close only once the authoritative resolver has a decisive outcome for
+        // that bracket key; a merely accepted but stale replacement must still be repaired.
+        return !resolvedBracket?.games.some(
+          (resolved) =>
+            resolved.key === game.bracketKey &&
+            resolved.winnerTeamId !== null &&
+            resolved.loserTeamId !== null,
+        );
+      });
+      if (cancelledBracketGame) {
+        setError(
+          'This elimination round contains a cancelled game without a bracket outcome. Generate a replacement or record an explicit forfeit/administrative resolution before closing it.',
+        );
         return false;
       }
       const unresolved = snapshot.scheduledGames.some(
@@ -3375,6 +3806,12 @@ export function useDirectorController(repository = createDirectorRepository()): 
         );
         return false;
       }
+      if (scheduled.bracketKey) {
+        setError(
+          'An elimination game cannot be cancelled while the bracket needs its winner. Record a forfeit or use an explicit administrative recovery decision.',
+        );
+        return false;
+      }
       const normalizedReason = reason.trim() || 'Cancelled by director';
       return commit((draft) => {
         const target = draft.scheduledGames.find((game) => game.id === scheduledGameId);
@@ -3406,6 +3843,110 @@ export function useDirectorController(repository = createDirectorRepository()): 
           summary: `Cancelled the game between ${target.leftTeamId} and ${target.rightTeamId ?? 'a bye'}.`,
           entityId: scheduledGameId,
           details: { reason: normalizedReason, roundId: target.roundId },
+        });
+      });
+    },
+    [commit],
+  );
+
+  const recordForfeit = useCallback(
+    (
+      scheduledGameId: DirectorId,
+      forfeitedTeamId: DirectorId,
+      reason = 'Forfeit recorded by director',
+    ): boolean => {
+      const snapshot = stateRef.current;
+      const scheduled = snapshot.scheduledGames.find((game) => game.id === scheduledGameId);
+      if (!scheduled || scheduled.bye || !scheduled.rightTeamId) {
+        setError('A forfeit requires a non-bye game with two assigned teams.');
+        return false;
+      }
+      if (![scheduled.leftTeamId, scheduled.rightTeamId].includes(forfeitedTeamId)) {
+        setError('The forfeiting team must be one of the teams assigned to this game.');
+        return false;
+      }
+      if (scheduled.status === 'cancelled') {
+        setError('A cancelled scheduled game cannot receive a forfeit.');
+        return false;
+      }
+      if (scheduled.status === 'accepted' || canonicalAcceptedGame(snapshot, scheduled.id)) {
+        setError('That scheduled game already has a canonical result. Correct that result instead.');
+        return false;
+      }
+      const normalizedReason = reason.trim() || 'Forfeit recorded by director';
+      return commit((draft) => {
+        const target = draft.scheduledGames.find((game) => game.id === scheduledGameId);
+        if (!target || target.bye || !target.rightTeamId) return;
+        if (![target.leftTeamId, target.rightTeamId].includes(forfeitedTeamId)) return;
+        if (target.status === 'cancelled' || target.status === 'accepted') return;
+        if (canonicalAcceptedGame(draft, target.id)) return;
+
+        const now = isoNow();
+        const packetId = effectivePacketId(draft, target);
+        for (const game of draft.games.filter((entry) => entry.scheduledGameId === target.id)) {
+          if (game.status !== 'accepted' && game.status !== 'forfeit') {
+            game.status = 'rejected';
+            game.note = [game.note, `Replaced by administrative forfeit: ${normalizedReason}`]
+              .filter(Boolean)
+              .join(' · ');
+          }
+          for (const submission of draft.submissions.filter((entry) => entry.gameId === game.id)) {
+            if (submission.status === 'received' || submission.status === 'review') {
+              submission.status = 'rejected';
+              submission.reason = `Replaced by administrative forfeit: ${normalizedReason}`;
+            }
+          }
+        }
+        const scores = [zeroGameScore(target.leftTeamId), zeroGameScore(target.rightTeamId)];
+        const gameId = newDirectorId('game-record');
+        const game: GameRecord = {
+          id: gameId,
+          scheduledGameId: target.id,
+          roundId: target.roundId,
+          packetId,
+          status: 'forfeit',
+          forfeitedTeamId,
+          scores,
+          playerStats: [],
+          source: 'manual',
+          detailedStats: 'unknown',
+          finishedAt: now,
+          acceptedAt: now,
+          note: normalizedReason,
+        };
+        draft.games.push(game);
+        target.status = 'accepted';
+        markPacketUsed(draft, target.id, packetId);
+        markRoomFinished(draft, target.roomId);
+        for (const session of draft.qbtcpSessions.filter((entry) => entry.matchId === target.id)) {
+          session.state = 'result-received';
+          session.resumable = false;
+          session.resultReceived = true;
+          session.progress = null;
+        }
+        draft.submissions.push({
+          id: newDirectorId('submission'),
+          gameId,
+          receivedAt: now,
+          fingerprint: fingerprintForScores(scores),
+          status: 'accepted',
+          rawSubmission: {
+            source: 'manual',
+            outcome: 'forfeit',
+            forfeitedTeamId,
+            reason: normalizedReason,
+          },
+          acceptedBy: operatorDisplayName(loadOperatorProfile()),
+          acceptedAt: now,
+        });
+        draft.audit.push({
+          id: newDirectorId('audit'),
+          at: now,
+          actor: 'Director',
+          type: 'result-accepted',
+          summary: `Recorded a forfeit for ${target.id}.`,
+          entityId: gameId,
+          details: { scheduledGameId: target.id, forfeitedTeamId, reason: normalizedReason },
         });
       });
     },
@@ -4093,6 +4634,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
   const checkpoint = useCallback(
     async (reason: string) => {
       if (documentTransitionRef.current) throw new Error('Wait for tournament recovery to finish.');
+      if (!ensureWriter()) throw new Error('This tournament is read-only in this Director tab.');
       const snapshot = structuredClone(stateRef.current);
       const next = structuredClone(snapshot);
       const now = isoNow();
@@ -4109,19 +4651,23 @@ export function useDirectorController(repository = createDirectorRepository()): 
       stateRevisionRef.current = revision;
       stateRef.current = next;
       setState(next);
+      const authority = captureWriteAuthority(next);
       await enqueuePersistence(next, revision, async (persisted) => {
         persisted.metadata.lastSavedAt = isoNow();
+        assertWriteAuthority(authority, next);
         await repositoryRef.current.checkpoint(snapshot, reason);
+        assertWriteAuthority(authority, next);
         await repositoryRef.current.save(persisted);
         await refreshCheckpoints();
       });
     },
-    [enqueuePersistence, refreshCheckpoints],
+    [assertWriteAuthority, captureWriteAuthority, enqueuePersistence, ensureWriter, refreshCheckpoints],
   );
 
   const restoreCheckpoint = useCallback(
     async (checkpointId: string): Promise<boolean> => {
       if (documentTransitionRef.current) return false;
+      if (!ensureWriter()) return false;
       if (!repositoryRef.current.restoreCheckpoint) {
         setError('This storage backend does not support recovery points.');
         return false;
@@ -4136,7 +4682,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
         await Promise.allSettled([qbtcpSyncInFlightRef.current, liveDrainInFlightRef.current]);
         await persistenceQueueRef.current;
         const current = structuredClone(stateRef.current);
+        const authority = captureWriteAuthority(current);
+        assertWriteAuthority(authority, current);
         const restored = await repositoryRef.current.restoreCheckpoint(current, checkpointId);
+        assertWriteAuthority(authority, current);
         // Transport projections cannot rewind a published revision or replay an old outbox.
         // Recovery restores the tournament; the next publication is a full current snapshot.
         if (restored.live?.settings.enabled) {
@@ -4155,6 +4704,13 @@ export function useDirectorController(repository = createDirectorRepository()): 
           await stopLocalLiveServer().catch(() => undefined);
         }
         stateRevisionRef.current += 1;
+        durableRevisionRef.current = stateRevisionRef.current;
+        setPersistence({
+          status: 'saved',
+          revision: stateRevisionRef.current,
+          durableRevision: durableRevisionRef.current,
+          error: null,
+        });
         stateRef.current = restored;
         setState(restored);
         publishedSnapshotRef.current = null;
@@ -4165,8 +4721,17 @@ export function useDirectorController(repository = createDirectorRepository()): 
         if (restored.live?.settings.enabled) {
           // The restore already committed. A projection-save failure must not leave the UI on
           // the discarded document or misreport that the tournament itself was not restored.
+          assertWriteAuthority(authority, restored);
           await repositoryRef.current.save(restored).catch((reason: unknown) => {
-            setError(reason instanceof Error ? reason.message : 'Restored, but Live could not be refreshed.');
+            const message =
+              reason instanceof Error ? reason.message : 'Restored, but Live could not be refreshed.';
+            setError(message);
+            setPersistence({
+              status: 'failed',
+              revision: stateRevisionRef.current,
+              durableRevision: durableRevisionRef.current,
+              error: message,
+            });
           });
         }
         await refreshCheckpoints();
@@ -4181,12 +4746,13 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setRecovering(false);
       }
     },
-    [refreshCheckpoints, refreshTournaments],
+    [assertWriteAuthority, captureWriteAuthority, ensureWriter, refreshCheckpoints, refreshTournaments],
   );
 
   const editTournamentSnapshot = useCallback(
     async (value: DirectorState, reason: string): Promise<boolean> => {
       if (documentTransitionRef.current) return false;
+      if (!ensureWriter()) return false;
       const before = structuredClone(stateRef.current);
       if (!before.tournament || value.tournament?.id !== before.tournament.id) {
         setError('Structural edits must belong to the open tournament.');
@@ -4201,6 +4767,8 @@ export function useDirectorController(repository = createDirectorRepository()): 
         // would refuse the restore that fixes it.
         await Promise.allSettled([qbtcpSyncInFlightRef.current, liveDrainInFlightRef.current]);
         await persistenceQueueRef.current;
+        const authority = captureWriteAuthority(before);
+        assertWriteAuthority(authority, before);
         await repositoryRef.current.checkpoint(before, reason);
         const next = normalizeDirectorState(value);
         next.metadata.lastCheckpointAt = isoNow();
@@ -4210,8 +4778,16 @@ export function useDirectorController(repository = createDirectorRepository()): 
           if (derived.live) next.live = derived.live;
           publishedSnapshotRef.current = derived.snapshot;
         }
+        assertWriteAuthority(authority, next);
         await repositoryRef.current.save(next);
         stateRevisionRef.current += 1;
+        durableRevisionRef.current = stateRevisionRef.current;
+        setPersistence({
+          status: 'saved',
+          revision: stateRevisionRef.current,
+          durableRevision: durableRevisionRef.current,
+          error: null,
+        });
         stateRef.current = next;
         setState(next);
         setError(null);
@@ -4227,7 +4803,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setRecovering(false);
       }
     },
-    [refreshCheckpoints, refreshTournaments],
+    [assertWriteAuthority, captureWriteAuthority, ensureWriter, refreshCheckpoints, refreshTournaments],
   );
 
   const setRoundPacket = useCallback(
@@ -4384,7 +4960,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         const invalidRoom = activeGames.find((game) => {
           if (!game.roomId) return false;
           const room = snapshot.rooms.find((entry) => entry.id === game.roomId);
-          return !room || !roomIsAssignable(snapshot, game.roomId);
+          return !room || !roomAssignmentIsValid(snapshot, game.roomId, game.id);
         });
         const roomIdsForRound = new Set(roomIds.filter((roomId): roomId is DirectorId => roomId !== null));
         const resourceIssues = roomAssignmentConflicts(snapshot, roomIdsForRound);
@@ -4427,10 +5003,48 @@ export function useDirectorController(repository = createDirectorRepository()): 
       ) {
         return fail(round.name, 'The tournament changed while starting the round. Try again.');
       }
-      const pending = usbConfigured ? activeGames.filter((game) => game.roomId === null).map(gameLabel) : [];
-      const delivered = activeGames.filter((game) => game.roomId !== null).length;
-      const manual = !roomsInPlay;
-      commit((draft) => {
+      // Check room occupancy again after the checkpoint. QBTCP sync or another Director action
+      // may have claimed a room while the durable recovery point was being written.
+      const latest = stateRef.current;
+      const latestRound = latest.rounds.find((entry) => entry.id === roundId);
+      const latestGames = latest.scheduledGames.filter((game) => game.roundId === roundId);
+      const latestActiveGames = latestGames.filter((game) => !game.bye && game.status !== 'cancelled');
+      const latestUsbConfigured = latest.transfers.locations.length > 0;
+      const latestSessionsPaired = latest.qbtcpSessions.some((session) => session.state !== 'abandoned');
+      const latestFullyAssigned =
+        latestActiveGames.length > 0 && latestActiveGames.every((game) => game.roomId !== null);
+      const latestRoomsInPlay = latestSessionsPaired || latestUsbConfigured || latestFullyAssigned;
+      if (!latestRound || !['planned', 'prepared'].includes(latestRound.status)) {
+        return fail(round.name, 'The round changed while starting. Review its current status and try again.');
+      }
+      if (latestRoomsInPlay) {
+        const latestRoomIds = latestActiveGames.map((game) => game.roomId);
+        const duplicateLatestRoom = latestRoomIds.find(
+          (roomId, index) => roomId && latestRoomIds.indexOf(roomId) !== index,
+        );
+        const invalidLatestRoom = latestActiveGames.find(
+          (game) => game.roomId !== null && !roomAssignmentIsValid(latest, game.roomId, game.id),
+        );
+        const latestResourceIssues = roomAssignmentConflicts(
+          latest,
+          new Set(latestRoomIds.filter((roomId): roomId is DirectorId => roomId !== null)),
+        );
+        if (duplicateLatestRoom || invalidLatestRoom || latestResourceIssues.length > 0) {
+          return fail(
+            round.name,
+            latestResourceIssues[0]?.message ??
+              (duplicateLatestRoom
+                ? 'A room became occupied while starting this round. Review room assignments and try again.'
+                : 'A room became unavailable while starting this round. Review room assignments and try again.'),
+          );
+        }
+      }
+      const pending = latestUsbConfigured
+        ? latestActiveGames.filter((game) => game.roomId === null).map(gameLabel)
+        : [];
+      const delivered = latestActiveGames.filter((game) => game.roomId !== null).length;
+      const manual = !latestRoomsInPlay;
+      const committed = commit((draft) => {
         const target = draft.rounds.find((entry) => entry.id === roundId);
         if (!target || (target.status !== 'planned' && target.status !== 'prepared')) return;
         if (target.status === 'planned') target.status = 'prepared';
@@ -4446,6 +5060,8 @@ export function useDirectorController(repository = createDirectorRepository()): 
           details: { manual, deliveredGames: delivered, pendingHandoffs: pending },
         });
       });
+      if (!committed)
+        return fail(round.name, 'The round could not be started. Review the Director warning and try again.');
       return {
         ok: true,
         roundId,
@@ -4504,6 +5120,8 @@ export function useDirectorController(repository = createDirectorRepository()): 
 
   const importSnapshot = useCallback(
     (value: unknown) => {
+      if (!ensureWriter()) return false;
+      const previousTournamentId = stateRef.current.tournament?.id;
       const candidate =
         value && typeof value === 'object' && 'state' in value ? (value as { state?: unknown }).state : value;
       let next: DirectorState;
@@ -4544,12 +5162,28 @@ export function useDirectorController(repository = createDirectorRepository()): 
       };
       const revision = stateRevisionRef.current + 1;
       stateRevisionRef.current = revision;
+      if (next.tournament && next.tournament.id !== previousTournamentId) {
+        writerEpochRef.current += 1;
+        if (previousTournamentId) {
+          settleWriterReady(
+            previousTournamentId,
+            new Error('The active tournament changed before this Director save could start.'),
+          );
+        }
+        writerClaimRef.current?.release();
+        writerClaimRef.current = null;
+        writerStatusRef.current = isNativeDirector() ? 'native' : 'checking';
+        setWriterStatus(writerStatusRef.current);
+      }
+      if (next.tournament && next.tournament.id !== previousTournamentId) {
+        writerGraceDocumentRef.current = next.tournament.id;
+      }
       stateRef.current = next;
       setState(next);
       void persist(next, revision).catch(() => undefined);
       return true;
     },
-    [persist, tournaments],
+    [ensureWriter, persist, settleWriterReady, tournaments],
   );
 
   // -------------------------------------------------------------------------
@@ -5178,6 +5812,9 @@ export function useDirectorController(repository = createDirectorRepository()): 
     loading,
     saving,
     error,
+    persistence,
+    retryPersistence,
+    writerStatus,
     repositoryKind,
     tournaments,
     refreshTournaments,
@@ -5240,6 +5877,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
     startRound,
     finishRound,
     cancelScheduledGame,
+    recordForfeit,
     addManualResult,
     associateSubmission,
     acceptSubmission,
@@ -5305,6 +5943,20 @@ function fingerprintForScores(scores: TeamGameScore[]): string {
     )
     .sort()
     .join('\u001e');
+}
+
+function zeroGameScore(teamId: DirectorId): TeamGameScore {
+  return {
+    teamId,
+    score: 0,
+    superpowers: 0,
+    powers: 0,
+    gets: 0,
+    negs: 0,
+    bonuses: 0,
+    bonusPoints: 0,
+    bouncebacks: 0,
+  };
 }
 
 function isRecordLike(value: unknown): value is Record<string, unknown> {
@@ -5655,6 +6307,12 @@ function planBracketCorrection(
 
   const previousOutcome = winnerAndLoser(game.scores, scheduled.leftTeamId, scheduled.rightTeamId);
   const correctedOutcome = winnerAndLoser(scores, scheduled.leftTeamId, scheduled.rightTeamId);
+  if (correctedOutcome.winnerTeamId === null || correctedOutcome.loserTeamId === null) {
+    return {
+      updates: [],
+      issue: `Cannot correct ${scheduled.id}: a single-elimination result must remain decisive.`,
+    };
+  }
   if (
     previousOutcome.winnerTeamId === correctedOutcome.winnerTeamId &&
     previousOutcome.loserTeamId === correctedOutcome.loserTeamId
@@ -5768,7 +6426,7 @@ function markRoomAvailableIfIdle(state: DirectorState, roomId: DirectorId): bool
   const openHelp = state.qbtcpHelpRequests.some(
     (request) => request.roomId === roomId && request.status === 'open',
   );
-  if (roomHasUnresolvedLiveWork(state, roomId) || openHelp) return false;
+  if (roomHasUnresolvedWork(state, roomId) || openHelp) return false;
   room.status = room.available ? 'available' : 'offline';
   return true;
 }
@@ -5907,6 +6565,11 @@ function applyNativeProgress(state: DirectorState, records: NativeProgressSnapsh
   for (const record of records) {
     let session = state.qbtcpSessions.find((entry) => entry.sessionId === record.sessionId);
     if (session && (session.state === 'result-received' || session.state === 'abandoned')) continue;
+    const matchedScheduled = session?.matchId
+      ? state.scheduledGames.find((game) => game.id === session?.matchId)
+      : undefined;
+    // A delayed native heartbeat must not resurrect an assignment that Director already resolved.
+    if (matchedScheduled && ['accepted', 'cancelled'].includes(matchedScheduled.status)) continue;
     const sequence = Number.isInteger(record.sequence) && record.sequence >= 0 ? record.sequence : 0;
     const summary = progressSummary(record.matchState);
     const appliedSequence = session?.progressSequence ?? -1;
@@ -5952,7 +6615,12 @@ function applyNativeProgress(state: DirectorState, records: NativeProgressSnapsh
     );
     const scheduledGame =
       (session.matchId
-        ? state.scheduledGames.find((game) => game.id === session.matchId && game.roomId === record.roomId)
+        ? state.scheduledGames.find(
+            (game) =>
+              game.id === session.matchId &&
+              game.roomId === record.roomId &&
+              !['accepted', 'cancelled'].includes(game.status),
+          )
         : undefined) ?? (candidateGames.length === 1 ? candidateGames[0] : undefined);
     const round = scheduledGame
       ? state.rounds.find((entry) => entry.id === scheduledGame.roundId)
@@ -6090,15 +6758,17 @@ function applyNativeRosterAmendments(
 function restoreRoomStatusAfterHelp(state: DirectorState, roomId: DirectorId): boolean {
   const room = state.rooms.find((entry) => entry.id === roomId);
   if (!room || room.status !== 'help') return false;
-  const liveSession = state.qbtcpSessions.some(
-    (session) => session.roomId === roomId && session.state === 'live',
-  );
-  const liveGame = state.scheduledGames.some((game) => game.roomId === roomId && game.status === 'live');
+  const unresolvedWork = roomHasUnresolvedWork(state, roomId);
   const finishedGame = state.scheduledGames.some(
     (game) => game.roomId === roomId && ['accepted', 'cancelled'].includes(game.status),
   );
-  room.status =
-    liveSession || liveGame ? 'live' : finishedGame ? 'finished' : room.available ? 'available' : 'offline';
+  room.status = unresolvedWork
+    ? 'live'
+    : finishedGame
+      ? 'finished'
+      : room.available
+        ? 'available'
+        : 'offline';
   return true;
 }
 

@@ -1028,12 +1028,16 @@ describe('Director integration hardening', () => {
       expect(electronic.hook.result.current.generateSchedule().generated).toBe(true);
     });
     const roomId = electronic.hook.result.current.state.rooms[0].id;
+    const pairedGame = electronic.hook.result.current.state.scheduledGames.find(
+      (game) => game.roomId === roomId && !game.bye,
+    );
+    if (!pairedGame) throw new Error('test setup did not create the paired room game');
     const paired = structuredClone(electronic.hook.result.current.state);
     paired.qbtcpSessions = [
       {
         roomId,
         sessionId: 'session-1',
-        matchId: 'match-1',
+        matchId: pairedGame.id,
         deviceId: 'device-1',
         operatorName: 'Scorekeeper',
         state: 'paired',
@@ -3062,7 +3066,7 @@ describe('Director integration hardening', () => {
     expect(ambiguousSubmission?.warnings?.some((warning) => /ambiguous/i.test(warning))).toBe(true);
   });
 
-  test('expired QBTCP sessions lose stale progress and release an idle room', async () => {
+  test('expired resumable QBTCP sessions retain the room until the game is resolved', async () => {
     const { hook } = await directorWithSetup();
     const imported = structuredClone(hook.result.current.state);
     const room = imported.rooms[0];
@@ -3098,7 +3102,7 @@ describe('Director integration hardening', () => {
       progress: null,
       resumable: true,
     });
-    expect(hook.result.current.state.rooms[0]?.status).toBe('available');
+    expect(hook.result.current.state.rooms[0]?.status).toBe('live');
   });
 
   test('a QBTCP restart closes persisted help requests the server no longer knows', async () => {
@@ -3154,7 +3158,7 @@ describe('Director integration hardening', () => {
 
     expect(hook.result.current.state.qbtcpHelpRequests[0]?.status).toBe('cancelled');
     expect(hook.result.current.state.qbtcpSessions[0]?.helpRequestId).toBeNull();
-    expect(hook.result.current.state.rooms[0]?.status).toBe('available');
+    expect(hook.result.current.state.rooms[0]?.status).toBe('live');
   });
 
   test('Director resolves QBTCP help through the trusted native operation and restores derived room state', async () => {
@@ -3882,6 +3886,41 @@ describe('Director integration hardening', () => {
     expect((await restarted.listTournaments()).filter((entry) => entry.status === 'archived')).toHaveLength(
       0,
     );
+  });
+
+  test('browser mutation saves do not let another tournament tab move the shared restart pointer', async () => {
+    const makeState = (id: string): DirectorState => {
+      const state = emptyDirectorState();
+      state.tournament = {
+        id,
+        name: id,
+        date: '',
+        venue: '',
+        organizer: '',
+        status: 'draft',
+        timeZone: 'UTC',
+        rules: structuredClone(defaultRules),
+        formatId: null,
+        currentPhaseId: null,
+        currentPacketId: null,
+        currentRoundId: null,
+        createdAt: id,
+        updatedAt: id,
+      };
+      return state;
+    };
+    const repository = new IndexedDbDirectorRepository();
+    await repository.saveDocument(makeState('tab-a'), true);
+    await repository.saveDocument(makeState('tab-b'), true);
+    await repository.openTournament('tab-a');
+
+    const changedB = makeState('tab-b');
+    changedB.tournament!.venue = 'Changed in another tab';
+    await new IndexedDbDirectorRepository().saveDocument(changedB, false);
+    expect((await repository.load()).tournament?.id).toBe('tab-a');
+
+    sessionStorage.removeItem('qbsheet.director.current-tournament-id.v1');
+    expect((await new IndexedDbDirectorRepository().load()).tournament?.id).toBe('tab-a');
   });
 
   test('localStorage catalog fallback is migrated in full when IndexedDB becomes available', async () => {

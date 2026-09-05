@@ -15,6 +15,9 @@ const stateKey = 'current';
 const documentsStoreName = 'tournament-documents';
 const metadataStoreName = 'app-metadata';
 const currentMetadataKey = 'current-tournament-id';
+// IndexedDB metadata is shared by every browser tab. The session pointer keeps a tab that is
+// intentionally editing a different tournament from being redirected by another tab's save.
+const sessionCurrentKey = 'qbsheet.director.current-tournament-id.v1';
 const localStorageKey = 'qbsheet.director.state.v1';
 const localLibraryKey = 'qbsheet.director.library.v1';
 /** Recovery points retained per tournament when only `localStorage` is available. */
@@ -209,9 +212,13 @@ export class IndexedDbDirectorRepository implements DirectorRepository {
     if (!database) return this.loadLocalStorage();
     try {
       await this.ensureMigrated(database);
-      const currentId = await this.readCurrentId(database);
       const records = await this.readAllRecords(database);
+      const sessionId = this.readSessionCurrentId();
+      const sharedId = await this.readCurrentId(database);
+      const currentId =
+        (sessionId && records.some((entry) => entry.id === sessionId) ? sessionId : null) ?? sharedId;
       const record = (currentId ? records.find((entry) => entry.id === currentId) : undefined) ?? records[0];
+      if (record) this.writeSessionCurrentId(record.id);
       return normalizeDirectorState(record?.state ?? null);
     } catch (reason: unknown) {
       throw browserPersistenceError('Director browser storage could not be read.', reason);
@@ -224,7 +231,11 @@ export class IndexedDbDirectorRepository implements DirectorRepository {
       if (!database) this.saveLocalStorage(state);
       return;
     }
-    await this.saveDocument(state, true);
+    // Normal mutation saves must not move the shared current pointer. A second tab can be editing
+    // another tournament, and changing that pointer would make a restart in the first tab open
+    // the wrong document. The per-tab session pointer is updated after the document write.
+    await this.saveDocument(state, false);
+    this.writeSessionCurrentId(state.tournament.id);
   }
 
   async checkpoint(state: DirectorState, reason: string): Promise<void> {
@@ -234,10 +245,12 @@ export class IndexedDbDirectorRepository implements DirectorRepository {
       const database = await this.database();
       if (!database) {
         this.saveLocalRecovery(record, state);
+        this.writeSessionCurrentId(state.tournament!.id);
         return;
       }
       await this.ensureMigrated(database);
       await this.writeRecovery(database, record, state);
+      this.writeSessionCurrentId(state.tournament!.id);
     } catch (reason: unknown) {
       throw browserPersistenceError('Director browser recovery point could not be saved.', reason);
     }
@@ -273,6 +286,7 @@ export class IndexedDbDirectorRepository implements DirectorRepository {
       } else {
         await this.writeRecovery(database, before, restored);
       }
+      this.writeSessionCurrentId(current.tournament!.id);
       return restored;
     } catch (reason: unknown) {
       throw browserPersistenceError('Director recovery point could not be restored.', reason);
@@ -318,7 +332,9 @@ export class IndexedDbDirectorRepository implements DirectorRepository {
       record,
     ];
     library.documents[record.tournamentId] = structuredClone(active);
-    library.currentId = record.tournamentId;
+    // Do not redirect another browser tab merely because this tab created a checkpoint. Preserve
+    // the shared pointer when one exists; the active tab uses the session pointer on reload.
+    if (!library.currentId) library.currentId = record.tournamentId;
     try {
       localStorage.setItem(localLibraryKey, JSON.stringify(library));
     } catch (reason: unknown) {
@@ -335,15 +351,9 @@ export class IndexedDbDirectorRepository implements DirectorRepository {
     active: DirectorState,
   ): Promise<void> {
     await new Promise<void>((resolve, reject) => {
-      const transaction = database.transaction(
-        [checkpointsStoreName, documentsStoreName, metadataStoreName],
-        'readwrite',
-      );
+      const transaction = database.transaction([checkpointsStoreName, documentsStoreName], 'readwrite');
       transaction.objectStore(checkpointsStoreName).add(record);
       transaction.objectStore(documentsStoreName).put({ id: active.tournament!.id, state: active });
-      transaction
-        .objectStore(metadataStoreName)
-        .put({ key: currentMetadataKey, value: active.tournament!.id });
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error);
       transaction.onabort = () => reject(transaction.error ?? new Error('Recovery write was aborted.'));
@@ -368,6 +378,7 @@ export class IndexedDbDirectorRepository implements DirectorRepository {
     if (!database) {
       const state = this.readLocalTournament(id);
       this.writeLocalCurrentId(id);
+      this.writeSessionCurrentId(id);
       return state;
     }
     try {
@@ -375,6 +386,7 @@ export class IndexedDbDirectorRepository implements DirectorRepository {
       const record = (await this.readAllRecords(database)).find((entry) => entry.id === id);
       if (!record) throw new DirectorPersistenceError(`Tournament “${id}” is not in the local catalog.`);
       await this.writeCurrentId(database, id);
+      this.writeSessionCurrentId(id);
       return normalizeDirectorState(record.state);
     } catch (reason: unknown) {
       throw browserPersistenceError('Director tournament could not be opened.', reason);
@@ -403,6 +415,7 @@ export class IndexedDbDirectorRepository implements DirectorRepository {
     const database = await this.database();
     if (!database) {
       this.saveLocalDocument(state, activate);
+      if (activate) this.writeSessionCurrentId(state.tournament!.id);
       return;
     }
     try {
@@ -426,6 +439,7 @@ export class IndexedDbDirectorRepository implements DirectorRepository {
         transaction.onerror = () => reject(transaction.error ?? new Error('Director storage failed.'));
         transaction.onabort = () => reject(transaction.error ?? new Error('Director storage was aborted.'));
       });
+      if (activate) this.writeSessionCurrentId(state.tournament!.id);
     } catch (reason: unknown) {
       throw browserPersistenceError('Director browser storage could not be saved.', reason);
     }
@@ -564,6 +578,8 @@ export class IndexedDbDirectorRepository implements DirectorRepository {
     }
     try {
       const library = this.readLocalLibrary();
+      const sessionId = this.readSessionCurrentId();
+      if (sessionId && library.documents[sessionId]) return library.documents[sessionId];
       if (library.currentId && library.documents[library.currentId])
         return library.documents[library.currentId];
       const legacy = localStorage.getItem(localStorageKey);
@@ -659,6 +675,26 @@ export class IndexedDbDirectorRepository implements DirectorRepository {
     const library = this.readLocalLibrary();
     library.currentId = id;
     localStorage.setItem(localLibraryKey, JSON.stringify(library));
+  }
+
+  private readSessionCurrentId(): string | null {
+    if (typeof sessionStorage === 'undefined') return null;
+    try {
+      const value = sessionStorage.getItem(sessionCurrentKey);
+      return value && value.trim() ? value : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private writeSessionCurrentId(id: string): void {
+    if (typeof sessionStorage === 'undefined') return;
+    try {
+      sessionStorage.setItem(sessionCurrentKey, id);
+    } catch {
+      // Session storage is a convenience for tab isolation. Durable document writes must still
+      // succeed when a privacy mode blocks this best-effort hint.
+    }
   }
 }
 
