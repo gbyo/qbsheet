@@ -17,6 +17,9 @@ use tokio::net::TcpListener;
 
 pub const DEFAULT_QBTCP_PORT: u16 = 8787;
 const SCORE_SHEET_URL: &str = "https://qbsheet.com/";
+const DUPLICATE_ASSIGNMENT_REASON: &str = "duplicate-room-assignment";
+const DUPLICATE_ASSIGNMENT_MESSAGE: &str =
+    "This room has multiple released or live assignments. Resolve the duplicate assignments in Director before pairing.";
 
 const ALLOWED_SCORE_SHEET_ORIGINS: &[&str] = &[
     "https://qbsheet.com",
@@ -431,6 +434,11 @@ pub struct DirectorQbtcpState {
     session_snapshots: Mutex<HashMap<String, ServerSessionSnapshot>>,
 }
 
+struct ProjectedAssignment {
+    key: String,
+    state: AssignmentState,
+}
+
 impl DirectorQbtcpState {
     pub fn from_document(document: Option<&Value>) -> Self {
         Self::from_document_inner(document, None)
@@ -456,11 +464,11 @@ impl DirectorQbtcpState {
             .collect();
         let assignment_keys = assignments
             .iter()
-            .map(|(room_id, assignment)| (room_id.clone(), assignment_key(assignment)))
+            .map(|(room_id, assignment)| (room_id.clone(), assignment.key.clone()))
             .collect();
         let memory = MemoryState::new(tournament.clone(), rooms);
         for (room_id, assignment) in assignments {
-            memory.set_assignment(room_id, AssignmentState::Assigned(assignment));
+            memory.set_assignment(room_id, assignment.state);
         }
         let state = Self {
             memory,
@@ -542,7 +550,7 @@ impl DirectorQbtcpState {
             .collect();
         let next_assignment_keys: HashMap<String, String> = assignments
             .iter()
-            .map(|(room_id, assignment)| (room_id.clone(), assignment_key(assignment)))
+            .map(|(room_id, assignment)| (room_id.clone(), assignment.key.clone()))
             .collect();
 
         let previous_room_states = self
@@ -594,8 +602,7 @@ impl DirectorQbtcpState {
             );
         }
         for (room_id, assignment) in assignments {
-            self.memory
-                .set_assignment(room_id, AssignmentState::Assigned(assignment));
+            self.memory.set_assignment(room_id, assignment.state);
         }
 
         if let Ok(mut states) = self.room_states.lock() {
@@ -1175,7 +1182,7 @@ fn rooms_from_document(document: Option<&Value>) -> Vec<RoomInfo> {
 /// playable assignment: scoring rules, rosters, phase/round context, packet identity, and the
 /// unplayed Match. The scorer supplies the questions in the room, just as it does for a manual QBJ
 /// assignment. No scores, question content, or credentials are invented here.
-fn assignments_from_document(document: Option<&Value>) -> Vec<(String, AssignedAssignment)> {
+fn assignments_from_document(document: Option<&Value>) -> Vec<(String, ProjectedAssignment)> {
     let Some(root) = document.and_then(Value::as_object) else {
         return Vec::new();
     };
@@ -1219,27 +1226,55 @@ fn assignments_from_document(document: Option<&Value>) -> Vec<(String, AssignedA
         .filter_map(|game| string_field(Some(game), "scheduledGameId").map(|id| (id, game)))
         .collect::<HashMap<_, _>>();
 
-    scheduled_games
-        .iter()
-        .filter_map(Value::as_object)
-        .filter_map(|scheduled| {
-            let status = string_field(Some(scheduled), "status")?;
-            if !matches!(status.as_str(), "released" | "live") {
-                return None;
-            }
-            if scheduled
+    let mut active_by_room = HashMap::<String, Vec<&Map<String, Value>>>::new();
+    for scheduled in scheduled_games.iter().filter_map(Value::as_object) {
+        let Some(status) = string_field(Some(scheduled), "status") else {
+            continue;
+        };
+        if !matches!(status.as_str(), "released" | "live")
+            || scheduled
                 .get("bye")
                 .and_then(Value::as_bool)
                 .unwrap_or(false)
-            {
-                return None;
+        {
+            continue;
+        }
+        let Some(room_id) = string_field(Some(scheduled), "roomId") else {
+            continue;
+        };
+        if !eligible_rooms.contains(&room_id) {
+            continue;
+        }
+        active_by_room.entry(room_id).or_default().push(scheduled);
+    }
+
+    active_by_room
+        .into_iter()
+        .filter_map(|(room_id, scheduled_games)| {
+            if scheduled_games.len() > 1 {
+                let mut scheduled_ids = scheduled_games
+                    .iter()
+                    .filter_map(|scheduled| string_field(Some(scheduled), "id"))
+                    .collect::<Vec<_>>();
+                scheduled_ids.sort_unstable();
+                return Some((
+                    room_id,
+                    ProjectedAssignment {
+                        key: format!(
+                            "blocked|{DUPLICATE_ASSIGNMENT_REASON}|{}",
+                            scheduled_ids.join(",")
+                        ),
+                        state: AssignmentState::Blocked {
+                            reason: DUPLICATE_ASSIGNMENT_REASON.to_owned(),
+                            message: DUPLICATE_ASSIGNMENT_MESSAGE.to_owned(),
+                            meta: AssignmentMeta::default(),
+                        },
+                    },
+                ));
             }
 
+            let scheduled = scheduled_games.first()?;
             let scheduled_id = string_field(Some(scheduled), "id")?;
-            let room_id = string_field(Some(scheduled), "roomId")?;
-            if !eligible_rooms.contains(&room_id) {
-                return None;
-            }
             let round_id = string_field(Some(scheduled), "roundId")?;
             let round = rounds.get(&round_id)?;
             let round_number = u32_field(Some(round), "number").filter(|number| *number > 0)?;
@@ -1282,7 +1317,14 @@ fn assignments_from_document(document: Option<&Value>) -> Vec<(String, AssignedA
                 released_round: Some(round_number),
                 ..AssignmentMeta::default()
             };
-            Some((room_id, assignment))
+            let key = assignment_key(&assignment);
+            Some((
+                room_id,
+                ProjectedAssignment {
+                    key,
+                    state: AssignmentState::Assigned(assignment),
+                },
+            ))
         })
         .collect()
 }
@@ -1978,6 +2020,117 @@ mod tests {
             .expect("unknown assignment");
         let unknown_match = assignment_match_object(&unknown).expect("match object");
         assert!(unknown_match["_qbtcp"].get("scorekeeper").is_none());
+    }
+
+    #[test]
+    fn duplicate_released_assignments_are_blocked_during_initial_projection() {
+        let document = json!({
+            "tournament": {"id": "t-1", "name": "Local Invitational"},
+            "rooms": [{"id": "room-101", "name": "Room 101", "available": true}],
+            "teams": [
+                {"id": "team-a", "displayName": "North A"},
+                {"id": "team-b", "displayName": "South B"},
+                {"id": "team-c", "displayName": "East C"},
+                {"id": "team-d", "displayName": "West D"}
+            ],
+            "rounds": [{"id": "round-1", "name": "Round 1", "number": 1, "revision": 1}],
+            "scheduledGames": [
+                {
+                    "id": "scheduled-1",
+                    "roundId": "round-1",
+                    "roomId": "room-101",
+                    "leftTeamId": "team-a",
+                    "rightTeamId": "team-b",
+                    "bye": false,
+                    "status": "released"
+                },
+                {
+                    "id": "scheduled-2",
+                    "roundId": "round-1",
+                    "roomId": "room-101",
+                    "leftTeamId": "team-c",
+                    "rightTeamId": "team-d",
+                    "bye": false,
+                    "status": "live"
+                }
+            ]
+        });
+
+        let state = DirectorQbtcpState::from_document(Some(&document));
+        let assignment = <DirectorQbtcpState as QbtcpState>::assignment(&state, "room-101")
+            .expect("room assignment is available");
+        match assignment {
+            AssignmentState::Blocked {
+                reason, message, ..
+            } => {
+                assert_eq!(reason, DUPLICATE_ASSIGNMENT_REASON);
+                assert_eq!(message, DUPLICATE_ASSIGNMENT_MESSAGE);
+            }
+            AssignmentState::Assigned(_)
+            | AssignmentState::None(_)
+            | AssignmentState::Held { .. } => {
+                panic!("duplicate active assignments must be blocked")
+            }
+        }
+    }
+
+    #[test]
+    fn refresh_clears_duplicate_assignment_block_when_one_assignment_remains() {
+        let document = json!({
+            "tournament": {"id": "t-1", "name": "Local Invitational"},
+            "rooms": [{"id": "room-101", "name": "Room 101", "available": true}],
+            "teams": [
+                {"id": "team-a", "displayName": "North A"},
+                {"id": "team-b", "displayName": "South B"},
+                {"id": "team-c", "displayName": "East C"},
+                {"id": "team-d", "displayName": "West D"}
+            ],
+            "rounds": [{"id": "round-1", "name": "Round 1", "number": 1, "revision": 1}],
+            "scheduledGames": [{
+                "id": "scheduled-1",
+                "roundId": "round-1",
+                "roomId": "room-101",
+                "leftTeamId": "team-a",
+                "rightTeamId": "team-b",
+                "bye": false,
+                "status": "released"
+            }]
+        });
+        let state = DirectorQbtcpState::from_document(Some(&document));
+
+        let mut duplicate = document.clone();
+        duplicate["scheduledGames"]
+            .as_array_mut()
+            .expect("scheduled games")
+            .push(json!({
+                "id": "scheduled-2",
+                "roundId": "round-1",
+                "roomId": "room-101",
+                "leftTeamId": "team-c",
+                "rightTeamId": "team-d",
+                "bye": false,
+                "status": "live"
+            }));
+        state.refresh_from_document(Some(&duplicate));
+        assert!(matches!(
+            <DirectorQbtcpState as QbtcpState>::assignment(&state, "room-101")
+                .expect("blocked room assignment"),
+            AssignmentState::Blocked { .. }
+        ));
+
+        state.refresh_from_document(Some(&document));
+        match <DirectorQbtcpState as QbtcpState>::assignment(&state, "room-101")
+            .expect("restored room assignment")
+        {
+            AssignmentState::Assigned(assignment) => {
+                assert_eq!(assignment.match_id, "scheduled-1");
+            }
+            AssignmentState::None(_)
+            | AssignmentState::Blocked { .. }
+            | AssignmentState::Held { .. } => {
+                panic!("a valid single assignment must clear the duplicate block")
+            }
+        }
     }
 
     fn assignment_match_object(assignment: &AssignmentState) -> Option<&Value> {
