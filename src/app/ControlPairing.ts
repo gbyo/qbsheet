@@ -89,8 +89,12 @@ export async function openControl(address: string): Promise<ControlOpenResult> {
   }
 
   const identified = await client.identify();
-  const rooms = await client.listRooms();
   if (!identified.ok) return { ok: false, error: identified.error, unreachable: false };
+
+  // The room list is optional. Do not request it until the required identify step has succeeded:
+  // otherwise an identify failure can be delayed by an unrelated room-list request that may itself
+  // be slow or unavailable.
+  const rooms = await client.listRooms();
 
   return {
     ok: true,
