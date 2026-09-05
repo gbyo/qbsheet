@@ -46,7 +46,6 @@ export function HelpDialog({ open, onClose }: { open: boolean; onClose: () => vo
       ref={dialogRef}
       aria-labelledby={titleId}
       className="director-help-dialog"
-      onClose={() => onCloseRef.current()}
       aria-modal="true"
     >
       <div className="director-help-dialog-header">
