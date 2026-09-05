@@ -18,7 +18,7 @@ export default function ScoreValue({ team, reaction }: { team: IDerivedTeam; rea
       started: true,
     });
   useEffect(() => {
-    if (reaction) setDecoratedPoints(team.points);
+    if (reaction?.token) setDecoratedPoints(team.points);
   }, [reaction?.token, team.points]);
   const ordinaryMotion = motion.started && !reaction && decoratedPoints !== team.points;
   return (
