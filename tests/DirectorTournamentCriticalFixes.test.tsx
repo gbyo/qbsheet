@@ -315,6 +315,65 @@ describe('Director tournament-critical regressions', () => {
     hook.unmount();
   });
 
+  test('a cancelled elimination game is refused, and a legacy one regenerates with distinct ids', async () => {
+    const hook = await directorWithSetup(2, 1);
+    act(() => expect(hook.result.current.updateFormat({ kind: 'single-elimination' })).toBe(true));
+    act(() =>
+      expect(hook.result.current.generateSchedule({ roundName: 'Opening game' }).generated).toBe(true),
+    );
+    const originalRound = hook.result.current.state.rounds[0];
+    const originalGame = hook.result.current.state.scheduledGames.find((game) => !game.bye);
+    if (!originalRound || !originalGame || !originalGame.rightTeamId) {
+      throw new Error('test setup did not create the opening elimination game');
+    }
+
+    await act(async () => {
+      expect((await hook.result.current.startRound(originalRound.id)).ok).toBe(true);
+    });
+
+    // Cancelling an elimination game would strand the bracket without a winner, so the controller
+    // refuses it and asks for a forfeit or an explicit administrative decision instead.
+    act(() => {
+      expect(hook.result.current.cancelScheduledGame(originalGame.id, 'Recovery regression')).toBe(false);
+    });
+    expect(
+      hook.result.current.state.scheduledGames.find((game) => game.id === originalGame.id)?.status,
+    ).not.toBe('cancelled');
+    await waitFor(() => expect(hook.result.current.error).toMatch(/forfeit|administrative|winner/i));
+
+    // A cancelled row can still arrive from a recovered document written before that rule existed.
+    // Regeneration must then mint fresh identifiers rather than collide with the abandoned round.
+    const legacy = structuredClone(hook.result.current.state);
+    legacy.scheduledGames.find((game) => game.id === originalGame.id)!.status = 'cancelled';
+    await act(async () => {
+      expect(await hook.result.current.editTournamentSnapshot(legacy, 'Legacy cancelled elimination')).toBe(
+        true,
+      );
+    });
+
+    act(() => {
+      expect(hook.result.current.generateSchedule({ roundName: 'Replacement game' }).generated).toBe(true);
+    });
+    const replacementRound = hook.result.current.state.rounds.find((round) => round.id !== originalRound.id);
+    const replacementGame = hook.result.current.state.scheduledGames.find(
+      (game) => game.bracketKey === originalGame.bracketKey && game.status === 'scheduled',
+    );
+    if (!replacementRound || !replacementGame)
+      throw new Error('test setup did not regenerate the bracket game');
+    expect(replacementRound.id).not.toBe(originalRound.id);
+    expect(replacementGame.id).not.toBe(originalGame.id);
+    expect(replacementGame).toMatchObject({
+      roundId: replacementRound.id,
+      leftTeamId: originalGame.leftTeamId,
+      rightTeamId: originalGame.rightTeamId,
+      bracketKey: originalGame.bracketKey,
+    });
+    expect(roundScheduleIsValid(hook.result.current.state, originalRound.id)).toBe(true);
+    expect(roundScheduleIsValid(hook.result.current.state, replacementRound.id)).toBe(true);
+    await waitFor(() => expect(hook.result.current.saving).toBe(false));
+    hook.unmount();
+  });
+
   test('dropping a team closes a released round without losing matchup history and leaves future rounds operable', async () => {
     const hook = await directorWithSetup(4, 1);
     act(() => expect(hook.result.current.generateSchedule({ roundName: 'Round 1' }).generated).toBe(true));
@@ -594,6 +653,24 @@ describe('Director tournament-critical regressions', () => {
         ).toBe(true);
       }
     });
+    const tieCandidate = semifinals[0]!;
+    const tieRecord = hook.result.current.state.games.find(
+      (game) => game.scheduledGameId === tieCandidate.id,
+    );
+    if (!tieRecord || !tieCandidate.rightTeamId)
+      throw new Error('missing semifinal result for tie correction');
+    act(() => {
+      expect(
+        hook.result.current.editAcceptedResult(tieRecord.id, [
+          score(tieCandidate.leftTeamId, 100),
+          score(tieCandidate.rightTeamId!, 100),
+        ]),
+      ).toBe(false);
+    });
+    expect(hook.result.current.state.games.find((game) => game.id === tieRecord.id)?.scores).toEqual(
+      tieRecord.scores,
+    );
+    expect(hook.result.current.error).toMatch(/single-elimination|decisive/i);
     act(() => expect(hook.result.current.finishRound(semifinalRound.id).finished).toBe(true));
     expect(hook.result.current.state.phases[0]?.status).toBe('active');
     expect(formatGenerationAvailability(hook.result.current.state).supported).toBe(true);
@@ -605,12 +682,9 @@ describe('Director tournament-critical regressions', () => {
       : undefined;
     if (!finalRound || !final || !final.rightTeamId) throw new Error('test setup did not create a final');
     const originalFinalParticipants = [final.leftTeamId, final.rightTeamId];
-    const correctedSemifinal = semifinals[0]!;
-    const correctedRecord = hook.result.current.state.games.find(
-      (game) => game.scheduledGameId === correctedSemifinal.id,
-    );
-    if (!correctedRecord || !correctedSemifinal.rightTeamId) throw new Error('missing semifinal result');
-    const correctedRightTeamId = correctedSemifinal.rightTeamId;
+    const correctedSemifinal = tieCandidate;
+    const correctedRecord = tieRecord;
+    const correctedRightTeamId = correctedSemifinal.rightTeamId!;
 
     act(() => {
       expect(

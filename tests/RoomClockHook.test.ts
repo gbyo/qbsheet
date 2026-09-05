@@ -1,11 +1,12 @@
 /** @vitest-environment jsdom */
 
 import { act, renderHook } from '@testing-library/react';
-import { beforeEach, describe, expect, test } from 'vitest';
-import { loadRoomClock } from '../src/scorer/RoomClock';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
+import { loadRoomClock, saveRoomClock } from '../src/scorer/RoomClock';
 import useRoomClock from '../src/scorer/useRoomClock';
 
 beforeEach(() => {
+  vi.restoreAllMocks();
   const values = new Map<string, string>();
   Object.defineProperty(window, 'localStorage', {
     configurable: true,
@@ -61,6 +62,36 @@ describe('useRoomClock persistence identity', () => {
     });
     expect(loadRoomClock('game-a', 120_000, window.localStorage, 'half-2').status).toBe('idle');
     expect(loadRoomClock('game-a', 60_000, window.localStorage, 'half-1').status).toBe('running');
+    hook.unmount();
+  });
+
+  test('refreshes the display timestamp when switching to a stored running clock', () => {
+    window.localStorage.clear();
+    const now = vi.spyOn(Date, 'now');
+    now.mockReturnValue(1_000);
+    saveRoomClock(
+      'game-b',
+      {
+        version: 2,
+        durationMs: 60_000,
+        status: 'running',
+        accumulatedMs: 0,
+        runningSince: 1_000,
+      },
+      window.localStorage,
+      'half-1',
+    );
+
+    now.mockReturnValue(5_000);
+    const hook = renderHook(({ gameKey }: { gameKey: string }) => useRoomClock(gameKey, 1, 'half-1'), {
+      initialProps: { gameKey: 'game-a' },
+    });
+
+    now.mockReturnValue(31_000);
+    hook.rerender({ gameKey: 'game-b' });
+
+    expect(hook.result.current.remainingMs).toBe(30_000);
+    expect(hook.result.current.display).toBe('00:30');
     hook.unmount();
   });
 });

@@ -94,6 +94,11 @@ export default function HomepageSecrets() {
       clearHold();
       holdTimer.current = window.setTimeout(unlock, logoHoldDurationMs);
     };
+    const onPointerMove = (event: PointerEvent) => {
+      if (holdTimer.current === null) return;
+      const target = document.elementFromPoint(event.clientX, event.clientY);
+      if (!homepageLogoFromTarget(target)) clearHold();
+    };
     const onPointerEnd = () => clearHold();
     const onClick = (event: MouseEvent) => {
       if (!homepageLogoFromTarget(event.target)) return;
@@ -106,12 +111,14 @@ export default function HomepageSecrets() {
     };
 
     document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('pointermove', onPointerMove);
     document.addEventListener('pointerup', onPointerEnd);
     document.addEventListener('pointercancel', onPointerEnd);
     document.addEventListener('click', onClick);
     document.addEventListener('contextmenu', onContextMenu);
     return () => {
       document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('pointermove', onPointerMove);
       document.removeEventListener('pointerup', onPointerEnd);
       document.removeEventListener('pointercancel', onPointerEnd);
       document.removeEventListener('click', onClick);

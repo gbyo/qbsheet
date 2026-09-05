@@ -1115,14 +1115,14 @@ function generateSingleEliminationRound(
   const roundNumber = bracket.roundNumbers[roundIndex] ?? nextRoundNumber(state);
   const configuredRoundId = bracket.roundIds[String(roundIndex)];
   const configuredRound = configuredRoundId
-    ? state.rounds.find((candidate) => candidate.id === configuredRoundId)
+    ? state.rounds.find((round) => round.id === configuredRoundId)
     : undefined;
   const defaultRoundId = `bracket-round-${phaseId}-${roundIndex + 1}`;
   const roundId =
     configuredRound && configuredRound.status !== 'planned'
       ? newDirectorId('bracket-round')
       : (configuredRoundId ??
-        (state.rounds.some((candidate) => candidate.id === defaultRoundId)
+        (state.rounds.some((round) => round.id === defaultRoundId)
           ? newDirectorId('bracket-round')
           : defaultRoundId));
   bracket.roundIds[String(roundIndex)] = roundId;

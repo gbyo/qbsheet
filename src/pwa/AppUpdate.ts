@@ -254,6 +254,8 @@ export class AppUpdateWatcher {
     if (this.container && this.controllerChangeHandler) {
       this.container.removeEventListener('controllerchange', this.controllerChangeHandler);
     }
+    this.registration = null;
+    this.container = null;
     this.updateFoundHandler = null;
     this.controllerChangeHandler = null;
     if (this.timer !== null) clearInterval(this.timer);
