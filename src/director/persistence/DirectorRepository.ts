@@ -121,6 +121,12 @@ export class DirectorPersistenceError extends Error {
   }
 }
 
+function browserPersistenceError(message: string, reason: unknown): Error {
+  if (reason instanceof DirectorPersistenceError) return reason;
+  if (reason instanceof Error && reason.name === 'DirectorStateVersionError') return reason;
+  return new DirectorPersistenceError(message, { cause: reason });
+}
+
 interface TauriInternals {
   invoke(command: string, args?: Record<string, unknown>): Promise<unknown>;
 }
@@ -208,14 +214,7 @@ export class IndexedDbDirectorRepository implements DirectorRepository {
       const record = (currentId ? records.find((entry) => entry.id === currentId) : undefined) ?? records[0];
       return normalizeDirectorState(record?.state ?? null);
     } catch (reason: unknown) {
-      if (reason instanceof Error && reason.name === 'DirectorStateVersionError') throw reason;
-      try {
-        return this.loadLocalStorage();
-      } catch {
-        throw reason instanceof DirectorPersistenceError
-          ? reason
-          : new DirectorPersistenceError('Director browser storage could not be read.', { cause: reason });
-      }
+      throw browserPersistenceError('Director browser storage could not be read.', reason);
     }
   }
 
@@ -229,15 +228,19 @@ export class IndexedDbDirectorRepository implements DirectorRepository {
   }
 
   async checkpoint(state: DirectorState, reason: string): Promise<void> {
-    const existing = state.tournament ? await this.checkpointRecords(state.tournament.id) : [];
-    const record = recoveryPoint(state, reason, nextSequence(existing));
-    const database = await this.database();
-    if (!database) {
-      this.saveLocalRecovery(record, state);
-      return;
+    try {
+      const existing = state.tournament ? await this.checkpointRecords(state.tournament.id) : [];
+      const record = recoveryPoint(state, reason, nextSequence(existing));
+      const database = await this.database();
+      if (!database) {
+        this.saveLocalRecovery(record, state);
+        return;
+      }
+      await this.ensureMigrated(database);
+      await this.writeRecovery(database, record, state);
+    } catch (reason: unknown) {
+      throw browserPersistenceError('Director browser recovery point could not be saved.', reason);
     }
-    await this.ensureMigrated(database);
-    await this.writeRecovery(database, record, state);
   }
 
   async listCheckpoints(tournamentId: string): Promise<DirectorCheckpoint[]> {
@@ -255,37 +258,45 @@ export class IndexedDbDirectorRepository implements DirectorRepository {
   }
 
   async restoreCheckpoint(current: DirectorState, checkpointId: string): Promise<DirectorState> {
-    const records = await this.checkpointRecords(current.tournament!.id);
-    const record = records.find((entry) => entry.id === checkpointId);
-    const restored = restoredState(record, current.tournament!.id);
-    const before = recoveryPoint(
-      current,
-      `Before restoring checkpoint from ${record!.createdAt}`,
-      nextSequence(records),
-    );
-    const database = await this.database();
-    if (!database) {
-      this.saveLocalRecovery(before, restored);
-    } else {
-      await this.writeRecovery(database, before, restored);
+    try {
+      const records = await this.checkpointRecords(current.tournament!.id);
+      const record = records.find((entry) => entry.id === checkpointId);
+      const restored = restoredState(record, current.tournament!.id);
+      const before = recoveryPoint(
+        current,
+        `Before restoring checkpoint from ${record!.createdAt}`,
+        nextSequence(records),
+      );
+      const database = await this.database();
+      if (!database) {
+        this.saveLocalRecovery(before, restored);
+      } else {
+        await this.writeRecovery(database, before, restored);
+      }
+      return restored;
+    } catch (reason: unknown) {
+      throw browserPersistenceError('Director recovery point could not be restored.', reason);
     }
-    return restored;
   }
 
   private async checkpointRecords(tournamentId: string): Promise<CheckpointRecord[]> {
     const database = await this.database();
     if (!database)
       return this.readLocalLibrary().checkpoints.filter((entry) => entry.tournamentId === tournamentId);
-    await this.ensureMigrated(database);
-    return new Promise((resolve, reject) => {
-      const request = database
-        .transaction(checkpointsStoreName)
-        .objectStore(checkpointsStoreName)
-        .index('tournamentId')
-        .getAll(tournamentId);
-      request.onsuccess = () => resolve(request.result as CheckpointRecord[]);
-      request.onerror = () => reject(request.error);
-    });
+    try {
+      await this.ensureMigrated(database);
+      return await new Promise((resolve, reject) => {
+        const request = database
+          .transaction(checkpointsStoreName)
+          .objectStore(checkpointsStoreName)
+          .index('tournamentId')
+          .getAll(tournamentId);
+        request.onsuccess = () => resolve(request.result as CheckpointRecord[]);
+        request.onerror = () => reject(request.error ?? new Error('Recovery points read failed.'));
+      });
+    } catch (reason: unknown) {
+      throw browserPersistenceError('Director recovery points could not be read.', reason);
+    }
   }
 
   /**
@@ -348,13 +359,7 @@ export class IndexedDbDirectorRepository implements DirectorRepository {
         .map((record) => catalogEntry(record.state))
         .sort(sortCatalogEntries);
     } catch (reason: unknown) {
-      try {
-        return this.listLocalTournaments();
-      } catch {
-        throw reason instanceof DirectorPersistenceError
-          ? reason
-          : new DirectorPersistenceError('Director browser catalog could not be read.', { cause: reason });
-      }
+      throw browserPersistenceError('Director browser catalog could not be read.', reason);
     }
   }
 
@@ -365,20 +370,28 @@ export class IndexedDbDirectorRepository implements DirectorRepository {
       this.writeLocalCurrentId(id);
       return state;
     }
-    await this.ensureMigrated(database);
-    const record = (await this.readAllRecords(database)).find((entry) => entry.id === id);
-    if (!record) throw new DirectorPersistenceError(`Tournament “${id}” is not in the local catalog.`);
-    await this.writeCurrentId(database, id);
-    return normalizeDirectorState(record.state);
+    try {
+      await this.ensureMigrated(database);
+      const record = (await this.readAllRecords(database)).find((entry) => entry.id === id);
+      if (!record) throw new DirectorPersistenceError(`Tournament “${id}” is not in the local catalog.`);
+      await this.writeCurrentId(database, id);
+      return normalizeDirectorState(record.state);
+    } catch (reason: unknown) {
+      throw browserPersistenceError('Director tournament could not be opened.', reason);
+    }
   }
 
   async readTournament(id: string): Promise<DirectorState> {
     const database = await this.database();
     if (!database) return this.readLocalTournament(id);
-    await this.ensureMigrated(database);
-    const record = (await this.readAllRecords(database)).find((entry) => entry.id === id);
-    if (!record) throw new DirectorPersistenceError(`Tournament “${id}” is not in the local catalog.`);
-    return normalizeDirectorState(record.state);
+    try {
+      await this.ensureMigrated(database);
+      const record = (await this.readAllRecords(database)).find((entry) => entry.id === id);
+      if (!record) throw new DirectorPersistenceError(`Tournament “${id}” is not in the local catalog.`);
+      return normalizeDirectorState(record.state);
+    } catch (reason: unknown) {
+      throw browserPersistenceError('Director tournament could not be read.', reason);
+    }
   }
 
   async saveDocument(state: DirectorState, activate = true): Promise<void> {
@@ -414,13 +427,7 @@ export class IndexedDbDirectorRepository implements DirectorRepository {
         transaction.onabort = () => reject(transaction.error ?? new Error('Director storage was aborted.'));
       });
     } catch (reason: unknown) {
-      try {
-        this.saveLocalDocument(state, activate);
-      } catch (fallbackReason: unknown) {
-        throw new DirectorPersistenceError('Director browser storage could not be saved.', {
-          cause: fallbackReason ?? reason,
-        });
-      }
+      throw browserPersistenceError('Director browser storage could not be saved.', reason);
     }
   }
 
