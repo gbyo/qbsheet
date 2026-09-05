@@ -19,6 +19,7 @@ import {
   type BracketGameOutcome,
   type BracketNode,
   type BracketPlan,
+  type ResolvedBracket,
   pairQuizbowlSwiss,
   type QuizbowlSwissPairing,
   type ScheduledGame as CoreScheduledGame,
@@ -86,6 +87,32 @@ export interface FormatGenerationAvailability {
   message: string;
 }
 
+/**
+ * Resolve the persisted bracket using only accepted/forfeit results whose assigned participants
+ * still agree with the bracket. This is the shared source of truth for generation, validation,
+ * correction, and phase completion.
+ */
+export function resolveDirectorBracket(state: DirectorState, formatId: DirectorId): ResolvedBracket | null {
+  const format = state.formats.find((entry) => entry.id === formatId);
+  return format?.kind === 'single-elimination' && format.bracket
+    ? resolveBracketState(state, format.bracket)
+    : null;
+}
+
+/** A phase is complete only when its generated rounds are closed and its format is complete. */
+export function phaseCanComplete(state: DirectorState, phaseId: DirectorId): boolean {
+  const phase = state.phases.find((entry) => entry.id === phaseId);
+  if (!phase || phase.roundIds.length === 0) return false;
+  if (!phase.roundIds.every((id) => state.rounds.find((round) => round.id === id)?.status === 'closed')) {
+    return false;
+  }
+  const format = state.formats.find((entry) => entry.id === phase.formatId);
+  if (format?.kind === 'single-elimination') {
+    return resolveDirectorBracket(state, format.id)?.complete === true;
+  }
+  return true;
+}
+
 export function currentFormat(state: DirectorState): FormatDefinition | null {
   const formatId = state.tournament?.formatId;
   return formatId ? (state.formats.find((format) => format.id === formatId) ?? null) : null;
@@ -126,7 +153,7 @@ export function formatGenerationAvailability(state: DirectorState): FormatGenera
   if (confirmedCount < 2) {
     return { supported: false, message: 'Add at least two confirmed teams before generating a round.' };
   }
-  if (phase.status === 'complete') {
+  if (phase.status === 'complete' && !canRecoverIncompleteEliminationPhase(state, phase, format)) {
     return {
       supported: false,
       message: 'This phase is complete; select or add another phase for additional play.',
@@ -194,6 +221,14 @@ export function formatGenerationAvailability(state: DirectorState): FormatGenera
   };
 }
 
+function canRecoverIncompleteEliminationPhase(
+  state: DirectorState,
+  phase: Phase,
+  format: FormatDefinition,
+): boolean {
+  return format.kind === 'single-elimination' && !phaseCanComplete(state, phase.id);
+}
+
 function poolConfigurationProblem(
   state: DirectorState,
   phase: Phase,
@@ -228,7 +263,10 @@ function poolConfigurationProblem(
   }
   for (const pool of pools) {
     const confirmed = pool.teamIds.filter((teamId) => teamsById.get(teamId)?.status === 'confirmed');
-    const invalid = pool.teamIds.filter((teamId) => teamsById.get(teamId)?.status !== 'confirmed');
+    const invalid = pool.teamIds.filter((teamId) => {
+      const team = teamsById.get(teamId);
+      return !team || (team.status !== 'confirmed' && team.status !== 'dropped');
+    });
     if (invalid.length > 0) return `Pool ${pool.name} contains a missing or non-confirmed team.`;
     if (confirmed.length === 0) return `Pool ${pool.name} has no confirmed teams.`;
     if (confirmed.length % 2 === 1 && !allowByes) {
@@ -693,7 +731,7 @@ export function generateDirectorRound(
       `This tournament is ${state.tournament?.status}; schedule generation is disabled.`,
     );
   }
-  if (phase.status === 'complete') {
+  if (phase.status === 'complete' && !canRecoverIncompleteEliminationPhase(state, phase, format)) {
     return failedGenerationResult(
       state,
       { ...options, phaseId: phase.id },
@@ -1044,37 +1082,7 @@ function generateSingleEliminationRound(
     };
   }
 
-  const plan: BracketPlan = {
-    teamCount: bracket.teamCount,
-    bracketSize: bracket.bracketSize,
-    roundCount: bracket.roundCount,
-    nodes: bracket.nodes as BracketNode[],
-    byes: bracket.byes,
-    notes: [],
-    issues: [],
-  };
-  const outcomes: BracketGameOutcome[] = [];
-  for (const scheduled of state.scheduledGames) {
-    if (!scheduled.bracketKey || scheduled.bye || !scheduled.rightTeamId) continue;
-    const game = state.games
-      .filter((candidate) => candidate.scheduledGameId === scheduled.id && candidate.status === 'accepted')
-      .sort(
-        (left, right) =>
-          (left.acceptedAt ?? '').localeCompare(right.acceptedAt ?? '') || left.id.localeCompare(right.id),
-      )
-      .at(-1);
-    if (!game) continue;
-    const left = game.scores.find((score) => score.teamId === scheduled.leftTeamId);
-    const right = game.scores.find((score) => score.teamId === scheduled.rightTeamId);
-    if (!left || !right || left.score === right.score) continue;
-    outcomes.push({
-      gameKey: scheduled.bracketKey,
-      winnerTeamId: left.score > right.score ? left.teamId : right.teamId,
-      loserTeamId: left.score > right.score ? right.teamId : left.teamId,
-    });
-  }
-  const placements = bracket.roundNumbers.map((roundNumber, roundIndex) => ({ roundIndex, roundNumber }));
-  const resolved = resolveBracket({ plan, seeding: bracket.seeding, outcomes, roundPlacements: placements });
+  const resolved = resolveBracketState(state, bracket);
   const existingKeys = new Set(
     state.scheduledGames.flatMap((game) => (game.bracketKey ? [game.bracketKey] : [])),
   );
@@ -1169,6 +1177,105 @@ function generateSingleEliminationRound(
     closedAt: null,
   };
   return { round, games, conflicts, hardFailure: false, bracket };
+}
+
+function resolveBracketState(state: DirectorState, bracket: BracketState): ResolvedBracket {
+  const plan: BracketPlan = {
+    teamCount: bracket.teamCount,
+    bracketSize: bracket.bracketSize,
+    roundCount: bracket.roundCount,
+    nodes: bracket.nodes as BracketNode[],
+    byes: bracket.byes,
+    notes: [],
+    issues: [],
+  };
+  const placements = bracket.roundNumbers.map((roundNumber, roundIndex) => ({ roundIndex, roundNumber }));
+  const acceptedByKey = new Map<string, { scheduled: ScheduledGame; outcome: BracketGameOutcome }>();
+  for (const scheduled of state.scheduledGames) {
+    if (
+      !scheduled.bracketKey ||
+      scheduled.bye ||
+      !scheduled.rightTeamId ||
+      scheduled.status === 'cancelled'
+    ) {
+      continue;
+    }
+    const game = state.games
+      .filter(
+        (candidate) =>
+          candidate.scheduledGameId === scheduled.id &&
+          (candidate.status === 'accepted' || candidate.status === 'forfeit'),
+      )
+      .sort(
+        (left, right) =>
+          (left.acceptedAt ?? left.finishedAt ?? '').localeCompare(
+            right.acceptedAt ?? right.finishedAt ?? '',
+          ) || left.id.localeCompare(right.id),
+      )
+      .at(-1);
+    if (!game) continue;
+    const outcome = bracketOutcome(game, scheduled);
+    if (!outcome) continue;
+    acceptedByKey.set(scheduled.bracketKey, {
+      scheduled,
+      outcome,
+    });
+  }
+
+  // Resolve in bracket order and accept an outcome only when its scheduled participants match the
+  // currently resolved slots. A stale downstream result therefore cannot make the bracket appear
+  // complete or make an invalid participant assignment look current.
+  const outcomes: BracketGameOutcome[] = [];
+  let resolved = resolveBracket({ plan, seeding: bracket.seeding, roundPlacements: placements });
+  for (const node of [...plan.nodes].sort(
+    (left, right) => left.roundIndex - right.roundIndex || left.sequence - right.sequence,
+  )) {
+    const candidate = acceptedByKey.get(node.key);
+    const current = resolved.games.find((game) => game.key === node.key);
+    if (
+      !candidate ||
+      !current?.ready ||
+      candidate.scheduled.leftTeamId !== current.slotA.teamId ||
+      candidate.scheduled.rightTeamId !== current.slotB.teamId
+    ) {
+      continue;
+    }
+    outcomes.push(candidate.outcome);
+    resolved = resolveBracket({ plan, seeding: bracket.seeding, outcomes, roundPlacements: placements });
+  }
+  return resolved;
+}
+
+function bracketOutcome(
+  game: DirectorState['games'][number],
+  scheduled: ScheduledGame,
+): BracketGameOutcome | null {
+  if (!scheduled.bracketKey || !scheduled.rightTeamId) return null;
+  if (game.status === 'forfeit' && game.forfeitedTeamId) {
+    if (game.forfeitedTeamId === scheduled.leftTeamId) {
+      return {
+        gameKey: scheduled.bracketKey,
+        winnerTeamId: scheduled.rightTeamId,
+        loserTeamId: scheduled.leftTeamId,
+      };
+    }
+    if (game.forfeitedTeamId === scheduled.rightTeamId) {
+      return {
+        gameKey: scheduled.bracketKey,
+        winnerTeamId: scheduled.leftTeamId,
+        loserTeamId: scheduled.rightTeamId,
+      };
+    }
+    return null;
+  }
+  const left = game.scores.find((score) => score.teamId === scheduled.leftTeamId);
+  const right = game.scores.find((score) => score.teamId === scheduled.rightTeamId);
+  if (!left || !right || left.score === right.score) return null;
+  return {
+    gameKey: scheduled.bracketKey,
+    winnerTeamId: left.score > right.score ? left.teamId : right.teamId,
+    loserTeamId: left.score > right.score ? right.teamId : left.teamId,
+  };
 }
 
 function assignBracketSeeds(teams: Team[]): Array<{ seed: number; teamId: DirectorId }> {
@@ -1287,7 +1394,9 @@ function generatePoolRound(
         teamIds: pool.teamIds,
       });
     }
-    const missing = pool.teamIds.filter((teamId) => !teams.some((team) => team.id === teamId));
+    const missing = pool.teamIds.filter(
+      (teamId) => teamsById.get(teamId)?.status !== 'dropped' && !teams.some((team) => team.id === teamId),
+    );
     if (missing.length > 0) {
       conflicts.push({
         code: 'invalid-generation',
@@ -1387,8 +1496,22 @@ export function scheduleGameCount(games: ScheduledGame[]): number {
   return games.filter((game) => !game.bye && game.status !== 'cancelled').length;
 }
 
+export function roomHasUnresolvedLiveWork(state: DirectorState, roomId: DirectorId): boolean {
+  return (
+    state.qbtcpSessions.some((session) => session.roomId === roomId && session.state === 'live') ||
+    state.scheduledGames.some((game) => game.roomId === roomId && !game.bye && game.status === 'live')
+  );
+}
+
+export function roomIsAssignable(state: DirectorState, roomId: DirectorId): boolean {
+  const room = state.rooms.find((entry) => entry.id === roomId);
+  return Boolean(
+    room && room.available && room.status === 'available' && !roomHasUnresolvedLiveWork(state, roomId),
+  );
+}
+
 function assignableRoomIds(state: DirectorState): DirectorId[] {
-  return state.rooms.filter((room) => room.available && room.status === 'available').map((room) => room.id);
+  return state.rooms.filter((room) => roomIsAssignable(state, room.id)).map((room) => room.id);
 }
 
 function roundRobinCycleLength(teamCount: number): number {
@@ -1447,9 +1570,7 @@ export function generatePlannedRoundRobinGames(state: DirectorState): ScheduledG
     phaseId: phase.id,
     teams: state.teams.filter((team) => team.status === 'confirmed').map(toCoreTeam),
     rounds: rounds.map((round) => ({ id: round.id, number: round.number })),
-    roomIds: state.rooms
-      .filter((room) => room.available && room.status === 'available')
-      .map((room) => room.id),
+    roomIds: state.rooms.filter((room) => roomIsAssignable(state, room.id)).map((room) => room.id),
     repetitions: format.kind === 'double-round-robin' ? 2 : 1,
     rematchPolicy: format.kind === 'double-round-robin' ? 'allow' : 'forbid',
     requireRoomAssignments: false,
