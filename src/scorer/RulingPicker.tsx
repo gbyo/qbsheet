@@ -126,7 +126,7 @@ export default function RulingPicker(props: IRulingPickerProps) {
       event.stopPropagation();
       onDismiss(true);
     };
-    const onPointerDown = (event: Event) => {
+    const onPointerDown = (event: PointerEvent) => {
       const target = event.target;
       if (!(target instanceof Node)) return;
       // The tile is the toggle. Closing on its own press would fight the press that reopens it.
@@ -134,12 +134,10 @@ export default function RulingPicker(props: IRulingPickerProps) {
       onDismiss(false);
     };
     document.addEventListener('keydown', onKeyDown, true);
-    document.addEventListener('mousedown', onPointerDown);
-    document.addEventListener('touchstart', onPointerDown);
+    document.addEventListener('pointerdown', onPointerDown);
     return () => {
       document.removeEventListener('keydown', onKeyDown, true);
-      document.removeEventListener('mousedown', onPointerDown);
-      document.removeEventListener('touchstart', onPointerDown);
+      document.removeEventListener('pointerdown', onPointerDown);
     };
   }, [anchor, onDismiss]);
 
