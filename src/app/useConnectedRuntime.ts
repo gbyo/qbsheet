@@ -47,7 +47,7 @@
  * send while it was away. It sends the current one. The server keeps one snapshot per session, so
  * the newest picture is the whole of what anybody wanted.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { RoomConnectionState } from './ConnectionState';
 import { IScorerAlert } from '../scorer/ConnectionStatus';
 import FruityServerClient, {
@@ -502,13 +502,12 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     writerConflict === null;
   const writesAllowedRef = useRef(writesAllowed);
   /*
-   * Assigned from a committed effect rather than during render. A render can be thrown away and
-   * replayed, and a ref written during one holds a value from a pass that never happened; the
-   * readers here are all timers and event handlers, which run as their own tasks after the effects
-   * of any commit before them, so an effect is never the staler of the two options and is the only
-   * one that stays correct if this tree ever renders concurrently.
+   * Keep this mirror tied to a committed render, but update it before browser input can reach the
+   * callbacks exposed by that commit. `submitFinal` is user-triggered, so a passive effect can leave
+   * the newly-rendered disabled state paired with the previous commit's permission until React gets
+   * a later scheduler task. A layout effect closes that gap without leaking an abandoned render.
    */
-  useEffect(() => {
+  useLayoutEffect(() => {
     writesAllowedRef.current = writesAllowed;
   }, [writesAllowed]);
 
