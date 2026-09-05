@@ -57,11 +57,13 @@ export default function useRoomClock(
    */
   const wantedIdentity = configured ? identity : '';
   if (loadedIdentity !== wantedIdentity) {
-    const current = Date.now();
-    setNow(current);
+    // Both wall-clock reads stay inside their updaters, where the time is asked for rather than
+    // taken as a side effect of rendering. They resolve in the same render pass, far closer together
+    // than the second that the remaining time and its display are quantised to.
+    setNow(() => Date.now());
     setState(() => {
       if (!configured) return idleRoomClock(0);
-      return expireRoomClock(loadRoomClock(gameKey, durationMs, undefined, segment), current);
+      return expireRoomClock(loadRoomClock(gameKey, durationMs, undefined, segment), Date.now());
     });
     setLoadedIdentity(wantedIdentity);
   }

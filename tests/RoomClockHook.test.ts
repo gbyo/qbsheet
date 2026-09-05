@@ -91,7 +91,7 @@ describe('useRoomClock persistence identity', () => {
     hook.rerender({ gameKey: 'game-b' });
 
     expect(hook.result.current.remainingMs).toBe(30_000);
-    expect(hook.result.current.display).toBe('0:30');
+    expect(hook.result.current.display).toBe('00:30');
     hook.unmount();
   });
 });
