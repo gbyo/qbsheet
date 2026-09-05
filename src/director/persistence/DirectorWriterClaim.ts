@@ -162,7 +162,9 @@ async function claimWithBroadcastChannel(
   let closed = false;
   let broken = false;
   let claimIssuedAt: number | null = null;
-  let heartbeat: ReturnType<typeof setInterval> | undefined;
+  // Set once the claim is won. `close` runs earlier too, on an election this tab lost, so the
+  // slot starts as a no-op rather than as a timer handle that may never exist.
+  let stopHeartbeat = () => {};
   // A fallback holder is leased, rather than immortal. The default heartbeat is deliberately
   // longer than the election response window, so use a lease at least two heartbeat periods long
   // or a healthy tab could be reclaimed between heartbeats. A suspended tab that resumes after
@@ -180,7 +182,7 @@ async function claimWithBroadcastChannel(
   const close = () => {
     if (closed) return;
     closed = true;
-    if (heartbeat !== undefined) clearInterval(heartbeat);
+    stopHeartbeat();
     channel.removeEventListener('message', listener);
     try {
       channel.close();
@@ -263,9 +265,10 @@ async function claimWithBroadcastChannel(
   claimIssuedAt = Date.now();
   post({ kind: 'claim', scope, tabId, claimIssuedAt });
   post({ kind: 'heartbeat', scope, tabId, claimIssuedAt });
-  heartbeat = setInterval(() => {
+  const heartbeat = setInterval(() => {
     if (claimIssuedAt !== null) post({ kind: 'heartbeat', scope, tabId, claimIssuedAt });
   }, heartbeatMs);
+  stopHeartbeat = () => clearInterval(heartbeat);
   return {
     held: true,
     lost: lost.signal,

@@ -694,7 +694,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         );
       }
     },
-    [captureWriteAuthority],
+    [],
   );
 
   useEffect(() => {

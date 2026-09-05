@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   qbtcpSessionHasUnresolvedWork,
   roomIsAssignable,
@@ -1123,7 +1123,26 @@ function RoomRows({
   );
 }
 
+/*
+ * A session goes stale on the clock, not on a Director action, so reading `Date.now()` straight
+ * through render would leave the badge to appear whenever some unrelated edit happened to
+ * re-render the table. Holding the current time in state and ticking it keeps render pure and
+ * makes a quiet session announce itself on its own.
+ */
+const qbtcpStaleAfterMs = 2 * 60 * 1000;
+const qbtcpStaleTickMs = 30 * 1000;
+
+function useNow(intervalMs: number): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(timer);
+  }, [intervalMs]);
+  return now;
+}
+
 function RoomQbtcpTelemetry({ state, roomId }: { state: DirectorState; roomId: string }) {
+  const now = useNow(qbtcpStaleTickMs);
   const allSessions = state.qbtcpSessions.filter((session) => session.roomId === roomId);
   const unresolvedSessions = allSessions.filter((session) => qbtcpSessionHasUnresolvedWork(state, session));
   const sessions = unresolvedSessions.length
@@ -1146,7 +1165,7 @@ function RoomQbtcpTelemetry({ state, roomId }: { state: DirectorState; roomId: s
           : undefined;
         if (game) linkedGameIds.add(game.id);
         const lastSeen = new Date(session.lastSeenAt).getTime();
-        const stale = Number.isFinite(lastSeen) && Date.now() - lastSeen > 2 * 60 * 1000;
+        const stale = Number.isFinite(lastSeen) && now - lastSeen > qbtcpStaleAfterMs;
         const help = session.helpRequestId
           ? state.qbtcpHelpRequests.some(
               (request) => request.id === session.helpRequestId && request.status === 'open',
