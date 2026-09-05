@@ -83,9 +83,27 @@ export default function GameMenu(props: { items: IGameMenuItem[]; label?: string
     ]?.focus();
   };
 
+  /*
+   * Keep an open menu focusable after its entries change.
+   *
+   * Scorer menu data is rebuilt on every score update, so this runs constantly while the menu is
+   * open. It leaves an enabled, focused entry alone: refocusing then would steal a keyboard user's
+   * position. It acts only when the entry holding focus has stopped existing or become disabled,
+   * which otherwise drops focus to the document with the menu still open.
+   */
+  useEffect(() => {
+    if (!open) return;
+
+    const activeElement = document.activeElement;
+    const focusedIndex = menuItems.current.findIndex((element) => element === activeElement);
+    if (focusedIndex >= 0 && !items[focusedIndex]?.disabled) return;
+
+    const firstEnabledIndex = items.findIndex((item) => !item.disabled);
+    if (firstEnabledIndex >= 0) menuItems.current[firstEnabledIndex]?.focus();
+  }, [items, open]);
+
   useEffect(() => {
     if (!open) return undefined;
-    menuItems.current[items.findIndex((item) => !item.disabled)]?.focus();
     const onDocumentEvent = (domEvent: Event) => {
       if (domEvent instanceof KeyboardEvent) {
         if (domEvent.key === 'Escape') {
@@ -103,9 +121,6 @@ export default function GameMenu(props: { items: IGameMenuItem[]; label?: string
       document.removeEventListener('keydown', onDocumentEvent);
       document.removeEventListener('mousedown', onDocumentEvent);
     };
-    // `items` is intentionally omitted: scorer menu data is rebuilt on every score update, and
-    // refocusing an already-open menu would steal a keyboard user's current position.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   if (items.length === 0) return null;

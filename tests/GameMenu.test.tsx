@@ -52,4 +52,21 @@ describe('GameMenu focus and pointer ordering', () => {
 
     expect(screen.queryByRole('menu')).toBeNull();
   });
+
+  test('moves focus to a surviving item when the focused action disappears', () => {
+    const notes = { label: 'Notes', icon: 'game' as const, onSelect: vi.fn() };
+    const endGame = { label: 'End game early…', icon: 'game' as const, onSelect: vi.fn() };
+    const { rerender } = render(<GameMenu items={[notes, endGame]} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Game' }));
+    const notesButton = screen.getByRole('menuitem', { name: 'Notes' });
+    const endGameButton = screen.getByRole('menuitem', { name: 'End game early…' });
+    fireEvent.keyDown(notesButton, { key: 'ArrowDown' });
+    expect(endGameButton).toHaveFocus();
+
+    rerender(<GameMenu items={[notes]} />);
+
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Notes' })).toHaveFocus();
+  });
 });
