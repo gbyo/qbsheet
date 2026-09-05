@@ -38,13 +38,22 @@ export function serviceWorkerSupported(): boolean {
   return typeof navigator !== 'undefined' && 'serviceWorker' in navigator && typeof window !== 'undefined';
 }
 
+/** Run deferred startup work once the page is loaded, even if load already happened. */
+export function runAfterPageLoad(callback: () => void): void {
+  if (document.readyState === 'complete') {
+    callback();
+    return;
+  }
+  window.addEventListener('load', callback, { once: true });
+}
+
 export function registerServiceWorker(): void {
   if (!serviceWorkerSupported()) return;
   // Vite rewrites `import.meta.env.DEV`; a worker precaching a dev server's module graph would
   // serve a room yesterday's code from a cache nobody asked for.
   if (import.meta.env?.DEV) return;
 
-  window.addEventListener('load', () => {
+  runAfterPageLoad(() => {
     // Relative to the document, so the worker's scope is whatever directory the site is deployed
     // in — `/` on a user site, `/repository/` on a project one — with nothing to configure.
     navigator.serviceWorker
