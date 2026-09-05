@@ -1084,7 +1084,9 @@ function generateSingleEliminationRound(
 
   const resolved = resolveBracketState(state, bracket);
   const existingKeys = new Set(
-    state.scheduledGames.flatMap((game) => (game.bracketKey ? [game.bracketKey] : [])),
+    state.scheduledGames.flatMap((game) =>
+      game.status !== 'cancelled' && game.bracketKey ? [game.bracketKey] : [],
+    ),
   );
   const firstReadyRound = resolved.games
     .filter((game) => game.ready && !existingKeys.has(game.key))
@@ -1111,7 +1113,18 @@ function generateSingleEliminationRound(
   }
   const roundIndex = firstReadyRound ?? byeCandidates[0]!.roundIndex;
   const roundNumber = bracket.roundNumbers[roundIndex] ?? nextRoundNumber(state);
-  const roundId = bracket.roundIds[String(roundIndex)] ?? `bracket-round-${phaseId}-${roundIndex + 1}`;
+  const configuredRoundId = bracket.roundIds[String(roundIndex)];
+  const configuredRound = configuredRoundId
+    ? state.rounds.find((round) => round.id === configuredRoundId)
+    : undefined;
+  const defaultRoundId = `bracket-round-${phaseId}-${roundIndex + 1}`;
+  const roundId =
+    configuredRound && configuredRound.status !== 'planned'
+      ? newDirectorId('bracket-round')
+      : (configuredRoundId ??
+        (state.rounds.some((round) => round.id === defaultRoundId)
+          ? newDirectorId('bracket-round')
+          : defaultRoundId));
   bracket.roundIds[String(roundIndex)] = roundId;
   const availableRooms = assignableRoomIds(state);
   let roomIndex = 0;
@@ -1119,8 +1132,14 @@ function generateSingleEliminationRound(
   for (const resolvedGame of resolved.games.filter(
     (game) => game.roundIndex === roundIndex && game.ready && !existingKeys.has(game.key),
   )) {
+    const deterministicGameId = `bracket-game-${phaseId}-${resolvedGame.key}`;
+    const hasPriorScheduledGame = state.scheduledGames.some(
+      (candidate) =>
+        candidate.id === deterministicGameId ||
+        (candidate.bracketKey === resolvedGame.key && candidate.status === 'cancelled'),
+    );
     const game: ScheduledGame = {
-      id: `bracket-game-${phaseId}-${resolvedGame.key}`,
+      id: hasPriorScheduledGame ? newDirectorId('bracket-game') : deterministicGameId,
       roundId,
       poolId: null,
       roomId: availableRooms[roomIndex++] ?? null,

@@ -5655,6 +5655,12 @@ function planBracketCorrection(
 
   const previousOutcome = winnerAndLoser(game.scores, scheduled.leftTeamId, scheduled.rightTeamId);
   const correctedOutcome = winnerAndLoser(scores, scheduled.leftTeamId, scheduled.rightTeamId);
+  if (correctedOutcome.winnerTeamId === null || correctedOutcome.loserTeamId === null) {
+    return {
+      updates: [],
+      issue: `Cannot correct ${scheduled.id}: a single-elimination result must remain decisive.`,
+    };
+  }
   if (
     previousOutcome.winnerTeamId === correctedOutcome.winnerTeamId &&
     previousOutcome.loserTeamId === correctedOutcome.loserTeamId
