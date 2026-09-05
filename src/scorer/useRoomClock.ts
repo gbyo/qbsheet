@@ -57,9 +57,11 @@ export default function useRoomClock(
    */
   const wantedIdentity = configured ? identity : '';
   if (loadedIdentity !== wantedIdentity) {
+    const current = Date.now();
+    setNow(current);
     setState(() => {
       if (!configured) return idleRoomClock(0);
-      return expireRoomClock(loadRoomClock(gameKey, durationMs, undefined, segment), Date.now());
+      return expireRoomClock(loadRoomClock(gameKey, durationMs, undefined, segment), current);
     });
     setLoadedIdentity(wantedIdentity);
   }
