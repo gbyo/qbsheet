@@ -14,6 +14,8 @@ import { IStoredGameRecord } from '../game/GameStore';
 import { gamePackageLabel, gamePackageMatchup } from '../game/GamePackage';
 import { progressLabel } from './WelcomeScreen';
 
+const recoveryViewId = 'duplicate-tab-recovery-view';
+
 export default function DuplicateTabNotice(props: {
   record: IStoredGameRecord;
   onHome: () => void | Promise<void>;
@@ -33,13 +35,19 @@ export default function DuplicateTabNotice(props: {
         <button type="button" className="shell-button is-primary" onClick={() => void onHome()}>
           Return to home
         </button>
-        <button type="button" className="shell-button" onClick={() => setShowing((open) => !open)}>
+        <button
+          type="button"
+          className="shell-button"
+          aria-expanded={showing}
+          aria-controls={recoveryViewId}
+          onClick={() => setShowing((open) => !open)}
+        >
           {showing ? 'Hide recovery view' : 'Open read-only recovery view'}
         </button>
       </div>
 
       {showing && (
-        <section className="shell-section">
+        <section id={recoveryViewId} className="shell-section">
           <h2 className="shell-heading">Recovery view</h2>
           <p className="shell-hint">
             What this device has saved for this game. Nothing here can be edited, and opening it changes
