@@ -53,6 +53,7 @@ describe('UpdateNotice', () => {
     expect(notice).toHaveAttribute('data-update-presentation', 'hero');
     expect(notice).toHaveClass('update-notice-hero');
     expect(screen.getByRole('button', { name: 'Not now' })).toBeInTheDocument();
+    expect(window.localStorage.getItem(updateNoticeDismissalKey)).toBeNull();
   });
 
   test('does not render when there is no waiting update', () => {

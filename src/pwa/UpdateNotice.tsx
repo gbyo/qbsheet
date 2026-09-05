@@ -62,6 +62,15 @@ export default function UpdateNotice({
     }
   };
 
+  const showDetails = () => {
+    setDismissed(false);
+    try {
+      window.localStorage.removeItem(updateNoticeDismissalKey);
+    } catch {
+      // Reopening still works for this render when storage cannot be changed.
+    }
+  };
+
   if (dismissed) {
     return (
       <section
@@ -78,7 +87,7 @@ export default function UpdateNotice({
         >
           {applying ? 'Updating…' : 'Update now'}
         </button>
-        <button type="button" className="shell-button shell-button-quiet" onClick={() => setDismissed(false)}>
+        <button type="button" className="shell-button shell-button-quiet" onClick={showDetails}>
           Show details
         </button>
       </section>
