@@ -13,8 +13,12 @@ import {
   normalizeTimeZone,
   nextDayOrder,
   orderDayItems,
+  phaseCanComplete,
   previewAdvancement,
   roomAssignmentConflicts,
+  roomHasUnresolvedLiveWork,
+  resolveDirectorBracket,
+  roomIsAssignable,
   roundScheduleIsValid,
   rosterAmendmentId,
   type TimelineEventType,
@@ -3255,7 +3259,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
       const invalidRoom = activeGames.find((game) => {
         if (!game.roomId) return true;
         const room = snapshot.rooms.find((entry) => entry.id === game.roomId);
-        return !room || !room.available || room.status !== 'available';
+        return !room || !roomIsAssignable(snapshot, game.roomId);
       });
       const roomIdsForRound = new Set(roomIds.filter((roomId): roomId is DirectorId => roomId !== null));
       const resourceIssues = roomAssignmentConflicts(snapshot, roomIdsForRound);
@@ -3306,10 +3310,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         if (!target || target.status !== 'released') return;
         Object.assign(target, closeRound(target));
         const phase = draft.phases.find((entry) => entry.id === target.phaseId);
-        if (
-          phase &&
-          phase.roundIds.every((id) => draft.rounds.find((entry) => entry.id === id)?.status === 'closed')
-        ) {
+        if (phase && phaseCanComplete(draft, phase.id)) {
           if (phase.status !== 'complete') {
             phase.status = 'complete';
             draft.audit.push({
@@ -3776,6 +3777,11 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError('Only the current canonical accepted result can be corrected.');
         return false;
       }
+      const correctionIssue = planBracketCorrection(snapshot, gameId, scores).issue;
+      if (correctionIssue) {
+        setError(correctionIssue);
+        return false;
+      }
       return commit((draft) => {
         applyAcceptedResultCorrection(
           draft,
@@ -3881,6 +3887,15 @@ export function useDirectorController(repository = createDirectorRepository()): 
           !Number.isFinite(score.score + adjustment.delta)
         ) {
           setError('A protest correction must target a team in the current canonical accepted result.');
+          return false;
+        }
+        const correctedScores = structuredClone(game.scores);
+        const correctedScore = correctedScores.find((entry) => entry.teamId === adjustment.teamId);
+        if (!correctedScore) return false;
+        correctedScore.score += adjustment.delta;
+        const correctionIssue = planBracketCorrection(snapshot, game.id, correctedScores).issue;
+        if (correctionIssue) {
+          setError(correctionIssue);
           return false;
         }
       }
@@ -4263,12 +4278,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         assignments[game.id] === undefined ? game.roomId : assignments[game.id],
       );
       const roomIds = selected.filter((id): id is string => id !== null);
-      if (
-        new Set(roomIds).size !== roomIds.length ||
-        roomIds.some(
-          (id) => !next.rooms.some((room) => room.id === id && room.available && room.status === 'available'),
-        )
-      ) {
+      if (new Set(roomIds).size !== roomIds.length || roomIds.some((id) => !roomIsAssignable(next, id))) {
         setError('Choose available rooms, with no room hosting two games in the same round.');
         return false;
       }
@@ -4374,7 +4384,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         const invalidRoom = activeGames.find((game) => {
           if (!game.roomId) return false;
           const room = snapshot.rooms.find((entry) => entry.id === game.roomId);
-          return !room || !room.available || room.status !== 'available';
+          return !room || !roomIsAssignable(snapshot, game.roomId);
         });
         const roomIdsForRound = new Set(roomIds.filter((roomId): roomId is DirectorId => roomId !== null));
         const resourceIssues = roomAssignmentConflicts(snapshot, roomIdsForRound);
@@ -5551,6 +5561,8 @@ function applyAcceptedResultCorrection(
   const scheduled = state.scheduledGames.find((entry) => entry.id === game.scheduledGameId);
   if (!scheduled || scheduled.bye || canonicalAcceptedGame(state, scheduled.id)?.id !== gameId)
     return undefined;
+  const bracketPlan = planBracketCorrection(state, gameId, scores);
+  if (bracketPlan.issue) return undefined;
   const previous = structuredClone(game);
   const now = isoNow();
   const replacementId = newDirectorId('submission');
@@ -5569,6 +5581,15 @@ function applyAcceptedResultCorrection(
   game.packetId = effectivePacketId(state, scheduled);
   game.detailedStats ??= game.playerStats.length > 0 ? 'incomplete' : 'unknown';
   scheduled.status = 'accepted';
+  for (const update of bracketPlan.updates) {
+    const dependent = state.scheduledGames.find((entry) => entry.id === update.scheduledGameId);
+    if (!dependent) continue;
+    dependent.leftTeamId = update.leftTeamId;
+    dependent.rightTeamId = update.rightTeamId;
+    dependent.assignmentRevision += 1;
+    const dependentRound = state.rounds.find((round) => round.id === dependent.roundId);
+    if (dependentRound) dependentRound.revision += 1;
+  }
   markPacketUsed(state, scheduled.id, game.packetId);
   state.submissions.push({
     id: replacementId,
@@ -5599,9 +5620,128 @@ function applyAcceptedResultCorrection(
       replacementSubmissionId: replacementId,
       previousScores: previous.scores,
       correctedScores: scores,
+      reconciledDependentGameIds: bracketPlan.updates.map((update) => update.scheduledGameId),
     },
   });
   return replacementId;
+}
+
+interface BracketCorrectionUpdate {
+  scheduledGameId: DirectorId;
+  leftTeamId: DirectorId;
+  rightTeamId: DirectorId;
+}
+
+interface BracketCorrectionPlan {
+  updates: BracketCorrectionUpdate[];
+  issue?: string;
+}
+
+function planBracketCorrection(
+  state: DirectorState,
+  gameId: DirectorId,
+  scores: TeamGameScore[],
+): BracketCorrectionPlan {
+  const game = state.games.find((entry) => entry.id === gameId);
+  const scheduled = game
+    ? state.scheduledGames.find((entry) => entry.id === game.scheduledGameId)
+    : undefined;
+  const round = scheduled ? state.rounds.find((entry) => entry.id === scheduled.roundId) : undefined;
+  const phase = round ? state.phases.find((entry) => entry.id === round.phaseId) : undefined;
+  const format = phase ? state.formats.find((entry) => entry.id === phase.formatId) : undefined;
+  if (!game || !scheduled || !format || format.kind !== 'single-elimination' || !scheduled.bracketKey) {
+    return { updates: [] };
+  }
+
+  const previousOutcome = winnerAndLoser(game.scores, scheduled.leftTeamId, scheduled.rightTeamId);
+  const correctedOutcome = winnerAndLoser(scores, scheduled.leftTeamId, scheduled.rightTeamId);
+  if (
+    previousOutcome.winnerTeamId === correctedOutcome.winnerTeamId &&
+    previousOutcome.loserTeamId === correctedOutcome.loserTeamId
+  ) {
+    return { updates: [] };
+  }
+
+  const corrected = structuredClone(state);
+  const correctedGame = corrected.games.find((entry) => entry.id === gameId);
+  if (correctedGame) correctedGame.scores = structuredClone(scores);
+  const after = resolveDirectorBracket(corrected, format.id);
+  if (!after || !format.bracket) return { updates: [] };
+
+  const dependentKeys = dependentBracketKeys(format.bracket, scheduled.bracketKey);
+  const updates: BracketCorrectionUpdate[] = [];
+  for (const key of dependentKeys) {
+    const expected = after.games.find((candidate) => candidate.key === key);
+    const dependents = state.scheduledGames.filter((candidate) => candidate.bracketKey === key);
+    for (const dependent of dependents) {
+      if (
+        expected?.ready &&
+        dependent.leftTeamId === expected.slotA.teamId &&
+        dependent.rightTeamId === expected.slotB.teamId
+      ) {
+        continue;
+      }
+      if (!expected?.ready) {
+        return {
+          updates: [],
+          issue: `Cannot correct ${scheduled.id}: dependent bracket game ${dependent.id} is no longer resolvable.`,
+        };
+      }
+      const hasUnresolvedRecord = state.games.some(
+        (candidate) =>
+          candidate.scheduledGameId === dependent.id &&
+          candidate.status !== 'rejected' &&
+          candidate.status !== 'cancelled',
+      );
+      if (dependent.status !== 'scheduled' || hasUnresolvedRecord) {
+        return {
+          updates: [],
+          issue: `Cannot correct ${scheduled.id}: dependent bracket game ${dependent.id} has already been released or has a result.`,
+        };
+      }
+      updates.push({
+        scheduledGameId: dependent.id,
+        leftTeamId: expected.slotA.teamId as DirectorId,
+        rightTeamId: expected.slotB.teamId as DirectorId,
+      });
+    }
+  }
+  return { updates };
+}
+
+function winnerAndLoser(
+  scores: readonly TeamGameScore[],
+  leftTeamId: DirectorId,
+  rightTeamId: DirectorId | null,
+): { winnerTeamId: DirectorId | null; loserTeamId: DirectorId | null } {
+  if (!rightTeamId) return { winnerTeamId: null, loserTeamId: null };
+  const left = scores.find((score) => score.teamId === leftTeamId);
+  const right = scores.find((score) => score.teamId === rightTeamId);
+  if (!left || !right || left.score === right.score) return { winnerTeamId: null, loserTeamId: null };
+  return left.score > right.score
+    ? { winnerTeamId: leftTeamId, loserTeamId: rightTeamId }
+    : { winnerTeamId: rightTeamId, loserTeamId: leftTeamId };
+}
+
+function dependentBracketKeys(
+  bracket: NonNullable<DirectorState['formats'][number]['bracket']>,
+  root: string,
+): Set<string> {
+  const seen = new Set<string>();
+  const pending = [root];
+  while (pending.length > 0) {
+    const source = pending.shift() as string;
+    for (const node of bracket.nodes) {
+      if (seen.has(node.key)) continue;
+      const dependsOnSource = [node.slotA, node.slotB].some(
+        (slot) => slot.kind !== 'seed' && slot.gameKey === source,
+      );
+      if (!dependsOnSource) continue;
+      seen.add(node.key);
+      pending.push(node.key);
+    }
+  }
+  return seen;
 }
 
 function expireQbtcpSessions(state: DirectorState): boolean {
@@ -5625,14 +5765,10 @@ function expireQbtcpSessions(state: DirectorState): boolean {
 function markRoomAvailableIfIdle(state: DirectorState, roomId: DirectorId): boolean {
   const room = state.rooms.find((entry) => entry.id === roomId);
   if (!room || room.status !== 'live') return false;
-  const anotherLiveSession = state.qbtcpSessions.some(
-    (candidate) => candidate.roomId === roomId && candidate.state === 'live',
-  );
-  const liveGame = state.scheduledGames.some((game) => game.roomId === roomId && game.status === 'live');
   const openHelp = state.qbtcpHelpRequests.some(
     (request) => request.roomId === roomId && request.status === 'open',
   );
-  if (anotherLiveSession || liveGame || openHelp) return false;
+  if (roomHasUnresolvedLiveWork(state, roomId) || openHelp) return false;
   room.status = room.available ? 'available' : 'offline';
   return true;
 }
@@ -5653,7 +5789,9 @@ function applyNativeSessions(state: DirectorState, records: NativeSessionSnapsho
         resumable:
           nextState === 'abandoned' ? true : nextState === 'result-received' ? false : record.resumable,
         resultReceived: record.resultReceived || nextState === 'result-received',
-        progressSequence: record.progressSequence,
+        // `progressSequence` is the Director cursor for a progress payload it has actually
+        // applied. Native session metadata is only recovery metadata and must not advance it.
+        progressSequence: undefined,
         lastSeenAt: record.updatedAt,
         progress: null,
         helpRequestId: null,
@@ -5665,7 +5803,6 @@ function applyNativeSessions(state: DirectorState, records: NativeSessionSnapsho
     const lastSeenAt = newerTimestamp(session.lastSeenAt, record.updatedAt)
       ? record.updatedAt
       : session.lastSeenAt;
-    const nextProgressSequence = Math.max(session.progressSequence ?? -1, record.progressSequence ?? -1);
     const nextResultReceived = Boolean(session.resultReceived || record.resultReceived);
     if (
       session.roomId !== record.roomId ||
@@ -5676,7 +5813,6 @@ function applyNativeSessions(state: DirectorState, records: NativeSessionSnapsho
       session.resumable !==
         (nextState === 'abandoned' ? true : nextState === 'result-received' ? false : record.resumable) ||
       session.resultReceived !== nextResultReceived ||
-      session.progressSequence !== (nextProgressSequence < 0 ? undefined : nextProgressSequence) ||
       session.lastSeenAt !== lastSeenAt
     ) {
       session.roomId = record.roomId || session.roomId;
@@ -5687,7 +5823,6 @@ function applyNativeSessions(state: DirectorState, records: NativeSessionSnapsho
       session.resumable =
         nextState === 'abandoned' ? true : nextState === 'result-received' ? false : record.resumable;
       session.resultReceived = nextResultReceived;
-      session.progressSequence = nextProgressSequence < 0 ? undefined : nextProgressSequence;
       session.lastSeenAt = lastSeenAt;
       changed = true;
     }
@@ -5773,8 +5908,17 @@ function applyNativeProgress(state: DirectorState, records: NativeProgressSnapsh
     let session = state.qbtcpSessions.find((entry) => entry.sessionId === record.sessionId);
     if (session && (session.state === 'result-received' || session.state === 'abandoned')) continue;
     const sequence = Number.isInteger(record.sequence) && record.sequence >= 0 ? record.sequence : 0;
-    if (session && sequence <= (session.progressSequence ?? -1)) continue;
     const summary = progressSummary(record.matchState);
+    const appliedSequence = session?.progressSequence ?? -1;
+    // A sequence is a cursor for the summary stored by Director, not proof that native session
+    // metadata was applied. An equal sequence is idempotent once a payload is stored; an equal
+    // sequence with no stored progress is replayed to repair a partially applied snapshot.
+    if (
+      session &&
+      (sequence < appliedSequence || (sequence === appliedSequence && session.progress !== null))
+    ) {
+      continue;
+    }
     if (!session) {
       session = {
         roomId: record.roomId,
@@ -6213,7 +6357,9 @@ function markNativeSessionResult(
       state: 'result-received',
       resumable: false,
       resultReceived: true,
-      progressSequence: nativeSession?.progressSequence ?? progress?.sequence,
+      // The Director cursor advances only when applyNativeProgress stores a payload. A terminal
+      // session snapshot is not itself proof that progress was applied.
+      progressSequence: undefined,
       lastSeenAt: now,
       progress: null,
       helpRequestId: null,
@@ -6225,9 +6371,6 @@ function markNativeSessionResult(
     session.progress = null;
     session.matchId = nativeSession?.matchId ?? session.matchId;
     session.lastSeenAt = now;
-    if (progress && progress.sequence > (session.progressSequence ?? -1)) {
-      session.progressSequence = progress.sequence;
-    }
   }
   if (scheduled?.roomId) {
     const room = state.rooms.find((entry) => entry.id === scheduled.roomId);

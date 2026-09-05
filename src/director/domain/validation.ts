@@ -4,6 +4,8 @@ import {
   currentPhase,
   currentPacket,
   formatGenerationAvailability,
+  resolveDirectorBracket,
+  roomHasUnresolvedLiveWork,
   scheduleIsValid,
 } from './scheduling';
 
@@ -111,7 +113,9 @@ export function runPreflight(
     const round = state.rounds.find((entry) => entry.id === game.roundId);
     if (!round || (round.status !== 'planned' && round.status !== 'prepared')) return false;
     const room = state.rooms.find((entry) => entry.id === game.roomId);
-    return !room || !room.available || room.status !== 'available';
+    return (
+      !room || !room.available || room.status !== 'available' || roomHasUnresolvedLiveWork(state, game.roomId)
+    );
   });
   if (unavailableRooms.length > 0) {
     issues.push({
@@ -326,15 +330,40 @@ export function roundScheduleIsValid(state: DirectorState, roundId: DirectorId):
 
   const format = state.formats.find((candidate) => candidate.id === phase.formatId);
   if (!format || games.length === 0) return false;
+  const droppedTeamIds = new Set(
+    state.teams.filter((team) => team.status === 'dropped').map((team) => team.id),
+  );
+  const activeGames = games.filter(
+    (game) => game.status !== 'cancelled' && !(game.bye && droppedTeamIds.has(game.leftTeamId)),
+  );
   // A single-elimination round is a resolvable slice of a bracket, not a field-wide pairing. The
   // first slice may contain several bracket byes (for example, three byes in a five-team draw),
   // while later slices contain only the winners that are ready to advance. The bracket adapter has
   // already proved the dependency graph; here we enforce the operational invariants that matter
   // before release: unique participants, no pool leakage, and stable bracket identities.
   if (format.kind === 'single-elimination') {
-    return games.every((game) => game.poolId == null && Boolean(game.bracketKey)) && scheduleIsValid(games);
+    const resolved = resolveDirectorBracket(state, format.id);
+    if (!resolved) return false;
+    return (
+      activeGames.every((game) => {
+        if (game.poolId != null || !game.bracketKey) return false;
+        if (game.bye) {
+          const bye = resolved.byes.find(
+            (candidate) => `bye:${candidate.roundIndex}:${candidate.seed}` === game.bracketKey,
+          );
+          return bye?.roundNumber === round.number && bye.teamId === game.leftTeamId;
+        }
+        const expected = resolved.games.find((candidate) => candidate.key === game.bracketKey);
+        return (
+          expected?.roundNumber === round.number &&
+          expected.ready &&
+          expected.slotA.teamId === game.leftTeamId &&
+          expected.slotB.teamId === game.rightTeamId
+        );
+      }) && scheduleIsValid(activeGames)
+    );
   }
-  const expectedTeams =
+  const expectedTeamsBeforeCancellations =
     format.kind === 'custom'
       ? state.teams.filter(
           (team) =>
@@ -342,13 +371,21 @@ export function roundScheduleIsValid(state: DirectorState, roundId: DirectorId):
             games.some((game) => game.leftTeamId === team.id || game.rightTeamId === team.id),
         )
       : expectedRoundTeams(state, phase);
-  if (expectedTeams.length < 2) return false;
+  const cancellationExemptTeamIds = cancellationExemptTeams(state, games);
+  const expectedTeams = expectedTeamsBeforeCancellations.filter(
+    (team) => !cancellationExemptTeamIds.has(team.id),
+  );
   const expectedByeCount =
     format.kind === 'custom'
       ? expectedTeams.length % 2
-      : expectedRoundByeCount(state, phase, expectedTeams.length);
+      : expectedRoundByeCount(
+          state,
+          phase,
+          expectedTeams.length,
+          new Set(expectedTeams.map((team) => team.id)),
+        );
   if (
-    !scheduleIsValid(games, expectedTeams, {
+    !scheduleIsValid(activeGames, expectedTeams, {
       expectedByeCount,
       allowByes: format.allowByes,
     })
@@ -365,26 +402,36 @@ export function roundScheduleIsValid(state: DirectorState, roundId: DirectorId):
   const confirmedIds = new Set(
     state.teams.filter((team) => team.status === 'confirmed').map((team) => team.id),
   );
+  const eligiblePoolTeamIds = new Set(
+    state.teams
+      .filter((team) => team.status === 'confirmed' || team.status === 'dropped')
+      .map((team) => team.id),
+  );
   const poolTeamIds = pools.flatMap((pool) => pool?.teamIds ?? []);
-  const poolTeamIdSet = new Set(poolTeamIds);
+  const activePoolTeamIds = new Set(poolTeamIds.filter((teamId) => confirmedIds.has(teamId)));
   if (
-    poolTeamIds.some((teamId, index) => !confirmedIds.has(teamId) || poolTeamIds.indexOf(teamId) !== index) ||
+    poolTeamIds.some(
+      (teamId, index) => !eligiblePoolTeamIds.has(teamId) || poolTeamIds.indexOf(teamId) !== index,
+    ) ||
     (format.kind === 'pools' &&
-      (poolTeamIdSet.size !== confirmedIds.size ||
-        [...confirmedIds].some((teamId) => !poolTeamIdSet.has(teamId))))
+      (activePoolTeamIds.size !== confirmedIds.size ||
+        [...confirmedIds].some((teamId) => !activePoolTeamIds.has(teamId))))
   ) {
     return false;
   }
   const activePoolIds = new Set(pools.map((pool) => pool.id));
-  if (!games.every((game) => typeof game.poolId === 'string' && activePoolIds.has(game.poolId))) {
+  if (!activeGames.every((game) => typeof game.poolId === 'string' && activePoolIds.has(game.poolId))) {
     return false;
   }
   return pools.every((pool) => {
     if (!pool) return false;
     const poolTeams = state.teams.filter(
-      (team) => team.status === 'confirmed' && pool.teamIds.includes(team.id),
+      (team) =>
+        team.status === 'confirmed' &&
+        pool.teamIds.includes(team.id) &&
+        !cancellationExemptTeamIds.has(team.id),
     );
-    const poolGames = games.filter((game) => game.poolId === pool.id);
+    const poolGames = activeGames.filter((game) => game.poolId === pool.id);
     return scheduleIsValid(poolGames, poolTeams, {
       expectedByeCount: poolTeams.length % 2,
       allowByes: format.allowByes,
@@ -408,16 +455,32 @@ function expectedRoundByeCount(
   state: DirectorState,
   phase: DirectorState['phases'][number] | undefined,
   expectedTeamCount: number,
+  expectedTeamIds?: ReadonlySet<DirectorId>,
 ): number {
   if (!phase || phase.poolIds.length === 0) return expectedTeamCount % 2;
   return state.pools
     .filter((pool) => phase.poolIds.includes(pool.id) && pool.archived !== true)
     .reduce((count, pool) => {
       const activeCount = pool.teamIds.filter(
-        (teamId) => state.teams.find((team) => team.id === teamId)?.status === 'confirmed',
+        (teamId) =>
+          state.teams.find((team) => team.id === teamId)?.status === 'confirmed' &&
+          (!expectedTeamIds || expectedTeamIds.has(teamId)),
       ).length;
       return count + (activeCount % 2);
     }, 0);
+}
+
+function cancellationExemptTeams(state: DirectorState, games: readonly ScheduledGame[]): Set<DirectorId> {
+  const exempt = new Set<DirectorId>();
+  for (const team of state.teams.filter((entry) => entry.status === 'confirmed')) {
+    const involving = games.filter(
+      (game) => !game.bye && (game.leftTeamId === team.id || game.rightTeamId === team.id),
+    );
+    if (involving.length > 0 && involving.every((game) => game.status === 'cancelled')) {
+      exempt.add(team.id);
+    }
+  }
+  return exempt;
 }
 
 export function packetUseConflicts(
