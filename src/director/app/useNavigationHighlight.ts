@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { DirectorNavigationTarget } from './navigationTarget';
 
 /**
@@ -14,6 +14,7 @@ export function useNavigationHighlight(
   onClear?: () => void,
 ): boolean {
   const [highlighted, setHighlighted] = useState(false);
+  const highlightSequence = useRef(0);
 
   useEffect(() => {
     if (
@@ -29,6 +30,7 @@ export function useNavigationHighlight(
     );
     if (!element) return;
     const frame = window.requestAnimationFrame(() => {
+      const sequence = ++highlightSequence.current;
       setHighlighted(true);
       element.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
       // Chromium does not make a table row the active element even when it has tabindex=-1. The
@@ -38,14 +40,18 @@ export function useNavigationHighlight(
       const focusTarget = element.querySelector<HTMLElement>('[data-director-navigation-focus]') ?? element;
       focusTarget.focus({ preventScroll: true });
       onClear?.();
-      window.setTimeout(() => setHighlighted(false), 1600);
+      window.setTimeout(() => {
+        // A second navigation can arrive before this treatment expires. Its own timeout should own
+        // the new highlight; an older timer must not clear it early.
+        if (highlightSequence.current === sequence) setHighlighted(false);
+      }, 1600);
     });
     return () => {
       window.cancelAnimationFrame(frame);
       // Clearing the one-shot target causes the parent to render once more. Keep the timer alive
       // across that render so the destination remains visibly highlighted for the full treatment.
-      // A later target may start its own timer; its render will still remove the old class before
-      // the new destination is focused.
+      // A later target starts a newer sequence, making the older timer harmless when it eventually
+      // fires.
     };
   }, [entityId, entityType, onClear, section, target]);
 
