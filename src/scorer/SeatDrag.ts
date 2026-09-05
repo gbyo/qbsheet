@@ -223,7 +223,11 @@ export function useSeatDrag(
       if (finished && finished.to !== finished.from) onDropRef.current(finished.from, finished.to);
     };
 
-    const onPointerCancel = () => clear();
+    const onPointerCancel = (event: PointerEvent) => {
+      const waiting = pending.current;
+      if (!waiting || event.pointerId !== waiting.pointerId) return;
+      clear();
+    };
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || live.current === null) return;
