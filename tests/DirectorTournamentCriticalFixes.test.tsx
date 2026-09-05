@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
   formatGenerationAvailability,
+  roomIsAssignable,
   roundScheduleIsValid,
   type TeamGameScore,
 } from '../src/director/domain';
@@ -188,7 +189,133 @@ describe('Director tournament-critical regressions', () => {
     hook.unmount();
   });
 
-  test('cancelled single-elimination games regenerate with a distinct game and round', async () => {
+  test('a resumable abandoned session cannot free an unresolved room, but cancellation releases it', async () => {
+    const hook = await directorWithSetup(2, 1);
+    act(() => expect(hook.result.current.generateSchedule({ roundName: 'Round 1' }).generated).toBe(true));
+    const firstRound = hook.result.current.state.rounds[0];
+    const firstGame = hook.result.current.state.scheduledGames.find((game) => !game.bye);
+    const room = hook.result.current.state.rooms[0];
+    if (!firstRound || !firstGame || !room) throw new Error('test setup did not create the first room game');
+    await act(async () => {
+      expect((await hook.result.current.startRound(firstRound.id)).ok).toBe(true);
+    });
+
+    const stale = structuredClone(hook.result.current.state);
+    stale.rooms[0]!.status = 'available';
+    stale.qbtcpSessions = [
+      {
+        roomId: room.id,
+        sessionId: 'resumable-abandoned',
+        matchId: firstGame.id,
+        deviceId: 'device-1',
+        state: 'abandoned',
+        resumable: true,
+        resultReceived: false,
+        progressSequence: 4,
+        lastSeenAt: '2000-01-01T00:00:00.000Z',
+        progress: null,
+        helpRequestId: null,
+      },
+    ];
+    await act(async () => {
+      expect(await hook.result.current.editTournamentSnapshot(stale, 'Resumable room reservation')).toBe(
+        true,
+      );
+    });
+    expect(roomIsAssignable(hook.result.current.state, room.id)).toBe(false);
+
+    act(() => expect(hook.result.current.generateSchedule({ roundName: 'Round 2' }).generated).toBe(true));
+    const secondRound = hook.result.current.state.rounds.find((round) => round.name === 'Round 2');
+    const secondGame = secondRound
+      ? hook.result.current.state.scheduledGames.find((game) => game.roundId === secondRound.id && !game.bye)
+      : undefined;
+    if (!secondGame) throw new Error('test setup did not create the second game');
+    expect(secondGame.roomId).toBeNull();
+
+    act(() =>
+      expect(hook.result.current.cancelScheduledGame(firstGame.id, 'Resolved administratively')).toBe(true),
+    );
+    expect(roomIsAssignable(hook.result.current.state, room.id)).toBe(true);
+    hook.unmount();
+  });
+
+  test('a paired session keeps its released game room-reserved until that game is resolved', async () => {
+    const hook = await directorWithSetup(2, 1);
+    act(() => expect(hook.result.current.generateSchedule({ roundName: 'Round 1' }).generated).toBe(true));
+    const firstRound = hook.result.current.state.rounds[0];
+    const firstGame = hook.result.current.state.scheduledGames.find((game) => !game.bye);
+    const room = hook.result.current.state.rooms[0];
+    if (!firstRound || !firstGame || !room) throw new Error('test setup did not create the first room game');
+    await act(async () => {
+      expect((await hook.result.current.startRound(firstRound.id)).ok).toBe(true);
+    });
+
+    const paired = structuredClone(hook.result.current.state);
+    paired.rooms[0]!.status = 'available';
+    paired.qbtcpSessions = [
+      {
+        roomId: room.id,
+        sessionId: 'paired-session',
+        matchId: firstGame.id,
+        deviceId: 'device-1',
+        state: 'paired',
+        resumable: true,
+        resultReceived: false,
+        progressSequence: 0,
+        lastSeenAt: new Date().toISOString(),
+        progress: null,
+        helpRequestId: null,
+      },
+    ];
+    await act(async () => {
+      expect(await hook.result.current.editTournamentSnapshot(paired, 'Paired room reservation')).toBe(true);
+    });
+    expect(roomIsAssignable(hook.result.current.state, room.id)).toBe(false);
+
+    act(() => expect(hook.result.current.generateSchedule({ roundName: 'Round 2' }).generated).toBe(true));
+    const secondGame = hook.result.current.state.scheduledGames.find(
+      (game) => game.roundId !== firstRound.id && !game.bye,
+    );
+    expect(secondGame?.roomId).toBeNull();
+    act(() =>
+      expect(hook.result.current.cancelScheduledGame(firstGame.id, 'Resolved administratively')).toBe(true),
+    );
+    expect(roomIsAssignable(hook.result.current.state, room.id)).toBe(true);
+    hook.unmount();
+  });
+
+  test('team drops block every operational game state without changing tournament state', async () => {
+    const hook = await directorWithSetup(2, 1);
+    act(() => expect(hook.result.current.generateSchedule().generated).toBe(true));
+    const round = hook.result.current.state.rounds[0];
+    const game = hook.result.current.state.scheduledGames.find((entry) => !entry.bye);
+    if (!round || !game) throw new Error('test setup did not create a game');
+    await act(async () => expect((await hook.result.current.startRound(round.id)).ok).toBe(true));
+    const teamId = game.leftTeamId;
+
+    for (const status of ['released', 'live', 'submitted'] as const) {
+      if (status !== 'released') {
+        const next = structuredClone(hook.result.current.state);
+        next.scheduledGames.find((entry) => entry.id === game.id)!.status = status;
+        await act(async () => {
+          expect(await hook.result.current.editTournamentSnapshot(next, `Drop guard ${status}`)).toBe(true);
+        });
+      }
+      const before = structuredClone(hook.result.current.state);
+      await act(async () => expect(dropTeamFlexibly(hook.result.current, teamId)).resolves.toBe(false));
+      expect(hook.result.current.state).toEqual(before);
+      expect(hook.result.current.error).toMatch(/resolve.*(round|game)|unresolved/i);
+    }
+
+    act(() =>
+      expect(hook.result.current.cancelScheduledGame(game.id, 'Administrative resolution')).toBe(true),
+    );
+    await act(async () => expect(dropTeamFlexibly(hook.result.current, teamId)).resolves.toBe(true));
+    expect(hook.result.current.state.teams.find((team) => team.id === teamId)?.status).toBe('dropped');
+    hook.unmount();
+  });
+
+  test('a cancelled elimination game is refused, and a legacy one regenerates with distinct ids', async () => {
     const hook = await directorWithSetup(2, 1);
     act(() => expect(hook.result.current.updateFormat({ kind: 'single-elimination' })).toBe(true));
     act(() =>
@@ -203,18 +330,26 @@ describe('Director tournament-critical regressions', () => {
     await act(async () => {
       expect((await hook.result.current.startRound(originalRound.id)).ok).toBe(true);
     });
+
+    // Cancelling an elimination game would strand the bracket without a winner, so the controller
+    // refuses it and asks for a forfeit or an explicit administrative decision instead.
     act(() => {
-      expect(hook.result.current.cancelScheduledGame(originalGame.id, 'Recovery regression')).toBe(true);
+      expect(hook.result.current.cancelScheduledGame(originalGame.id, 'Recovery regression')).toBe(false);
     });
     expect(
-      hook.result.current.state.scheduledGames.find((game) => game.id === originalGame.id),
-    ).toMatchObject({
-      status: 'cancelled',
-      bracketKey: originalGame.bracketKey,
-      leftTeamId: originalGame.leftTeamId,
-      rightTeamId: originalGame.rightTeamId,
+      hook.result.current.state.scheduledGames.find((game) => game.id === originalGame.id)?.status,
+    ).not.toBe('cancelled');
+    await waitFor(() => expect(hook.result.current.error).toMatch(/forfeit|administrative|winner/i));
+
+    // A cancelled row can still arrive from a recovered document written before that rule existed.
+    // Regeneration must then mint fresh identifiers rather than collide with the abandoned round.
+    const legacy = structuredClone(hook.result.current.state);
+    legacy.scheduledGames.find((game) => game.id === originalGame.id)!.status = 'cancelled';
+    await act(async () => {
+      expect(await hook.result.current.editTournamentSnapshot(legacy, 'Legacy cancelled elimination')).toBe(
+        true,
+      );
     });
-    expect(hook.result.current.state.rooms[0]?.status).toBe('available');
 
     act(() => {
       expect(hook.result.current.generateSchedule({ roundName: 'Replacement game' }).generated).toBe(true);
@@ -235,14 +370,6 @@ describe('Director tournament-critical regressions', () => {
     });
     expect(roundScheduleIsValid(hook.result.current.state, originalRound.id)).toBe(true);
     expect(roundScheduleIsValid(hook.result.current.state, replacementRound.id)).toBe(true);
-
-    act(() => {
-      expect(hook.result.current.finishRound(originalRound.id).finished).toBe(true);
-    });
-    expect(hook.result.current.state.rounds.find((round) => round.id === originalRound.id)?.status).toBe(
-      'closed',
-    );
-    expect(hook.result.current.state.phases[0]?.status).toBe('active');
     await waitFor(() => expect(hook.result.current.saving).toBe(false));
     hook.unmount();
   });
@@ -275,8 +402,23 @@ describe('Director tournament-critical regressions', () => {
         }),
       ).toBe(true);
     });
+    const acceptedHistoryId = hook.result.current.state.games.find(
+      (game) => game.scheduledGameId === unaffected.id,
+    )?.id;
+    if (!acceptedHistoryId) throw new Error('test setup did not retain the accepted history record');
 
     const droppedTeamId = affected.leftTeamId;
+    const beforeBlockedDrop = structuredClone(hook.result.current.state);
+    await act(async () => {
+      expect(await dropTeamFlexibly(hook.result.current, droppedTeamId)).toBe(false);
+    });
+    expect(hook.result.current.state.scheduledGames).toEqual(beforeBlockedDrop.scheduledGames);
+    expect(hook.result.current.state.teams.find((team) => team.id === droppedTeamId)?.status).toBe(
+      'confirmed',
+    );
+    expect(hook.result.current.error).toMatch(/resolve.*(round|game)|unresolved/i);
+
+    act(() => expect(hook.result.current.cancelScheduledGame(affected.id, 'Room unavailable')).toBe(true));
     await act(async () => {
       expect(await dropTeamFlexibly(hook.result.current, droppedTeamId)).toBe(true);
     });
@@ -288,6 +430,15 @@ describe('Director tournament-critical regressions', () => {
     });
     expect(roundScheduleIsValid(hook.result.current.state, round.id)).toBe(true);
     expect(roundScheduleIsValid(hook.result.current.state, futureRound.id)).toBe(true);
+    expect(hook.result.current.state.games.find((game) => game.id === acceptedHistoryId)).toMatchObject({
+      status: 'accepted',
+      scheduledGameId: unaffected.id,
+    });
+    const afterDrop = structuredClone(hook.result.current.state);
+    await act(async () => {
+      expect(await dropTeamFlexibly(hook.result.current, droppedTeamId)).toBe(false);
+    });
+    expect(hook.result.current.state).toEqual(afterDrop);
 
     act(() => {
       expect(hook.result.current.finishRound(round.id)).toMatchObject({ finished: true });
@@ -331,6 +482,148 @@ describe('Director tournament-critical regressions', () => {
       expect(hook.result.current.prepareRound(futureRound.id)).toBe(true);
     });
     await waitFor(() => expect(hook.result.current.saving).toBe(false));
+    hook.unmount();
+  });
+
+  test('a pending review keeps an accepted game operationally unresolved', async () => {
+    const hook = await directorWithSetup(2, 1);
+    act(() => expect(hook.result.current.generateSchedule().generated).toBe(true));
+    const game = hook.result.current.state.scheduledGames.find((entry) => !entry.bye);
+    if (!game || !game.leftTeamId || !game.rightTeamId) throw new Error('test setup did not create a game');
+    const leftTeamId = game.leftTeamId;
+    const rightTeamId = game.rightTeamId;
+    act(() =>
+      expect(
+        hook.result.current.addManualResult({
+          scheduledGameId: game.id,
+          scores: [score(leftTeamId, 100), score(rightTeamId, 80)],
+        }),
+      ).toBe(true),
+    );
+    const accepted = structuredClone(hook.result.current.state);
+    const acceptedSubmission = accepted.submissions[0];
+    if (!acceptedSubmission) throw new Error('test setup did not create an accepted submission');
+    accepted.submissions.push({
+      ...structuredClone(acceptedSubmission),
+      id: 'late-review',
+      status: 'review',
+      reason: 'Late conflicting result',
+      acceptedAt: undefined,
+      acceptedBy: undefined,
+    });
+    await act(async () => {
+      expect(await hook.result.current.editTournamentSnapshot(accepted, 'Pending review regression')).toBe(
+        true,
+      );
+    });
+    const beforeDrop = structuredClone(hook.result.current.state);
+    await act(async () => expect(await dropTeamFlexibly(hook.result.current, game.leftTeamId)).toBe(false));
+    expect(hook.result.current.state).toEqual(beforeDrop);
+    expect(hook.result.current.error).toMatch(/resolve|unresolved|review/i);
+    hook.unmount();
+  });
+
+  test('flexible team drops cannot cancel a planned elimination slot', async () => {
+    const hook = await directorWithSetup(4, 2);
+    act(() => expect(hook.result.current.updateFormat({ kind: 'single-elimination' })).toBe(true));
+    act(() => expect(hook.result.current.generateSchedule({ roundName: 'Semifinals' }).generated).toBe(true));
+    const semifinal = hook.result.current.state.scheduledGames.find((game) => game.bracketKey && !game.bye);
+    if (!semifinal) throw new Error('test setup did not create a planned elimination game');
+    await waitFor(() => expect(hook.result.current.saving).toBe(false));
+    const beforeDrop = structuredClone(hook.result.current.state);
+    await act(async () =>
+      expect(await dropTeamFlexibly(hook.result.current, semifinal.leftTeamId)).toBe(false),
+    );
+    expect(hook.result.current.state).toEqual(beforeDrop);
+    expect(hook.result.current.error).toMatch(/planned elimination|forfeit|resolution/i);
+    hook.unmount();
+  });
+
+  test('elimination cancellation is blocked and an explicit forfeit advances a valid final', async () => {
+    const hook = await directorWithSetup(4, 2);
+    act(() => expect(hook.result.current.updateFormat({ kind: 'single-elimination' })).toBe(true));
+    act(() => expect(hook.result.current.generateSchedule({ roundName: 'Semifinals' }).generated).toBe(true));
+    const semifinalRound = hook.result.current.state.rounds[0];
+    if (!semifinalRound) throw new Error('test setup did not create the semifinal round');
+    await act(async () => {
+      expect((await hook.result.current.startRound(semifinalRound.id)).ok).toBe(true);
+    });
+    const semifinals = hook.result.current.state.scheduledGames.filter(
+      (game) => game.roundId === semifinalRound.id && !game.bye && game.rightTeamId,
+    );
+    if (semifinals.length !== 2) throw new Error('test setup did not create two semifinals');
+    const beforeCancel = structuredClone(hook.result.current.state.scheduledGames);
+    act(() => expect(hook.result.current.cancelScheduledGame(semifinals[0]!.id, 'Room closed')).toBe(false));
+    expect(hook.result.current.error).toMatch(/winner|forfeit|administrative/i);
+    expect(hook.result.current.state.scheduledGames).toEqual(beforeCancel);
+
+    act(() => {
+      expect(hook.result.current.recordForfeit(semifinals[0]!.id, semifinals[0]!.leftTeamId)).toBe(true);
+      expect(
+        hook.result.current.addManualResult({
+          scheduledGameId: semifinals[1]!.id,
+          scores: [score(semifinals[1]!.leftTeamId, 100), score(semifinals[1]!.rightTeamId!, 80)],
+        }),
+      ).toBe(true);
+    });
+    expect(
+      hook.result.current.state.games.find((game) => game.scheduledGameId === semifinals[0]!.id),
+    ).toMatchObject({
+      status: 'forfeit',
+      forfeitedTeamId: semifinals[0]!.leftTeamId,
+    });
+    act(() => expect(hook.result.current.finishRound(semifinalRound.id).finished).toBe(true));
+    act(() => expect(hook.result.current.generateSchedule({ roundName: 'Final' }).generated).toBe(true));
+    const finalRound = hook.result.current.state.rounds.find((round) => round.id !== semifinalRound.id);
+    const final = finalRound
+      ? hook.result.current.state.scheduledGames.find((game) => game.roundId === finalRound.id && !game.bye)
+      : undefined;
+    if (!final || !final.rightTeamId) throw new Error('test setup did not create the final');
+    const forfeitingWinner = semifinals[0]!.rightTeamId;
+    expect([final.leftTeamId, final.rightTeamId]).toContain(forfeitingWinner);
+    expect([final.leftTeamId, final.rightTeamId]).toContain(semifinals[1]!.leftTeamId);
+    act(() => {
+      expect(hook.result.current.recordForfeit(semifinals[0]!.id, semifinals[0]!.leftTeamId)).toBe(false);
+    });
+    await waitFor(() => expect(hook.result.current.saving).toBe(false));
+    hook.unmount();
+  });
+
+  test('legacy cancelled elimination state cannot close without a replacement outcome', async () => {
+    const hook = await directorWithSetup(4, 2);
+    act(() => expect(hook.result.current.updateFormat({ kind: 'single-elimination' })).toBe(true));
+    act(() => expect(hook.result.current.generateSchedule({ roundName: 'Semifinals' }).generated).toBe(true));
+    const semifinalRound = hook.result.current.state.rounds[0];
+    if (!semifinalRound) throw new Error('test setup did not create the semifinal round');
+    await act(async () => {
+      expect((await hook.result.current.startRound(semifinalRound.id)).ok).toBe(true);
+    });
+    const semifinals = hook.result.current.state.scheduledGames.filter(
+      (game) => game.roundId === semifinalRound.id && !game.bye && game.rightTeamId,
+    );
+    if (semifinals.length !== 2) throw new Error('test setup did not create two semifinals');
+    act(() => {
+      expect(
+        hook.result.current.addManualResult({
+          scheduledGameId: semifinals[1]!.id,
+          scores: [score(semifinals[1]!.leftTeamId, 100), score(semifinals[1]!.rightTeamId!, 80)],
+        }),
+      ).toBe(true);
+    });
+    const legacy = structuredClone(hook.result.current.state);
+    legacy.scheduledGames.find((game) => game.id === semifinals[0]!.id)!.status = 'cancelled';
+    await act(async () => {
+      expect(await hook.result.current.editTournamentSnapshot(legacy, 'Legacy cancelled elimination')).toBe(
+        true,
+      );
+    });
+
+    let finished: ReturnType<typeof hook.result.current.finishRound> | undefined;
+    act(() => {
+      finished = hook.result.current.finishRound(semifinalRound.id);
+    });
+    expect(finished?.finished).toBe(false);
+    await waitFor(() => expect(hook.result.current.error).toMatch(/cancelled game|replacement|resolution/i));
     hook.unmount();
   });
 

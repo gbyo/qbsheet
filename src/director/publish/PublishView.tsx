@@ -163,7 +163,7 @@ function PublishAction({
   );
 }
 
-async function downloadArchive(
+export async function downloadArchive(
   state: DirectorState,
   onAnnounce: (announcement: AnnounceInput) => void,
 ): Promise<void> {

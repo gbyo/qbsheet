@@ -78,8 +78,8 @@ export function HelpDialog({ open, onClose }: { open: boolean; onClose: () => vo
         <section id="help-planning">
           <h3>Planning a tournament</h3>
           <p>
-            Teams → Format → Rooms & staff → Packets. The preflight checklist on Tournament control shows what
-            is missing.
+            Teams → Format → Rooms & staff → Packets. The preflight checklist on Overview shows what is
+            missing.
           </p>
           <ul>
             <li>Add confirmed teams before generating a schedule.</li>

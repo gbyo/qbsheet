@@ -9,7 +9,7 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { DirectorController } from '../state/useDirectorController';
-import { tournamentState } from '../../../tests/directorFixtures';
+import { scheduledGame, team, tournamentState } from '../../../tests/directorFixtures';
 import { RoomsView } from './RoomsView';
 
 afterEach(cleanup);
@@ -128,5 +128,91 @@ describe('creating a staff member', () => {
     expect(controller.addStaff).not.toHaveBeenCalled();
     // And the typed name is still there to save once a role is chosen.
     expect((screen.getByPlaceholderText('Alex Morgan') as HTMLInputElement).value).toBe('Alex Morgan');
+  });
+});
+
+describe('room operations visibility', () => {
+  test('Available means ready for assignment, not merely marked available', () => {
+    const state = tournamentState();
+    state.rooms.push(
+      {
+        id: 'room-ready',
+        name: 'Ready room',
+        status: 'available',
+        moderatorId: null,
+        scorekeeperId: null,
+        equipmentId: null,
+        available: true,
+      },
+      {
+        id: 'room-live',
+        name: 'Live room',
+        status: 'live',
+        moderatorId: null,
+        scorekeeperId: null,
+        equipmentId: null,
+        available: true,
+      },
+    );
+
+    render(<RoomsView state={state} controller={controllerWith()} onAnnounce={vi.fn()} />);
+
+    expect(screen.getByRole('button', { name: 'Available 1' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Available 1' }));
+
+    expect(screen.getByText('Ready room')).toBeInTheDocument();
+    expect(screen.queryByText('Live room')).toBeNull();
+  });
+
+  test('shows assignment and concise QBTCP state for the room', () => {
+    const state = tournamentState();
+    state.teams.push(team('team-a', 'Alpha'), team('team-b', 'Beta'));
+    state.rooms.push({
+      id: 'room-1',
+      name: 'Room 1',
+      status: 'available',
+      moderatorId: null,
+      scorekeeperId: null,
+      equipmentId: null,
+      available: true,
+    });
+    state.scheduledGames.push(
+      scheduledGame('game-1', 'team-a', 'team-b', { roomId: 'room-1', status: 'released' }),
+    );
+    state.qbtcpSessions.push({
+      roomId: 'room-1',
+      sessionId: 'session-1',
+      matchId: 'game-1',
+      deviceId: 'device-1',
+      operatorName: 'Morgan',
+      state: 'live',
+      resumable: true,
+      resultReceived: false,
+      lastSeenAt: new Date(Date.now() - 3 * 60 * 1000).toISOString(),
+      progress: null,
+      helpRequestId: 'help-1',
+    });
+    state.qbtcpHelpRequests.push({
+      id: 'help-1',
+      roomId: 'room-1',
+      roomName: 'Room 1',
+      category: 'connection',
+      message: 'Need help',
+      status: 'open',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      deviceId: 'device-1',
+      operatorName: 'Morgan',
+    });
+
+    render(<RoomsView state={state} controller={controllerWith()} onAnnounce={vi.fn()} />);
+
+    expect(screen.getByText('Live', { selector: 'strong' })).toBeInTheDocument();
+    expect(screen.getByText(/Alpha vs Beta/, { selector: 'small' })).toBeInTheDocument();
+    expect(screen.getAllByText(/Morgan/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Stale · Last seen/)).toBeInTheDocument();
+    expect(screen.getByText(/Resumable/)).toBeInTheDocument();
+    expect(screen.getByText(/Help open/)).toBeInTheDocument();
+    expect(screen.getByText('Not assignable while current work resolves')).toBeInTheDocument();
   });
 });

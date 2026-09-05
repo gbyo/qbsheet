@@ -14,7 +14,7 @@ import { ResultsView } from '../results/ResultsView';
 import { useTransfers } from '../transfers/useTransfers';
 import { TransfersView } from '../transfers/TransfersView';
 import { StandingsView } from '../standings/StandingsView';
-import { PublishView } from '../publish/PublishView';
+import { downloadArchive, PublishView } from '../publish/PublishView';
 import { LiveView } from '../live/LiveView';
 import { SettingsView } from '../settings/SettingsView';
 import {
@@ -78,10 +78,13 @@ export default function DirectorApp() {
   const [operatorProfile, setOperatorProfile] = useState<OperatorProfile>(() => loadOperatorProfile());
   // Exactly one Director popover menu is ever open: opening one closes the other, and opening
   // an overlay (help, dialogs) closes any menu so none is stranded underneath.
-  const [openMenu, setOpenMenu] = useState<'tournament' | 'operator' | null>(null);
+  const [openMenu, setOpenMenu] = useState<'tournament' | 'operator' | 'compact' | null>(null);
   const menuOpenerRef = useRef<HTMLElement | null>(null);
   const closeMenu = () => setOpenMenu(null);
-  const openMenuFrom = (name: 'tournament' | 'operator', opener: { currentTarget: HTMLElement }) => {
+  const openMenuFrom = (
+    name: 'tournament' | 'operator' | 'compact',
+    opener: { currentTarget: HTMLElement },
+  ) => {
     menuOpenerRef.current = opener.currentTarget;
     setOpenMenu((current) => (current === name ? null : name));
   };
@@ -90,6 +93,8 @@ export default function DirectorApp() {
   const [newTournamentOpen, setNewTournamentOpen] = useState(false);
   const [tournamentDetailsOpen, setTournamentDetailsOpen] = useState(false);
   const tournamentButtonRef = useRef<HTMLButtonElement>(null);
+  const compactMenuButtonRef = useRef<HTMLButtonElement>(null);
+  const compactArchiveInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const focusSearch = (event: KeyboardEvent) => {
@@ -147,6 +152,64 @@ export default function DirectorApp() {
     setActiveSection(canonicalSection(section));
     setAnnouncement(null);
     setNavigationTarget(target ? { ...target, section: canonicalSection(target.section) } : null);
+  };
+  const openTournamentArchive = (file: File | undefined) => {
+    closeMenu();
+    void (async () => {
+      if (!file) return;
+      try {
+        const extension = file.name.toLocaleLowerCase().split('.').at(-1);
+        if (extension === 'qbst') {
+          const report = importArchiveBytes(new Uint8Array(await file.arrayBuffer()));
+          if (!report.ok || !report.state)
+            throw new Error(report.errors.join(' ') || 'That archive is not valid.');
+          if (!controller.importSnapshot(report.state))
+            throw new Error('That archive could not be imported.');
+          announce(importWarningMessage('Portable archive imported.', report.warnings));
+          return;
+        }
+        const text = await file.text();
+        if (extension === 'qbj') {
+          const report = importQbjText(text);
+          if (!report.ok || !report.state)
+            throw new Error(report.errors.join(' ') || 'That QBJ file is not valid.');
+          if (!controller.importSnapshot(report.state))
+            throw new Error('That QBJ file could not be imported.');
+          announce(importWarningMessage('QBJ tournament imported.', report.warnings));
+          return;
+        }
+        if (extension === 'yft') {
+          const report = importYellowFruitText(text);
+          if (!report.ok || !report.state)
+            throw new Error(report.errors.join(' ') || 'That YellowFruit file is not valid.');
+          if (!controller.importSnapshot(report.state))
+            throw new Error('That YellowFruit tournament could not be imported.');
+          announce(importWarningMessage('YellowFruit tournament imported.', report.warnings));
+          return;
+        }
+        const parsed: unknown = JSON.parse(text);
+        if (isDirectorStateLike(parsed)) {
+          if (!controller.importSnapshot(parsed))
+            throw new Error('That Director state could not be imported.');
+        } else if (isDirectorTournamentLike(parsed)) {
+          if (!controller.importSnapshot(importDirectorTournament(parsed as DirectorTournamentInput)))
+            throw new Error('That tournament data could not be imported.');
+        } else {
+          const report = importQbjText(text);
+          if (!report.ok || !report.state)
+            throw new Error(report.errors.join(' ') || 'That file is not a supported archive.');
+          if (!controller.importSnapshot(report.state))
+            throw new Error('That QBJ tournament could not be imported.');
+          announce(importWarningMessage('QBJ tournament imported.', report.warnings));
+          return;
+        }
+        announce('Tournament archive imported and opened.');
+      } catch (reason: unknown) {
+        setAnnouncement(
+          errorNotice(reason instanceof Error ? reason.message : 'That archive could not be opened.'),
+        );
+      }
+    })();
   };
   const selectSearchResult = (result: SearchResult) => {
     const target: DirectorNavigationTarget = {
@@ -429,71 +492,8 @@ export default function DirectorApp() {
                   accept=".qbst,.qbj,.yft,.json"
                   className="director-visually-hidden-input"
                   onChange={(event) => {
-                    closeMenu();
                     const file = event.currentTarget.files?.[0];
-                    void (async () => {
-                      if (!file) return;
-                      try {
-                        const extension = file.name.toLocaleLowerCase().split('.').at(-1);
-                        if (extension === 'qbst') {
-                          const report = importArchiveBytes(new Uint8Array(await file.arrayBuffer()));
-                          if (!report.ok || !report.state)
-                            throw new Error(report.errors.join(' ') || 'That archive is not valid.');
-                          if (!controller.importSnapshot(report.state))
-                            throw new Error('That archive could not be imported.');
-                          announce(importWarningMessage('Portable archive imported.', report.warnings));
-                          return;
-                        }
-                        const text = await file.text();
-                        if (extension === 'qbj') {
-                          const report = importQbjText(text);
-                          if (!report.ok || !report.state)
-                            throw new Error(report.errors.join(' ') || 'That QBJ file is not valid.');
-                          if (!controller.importSnapshot(report.state))
-                            throw new Error('That QBJ file could not be imported.');
-                          announce(importWarningMessage('QBJ tournament imported.', report.warnings));
-                          return;
-                        }
-                        if (extension === 'yft') {
-                          const report = importYellowFruitText(text);
-                          if (!report.ok || !report.state)
-                            throw new Error(report.errors.join(' ') || 'That YellowFruit file is not valid.');
-                          if (!controller.importSnapshot(report.state))
-                            throw new Error('That YellowFruit file could not be imported.');
-                          announce(importWarningMessage('YellowFruit tournament imported.', report.warnings));
-                          return;
-                        }
-                        const parsed: unknown = JSON.parse(text);
-                        if (isDirectorStateLike(parsed)) {
-                          if (!controller.importSnapshot(parsed))
-                            throw new Error('That Director state could not be imported.');
-                        } else if (isDirectorTournamentLike(parsed)) {
-                          if (
-                            !controller.importSnapshot(
-                              importDirectorTournament(parsed as DirectorTournamentInput),
-                            )
-                          )
-                            throw new Error('That tournament data could not be imported.');
-                        } else {
-                          const report = importQbjText(text);
-                          if (!report.ok || !report.state)
-                            throw new Error(
-                              report.errors.join(' ') || 'That file is not a supported archive.',
-                            );
-                          if (!controller.importSnapshot(report.state))
-                            throw new Error('That QBJ tournament could not be imported.');
-                          announce(importWarningMessage('QBJ tournament imported.', report.warnings));
-                          return;
-                        }
-                        announce('Tournament archive imported and opened.');
-                      } catch (reason: unknown) {
-                        setAnnouncement(
-                          errorNotice(
-                            reason instanceof Error ? reason.message : 'That archive could not be opened.',
-                          ),
-                        );
-                      }
-                    })();
+                    openTournamentArchive(file);
                     event.currentTarget.value = '';
                   }}
                 />
@@ -719,9 +719,241 @@ export default function DirectorApp() {
             >
               {operatorInitials(operatorProfile.displayName)}
             </button>
+            <div className="director-compact-menu-wrap">
+              <button
+                ref={compactMenuButtonRef}
+                type="button"
+                className="director-button director-button-secondary director-compact-menu-button"
+                aria-haspopup="menu"
+                aria-expanded={openMenu === 'compact'}
+                onClick={(event) => openMenuFrom('compact', event)}
+              >
+                More <Icon name="chevron" size={13} />
+              </button>
+              {openMenu === 'compact' && (
+                <DirectorMenu
+                  label="More Director actions"
+                  className="director-compact-menu"
+                  openerRef={menuOpenerRef}
+                  onClose={closeMenu}
+                >
+                  <div className="director-tournament-menu-header">
+                    <strong>{tournament.name}</strong>
+                    <small>Global tournament controls</small>
+                  </div>
+                  <p className="director-menu-section-label">Switch tournament</p>
+                  {recentTournaments.map((entry) => (
+                    <button
+                      key={entry.id}
+                      role="menuitem"
+                      type="button"
+                      className={`director-menu-item ${entry.id === tournament.id ? 'is-selected' : ''}`}
+                      onClick={() => {
+                        closeMenu();
+                        void controller.switchTournament(entry.id).then((switched) => {
+                          if (switched) announce(`Opened ${entry.name}.`);
+                        });
+                      }}
+                    >
+                      <span>{entry.name}</span>
+                      <small>{entry.date || statusLabel(entry.status)}</small>
+                    </button>
+                  ))}
+                  {archivedTournaments.map((entry) => (
+                    <div className="director-menu-item director-menu-item-with-action" key={entry.id}>
+                      <button
+                        role="menuitem"
+                        type="button"
+                        onClick={() => {
+                          closeMenu();
+                          void controller.switchTournament(entry.id).then((switched) => {
+                            if (switched) announce(`Opened archived tournament ${entry.name}.`);
+                          });
+                        }}
+                      >
+                        <span>{entry.name}</span>
+                        <small>{entry.date || 'Archived'}</small>
+                      </button>
+                      <button
+                        type="button"
+                        className="director-inline-action"
+                        onClick={() => {
+                          void controller.reopenTournament(entry.id).then((reopened) => {
+                            if (reopened) announce(`${entry.name} reopened as a draft.`);
+                          });
+                        }}
+                      >
+                        Reopen
+                      </button>
+                    </div>
+                  ))}
+                  <div role="separator" className="director-menu-separator" />
+                  <button
+                    role="menuitem"
+                    type="button"
+                    className="director-menu-item"
+                    onClick={() => {
+                      closeMenu();
+                      setTournamentDetailsOpen(true);
+                    }}
+                  >
+                    Tournament details…
+                  </button>
+                  <button
+                    role="menuitem"
+                    type="button"
+                    className="director-menu-item"
+                    onClick={() => {
+                      closeMenu();
+                      setNewTournamentOpen(true);
+                    }}
+                  >
+                    New tournament…
+                  </button>
+                  <button
+                    role="menuitem"
+                    type="button"
+                    className="director-menu-item"
+                    onClick={() => compactArchiveInputRef.current?.click()}
+                  >
+                    Open archive…
+                  </button>
+                  <input
+                    ref={compactArchiveInputRef}
+                    type="file"
+                    accept=".qbst,.qbj,.yft,.json"
+                    aria-label="Open tournament archive"
+                    className="director-visually-hidden-input"
+                    onChange={(event) => {
+                      const file = event.currentTarget.files?.[0];
+                      openTournamentArchive(file);
+                      event.currentTarget.value = '';
+                    }}
+                  />
+                  <div role="separator" className="director-menu-separator" />
+                  <button
+                    role="menuitem"
+                    type="button"
+                    className="director-menu-item"
+                    onClick={() => {
+                      if (
+                        !confirm(
+                          'Archive ' +
+                            tournament.name +
+                            '? It will leave the recent list but remain reopenable.',
+                        )
+                      )
+                        return;
+                      closeMenu();
+                      void controller.archiveTournament().then((archived) => {
+                        if (archived) announce(tournament.name + ' archived.');
+                      });
+                    }}
+                    disabled={tournament.status !== 'complete'}
+                  >
+                    Archive current tournament
+                  </button>
+                  <button
+                    role="menuitem"
+                    type="button"
+                    className="director-menu-item"
+                    onClick={() => navigate('rooms')}
+                  >
+                    Rooms & QBTCP status
+                  </button>
+                  <button
+                    role="menuitem"
+                    type="button"
+                    className="director-menu-item"
+                    onClick={() => navigate('settings')}
+                  >
+                    Settings
+                  </button>
+                  <button
+                    role="menuitem"
+                    type="button"
+                    className="director-menu-item"
+                    onClick={() => {
+                      closeMenu();
+                      setOperatorDialogOpen(true);
+                    }}
+                  >
+                    Operator profile…
+                  </button>
+                  <button
+                    role="menuitem"
+                    type="button"
+                    className="director-menu-item"
+                    onClick={() => {
+                      closeMenu();
+                      setHelpOpen(true);
+                    }}
+                  >
+                    Help & keyboard shortcuts
+                  </button>
+                </DirectorMenu>
+              )}
+            </div>
           </div>
         </header>
         <div className="director-content">
+          {controller.writerStatus === 'blocked' || controller.writerStatus === 'unavailable' ? (
+            <section className="director-persistence-banner director-persistence-banner-warning" role="alert">
+              <div>
+                <strong>Read-only Director tab</strong>
+                <p>
+                  {controller.writerStatus === 'blocked'
+                    ? 'Another browser tab is editing this tournament. Close it or make changes there before continuing.'
+                    : 'This browser cannot safely coordinate multiple Director tabs, so edits are disabled here.'}
+                </p>
+              </div>
+            </section>
+          ) : null}
+          {controller.persistence.status !== 'saved' ? (
+            <section
+              className={`director-persistence-banner ${
+                controller.persistence.status === 'failed' ? 'director-persistence-banner-error' : ''
+              }`}
+              role={controller.persistence.status === 'failed' ? 'alert' : 'region'}
+              aria-label="Tournament persistence"
+              aria-live={controller.persistence.status === 'failed' ? 'assertive' : 'polite'}
+            >
+              <div>
+                <strong>
+                  {controller.persistence.status === 'failed'
+                    ? 'Changes are not saved'
+                    : 'Saving tournament changes…'}
+                </strong>
+                <p>
+                  {controller.persistence.status === 'failed'
+                    ? `${controller.persistence.error ?? 'Director storage failed.'} The current in-memory state is still open; retry or export a recovery archive.`
+                    : 'Keep this tab open until the save finishes.'}
+                </p>
+              </div>
+              <div className="director-persistence-banner-actions">
+                <Button
+                  variant="secondary"
+                  disabled={controller.persistence.status === 'saving'}
+                  onClick={() =>
+                    void controller
+                      .retryPersistence()
+                      .then((saved) =>
+                        announce(
+                          saved
+                            ? 'Tournament changes saved.'
+                            : errorNotice('Tournament changes are still not saved.'),
+                        ),
+                      )
+                  }
+                >
+                  Retry save
+                </Button>
+                <Button variant="quiet" onClick={() => void downloadArchive(state, announce)}>
+                  Export recovery archive
+                </Button>
+              </div>
+            </section>
+          ) : null}
           {controller.error && (
             <p className="director-error-copy" role="alert">
               {controller.error}

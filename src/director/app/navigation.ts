@@ -33,7 +33,8 @@ export interface NavigationGroup {
  *
  * One workspace, three steady groups. Every destination is directly
  * discoverable: progressive disclosure hides irrelevant *controls*, never
- * ordinary destinations. There is no generic More bucket.
+ * ordinary destinations. The narrow top-bar More menu contains global actions,
+ * not another navigation bucket.
  * See `docs/DIRECTOR_PRODUCT_PRINCIPLES.md` (principle 1: complexity comes
  * from the tournament, not the application).
  */

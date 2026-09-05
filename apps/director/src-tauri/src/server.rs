@@ -19,7 +19,10 @@ pub const DEFAULT_QBTCP_PORT: u16 = 8787;
 const SCORE_SHEET_URL: &str = "https://qbsheet.com/";
 const DUPLICATE_ASSIGNMENT_REASON: &str = "duplicate-room-assignment";
 const DUPLICATE_ASSIGNMENT_MESSAGE: &str =
-    "This room has multiple released or live assignments. Resolve the duplicate assignments in Director before pairing.";
+    "This room has multiple unresolved assignments. Resolve the duplicate assignments in Director before pairing.";
+const UNRESOLVED_RESULT_REASON: &str = "unresolved-result";
+const UNRESOLVED_RESULT_MESSAGE: &str =
+    "This room has a submitted result awaiting Director review. Resolve it before pairing another game.";
 
 const ALLOWED_SCORE_SHEET_ORIGINS: &[&str] = &[
     "https://qbsheet.com",
@@ -1225,13 +1228,41 @@ fn assignments_from_document(document: Option<&Value>) -> Vec<(String, Projected
         .filter_map(Value::as_object)
         .filter_map(|game| string_field(Some(game), "scheduledGameId").map(|id| (id, game)))
         .collect::<HashMap<_, _>>();
+    let pending_game_ids: HashSet<String> = root
+        .get("submissions")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_object)
+        .filter(|submission| {
+            matches!(
+                string_field(Some(submission), "status").as_deref(),
+                Some("received" | "review")
+            )
+        })
+        .filter_map(|submission| string_field(Some(submission), "gameId"))
+        .collect();
+    let pending_scheduled_ids: HashSet<String> = games
+        .values()
+        .filter_map(|game| {
+            let game_id = string_field(Some(game), "id")?;
+            if !pending_game_ids.contains(&game_id) {
+                return None;
+            }
+            string_field(Some(game), "scheduledGameId")
+        })
+        .collect();
 
     let mut active_by_room = HashMap::<String, Vec<&Map<String, Value>>>::new();
     for scheduled in scheduled_games.iter().filter_map(Value::as_object) {
         let Some(status) = string_field(Some(scheduled), "status") else {
             continue;
         };
-        if !matches!(status.as_str(), "released" | "live")
+        let Some(scheduled_id) = string_field(Some(scheduled), "id") else {
+            continue;
+        };
+        if (!matches!(status.as_str(), "released" | "live" | "submitted")
+            && !pending_scheduled_ids.contains(&scheduled_id))
             || scheduled
                 .get("bye")
                 .and_then(Value::as_bool)
@@ -1275,6 +1306,21 @@ fn assignments_from_document(document: Option<&Value>) -> Vec<(String, Projected
 
             let scheduled = scheduled_games.first()?;
             let scheduled_id = string_field(Some(scheduled), "id")?;
+            if string_field(Some(scheduled), "status").as_deref() == Some("submitted")
+                || pending_scheduled_ids.contains(&scheduled_id)
+            {
+                return Some((
+                    room_id,
+                    ProjectedAssignment {
+                        key: format!("blocked|{UNRESOLVED_RESULT_REASON}|{scheduled_id}"),
+                        state: AssignmentState::Blocked {
+                            reason: UNRESOLVED_RESULT_REASON.to_owned(),
+                            message: UNRESOLVED_RESULT_MESSAGE.to_owned(),
+                            meta: AssignmentMeta::default(),
+                        },
+                    },
+                ));
+            }
             let round_id = string_field(Some(scheduled), "roundId")?;
             let round = rounds.get(&round_id)?;
             let round_number = u32_field(Some(round), "number").filter(|number| *number > 0)?;
@@ -2072,6 +2118,81 @@ mod tests {
                 panic!("duplicate active assignments must be blocked")
             }
         }
+    }
+
+    #[test]
+    fn submitted_result_blocks_native_room_projection_until_director_review() {
+        let document = json!({
+            "tournament": {"id": "t-1", "name": "Local Invitational"},
+            "rooms": [{"id": "room-101", "name": "Room 101", "available": true}],
+            "teams": [
+                {"id": "team-a", "displayName": "North A"},
+                {"id": "team-b", "displayName": "South B"}
+            ],
+            "rounds": [{"id": "round-1", "name": "Round 1", "number": 1, "revision": 1}],
+            "scheduledGames": [{
+                "id": "scheduled-1",
+                "roundId": "round-1",
+                "roomId": "room-101",
+                "leftTeamId": "team-a",
+                "rightTeamId": "team-b",
+                "bye": false,
+                "status": "submitted"
+            }]
+        });
+        let state = DirectorQbtcpState::from_document(Some(&document));
+        match <DirectorQbtcpState as QbtcpState>::assignment(&state, "room-101")
+            .expect("room projection is available")
+        {
+            AssignmentState::Blocked {
+                reason, message, ..
+            } => {
+                assert_eq!(reason, UNRESOLVED_RESULT_REASON);
+                assert_eq!(message, UNRESOLVED_RESULT_MESSAGE);
+            }
+            AssignmentState::Assigned(_)
+            | AssignmentState::None(_)
+            | AssignmentState::Held { .. } => {
+                panic!("submitted result must block a new native assignment")
+            }
+        }
+    }
+
+    #[test]
+    fn accepted_game_with_pending_review_still_blocks_native_room_projection() {
+        let document = json!({
+            "tournament": {"id": "t-1", "name": "Local Invitational"},
+            "rooms": [{"id": "room-101", "name": "Room 101", "available": true}],
+            "teams": [
+                {"id": "team-a", "displayName": "North A"},
+                {"id": "team-b", "displayName": "South B"}
+            ],
+            "rounds": [{"id": "round-1", "name": "Round 1", "number": 1, "revision": 1}],
+            "scheduledGames": [{
+                "id": "scheduled-1",
+                "roundId": "round-1",
+                "roomId": "room-101",
+                "leftTeamId": "team-a",
+                "rightTeamId": "team-b",
+                "bye": false,
+                "status": "accepted"
+            }],
+            "games": [{
+                "id": "game-1",
+                "scheduledGameId": "scheduled-1",
+                "status": "accepted"
+            }],
+            "submissions": [{
+                "id": "submission-1",
+                "gameId": "game-1",
+                "status": "review"
+            }]
+        });
+        let state = DirectorQbtcpState::from_document(Some(&document));
+        assert!(matches!(
+            <DirectorQbtcpState as QbtcpState>::assignment(&state, "room-101"),
+            Ok(AssignmentState::Blocked { reason, .. }) if reason == UNRESOLVED_RESULT_REASON
+        ));
     }
 
     #[test]

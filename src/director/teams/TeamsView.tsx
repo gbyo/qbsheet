@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DirectorController, NewPlayerInput } from '../state/useDirectorController';
-import type { DirectorState } from '../domain';
+import { unresolvedScheduledGameForTeam, type DirectorState } from '../domain';
 import { Button, EmptyState, FormField, PanelBody, PanelFooter, StateLabel } from '../components/Controls';
 import { DirectorMenu } from '../components/DirectorMenu';
 import { PageHeader } from '../components/PageHeader';
@@ -443,7 +443,7 @@ function TeamRow({
               className="director-menu-item"
               onClick={async () => {
                 setMenuOpen(false);
-                const affected = state.scheduledGames.filter((game) => {
+                const affectedGames = state.scheduledGames.filter((game) => {
                   const round = state.rounds.find((entry) => entry.id === game.roundId);
                   return (
                     round?.status !== 'closed' &&
@@ -452,7 +452,35 @@ function TeamRow({
                     game.status !== 'accepted' &&
                     (game.leftTeamId === team.id || game.rightTeamId === team.id)
                   );
-                }).length;
+                });
+                const operationalGame = unresolvedScheduledGameForTeam(state, team.id);
+                if (team.status !== 'dropped' && operationalGame) {
+                  const round = state.rounds.find((entry) => entry.id === operationalGame.roundId);
+                  onAnnounce(
+                    errorNotice(
+                      `Cannot drop ${team.displayName} while ${round?.name ?? 'the current game'} is unresolved. ` +
+                        'Accept the result, record a forfeit, or cancel/replay it through recovery first.',
+                    ),
+                  );
+                  return;
+                }
+                const futureGames = affectedGames.filter((game) => game.status === 'scheduled');
+                if (team.status !== 'dropped') {
+                  const roundNames = [
+                    ...new Set(
+                      futureGames
+                        .map((game) => state.rounds.find((round) => round.id === game.roundId)?.name)
+                        .filter((name): name is string => Boolean(name)),
+                    ),
+                  ];
+                  const futureSummary = futureGames.length
+                    ? `${futureGames.length} unstarted game${futureGames.length === 1 ? '' : 's'} in ${roundNames.join(', ') || 'later rounds'} will be reconciled.`
+                    : 'No unstarted games are currently scheduled for this team.';
+                  const confirmed = window.confirm(
+                    `Drop ${team.displayName}? ${futureSummary} Completed games remain in tournament history. Future rounds may need regeneration or reconciliation.`,
+                  );
+                  if (!confirmed) return;
+                }
                 let changed = false;
                 try {
                   changed =
@@ -476,7 +504,7 @@ function TeamRow({
                 onAnnounce(
                   team.status === 'dropped'
                     ? `${team.displayName} restored. Future pool or round assignments can now be repaired as needed.`
-                    : `${team.displayName} dropped.${affected ? ` ${affected} future game${affected === 1 ? '' : 's'} cancelled; repair those rounds when ready.` : ''}`,
+                    : `${team.displayName} dropped.${futureGames.length ? ` ${futureGames.length} unstarted game${futureGames.length === 1 ? '' : 's'} reconciled; repair those rounds when ready.` : ''}`,
                 );
               }}
             >

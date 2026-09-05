@@ -4,6 +4,7 @@ import {
   isoToZonedDateTimeInput,
   latestRound,
   orderDayItems,
+  roomIsAssignable,
   timeZoneLabel,
   timelineEventTypeLabel,
   timelineEventTypes,
@@ -539,12 +540,16 @@ function RoundWorkspaceRow({
                   >
                     <option value="">No room</option>
                     {state.rooms
-                      .filter((room) => room.available && room.status === 'available')
-                      .map((room) => (
-                        <option key={room.id} value={room.id}>
-                          {room.name}
-                        </option>
-                      ))}
+                      .filter((room) => roomIsAssignable(state, room.id) || room.id === game.roomId)
+                      .map((room) => {
+                        const assignable = roomIsAssignable(state, room.id);
+                        return (
+                          <option key={room.id} value={room.id} disabled={!assignable}>
+                            {room.name}
+                            {!assignable ? ' — currently not assignable' : ''}
+                          </option>
+                        );
+                      })}
                   </select>
                 </FormField>
               ))}

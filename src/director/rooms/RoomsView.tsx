@@ -1,5 +1,10 @@
-import { useState } from 'react';
-import type { DirectorState, StaffRole } from '../domain';
+import { useEffect, useState } from 'react';
+import {
+  qbtcpSessionHasUnresolvedWork,
+  roomIsAssignable,
+  type DirectorState,
+  type StaffRole,
+} from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
 import { Button, EmptyState, FormField, PanelBody, PanelFooter, StateLabel } from '../components/Controls';
 import type { SectionId } from '../app/navigation';
@@ -128,7 +133,10 @@ export function RoomsView({
       : qbtcpRunning
         ? 'connected'
         : 'not-started';
-  const pairingRooms = state.rooms.filter((room) => room.available && room.status === 'available');
+  const assignableRoomIds = new Set(
+    state.rooms.filter((room) => roomIsAssignable(state, room.id)).map((room) => room.id),
+  );
+  const pairingRooms = state.rooms.filter((room) => assignableRoomIds.has(room.id));
   const invitations = qbtcpStatus?.pairingInvitations ?? [];
   const [showForm, setShowForm] = useState<'room' | 'staff' | 'equipment' | null>(null);
   /*
@@ -157,7 +165,7 @@ export function RoomsView({
     (room) =>
       room.id === targetRoomId ||
       filter === 'all' ||
-      (filter === 'available' ? room.available : room.status === filter),
+      (filter === 'available' ? assignableRoomIds.has(room.id) : room.status === filter),
   );
   const helpRequests = [...state.qbtcpHelpRequests].sort((left, right) =>
     right.updatedAt.localeCompare(left.updatedAt),
@@ -596,7 +604,7 @@ export function RoomsView({
                   All <span>{state.rooms.length}</span>
                 </FilterButton>
                 <FilterButton active={filter === 'available'} onClick={() => setFilter('available')}>
-                  Available <span>{state.rooms.filter((room) => room.available).length}</span>
+                  Available <span>{assignableRoomIds.size}</span>
                 </FilterButton>
                 <FilterButton active={filter === 'live'} onClick={() => setFilter('live')}>
                   Live <span>{state.rooms.filter((room) => room.status === 'live').length}</span>
@@ -619,6 +627,7 @@ export function RoomsView({
                     <th>Scorekeeper</th>
                     <th>Equipment</th>
                     <th>Status</th>
+                    <th>QBTCP</th>
                     <th aria-label="Actions" />
                   </tr>
                 </thead>
@@ -638,7 +647,7 @@ export function RoomsView({
                     ))
                   ) : (
                     <tr className="director-table-empty-row">
-                      <td colSpan={7}>
+                      <td colSpan={8}>
                         <p className="director-empty-copy">No rooms match this filter.</p>
                         <button
                           type="button"
@@ -900,6 +909,7 @@ function RoomRows({
   const [scorekeeperId, setScorekeeperId] = useState(room.scorekeeperId ?? '');
   const [equipmentId, setEquipmentId] = useState(room.equipmentId ?? '');
   const [available, setAvailable] = useState(room.available);
+  const assignable = roomIsAssignable(state, room.id);
   const beginEdit = () => {
     setName(room.name);
     setBuilding(room.building ?? '');
@@ -960,14 +970,19 @@ function RoomRows({
         <td>
           <StateLabel state={room.status} />
           <small className="director-table-subtext">
-            {room.available
-              ? room.status === 'available'
-                ? 'Ready for assignment'
-                : room.status === 'finished'
-                  ? 'Marked available after round closes'
-                  : 'Marked available after current session'
-              : 'Unavailable for future rounds'}
+            {assignable
+              ? 'Ready for assignment'
+              : room.available && room.status === 'available'
+                ? 'Not assignable while current work resolves'
+                : room.available
+                  ? room.status === 'finished'
+                    ? 'Marked available after round closes'
+                    : 'Marked available after current session'
+                  : 'Unavailable for future rounds'}
           </small>
+        </td>
+        <td className="director-room-telemetry">
+          <RoomQbtcpTelemetry state={state} roomId={room.id} />
         </td>
         <td>
           <div className="director-row-actions">
@@ -1003,7 +1018,7 @@ function RoomRows({
       </tr>
       {editing && (
         <tr className="director-table-edit-row">
-          <td colSpan={7}>
+          <td colSpan={8}>
             <form
               className="director-inline-edit"
               onSubmit={(event) => {
@@ -1106,6 +1121,119 @@ function RoomRows({
       )}
     </>
   );
+}
+
+/*
+ * A session goes stale on the clock, not on a Director action, so reading `Date.now()` straight
+ * through render would leave the badge to appear whenever some unrelated edit happened to
+ * re-render the table. Holding the current time in state and ticking it keeps render pure and
+ * makes a quiet session announce itself on its own.
+ */
+const qbtcpStaleAfterMs = 2 * 60 * 1000;
+const qbtcpStaleTickMs = 30 * 1000;
+
+function useNow(intervalMs: number): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(timer);
+  }, [intervalMs]);
+  return now;
+}
+
+function RoomQbtcpTelemetry({ state, roomId }: { state: DirectorState; roomId: string }) {
+  const now = useNow(qbtcpStaleTickMs);
+  const allSessions = state.qbtcpSessions.filter((session) => session.roomId === roomId);
+  const unresolvedSessions = allSessions.filter((session) => qbtcpSessionHasUnresolvedWork(state, session));
+  const sessions = unresolvedSessions.length
+    ? unresolvedSessions
+    : [...allSessions].sort((left, right) => right.lastSeenAt.localeCompare(left.lastSeenAt)).slice(0, 1);
+  const priorSessionCount = allSessions.length - sessions.length;
+  const games = state.scheduledGames.filter(
+    (game) => game.roomId === roomId && !game.bye && !['accepted', 'cancelled'].includes(game.status),
+  );
+  const openHelp = state.qbtcpHelpRequests.some(
+    (request) => request.roomId === roomId && request.status === 'open',
+  );
+  const linkedGameIds = new Set<string>();
+
+  return (
+    <div className="director-room-telemetry-stack">
+      {sessions.map((session) => {
+        const game = session.matchId
+          ? state.scheduledGames.find((candidate) => candidate.id === session.matchId)
+          : undefined;
+        if (game) linkedGameIds.add(game.id);
+        const lastSeen = new Date(session.lastSeenAt).getTime();
+        const stale = Number.isFinite(lastSeen) && now - lastSeen > qbtcpStaleAfterMs;
+        const help = session.helpRequestId
+          ? state.qbtcpHelpRequests.some(
+              (request) => request.id === session.helpRequestId && request.status === 'open',
+            )
+          : openHelp;
+        return (
+          <div className="director-room-telemetry-item" key={session.sessionId}>
+            <strong>{qbtcpSessionLabel(session.state)}</strong>
+            <small className="director-table-subtext">
+              {game
+                ? matchupLabel(state, game)
+                : session.matchId
+                  ? `Game ${session.matchId}`
+                  : 'No game linked'}
+              {session.operatorName ? ` · ${session.operatorName}` : ''}
+            </small>
+            <small className="director-table-subtext">
+              {stale ? 'Stale · ' : ''}Last seen {formatTime(session.lastSeenAt)}
+              {session.resumable ? ' · Resumable' : ''}
+              {help ? ' · Help open' : ''}
+            </small>
+          </div>
+        );
+      })}
+      {games
+        .filter((game) => !linkedGameIds.has(game.id))
+        .map((game) => (
+          <div className="director-room-telemetry-item" key={game.id}>
+            <strong>Assignment · {game.status}</strong>
+            <small className="director-table-subtext">{matchupLabel(state, game)}</small>
+            <small className="director-table-subtext">No QBTCP session</small>
+          </div>
+        ))}
+      {openHelp &&
+        !sessions.some((session) =>
+          session.helpRequestId
+            ? state.qbtcpHelpRequests.some(
+                (request) => request.id === session.helpRequestId && request.status === 'open',
+              )
+            : false,
+        ) && <small className="director-room-telemetry-warning">Help request open</small>}
+      {priorSessionCount > 0 && (
+        <small className="director-table-subtext">
+          {priorSessionCount} prior session{priorSessionCount === 1 ? '' : 's'} omitted
+        </small>
+      )}
+      {sessions.length === 0 && games.length === 0 && !openHelp && (
+        <small className="director-table-subtext">No active session</small>
+      )}
+    </div>
+  );
+}
+
+function qbtcpSessionLabel(state: DirectorState['qbtcpSessions'][number]['state']): string {
+  switch (state) {
+    case 'result-received':
+      return 'Result received';
+    case 'abandoned':
+      return 'Abandoned';
+    default:
+      return state.charAt(0).toUpperCase() + state.slice(1);
+  }
+}
+
+function matchupLabel(state: DirectorState, game: DirectorState['scheduledGames'][number]): string {
+  return `${teamName(state, game.leftTeamId)} vs ${
+    game.rightTeamId ? teamName(state, game.rightTeamId) : 'Bye'
+  }`;
 }
 
 const staffRoleOptions: Array<{ value: StaffRole; label: string }> = [

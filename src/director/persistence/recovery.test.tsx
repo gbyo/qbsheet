@@ -86,6 +86,39 @@ test('IndexedDB v2 upgrades without changing existing tournament documents', asy
   expect(await repository.listCheckpoints(before.tournament!.id)).toHaveLength(1);
 });
 
+test('IndexedDB failures do not fall back to a stale localStorage document', async () => {
+  vi.stubGlobal('indexedDB', new IDBFactory());
+  const base = normalizeDirectorState(directorFixture());
+  const repository = new IndexedDbDirectorRepository();
+  await repository.save(base);
+
+  const stale = structuredClone(base);
+  stale.teams[0].displayName = 'Stale local copy';
+  localStorage.setItem(
+    'qbsheet.director.library.v1',
+    JSON.stringify({
+      currentId: stale.tournament!.id,
+      documents: { [stale.tournament!.id]: stale },
+      checkpoints: [],
+    }),
+  );
+  const localCopyBeforeFailure = localStorage.getItem('qbsheet.director.library.v1');
+  const changed = structuredClone(base);
+  changed.teams[0].displayName = 'IndexedDB write';
+
+  const transaction = vi.spyOn(IDBDatabase.prototype, 'transaction').mockImplementation(() => {
+    throw new DOMException('database is closed', 'InvalidStateError');
+  });
+  try {
+    await expect(repository.save(changed)).rejects.toThrow(DirectorPersistenceError);
+    await expect(repository.load()).rejects.toThrow(DirectorPersistenceError);
+    await expect(repository.listTournaments()).rejects.toThrow(DirectorPersistenceError);
+    expect(localStorage.getItem('qbsheet.director.library.v1')).toBe(localCopyBeforeFailure);
+  } finally {
+    transaction.mockRestore();
+  }
+});
+
 test('controller restores exact document and preserves the state before destructive round removal', async () => {
   const repository = new MemoryDirectorRepository();
   await repository.save(normalizeDirectorState(directorFixture()));

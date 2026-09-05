@@ -5,7 +5,7 @@ import {
   currentPacket,
   formatGenerationAvailability,
   resolveDirectorBracket,
-  roomHasUnresolvedLiveWork,
+  roomHasUnresolvedWork,
   scheduleIsValid,
 } from './scheduling';
 
@@ -114,7 +114,7 @@ export function runPreflight(
     if (!round || (round.status !== 'planned' && round.status !== 'prepared')) return false;
     const room = state.rooms.find((entry) => entry.id === game.roomId);
     return (
-      !room || !room.available || room.status !== 'available' || roomHasUnresolvedLiveWork(state, game.roomId)
+      !room || !room.available || room.status !== 'available' || roomHasUnresolvedWork(state, game.roomId)
     );
   });
   if (unavailableRooms.length > 0) {
