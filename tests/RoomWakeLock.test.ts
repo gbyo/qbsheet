@@ -33,4 +33,31 @@ describe('screen wake lock acquisition', () => {
     });
     expect(release).toHaveBeenCalledTimes(1);
   });
+
+  test('reacquires when the browser revokes a visible wake lock', async () => {
+    visibleDocument();
+    const first = Object.assign(new EventTarget(), {
+      release: vi.fn(() => Promise.resolve()),
+    });
+    const second = Object.assign(new EventTarget(), {
+      release: vi.fn(() => Promise.resolve()),
+    });
+    const request = vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+    Object.defineProperty(navigator, 'wakeLock', { configurable: true, value: { request } });
+
+    const hook = renderHook(() => useScreenWakeLock(true));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(request).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      first.dispatchEvent(new Event('release'));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(request).toHaveBeenCalledTimes(2);
+    hook.unmount();
+  });
 });

@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 
 interface IWakeLockSentinel {
   release: () => Promise<void>;
+  addEventListener?: (type: 'release', listener: () => void) => void;
 }
 
 type INavigatorWithWakeLock = Navigator & {
@@ -45,6 +46,13 @@ export default function useScreenWakeLock(active: boolean): void {
             return undefined;
           }
           sentinel.current = next;
+          next.addEventListener?.('release', () => {
+            if (sentinel.current !== next) return;
+            sentinel.current = null;
+            if (!cancelled && active && document.visibilityState === 'visible') {
+              acquire().catch(() => undefined);
+            }
+          });
           return undefined;
         })
         .catch(() => {
