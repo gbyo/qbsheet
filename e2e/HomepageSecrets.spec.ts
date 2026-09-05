@@ -32,3 +32,31 @@ test('pressing and holding the homepage logo unlocks the same secret', async ({ 
     isPrimary: true,
   });
 });
+
+test('moving off the homepage logo cancels a pending hold unlock', async ({ page }) => {
+  await page.goto('/');
+  const logo = page.locator(homepageLogo);
+  await expect(logo).toBeVisible();
+
+  const box = await logo.boundingBox();
+  if (!box) throw new Error('Homepage logo has no bounding box');
+
+  await logo.dispatchEvent('pointerdown', {
+    pointerId: 1,
+    pointerType: 'touch',
+    isPrimary: true,
+    clientX: box.x + box.width / 2,
+    clientY: box.y + box.height / 2,
+  });
+  await page.locator('body').dispatchEvent('pointermove', {
+    pointerId: 1,
+    pointerType: 'touch',
+    isPrimary: true,
+    clientX: 1,
+    clientY: 1,
+  });
+
+  await page.waitForTimeout(1000);
+  await expect(page.getByRole('dialog', { name: 'You found it.' })).toHaveCount(0);
+  await expect(logo).not.toHaveAttribute('data-home-rainbow', 'true');
+});
