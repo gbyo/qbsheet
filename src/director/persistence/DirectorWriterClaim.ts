@@ -248,9 +248,7 @@ async function claimWithBroadcastChannel(
 }
 
 /** Try to become the sole browser Director writer for one tournament document. */
-export async function claimDirectorWriter(
-  options: DirectorWriterClaimOptions,
-): Promise<DirectorWriterClaim> {
+export async function claimDirectorWriter(options: DirectorWriterClaimOptions): Promise<DirectorWriterClaim> {
   const scope = scopeFor(options.tournamentId, options.documentId);
   const tabId = options.tabId ?? newTabId();
   const locks = options.locks === undefined ? defaultLocks() : options.locks;
@@ -272,4 +270,3 @@ export async function claimDirectorWriter(
     options.heartbeatMs ?? directorWriterHeartbeatMs,
   );
 }
-
