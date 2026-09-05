@@ -97,7 +97,10 @@ export default function useArcadeLoop(input: IArcadeLoopInput): void {
     };
 
     document.addEventListener('visibilitychange', onVisibilityChange);
-    frame = window.requestAnimationFrame(tick);
+    // A game can become running while its document is already hidden (for example during a tab
+    // restore). Do not wait for a future visibilitychange before honoring the same pause contract.
+    if (document.visibilityState === 'hidden') latest.current.onHidden?.();
+    else frame = window.requestAnimationFrame(tick);
 
     return () => {
       document.removeEventListener('visibilitychange', onVisibilityChange);
