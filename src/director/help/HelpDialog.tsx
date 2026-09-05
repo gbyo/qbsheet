@@ -42,13 +42,7 @@ export function HelpDialog({ open, onClose }: { open: boolean; onClose: () => vo
   }, [open]);
 
   return (
-    <dialog
-      ref={dialogRef}
-      aria-labelledby={titleId}
-      className="director-help-dialog"
-      onClose={() => onCloseRef.current()}
-      aria-modal="true"
-    >
+    <dialog ref={dialogRef} aria-labelledby={titleId} className="director-help-dialog" aria-modal="true">
       <div className="director-help-dialog-header">
         <h2 id={titleId}>Help & keyboard shortcuts</h2>
         <button
