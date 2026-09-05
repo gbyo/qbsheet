@@ -84,8 +84,18 @@ export default function GameMenu(props: { items: IGameMenuItem[]; label?: string
   };
 
   useEffect(() => {
+    if (!open) return;
+
+    const activeElement = document.activeElement;
+    const focusedIndex = menuItems.current.findIndex((element) => element === activeElement);
+    if (focusedIndex >= 0 && !items[focusedIndex]?.disabled) return;
+
+    const firstEnabledIndex = items.findIndex((item) => !item.disabled);
+    if (firstEnabledIndex >= 0) menuItems.current[firstEnabledIndex]?.focus();
+  }, [items, open]);
+
+  useEffect(() => {
     if (!open) return undefined;
-    menuItems.current[items.findIndex((item) => !item.disabled)]?.focus();
     const onDocumentEvent = (domEvent: Event) => {
       if (domEvent instanceof KeyboardEvent) {
         if (domEvent.key === 'Escape') {
@@ -103,9 +113,6 @@ export default function GameMenu(props: { items: IGameMenuItem[]; label?: string
       document.removeEventListener('keydown', onDocumentEvent);
       document.removeEventListener('mousedown', onDocumentEvent);
     };
-    // `items` is intentionally omitted: scorer menu data is rebuilt on every score update, and
-    // refocusing an already-open menu would steal a keyboard user's current position.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   if (items.length === 0) return null;
@@ -143,13 +150,6 @@ export default function GameMenu(props: { items: IGameMenuItem[]; label?: string
         >
           {items.map((item, index) => (
             <Fragment key={item.label}>
-              {/*
-                A rule, and nothing that can be reached. `role="separator"` is what tells assistive
-                technology this is a grouping mark rather than a thing to do, and it is deliberately
-                outside the `menuItems` refs below: arrow keys, Home and End walk the entries only,
-                because a menu that made somebody press Down twice to get past a line would have made
-                the line a control.
-              */}
               {item.groupLabel && (
                 <li role="presentation" className="scorer-menu-group-label">
                   {item.groupLabel}
