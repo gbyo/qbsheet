@@ -1907,7 +1907,8 @@ mod tests {
             "rules": {"roomProcedure": {"timed": true}},
             "rooms": [
                 {"id": "room-101", "name": "Room 101", "available": true},
-                {"id": "room-102", "name": "Room 102", "available": true}
+                {"id": "room-102", "name": "Room 102", "available": true},
+                {"id": "room-103", "name": "Room 103", "available": true}
             ],
             "teams": [
                 {"id": "team-a", "displayName": "North A"},
@@ -1999,6 +2000,28 @@ mod tests {
             | AssignmentState::Blocked { .. }
             | AssignmentState::Held { .. } => {
                 panic!("released Director game should be assigned")
+            }
+        }
+
+        let mut moved = document.clone();
+        moved["scheduledGames"][0]["roomId"] = json!("room-103");
+        moved["scheduledGames"][0]["assignmentRevision"] = json!(4);
+        state.refresh_from_document(Some(&moved));
+        assert!(matches!(
+            <DirectorQbtcpState as QbtcpState>::assignment(&state, "room-101"),
+            Ok(AssignmentState::None(_))
+        ));
+        match <DirectorQbtcpState as QbtcpState>::assignment(&state, "room-103")
+            .expect("moved assignment is available")
+        {
+            AssignmentState::Assigned(assignment) => {
+                assert_eq!(assignment.match_id, "match-1");
+                assert_eq!(assignment.meta.assignment_revision, Some(4));
+            }
+            AssignmentState::None(_)
+            | AssignmentState::Blocked { .. }
+            | AssignmentState::Held { .. } => {
+                panic!("moved released QBJ game should be assigned to the new room")
             }
         }
 

@@ -4,9 +4,13 @@ import {
   currentPhase,
   currentPacket,
   formatGenerationAvailability,
+  qbtcpSessionHasUnresolvedWork,
   resolveDirectorBracket,
+  roomAssignmentIsValid,
   roomHasUnresolvedWork,
+  roomIsAssignable,
   scheduleIsValid,
+  scheduledGameHasUnresolvedWork,
 } from './scheduling';
 
 export type PreflightSeverity = 'blocker' | 'warning' | 'recommendation';
@@ -17,6 +21,120 @@ export interface PreflightIssue {
   area: 'tournament' | 'teams' | 'format' | 'schedule' | 'rooms' | 'packets' | 'storage' | 'qbtcp';
   message: string;
   action?: string;
+}
+
+/**
+ * Return an actionable reason when a released, not-yet-started game cannot be moved to a room.
+ *
+ * This is deliberately the same occupancy path used by release/start validation. The scheduled
+ * game being moved is the one exception to the current-room occupancy check; unrelated games and
+ * QBTCP sessions still reserve that room and block the recovery.
+ */
+export function releasedGameRoomMoveBlocker(
+  state: DirectorState,
+  scheduledGameId: DirectorId,
+  destinationRoomId: DirectorId,
+): string | null {
+  const game = state.scheduledGames.find((entry) => entry.id === scheduledGameId);
+  if (!game) return 'That scheduled game is no longer in the tournament workspace.';
+  const round = state.rounds.find((entry) => entry.id === game.roundId);
+  if (!round || round.status !== 'released') {
+    return 'Only a game in a released round can be moved with this recovery action.';
+  }
+  if (game.bye) return 'A bye has no room assignment to move.';
+  if (game.status === 'accepted') {
+    return 'This game is already completed; its room cannot be changed.';
+  }
+  if (game.status === 'cancelled') return 'This game was cancelled; its room cannot be changed.';
+  if (game.status === 'submitted') {
+    return 'A result has been submitted for this game; wait for Director review before changing rooms.';
+  }
+  if (game.status === 'live') {
+    return 'This game has already started; changing its room could split scorer state.';
+  }
+  if (game.status !== 'released' || !scheduledGameHasUnresolvedWork(state, game)) {
+    return 'This game is no longer a released, not-started game; its room cannot be changed safely.';
+  }
+  if (!game.roomId) return 'This game does not have a current room to move.';
+  if (game.roomId === destinationRoomId) return 'Choose a different destination room.';
+
+  const gameRecordIds = new Set(
+    state.games.filter((record) => record.scheduledGameId === game.id).map((record) => record.id),
+  );
+  const result = state.games.find(
+    (record) =>
+      record.scheduledGameId === game.id && !['scheduled', 'rejected', 'cancelled'].includes(record.status),
+  );
+  if (result) {
+    if (result.status === 'accepted' || result.status === 'forfeit') {
+      return 'This game is already completed; its room cannot be changed.';
+    }
+    if (result.status === 'submitted') {
+      return 'A result is awaiting Director review; resolve it before changing rooms.';
+    }
+    if (result.status === 'live') {
+      return 'This game has already started; changing its room could split scorer state.';
+    }
+    return 'This game has progressed beyond a safe room move; resolve it before changing rooms.';
+  }
+  if (
+    state.submissions.some(
+      (submission) =>
+        gameRecordIds.has(submission.gameId) &&
+        (submission.status === 'received' || submission.status === 'review'),
+    )
+  ) {
+    return 'A result is awaiting Director review; resolve it before changing rooms.';
+  }
+
+  const scorerSession = state.qbtcpSessions.find(
+    (session) => session.matchId === game.id && qbtcpSessionHasUnresolvedWork(state, session),
+  );
+  if (scorerSession) {
+    if (scorerSession.state === 'result-received') {
+      return 'A result has already been received from the scorer; review it before changing rooms.';
+    }
+    if (scorerSession.state === 'abandoned' && scorerSession.resumable === true) {
+      return 'The scorer has resumable work in the current room; resolve it before changing rooms.';
+    }
+    return 'The scorer is already paired in the current room; finish or resolve it before changing rooms.';
+  }
+
+  const sourceRoom = state.rooms.find((room) => room.id === game.roomId);
+  if (!sourceRoom) return 'The current room no longer exists in the tournament workspace.';
+  if (!roomAssignmentIsValid(state, sourceRoom.id, game.id, { allowUnavailableRoom: true })) {
+    return 'The current room has other unresolved game or scorer work; resolve it before moving this game.';
+  }
+
+  const destinationRoom = state.rooms.find((room) => room.id === destinationRoomId);
+  if (!destinationRoom) return 'Choose an existing destination room.';
+  if (
+    !roomIsAssignable(state, destinationRoom.id) ||
+    !roomAssignmentIsValid(state, destinationRoom.id, game.id)
+  ) {
+    return destinationRoom.status !== 'available' || !destinationRoom.available
+      ? `Room ${destinationRoom.name} is not operationally available.`
+      : `Room ${destinationRoom.name} is occupied by another unresolved game or scorer session.`;
+  }
+
+  // Validate the prospective round room set with the existing staff/equipment conflict rules. The
+  // moved game is removed from its old slot before the destination is added, so a room used only by
+  // this game does not create a false conflict during the check.
+  const roundRoomIds = new Set(
+    state.scheduledGames
+      .filter(
+        (entry) =>
+          entry.id !== game.id &&
+          entry.roundId === game.roundId &&
+          !entry.bye &&
+          entry.status !== 'cancelled' &&
+          entry.roomId !== null,
+      )
+      .map((entry) => entry.roomId as DirectorId),
+  );
+  roundRoomIds.add(destinationRoom.id);
+  const resourceIssue = roomAssignmentConflicts(state, roundRoomIds)[0];
+  return resourceIssue?.message ?? null;
 }
 
 export function runPreflight(
