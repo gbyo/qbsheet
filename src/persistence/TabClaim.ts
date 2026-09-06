@@ -236,6 +236,12 @@ export function newTabId(): string {
   const bytes = new Uint8Array(8);
   if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
     crypto.getRandomValues(bytes);
+  } else {
+    // Duplicate-tab elections rely on different labels even in browsers without Web Crypto.
+    // Math.random is sufficient for this non-authoritative compatibility fallback.
+    for (let index = 0; index < bytes.length; index += 1) {
+      bytes[index] = Math.floor(Math.random() * 256);
+    }
   }
   return `tab-${Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}-${performance.now().toFixed(0)}`;
 }
