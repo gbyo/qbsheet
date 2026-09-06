@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useLayoutEffect } from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { directorFixture, scoreAssignment } from '../transfers/testFixtures';
@@ -29,7 +29,14 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 
-async function open() {
+/**
+ * Mount the Rounds page over a fixture whose current round is not the one the quick action offers.
+ *
+ * `onCommit` runs from a layout effect, which is to say from inside each commit and before React
+ * flushes that commit's passive effects. A test that needs to know what a click arriving straight
+ * after a render would see has to ask from there.
+ */
+async function open(onCommit?: () => void) {
   const state = directorFixture(); // Round 5 is current and highest; quick action requests Round 4.
   const fourth = {
     ...state.rounds[0],
@@ -59,6 +66,7 @@ async function open() {
     controller = useDirectorController(repository);
     const announce = useCallback(onAnnounce, []);
     runtime = useTransfers(controller.state, controller, announce, !controller.loading);
+    useLayoutEffect(() => onCommit?.());
     return controller.loading ? null : (
       <RoundsView
         state={controller.state}
@@ -119,6 +127,37 @@ test('requested round writes through the real runtime even when another round is
   expect(controller.state.submissions).toHaveLength(1);
   await waitFor(() => expect(controller.saving).toBe(false));
   expect((await repository.load()).submissions).toHaveLength(1);
+});
+
+test('a drive can be written from the commit that puts its button on screen', async () => {
+  // What broke in CI, and what a director would have hit eventually.
+  //
+  // The runtime keeps a mirror of the tournament for its timers and callbacks to read. That mirror
+  // used to be written by a passive effect, which React flushes in a scheduler task *after* the
+  // commit that painted the DOM — and it yields between the two whenever the commit runs past its
+  // frame budget, which is exactly what a machine under load does. In that gap the drive's button
+  // is on screen and clickable while the runtime still cannot see the drive, so `prepareTo` finds
+  // no such location and returns having written nothing, said nothing and logged nothing.
+  //
+  // `onCommit` below is a layout effect, so it runs inside the commit itself: the earliest instant
+  // anything can reach the DOM that commit produced, and therefore earlier than any click on the
+  // button it just added. Asking the runtime to write the drive from there states the requirement
+  // without depending on how loaded the machine is — the scheduler timing that decides whether a
+  // real click lands in the gap never enters into it.
+  let requested = false;
+  await open(() => {
+    const location = controller.state.transfers.locations[0];
+    if (!location || requested) return;
+    requested = true;
+    void runtime.prepareTo(location.id, { kind: 'round', roundId: 'round-4' });
+  });
+  fileSystem.addVolume('/usb', { name: 'KINGSTON' });
+  await act(async () => controller.syncTransferVolumes(await fileSystem.listVolumes()));
+  expect(requested).toBe(true);
+  await waitFor(() =>
+    expect(onAnnounce).toHaveBeenCalledWith('Round 4 copied to KINGSTON — eject normally.'),
+  );
+  expect(fileSystem.allPaths().filter((path) => path.endsWith('.qbj'))).toHaveLength(2);
 });
 
 test('no USB gives no disabled controls; multiple writable drives use a contextual chooser', async () => {
