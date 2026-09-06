@@ -25,7 +25,8 @@ export interface StatsScope {
 
 export function buildStatsScopes(state: DirectorState): { scopes: StatsScope[]; showSelector: boolean } {
   const phases = state.phases.filter((phase) => !phase.archived);
-  const pools = state.pools.filter((pool) => !pool.archived);
+  const activePhaseIds = new Set(phases.map((phase) => phase.id));
+  const pools = state.pools.filter((pool) => !pool.archived && activePhaseIds.has(pool.phaseId));
   const scopes: StatsScope[] = [{ id: 'overall', label: 'Overall' }];
   if (phases.length > 1) {
     for (const phase of phases)

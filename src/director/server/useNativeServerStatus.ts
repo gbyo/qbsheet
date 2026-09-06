@@ -12,7 +12,7 @@
  * the mutation and undo it. Only one read is ever in flight, and a read whose generation has
  * been superseded by a mutation is discarded rather than applied.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   readNativeServerStatus,
   startNativeServer,
@@ -54,7 +54,9 @@ export function useNativeServerStatus(options: {
   // cannot apply afterwards.
   const readInFlightRef = useRef(false);
   const generationRef = useRef(0);
-  useEffect(() => {
+  // `toggle` is reachable from controls rendered by this same commit. Keep its status mirror current
+  // before browser input can reach those controls, while still avoiding writes from discarded renders.
+  useLayoutEffect(() => {
     statusRef.current = status;
   }, [status]);
   useEffect(() => {
