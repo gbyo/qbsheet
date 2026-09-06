@@ -163,20 +163,19 @@ struct StaleBanner: View {
 
     var body: some View {
         if case .offline = connection {
-            HStack(spacing: 8) {
-                Image(systemName: "wifi.exclamationmark")
-                    .foregroundStyle(.secondary)
+            GroupBox {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(ageDescription)
                     Text("Reconnecting…")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                Spacer(minLength: 0)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } label: {
+                Label("Offline", systemImage: "wifi.exclamationmark")
+                    .foregroundStyle(.secondary)
             }
             .font(.subheadline)
-            .padding(12)
-            .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
             .accessibilityElement(children: .combine)
         }
     }
@@ -197,16 +196,20 @@ struct ConnectionBadge: View {
     let connection: TournamentStore.Connection
 
     var body: some View {
-        HStack(spacing: 5) {
-            Circle()
-                .fill(color)
-                .frame(width: 7, height: 7)
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+        Label(label, systemImage: symbol)
+            .font(.caption)
+            .foregroundStyle(color)
+            .accessibilityLabel("Connection: \(label)")
+    }
+
+    private var symbol: String {
+        switch connection {
+        case .live: "dot.radiowaves.left.and.right"
+        case .polling: "checkmark.circle"
+        case .offline: "wifi.slash"
+        case .failed: "exclamationmark.triangle"
+        case .loading: "arrow.triangle.2.circlepath"
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Connection: \(label)")
     }
 
     private var color: Color {
@@ -232,20 +235,15 @@ struct ConnectionBadge: View {
 /// The App Clip's one difference from the full app.
 struct AppClipBanner: View {
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "arrow.down.app")
+        GroupBox {
+            Text("Get the app to keep this tournament on your Lock Screen.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } label: {
+            Label("QBSheet Live", systemImage: "arrow.down.app")
                 .foregroundStyle(.tint)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("QBSheet Live")
-                    .font(.subheadline.weight(.semibold))
-                Text("Get the app to keep this tournament on your Lock Screen.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 0)
         }
-        .padding(12)
-        .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
         .accessibilityElement(children: .combine)
     }
 }
