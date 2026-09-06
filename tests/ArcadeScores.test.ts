@@ -54,6 +54,12 @@ describe('where a best score lives', () => {
     expect(loadBestScore('snake')).toBe(0);
   });
 
+  test('a stale lower score cannot replace a newer best from another tab', () => {
+    expect(saveBestScore('qbbird', 10)).toBe(true);
+    expect(saveBestScore('qbbird', 5)).toBe(true);
+    expect(loadBestScore('qbbird')).toBe(10);
+  });
+
   test('a device that has never played has a best of zero rather than nothing', () => {
     expect(loadBestScore('qbbird')).toBe(0);
     expect(loadBestScore('snake')).toBe(0);

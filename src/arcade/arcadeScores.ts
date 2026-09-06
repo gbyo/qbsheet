@@ -73,10 +73,13 @@ export function saveBestScore(
   score: number,
   storage: IArcadeStorage | null = browserStorage(),
 ): boolean {
-  if (!Number.isInteger(score) || score < 0) return false;
+  if (!Number.isInteger(score) || score < 0 || storage === null) return false;
   try {
-    storage?.setItem(arcadeBestScoreKeys[game], String(score));
-    return storage !== null;
+    const key = arcadeBestScoreKeys[game];
+    const stored = Number(storage.getItem(key));
+    const current = Number.isInteger(stored) && stored >= 0 ? stored : 0;
+    if (score > current) storage.setItem(key, String(score));
+    return true;
   } catch {
     return false;
   }
