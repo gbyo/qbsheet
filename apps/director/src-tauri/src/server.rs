@@ -390,6 +390,19 @@ impl ServerRuntime {
             .and_then(|state| state.snapshot())
     }
 
+    /// Rooms among `room_ids` a scorer is connected to right now.
+    ///
+    /// A stopped server has no scorer to disconnect, so it reports nothing occupied rather than
+    /// failing: the caller is asking whether a reassignment would strand someone, and it would not.
+    pub fn rooms_with_live_scorers(&self, room_ids: &HashSet<String>) -> Vec<String> {
+        self.inner
+            .lock()
+            .ok()
+            .and_then(|inner| inner.state.clone())
+            .map(|state| state.rooms_with_live_scorers(room_ids))
+            .unwrap_or_default()
+    }
+
     /// Resolve a room help request through the trusted Director host operation, not the room's
     /// authenticated cancel endpoint.
     pub fn resolve_help(&self, help_id: &str) -> Result<qbtcp_server::HelpRequest, ServerError> {
@@ -697,6 +710,50 @@ impl DirectorQbtcpState {
             .lock()
             .map(|rooms| rooms.len())
             .unwrap_or_default()
+    }
+
+    /// Rooms among `room_ids` a scorer is connected to right now.
+    ///
+    /// Director validates a room move against the QBTCP sessions in its own document, and that
+    /// document only learns about pairings on its once-per-second poll. A scorer who pairs between
+    /// two polls is invisible to that validation, so the move is permitted and the reassignment it
+    /// saves runs `cleanup_room_tracking` over both rooms and drops the live session. This is the
+    /// authoritative answer to "is anyone in there" at the moment it is asked.
+    ///
+    /// Only self-limiting tracking counts: heartbeat presence, a room-bound open session, and its
+    /// live progress. All three are released when the device stops heartbeating or the session
+    /// ends. Retained terminal and resumable-abandoned snapshots are deliberately excluded — they
+    /// outlive the scorer, and whether they still matter depends on the scheduled game's status,
+    /// which only the Director document knows.
+    pub fn rooms_with_live_scorers(&self, room_ids: &HashSet<String>) -> Vec<String> {
+        if room_ids.is_empty() {
+            return Vec::new();
+        }
+        let mut occupied: HashSet<String> = HashSet::new();
+        if let Ok(presence) = self.presence.lock() {
+            for (room_id, _) in presence.keys() {
+                if room_ids.contains(room_id) {
+                    occupied.insert(room_id.clone());
+                }
+            }
+        }
+        if let Ok(sessions) = self.session_rooms.lock() {
+            for room_id in sessions.values() {
+                if room_ids.contains(room_id) {
+                    occupied.insert(room_id.clone());
+                }
+            }
+        }
+        if let Ok(progress) = self.progress.lock() {
+            for record in progress.values() {
+                if room_ids.contains(&record.room_id) {
+                    occupied.insert(record.room_id.clone());
+                }
+            }
+        }
+        let mut rooms: Vec<String> = occupied.into_iter().collect();
+        rooms.sort();
+        rooms
     }
 
     pub fn snapshot(&self) -> Result<ServerSnapshot, ServerError> {
@@ -1898,6 +1955,138 @@ mod tests {
             sessions[0].status,
             qbtcp_server::SessionStatus::FinalReceived
         );
+    }
+
+    #[test]
+    fn a_scorer_who_pairs_between_polls_is_reported_before_a_room_move_clears_them() {
+        let document = json!({
+            "tournament": {"id": "t-1", "name": "Local Invitational"},
+            "rooms": [
+                {"id": "room-101", "name": "Room 101", "available": true},
+                {"id": "room-102", "name": "Room 102", "available": true}
+            ],
+            "teams": [
+                {"id": "team-a", "displayName": "North A"},
+                {"id": "team-b", "displayName": "South B"}
+            ],
+            "rounds": [{"id": "round-1", "name": "Round 1", "number": 1, "revision": 1}],
+            "scheduledGames": [{
+                "id": "scheduled-1",
+                "roundId": "round-1",
+                "roomId": "room-101",
+                "leftTeamId": "team-a",
+                "rightTeamId": "team-b",
+                "bye": false,
+                "status": "released",
+                "assignmentRevision": 1
+            }]
+        });
+        let state = DirectorQbtcpState::from_document(Some(&document));
+        let rooms = HashSet::from(["room-101".to_owned(), "room-102".to_owned()]);
+        assert!(state.rooms_with_live_scorers(&rooms).is_empty());
+
+        // The window the Director document cannot see: a scorer pairs after the last poll, so
+        // schedule validation still believes Room 101 is empty.
+        <DirectorQbtcpState as QbtcpState>::record_presence(
+            &state,
+            PresenceRecord {
+                room_id: "room-101".to_owned(),
+                room_name: "Room 101".to_owned(),
+                device_id: "device-1".to_owned(),
+                operator_name: Some("Scorer".to_owned()),
+                update: Default::default(),
+                observed_at: "2026-01-01T00:00:00Z".to_owned(),
+            },
+        )
+        .expect("presence is recorded");
+
+        assert_eq!(
+            state.rooms_with_live_scorers(&rooms),
+            vec!["room-101".to_owned()]
+        );
+
+        // Without that report the move is permitted, and the reassignment silently drops the
+        // scorer: this is what the caller is now able to refuse.
+        let mut moved = document.clone();
+        moved["scheduledGames"][0]["roomId"] = json!("room-102");
+        moved["scheduledGames"][0]["assignmentRevision"] = json!(2);
+        state.refresh_from_document(Some(&moved));
+        assert!(state.rooms_with_live_scorers(&rooms).is_empty());
+    }
+
+    #[test]
+    fn an_open_session_and_its_progress_keep_a_room_reported_as_live() {
+        let document = json!({
+            "tournament": {"id": "t-1", "name": "Local Invitational"},
+            "rooms": [{"id": "room-101", "name": "Room 101", "available": true}]
+        });
+        let state = DirectorQbtcpState::from_document(Some(&document));
+        let rooms = HashSet::from(["room-101".to_owned()]);
+
+        <DirectorQbtcpState as QbtcpState>::record_session_event(
+            &state,
+            SessionEvent::Opened {
+                session_id: "session-1".to_owned(),
+                room_id: "room-101".to_owned(),
+                match_id: "scheduled-1".to_owned(),
+            },
+        )
+        .expect("session is recorded");
+        <DirectorQbtcpState as QbtcpState>::record_progress(
+            &state,
+            ProgressRecord {
+                session_id: "session-1".to_owned(),
+                room_id: "room-101".to_owned(),
+                sequence: 1,
+                match_state: json!({"tossup": 1}),
+                received_at: "2026-01-01T00:00:00Z".to_owned(),
+            },
+        )
+        .expect("progress is recorded");
+        assert_eq!(
+            state.rooms_with_live_scorers(&rooms),
+            vec!["room-101".to_owned()]
+        );
+
+        // A retained result ends the session and clears its progress. The session snapshot survives
+        // a reassignment, so it must not hold the room open forever; only tracking that releases
+        // itself counts as live.
+        <DirectorQbtcpState as QbtcpState>::record_session_event(
+            &state,
+            SessionEvent::ResultRetained {
+                session_id: "session-1".to_owned(),
+                result_id: "result-1".to_owned(),
+                review_required: false,
+            },
+        )
+        .expect("terminal result is recorded");
+        assert!(state.rooms_with_live_scorers(&rooms).is_empty());
+    }
+
+    #[test]
+    fn a_room_nobody_asked_about_is_never_reported_as_live() {
+        let document = json!({
+            "tournament": {"id": "t-1", "name": "Local Invitational"},
+            "rooms": [
+                {"id": "room-101", "name": "Room 101", "available": true},
+                {"id": "room-102", "name": "Room 102", "available": true}
+            ]
+        });
+        let state = DirectorQbtcpState::from_document(Some(&document));
+        <DirectorQbtcpState as QbtcpState>::record_session_event(
+            &state,
+            SessionEvent::Opened {
+                session_id: "session-1".to_owned(),
+                room_id: "room-101".to_owned(),
+                match_id: "scheduled-1".to_owned(),
+            },
+        )
+        .expect("session is recorded");
+
+        assert!(state
+            .rooms_with_live_scorers(&HashSet::from(["room-102".to_owned()]))
+            .is_empty());
+        assert!(state.rooms_with_live_scorers(&HashSet::new()).is_empty());
     }
 
     #[test]

@@ -263,6 +263,25 @@ export async function readNativeServerSnapshot(): Promise<NativeSnapshotReadResu
   }
 }
 
+/**
+ * Ask the native server which of `roomIds` a scorer is connected to right now.
+ *
+ * The Director document only learns about pairings on its once-per-second QBTCP poll, and it cannot
+ * represent a device that is present without a server-issued session id at all. Anything that
+ * reassigns a room clears that room's operational tracking, so this is the only way to know a
+ * scorer is in there before the reassignment disconnects them.
+ *
+ * The browser preview has no native server and therefore no scorer to disconnect. A native read
+ * that fails throws: an unanswered question is not the same as an empty room.
+ */
+export async function readNativeLiveScorerRooms(roomIds: string[]): Promise<string[]> {
+  const native = bridge();
+  if (!native || roomIds.length === 0) return [];
+  const rooms = await native.invoke('director_qbtcp_live_rooms', { roomIds });
+  if (!Array.isArray(rooms)) throw new Error('The native server returned an invalid live room list.');
+  return rooms.filter((roomId): roomId is string => typeof roomId === 'string');
+}
+
 export async function resolveNativeQbtcpHelp(helpId: string): Promise<NativeHelpSnapshot> {
   const native = bridge();
   if (!native) throw new Error('Only the Director desktop app can resolve a live QBTCP help request.');
