@@ -23,7 +23,7 @@ struct HomeView: View {
             nextCard
 
             if let placement = snapshot.placement(for: teamId) {
-                Section {
+                GroupBox {
                     VStack(spacing: 0) {
                         PlacementRow(
                             title: snapshot.teamName(teamId),
@@ -44,24 +44,22 @@ struct HomeView: View {
                             )
                         }
                     }
-                    .background(.background.secondary, in: RoundedRectangle(cornerRadius: 12))
-                } header: {
-                    SectionHeader("Placement")
+                } label: {
+                    Text("Placement")
                 }
             }
 
             let recent = snapshot.recentResults(for: teamId)
             if !recent.isEmpty {
-                Section {
+                GroupBox {
                     VStack(spacing: 0) {
                         ForEach(Array(recent.enumerated()), id: \.element.gameId) { index, result in
                             if index > 0 { Divider() }
                             ResultRow(result: result, snapshot: snapshot, teamId: teamId)
                         }
                     }
-                    .background(.background.secondary, in: RoundedRectangle(cornerRadius: 12))
-                } header: {
-                    SectionHeader("Recent results")
+                } label: {
+                    Text("Recent results")
                 }
             }
 
@@ -79,41 +77,41 @@ struct HomeView: View {
 
     @ViewBuilder
     private var nextCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if let live = snapshot.liveGame(for: teamId) {
-                Label("Now playing", systemImage: "dot.radiowaves.left.and.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.red)
-                    .textCase(.uppercase)
-                LiveScoreView(live: live, snapshot: snapshot, teamId: teamId)
-                DetailLine(items: [
-                    snapshot.room(live.roomId)?.name,
-                    live.tossupsRead.map { "TU \($0)" },
-                ])
-            } else if let next = snapshot.nextEvent(for: teamId, now: now) {
-                Text("Next")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tint)
-                    .textCase(.uppercase)
-                NextEventView(next: next, snapshot: snapshot, teamId: teamId)
-            } else {
-                Text("Next")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tint)
-                    .textCase(.uppercase)
-                Text("Nothing scheduled")
-                    .font(.title2.weight(.semibold))
-                Text(
-                    snapshot.tournament.status == .complete
-                        ? "The tournament is over."
-                        : "Nothing further has been released yet."
-                )
-                .foregroundStyle(.secondary)
+        GroupBox {
+            VStack(alignment: .leading, spacing: 8) {
+                if let live = snapshot.liveGame(for: teamId) {
+                    Label("Now playing", systemImage: "dot.radiowaves.left.and.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.red)
+                        .textCase(.uppercase)
+                    LiveScoreView(live: live, snapshot: snapshot, teamId: teamId)
+                    DetailLine(items: [
+                        snapshot.room(live.roomId)?.name,
+                        live.tossupsRead.map { "TU \($0)" },
+                    ])
+                } else if let next = snapshot.nextEvent(for: teamId, now: now) {
+                    Text("Next")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tint)
+                        .textCase(.uppercase)
+                    NextEventView(next: next, snapshot: snapshot, teamId: teamId)
+                } else {
+                    Text("Next")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tint)
+                        .textCase(.uppercase)
+                    Text("Nothing scheduled")
+                        .font(.title2.weight(.semibold))
+                    Text(
+                        snapshot.tournament.status == .complete
+                            ? "The tournament is over."
+                            : "Nothing further has been released yet."
+                    )
+                    .foregroundStyle(.secondary)
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 12))
     }
 
     private var footer: String {
@@ -292,20 +290,6 @@ struct ResultRow: View {
         .accessibilityLabel(
             "\(won ? "Won" : "Lost") against \(snapshot.teamName(opponentId)), \(Int(ours)) to \(Int(theirs?.score ?? 0))"
         )
-    }
-}
-
-struct SectionHeader: View {
-    let title: String
-
-    init(_ title: String) { self.title = title }
-
-    var body: some View {
-        Text(title)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.secondary)
-            .textCase(.uppercase)
-            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
