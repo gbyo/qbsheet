@@ -47,7 +47,7 @@
  * send while it was away. It sends the current one. The server keeps one snapshot per session, so
  * the newest picture is the whole of what anybody wanted.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { RoomConnectionState } from './ConnectionState';
 import { IScorerAlert } from '../scorer/ConnectionStatus';
 import FruityServerClient, {
@@ -470,6 +470,10 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
 
   useEffect(() => {
     // A repaired room token is the only event that can make a help-specific 401 stale.
+    //
+    // Passive is right here: the poll's `setInterval` callback is the only reader, and it runs as
+    // its own task. Nothing on screen is wired to this, so no click can land in the window between
+    // the commit and this effect.
     helpRoomCredentialProblem.current = false;
   }, [helpIdentity.token]);
 
@@ -502,13 +506,26 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     writerConflict === null;
   const writesAllowedRef = useRef(writesAllowed);
   /*
-   * Assigned from a committed effect rather than during render. A render can be thrown away and
-   * replayed, and a ref written during one holds a value from a pass that never happened; the
-   * readers here are all timers and event handlers, which run as their own tasks after the effects
-   * of any commit before them, so an effect is never the staler of the two options and is the only
-   * one that stays correct if this tree ever renders concurrently.
+   * Assigned from a committed effect rather than during render, and from a *layout* effect rather
+   * than a passive one.
+   *
+   * The first half is unchanged: a render can be thrown away and replayed, and a ref written during
+   * one holds a value from a pass that never happened, so only a committed render may write here.
+   *
+   * The second half is a correction. This used to be a passive effect, on the reasoning that every
+   * reader is a timer or an event handler and therefore runs as its own task after the effects of
+   * any commit before it. That is true of the timers and false of the event handlers. React flushes
+   * passive effects in a scheduler task *after* the commit that painted, and yields between the two
+   * when the commit overruns its frame budget — which the machine running a tournament does
+   * routinely. `writesAllowed` is also rendered, as `automaticDelivery`, so in that window the
+   * completion screen says the result will be sent while this ref still says the room may not
+   * write, and a `submitFinal` arriving there refuses a final that was allowed: `attempted: false`,
+   * `retryable` computed from a `forbidden`/`writerConflict` pair that has already been cleared, and
+   * a result that never leaves the device. A layout effect runs inside the commit, so the ref and
+   * the DOM that a click can reach are never out of step, and it still only runs for renders that
+   * committed — which is the whole of what the render-phase argument above requires.
    */
-  useEffect(() => {
+  useLayoutEffect(() => {
     writesAllowedRef.current = writesAllowed;
   }, [writesAllowed]);
 
@@ -534,7 +551,15 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     return next;
   }, [progressSequence, onProgressSequence]);
 
-  /** Read by the poll, which must be able to see the current answer without restarting itself. */
+  /**
+   * Read by the poll, which must be able to see the current answer without restarting itself.
+   *
+   * A passive effect on purpose, unlike `writesAllowedRef` above. The poll's `setInterval` callback
+   * is this ref's only reader, and no event handler and no rendered control consults it, so there is
+   * no click that can arrive between a commit and this effect and read the wrong answer. The poll's
+   * own first call runs from an effect declared below this one, so it already sees the new value in
+   * that same flush.
+   */
   const forbiddenRef = useRef(forbidden);
   useEffect(() => {
     forbiddenRef.current = forbidden;
@@ -875,9 +900,19 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
    * closure to something that calls it much later. The effect keys on the send, which changes with
    * exactly the dependencies the memo used to list, so a new sender is still built — and the one
    * before it still stopped — at the same moments as before.
+   *
+   * A layout effect, for the same reason as `writesAllowedRef`: `reportProgress` is called from
+   * scoring, which is an event handler, and it reads this ref. `sendProgress` changes identity on
+   * every successful send (`nextSequence` closes over the persisted sequence), so this rebuilds
+   * often, and each rebuild stops the previous sender — which drops whatever it was still holding.
+   * A snapshot offered in the window between such a commit and a passive effect would go to a
+   * sender about to be stopped, or to `null` on the first commit of all. Nothing is lost either way,
+   * because `latestSnapshotRef` keeps it and the next successful poll re-offers it; the cost is a
+   * progress update arriving up to a poll interval late, on the one send after every send. Building
+   * inside the commit removes the window rather than relying on the poll to paper over it.
    */
   const senderRef = useRef<ProgressSender | null>(null);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const built = new ProgressSender(sendProgress);
     senderRef.current = built;
     return () => {

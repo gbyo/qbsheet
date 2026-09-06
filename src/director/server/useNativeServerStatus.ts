@@ -12,7 +12,7 @@
  * the mutation and undo it. Only one read is ever in flight, and a read whose generation has
  * been superseded by a mutation is discarded rather than applied.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   readNativeServerStatus,
   startNativeServer,
@@ -54,9 +54,28 @@ export function useNativeServerStatus(options: {
   // cannot apply afterwards.
   const readInFlightRef = useRef(false);
   const generationRef = useRef(0);
-  useEffect(() => {
+  /*
+   * A layout effect, because `toggle` is the Start/Stop button's own click handler and this ref is
+   * what tells it which of the two it is.
+   *
+   * React flushes passive effects in a task after the commit that painted, and yields between the
+   * two when the commit overruns its frame budget. A poll that lands `{ running: true }` therefore
+   * repaints the button as "Stop server" a frame before a passive mirror would catch up, and a
+   * director pressing it in that window would have `statusRef.current.running` still read `false`
+   * and start the server they just asked to stop — then `commitStatus` applies that start, so the
+   * button flips straight back and the mistake looks like the click was missed. A wrong action, not
+   * a dropped one, which is why this is the mirror in this file that cannot stay passive. Running
+   * inside the commit keeps the ref and the button's label the same fact, and a layout effect still
+   * only runs for a render that committed.
+   */
+  useLayoutEffect(() => {
     statusRef.current = status;
   }, [status]);
+  /*
+   * Passive is right for this one: `onPollRef` is read only by `poll`, which is a `setInterval`
+   * callback and the setup body of an effect declared below this one — both already run after this
+   * effect. Nothing on screen reads it, so no click can observe the window.
+   */
   useEffect(() => {
     onPollRef.current = onPoll;
   }, [onPoll]);
