@@ -42,28 +42,29 @@ struct AnnouncementCard: View {
     let compact: Bool
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            RoundedRectangle(cornerRadius: 2)
-                .fill(accent)
-                .frame(width: 3)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 4) {
+            Label {
                 Text(announcement.title)
-                    .font(.headline)
-                // Plain text. `.pre-wrap` equivalent: line breaks survive, markup does not.
-                Text(announcement.body)
-                    .font(.subheadline)
-                    .fixedSize(horizontal: false, vertical: true)
-                if !compact {
-                    Text(footer)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                    .foregroundStyle(.primary)
+            } icon: {
+                Image(systemName: severitySymbol)
+                    .foregroundStyle(accent)
             }
-            Spacer(minLength: 0)
+            .font(.headline)
+
+            // Plain text. `.pre-wrap` equivalent: line breaks survive, markup does not.
+            Text(announcement.body)
+                .font(.subheadline)
+                .fixedSize(horizontal: false, vertical: true)
+            if !compact {
+                Text(footer)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
-        .background(background, in: RoundedRectangle(cornerRadius: 12))
+        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 12))
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(severityWord). \(announcement.title). \(announcement.body)")
     }
@@ -76,11 +77,11 @@ struct AnnouncementCard: View {
         }
     }
 
-    private var background: some ShapeStyle {
+    private var severitySymbol: String {
         switch announcement.severity {
-        case .urgent: AnyShapeStyle(Color.red.opacity(0.10))
-        case .important: AnyShapeStyle(Color.orange.opacity(0.10))
-        case .information: AnyShapeStyle(.background.secondary)
+        case .urgent: "exclamationmark.triangle.fill"
+        case .important: "exclamationmark.circle.fill"
+        case .information: "info.circle"
         }
     }
 
