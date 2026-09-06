@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { readRosterLines } from '../src/game/Roster';
+import { readRosterLines, rosterLineProblems } from '../src/game/Roster';
 
 describe('roster paste reading', () => {
   test('keeps the ordinary one-name-per-line workflow unchanged', () => {
@@ -26,5 +26,13 @@ describe('roster paste reading', () => {
   test('never splits comma-shaped names', () => {
     expect(readRosterLines('Smith, John\nDoe, Jane')).toEqual(['Smith, John', 'Doe, Jane']);
     expect(readRosterLines('Smith, John\tTeam A\nDoe, Jane\tTeam A')).toEqual(['Smith, John', 'Doe, Jane']);
+  });
+});
+
+describe('roster validation', () => {
+  test('flags duplicate player names regardless of capitalization', () => {
+    expect(rosterLineProblems(['Alex Smith', 'alex smith'])).toEqual([
+      '"alex smith" is listed more than once.',
+    ]);
   });
 });
