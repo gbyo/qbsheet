@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { useRef, useState } from 'react';
-import { describe, expect, test } from 'vitest';
+import { useLayoutEffect, useRef, useState } from 'react';
+import { describe, expect, test, vi } from 'vitest';
 import { DirectorMenu } from './DirectorMenu';
 
 function Harness({ items = ['Alpha', 'Bravo', 'Charlie'] }: { items?: string[] }) {
@@ -29,6 +29,32 @@ function Harness({ items = ['Alpha', 'Bravo', 'Charlie'] }: { items?: string[] }
           ))}
         </DirectorMenu>
       )}
+    </>
+  );
+}
+
+function CallbackHarness({ onClose }: { onClose: () => void }) {
+  const openerRef = useRef<HTMLButtonElement | null>(null);
+  const mountedRef = useRef(false);
+
+  useLayoutEffect(() => {
+    if (!mountedRef.current) {
+      mountedRef.current = true;
+      return;
+    }
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  }, [onClose]);
+
+  return (
+    <>
+      <button ref={openerRef} type="button">
+        Open
+      </button>
+      <DirectorMenu label="Test menu" openerRef={openerRef} onClose={onClose}>
+        <button role="menuitem" type="button">
+          Alpha
+        </button>
+      </DirectorMenu>
     </>
   );
 }
@@ -71,5 +97,16 @@ describe('DirectorMenu', () => {
     expect(screen.getByRole('menuitem', { name: 'Charlie' })).toHaveFocus();
     fireEvent.keyDown(document.activeElement!, { key: 'Home' });
     expect(screen.getByRole('menuitem', { name: 'Alpha' })).toHaveFocus();
+  });
+
+  test('Escape uses the close callback from the current commit', () => {
+    const firstClose = vi.fn();
+    const secondClose = vi.fn();
+    const view = render(<CallbackHarness onClose={firstClose} />);
+
+    view.rerender(<CallbackHarness onClose={secondClose} />);
+
+    expect(firstClose).not.toHaveBeenCalled();
+    expect(secondClose).toHaveBeenCalledTimes(1);
   });
 });
