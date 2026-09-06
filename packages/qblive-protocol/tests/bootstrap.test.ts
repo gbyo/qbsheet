@@ -118,6 +118,12 @@ describe('parsing', () => {
       ),
     ).toThrow(QbliveBootstrapError);
   });
+
+  test('a malformed percent escape in the publication id is reported as a bootstrap error', () => {
+    expect(() =>
+      parseBootstrapUrl('https://live.qbsheet.com/t/%E0%A4%A?b=https%3A%2F%2Fx.example&v=1'),
+    ).toThrow(QbliveBootstrapError);
+  });
 });
 
 describe('route construction', () => {
