@@ -4,7 +4,7 @@ import type { DirectorController } from '../state/useDirectorController';
 import type { OperatorProfile } from '../operator/operatorProfile';
 import { Button, FormField, PanelBody, PanelFooter, StateLabel } from '../components/Controls';
 import { PageHeader } from '../components/PageHeader';
-import type { AnnounceInput } from '../notices';
+import { errorNotice, type AnnounceInput } from '../notices';
 
 /** How many audit rows a first look at Settings draws, and how many each `Load more` adds. */
 export const auditPageSize = 100;
@@ -83,11 +83,11 @@ export function SettingsView({
         };
   const save = () => {
     if (!details.name.trim()) {
-      onAnnounce('Enter a tournament name first.');
+      onAnnounce(errorNotice('Enter a tournament name first.'));
       return;
     }
     if (!isValidTimeZone(details.timeZone)) {
-      onAnnounce('Choose a recognized IANA timezone.');
+      onAnnounce(errorNotice('Choose a recognized IANA timezone.'));
       return;
     }
     if (
@@ -101,7 +101,7 @@ export function SettingsView({
         timeZone: details.timeZone,
       })
     ) {
-      onAnnounce('Tournament details were not updated; review the Director error.');
+      onAnnounce(errorNotice('Tournament details were not updated; review the Director error.'));
       return;
     }
     onAnnounce('Tournament details updated locally; saving now.');
@@ -313,7 +313,9 @@ export function SettingsView({
                   .then(() => onAnnounce('Recovery point created.'))
                   .catch((reason: unknown) =>
                     onAnnounce(
-                      reason instanceof Error ? reason.message : 'Recovery point could not be saved.',
+                      errorNotice(
+                        reason instanceof Error ? reason.message : 'Recovery point could not be saved.',
+                      ),
                     ),
                   );
               }}
@@ -359,7 +361,9 @@ export function SettingsView({
                             onAnnounce(
                               restored
                                 ? 'Tournament restored. The previous state is also available in Recovery.'
-                                : 'The tournament could not be restored; review the Director error.',
+                                : errorNotice(
+                                    'The tournament could not be restored; review the Director error.',
+                                  ),
                             ),
                           );
                       }}

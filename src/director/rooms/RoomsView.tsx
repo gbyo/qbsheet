@@ -174,11 +174,11 @@ export function RoomsView({
   const openHelpCount = helpRequests.filter((request) => request.status === 'open').length;
   const save = () => {
     if (!roomDraft.name.trim()) {
-      onAnnounce('Enter a room name first.');
+      onAnnounce(errorNotice('Enter a room name first.'));
       return;
     }
     if (!controller.addRoom(roomDraft)) {
-      onAnnounce('The room could not be added; review the Director error.');
+      onAnnounce(errorNotice('The room could not be added; review the Director error.'));
       return;
     }
     onAnnounce(`${roomDraft.name.trim()} added.`);
@@ -188,15 +188,15 @@ export function RoomsView({
   };
   const saveStaff = () => {
     if (!staffDraft.name.trim()) {
-      onAnnounce('Enter a staff name first.');
+      onAnnounce(errorNotice('Enter a staff name first.'));
       return;
     }
     if (staffDraft.roles.length === 0) {
-      onAnnounce('Choose at least one staff role.');
+      onAnnounce(errorNotice('Choose at least one staff role.'));
       return;
     }
     if (!controller.addStaff({ name: staffDraft.name, roles: staffDraft.roles, notes: staffDraft.notes })) {
-      onAnnounce('The staff member could not be added; review the Director error.');
+      onAnnounce(errorNotice('The staff member could not be added; review the Director error.'));
       return;
     }
     onAnnounce(`${staffDraft.name.trim()} added to staff.`);
@@ -205,7 +205,7 @@ export function RoomsView({
   };
   const saveEquipment = () => {
     if (!equipmentDraft.name.trim()) {
-      onAnnounce('Enter an equipment name first.');
+      onAnnounce(errorNotice('Enter an equipment name first.'));
       return;
     }
     if (
@@ -215,7 +215,7 @@ export function RoomsView({
         notes: equipmentDraft.notes,
       })
     ) {
-      onAnnounce('The equipment resource could not be added; review the Director error.');
+      onAnnounce(errorNotice('The equipment resource could not be added; review the Director error.'));
       return;
     }
     onAnnounce(`${equipmentDraft.name.trim()} added to equipment.`);
@@ -705,6 +705,12 @@ export function RoomsView({
                             onClick={() => {
                               void controller.resolveQbtcpHelp(request.id).then((resolved) => {
                                 if (resolved) onAnnounce(`${request.roomName} help request resolved.`);
+                                else
+                                  onAnnounce(
+                                    errorNotice(
+                                      `${request.roomName}'s help request was not resolved; review the Director error.`,
+                                    ),
+                                  );
                               });
                             }}
                           >
@@ -765,6 +771,12 @@ export function RoomsView({
                                 onClick={() => {
                                   if (controller.approveRosterAmendmentAsNew(entry.id)) {
                                     onAnnounce(`${playerName} approved as a new canonical player.`);
+                                  } else {
+                                    onAnnounce(
+                                      errorNotice(
+                                        `${playerName} was not approved; review the Director error.`,
+                                      ),
+                                    );
                                   }
                                 }}
                               >
@@ -793,6 +805,10 @@ export function RoomsView({
                                 onClick={() => {
                                   if (controller.mapRosterAmendment(entry.id, selectedPlayerId)) {
                                     onAnnounce(`${playerName} mapped to the canonical roster.`);
+                                  } else {
+                                    onAnnounce(
+                                      errorNotice(`${playerName} was not mapped; review the Director error.`),
+                                    );
                                   }
                                 }}
                               >
@@ -803,6 +819,12 @@ export function RoomsView({
                                 onClick={() => {
                                   if (controller.rejectRosterAmendment(entry.id)) {
                                     onAnnounce(`${playerName} roster amendment dismissed.`);
+                                  } else {
+                                    onAnnounce(
+                                      errorNotice(
+                                        `${playerName}'s roster amendment was not dismissed; review the Director error.`,
+                                      ),
+                                    );
                                   }
                                 }}
                               >
@@ -926,7 +948,7 @@ function RoomRows({
   const save = () => {
     const trimmedName = name.trim();
     if (!trimmedName) {
-      onAnnounce('Enter a room name first.');
+      onAnnounce(errorNotice('Enter a room name first.'));
       return;
     }
     const updated = controller.updateRoom(room.id, {
@@ -942,7 +964,7 @@ function RoomRows({
       available,
     });
     if (!updated) {
-      onAnnounce('The room could not be updated; review the Director error.');
+      onAnnounce(errorNotice('The room could not be updated; review the Director error.'));
       return;
     }
     setEditing(false);
@@ -998,6 +1020,8 @@ function RoomRows({
                   onAnnounce(
                     `${room.name} marked ${room.available ? 'unavailable' : 'available'} for the next round.`,
                   );
+                } else {
+                  onAnnounce(errorNotice(`${room.name} was not changed; review the Director error.`));
                 }
               }}
             >
@@ -1315,11 +1339,11 @@ function StaffResourceRow({
   const save = () => {
     const trimmedName = name.trim();
     if (!trimmedName) {
-      onAnnounce('Enter a staff name first.');
+      onAnnounce(errorNotice('Enter a staff name first.'));
       return;
     }
     if (roles.length === 0) {
-      onAnnounce('Choose at least one staff role.');
+      onAnnounce(errorNotice('Choose at least one staff role.'));
       return;
     }
     if (
@@ -1329,7 +1353,7 @@ function StaffResourceRow({
         notes,
       })
     ) {
-      onAnnounce('The staff member could not be updated; review the Director error.');
+      onAnnounce(errorNotice('The staff member could not be updated; review the Director error.'));
       return;
     }
     setEditing(false);
@@ -1361,6 +1385,8 @@ function StaffResourceRow({
               onAnnounce(
                 `${member.name} marked ${member.available ? 'unavailable' : 'available'} for future assignment.`,
               );
+            } else {
+              onAnnounce(errorNotice(`${member.name} was not changed; review the Director error.`));
             }
           }}
         >
@@ -1429,7 +1455,7 @@ function EquipmentResourceRow({
   const save = () => {
     const trimmedName = name.trim();
     if (!trimmedName) {
-      onAnnounce('Enter an equipment name first.');
+      onAnnounce(errorNotice('Enter an equipment name first.'));
       return;
     }
     if (
@@ -1439,7 +1465,7 @@ function EquipmentResourceRow({
         notes,
       })
     ) {
-      onAnnounce('The equipment resource could not be updated; review the Director error.');
+      onAnnounce(errorNotice('The equipment resource could not be updated; review the Director error.'));
       return;
     }
     setEditing(false);
@@ -1471,6 +1497,8 @@ function EquipmentResourceRow({
               onAnnounce(
                 `${item.name} marked ${item.available ? 'unavailable' : 'available'} for future assignment.`,
               );
+            } else {
+              onAnnounce(errorNotice(`${item.name} was not changed; review the Director error.`));
             }
           }}
         >

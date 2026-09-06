@@ -33,7 +33,7 @@ import type { TransferLocation } from './model';
 import { initializeExchange, planAssignments, prepareAssignments, type PrepareReport } from './prepare';
 import { collectFromLocation, filesFromDataTransfer, readBrowserFiles } from './service';
 import type { ImportSummary } from './state';
-import { errorNotice, type AnnounceInput } from '../notices';
+import { errorNotice, infoNotice, type AnnounceInput } from '../notices';
 
 /** Shown when a drive with recognisable QBSheet data appears. Restrained, non-blocking, dismissible. */
 export interface DriveNotice {
@@ -315,7 +315,9 @@ export function useTransfers(
 
   const addFolder = useCallback(async () => {
     if (!platform.native) {
-      onAnnounce('Choosing a folder needs the Director desktop app. Drag files onto this page instead.');
+      onAnnounce(
+        infoNotice('Choosing a folder needs the Director desktop app. Drag files onto this page instead.'),
+      );
       return;
     }
     try {
@@ -439,7 +441,11 @@ export function useTransfers(
         location.path,
         stateRef.current.tournament?.name ?? 'QBSheet tournament',
       );
-      onAnnounce(outcome.ok ? `${location.label} is ready for exchange.` : (outcome.error ?? 'Failed.'));
+      onAnnounce(
+        outcome.ok
+          ? `${location.label} is ready for exchange.`
+          : errorNotice(outcome.error ?? `${location.label} could not be prepared for exchange.`),
+      );
       if (outcome.ok) controllerRef.current.setTransferWatching(location.id, true);
     },
     [onAnnounce, platform.fileSystem],
@@ -466,7 +472,7 @@ export function useTransfers(
     async (data: DataTransfer | null) => {
       const files = filesFromDataTransfer(data);
       if (files.length === 0) {
-        onAnnounce('Drop QBJ files. Other file types are not read.');
+        onAnnounce(errorNotice('Drop QBJ files. Other file types are not read.'));
         return null;
       }
       beginOperation(importDropOperation);
@@ -521,7 +527,7 @@ export function useTransfers(
       onAnnounce(
         count > 0
           ? `${count} assignment file${count === 1 ? '' : 's'} downloaded. Upload them to your cloud folder, then return the completed files here.`
-          : 'There was nothing to export.',
+          : infoNotice('There was nothing to export.'),
       );
       return count;
     },

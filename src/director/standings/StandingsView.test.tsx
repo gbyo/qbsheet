@@ -83,3 +83,32 @@ test('the two exports are offered by name rather than as one unexplained CSV', (
   expect(screen.getByRole('button', { name: 'Export team standings CSV' })).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Export player stats CSV' })).toBeTruthy();
 });
+
+/**
+ * A win rate needs a game to be a rate.
+ *
+ * Every confirmed team is seeded `winPercentage: 0`, so a team added to the field and not yet
+ * played rendered `0.0%` in the same column, the same shape and the same weight as a team that
+ * played four games and lost all four. Two different facts cannot share one cell.
+ */
+test('a team that has not played shows an unknown win rate, not 0.0%', () => {
+  const state = playedTournament();
+  state.teams.push(team('team-c', 'Abbeville'));
+
+  render(<StandingsView state={state} controller={controller} onAnnounce={vi.fn()} />);
+
+  const table = document.querySelector('.director-standings-table') as HTMLElement;
+  const row = within(table).getByText('Abbeville').closest('tr') as HTMLElement;
+  const cells = within(row).getAllByRole('cell');
+  // #, Team, W–L, Win %
+  expect(cells[3]?.textContent).toBe('—');
+  expect(row.textContent).not.toContain('0.0%');
+});
+
+test('a team that has played still shows the rate it earned', () => {
+  render(<StandingsView state={playedTournament()} controller={controller} onAnnounce={vi.fn()} />);
+
+  const table = document.querySelector('.director-standings-table') as HTMLElement;
+  const row = within(table).getByText('Ninety Six').closest('tr') as HTMLElement;
+  expect(within(row).getAllByRole('cell')[3]?.textContent).toBe('100.0%');
+});

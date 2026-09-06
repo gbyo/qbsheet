@@ -7,7 +7,7 @@
  */
 
 import { isNativeDirector, saveNativeFile } from '../platform/native';
-import type { AnnounceInput } from '../notices';
+import { errorNotice, infoNotice, type AnnounceInput } from '../notices';
 
 export function safeReportName(value: string): string {
   return (
@@ -30,11 +30,11 @@ export async function saveOrDownloadBytes(
     if (isNativeDirector()) {
       const result = await saveNativeFile(name, bytes);
       if (result.status === 'cancelled') {
-        onAnnounce(cancelledMessage);
+        onAnnounce(infoNotice(cancelledMessage));
         return;
       }
       if (result.status === 'unavailable') {
-        onAnnounce('The native file-save dialog is unavailable.');
+        onAnnounce(infoNotice('The native file-save dialog is unavailable.'));
         return;
       }
       onAnnounce(`${successMessage} Saved to ${result.path}.`);
@@ -43,7 +43,7 @@ export async function saveOrDownloadBytes(
     downloadBytes(bytes, name, mimeType);
     onAnnounce(`${successMessage}.`);
   } catch (reason: unknown) {
-    onAnnounce(reason instanceof Error ? reason.message : `${successMessage} failed.`);
+    onAnnounce(errorNotice(reason instanceof Error ? reason.message : `${successMessage} failed.`));
   }
 }
 

@@ -7,7 +7,7 @@
  * a director looking for a packet list.
  */
 import { afterEach, expect, test, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { DirectorState } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
 import { tournamentState } from '../../../tests/directorFixtures';
@@ -79,4 +79,43 @@ test('Import QBJ asks for QBJ files rather than any JSON on the machine', () => 
   const input = document.querySelector('input[type="file"]') as HTMLInputElement;
   expect(input.accept).toBe('.qbj,application/vnd.quizbowl.qbj+json');
   expect(input.accept).not.toContain('application/json');
+});
+
+/**
+ * A refusal reads as a refusal.
+ *
+ * `onAnnounce` takes either a bare string, which the shell renders with the success check and
+ * `role="status"`, or a toned notice. Every rejection on this page passed a bare string, so
+ * "Retired packets cannot be selected" arrived looking exactly like "Packet A selected".
+ */
+test('selecting a retired packet is announced as an error, not a success', () => {
+  const onAnnounce = vi.fn();
+  const state = stateWithPackets();
+  state.packets[1].retired = true;
+
+  render(<PacketsView state={state} controller={controllerWith()} onAnnounce={onAnnounce} />);
+  screen.getAllByRole('button', { name: 'Use next' })[0].click();
+
+  expect(onAnnounce).toHaveBeenCalledWith({
+    message: 'Retired packets cannot be selected; restore it first.',
+    tone: 'error',
+  });
+});
+
+test('a packet the controller refuses to add is announced as an error', () => {
+  const onAnnounce = vi.fn();
+  const controller = {
+    ...controllerWith(),
+    addPacket: vi.fn(() => false),
+  } as unknown as DirectorController;
+
+  render(<PacketsView state={stateWithPackets()} controller={controller} onAnnounce={onAnnounce} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Add packet' }));
+  fireEvent.change(screen.getByLabelText('Packet name'), { target: { value: 'Packet C' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save packet' }));
+
+  expect(onAnnounce).toHaveBeenCalledWith({
+    message: 'Packet was not added; review the Director error.',
+    tone: 'error',
+  });
 });
