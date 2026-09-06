@@ -35,8 +35,13 @@ export function loadOperatorProfile(): OperatorProfile {
 }
 
 export function saveOperatorProfile(profile: OperatorProfile): void {
-  if (typeof localStorage === 'undefined') return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
+  try {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
+  } catch {
+    // The profile is a local preference. Keep the active session usable when
+    // browser storage is blocked, unavailable, or out of quota.
+  }
 }
 
 export function operatorInitials(name: string): string {

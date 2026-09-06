@@ -1,12 +1,13 @@
 /** @vitest-environment jsdom */
 
 import { act, renderHook } from '@testing-library/react';
-import { beforeEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { loadRoomClock, saveRoomClock } from '../src/scorer/RoomClock';
 import useRoomClock from '../src/scorer/useRoomClock';
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  Object.defineProperty(document, 'hidden', { configurable: true, value: false });
   const values = new Map<string, string>();
   Object.defineProperty(window, 'localStorage', {
     configurable: true,
@@ -17,6 +18,10 @@ beforeEach(() => {
       clear: () => values.clear(),
     },
   });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe('useRoomClock persistence identity', () => {
@@ -92,6 +97,27 @@ describe('useRoomClock persistence identity', () => {
 
     expect(hook.result.current.remainingMs).toBe(30_000);
     expect(hook.result.current.display).toBe('00:30');
+    hook.unmount();
+  });
+
+  test('does not tick a running clock while hidden and catches up when visible', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-05T16:00:00.000Z'));
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+
+    const hook = renderHook(() => useRoomClock('game-a', 1, 'half-1'));
+    act(() => hook.result.current.start());
+    expect(hook.result.current.remainingMs).toBe(60_000);
+
+    act(() => vi.advanceTimersByTime(5_000));
+    expect(hook.result.current.remainingMs).toBe(60_000);
+
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+    act(() => document.dispatchEvent(new Event('visibilitychange')));
+    expect(hook.result.current.remainingMs).toBe(55_000);
+
+    act(() => vi.advanceTimersByTime(1_000));
+    expect(hook.result.current.remainingMs).toBe(54_000);
     hook.unmount();
   });
 });
