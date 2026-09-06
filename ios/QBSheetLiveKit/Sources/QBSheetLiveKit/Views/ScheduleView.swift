@@ -28,7 +28,7 @@ struct ScheduleView: View {
 
             let events = snapshot.timeline.filter { ($0.scheduledEnd ?? .distantFuture) >= now }
             if scope == .team && !events.isEmpty {
-                Section {
+                GroupBox("Today") {
                     VStack(spacing: 0) {
                         ForEach(Array(events.enumerated()), id: \.element.id) { index, event in
                             if index > 0 { Divider() }
@@ -45,13 +45,9 @@ struct ScheduleView: View {
                                         .foregroundStyle(.secondary)
                                 }
                             }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 11)
+                            .padding(.vertical, 8)
                         }
                     }
-                    .background(.background.secondary, in: RoundedRectangle(cornerRadius: 12))
-                } header: {
-                    SectionHeader("Today")
                 }
             }
 
@@ -64,7 +60,7 @@ struct ScheduleView: View {
                 )
             } else {
                 ForEach(rounds(of: games), id: \.id) { round in
-                    Section {
+                    GroupBox(round.title) {
                         VStack(spacing: 0) {
                             ForEach(Array(round.games.enumerated()), id: \.element.id) { index, game in
                                 if index > 0 { Divider() }
@@ -75,9 +71,6 @@ struct ScheduleView: View {
                                 )
                             }
                         }
-                        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 12))
-                    } header: {
-                        SectionHeader(round.title)
                     }
                 }
             }
@@ -128,8 +121,7 @@ struct ScheduleRow: View {
             Spacer(minLength: 12)
             trailing
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 11)
+        .padding(.vertical, 8)
         .accessibilityElement(children: .combine)
     }
 
