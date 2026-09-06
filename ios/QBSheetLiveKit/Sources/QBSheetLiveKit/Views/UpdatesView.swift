@@ -33,11 +33,7 @@ struct AnnouncementCard: View {
     let compact: Bool
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            RoundedRectangle(cornerRadius: 2)
-                .fill(accent)
-                .frame(width: 3)
-                .accessibilityHidden(true)
+        GroupBox {
             VStack(alignment: .leading, spacing: 4) {
                 Text(announcement.title)
                     .font(.headline)
@@ -51,10 +47,11 @@ struct AnnouncementCard: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            Spacer(minLength: 0)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } label: {
+            Label(severityWord, systemImage: severitySymbol)
+                .foregroundStyle(accent)
         }
-        .padding(14)
-        .background(background, in: RoundedRectangle(cornerRadius: 12))
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(severityWord). \(announcement.title). \(announcement.body)")
     }
@@ -67,11 +64,11 @@ struct AnnouncementCard: View {
         }
     }
 
-    private var background: some ShapeStyle {
+    private var severitySymbol: String {
         switch announcement.severity {
-        case .urgent: AnyShapeStyle(Color.red.opacity(0.10))
-        case .important: AnyShapeStyle(Color.orange.opacity(0.10))
-        case .information: AnyShapeStyle(.background.secondary)
+        case .urgent: "exclamationmark.triangle.fill"
+        case .important: "exclamationmark.circle.fill"
+        case .information: "info.circle"
         }
     }
 
