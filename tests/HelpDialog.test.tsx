@@ -3,6 +3,7 @@
  */
 
 import { fireEvent, render, screen } from '@testing-library/react';
+import { useLayoutEffect } from 'react';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { HelpDialog } from '../src/director/help/HelpDialog';
 
@@ -35,5 +36,24 @@ describe('Director help dialog', () => {
     rerender(<HelpDialog open={false} onClose={onClose} />);
 
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  test('cancel uses the callback from the commit that is on screen', () => {
+    const firstClose = vi.fn();
+    const currentClose = vi.fn();
+
+    function Harness({ onClose, cancelDuringLayout }: { onClose: () => void; cancelDuringLayout: boolean }) {
+      useLayoutEffect(() => {
+        if (!cancelDuringLayout) return;
+        screen.getByRole('dialog').dispatchEvent(new Event('cancel', { cancelable: true }));
+      }, [cancelDuringLayout]);
+      return <HelpDialog open onClose={onClose} />;
+    }
+
+    const { rerender } = render(<Harness onClose={firstClose} cancelDuringLayout={false} />);
+    rerender(<Harness onClose={currentClose} cancelDuringLayout />);
+
+    expect(firstClose).not.toHaveBeenCalled();
+    expect(currentClose).toHaveBeenCalledTimes(1);
   });
 });
