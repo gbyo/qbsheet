@@ -41,7 +41,11 @@ struct QBSheetLiveActivityView: Widget {
                     }
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    DetailRow(attributes: context.attributes, team: team)
+                    ExpandedActivityDetailView(
+                        attributes: context.attributes,
+                        state: context.state,
+                        team: team
+                    )
                 }
             } compactLeading: {
                 Image(systemName: "flag.checkered")
@@ -77,6 +81,39 @@ struct QBSheetLiveActivityView: Widget {
     }
 }
 
+/// Uses the extra room in the expanded Dynamic Island for the context people actually need:
+/// what the score/status is *for*. Compact and minimal presentations stay intentionally terse.
+struct ExpandedActivityDetailView: View {
+    let attributes: QBLiveActivityAttributes
+    let state: QBLiveActivityAttributes.ContentState
+    let team: QBLiveActivityAttributes.TeamState?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if let headline {
+                Text(headline)
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+            }
+            DetailRow(attributes: attributes, team: team)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var headline: String? {
+        guard let team else { return nil }
+        if let event = team.ev { return event }
+
+        switch team.m {
+        case .upcoming, .live, .final:
+            let opponent = activityOpponentName(team, state: state)
+            return opponent == "—" ? nil : "vs \(opponent)"
+        case .idle:
+            return nil
+        }
+    }
+}
+
 struct LockScreenView: View {
     let attributes: QBLiveActivityAttributes
     let state: QBLiveActivityAttributes.ContentState
@@ -92,7 +129,6 @@ struct LockScreenView: View {
                 Spacer(minLength: 8)
                 if team?.m == .live {
                     Label("Live", systemImage: "dot.radiowaves.left.and.right")
-                        .labelStyle(.titleOnly)
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.red)
                 }
@@ -109,7 +145,7 @@ struct LockScreenView: View {
                     }
                     .fontWeight(ours >= theirs ? .semibold : .regular)
                     GridRow {
-                        Text(opponentName(team)).lineLimit(1)
+                        Text(activityOpponentName(team, state: state)).lineLimit(1)
                         Text("\(theirs)")
                             .font(.title2.weight(.semibold))
                             .monospacedDigit()
@@ -118,11 +154,11 @@ struct LockScreenView: View {
                     .fontWeight(theirs > ours ? .semibold : .regular)
                 }
             } else if let team, team.m == .upcoming {
-                Text(team.ev ?? "vs \(opponentName(team))")
+                Text(team.ev ?? "vs \(activityOpponentName(team, state: state))")
                     .font(.headline)
             } else if let team, team.m == .live {
                 // The tournament publishes that a game is happening but not the score.
-                Text("vs \(opponentName(team))")
+                Text("vs \(activityOpponentName(team, state: state))")
                     .font(.headline)
                 Text("Game in progress")
                     .font(.subheadline)
@@ -140,16 +176,19 @@ struct LockScreenView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
     }
+}
 
-    private func opponentName(_ team: QBLiveActivityAttributes.TeamState) -> String {
-        // A same-shard opponent is an index into the broadcast state; a cross-shard opponent
-        // carries its own name, because the shard does not contain it.
-        if let name = team.on { return name }
-        if let index = team.o, let opponent = state.t.first(where: { $0.i == index }) {
-            return "Team \(opponent.i + 1)"
-        }
-        return "—"
+private func activityOpponentName(
+    _ team: QBLiveActivityAttributes.TeamState,
+    state: QBLiveActivityAttributes.ContentState
+) -> String {
+    // A same-shard opponent is an index into the broadcast state; a cross-shard opponent carries
+    // its own name, because the shard does not contain it.
+    if let name = team.on { return name }
+    if let index = team.o, let opponent = state.t.first(where: { $0.i == index }) {
+        return "Team \(opponent.i + 1)"
     }
+    return "—"
 }
 
 struct DetailRow: View {
