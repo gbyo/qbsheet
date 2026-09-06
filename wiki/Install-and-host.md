@@ -5,7 +5,7 @@ and you can also open a build from a local directory.
 
 ## Build the application
 
-You need Node 20 or a later version.
+You need Node 22 or a later version.
 
 ```sh
 git clone https://github.com/gbyo/qbsheet.git

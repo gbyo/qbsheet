@@ -92,7 +92,7 @@ QBTCP uses QBJ for game data. File-based games and connected games therefore use
 
 ## Development
 
-QBSheet requires Node.js 20 or later.
+QBSheet requires Node.js 22 or later.
 
 ```sh
 git clone https://github.com/gbyo/qbsheet.git

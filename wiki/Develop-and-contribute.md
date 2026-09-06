@@ -48,7 +48,7 @@ git clone https://github.com/gbyo/qbsheet.git
 cd qbsheet && npm ci && npm start
 ```
 
-CI runs Node 20. Develop against that version.
+CI runs Node 22. Develop against that version.
 
 ## Repository layout
 

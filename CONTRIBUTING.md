@@ -42,7 +42,7 @@ The tests also defend two invariants:
 
 ## Getting set up
 
-Use Node 20 or a later version. CI runs Node 20, so develop against that version.
+Use Node 22 or a later version. CI runs Node 22, so develop against that version.
 
 ```sh
 git clone https://github.com/gbyo/qbsheet.git
