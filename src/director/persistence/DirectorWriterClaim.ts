@@ -165,17 +165,23 @@ async function claimWithBroadcastChannel(
   // Set once the claim is won. `close` runs earlier too, on an election this tab lost, so the
   // slot starts as a no-op rather than as a timer handle that may never exist.
   let stopHeartbeat = () => {};
+  // `post` can fail after a claim has already been won. In that case this tab must immediately
+  // yield; otherwise another tab can reclaim the silent lease while this one remains writable.
+  let lose = () => {};
   // A fallback holder is leased, rather than immortal. The default heartbeat is deliberately
   // longer than the election response window, so use a lease at least two heartbeat periods long
   // or a healthy tab could be reclaimed between heartbeats. A suspended tab that resumes after
   // this lease must yield even if its tab id would otherwise win the deterministic election.
   const leaseTimeoutMs = Math.max(responseTimeoutMs, heartbeatMs * 2);
 
-  const post = (message: WriterMessage) => {
+  const post = (message: WriterMessage): boolean => {
     try {
       channel.postMessage(message);
+      return true;
     } catch {
       broken = true;
+      if (claimed) lose();
+      return false;
     }
   };
 
@@ -191,7 +197,7 @@ async function claimWithBroadcastChannel(
     }
   };
 
-  const lose = () => {
+  lose = () => {
     if (!claimed || lost.signal.aborted) return;
     claimed = false;
     close();
@@ -263,8 +269,12 @@ async function claimWithBroadcastChannel(
 
   claimed = true;
   claimIssuedAt = Date.now();
-  post({ kind: 'claim', scope, tabId, claimIssuedAt });
-  post({ kind: 'heartbeat', scope, tabId, claimIssuedAt });
+  if (
+    !post({ kind: 'claim', scope, tabId, claimIssuedAt }) ||
+    !post({ kind: 'heartbeat', scope, tabId, claimIssuedAt })
+  ) {
+    return unavailable();
+  }
   const heartbeat = setInterval(() => {
     if (claimIssuedAt !== null) post({ kind: 'heartbeat', scope, tabId, claimIssuedAt });
   }, heartbeatMs);
