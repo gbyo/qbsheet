@@ -21,21 +21,28 @@ export function useManualGameDraft(storageKey: string, initialInput?: IManualGam
     setupDirty: dirty,
   });
   useEffect(() => {
-    const timer = window.setTimeout(() => {
+    const persist = (updateState: boolean) => {
       const storage = manualDraftStorage();
       if (!storage) {
-        setDraftSaveState(dirty ? 'failed' : 'not-saved');
+        if (updateState) setDraftSaveState(dirty ? 'failed' : 'not-saved');
         return;
       }
       try {
         if (dirty) storage.setItem(storageKey, JSON.stringify(input));
         else storage.removeItem(storageKey);
-        setDraftSaveState(dirty ? 'saved' : 'not-saved');
+        if (updateState) setDraftSaveState(dirty ? 'saved' : 'not-saved');
       } catch {
-        setDraftSaveState('failed');
+        if (updateState) setDraftSaveState('failed');
       }
-    }, 0);
-    return () => window.clearTimeout(timer);
+    };
+
+    const timer = window.setTimeout(() => persist(true), 0);
+    return () => {
+      window.clearTimeout(timer);
+      // A navigation can unmount this editor before the deferred save gets a turn. Persist the
+      // committed draft during cleanup so the most recent typed setup is not lost on that path.
+      persist(false);
+    };
   }, [dirty, input, storageKey]);
   return { input, setInput, draftSaveState };
 }
