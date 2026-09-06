@@ -10,7 +10,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { emptyDirectorState } from '../domain';
 import { playedTournament } from '../../../tests/directorFixtures';
-import { PublishView } from './PublishView';
+import { downloadArchive, PublishView } from './PublishView';
 
 interface Saved {
   name: string;
@@ -120,4 +120,28 @@ test('with no tournament open, the page is the empty state and nothing else', ()
   expect(screen.queryByText('What is included')).toBeNull();
   expect(screen.queryByText(/Team standings use accepted results only/)).toBeNull();
   expect(screen.queryByText('Exports')).toBeNull();
+});
+
+/**
+ * A failed export does not get a green check.
+ *
+ * `downloadArchive` is also what the persistence banner's "Export recovery archive" runs, which is
+ * the moment a director reaches for when storage has already failed. Announcing the failure as a
+ * bare string gave it `role="status"` and the success icon — a toast reading "could not be
+ * exported" beside a check mark, which is the one thing `notices` exists to make impossible.
+ */
+test('an archive that cannot be written is announced as an error, not a success', async () => {
+  const onAnnounce = vi.fn();
+  const state = playedTournament();
+  // The serializer runs before anything is written; a Blob that refuses to construct stands in for
+  // any failure inside the export.
+  globalThis.Blob = class {
+    constructor() {
+      throw new Error('Disk is full.');
+    }
+  } as unknown as typeof Blob;
+
+  await downloadArchive(state, onAnnounce);
+
+  expect(onAnnounce).toHaveBeenCalledWith({ message: 'Disk is full.', tone: 'error' });
 });

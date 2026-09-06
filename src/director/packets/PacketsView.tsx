@@ -7,7 +7,7 @@ import { PageHeader } from '../components/PageHeader';
 import { importQbjText } from '../format/interchange';
 import type { DirectorNavigationTarget } from '../app/navigationTarget';
 import { useNavigationHighlight } from '../app/useNavigationHighlight';
-import type { AnnounceInput } from '../notices';
+import { errorNotice, type AnnounceInput } from '../notices';
 
 export function PacketsView({
   state,
@@ -31,11 +31,11 @@ export function PacketsView({
   const [notes, setNotes] = useState('');
   const save = () => {
     if (!name.trim()) {
-      onAnnounce('Enter a packet name first.');
+      onAnnounce(errorNotice('Enter a packet name first.'));
       return;
     }
     if (!controller.addPacket(name, 'manual', { tiebreaker, notes })) {
-      onAnnounce('Packet was not added; review the Director error.');
+      onAnnounce(errorNotice('Packet was not added; review the Director error.'));
       return;
     }
     onAnnounce(`${name.trim()} added to inventory.`);
@@ -49,11 +49,11 @@ export function PacketsView({
     try {
       const report = importQbjText(await file.text());
       if (!report.ok || !report.state) {
-        onAnnounce(report.errors.join(' ') || 'That QBJ file is not valid.');
+        onAnnounce(errorNotice(report.errors.join(' ') || 'That QBJ file is not valid.'));
         return;
       }
       if (report.state.packets.length === 0) {
-        onAnnounce('That QBJ file does not contain packet inventory.');
+        onAnnounce(errorNotice('That QBJ file does not contain packet inventory.'));
         return;
       }
       const result = controller.addPackets(
@@ -70,7 +70,7 @@ export function PacketsView({
         }.${report.warnings.length ? ` ${report.warnings.length} warning${report.warnings.length === 1 ? '' : 's'} retained.` : ''}`,
       );
     } catch (reason: unknown) {
-      onAnnounce(reason instanceof Error ? reason.message : 'That QBJ file could not be read.');
+      onAnnounce(errorNotice(reason instanceof Error ? reason.message : 'That QBJ file could not be read.'));
     }
   };
   return (
@@ -282,11 +282,11 @@ function PacketRow({
   const save = () => {
     const normalizedName = name.trim();
     if (!normalizedName) {
-      onAnnounce('Enter a packet name first.');
+      onAnnounce(errorNotice('Enter a packet name first.'));
       return;
     }
     if (!controller.updatePacket(packet.id, { name: normalizedName, tiebreaker, notes })) {
-      onAnnounce('Packet was not changed; review the Director error.');
+      onAnnounce(errorNotice('Packet was not changed; review the Director error.'));
       return;
     }
     setEditing(false);
@@ -331,15 +331,15 @@ function PacketRow({
                 onClick={() => {
                   const exists = state.packets.some((entry) => entry.id === packet.id);
                   if (!exists) {
-                    onAnnounce('That packet is not in the current inventory.');
+                    onAnnounce(errorNotice('That packet is not in the current inventory.'));
                     return;
                   }
                   if (!state.tournament) {
-                    onAnnounce('Create a tournament before selecting a packet.');
+                    onAnnounce(errorNotice('Create a tournament before selecting a packet.'));
                     return;
                   }
                   if (packet.retired) {
-                    onAnnounce('Retired packets cannot be selected; restore it first.');
+                    onAnnounce(errorNotice('Retired packets cannot be selected; restore it first.'));
                     return;
                   }
                   controller.selectPacket(packet.id);
@@ -356,6 +356,7 @@ function PacketRow({
                   return;
                 const changed = controller.setPacketRetired(packet.id, !packet.retired);
                 if (changed) onAnnounce(`${packet.name} ${packet.retired ? 'restored' : 'retired'}.`);
+                else onAnnounce(errorNotice('The packet was not changed; review the Director error.'));
               }}
             >
               {packet.retired ? 'Restore' : 'Retire'}

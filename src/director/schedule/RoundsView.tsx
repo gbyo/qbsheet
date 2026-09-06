@@ -122,7 +122,7 @@ export function RoundsView({
               onAnnounce(
                 result.generated
                   ? 'Round added at the end of the day.'
-                  : result.conflicts.join(' ') || 'The round could not be generated.',
+                  : errorNotice(result.conflicts.join(' ') || 'The round could not be generated.'),
               );
             }}
           >
@@ -207,6 +207,8 @@ export function RoundsView({
                 onDelete={() => {
                   if (!confirm(`Remove “${item.event?.title}” from the day?`)) return;
                   if (controller.removeTimelineEvent(item.id)) onAnnounce(`${item.event?.title} removed.`);
+                  else
+                    onAnnounce(errorNotice('The schedule event was not removed; review the Director error.'));
                 }}
                 {...moveProps}
               />
@@ -353,7 +355,7 @@ function RoundWorkspaceRow({
     void controller
       .startRound(round.id)
       .then((result) => {
-        onAnnounce(result.summary);
+        onAnnounce(result.ok || result.alreadyStarted ? result.summary : errorNotice(result.summary));
         if (!result.ok && !result.alreadyStarted) setFailure(result.reason ?? result.summary);
       })
       .finally(() => setStarting(false));
@@ -362,7 +364,7 @@ function RoundWorkspaceRow({
     setFinishing(true);
     setFailure(null);
     const result = controller.finishRound(round.id);
-    onAnnounce(result.summary);
+    onAnnounce(result.finished || result.alreadyFinished ? result.summary : errorNotice(result.summary));
     if (!result.finished && !result.alreadyFinished) setFailure(result.reason ?? result.summary);
     setFinishing(false);
   };
@@ -740,10 +742,11 @@ function RoundAdvancedDetails({
   const saveTime = () => {
     const iso = value ? zonedDateTimeInputToIso(value, timeZone) : null;
     if (value && !iso) {
-      onAnnounce('That local time does not exist in the tournament timezone.');
+      onAnnounce(errorNotice('That local time does not exist in the tournament timezone.'));
       return;
     }
     if (controller.setRoundScheduledStart(round.id, iso)) onAnnounce(`${round.name} planned time updated.`);
+    else onAnnounce(errorNotice('The planned time was not saved; review the Director error.'));
   };
   const games = state.scheduledGames.filter((game) => game.roundId === round.id && !game.bye);
   return (
@@ -764,7 +767,7 @@ function RoundAdvancedDetails({
               onAnnounce(
                 prepared
                   ? `${roundName} prepared.`
-                  : `${roundName} could not be prepared; review the schedule first.`,
+                  : errorNotice(`${roundName} could not be prepared; review the schedule first.`),
               );
             }}
           >
@@ -779,7 +782,9 @@ function RoundAdvancedDetails({
               onAnnounce(
                 released
                   ? `${roundName} released.`
-                  : 'The round is not ready to release; review the Director error and room assignments.',
+                  : errorNotice(
+                      'The round is not ready to release; review the Director error and room assignments.',
+                    ),
               );
             }}
           >
@@ -794,7 +799,7 @@ function RoundAdvancedDetails({
               onAnnounce(
                 closed
                   ? `${roundName} closed.`
-                  : `${roundName} could not close; accept or cancel every game first.`,
+                  : errorNotice(`${roundName} could not close; accept or cancel every game first.`),
               );
             }}
           >
@@ -992,11 +997,11 @@ function TimelineEventForm({
     const scheduledStart = start ? zonedDateTimeInputToIso(start, timeZone) : null;
     const scheduledEnd = end ? zonedDateTimeInputToIso(end, timeZone) : null;
     if (start && !scheduledStart) {
-      onAnnounce('The event start is not a valid time in the tournament timezone.');
+      onAnnounce(errorNotice('The event start is not a valid time in the tournament timezone.'));
       return;
     }
     if (end && !scheduledEnd) {
-      onAnnounce('The event end is not a valid time in the tournament timezone.');
+      onAnnounce(errorNotice('The event end is not a valid time in the tournament timezone.'));
       return;
     }
     const input: NewTimelineEventInput = {
