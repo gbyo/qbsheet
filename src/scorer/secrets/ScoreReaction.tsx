@@ -10,12 +10,25 @@ export interface ScoreReaction {
 /** Shared by the table and scoresheet. Existing number motion remains the ordinary response. */
 export default function ScoreValue({ team, reaction }: { team: IDerivedTeam; reaction?: ScoreReaction }) {
   const [motion, setMotion] = useState({ points: team.points, direction: 'is-up', started: false });
+  const [decorated, setDecorated] = useState<number | null>(null);
   if (motion.points !== team.points)
     setMotion({
       points: team.points,
       direction: team.points < motion.points ? 'is-down' : 'is-up',
       started: true,
     });
+  /*
+   * A reaction is this score's celebration, and it replaces the ordinary roll rather than joining
+   * it: `[data-power]` outranks `.is-up`, so while the decoration is up the roll is not what plays.
+   * The decoration only lasts 650ms, and its `key` change re-keys the number on the way out — which
+   * restarts `.is-up` and animates one commit a second time, after the fact and for no reason.
+   *
+   * So remember which score a decoration answered. Adjusted during render, guarded, in the same
+   * shape as `motion` above: the value is a function of the props, and an effect would both trail
+   * the commit it describes and cascade a render behind it.
+   */
+  if (reaction && decorated !== team.points) setDecorated(team.points);
+  const ordinaryMotion = motion.started && !reaction && decorated !== team.points;
   return (
     <span
       className="score-reaction"
@@ -25,7 +38,7 @@ export default function ScoreValue({ team, reaction }: { team: IDerivedTeam; rea
     >
       <span
         key={reaction?.token ?? team.points}
-        className={`scorer-team-score-value${motion.started ? ` ${motion.direction}` : ''}`}
+        className={`scorer-team-score-value${ordinaryMotion ? ` ${motion.direction}` : ''}`}
       >
         {team.points}
       </span>

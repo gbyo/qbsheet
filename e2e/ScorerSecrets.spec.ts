@@ -83,6 +83,21 @@ test('power decorates the committed score and undo removes the effect', async ({
   await expect(page.getByLabel('Ninety Six score')).toContainText('0');
 });
 
+test('the decoration expiring leaves the score still, not rolling', async ({ page }) => {
+  await startGame(page);
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.getByRole('button', { name: 'Sarah Mitchell Power', exact: true }).click();
+  const powerReaction = page.locator('.score-reaction[data-power="true"]');
+  const scoreValue = page.getByLabel('Ninety Six score').locator('.scorer-team-score-value');
+  await expect(powerReaction).toContainText('15');
+  // The decoration lasts 650ms. The number is re-keyed as it goes, and what must not follow is the
+  // ordinary roll the power reaction already stood in for: one score, animated twice.
+  await expect(powerReaction).toHaveCount(0);
+  expect(await scoreValue.evaluate((element) => getComputedStyle(element).animationName)).not.toBe(
+    'scorer-score-roll-up',
+  );
+});
+
 test('question mark does not hijack typing and reduced motion makes DVD static', async ({ page }) => {
   await startGame(page);
   await page.locator('.scorer').evaluate((scorer) => {
