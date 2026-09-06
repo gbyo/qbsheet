@@ -195,7 +195,17 @@ export function saveStatsColumnPrefs(tournamentId: string | undefined, prefs: St
   if (!tournamentId || typeof localStorage === 'undefined') return;
   try {
     const raw = localStorage.getItem(prefsKey);
-    const all = raw ? (JSON.parse(raw) as Record<string, StatsColumnPrefs>) : {};
+    let all: Record<string, StatsColumnPrefs> = {};
+    if (raw) {
+      try {
+        const parsed: unknown = JSON.parse(raw);
+        if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+          all = parsed as Record<string, StatsColumnPrefs>;
+        }
+      } catch {
+        // A corrupt convenience preference should be replaced by the next valid choice.
+      }
+    }
     all[tournamentId] = prefs;
     localStorage.setItem(prefsKey, JSON.stringify(all));
   } catch {
