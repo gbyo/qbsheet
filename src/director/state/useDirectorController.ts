@@ -21,6 +21,7 @@ import {
   roomHasUnresolvedWork,
   resolveDirectorBracket,
   roomIsAssignable,
+  releasedGameRoomMoveBlocker,
   roundScheduleIsValid,
   rosterAmendmentId,
   unresolvedScheduledGameForTeam,
@@ -236,6 +237,14 @@ export interface StartRoundResult {
   reason?: string;
 }
 
+export interface MoveReleasedGameResult {
+  ok: boolean;
+  /** One honest line the UI can announce as-is. */
+  summary: string;
+  /** Set when ok is false. */
+  reason?: string;
+}
+
 export interface CommitAdvancementAssignment {
   teamId: DirectorId;
   targetPoolId: DirectorId;
@@ -385,6 +394,10 @@ export interface DirectorController {
   moveDayItem(itemId: DirectorId, direction: 'up' | 'down'): boolean;
   setRoundPacket(roundId: DirectorId, packetId: DirectorId | null): Promise<boolean>;
   assignRoundRooms(roundId: DirectorId, assignments: Record<DirectorId, DirectorId | null>): Promise<boolean>;
+  moveReleasedGame(
+    scheduledGameId: DirectorId,
+    destinationRoomId: DirectorId,
+  ): Promise<MoveReleasedGameResult>;
   setRoundScheduledStart(roundId: DirectorId, scheduledStart: string | null): boolean;
   selectPhase(phaseId: DirectorId): void;
   selectPacket(packetId: DirectorId): void;
@@ -4754,6 +4767,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
       if (documentTransitionRef.current) return false;
       if (!ensureWriter()) return false;
       const before = structuredClone(stateRef.current);
+      const startingRevision = stateRevisionRef.current;
       if (!before.tournament || value.tournament?.id !== before.tournament.id) {
         setError('Structural edits must belong to the open tournament.');
         return false;
@@ -4767,6 +4781,13 @@ export function useDirectorController(repository = createDirectorRepository()): 
         // would refuse the restore that fixes it.
         await Promise.allSettled([qbtcpSyncInFlightRef.current, liveDrainInFlightRef.current]);
         await persistenceQueueRef.current;
+        if (
+          stateRevisionRef.current !== startingRevision ||
+          stateRef.current.tournament?.id !== before.tournament.id
+        ) {
+          setError('The tournament changed while saving this recovery action. Try again.');
+          return false;
+        }
         const authority = captureWriteAuthority(before);
         assertWriteAuthority(authority, before);
         await repositoryRef.current.checkpoint(before, reason);
@@ -4875,6 +4896,64 @@ export function useDirectorController(repository = createDirectorRepository()): 
         entityId: roundId,
       });
       return editTournamentSnapshot(next, `Before changing rooms for ${round.name}`);
+    },
+    [editTournamentSnapshot],
+  );
+
+  const moveReleasedGame = useCallback(
+    async (scheduledGameId: DirectorId, destinationRoomId: DirectorId): Promise<MoveReleasedGameResult> => {
+      const snapshot = stateRef.current;
+      const fail = (reason: string): MoveReleasedGameResult => {
+        setError(reason);
+        return { ok: false, summary: reason, reason };
+      };
+      const blocker = releasedGameRoomMoveBlocker(snapshot, scheduledGameId, destinationRoomId);
+      if (blocker) return fail(blocker);
+
+      const game = snapshot.scheduledGames.find((entry) => entry.id === scheduledGameId);
+      const round = game ? snapshot.rounds.find((entry) => entry.id === game.roundId) : undefined;
+      const sourceRoom = game?.roomId ? snapshot.rooms.find((entry) => entry.id === game.roomId) : undefined;
+      const destinationRoom = snapshot.rooms.find((entry) => entry.id === destinationRoomId);
+      if (!game || !round || !sourceRoom || !destinationRoom) {
+        return fail('The room move could not be prepared from the current tournament state.');
+      }
+      const teamName = (teamId: DirectorId | null): string =>
+        (teamId && snapshot.teams.find((team) => team.id === teamId)?.displayName) || 'Unknown team';
+      const matchup = game.rightTeamId
+        ? `${teamName(game.leftTeamId)} vs ${teamName(game.rightTeamId)}`
+        : teamName(game.leftTeamId);
+      const summary = `Moved ${round.name} · ${matchup} from ${sourceRoom.name} to ${destinationRoom.name}.`;
+      const next = structuredClone(snapshot);
+      const target = next.scheduledGames.find((entry) => entry.id === scheduledGameId);
+      const nextRound = next.rounds.find((entry) => entry.id === round.id);
+      if (!target || !nextRound || !target.roomId) {
+        return fail('The room move could not be prepared from the current tournament state.');
+      }
+      const oldRoomId = target.roomId;
+      target.roomId = destinationRoomId;
+      target.movedFromRoomId = oldRoomId;
+      target.assignmentRevision += 1;
+      nextRound.revision += 1;
+      next.audit.push({
+        id: newDirectorId('audit'),
+        at: isoNow(),
+        actor: operatorDisplayName(loadOperatorProfile()),
+        type: 'room-changed',
+        summary,
+        entityId: scheduledGameId,
+        details: {
+          roundId: round.id,
+          scheduledGameId,
+          oldRoomId,
+          newRoomId: destinationRoomId,
+        },
+      });
+      const saved = await editTournamentSnapshot(next, `Before ${summary}`);
+      if (!saved) {
+        const reason = 'The room move could not be saved. Review the Director warning and try again.';
+        return { ok: false, summary: reason, reason };
+      }
+      return { ok: true, summary };
     },
     [editTournamentSnapshot],
   );
@@ -5855,6 +5934,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
     setRoundScheduledStart,
     setRoundPacket,
     assignRoundRooms,
+    moveReleasedGame,
     addImportedTeams,
     selectPhase,
     selectPacket,

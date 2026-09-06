@@ -4,6 +4,7 @@ import {
   isoToZonedDateTimeInput,
   latestRound,
   orderDayItems,
+  releasedGameRoomMoveBlocker,
   roomIsAssignable,
   timeZoneLabel,
   timelineEventTypeLabel,
@@ -237,6 +238,14 @@ function friendlyRoundStatus(status: string, accepted: number, total: number): s
   return total > 0 ? `${total} game${total === 1 ? '' : 's'} · ready` : 'ready';
 }
 
+function gameLabel(state: DirectorState, game: DirectorState['scheduledGames'][number]): string {
+  const left = state.teams.find((team) => team.id === game.leftTeamId)?.displayName ?? 'Unknown team';
+  const right = game.rightTeamId
+    ? (state.teams.find((team) => team.id === game.rightTeamId)?.displayName ?? 'Unknown team')
+    : null;
+  return right ? `${left} vs ${right}` : left;
+}
+
 function RoundWorkspaceRow({
   transfers,
   state,
@@ -267,6 +276,10 @@ function RoundWorkspaceRow({
   const [assigningPacket, setAssigningPacket] = useState(false);
   const [assigningRooms, setAssigningRooms] = useState(false);
   const [roomDraft, setRoomDraft] = useState<Record<string, string | null>>({});
+  const [movingGameId, setMovingGameId] = useState<string | null>(null);
+  const [moveRoomId, setMoveRoomId] = useState('');
+  const [moveInProgress, setMoveInProgress] = useState(false);
+  const [moveFailure, setMoveFailure] = useState<string | null>(null);
   const [choosingDrive, setChoosingDrive] = useState(false);
   const driveOpenerRef = useRef<HTMLElement | null>(null);
   const drives = transfers?.native
@@ -313,6 +326,26 @@ function RoundWorkspaceRow({
   const highlighted = highlightedCurrent || highlightedLegacy;
   const isActive = round.status === 'released';
   const isComplete = round.status === 'closed';
+  const roomMoveOptions = games
+    .filter((game) => game.roomId !== null && game.status !== 'cancelled')
+    .map((game) => {
+      const destinations = state.rooms.filter(
+        (room) => room.id !== game.roomId && releasedGameRoomMoveBlocker(state, game.id, room.id) === null,
+      );
+      const blocker =
+        destinations.length > 0
+          ? null
+          : (state.rooms
+              .filter((room) => room.id !== game.roomId)
+              .map((room) => releasedGameRoomMoveBlocker(state, game.id, room.id))
+              .find((reason): reason is string => Boolean(reason)) ??
+            'No safe destination room is currently available.');
+      return { game, destinations, blocker };
+    });
+  const selectedRoomMove =
+    roomMoveOptions.find((entry) => entry.game.id === movingGameId) ??
+    roomMoveOptions.find((entry) => entry.blocker === null) ??
+    roomMoveOptions[0];
 
   const start = () => {
     setStarting(true);
@@ -332,6 +365,13 @@ function RoundWorkspaceRow({
     onAnnounce(result.summary);
     if (!result.finished && !result.alreadyFinished) setFailure(result.reason ?? result.summary);
     setFinishing(false);
+  };
+
+  const openRoomMove = () => {
+    const first = roomMoveOptions.find((entry) => entry.blocker === null) ?? roomMoveOptions[0];
+    setMovingGameId(first?.game.id ?? null);
+    setMoveRoomId(first?.destinations[0]?.id ?? '');
+    setMoveFailure(null);
   };
 
   return (
@@ -435,6 +475,11 @@ function RoundWorkspaceRow({
           {isActive && (
             <Button variant="quiet" onClick={openResults}>
               Open results
+            </Button>
+          )}
+          {isActive && roomMoveOptions.length > 0 && (
+            <Button variant="quiet" onClick={openRoomMove}>
+              Move game
             </Button>
           )}
           {!isComplete &&
@@ -571,6 +616,91 @@ function RoundWorkspaceRow({
             <Button variant="quiet" onClick={() => setAssigningRooms(false)}>
               Cancel
             </Button>
+          </div>
+        )}
+        {movingGameId && isActive && selectedRoomMove && (
+          <div className="director-round-advanced">
+            <FormField label={`Game to move in ${round.name}`}>
+              <select
+                value={selectedRoomMove.game.id}
+                onChange={(event) => {
+                  const next = roomMoveOptions.find((entry) => entry.game.id === event.target.value);
+                  setMovingGameId(next?.game.id ?? null);
+                  setMoveRoomId(next?.destinations[0]?.id ?? '');
+                  setMoveFailure(null);
+                }}
+              >
+                {roomMoveOptions.map(({ game, blocker }) => (
+                  <option key={game.id} value={game.id} disabled={blocker !== null}>
+                    {gameLabel(state, game)}
+                    {blocker ? ` — ${blocker}` : ''}
+                  </option>
+                ))}
+              </select>
+            </FormField>
+            <FormField label="Destination room">
+              <select
+                value={moveRoomId}
+                disabled={selectedRoomMove.blocker !== null || selectedRoomMove.destinations.length === 0}
+                onChange={(event) => setMoveRoomId(event.target.value)}
+              >
+                <option value="">Choose room</option>
+                {selectedRoomMove.destinations.map((room) => (
+                  <option key={room.id} value={room.id}>
+                    {room.name}
+                  </option>
+                ))}
+              </select>
+            </FormField>
+            <p className="director-muted">
+              Only rooms that are available and free of unresolved game or scorer work are listed.
+            </p>
+            {selectedRoomMove.blocker && (
+              <p className="director-round-failure" role="alert">
+                {selectedRoomMove.blocker}
+              </p>
+            )}
+            {moveFailure && (
+              <p className="director-round-failure" role="alert">
+                {moveFailure}
+              </p>
+            )}
+            <div className="director-row-actions">
+              <Button
+                disabled={
+                  moveInProgress ||
+                  selectedRoomMove.blocker !== null ||
+                  selectedRoomMove.destinations.length === 0 ||
+                  !moveRoomId
+                }
+                onClick={() => {
+                  setMoveInProgress(true);
+                  setMoveFailure(null);
+                  void controller
+                    .moveReleasedGame(selectedRoomMove.game.id, moveRoomId)
+                    .then((result) => {
+                      onAnnounce(result.ok ? result.summary : errorNotice(result.reason ?? result.summary));
+                      if (result.ok) {
+                        setMovingGameId(null);
+                        setMoveRoomId('');
+                      } else setMoveFailure(result.reason ?? result.summary);
+                    })
+                    .finally(() => setMoveInProgress(false));
+                }}
+              >
+                {moveInProgress ? 'Moving game…' : 'Change room'}
+              </Button>
+              <Button
+                variant="quiet"
+                onClick={() => {
+                  setMovingGameId(null);
+                  setMoveRoomId('');
+                  setMoveFailure(null);
+                }}
+              >
+                Cancel
+              </Button>
+            </div>
           </div>
         )}
         {showAdvanced && (

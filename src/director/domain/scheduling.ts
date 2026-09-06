@@ -1613,15 +1613,19 @@ export function roomIsAssignable(state: DirectorState, roomId: DirectorId): bool
 /**
  * Validate an assignment that already belongs to a scheduled game. The game's own paired/live
  * session is expected occupancy; only unrelated unresolved work makes the assignment conflicting.
- * New assignments must continue to use roomIsAssignable so they cannot claim an occupied room.
+ * New assignments must continue to use roomIsAssignable so they cannot claim an occupied room. A
+ * recovery move may allow an unavailable source room because the move is precisely what removes
+ * its assignment; unrelated occupancy is still checked in that mode.
  */
 export function roomAssignmentIsValid(
   state: DirectorState,
   roomId: DirectorId,
   scheduledGameId: DirectorId,
+  options: { allowUnavailableRoom?: boolean } = {},
 ): boolean {
   const room = state.rooms.find((entry) => entry.id === roomId);
-  if (!room || !room.available || room.status !== 'available') return false;
+  if (!room || (!options.allowUnavailableRoom && (!room.available || room.status !== 'available')))
+    return false;
   return (
     !state.scheduledGames.some(
       (game) =>

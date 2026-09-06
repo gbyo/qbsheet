@@ -24,8 +24,7 @@ function score(teamId: string, value: number): TeamGameScore {
   };
 }
 
-async function directorWithSetup(teamCount = 4, roomCount = 1) {
-  const repository = new MemoryDirectorRepository();
+async function directorWithSetup(teamCount = 4, roomCount = 1, repository = new MemoryDirectorRepository()) {
   const hook = renderHook(() => useDirectorController(repository));
   await waitFor(() => expect(hook.result.current.loading).toBe(false));
   act(() => {
@@ -45,6 +44,35 @@ async function directorWithSetup(teamCount = 4, roomCount = 1) {
   });
   await waitFor(() => expect(hook.result.current.saving).toBe(false));
   return hook;
+}
+
+async function releasedRoomMoveSetup(teamCount = 2, roomCount = 2) {
+  const repository = new MemoryDirectorRepository();
+  const hook = await directorWithSetup(teamCount, roomCount, repository);
+  act(() => expect(hook.result.current.generateSchedule({ roundName: 'Round 1' }).generated).toBe(true));
+  const round = hook.result.current.state.rounds[0];
+  const game = round
+    ? hook.result.current.state.scheduledGames.find((entry) => entry.roundId === round.id && !entry.bye)
+    : undefined;
+  const sourceRoom = game?.roomId
+    ? hook.result.current.state.rooms.find((room) => room.id === game.roomId)
+    : undefined;
+  const destinationRoom = hook.result.current.state.rooms.find((room) => room.id !== sourceRoom?.id);
+  if (!round || !game || !sourceRoom || !destinationRoom) {
+    throw new Error('test setup did not create a released room move');
+  }
+  await act(async () => {
+    expect((await hook.result.current.startRound(round.id)).ok).toBe(true);
+  });
+  await waitFor(() => expect(hook.result.current.saving).toBe(false));
+  return {
+    hook,
+    repository,
+    roundId: round.id,
+    gameId: game.id,
+    sourceRoomId: sourceRoom.id,
+    destinationRoomId: destinationRoom.id,
+  };
 }
 
 function emptySnapshotCollections() {
@@ -777,6 +805,244 @@ describe('Director tournament-critical regressions', () => {
     act(() => expect(hook.result.current.finishRound(finalRound.id).finished).toBe(true));
     expect(hook.result.current.state.phases[0]?.status).toBe('complete');
     await waitFor(() => expect(hook.result.current.saving).toBe(false));
+    hook.unmount();
+  });
+
+  test('moves a released unpaired game without changing its identity, and survives reload', async () => {
+    const { hook, repository, roundId, gameId, sourceRoomId, destinationRoomId } =
+      await releasedRoomMoveSetup();
+    const before = hook.result.current.state.scheduledGames.find((game) => game.id === gameId)!;
+    let result: { ok: boolean; summary: string; reason?: string } = { ok: false, summary: '' };
+    await act(async () => {
+      result = await hook.result.current.moveReleasedGame(gameId, destinationRoomId);
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      summary: 'Moved Round 1 · Team 1 vs Team 2 from Room 1 to Room 2.',
+    });
+    const moved = hook.result.current.state.scheduledGames.find((game) => game.id === gameId);
+    expect(moved).toMatchObject({
+      id: before.id,
+      roundId,
+      roomId: destinationRoomId,
+      movedFromRoomId: sourceRoomId,
+      leftTeamId: before.leftTeamId,
+      rightTeamId: before.rightTeamId,
+      packetId: before.packetId,
+      assignmentRevision: before.assignmentRevision + 1,
+    });
+    expect(moved?.bracketKey).toBe(before.bracketKey);
+    expect(
+      hook.result.current.state.rounds.find((round) => round.id === roundId)?.scheduledGameIds,
+    ).toContain(gameId);
+    expect(roomIsAssignable(hook.result.current.state, sourceRoomId)).toBe(true);
+    expect(roomIsAssignable(hook.result.current.state, destinationRoomId)).toBe(false);
+    const moveAudit = hook.result.current.state.audit.find(
+      (event) =>
+        event.type === 'room-changed' &&
+        event.entityId === gameId &&
+        event.summary === 'Moved Round 1 · Team 1 vs Team 2 from Room 1 to Room 2.' &&
+        event.details?.oldRoomId === sourceRoomId &&
+        event.details?.newRoomId === destinationRoomId,
+    );
+    expect(moveAudit).toBeDefined();
+    expect(moveAudit?.actor).toBeTruthy();
+    expect(moveAudit?.at).toBeTruthy();
+    expect(
+      (await repository.listCheckpoints(hook.result.current.state.tournament!.id)).some((checkpoint) =>
+        checkpoint.reason.includes('Before Moved Round 1'),
+      ),
+    ).toBe(true);
+    await waitFor(() => expect(hook.result.current.saving).toBe(false));
+
+    hook.unmount();
+    const reloaded = renderHook(() => useDirectorController(repository));
+    await waitFor(() => expect(reloaded.result.current.loading).toBe(false));
+    const persisted = reloaded.result.current.state.scheduledGames.find((game) => game.id === gameId);
+    expect(persisted?.roomId).toBe(destinationRoomId);
+    expect(
+      reloaded.result.current.state.scheduledGames.filter((game) => game.roomId === sourceRoomId),
+    ).toHaveLength(0);
+    reloaded.unmount();
+  });
+
+  test('moves a game out of a source room that became unavailable', async () => {
+    const { hook, gameId, sourceRoomId, destinationRoomId } = await releasedRoomMoveSetup();
+    const next = structuredClone(hook.result.current.state);
+    const sourceRoom = next.rooms.find((room) => room.id === sourceRoomId)!;
+    sourceRoom.status = 'offline';
+    sourceRoom.available = false;
+    await act(async () => {
+      expect(await hook.result.current.editTournamentSnapshot(next, 'Room outage guard')).toBe(true);
+    });
+
+    let result: { ok: boolean; summary: string; reason?: string } = { ok: false, summary: '' };
+    await act(async () => {
+      result = await hook.result.current.moveReleasedGame(gameId, destinationRoomId);
+    });
+    expect(result.ok).toBe(true);
+    expect(hook.result.current.state.scheduledGames.find((game) => game.id === gameId)?.roomId).toBe(
+      destinationRoomId,
+    );
+    expect(hook.result.current.state.rooms.find((room) => room.id === sourceRoomId)?.status).toBe('offline');
+    hook.unmount();
+  });
+
+  test('rejects a released game move when the destination room is occupied', async () => {
+    const { hook, roundId, gameId } = await releasedRoomMoveSetup(4, 2);
+    const games = hook.result.current.state.scheduledGames.filter(
+      (game) => game.roundId === roundId && !game.bye,
+    );
+    const target = games.find((game) => game.id === gameId)!;
+    const other = games.find((game) => game.id !== gameId && game.roomId !== null)!;
+    const before = structuredClone(hook.result.current.state);
+    let result: { ok: boolean; summary: string; reason?: string } = { ok: false, summary: '' };
+    await act(async () => {
+      result = await hook.result.current.moveReleasedGame(gameId, other.roomId!);
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/occupied|unresolved/i);
+    expect(hook.result.current.state.scheduledGames).toEqual(before.scheduledGames);
+    expect(hook.result.current.state.audit).toEqual(before.audit);
+    expect(hook.result.current.state.scheduledGames.find((game) => game.id === target.id)?.roomId).toBe(
+      target.roomId,
+    );
+    hook.unmount();
+  });
+
+  test('rejects a move when unrelated scorer work still reserves the source room', async () => {
+    const { hook, gameId, sourceRoomId } = await releasedRoomMoveSetup(4, 3);
+    const otherGame = hook.result.current.state.scheduledGames.find((game) => game.id !== gameId)!;
+    const next = structuredClone(hook.result.current.state);
+    next.qbtcpSessions.push({
+      roomId: sourceRoomId,
+      sessionId: 'other-game-session',
+      matchId: otherGame.id,
+      deviceId: 'device-2',
+      state: 'paired',
+      resumable: false,
+      resultReceived: false,
+      lastSeenAt: new Date().toISOString(),
+      progress: null,
+      helpRequestId: null,
+    });
+    await act(async () => {
+      expect(await hook.result.current.editTournamentSnapshot(next, 'Source room guard')).toBe(true);
+    });
+    let result: { ok: boolean; summary: string; reason?: string } = { ok: false, summary: '' };
+    await act(async () => {
+      result = await hook.result.current.moveReleasedGame(gameId, 'room-103');
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/current room|unresolved/i);
+    expect(hook.result.current.state.scheduledGames.find((game) => game.id === gameId)?.roomId).toBe(
+      sourceRoomId,
+    );
+    hook.unmount();
+  });
+
+  test('rejects paired, live, result-received, and resumable scorer sessions', async () => {
+    const { hook, gameId, sourceRoomId, destinationRoomId } = await releasedRoomMoveSetup();
+    const cases = [
+      ['paired', false],
+      ['assigned', false],
+      ['live', false],
+      ['result-received', false],
+      ['abandoned', true],
+    ] as const;
+    for (const [sessionState, resumable] of cases) {
+      const next = structuredClone(hook.result.current.state);
+      next.qbtcpSessions = [
+        {
+          roomId: sourceRoomId,
+          sessionId: `session-${sessionState}`,
+          matchId: gameId,
+          deviceId: 'device-1',
+          state: sessionState,
+          resumable,
+          resultReceived: sessionState === 'result-received',
+          lastSeenAt: new Date().toISOString(),
+          progress: null,
+          helpRequestId: null,
+        },
+      ];
+      await act(async () => {
+        expect(await hook.result.current.editTournamentSnapshot(next, `Session guard ${sessionState}`)).toBe(
+          true,
+        );
+      });
+      let result: { ok: boolean; summary: string; reason?: string } = { ok: false, summary: '' };
+      await act(async () => {
+        result = await hook.result.current.moveReleasedGame(gameId, destinationRoomId);
+      });
+      expect(result.ok).toBe(false);
+      expect(result.reason).toMatch(/scorer|result|resumable/i);
+      expect(hook.result.current.state.scheduledGames.find((game) => game.id === gameId)?.roomId).toBe(
+        sourceRoomId,
+      );
+    }
+    hook.unmount();
+  });
+
+  test('rejects a submitted or pending-review result', async () => {
+    const { hook, gameId, destinationRoomId } = await releasedRoomMoveSetup();
+    const next = structuredClone(hook.result.current.state);
+    const scheduled = next.scheduledGames.find((game) => game.id === gameId)!;
+    next.games.push({
+      id: 'submitted-game',
+      scheduledGameId: gameId,
+      roundId: scheduled.roundId,
+      packetId: scheduled.packetId,
+      status: 'submitted',
+      scores: [],
+      playerStats: [],
+      source: 'qbtcp',
+    });
+    next.submissions.push({
+      id: 'review-submission',
+      gameId: 'submitted-game',
+      receivedAt: new Date().toISOString(),
+      fingerprint: 'review-fingerprint',
+      status: 'review',
+      rawSubmission: {},
+    });
+    await act(async () => {
+      expect(await hook.result.current.editTournamentSnapshot(next, 'Pending review guard')).toBe(true);
+    });
+    let result: { ok: boolean; summary: string; reason?: string } = { ok: false, summary: '' };
+    await act(async () => {
+      result = await hook.result.current.moveReleasedGame(gameId, destinationRoomId);
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/submitted|review/i);
+    expect(hook.result.current.state.scheduledGames.find((game) => game.id === gameId)?.roomId).toBe(
+      scheduled.roomId,
+    );
+    hook.unmount();
+  });
+
+  test('rejects a completed game without changing its room', async () => {
+    const { hook, gameId, sourceRoomId, destinationRoomId } = await releasedRoomMoveSetup();
+    const scheduled = hook.result.current.state.scheduledGames.find((game) => game.id === gameId)!;
+    act(() => {
+      expect(
+        hook.result.current.addManualResult({
+          scheduledGameId: gameId,
+          scores: [score(scheduled.leftTeamId, 100), score(scheduled.rightTeamId!, 80)],
+        }),
+      ).toBe(true);
+    });
+    let result: { ok: boolean; summary: string; reason?: string } = { ok: false, summary: '' };
+    await act(async () => {
+      result = await hook.result.current.moveReleasedGame(gameId, destinationRoomId);
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/completed|accepted/i);
+    expect(hook.result.current.state.scheduledGames.find((game) => game.id === gameId)?.roomId).toBe(
+      sourceRoomId,
+    );
     hook.unmount();
   });
 });
