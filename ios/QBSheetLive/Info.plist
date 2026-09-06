@@ -60,6 +60,8 @@
   <array>
     <string>NSUserActivityTypeBrowsingWeb</string>
   </array>
+  <key>NSCameraUsageDescription</key>
+  <string>Scan a QBSheet Live tournament code.</string>
   <key>NSSupportsLiveActivities</key>
   <true/>
   <!--

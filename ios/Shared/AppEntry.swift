@@ -114,13 +114,22 @@ public enum DebugLaunch {
 
 /// Shown when the app is opened with no tournament to show.
 public struct NoTournamentView: View {
-    public init() {}
+    private let scanAction: (() -> Void)?
+
+    public init(scanAction: (() -> Void)? = nil) {
+        self.scanAction = scanAction
+    }
 
     public var body: some View {
         ContentUnavailableView {
             Label("No tournament yet", systemImage: "qrcode.viewfinder")
         } description: {
             Text("Scan the QBSheet Live code at your tournament, or open the link a tournament director shared.")
+        } actions: {
+            if let scanAction {
+                Button("Scan Tournament Code", systemImage: "qrcode.viewfinder", action: scanAction)
+                    .buttonStyle(.borderedProminent)
+            }
         }
     }
 }
