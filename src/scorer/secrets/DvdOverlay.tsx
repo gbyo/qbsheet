@@ -70,6 +70,7 @@ export default function DvdOverlay({
       clearTimeout(timer);
       setCorner(false);
       previous = null;
+      if (document.hidden) pointerOver.current = false;
       if (!document.hidden && !reduced) frame = requestAnimationFrame(tick);
     };
     const escape = (event: KeyboardEvent) => {
