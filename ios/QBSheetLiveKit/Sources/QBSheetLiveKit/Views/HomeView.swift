@@ -187,6 +187,8 @@ struct LiveScoreView: View {
                     Text(String(Int(ours)))
                         .font(.title.weight(.semibold))
                         .monospacedDigit()
+                        .contentTransition(.numericText())
+                        .animation(.snappy, value: Int(ours))
                         .gridColumnAlignment(.trailing)
                 }
                 .fontWeight(ours >= theirs ? .semibold : .regular)
@@ -197,6 +199,8 @@ struct LiveScoreView: View {
                     Text(String(Int(theirs)))
                         .font(.title.weight(.semibold))
                         .monospacedDigit()
+                        .contentTransition(.numericText())
+                        .animation(.snappy, value: Int(theirs))
                         .gridColumnAlignment(.trailing)
                 }
                 .fontWeight(theirs > ours ? .semibold : .regular)
