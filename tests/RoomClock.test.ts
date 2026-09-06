@@ -46,6 +46,17 @@ describe('timestamp-based room clock', () => {
     expect(formatClock(30_001)).toBe('00:31');
   });
 
+  test('a backward clock correction cannot subtract accumulated play time', () => {
+    const paused = pauseRoomClock(startRoomClock(idleRoomClock(60_000), 1_000), 'manual', 21_000);
+    const resumed = resumeRoomClock(paused, 100_000);
+
+    expect(elapsedRoomClock(resumed, 90_000)).toBe(20_000);
+    expect(pauseRoomClock(resumed, 'manual', 90_000)).toMatchObject({
+      status: 'paused',
+      accumulatedMs: 20_000,
+    });
+  });
+
   test('pause and resume preserve the accumulated duration', () => {
     const running = startRoomClock(idleRoomClock(60_000), 1_000);
     const paused = pauseRoomClock(running, 'timeout', 21_000);
