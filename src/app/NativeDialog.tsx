@@ -5,7 +5,7 @@
  * wrapper also handles the jsdom/non-modal fallback used by the tests and restores the control that
  * opened it when the dialog closes.
  */
-import { ReactNode, useEffect, useRef } from 'react';
+import { ReactNode, useEffect, useLayoutEffect, useRef } from 'react';
 
 export default function NativeDialog(props: {
   title: string;
@@ -28,16 +28,16 @@ export default function NativeDialog(props: {
 }) {
   const { title, onClose, children, className = '', bodyClassName = '', dismissible = true } = props;
   const panel = useRef<HTMLDialogElement>(null);
-  // Kept current by a committed effect. Every reader is an event — Escape, the close button, the
-  // dialog's own close event — so none of them can run before the effect that last wrote this.
+  // The document-level Escape listener outlives any one render. Refresh its callback before the
+  // browser can dispatch input to the newly committed dialog rather than one passive effect later.
   const onCloseRef = useRef(onClose);
-  useEffect(() => {
+  useLayoutEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
-  // Read by the document-level Escape listener, which is installed once and must see the current
-  // answer rather than the one that was true when the dialog opened.
+  // This guard can flip false while a write is starting. The Escape listener must see that new
+  // answer in the same commit that disables the visible close controls, not after passive effects.
   const dismissibleRef = useRef(dismissible);
-  useEffect(() => {
+  useLayoutEffect(() => {
     dismissibleRef.current = dismissible;
   }, [dismissible]);
 
