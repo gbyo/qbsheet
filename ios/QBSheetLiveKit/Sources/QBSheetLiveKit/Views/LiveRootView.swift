@@ -197,24 +197,19 @@ struct ConnectionBadge: View {
     let connection: TournamentStore.Connection
 
     var body: some View {
-        HStack(spacing: 5) {
-            Circle()
-                .fill(color)
-                .frame(width: 7, height: 7)
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Connection: \(label)")
+        Label(label, systemImage: symbol)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .accessibilityLabel("Connection: \(label)")
     }
 
-    private var color: Color {
+    private var symbol: String {
         switch connection {
-        case .live: .green
-        case .polling: .secondary
-        case .offline, .failed: .red
-        case .loading: .secondary
+        case .live: "antenna.radiowaves.left.and.right"
+        case .polling: "arrow.clockwise"
+        case .offline: "wifi.slash"
+        case .failed: "exclamationmark.triangle"
+        case .loading: "hourglass"
         }
     }
 
