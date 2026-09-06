@@ -15,7 +15,7 @@
  * open a modal, it does not accept a result, and it does not touch the standings. Every staged
  * result waits in the results inbox for a person, exactly as a QBTCP result does.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { DirectorId, DirectorState } from '../domain/model';
 import type { DirectorController } from '../state/useDirectorController';
 import {
@@ -151,7 +151,19 @@ export function useTransfers(
   // The timers and callbacks below outlive any one render and must act on the current controller
   // and the current tournament, not on whichever ones existed when they were created. This effect
   // is declared first so it commits before the effects that start those timers.
-  useEffect(() => {
+  //
+  // A layout effect rather than a passive one, and the difference is the whole point. Passive
+  // effects are flushed in a scheduler task *after* the commit that put the drive's button on
+  // screen, so on a busy machine there is a real window in which that button is visible and
+  // clickable while this mirror still describes the render before it. A director who clicks inside
+  // that window reaches `prepareTo`, which looks the drive up in `stateRef.current`, does not find
+  // it, and returns null: no files, no error, no announcement, and nothing to retry. Every callback
+  // below has the same shape, so the window costs a scan or a watch toggle just as silently.
+  //
+  // A layout effect still only runs for a commit — a render that is thrown away never writes here,
+  // which a render-phase assignment could not promise — but it runs inside that commit, so the
+  // mirror can never be behind the DOM through which these callbacks are reached.
+  useLayoutEffect(() => {
     controllerRef.current = controller;
     stateRef.current = state;
   });

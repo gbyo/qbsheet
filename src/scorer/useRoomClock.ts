@@ -47,6 +47,7 @@ export default function useRoomClock(
   );
   const [loadedIdentity, setLoadedIdentity] = useState(() => (configured ? identity : ''));
   const [now, setNow] = useState(() => Date.now());
+  const [hidden, setHidden] = useState(() => document.hidden);
 
   /*
    * A new clock identity means a different stored clock, loaded as that identity renders.
@@ -75,19 +76,20 @@ export default function useRoomClock(
   }, [configured, gameKey, identity, loadedIdentity, segment, state]);
 
   useEffect(() => {
-    if (!configured || state.status !== 'running') return undefined;
+    if (!configured || state.status !== 'running' || hidden) return undefined;
     const timer = setInterval(() => {
       const current = Date.now();
       setNow(current);
       setState((previous) => expireRoomClock(previous, current));
     }, 1000);
     return () => clearInterval(timer);
-  }, [configured, state.status]);
+  }, [configured, hidden, state.status]);
 
   useEffect(() => {
     if (!configured) return undefined;
     const refresh = () => {
       const current = Date.now();
+      setHidden(document.hidden);
       setNow(current);
       setState((previous) => expireRoomClock(previous, current));
     };
