@@ -151,7 +151,12 @@ export function parseBootstrapUrl(value: string): QbliveBootstrap {
   }
   const match = /^\/t\/([^/]+)\/?$/.exec(url.pathname);
   if (!match) throw new QbliveBootstrapError('That QBSheet Live link does not name a tournament.');
-  const publicationId = decodeURIComponent(match[1]);
+  let publicationId: string;
+  try {
+    publicationId = decodeURIComponent(match[1]);
+  } catch {
+    throw new QbliveBootstrapError('That QBSheet Live link does not name a valid tournament.');
+  }
   if (!isPublicationId(publicationId)) {
     throw new QbliveBootstrapError('That QBSheet Live link does not name a valid tournament.');
   }
