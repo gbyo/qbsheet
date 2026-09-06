@@ -18,9 +18,12 @@ export function automaticResultRetryDelayMs(attemptCount: number): number {
 }
 
 /** Epoch time at which this pending record may next be tried. Zero means immediately. */
-export function automaticResultRetryAt(record: IStoredGameRecord): number {
+export function automaticResultRetryAt(record: IStoredGameRecord, now = Date.now()): number {
   const attemptedAt = new Date(record.serverDeliveryLedger?.lastAttemptedAt ?? '').getTime();
   if (!Number.isFinite(attemptedAt)) return 0;
+  // Wall clocks on tournament devices can correct backward. A persisted attempt timestamp that is
+  // now in the future must not suppress an idempotent retry until the old clock catches up.
+  if (attemptedAt > now) return now;
   return attemptedAt + automaticResultRetryDelayMs(record.serverDeliveryLedger?.attemptCount ?? 0);
 }
 
@@ -55,7 +58,7 @@ export default function useAutomaticResultDelivery(input: IAutomaticResultDelive
       timer = undefined;
       const now = Date.now();
       const due = eligible()
-        .filter((record) => automaticResultRetryAt(record) <= now)
+        .filter((record) => automaticResultRetryAt(record, now) <= now)
         .sort(
           (first, second) =>
             completionTime(first) - completionTime(second) || first.id.localeCompare(second.id),
@@ -78,8 +81,9 @@ export default function useAutomaticResultDelivery(input: IAutomaticResultDelive
         timer = undefined;
         return;
       }
-      const nextAt = Math.min(...candidates.map(automaticResultRetryAt));
-      timer = setTimeout(() => void run(), Math.max(0, nextAt - Date.now()));
+      const now = Date.now();
+      const nextAt = Math.min(...candidates.map((record) => automaticResultRetryAt(record, now)));
+      timer = setTimeout(() => void run(), Math.max(0, nextAt - now));
     };
 
     const wake = () => schedule();
