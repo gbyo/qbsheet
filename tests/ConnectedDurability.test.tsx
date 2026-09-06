@@ -1,11 +1,13 @@
 /** @vitest-environment jsdom */
 
+import { useLayoutEffect } from 'react';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { connectionVersion, readConnection, writeConnection } from '../src/app/ConnectedSession';
 import useConnectedRuntime, { assignmentPollIntervalMs } from '../src/app/useConnectedRuntime';
 import FruityServerClient, { INormalizedAssignment } from '../src/integrations/fruity/FruityServerClient';
 import { progressIntervalMs } from '../src/integrations/fruity/FruityResultDestination';
+import type { IFinalDelivery } from '../src/integrations/fruity/FruityResultDestination';
 import { HelpRequestCategory, IHelpRequestSummary } from '../src/app/HelpRequests';
 
 class TestStorage {
@@ -303,6 +305,131 @@ describe('connected room durability', () => {
     expect(delivered.detail).toBeTruthy();
     // And nothing was filed over the device that holds the lock.
     expect(postFinal).not.toHaveBeenCalled();
+
+    hook.unmount();
+  });
+
+  test('a question scored in the first commit is sent on the interval, not held for the poll', async () => {
+    // The same window, one severity down.
+    //
+    // `reportProgress` is called from scoring — an event handler — and reads `senderRef`, which the
+    // sender's effect fills in. Built passively, the sender does not exist yet during the commit
+    // that put the scoresheet on screen, so a tossup scored right then offers to nothing. Not lost:
+    // `latestSnapshotRef` keeps it and the next successful poll re-offers it. But that is up to a
+    // poll interval away, and the poll is ten times the send interval, so the room's first snapshot
+    // sits on the device long after it was promised. Built during the commit, there is no gap.
+    vi.useFakeTimers();
+    const snapshots: object[] = [];
+    const client = {
+      ensureDiscovered: vi.fn(async () => null),
+      // A poll that never answers, so nothing here can be the poll's re-offer rescuing the send.
+      assignment: vi.fn(() => new Promise<never>(() => {})),
+      putSnapshot: vi.fn(async (_credentials: unknown, qbj: object) => {
+        snapshots.push(qbj);
+        return { ok: true as const, value: { accepted: true } };
+      }),
+    } as unknown as FruityServerClient;
+
+    let scored = false;
+    const hook = renderHook(() => {
+      const runtime = useConnectedRuntime({
+        client,
+        identity: { roomId: 'room-1', token: 'room-token' },
+        credentials: { sessionId: 'session-1', token: 'session-token' },
+        enabled: true,
+      });
+      useLayoutEffect(() => {
+        if (scored) return;
+        scored = true;
+        runtime.reportProgress({ tossups_read: 1 });
+      });
+      return runtime;
+    });
+
+    expect(scored).toBe(true);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(progressIntervalMs);
+    });
+    expect(snapshots).toEqual([{ tossups_read: 1 }]);
+
+    hook.unmount();
+  });
+
+  test('a repaired room can send its final from the commit that says it may', async () => {
+    // The window a passive mirror opens, stated without depending on how loaded the machine is.
+    //
+    // `writesAllowedRef` is what `submitFinal` consults at the moment a scorekeeper presses Submit,
+    // and the same value is rendered as `automaticDelivery` — the completion screen's promise that
+    // the result will travel. A passive effect writes the ref in a scheduler task *after* the commit
+    // that painted, and React yields between the two whenever the commit overruns its frame budget.
+    // So a takeover that succeeds repaints "the result will be sent" a frame before the ref agrees,
+    // and a Submit landing in that gap is refused with `attempted: false` — over a `forbidden` and
+    // `writerConflict` pair already cleared, so `retryable` is false too and Recent Games will not
+    // offer to send it again. The result stays on the device and the room is told it was saved.
+    //
+    // `onCommit` below is a layout effect declared after the hook's own, so it runs inside each
+    // commit at the earliest instant anything can reach the DOM that commit produced — earlier than
+    // any click on it. Submitting from there is the requirement; scheduler timing never enters in.
+    vi.useFakeTimers();
+    const postFinal = vi.fn(async () => ({ ok: true as const, value: { accepted: true, duplicate: false } }));
+    const client = {
+      ensureDiscovered: vi.fn(async () => null),
+      assignment: vi.fn(async () => ({ ok: true as const, value: assignmentWithNothingToPlay })),
+      putSnapshot: vi.fn(async () => ({
+        ok: false as const,
+        status: 409,
+        error: 'Another device is scoring this game.',
+        payload: { can_take_over: true },
+      })),
+      takeWriter: vi.fn(async () => ({
+        ok: true as const,
+        value: { sessionId: 'session-1', token: 'session-token' },
+      })),
+      postFinal,
+    } as unknown as FruityServerClient;
+
+    let armed = false;
+    let submitted: Promise<IFinalDelivery> | null = null;
+    const hook = renderHook(() => {
+      const runtime = useConnectedRuntime({
+        client,
+        identity: { roomId: 'room-1', token: 'room-token' },
+        credentials: { sessionId: 'session-1', token: 'session-token' },
+        enabled: true,
+      });
+      useLayoutEffect(() => {
+        // Armed only once the room is barred, so this stands for the press that follows the repair
+        // rather than the one that could have happened before anything went wrong.
+        if (!armed || submitted !== null || !runtime.automaticDelivery) return;
+        submitted = runtime.submitFinal({ tossups_read: 20 });
+      });
+      return runtime;
+    });
+
+    // Lose the writer lock, so the room is genuinely barred before the repair.
+    act(() => hook.result.current.reportProgress({ tossups_read: 1 }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(progressIntervalMs);
+    });
+    expect(hook.result.current.automaticDelivery).toBe(false);
+    expect(submitted).toBeNull();
+
+    // The room presses Take over, exactly as it appears on the alert.
+    armed = true;
+    const takeOver = hook.result.current.alerts
+      .find((alert) => alert.id === 'writer-conflict')
+      ?.actions?.find((action) => action.label === 'Take over scoring');
+    if (!takeOver) throw new Error('the writer-conflict alert did not offer a takeover');
+    await act(async () => {
+      takeOver.onSelect();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    expect(hook.result.current.automaticDelivery).toBe(true);
+    if (submitted === null) throw new Error('the commit that allowed writes did not submit');
+    const delivered = await act(async () => submitted);
+    expect(delivered).toMatchObject({ delivery: 'sent', attempted: true });
+    expect(postFinal).toHaveBeenCalledTimes(1);
 
     hook.unmount();
   });

@@ -1,3 +1,4 @@
+import { useLayoutEffect } from 'react';
 import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { describe, expect, test, vi } from 'vitest';
 import {
@@ -396,6 +397,53 @@ describe('transfers operation-aware busy state', () => {
 });
 
 describe('shared native QBTCP server status', () => {
+  test('Stop stops the server it says it will, pressed in the commit that relabelled it', async () => {
+    // The one mirror in this file that a stale read turns into the wrong action rather than a
+    // dropped one.
+    //
+    // `toggle` is the Start/Stop button's own click handler, and `statusRef` is the only thing
+    // telling it which of the two it is. Written by a passive effect, that ref lags the commit that
+    // painted the new label by a scheduler task — React yields between the two whenever the commit
+    // overruns its frame budget. So a poll landing `{ running: true }` repaints the button as "Stop
+    // server" while the ref still reads `false`, and a director pressing it there starts the server
+    // they just asked to stop. `commitStatus` then applies that start, the label flips back, and
+    // the whole thing looks like a click that missed.
+    //
+    // `onCommit` is a layout effect declared after the hook's own, so it runs inside each commit —
+    // earlier than any click on the DOM that commit produced. Toggling from there states the
+    // requirement without depending on how loaded the machine is.
+    const native = await import('../src/director/platform/native');
+    const read = vi.spyOn(native, 'readNativeServerStatus').mockResolvedValue({ running: true });
+    const start = vi.spyOn(native, 'startNativeServer').mockResolvedValue({ running: true });
+    const stop = vi.spyOn(native, 'stopNativeServer').mockResolvedValue({ running: false });
+    try {
+      const { useNativeServerStatus } = await import('../src/director/server/useNativeServerStatus');
+      let pressed = false;
+      const { result, unmount } = renderHook(() => {
+        const server = useNativeServerStatus({ active: true });
+        useLayoutEffect(() => {
+          // The press that follows the poll saying the server came up, and nothing before it.
+          if (pressed || !server.status.running) return;
+          pressed = true;
+          void server.toggle();
+        });
+        return server;
+      });
+
+      await waitFor(() => expect(pressed).toBe(true));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      expect(stop).toHaveBeenCalledTimes(1);
+      expect(start).not.toHaveBeenCalled();
+      expect(result.current.status.running).toBe(false);
+      unmount();
+    } finally {
+      read.mockRestore();
+      start.mockRestore();
+      stop.mockRestore();
+    }
+  });
+
   test('toggle and invitations write through to the one shared snapshot', async () => {
     const native = await import('../src/director/platform/native');
     const read = vi.spyOn(native, 'readNativeServerStatus').mockResolvedValue({ running: true });
