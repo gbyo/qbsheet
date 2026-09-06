@@ -203,8 +203,8 @@ export function loadGame(
       .map((candidate) => ({ candidate, updated: new Date(candidate.updatedAt).getTime() }))
       .filter(({ updated }) => Number.isFinite(updated))
       .filter(({ updated }) => {
-        const age = now.getTime() - updated;
-        return age >= 0 && age <= gameSessionMaxAgeMs;
+        const age = Math.max(0, now.getTime() - updated);
+        return age <= gameSessionMaxAgeMs;
       })
       .sort((first, second) => second.updated - first.updated)[0];
     return current?.candidate ?? null;
@@ -264,8 +264,8 @@ function inspectJournalCopy(
   if (!candidate) return { key, status: 'malformed', raw };
   const updated = new Date(candidate.updatedAt).getTime();
   if (!Number.isFinite(updated)) return { key, status: 'malformed', raw, updatedAt: candidate.updatedAt };
-  const age = now.getTime() - updated;
-  if (age < 0 || age > gameSessionMaxAgeMs) {
+  const age = Math.max(0, now.getTime() - updated);
+  if (age > gameSessionMaxAgeMs) {
     return { key, status: 'stale', raw, updatedAt: candidate.updatedAt, value: candidate };
   }
   return { key, status: 'valid', raw, updatedAt: candidate.updatedAt, value: candidate };
