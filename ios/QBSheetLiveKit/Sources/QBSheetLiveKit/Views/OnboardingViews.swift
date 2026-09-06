@@ -12,32 +12,36 @@ struct FollowTeamView: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                Section {
-                    ForEach(matches) { team in
-                        Button {
-                            onFollow(team.id)
-                        } label: {
-                            HStack {
-                                Text(team.name)
-                                Spacer(minLength: 12)
-                                if let seed = team.seed {
-                                    Text("Seed \(Int(seed))")
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
+            Group {
+                if hasSearchQuery && matches.isEmpty {
+                    ContentUnavailableView.search(text: query)
+                } else {
+                    List {
+                        Section {
+                            ForEach(matches) { team in
+                                Button {
+                                    onFollow(team.id)
+                                } label: {
+                                    LabeledContent {
+                                        if let seed = team.seed {
+                                            Text("Seed \(Int(seed))")
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    } label: {
+                                        Text(team.name)
+                                    }
+                                    .contentShape(.rect)
                                 }
+                                // Keep selection rows visually neutral while retaining the native
+                                // List hit target and pressed behavior.
+                                .buttonStyle(.plain)
                             }
-                            .contentShape(.rect)
+                        } header: {
+                            Text("Teams")
+                        } footer: {
+                            Text("Follow a team to see its schedule, results, and updates.")
                         }
-                        // `.plain` so a team reads as a name rather than as a link. The whole row
-                        // is still the hit target, via `contentShape`.
-                        .buttonStyle(.plain)
                     }
-                } header: {
-                    Text("Follow a team to see its schedule, results, and updates.")
-                        .textCase(nil)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
                 }
             }
             .navigationTitle(snapshot.tournament.name)
@@ -47,9 +51,13 @@ struct FollowTeamView: View {
         }
     }
 
+    private var hasSearchQuery: Bool {
+        !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     private var matches: [QBLiveTeam] {
         let sorted = snapshot.teams.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-        let needle = query.trimmingCharacters(in: .whitespaces)
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !needle.isEmpty else { return sorted }
         return sorted.filter { $0.name.localizedCaseInsensitiveContains(needle) }
     }
@@ -90,17 +98,18 @@ struct SelectPlayerView: View {
                             .contentShape(.rect)
                     }
                 } header: {
-                    Text("Optional. Pick a player to highlight their statistics.")
-                        .textCase(nil)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                Section {
-                    Button("Not now") { onSelect(nil) }
+                    Text(snapshot.teamName(teamId))
+                } footer: {
+                    Text("Optional. Choose a player to highlight their statistics.")
                 }
             }
-            .navigationTitle("Show my player stats")
+            .navigationTitle("Choose a Player")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Skip") { onSelect(nil) }
+                }
+            }
         }
     }
 }
