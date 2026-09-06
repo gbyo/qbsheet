@@ -107,6 +107,7 @@ import {
 } from '../transfers/state';
 import type { TransferVolume } from '../transfers/ports';
 import {
+  readNativeLiveScorerRooms,
   readNativeServerSnapshot,
   resolveNativeQbtcpHelp,
   isNativeDirector,
@@ -4902,11 +4903,21 @@ export function useDirectorController(repository = createDirectorRepository()): 
 
   const moveReleasedGame = useCallback(
     async (scheduledGameId: DirectorId, destinationRoomId: DirectorId): Promise<MoveReleasedGameResult> => {
-      const snapshot = stateRef.current;
       const fail = (reason: string): MoveReleasedGameResult => {
         setError(reason);
         return { ok: false, summary: reason, reason };
       };
+      // Saving this move reassigns both rooms, and the native server responds by clearing their
+      // operational tracking: sessions, presence, progress, and the paired-room record. The
+      // document that authorizes the move only learns about pairings on the once-per-second QBTCP
+      // poll, so validating against a poll-old snapshot can permit a move over a scorer who paired
+      // in the meantime. Settle the reads and writes already in flight and take a fresh snapshot
+      // first, so the check below runs on state the server agrees with rather than on a stale one.
+      await Promise.allSettled([qbtcpSyncInFlightRef.current, liveDrainInFlightRef.current]);
+      await persistenceQueueRef.current;
+      if (isNativeDirector()) await syncQbtcp();
+
+      const snapshot = stateRef.current;
       const blocker = releasedGameRoomMoveBlocker(snapshot, scheduledGameId, destinationRoomId);
       if (blocker) return fail(blocker);
 
@@ -4923,6 +4934,27 @@ export function useDirectorController(repository = createDirectorRepository()): 
         ? `${teamName(game.leftTeamId)} vs ${teamName(game.rightTeamId)}`
         : teamName(game.leftTeamId);
       const summary = `Moved ${round.name} · ${matchup} from ${sourceRoom.name} to ${destinationRoom.name}.`;
+
+      // The last check before the save, and the only one that does not go through the document.
+      // A device can be present without a server-issued session id, which the document cannot
+      // represent at all, so ask the server itself whether either room is occupied right now.
+      let liveRooms: DirectorId[];
+      try {
+        liveRooms = await readNativeLiveScorerRooms([sourceRoom.id, destinationRoom.id]);
+      } catch {
+        return fail(
+          'The live scorer state could not be read, so the room move was not made. Check the QBTCP server and try again.',
+        );
+      }
+      if (liveRooms.length > 0) {
+        const names = liveRooms
+          .map((roomId) => snapshot.rooms.find((entry) => entry.id === roomId)?.name ?? roomId)
+          .join(' and ');
+        return fail(
+          `A scorer is connected in ${names}; finish or resolve that session before changing rooms.`,
+        );
+      }
+
       const next = structuredClone(snapshot);
       const target = next.scheduledGames.find((entry) => entry.id === scheduledGameId);
       const nextRound = next.rounds.find((entry) => entry.id === round.id);
@@ -4955,7 +4987,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
       }
       return { ok: true, summary };
     },
-    [editTournamentSnapshot],
+    [editTournamentSnapshot, syncQbtcp],
   );
 
   const startRound = useCallback(

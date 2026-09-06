@@ -329,6 +329,25 @@ pub fn director_server_snapshot(
     server.snapshot().map_err(CommandError::server)
 }
 
+/// Report which of `room_ids` a scorer is connected to right now.
+///
+/// Director's schedule validation reads the QBTCP sessions in its own document, which is only as
+/// current as the last poll. A room move that reassigns a room clears that room's operational
+/// tracking, so a scorer who paired since that poll would be disconnected without any warning.
+/// This asks the running server instead of the document, immediately before such a move is saved.
+#[tauri::command]
+pub fn director_qbtcp_live_rooms(
+    room_ids: Vec<String>,
+    server: State<'_, ServerRuntime>,
+) -> Result<Vec<String>, CommandError> {
+    let room_ids = room_ids
+        .into_iter()
+        .map(|room_id| room_id.trim().to_owned())
+        .filter(|room_id| !room_id.is_empty())
+        .collect::<std::collections::HashSet<_>>();
+    Ok(server.rooms_with_live_scorers(&room_ids))
+}
+
 #[tauri::command]
 pub fn director_resolve_qbtcp_help(
     help_id: String,
