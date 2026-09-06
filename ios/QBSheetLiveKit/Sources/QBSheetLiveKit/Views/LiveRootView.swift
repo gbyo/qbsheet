@@ -145,7 +145,8 @@ public struct LiveRootView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .navigationTitle(title)
-            .navigationBarTitleDisplayMode(.inline)
+            // These are root destinations. Let NavigationStack use the platform's large-title
+            // behavior and collapse it naturally as the spectator scrolls.
             .refreshable { await store.refresh() }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
