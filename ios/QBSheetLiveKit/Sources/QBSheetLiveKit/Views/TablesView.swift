@@ -15,6 +15,7 @@ struct TablesView: View {
     let selectedPlayerId: String?
 
     @State private var scope: String = "overall"
+    @State private var searchText = ""
 
     var body: some View {
         if tables.isEmpty {
@@ -35,7 +36,8 @@ struct TablesView: View {
                             DataTableView(
                                 table: table,
                                 followedTeamId: followedTeamId,
-                                selectedPlayerId: selectedPlayerId
+                                selectedPlayerId: selectedPlayerId,
+                                searchText: searchText
                             )
                         } header: {
                             SectionHeader(title)
@@ -43,6 +45,7 @@ struct TablesView: View {
                     }
                 }
             }
+            .searchable(text: $searchText, prompt: "Search rows")
         }
     }
 
@@ -102,11 +105,16 @@ struct DataTableView: View {
     let table: QBLiveDataTable
     let followedTeamId: String?
     let selectedPlayerId: String?
+    let searchText: String
 
     var body: some View {
         if table.rows.isEmpty {
             Text("No rows yet.")
                 .foregroundStyle(.secondary)
+                .padding(.vertical, 8)
+        } else if filteredRows.isEmpty {
+            ContentUnavailableView.search(text: query)
+                .frame(maxWidth: .infinity)
                 .padding(.vertical, 8)
         } else {
             ScrollView(.horizontal, showsIndicators: true) {
@@ -122,7 +130,7 @@ struct DataTableView: View {
                     }
                     .padding(.vertical, 8)
                     Divider().gridCellUnsizedAxes(.horizontal)
-                    ForEach(table.rows) { row in
+                    ForEach(filteredRows) { row in
                         GridRow {
                             ForEach(Array(row.cells.enumerated()), id: \.offset) { index, cell in
                                 let column = index < table.columns.count ? table.columns[index] : nil
@@ -141,6 +149,22 @@ struct DataTableView: View {
                 .padding(.horizontal, 16)
             }
             .background(.background.secondary, in: RoundedRectangle(cornerRadius: 12))
+        }
+    }
+
+    private var query: String {
+        searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Search the server-rendered cell text rather than assuming which column contains a team or
+    /// player name. Dynamic QBLive tables can add and reorder columns without an app update.
+    private var filteredRows: [QBLiveRow] {
+        guard !query.isEmpty else { return table.rows }
+        return table.rows.filter { row in
+            row.cells.enumerated().contains { index, cell in
+                let precision = index < table.columns.count ? table.columns[index].precision : nil
+                return cell.text(precision: precision).localizedCaseInsensitiveContains(query)
+            }
         }
     }
 
