@@ -4,7 +4,15 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 import { directorFixture } from '../transfers/testFixtures';
 import { MemoryDirectorRepository } from '../persistence';
 import { useDirectorController, type DirectorController } from '../state/useDirectorController';
+import { readNativeLiveScorerRooms } from '../platform/native';
 import { RoundsView } from './RoundsView';
+
+vi.mock('../platform/native', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../platform/native')>()),
+  readNativeLiveScorerRooms: vi.fn(async () => []),
+}));
+
+const liveScorerRooms = vi.mocked(readNativeLiveScorerRooms);
 
 const onAnnounce = vi.fn();
 const onNavigate = vi.fn();
@@ -48,6 +56,8 @@ describe('released-game room recovery UI', () => {
   afterEach(() => {
     onAnnounce.mockClear();
     onNavigate.mockClear();
+    liveScorerRooms.mockReset();
+    liveScorerRooms.mockResolvedValue([]);
   });
 
   test('offers only valid destination rooms and reports a successful move', async () => {
@@ -95,5 +105,50 @@ describe('released-game room recovery UI', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Move game' }));
     expect(screen.getByRole('alert')).toHaveTextContent(/scorer is already paired/i);
     expect(screen.getByRole('button', { name: 'Change room' })).toBeDisabled();
+  });
+
+  // The document only learns about pairings on the once-per-second QBTCP poll, so a scorer who
+  // pairs between two polls leaves no trace in the state the blocker above reads. Saving the move
+  // anyway reassigns both rooms and the native server clears their session tracking, disconnecting
+  // that scorer with no warning. The server is asked directly for exactly this reason.
+  test('refuses a move the document permits when the server still sees a scorer in the room', async () => {
+    const { getController, repository } = await openRounds(directorFixture({ games: 2 }));
+    liveScorerRooms.mockResolvedValue(['room-101']);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move game' }));
+    fireEvent.change(screen.getByLabelText('Destination room'), { target: { value: 'room-107' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Change room' }));
+
+    await waitFor(() =>
+      expect(onAnnounce).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: 'A scorer is connected in Room 101; finish or resolve that session before changing rooms.',
+        }),
+      ),
+    );
+    expect(liveScorerRooms).toHaveBeenCalledWith(['room-101', 'room-107']);
+    expect(getController().state.scheduledGames.find((game) => game.id === 'game-5-1')?.roomId).toBe(
+      'room-101',
+    );
+    const persisted = await repository.load();
+    expect(persisted.scheduledGames.find((game) => game.id === 'game-5-1')?.roomId).toBe('room-101');
+  });
+
+  test('refuses the move when the live scorer state cannot be read at all', async () => {
+    const { getController } = await openRounds(directorFixture({ games: 2 }));
+    liveScorerRooms.mockRejectedValue(new Error('the server is unreachable'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move game' }));
+    fireEvent.change(screen.getByLabelText('Destination room'), { target: { value: 'room-107' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Change room' }));
+
+    await waitFor(() =>
+      expect(onAnnounce).toHaveBeenCalledWith(
+        expect.objectContaining({ message: expect.stringContaining('could not be read') }),
+      ),
+    );
+    expect(getController().state.scheduledGames.find((game) => game.id === 'game-5-1')?.roomId).toBe(
+      'room-101',
+    );
   });
 });
