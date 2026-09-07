@@ -1,10 +1,5 @@
 import { describe, expect, test, vi } from 'vitest';
-import {
-  AppUpdateWatcher,
-  IContainerLike,
-  IRegistrationLike,
-  IWorkerLike,
-} from '../src/pwa/AppUpdate';
+import { AppUpdateWatcher, IContainerLike, IRegistrationLike, IWorkerLike } from '../src/pwa/AppUpdate';
 
 class Worker implements IWorkerLike {
   state = 'installing';
