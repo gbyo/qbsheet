@@ -207,7 +207,7 @@ export function rememberManualGamePreset(input: IManualGameInput): IManualGamePr
     label: input.gameLabel.trim() || `${input.left.name.trim()} vs ${input.right.name.trim()}`,
     left: { ...input.left },
     right: { ...input.right },
-    rules: { ...input.rules },
+    rules: cloneRules(input.rules),
     options: cloneRoundOptions(input.options),
     savedAt: new Date().toISOString(),
   };
