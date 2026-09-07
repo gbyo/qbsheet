@@ -281,12 +281,8 @@ struct AppClipBanner: View {
 
 struct LoadingView: View {
     var body: some View {
-        VStack(spacing: 12) {
-            ProgressView()
-            Text("Loading the tournament…")
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        ProgressView("Loading the tournament…")
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
