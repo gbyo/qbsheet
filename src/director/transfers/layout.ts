@@ -116,6 +116,10 @@ export function buildManifest(input: {
   };
 }
 
+function parseRevision(value: unknown): number {
+  return Number.isSafeInteger(value) && Number(value) >= 1 ? Number(value) : 1;
+}
+
 /**
  * Read a manifest, forgivingly.
  *
@@ -140,10 +144,8 @@ export function parseManifest(value: unknown): TransferManifest | null {
         matchId: record.matchId,
         roundId: typeof record.roundId === 'string' ? record.roundId : '',
         roundName: typeof record.roundName === 'string' ? record.roundName : '',
-        roundRevision: Number.isFinite(record.roundRevision) ? Number(record.roundRevision) : 1,
-        assignmentRevision: Number.isFinite(record.assignmentRevision)
-          ? Number(record.assignmentRevision)
-          : 1,
+        roundRevision: parseRevision(record.roundRevision),
+        assignmentRevision: parseRevision(record.assignmentRevision),
         fileName: record.fileName,
         ...(typeof record.room === 'string' ? { room: record.room } : {}),
         teams: Array.isArray(record.teams) ? record.teams.filter((team) => typeof team === 'string') : [],
