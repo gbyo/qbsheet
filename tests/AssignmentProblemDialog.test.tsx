@@ -72,6 +72,30 @@ describe('the wrong-assignment report', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  test('cannot be dismissed while the report is still being sent', async () => {
+    let resolveReport: ((result: HelpRequestResult) => void) | undefined;
+    const pending = new Promise<HelpRequestResult>((resolve) => {
+      resolveReport = resolve;
+    });
+    const { onClose } = open(() => pending);
+
+    await press('Wrong packet');
+    await press('Tell tournament control');
+
+    expect(screen.getByRole('button', { name: 'Close dialog' })).toBeDisabled();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onClose).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveReport?.({
+        kind: 'accepted',
+        request: { category: 'question-packet', message: 'reported', id: 'help-1' },
+      });
+      await pending;
+    });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   test('keeps failure truthful and does not claim the request was delivered', async () => {
     const { onClose } = open(async () => ({
       kind: 'unreachable',
