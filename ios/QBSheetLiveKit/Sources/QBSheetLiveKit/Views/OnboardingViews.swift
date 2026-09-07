@@ -9,6 +9,7 @@ struct FollowTeamView: View {
     let onFollow: (String) -> Void
 
     @State private var query = ""
+    @State private var selectionFeedback = 0
 
     var body: some View {
         NavigationStack {
@@ -16,6 +17,7 @@ struct FollowTeamView: View {
                 Section {
                     ForEach(matches) { team in
                         Button {
+                            selectionFeedback += 1
                             onFollow(team.id)
                         } label: {
                             HStack {
@@ -44,6 +46,7 @@ struct FollowTeamView: View {
             .navigationBarTitleDisplayMode(.large)
             // Only when there are enough teams for search to be worth the chrome.
             .modifier(SearchIfMany(count: snapshot.teams.count, query: $query))
+            .sensoryFeedback(.selection, trigger: selectionFeedback)
         }
     }
 
@@ -79,15 +82,20 @@ struct SelectPlayerView: View {
     let teamId: String
     let onSelect: (String?) -> Void
 
+    @State private var selectionFeedback = 0
+
     var body: some View {
         NavigationStack {
             List {
                 Section {
                     ForEach(snapshot.team(teamId)?.players ?? []) { player in
-                        Button(player.name) { onSelect(player.id) }
-                            .buttonStyle(.plain)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(.rect)
+                        Button(player.name) {
+                            selectionFeedback += 1
+                            onSelect(player.id)
+                        }
+                        .buttonStyle(.plain)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(.rect)
                     }
                 } header: {
                     Text("Optional. Pick a player to highlight their statistics.")
@@ -96,11 +104,15 @@ struct SelectPlayerView: View {
                         .foregroundStyle(.secondary)
                 }
                 Section {
-                    Button("Not now") { onSelect(nil) }
+                    Button("Not now") {
+                        selectionFeedback += 1
+                        onSelect(nil)
+                    }
                 }
             }
             .navigationTitle("Show my player stats")
             .navigationBarTitleDisplayMode(.inline)
+            .sensoryFeedback(.selection, trigger: selectionFeedback)
         }
     }
 }
