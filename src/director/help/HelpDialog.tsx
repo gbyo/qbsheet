@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef } from 'react';
 
 export const DIRECTOR_SHORTCUTS = [
   { keys: ['⌘', 'K'], win: ['Ctrl', 'K'], description: 'Focus tournament search', action: 'search-focus' },
@@ -14,7 +14,7 @@ export function HelpDialog({ open, onClose }: { open: boolean; onClose: () => vo
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const onCloseRef = useRef(onClose);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
 
