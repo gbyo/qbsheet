@@ -735,10 +735,13 @@ function AssociateResult({
     : (choices[0]?.id ?? '');
   const associate = () => {
     if (!effectiveScheduledGameId) {
-      onAnnounce('Choose the scheduled game before associating this result.');
+      onAnnounce(errorNotice('Choose the scheduled game before associating this result.'));
       return;
     }
-    if (!controller.associateSubmission(submission.id, effectiveScheduledGameId)) return;
+    if (!controller.associateSubmission(submission.id, effectiveScheduledGameId)) {
+      onAnnounce(errorNotice('The result was not associated; review the Director error.'));
+      return;
+    }
     onSuccess();
     onAnnounce('Result associated with the selected game and kept in review. Verify it before accepting.');
   };
@@ -818,7 +821,7 @@ function AcceptedResultEditor({
     const nextLeft = Number(left);
     const nextRight = Number(right);
     if (!left.trim() || !right.trim() || !Number.isInteger(nextLeft) || !Number.isInteger(nextRight)) {
-      onAnnounce('Corrected scores must be finite whole numbers.');
+      onAnnounce(errorNotice('Corrected scores must be finite whole numbers.'));
       return;
     }
     const scores = game.scores.map((entry) =>
@@ -828,7 +831,10 @@ function AcceptedResultEditor({
           ? { ...entry, score: nextRight }
           : entry,
     );
-    if (!controller.editAcceptedResult(game.id, scores, note.trim() || undefined)) return;
+    if (!controller.editAcceptedResult(game.id, scores, note.trim() || undefined)) {
+      onAnnounce(errorNotice('The correction was not saved; review the Director error.'));
+      return;
+    }
     onSuccess();
     onAnnounce('Accepted result corrected; the prior result remains in audit history.');
   };
@@ -891,10 +897,13 @@ function ProtestCreator({
   const [description, setDescription] = useState('');
   const save = () => {
     if (!description.trim()) {
-      onAnnounce('Describe the protest before saving it.');
+      onAnnounce(errorNotice('Describe the protest before saving it.'));
       return;
     }
-    if (!controller.addProtest(game.id, description, category)) return;
+    if (!controller.addProtest(game.id, description, category)) {
+      onAnnounce(errorNotice('The protest was not opened; review the Director error.'));
+      return;
+    }
     onSuccess();
     onAnnounce('Protest opened and retained with the accepted result.');
   };
@@ -1031,19 +1040,22 @@ function ProtestRuling({
   if (!game || !scheduled || !scheduled.rightTeamId) return null;
   const save = () => {
     if (!ruling.trim()) {
-      onAnnounce('Enter the protest ruling first.');
+      onAnnounce(errorNotice('Enter the protest ruling first.'));
       return;
     }
     let adjustment: ProtestScoreAdjustment | undefined;
     if (teamId || delta.trim()) {
       const parsedDelta = Number(delta);
       if (!teamId || !Number.isInteger(parsedDelta) || parsedDelta === 0) {
-        onAnnounce('A score correction needs a team and a non-zero whole-number adjustment.');
+        onAnnounce(errorNotice('A score correction needs a team and a non-zero whole-number adjustment.'));
         return;
       }
       adjustment = { teamId, delta: parsedDelta };
     }
-    if (!controller.ruleProtest(protest.id, ruling, adjustment)) return;
+    if (!controller.ruleProtest(protest.id, ruling, adjustment)) {
+      onAnnounce(errorNotice('The ruling was not saved; review the Director error.'));
+      return;
+    }
     onAnnounce('Protest ruled and retained in the audit history.');
   };
   return (

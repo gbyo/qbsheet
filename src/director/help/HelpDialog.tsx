@@ -179,9 +179,31 @@ export function HelpDialog({ open, onClose }: { open: boolean; onClose: () => vo
           <p>Dialogs: Escape closes, focus is trapped while open and returns to the triggering button.</p>
         </section>
 
+        {/*
+          These are the only two links in Director that leave the application. Followed in place they
+          replace the running tournament with a GitHub page, and Director has no browser chrome to
+          come back with. They open in a new context, like every external link on the About site.
+        */}
         <p className="director-help-footnote">
-          Full docs: <a href="https://github.com/gbyo/qbsheet/blob/main/docs/QBTCP.md">QBTCP</a> ·{' '}
-          <a href="https://github.com/gbyo/qbsheet/blob/main/docs/QBLIVE.md">QBLive</a> (online, optional)
+          Full docs:{' '}
+          <a
+            href="https://github.com/gbyo/qbsheet/blob/main/docs/QBTCP.md"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            QBTCP
+            <span className="visually-hidden"> (opens in a new tab)</span>
+          </a>{' '}
+          ·{' '}
+          <a
+            href="https://github.com/gbyo/qbsheet/blob/main/docs/QBLIVE.md"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            QBLive
+            <span className="visually-hidden"> (opens in a new tab)</span>
+          </a>{' '}
+          (online, optional)
         </p>
       </div>
     </dialog>

@@ -8,6 +8,7 @@ import type { DirectorController } from '../state/useDirectorController';
 import { Button, EmptyState } from '../components/Controls';
 import { PageHeader } from '../components/PageHeader';
 import { playerStatsCsv, standingsFileStem, teamStandingsCsv } from '../format/standingsCsv';
+import { formatWinPct } from './statsDisplay';
 import { csvMediaType, downloadText } from '../format/downloadFile';
 import type { AnnounceInput } from '../notices';
 
@@ -100,7 +101,7 @@ export function StandingsView({
                           {standing.wins}–{standing.losses}
                           {standing.ties ? `–${standing.ties}` : ''}
                         </td>
-                        <td className="director-number-cell">{(standing.winPercentage * 100).toFixed(1)}%</td>
+                        <td className="director-number-cell">{formatWinPct(standing)}</td>
                         <td className="director-number-cell">{standing.pointsFor}</td>
                         <td className="director-number-cell">{standing.pointsAgainst}</td>
                         <td className="director-number-cell">

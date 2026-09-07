@@ -32,6 +32,23 @@ describe('the team standings CSV', () => {
     expect(parsed.headers).not.toContain('organization_id');
   });
 
+  /*
+   * The screen renders this cell as "—" for a team with no games. A spreadsheet reading `0.0%` would
+   * sort an unplayed team in among the winless ones, which is a different claim about the day.
+   */
+  test('a team that has not played has a blank win percentage, not 0.0%', () => {
+    const state = playedTournament();
+    state.teams.push(team('team-c', 'Abbeville'));
+
+    const parsed = table(teamStandingsCsv(state));
+    const unplayed = parsed.rows.find((cells) => cells[2] === 'Abbeville');
+    const played = parsed.rows.find((cells) => cells[2] === 'Ninety Six');
+    const winPercentage = parsed.headers.indexOf('win_percentage');
+
+    expect(unplayed?.[winPercentage]).toBe('');
+    expect(played?.[winPercentage]).toBe('100.0%');
+  });
+
   test('it carries the powers, gets and negs the screen shows', () => {
     const parsed = table(teamStandingsCsv(playedTournament()));
     const row = parsed.rows.find((cells) => cells[2] === 'Ninety Six');

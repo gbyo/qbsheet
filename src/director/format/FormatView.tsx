@@ -85,7 +85,7 @@ export function FormatView({
         [key]: null,
       } as Partial<NonNullable<DirectorState['tournament']>['rules']>);
       if (!cleared) {
-        onAnnounce('Scoring rule was not saved; review the Director error.');
+        onAnnounce(errorNotice('Scoring rule was not saved; review the Director error.'));
       }
       return;
     }
@@ -97,7 +97,7 @@ export function FormatView({
     if (
       !controller.updateRules({ [key]: value } as Partial<NonNullable<DirectorState['tournament']>['rules']>)
     ) {
-      onAnnounce(`${label} was not saved; review the Director error.`);
+      onAnnounce(errorNotice(`${label} was not saved; review the Director error.`));
     }
   };
   const commitRoundsPerTeam = (): void => {
@@ -116,7 +116,7 @@ export function FormatView({
       return;
     }
     if (!controller.updateFormat({ roundsPerTeam: value })) {
-      onAnnounce('Rounds per team was not saved; review the Director error.');
+      onAnnounce(errorNotice('Rounds per team was not saved; review the Director error.'));
       setRoundsDraftState({
         key: roundsDraftKey,
         value: format.roundsPerTeam?.toString() ?? '',
@@ -178,8 +178,10 @@ export function FormatView({
                 onNavigate('schedule');
               } else {
                 onAnnounce(
-                  result.conflicts.join(' ') ||
-                    'No round was generated; review the format and confirmed teams first.',
+                  errorNotice(
+                    result.conflicts.join(' ') ||
+                      'No round was generated; review the format and confirmed teams first.',
+                  ),
                 );
               }
             }}
@@ -319,7 +321,9 @@ export function FormatView({
                       disabled={scoringValuesLocked}
                       onClick={() => {
                         if (!controller.updateRules({ ...preset.rules })) {
-                          onAnnounce(`${preset.name} was not applied; review the Director error.`);
+                          onAnnounce(
+                            errorNotice(`${preset.name} was not applied; review the Director error.`),
+                          );
                           return;
                         }
                         onAnnounce(`${preset.name} rules applied. Adjust any field afterward.`);
@@ -776,6 +780,10 @@ export function FormatView({
                           onAnnounce(
                             `${entry.name} ${entry.archived ? 'reopened' : 'archived'}; history was retained.`,
                           );
+                        } else {
+                          onAnnounce(
+                            errorNotice(`${entry.name} was not changed; review the Director error.`),
+                          );
                         }
                       }}
                     >
@@ -865,7 +873,7 @@ function PhaseConfiguration({
       }
       const tiebreakers = phase.advancementRule?.tiebreakers ?? rules?.tiebreakers ?? [];
       if (tiebreakers.length === 0) {
-        onAnnounce('Configure at least one standings tiebreaker before enabling advancement.');
+        onAnnounce(errorNotice('Configure at least one standings tiebreaker before enabling advancement.'));
         return;
       }
       advancementRule = {
@@ -882,7 +890,7 @@ function PhaseConfiguration({
       advancementRule,
     });
     if (!updated) {
-      onAnnounce('Stage changes were not saved; review the Director error.');
+      onAnnounce(errorNotice('Stage changes were not saved; review the Director error.'));
       return;
     }
     setDraftState({
@@ -1118,6 +1126,8 @@ function TiebreakerConfiguration({
       onAnnounce(
         `${tiebreakerLabel(current)} moved ${direction < 0 ? 'up' : 'down'} in the standings order.`,
       );
+    } else {
+      onAnnounce(errorNotice('The tiebreaker order was not saved; review the Director error.'));
     }
   };
   return (
@@ -1212,20 +1222,22 @@ function ManualRoundBuilder({
   const createRound = () => {
     if (mode === 'swiss' && selected.length !== teams.length) {
       onAnnounce(
-        'Swiss manual override must account for every confirmed team; drop teams instead of omitting them.',
+        errorNotice(
+          'Swiss manual override must account for every confirmed team; drop teams instead of omitting them.',
+        ),
       );
       return;
     }
     if (selected.length < 2) {
-      onAnnounce('Select at least two confirmed teams.');
+      onAnnounce(errorNotice('Select at least two confirmed teams.'));
       return;
     }
     if (byeTeamId && !selectedTeamIds.includes(byeTeamId)) {
-      onAnnounce('Choose a bye team from the selected field.');
+      onAnnounce(errorNotice('Choose a bye team from the selected field.'));
       return;
     }
     if (oddNeedsBye) {
-      onAnnounce('This selected field is odd; choose the team receiving the bye.');
+      onAnnounce(errorNotice('This selected field is odd; choose the team receiving the bye.'));
       return;
     }
     const pairings = [] as Array<{ leftTeamId: string; rightTeamId: string | null }>;
@@ -1356,12 +1368,14 @@ function PoolConfiguration({
   const poolSetupComplete = activePools.length > 0 && poolGeneration.supported;
   const createPools = () => {
     if (locked) {
-      onAnnounce('Pool membership is locked after a round has been generated; add a new stage instead.');
+      onAnnounce(
+        errorNotice('Pool membership is locked after a round has been generated; add a new stage instead.'),
+      );
       return;
     }
     const count = Number(poolCount);
     if (!Number.isInteger(count) || count < 1 || count > confirmedTeams.length) {
-      onAnnounce(`Choose between 1 and ${confirmedTeams.length || 1} pools.`);
+      onAnnounce(errorNotice(`Choose between 1 and ${confirmedTeams.length || 1} pools.`));
       return;
     }
     const sizes = playoffPools
@@ -1372,7 +1386,7 @@ function PoolConfiguration({
       const teamIds = confirmedTeams.slice(offset, offset + (sizes[index] ?? 0)).map((team) => team.id);
       const added = controller.addPool({ phaseId: phase.id, name: poolName(index), teamIds });
       if (!added) {
-        onAnnounce('Pool creation stopped; review the Director error before trying again.');
+        onAnnounce(errorNotice('Pool creation stopped; review the Director error before trying again.'));
         return;
       }
       offset += sizes[index] ?? 0;
@@ -1385,11 +1399,16 @@ function PoolConfiguration({
   };
   const addPool = () => {
     if (locked) {
-      onAnnounce('Pool membership is locked after a round has been generated; add a new stage instead.');
+      onAnnounce(
+        errorNotice('Pool membership is locked after a round has been generated; add a new stage instead.'),
+      );
       return;
     }
     const name = newPoolName.trim() || poolName(pools.length);
-    if (!controller.addPool({ phaseId: phase.id, name })) return;
+    if (!controller.addPool({ phaseId: phase.id, name })) {
+      onAnnounce(errorNotice(`${name} was not added; review the Director error.`));
+      return;
+    }
     setNewPoolName('');
     onAnnounce(`${name} added; assign its teams before generating.`);
   };
@@ -1530,10 +1549,13 @@ function PoolEditor({
   const save = () => {
     const trimmedName = name.trim();
     if (!trimmedName) {
-      onAnnounce('Enter a pool name first.');
+      onAnnounce(errorNotice('Enter a pool name first.'));
       return;
     }
-    if (!controller.updatePool(pool.id, { name: trimmedName, teamIds })) return;
+    if (!controller.updatePool(pool.id, { name: trimmedName, teamIds })) {
+      onAnnounce(errorNotice(`${trimmedName} was not saved; review the Director error.`));
+      return;
+    }
     setDraft({ name: trimmedName, teamIds, nameDirty: false, teamIdsDirty: false });
     onAnnounce(`${trimmedName} updated.`);
   };
@@ -1602,6 +1624,8 @@ function PoolEditor({
             }
             if (controller.setPoolArchived(pool.id, !pool.archived)) {
               onAnnounce(`${pool.name} ${pool.archived ? 'reopened' : 'archived'}; history was retained.`);
+            } else {
+              onAnnounce(errorNotice(`${pool.name} was not changed; review the Director error.`));
             }
           }}
         >

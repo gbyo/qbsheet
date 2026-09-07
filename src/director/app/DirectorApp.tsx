@@ -1223,10 +1223,14 @@ function OperatorProfileDialog({
   const [name, setName] = useState(profile.displayName);
   const [role, setRole] = useState(profile.role ?? '');
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const firstFieldRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     const d = dialogRef.current;
     if (!d) return;
     if (!d.open) d.showModal();
+    // The other two Director dialogs open on their first field; this one used to open on nothing,
+    // so a keyboard operator arrived in a modal with no idea where they were.
+    firstFieldRef.current?.focus();
     const h = (e: Event) => {
       e.preventDefault();
       onClose();
@@ -1234,6 +1238,11 @@ function OperatorProfileDialog({
     d.addEventListener('cancel', h);
     return () => d.removeEventListener('cancel', h);
   }, [onClose]);
+  const save = () => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    onSave({ displayName: trimmed, role: role.trim() || undefined });
+  };
   return (
     <dialog
       ref={dialogRef}
@@ -1250,30 +1259,41 @@ function OperatorProfileDialog({
       <p className="director-panel-footnote">
         Local only — not saved to exports or Live. Used for audit events.
       </p>
-      <div className="director-form-grid director-form-grid-single" style={{ marginTop: 16 }}>
-        <label className="director-form-field">
-          <span>Display name</span>
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Director" />
-        </label>
-        <label className="director-form-field">
-          <span>Role / title (optional)</span>
-          <input value={role} onChange={(e) => setRole(e.target.value)} placeholder="Local operator" />
-        </label>
-      </div>
-      <div className="director-form-actions" style={{ marginTop: 16 }}>
-        <Button
-          variant="primary"
-          onClick={() => {
-            if (!name.trim()) return;
-            onSave({ displayName: name.trim(), role: role.trim() || undefined });
-          }}
-        >
-          Save
-        </Button>
-        <Button variant="secondary" onClick={onClose}>
-          Cancel
-        </Button>
-      </div>
+      {/*
+        A form, so Enter saves the way it does in New tournament and Tournament details. Save is
+        disabled on an empty name rather than accepting the click and doing nothing: the old button
+        looked live, swallowed the press, and left the dialog open with no explanation.
+      */}
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          save();
+        }}
+      >
+        <div className="director-form-grid director-form-grid-single" style={{ marginTop: 16 }}>
+          <label className="director-form-field">
+            <span>Display name</span>
+            <input
+              ref={firstFieldRef}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Director"
+            />
+          </label>
+          <label className="director-form-field">
+            <span>Role / title (optional)</span>
+            <input value={role} onChange={(e) => setRole(e.target.value)} placeholder="Local operator" />
+          </label>
+        </div>
+        <div className="director-form-actions" style={{ marginTop: 16 }}>
+          <Button variant="primary" type="submit" disabled={!name.trim()}>
+            Save
+          </Button>
+          <Button variant="secondary" type="button" onClick={onClose}>
+            Cancel
+          </Button>
+        </div>
+      </form>
     </dialog>
   );
 }
@@ -1318,11 +1338,14 @@ function NewTournamentScreen({
   const [venue, setVenue] = useState('');
   const [organizer, setOrganizer] = useState('');
   const create = () => {
-    if (!name.trim()) {
+    const trimmedName = name.trim();
+    if (!trimmedName) {
       onAnnounce(errorNotice('Enter a tournament name first.'));
       return;
     }
-    controller.createTournament({ name, date, venue, organizer });
+    // New tournament… trims; this screen did not, so a stray trailing space rode into the sidebar
+    // switcher, every export filename and the archive name.
+    controller.createTournament({ name: trimmedName, date, venue, organizer });
   };
   const importArchive = async (file: File | undefined) => {
     if (!file) return;

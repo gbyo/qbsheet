@@ -80,8 +80,13 @@ export function formatRecord(standing: Pick<TeamStanding, 'wins' | 'losses' | 't
     : `${standing.wins}–${standing.losses}`;
 }
 
-export function formatWinPct(winPercentage: number): string {
-  return `${(winPercentage * 100).toFixed(1)}%`;
+/**
+ * A win rate needs a game to be a rate. `deriveTeamStandings` seeds every confirmed team with
+ * `winPercentage: 0`, so a team that has not played renders `0.0%` — indistinguishable on the page
+ * from a team that played and lost every game. Unknown stays unknown.
+ */
+export function formatWinPct(standing: Pick<TeamStanding, 'winPercentage' | 'gamesPlayed'>): string {
+  return standing.gamesPlayed > 0 ? `${(standing.winPercentage * 100).toFixed(1)}%` : UNKNOWN_STAT;
 }
 
 export function formatAverage(total: number, games: number): string {

@@ -6,7 +6,7 @@ import { exportArchiveBytes, exportQbj, exportSqbs, exportTeamCsv } from '../for
 import { playerStatsCsv, standingsFileStem, teamStandingsCsv } from '../format/standingsCsv';
 import { csvMediaType, downloadBytes, downloadText } from '../format/downloadFile';
 import { isNativeDirector, saveNativeFile } from '../platform/native';
-import type { AnnounceInput } from '../notices';
+import { errorNotice, infoNotice, type AnnounceInput } from '../notices';
 
 export function PublishView({
   state,
@@ -173,11 +173,11 @@ export async function downloadArchive(
     if (isNativeDirector()) {
       const result = await saveNativeFile(name, bytes);
       if (result.status === 'cancelled') {
-        onAnnounce('Portable archive save cancelled.');
+        onAnnounce(infoNotice('Portable archive save cancelled.'));
         return;
       }
       if (result.status === 'unavailable') {
-        onAnnounce('The native file-save dialog is unavailable.');
+        onAnnounce(infoNotice('The native file-save dialog is unavailable.'));
         return;
       }
       onAnnounce(`Portable archive saved to ${result.path}.`);
@@ -187,7 +187,9 @@ export async function downloadArchive(
     onAnnounce('Portable tournament archive exported.');
   } catch (reason: unknown) {
     onAnnounce(
-      reason instanceof Error ? reason.message : 'Portable tournament archive could not be exported.',
+      errorNotice(
+        reason instanceof Error ? reason.message : 'Portable tournament archive could not be exported.',
+      ),
     );
   }
 }

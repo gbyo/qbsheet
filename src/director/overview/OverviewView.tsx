@@ -76,7 +76,15 @@ export function OverviewView({
   const issues = runPreflight(state, nativeServerReady, nativeServerAvailable);
   const blockers = issues.filter((issue) => issue.severity === 'blocker');
   const [showAllAttention, setShowAllAttention] = useState(false);
-  const standings = deriveTeamStandings(state).slice(0, 5);
+  /*
+   * Leaders are teams that have led something. `deriveTeamStandings` seeds a 0–0 row for every
+   * confirmed team, so ranking the raw list numbered five teams that had not played a game yet —
+   * a leaderboard invented out of an empty schedule. Filtering on games played leaves the panel's
+   * "accepted results will appear here" copy on screen until there is a result to rank.
+   */
+  const standings = deriveTeamStandings(state)
+    .filter((standing) => standing.gamesPlayed > 0)
+    .slice(0, 5);
   // Every blocker answers where it can be fixed: the attention item deep-links
   // into the tool that owns the problem instead of dumping everything on the
   // Tournament section.

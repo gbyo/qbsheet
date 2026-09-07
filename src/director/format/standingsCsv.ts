@@ -66,7 +66,12 @@ function ratio(numerator: number, denominator: number): string {
   return denominator === 0 ? '' : (numerator / denominator).toFixed(2);
 }
 
-/** The team table on `Standings & stats`, in the order the screen ranks it. */
+/**
+ * The team table on `Standings & stats`, in the order the screen ranks it.
+ *
+ * `win_percentage` is blank, not `0.0%`, for a team that has not played. The screen renders that
+ * same cell as "—"; a spreadsheet reading 0.0% would sort an unplayed team in with the winless ones.
+ */
 export function teamStandingsCsv(state: DirectorState): string {
   return serializeCsv(
     teamStandingsCsvHeaders,
@@ -78,7 +83,7 @@ export function teamStandingsCsv(state: DirectorState): string {
       standing.wins,
       standing.losses,
       standing.ties,
-      `${(standing.winPercentage * 100).toFixed(1)}%`,
+      standing.gamesPlayed > 0 ? `${(standing.winPercentage * 100).toFixed(1)}%` : '',
       standing.pointsFor,
       standing.pointsAgainst,
       standing.margin,
