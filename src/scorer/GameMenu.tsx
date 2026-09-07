@@ -165,13 +165,13 @@ export default function GameMenu(props: { items: IGameMenuItem[]; label?: string
                 because a menu that made somebody press Down twice to get past a line would have made
                 the line a control.
               */}
+              {item.dividerBefore && index > 0 && (
+                <li role="separator" className="scorer-menu-separator" aria-orientation="horizontal" />
+              )}
               {item.groupLabel && (
                 <li role="presentation" className="scorer-menu-group-label">
                   {item.groupLabel}
                 </li>
-              )}
-              {item.dividerBefore && index > 0 && (
-                <li role="separator" className="scorer-menu-separator" aria-orientation="horizontal" />
               )}
               <li role="none">
                 <button

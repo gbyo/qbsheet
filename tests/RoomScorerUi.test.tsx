@@ -1344,7 +1344,9 @@ describe('the game menu', () => {
     const destructiveStart = children.findIndex(
       (child) => child.querySelector('.scorer-menu-item.is-destructive') !== null,
     );
-    expect(children[destructiveStart - 1]?.getAttribute('role')).toBe('separator');
+    const destructiveLabel = children[destructiveStart - 1];
+    expect(destructiveLabel?.getAttribute('role')).toBe('presentation');
+    expect(children[destructiveStart - 2]?.getAttribute('role')).toBe('separator');
   });
 
   test('Swap team sides is quiet, discoverable, and maps a displayed-left buzz canonically', () => {
