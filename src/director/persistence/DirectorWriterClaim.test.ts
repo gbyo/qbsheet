@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
   claimDirectorWriter,
   directorWriterChannelName,
@@ -10,6 +10,8 @@ const claims: DirectorWriterClaim[] = [];
 
 afterEach(() => {
   for (const claim of claims.splice(0)) claim.release();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 const claim = (tournamentId: string, documentId: string, tabId: string) =>
@@ -81,6 +83,25 @@ describe('Director writer claims', () => {
     expect(first).toMatchObject({ held: true, mode: 'broadcast-channel' });
     expect(second).toMatchObject({ held: false, mode: 'broadcast-channel' });
     expect(first.lost.aborted).toBe(false);
+  });
+
+  test('keeps generated fallback tab IDs distinct without Web Crypto', async () => {
+    vi.stubGlobal('crypto', undefined);
+    vi.spyOn(performance, 'now').mockReturnValue(123);
+    let randomCalls = 0;
+    vi.spyOn(Math, 'random').mockImplementation(() => (randomCalls++ < 8 ? 0.1 : 0.2));
+
+    const options = {
+      tournamentId: 'tournament-a',
+      documentId: 'document-a',
+      locks: null,
+      responseTimeoutMs: 15,
+      heartbeatMs: 30,
+    } as const;
+    const [first, second] = await Promise.all([claimDirectorWriter(options), claimDirectorWriter(options)]);
+    claims.push(first, second);
+
+    expect([first.held, second.held].filter(Boolean)).toHaveLength(1);
   });
 
   test('a live holder keeps ownership when a lower-id contender probes it', async () => {
