@@ -75,8 +75,9 @@ export function rosterLineProblems(names: string[]): string[] {
       problems.push(`"${name.slice(0, 20)}…" is too long to be a name.`);
       continue;
     }
-    if (seen.has(name)) problems.push(`"${name}" is listed more than once.`);
-    seen.add(name);
+    const key = name.trim().toLocaleLowerCase();
+    if (seen.has(key)) problems.push(`"${name}" is listed more than once.`);
+    seen.add(key);
   }
   return problems;
 }
