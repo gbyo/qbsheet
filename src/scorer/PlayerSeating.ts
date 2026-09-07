@@ -89,8 +89,10 @@ export function loadSeating(
     if (parsed?.version !== playerSeatingVersion) return emptySeating();
     const updated = typeof parsed.updatedAt === 'string' ? new Date(parsed.updatedAt).getTime() : NaN;
     if (!Number.isFinite(updated)) return emptySeating();
-    const age = now.getTime() - updated;
-    if (age < 0 || age > playerSeatingMaxAgeMs) return emptySeating();
+    // A clock correction backward does not make a freshly saved preference stale. Treat a future
+    // timestamp as age zero, then let the normal maximum-age check expire it from the corrected clock.
+    const age = Math.max(0, now.getTime() - updated);
+    if (age > playerSeatingMaxAgeMs) return emptySeating();
     return { left: validNames(parsed.left), right: validNames(parsed.right) };
   } catch {
     // A seating preference is the least important thing on this device. Losing it costs a
