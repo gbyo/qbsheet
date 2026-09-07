@@ -103,15 +103,17 @@ struct SelectPlayerView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
-                Section {
+            }
+            .navigationTitle("Show my player stats")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
                     Button("Not now") {
                         selectionFeedback += 1
                         onSelect(nil)
                     }
                 }
             }
-            .navigationTitle("Show my player stats")
-            .navigationBarTitleDisplayMode(.inline)
             .sensoryFeedback(.selection, trigger: selectionFeedback)
         }
     }
