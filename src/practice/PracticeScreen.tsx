@@ -158,6 +158,27 @@ export function replayPracticeProgress(events: ScoreEvent[], furthestStepIndex =
   return { stepIndex, acceptedEventCount };
 }
 
+/**
+ * Whether the coach should trust replay over its persisted checkpoint.
+ *
+ * The Undo lesson is the one intentional exception: its success is represented by exactly one event
+ * disappearing, so replay briefly looks one step behind while that expected action is happening. A
+ * larger mismatch is not the lesson succeeding; it means the saved guide marker and game journal no
+ * longer describe the same history, and replay is the safe source of truth.
+ */
+export function shouldReplayPracticeProgress(
+  currentStepIndex: number,
+  acceptedEventCount: number,
+  eventCount: number,
+  replayedStepIndex: number,
+): boolean {
+  if (replayedStepIndex >= currentStepIndex) return false;
+  const currentStep = practiceSteps[currentStepIndex];
+  const expectedUndo =
+    currentStep?.expectation.kind === 'undo' && eventCount === acceptedEventCount - 1;
+  return !expectedUndo;
+}
+
 /** "Gibson, Jeremy, Owen and Lachlan" — a list a person reads rather than an array. */
 function nameList(names: readonly string[]): string {
   if (names.length < 2) return names[0] ?? '';
@@ -269,7 +290,7 @@ export default function PracticeScreen({
       if (complete) return;
 
       const replayed = replayPracticeProgress(events, stepIndex);
-      if (replayed.stepIndex < stepIndex && step.expectation.kind !== 'undo') {
+      if (shouldReplayPracticeProgress(stepIndex, acceptedEventCount, events.length, replayed.stepIndex)) {
         setProgress(replayed);
         setFeedback('The guide moved back to the first step affected by that change.');
         setMistake('');
