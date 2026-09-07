@@ -171,13 +171,18 @@ struct ScheduleRow: View {
             }
         } else if game.state == .live {
             if let live = snapshot.liveGames.first(where: { $0.gameId == game.id }), let scores = live.scores {
-                Text("\(Int(scores.first?.score ?? 0))–\(Int(scores.dropFirst().first?.score ?? 0))")
-                    .foregroundStyle(.red)
-                    .fontWeight(.semibold)
-                    .monospacedDigit()
+                let score = "\(Int(scores.first?.score ?? 0))–\(Int(scores.dropFirst().first?.score ?? 0))"
+                Label {
+                    Text(score)
+                        .monospacedDigit()
+                } icon: {
+                    Image(systemName: "dot.radiowaves.left.and.right")
+                }
+                .fontWeight(.semibold)
+                .foregroundStyle(.red)
+                .accessibilityLabel("Live score \(score)")
             } else {
                 Label("Live", systemImage: "dot.radiowaves.left.and.right")
-                    .labelStyle(.titleOnly)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.red)
             }
