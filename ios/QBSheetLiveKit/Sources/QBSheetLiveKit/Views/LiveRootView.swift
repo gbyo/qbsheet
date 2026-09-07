@@ -149,6 +149,35 @@ public struct LiveRootView: View {
             .refreshable { await store.refresh() }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
+                    if let snapshot = store.snapshot, let teamId = store.followedTeamId {
+                        Menu {
+                            Section(snapshot.teamName(teamId)) {
+                                Button {
+                                    store.selectedPlayerId = nil
+                                    store.followedTeamId = nil
+                                    choosingPlayer = false
+                                    tab = .home
+                                } label: {
+                                    Label("Change Team", systemImage: "person.2")
+                                }
+
+                                if snapshot.publishesPlayers {
+                                    Button {
+                                        choosingPlayer = true
+                                    } label: {
+                                        Label(
+                                            store.selectedPlayerId == nil ? "Choose Player" : "Change Player",
+                                            systemImage: "person.crop.circle"
+                                        )
+                                    }
+                                }
+                            }
+                        } label: {
+                            Label("Following \(snapshot.teamName(teamId))", systemImage: "person.crop.circle")
+                        }
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
                     ConnectionBadge(connection: store.connection)
                 }
             }
