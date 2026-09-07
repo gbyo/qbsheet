@@ -1,7 +1,8 @@
-import { afterEach, describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
   claimDirectorWriter,
   directorWriterChannelName,
+  type DirectorWriterChannel,
   type DirectorWriterClaim,
 } from './DirectorWriterClaim';
 
@@ -9,6 +10,8 @@ const claims: DirectorWriterClaim[] = [];
 
 afterEach(() => {
   for (const claim of claims.splice(0)) claim.release();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 const claim = (tournamentId: string, documentId: string, tabId: string) =>
@@ -82,6 +85,25 @@ describe('Director writer claims', () => {
     expect(first.lost.aborted).toBe(false);
   });
 
+  test('keeps generated fallback tab IDs distinct without Web Crypto', async () => {
+    vi.stubGlobal('crypto', undefined);
+    vi.spyOn(performance, 'now').mockReturnValue(123);
+    let randomCalls = 0;
+    vi.spyOn(Math, 'random').mockImplementation(() => (randomCalls++ < 8 ? 0.1 : 0.2));
+
+    const options = {
+      tournamentId: 'tournament-a',
+      documentId: 'document-a',
+      locks: null,
+      responseTimeoutMs: 15,
+      heartbeatMs: 30,
+    } as const;
+    const [first, second] = await Promise.all([claimDirectorWriter(options), claimDirectorWriter(options)]);
+    claims.push(first, second);
+
+    expect([first.held, second.held].filter(Boolean)).toHaveLength(1);
+  });
+
   test('a live holder keeps ownership when a lower-id contender probes it', async () => {
     const first = await claim('tournament-a', 'document-a', 'zeta');
     const second = await claim('tournament-a', 'document-a', 'alpha');
@@ -108,6 +130,36 @@ describe('Director writer claims', () => {
     holderChannel.close();
     const replacement = await claim('tournament-a', 'document-a', 'replacement');
     expect(replacement).toMatchObject({ held: true, mode: 'broadcast-channel' });
+  });
+
+  test('drops a fallback claim if its heartbeat channel breaks', async () => {
+    let posts = 0;
+    const channel: DirectorWriterChannel = {
+      postMessage: () => {
+        posts += 1;
+        // Probe, candidate, claim, and initial heartbeat succeed; the first scheduled heartbeat fails.
+        if (posts > 4) throw new Error('channel closed');
+      },
+      close: () => undefined,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    };
+
+    const holder = await claimDirectorWriter({
+      tournamentId: 'tournament-a',
+      documentId: 'document-a',
+      tabId: 'holder',
+      locks: null,
+      channel,
+      responseTimeoutMs: 1,
+      heartbeatMs: 5,
+    });
+    claims.push(holder);
+    expect(holder).toMatchObject({ held: true, mode: 'broadcast-channel' });
+    expect(holder.lost.aborted).toBe(false);
+
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    expect(holder.lost.aborted).toBe(true);
   });
 
   test('simultaneous contenders converge on one deterministic fallback holder', async () => {

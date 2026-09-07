@@ -10,7 +10,16 @@ struct UpdatesView: View {
     let teamId: String
 
     var body: some View {
-        let announcements = snapshot.announcements(for: teamId)
+        // Announcements can expire without a new snapshot arriving. Let SwiftUI schedule the
+        // lightweight time-driven refresh instead of owning another app-level timer or poll loop.
+        TimelineView(.periodic(from: .now, by: 30)) { context in
+            content(now: context.date)
+        }
+    }
+
+    @ViewBuilder
+    private func content(now: Date) -> some View {
+        let announcements = snapshot.announcements(for: teamId, now: now)
         if announcements.isEmpty {
             ContentUnavailableView(
                 "No announcements",
