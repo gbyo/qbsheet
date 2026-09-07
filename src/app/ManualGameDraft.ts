@@ -118,13 +118,20 @@ export interface IManualGamePreset {
   savedAt: string;
 }
 
+function cloneRoundOptions(options: IManualRoundOptions): IManualRoundOptions {
+  return {
+    ...options,
+    ...(options.breaks ? { breaks: options.breaks.map((row) => ({ ...row })) } : {}),
+  };
+}
+
 function presetStorageValue(value: IManualGamePreset): IManualGamePreset {
   return {
     ...value,
     left: { ...value.left },
     right: { ...value.right },
     rules: cloneRules(value.rules),
-    options: { ...value.options },
+    options: cloneRoundOptions(value.options),
   };
 }
 
@@ -201,7 +208,7 @@ export function rememberManualGamePreset(input: IManualGameInput): IManualGamePr
     left: { ...input.left },
     right: { ...input.right },
     rules: cloneRules(input.rules),
-    options: { ...input.options },
+    options: cloneRoundOptions(input.options),
     savedAt: new Date().toISOString(),
   };
   const signature = JSON.stringify({
