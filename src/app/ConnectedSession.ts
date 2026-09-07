@@ -181,6 +181,12 @@ export function newDeviceId(): string {
   const bytes = new Uint8Array(12);
   if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
     crypto.getRandomValues(bytes);
+  } else {
+    // The identifier carries no authority, but it still must not collapse every unsupported browser
+    // to the same value. Math.random is sufficient as a compatibility fallback for that label.
+    for (let index = 0; index < bytes.length; index += 1) {
+      bytes[index] = Math.floor(Math.random() * 256);
+    }
   }
   return `device-${Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
 }

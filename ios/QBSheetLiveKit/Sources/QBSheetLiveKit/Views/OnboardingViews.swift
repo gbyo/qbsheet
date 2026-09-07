@@ -9,6 +9,7 @@ struct FollowTeamView: View {
     let onFollow: (String) -> Void
 
     @State private var query = ""
+    @State private var selectionFeedback = 0
 
     var body: some View {
         NavigationStack {
@@ -20,6 +21,7 @@ struct FollowTeamView: View {
                         Section {
                             ForEach(matches) { team in
                                 Button {
+                                    selectionFeedback += 1
                                     onFollow(team.id)
                                 } label: {
                                     LabeledContent {
@@ -48,6 +50,7 @@ struct FollowTeamView: View {
             .navigationBarTitleDisplayMode(.large)
             // Only when there are enough teams for search to be worth the chrome.
             .modifier(SearchIfMany(count: snapshot.teams.count, query: $query))
+            .sensoryFeedback(.selection, trigger: selectionFeedback)
         }
     }
 
@@ -87,15 +90,20 @@ struct SelectPlayerView: View {
     let teamId: String
     let onSelect: (String?) -> Void
 
+    @State private var selectionFeedback = 0
+
     var body: some View {
         NavigationStack {
             List {
                 Section {
                     ForEach(snapshot.team(teamId)?.players ?? []) { player in
-                        Button(player.name) { onSelect(player.id) }
-                            .buttonStyle(.plain)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(.rect)
+                        Button(player.name) {
+                            selectionFeedback += 1
+                            onSelect(player.id)
+                        }
+                        .buttonStyle(.plain)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(.rect)
                     }
                 } header: {
                     Text(snapshot.teamName(teamId))
@@ -107,9 +115,13 @@ struct SelectPlayerView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Skip") { onSelect(nil) }
+                    Button("Skip") {
+                        selectionFeedback += 1
+                        onSelect(nil)
+                    }
                 }
             }
+            .sensoryFeedback(.selection, trigger: selectionFeedback)
         }
     }
 }

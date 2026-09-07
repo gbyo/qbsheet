@@ -1,4 +1,4 @@
-import { useEffect, useRef, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useRef, type RefObject } from 'react';
 
 /**
  * One Director popover menu with real menu behavior.
@@ -25,11 +25,14 @@ export function DirectorMenu({
   const onCloseRef = useRef(onClose);
   const didInitialFocusRef = useRef(false);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
     // Keyboard-opened menus start on the first item; mouse users keep their pointer position
     // but gain arrow-key travel from wherever focus lands. Once per mount only: later parent
-    // renders re-register listeners without stealing focus back.
+    // renders do not steal focus back.
     if (!didInitialFocusRef.current) {
       didInitialFocusRef.current = true;
       menuRef.current
@@ -86,7 +89,7 @@ export function DirectorMenu({
       document.removeEventListener('pointerdown', onPointerDown);
       document.removeEventListener('keydown', onKeyDown, true);
     };
-  }, [onClose, openerRef]);
+  }, [openerRef]);
 
   return (
     <div ref={menuRef} role="menu" aria-label={label} className={className}>

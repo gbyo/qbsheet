@@ -145,9 +145,50 @@ public struct LiveRootView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .navigationTitle(title)
-            .navigationBarTitleDisplayMode(.inline)
+            // These are root destinations. Let NavigationStack use the platform's large-title
+            // behavior and collapse it naturally as the spectator scrolls.
             .refreshable { await store.refresh() }
             .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    if let snapshot = store.snapshot, let teamId = store.followedTeamId {
+                        Menu {
+                            Section(snapshot.teamName(teamId)) {
+                                Button {
+                                    store.selectedPlayerId = nil
+                                    store.followedTeamId = nil
+                                    choosingPlayer = false
+                                    tab = .home
+                                } label: {
+                                    Label("Change Team", systemImage: "person.2")
+                                }
+
+                                if snapshot.publishesPlayers {
+                                    Button {
+                                        choosingPlayer = true
+                                    } label: {
+                                        Label(
+                                            store.selectedPlayerId == nil ? "Choose Player" : "Change Player",
+                                            systemImage: "person.crop.circle"
+                                        )
+                                    }
+                                }
+                            }
+                        } label: {
+                            Label("Following \(snapshot.teamName(teamId))", systemImage: "person.crop.circle")
+                        }
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    if let bootstrap, let snapshot = store.snapshot {
+                        ShareLink(
+                            item: bootstrap.url(),
+                            subject: Text(snapshot.tournament.name),
+                            message: Text("Follow \(snapshot.tournament.name) in QBSheet Live.")
+                        ) {
+                            Label("Share Tournament", systemImage: "square.and.arrow.up")
+                        }
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     ConnectionBadge(connection: store.connection)
                 }
@@ -167,7 +208,11 @@ struct StaleBanner: View {
                 Image(systemName: "wifi.exclamationmark")
                     .foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(ageDescription)
+                    if let receivedAt {
+                        Text("Last updated \(receivedAt, style: .relative)")
+                    } else {
+                        Text("Not updated yet")
+                    }
                     Text("Reconnecting…")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -180,41 +225,25 @@ struct StaleBanner: View {
             .accessibilityElement(children: .combine)
         }
     }
-
-    private var ageDescription: String {
-        guard let receivedAt else { return "Not updated yet" }
-        let seconds = Int(Date().timeIntervalSince(receivedAt))
-        if seconds < 10 { return "Updated just now" }
-        if seconds < 60 { return "Updated \(seconds) seconds ago" }
-        let minutes = seconds / 60
-        if minutes < 60 { return "Last updated \(minutes) \(minutes == 1 ? "minute" : "minutes") ago" }
-        let hours = minutes / 60
-        return "Last updated \(hours) \(hours == 1 ? "hour" : "hours") ago"
-    }
 }
 
 struct ConnectionBadge: View {
     let connection: TournamentStore.Connection
 
     var body: some View {
-        HStack(spacing: 5) {
-            Circle()
-                .fill(color)
-                .frame(width: 7, height: 7)
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Connection: \(label)")
+        Label(label, systemImage: symbol)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .accessibilityLabel("Connection: \(label)")
     }
 
-    private var color: Color {
+    private var symbol: String {
         switch connection {
-        case .live: .green
-        case .polling: .secondary
-        case .offline, .failed: .red
-        case .loading: .secondary
+        case .live: "antenna.radiowaves.left.and.right"
+        case .polling: "arrow.clockwise"
+        case .offline: "wifi.slash"
+        case .failed: "exclamationmark.triangle"
+        case .loading: "hourglass"
         }
     }
 
@@ -252,12 +281,8 @@ struct AppClipBanner: View {
 
 struct LoadingView: View {
     var body: some View {
-        VStack(spacing: 12) {
-            ProgressView()
-            Text("Loading the tournament…")
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        ProgressView("Loading the tournament…")
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
