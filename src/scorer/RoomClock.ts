@@ -86,8 +86,10 @@ export function resetRoomClock(state: IRoomClockState): IRoomClockState {
 
 export function elapsedRoomClock(state: IRoomClockState, now = Date.now()): number {
   const running =
-    state.status === 'running' && state.runningSince !== undefined ? now - state.runningSince : 0;
-  return Math.min(state.durationMs, Math.max(0, state.accumulatedMs + running));
+    state.status === 'running' && state.runningSince !== undefined
+      ? Math.max(0, now - state.runningSince)
+      : 0;
+  return Math.min(state.durationMs, state.accumulatedMs + running);
 }
 
 export function remainingRoomClock(state: IRoomClockState, now = Date.now()): number {
