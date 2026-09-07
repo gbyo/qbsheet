@@ -263,6 +263,7 @@ export class AppUpdateWatcher {
     if (this.applyResetTimer !== null) clearTimeout(this.applyResetTimer);
     this.applyResetTimer = null;
     this.clearApplyingWorkerListener();
+    this.publish({ available: false, applying: false });
   }
 
   private evaluate(): void {
