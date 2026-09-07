@@ -51,6 +51,8 @@ struct AnnouncementCard: View {
                     .foregroundStyle(accent)
             }
             .font(.headline)
+            .accessibilityLabel("\(severityWord): \(announcement.title)")
+            .accessibilityHeading(.h3)
 
             // Plain text. `.pre-wrap` equivalent: line breaks survive, markup does not.
             Text(announcement.body)
@@ -65,8 +67,6 @@ struct AnnouncementCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
         .background(.background.secondary, in: RoundedRectangle(cornerRadius: 12))
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(severityWord). \(announcement.title). \(announcement.body)")
     }
 
     private var accent: Color {
