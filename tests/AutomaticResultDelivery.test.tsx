@@ -60,6 +60,30 @@ describe('automatic result retry schedule', () => {
     expect(automaticResultRetryAt(pendingRecord('one', start.toISOString()))).toBe(start.getTime() + 5_000);
   });
 
+  test('retries immediately when a clock correction leaves the last attempt in the future', async () => {
+    const retry = vi.fn(async () => null);
+    const service = {
+      canAutoRetry: () => true,
+      retry,
+    } as unknown as ResultDeliveryService;
+    const onAttemptFinished = vi.fn(async () => undefined);
+    const futureAttempt = new Date(start.getTime() + 6 * 60 * 60_000).toISOString();
+
+    renderHook(() =>
+      useAutomaticResultDelivery({
+        records: [pendingRecord('clock-corrected', start.toISOString(), futureAttempt)],
+        service,
+        onAttemptFinished,
+      }),
+    );
+
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+
+    expect(retry).toHaveBeenCalledOnce();
+    expect(retry).toHaveBeenCalledWith('clock-corrected');
+    expect(onAttemptFinished).toHaveBeenCalledOnce();
+  });
+
   test('waits for the persisted due time before retrying', async () => {
     const retry = vi.fn(async () => null);
     const service = {

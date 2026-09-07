@@ -49,8 +49,9 @@ export function saveKeyboardEnabled(
   enabled: boolean,
   storage: IPreferenceStorage | null = browserStorage(),
 ): boolean {
+  if (!storage) return false;
   try {
-    storage?.setItem(keyboardPreferenceStorageKey, enabled ? 'on' : 'off');
+    storage.setItem(keyboardPreferenceStorageKey, enabled ? 'on' : 'off');
     return true;
   } catch {
     // Nothing depends on this sticking. The toggle still works for this tab.

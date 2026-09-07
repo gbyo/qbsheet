@@ -39,7 +39,14 @@
  * That is also why nothing here is persisted per frame: a drag is a question, and only the drop is
  * an answer.
  */
-import { PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState } from 'react';
+import {
+  PointerEvent as ReactPointerEvent,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 
 /**
  * How far a pointer travels before this is a drag rather than a press.
@@ -139,7 +146,7 @@ export function useSeatDrag(
    */
   const live = useRef<ISeatDragState | null>(null);
   const onDropRef = useRef(onDrop);
-  useEffect(() => {
+  useLayoutEffect(() => {
     onDropRef.current = onDrop;
   }, [onDrop]);
 

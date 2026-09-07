@@ -119,6 +119,9 @@ export class AppUpdateWatcher {
 
   private timer: ReturnType<typeof setInterval> | null = null;
 
+  /** One network check per registration at a time, even when manual and timer checks coincide. */
+  private updateCheck: { registration: IRegistrationLike; promise: Promise<void> } | null = null;
+
   private applyResetTimer: ReturnType<typeof setTimeout> | null = null;
 
   private applyingWorker: IWorkerLike | null = null;
@@ -263,6 +266,7 @@ export class AppUpdateWatcher {
     if (this.applyResetTimer !== null) clearTimeout(this.applyResetTimer);
     this.applyResetTimer = null;
     this.clearApplyingWorkerListener();
+    this.publish({ available: false, applying: false });
   }
 
   private evaluate(): void {
@@ -277,18 +281,37 @@ export class AppUpdateWatcher {
    * Silent about failure. A venue whose Wi-Fi has dropped, or whose captive portal is answering for
    * the origin, produces a rejected update check several times an hour, and none of those is
    * something to tell a room about.
+   *
+   * Calls that overlap for the same registration share one `registration.update()` request. Besides
+   * avoiding redundant network work, that keeps a slow update check from racing another observation
+   * of the same service-worker state.
    */
-  async checkNow(): Promise<void> {
+  checkNow(): Promise<void> {
     const registration = this.registration;
-    if (!registration) return;
-    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
-    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
-    try {
-      await registration.update();
-    } catch {
-      // Nothing to say and nothing to do; the next check is a quarter of an hour away.
-    }
-    this.evaluate();
+    if (!registration) return Promise.resolve();
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return Promise.resolve();
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return Promise.resolve();
+    if (this.updateCheck?.registration === registration) return this.updateCheck.promise;
+
+    const promise = (async () => {
+      try {
+        await registration.update();
+      } catch {
+        // Nothing to say and nothing to do; the next check is a quarter of an hour away.
+      }
+      // `observe()` may have switched registrations while the network request was in flight.
+      if (this.registration === registration) this.evaluate();
+    })();
+    this.updateCheck = { registration, promise };
+    void promise.then(
+      () => {
+        if (this.updateCheck?.promise === promise) this.updateCheck = null;
+      },
+      () => {
+        if (this.updateCheck?.promise === promise) this.updateCheck = null;
+      },
+    );
+    return promise;
   }
 
   /**
