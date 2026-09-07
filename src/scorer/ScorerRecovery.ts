@@ -57,7 +57,8 @@ function validPlayerList(value: unknown): value is string[] {
   return (
     Array.isArray(value) &&
     value.length > 0 &&
-    value.every((name) => typeof name === 'string' && name.trim() !== '')
+    value.every((name) => typeof name === 'string' && name.trim() !== '') &&
+    new Set(value).size === value.length
   );
 }
 
