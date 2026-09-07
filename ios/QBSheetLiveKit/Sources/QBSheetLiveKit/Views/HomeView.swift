@@ -10,73 +10,73 @@ struct HomeView: View {
     let teamId: String
     let selectedPlayerId: String?
 
-    /// Re-evaluates "next" as the day moves, without polling the network.
-    @State private var now = Date()
-    private let clock = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            if let announcement = headline {
-                AnnouncementCard(announcement: announcement, snapshot: snapshot, compact: true)
-            }
+        // Home has time-sensitive presentation even when no network snapshot changes: a scheduled
+        // event can become "next" and announcements can expire. Let SwiftUI own those lightweight
+        // refreshes instead of keeping a Combine timer alive with the view.
+        TimelineView(.periodic(from: .now, by: 30)) { context in
+            VStack(alignment: .leading, spacing: 20) {
+                if let announcement = headline(now: context.date) {
+                    AnnouncementCard(announcement: announcement, snapshot: snapshot, compact: true)
+                }
 
-            nextCard
+                nextCard(now: context.date)
 
-            if let placement = snapshot.placement(for: teamId) {
-                GroupBox {
-                    VStack(spacing: 0) {
-                        PlacementRow(
-                            title: snapshot.teamName(teamId),
-                            subtitle: placement.tableTitle,
-                            rank: placement.rank,
-                            of: placement.of
-                        )
-                        if let playerId = selectedPlayerId,
-                           let player = snapshot.player(playerId),
-                           let playerPlacement = snapshot.placement(forPlayer: playerId)
-                        {
-                            Divider()
+                if let placement = snapshot.placement(for: teamId) {
+                    GroupBox {
+                        VStack(spacing: 0) {
                             PlacementRow(
-                                title: player.name,
-                                subtitle: playerPlacement.tableTitle,
-                                rank: playerPlacement.rank,
-                                of: playerPlacement.of
+                                title: snapshot.teamName(teamId),
+                                subtitle: placement.tableTitle,
+                                rank: placement.rank,
+                                of: placement.of
                             )
+                            if let playerId = selectedPlayerId,
+                               let player = snapshot.player(playerId),
+                               let playerPlacement = snapshot.placement(forPlayer: playerId)
+                            {
+                                Divider()
+                                PlacementRow(
+                                    title: player.name,
+                                    subtitle: playerPlacement.tableTitle,
+                                    rank: playerPlacement.rank,
+                                    of: playerPlacement.of
+                                )
+                            }
                         }
+                    } label: {
+                        Text("Placement")
                     }
-                } label: {
-                    Text("Placement")
                 }
-            }
 
-            let recent = snapshot.recentResults(for: teamId)
-            if !recent.isEmpty {
-                GroupBox {
-                    VStack(spacing: 0) {
-                        ForEach(Array(recent.enumerated()), id: \.element.gameId) { index, result in
-                            if index > 0 { Divider() }
-                            ResultRow(result: result, snapshot: snapshot, teamId: teamId)
+                let recent = snapshot.recentResults(for: teamId)
+                if !recent.isEmpty {
+                    GroupBox {
+                        VStack(spacing: 0) {
+                            ForEach(Array(recent.enumerated()), id: \.element.gameId) { index, result in
+                                if index > 0 { Divider() }
+                                ResultRow(result: result, snapshot: snapshot, teamId: teamId)
+                            }
                         }
+                    } label: {
+                        Text("Recent results")
                     }
-                } label: {
-                    Text("Recent results")
                 }
-            }
 
-            Text(footer)
-                .font(.footnote)
-                .foregroundStyle(.tertiary)
+                Text(footer)
+                    .font(.footnote)
+                    .foregroundStyle(.tertiary)
+            }
         }
-        .onReceive(clock) { now = $0 }
     }
 
-    private var headline: QBLiveAnnouncement? {
+    private func headline(now: Date) -> QBLiveAnnouncement? {
         let visible = snapshot.announcements(for: teamId, now: now)
         return visible.first { $0.severity == .urgent } ?? visible.first { $0.severity == .important }
     }
 
     @ViewBuilder
-    private var nextCard: some View {
+    private func nextCard(now: Date) -> some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 8) {
                 if let live = snapshot.liveGame(for: teamId) {

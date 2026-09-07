@@ -36,6 +36,30 @@ interface CachedToken {
   mintedAt: number;
 }
 
+export class ProviderTokenCache {
+  private cached: CachedToken | null = null;
+  private minting: Promise<CachedToken> | null = null;
+
+  clear(): void {
+    this.cached = null;
+  }
+
+  async token(now: number, mint: () => Promise<string>): Promise<string> {
+    if (this.cached && now - this.cached.mintedAt < TOKEN_LIFETIME_MS) return this.cached.token;
+    if (this.minting) return (await this.minting).token;
+
+    const request = mint().then((token) => ({ token, mintedAt: now }));
+    this.minting = request;
+    try {
+      const cached = await request;
+      this.cached = cached;
+      return cached.token;
+    } finally {
+      if (this.minting === request) this.minting = null;
+    }
+  }
+}
+
 export class ApnsCredential extends DurableObject<Env> {
   /**
    * Held in an instance field, not storage.
@@ -44,7 +68,7 @@ export class ApnsCredential extends DurableObject<Env> {
    * output in a durable store for no benefit — an evicted object simply mints a new one, which is
    * one signature.
    */
-  private cached: CachedToken | null = null;
+  private readonly tokens = new ProviderTokenCache();
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
@@ -61,7 +85,7 @@ export class ApnsCredential extends DurableObject<Env> {
     if (url.pathname === '/rotate') {
       // Called by a sender that got `ExpiredProviderToken`, so the next attempt does not reuse the
       // token Apple just refused.
-      this.cached = null;
+      this.tokens.clear();
       return Response.json({ rotated: true });
     }
     return Response.json({ error: 'not-found', message: 'No such route.' }, { status: 404 });
@@ -71,13 +95,9 @@ export class ApnsCredential extends DurableObject<Env> {
   async token(now = Date.now()): Promise<string | null> {
     const { APNS_PRIVATE_KEY, APNS_KEY_ID, APNS_TEAM_ID } = this.env;
     if (!APNS_PRIVATE_KEY || !APNS_KEY_ID || !APNS_TEAM_ID) return null;
-    if (this.cached && now - this.cached.mintedAt < TOKEN_LIFETIME_MS) return this.cached.token;
-    const token = await mintProviderToken(
-      { keyId: APNS_KEY_ID, teamId: APNS_TEAM_ID, privateKeyPem: APNS_PRIVATE_KEY },
-      now,
+    return this.tokens.token(now, () =>
+      mintProviderToken({ keyId: APNS_KEY_ID, teamId: APNS_TEAM_ID, privateKeyPem: APNS_PRIVATE_KEY }, now),
     );
-    this.cached = { token, mintedAt: now };
-    return token;
   }
 }
 

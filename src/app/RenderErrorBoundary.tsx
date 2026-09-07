@@ -91,8 +91,9 @@ function sessionStore(): IStorageLike | null {
 export function readCrashCount(storage: IStorageLike | null = sessionStore()): number {
   try {
     const raw = storage?.getItem(crashCountStorageKey);
-    const parsed = raw === null || raw === undefined ? 0 : Number.parseInt(raw, 10);
-    return Number.isInteger(parsed) && parsed > 0 ? parsed : 0;
+    if (raw === null || raw === undefined || !/^\d+$/.test(raw)) return 0;
+    const parsed = Number(raw);
+    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : 0;
   } catch {
     return 0;
   }
