@@ -97,10 +97,7 @@ describe('Director writer claims', () => {
       responseTimeoutMs: 15,
       heartbeatMs: 30,
     } as const;
-    const [first, second] = await Promise.all([
-      claimDirectorWriter(options),
-      claimDirectorWriter(options),
-    ]);
+    const [first, second] = await Promise.all([claimDirectorWriter(options), claimDirectorWriter(options)]);
     claims.push(first, second);
 
     expect([first.held, second.held].filter(Boolean)).toHaveLength(1);
