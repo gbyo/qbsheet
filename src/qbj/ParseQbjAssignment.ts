@@ -272,10 +272,10 @@ function playState(match: QbjObject): MatchPlayState {
  *
  * `Round` carries a `name` and nothing else numeric — the reference implementation keeps its own
  * round number in a file extension, and writes `name` as the bare number ("4") for an ordinary
- * round. Its importer resolves rounds by running `parseInt` over exactly this field, so doing the
- * same here reads what it writes, and reads any other producer that names rounds numerically.
+ * round. Read that exact shape here, and read any other producer that names rounds with a bare
+ * integer. Display names that merely begin with digits are still names, not numbers.
  *
- * A non-numeric name ("Playoff 2", "Finals") yields nothing rather than a wrong number. A round
+ * A non-numeric name ("Playoff 2", "2026 Finals") yields nothing rather than a wrong number. A round
  * that cannot be numbered is not an error; it is a game scored without a round number.
  */
 function roundNumberOf(round: QbjObject | null | undefined): number | undefined {
@@ -283,7 +283,9 @@ function roundNumberOf(round: QbjObject | null | undefined): number | undefined 
   // An explicit numeric field wins where a producer supplies one, standard or not.
   if (finiteNumber(round.number)) return round.number;
   if (typeof round.name !== 'string') return undefined;
-  const parsed = Number.parseInt(round.name, 10);
+  const name = round.name.trim();
+  if (!/^[+-]?\d+$/.test(name)) return undefined;
+  const parsed = Number(name);
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
