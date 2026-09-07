@@ -39,8 +39,12 @@ function inputKey(item: DayOrderInput): string {
   return typeof item.id === 'string' ? item.id : '';
 }
 
+function validDayOrder(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
 function inputDayOrder(item: DayOrderInput): number | null {
-  return typeof item.dayOrder === 'number' && Number.isFinite(item.dayOrder) ? item.dayOrder : null;
+  return validDayOrder(item.dayOrder) ? item.dayOrder : null;
 }
 
 function inputTimestamp(item: DayOrderInput): string | null {
@@ -64,13 +68,11 @@ export interface OrderedDayItem {
 }
 
 function effectiveDayOrder(item: DayOrdered): number {
-  return typeof item.dayOrder === 'number' && Number.isFinite(item.dayOrder)
-    ? item.dayOrder
-    : Number.MAX_SAFE_INTEGER;
+  return validDayOrder(item.dayOrder) ? item.dayOrder : Number.MAX_SAFE_INTEGER;
 }
 
 function finiteDayOrderOrNull(item: DayOrdered): number | null {
-  return typeof item.dayOrder === 'number' && Number.isFinite(item.dayOrder) ? item.dayOrder : null;
+  return validDayOrder(item.dayOrder) ? item.dayOrder : null;
 }
 
 /**
