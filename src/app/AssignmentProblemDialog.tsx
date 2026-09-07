@@ -101,6 +101,7 @@ export default function AssignmentProblemDialog(props: {
       title="Something wrong with this game?"
       onClose={onClose}
       className="assignment-problem-dialog"
+      dismissible={report.kind !== 'compose' || !report.busy}
     >
       {report.kind === 'choose' && (
         <>
