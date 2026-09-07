@@ -167,7 +167,11 @@ struct StaleBanner: View {
                 Image(systemName: "wifi.exclamationmark")
                     .foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(ageDescription)
+                    if let receivedAt {
+                        Text("Last updated \(receivedAt, style: .relative)")
+                    } else {
+                        Text("Not updated yet")
+                    }
                     Text("Reconnecting…")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -179,17 +183,6 @@ struct StaleBanner: View {
             .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
             .accessibilityElement(children: .combine)
         }
-    }
-
-    private var ageDescription: String {
-        guard let receivedAt else { return "Not updated yet" }
-        let seconds = Int(Date().timeIntervalSince(receivedAt))
-        if seconds < 10 { return "Updated just now" }
-        if seconds < 60 { return "Updated \(seconds) seconds ago" }
-        let minutes = seconds / 60
-        if minutes < 60 { return "Last updated \(minutes) \(minutes == 1 ? "minute" : "minutes") ago" }
-        let hours = minutes / 60
-        return "Last updated \(hours) \(hours == 1 ? "hour" : "hours") ago"
     }
 }
 
