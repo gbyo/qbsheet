@@ -178,6 +178,17 @@ public struct LiveRootView: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
+                    if let bootstrap, let snapshot = store.snapshot {
+                        ShareLink(
+                            item: bootstrap.url(),
+                            subject: Text(snapshot.tournament.name),
+                            message: Text("Follow \(snapshot.tournament.name) in QBSheet Live.")
+                        ) {
+                            Label("Share Tournament", systemImage: "square.and.arrow.up")
+                        }
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
                     ConnectionBadge(connection: store.connection)
                 }
             }
