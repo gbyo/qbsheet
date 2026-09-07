@@ -46,8 +46,6 @@ describe('game journal clock corrections', () => {
     const inspection = inspectGameJournal('session-a', correctedNow, storage);
     expect(inspection.status).toBe('valid');
     expect(inspection.value?.events).toEqual(events);
-    expect(inspection.copies).toEqual([
-      expect.objectContaining({ key: 'current', status: 'valid' }),
-    ]);
+    expect(inspection.copies).toEqual([expect.objectContaining({ key: 'current', status: 'valid' })]);
   });
 });
