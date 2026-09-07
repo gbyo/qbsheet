@@ -394,13 +394,20 @@ impl ServerRuntime {
     ///
     /// A stopped server has no scorer to disconnect, so it reports nothing occupied rather than
     /// failing: the caller is asking whether a reassignment would strand someone, and it would not.
-    pub fn rooms_with_live_scorers(&self, room_ids: &HashSet<String>) -> Vec<String> {
-        self.inner
+    pub fn rooms_with_live_scorers(
+        &self,
+        room_ids: &HashSet<String>,
+    ) -> Result<Vec<String>, ServerError> {
+        let state = self
+            .inner
             .lock()
-            .ok()
-            .and_then(|inner| inner.state.clone())
-            .map(|state| state.rooms_with_live_scorers(room_ids))
-            .unwrap_or_default()
+            .map_err(|_| ServerError::Unavailable)?
+            .state
+            .clone();
+        match state {
+            Some(state) => state.rooms_with_live_scorers(room_ids),
+            None => Ok(Vec::new()),
+        }
     }
 
     /// Resolve a room help request through the trusted Director host operation, not the room's
@@ -725,35 +732,38 @@ impl DirectorQbtcpState {
     /// ends. Retained terminal and resumable-abandoned snapshots are deliberately excluded — they
     /// outlive the scorer, and whether they still matter depends on the scheduled game's status,
     /// which only the Director document knows.
-    pub fn rooms_with_live_scorers(&self, room_ids: &HashSet<String>) -> Vec<String> {
+    pub fn rooms_with_live_scorers(
+        &self,
+        room_ids: &HashSet<String>,
+    ) -> Result<Vec<String>, ServerError> {
         if room_ids.is_empty() {
-            return Vec::new();
+            return Ok(Vec::new());
         }
         let mut occupied: HashSet<String> = HashSet::new();
-        if let Ok(presence) = self.presence.lock() {
-            for (room_id, _) in presence.keys() {
-                if room_ids.contains(room_id) {
-                    occupied.insert(room_id.clone());
-                }
+        let presence = self.presence.lock().map_err(|_| ServerError::Unavailable)?;
+        for (room_id, _) in presence.keys() {
+            if room_ids.contains(room_id) {
+                occupied.insert(room_id.clone());
             }
         }
-        if let Ok(sessions) = self.session_rooms.lock() {
-            for room_id in sessions.values() {
-                if room_ids.contains(room_id) {
-                    occupied.insert(room_id.clone());
-                }
+        let sessions = self
+            .session_rooms
+            .lock()
+            .map_err(|_| ServerError::Unavailable)?;
+        for room_id in sessions.values() {
+            if room_ids.contains(room_id) {
+                occupied.insert(room_id.clone());
             }
         }
-        if let Ok(progress) = self.progress.lock() {
-            for record in progress.values() {
-                if room_ids.contains(&record.room_id) {
-                    occupied.insert(record.room_id.clone());
-                }
+        let progress = self.progress.lock().map_err(|_| ServerError::Unavailable)?;
+        for record in progress.values() {
+            if room_ids.contains(&record.room_id) {
+                occupied.insert(record.room_id.clone());
             }
         }
         let mut rooms: Vec<String> = occupied.into_iter().collect();
         rooms.sort();
-        rooms
+        Ok(rooms)
     }
 
     pub fn snapshot(&self) -> Result<ServerSnapshot, ServerError> {
@@ -1983,7 +1993,10 @@ mod tests {
         });
         let state = DirectorQbtcpState::from_document(Some(&document));
         let rooms = HashSet::from(["room-101".to_owned(), "room-102".to_owned()]);
-        assert!(state.rooms_with_live_scorers(&rooms).is_empty());
+        assert!(state
+            .rooms_with_live_scorers(&rooms)
+            .expect("live room state is readable")
+            .is_empty());
 
         // The window the Director document cannot see: a scorer pairs after the last poll, so
         // schedule validation still believes Room 101 is empty.
@@ -2001,7 +2014,9 @@ mod tests {
         .expect("presence is recorded");
 
         assert_eq!(
-            state.rooms_with_live_scorers(&rooms),
+            state
+                .rooms_with_live_scorers(&rooms)
+                .expect("live room state is readable"),
             vec!["room-101".to_owned()]
         );
 
@@ -2011,7 +2026,10 @@ mod tests {
         moved["scheduledGames"][0]["roomId"] = json!("room-102");
         moved["scheduledGames"][0]["assignmentRevision"] = json!(2);
         state.refresh_from_document(Some(&moved));
-        assert!(state.rooms_with_live_scorers(&rooms).is_empty());
+        assert!(state
+            .rooms_with_live_scorers(&rooms)
+            .expect("live room state is readable")
+            .is_empty());
     }
 
     #[test]
@@ -2044,7 +2062,9 @@ mod tests {
         )
         .expect("progress is recorded");
         assert_eq!(
-            state.rooms_with_live_scorers(&rooms),
+            state
+                .rooms_with_live_scorers(&rooms)
+                .expect("live room state is readable"),
             vec!["room-101".to_owned()]
         );
 
@@ -2060,7 +2080,10 @@ mod tests {
             },
         )
         .expect("terminal result is recorded");
-        assert!(state.rooms_with_live_scorers(&rooms).is_empty());
+        assert!(state
+            .rooms_with_live_scorers(&rooms)
+            .expect("live room state is readable")
+            .is_empty());
     }
 
     #[test]
@@ -2085,8 +2108,26 @@ mod tests {
 
         assert!(state
             .rooms_with_live_scorers(&HashSet::from(["room-102".to_owned()]))
+            .expect("live room state is readable")
             .is_empty());
-        assert!(state.rooms_with_live_scorers(&HashSet::new()).is_empty());
+        assert!(state
+            .rooms_with_live_scorers(&HashSet::new())
+            .expect("live room state is readable")
+            .is_empty());
+    }
+
+    #[test]
+    fn unreadable_live_tracking_fails_closed() {
+        let state = DirectorQbtcpState::from_document(None);
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = state.presence.lock().expect("presence lock");
+            panic!("poison live presence state");
+        }));
+
+        assert!(matches!(
+            state.rooms_with_live_scorers(&HashSet::from(["room-101".to_owned()])),
+            Err(ServerError::Unavailable)
+        ));
     }
 
     #[test]

@@ -345,7 +345,9 @@ pub fn director_qbtcp_live_rooms(
         .map(|room_id| room_id.trim().to_owned())
         .filter(|room_id| !room_id.is_empty())
         .collect::<std::collections::HashSet<_>>();
-    Ok(server.rooms_with_live_scorers(&room_ids))
+    server
+        .rooms_with_live_scorers(&room_ids)
+        .map_err(CommandError::server)
 }
 
 #[tauri::command]
