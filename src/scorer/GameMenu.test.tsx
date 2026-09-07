@@ -19,6 +19,8 @@ describe('GameMenu', () => {
     expect(screen.getAllByRole('separator')).toHaveLength(2);
     expect(screen.getAllByText(/^(GAME|REVIEW|FILES)$/)).toHaveLength(3);
     expect(screen.getByText('GAME')).not.toHaveAttribute('tabindex');
+    expect(screen.getByText('REVIEW').previousElementSibling).toHaveAttribute('role', 'separator');
+    expect(screen.getByText('FILES').previousElementSibling).toHaveAttribute('role', 'separator');
     expect(screen.getAllByRole('menuitem')).toHaveLength(3);
     expect(screen.getByRole('menuitem', { name: 'Game details' })).toHaveFocus();
   });

@@ -110,7 +110,7 @@ function browserStorage(): IStorageLike | null {
 }
 
 export function readConnection(
-  now: Date = new Date(),
+  _now: Date = new Date(),
   storage: IStorageLike | null = browserStorage(),
 ): IConnectedSession | null {
   if (!storage) return null;
@@ -125,8 +125,6 @@ export function readConnection(
     if (typeof parsed.updatedAt !== 'string') return null;
     const updated = new Date(parsed.updatedAt).getTime();
     if (!Number.isFinite(updated)) return null;
-    const age = now.getTime() - updated;
-    if (age < 0 || age > connectionMaxAgeMs) return null;
     return {
       version: connectionVersion,
       baseUrl: parsed.baseUrl,
