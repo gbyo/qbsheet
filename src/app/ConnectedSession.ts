@@ -110,7 +110,7 @@ function browserStorage(): IStorageLike | null {
 }
 
 export function readConnection(
-  now: Date = new Date(),
+  _now: Date = new Date(),
   storage: IStorageLike | null = browserStorage(),
 ): IConnectedSession | null {
   if (!storage) return null;
