@@ -44,8 +44,6 @@ struct AnnouncementCard: View {
     var body: some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 4) {
-                Text(announcement.title)
-                    .font(.headline)
                 // Plain text. `.pre-wrap` equivalent: line breaks survive, markup does not.
                 Text(announcement.body)
                     .font(.subheadline)
@@ -58,11 +56,17 @@ struct AnnouncementCard: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         } label: {
-            Label(severityWord, systemImage: severitySymbol)
-                .foregroundStyle(accent)
+            Label {
+                Text(announcement.title)
+                    .foregroundStyle(.primary)
+            } icon: {
+                Image(systemName: severitySymbol)
+                    .foregroundStyle(accent)
+            }
+            .font(.headline)
+            .accessibilityLabel("\(severityWord): \(announcement.title)")
+            .accessibilityHeading(.h3)
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(severityWord). \(announcement.title). \(announcement.body)")
     }
 
     private var accent: Color {
