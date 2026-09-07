@@ -42,7 +42,20 @@ struct AnnouncementCard: View {
     let compact: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 4) {
+                // Plain text. `.pre-wrap` equivalent: line breaks survive, markup does not.
+                Text(announcement.body)
+                    .font(.subheadline)
+                    .fixedSize(horizontal: false, vertical: true)
+                if !compact {
+                    Text(footer)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } label: {
             Label {
                 Text(announcement.title)
                     .foregroundStyle(.primary)
@@ -53,20 +66,7 @@ struct AnnouncementCard: View {
             .font(.headline)
             .accessibilityLabel("\(severityWord): \(announcement.title)")
             .accessibilityHeading(.h3)
-
-            // Plain text. `.pre-wrap` equivalent: line breaks survive, markup does not.
-            Text(announcement.body)
-                .font(.subheadline)
-                .fixedSize(horizontal: false, vertical: true)
-            if !compact {
-                Text(footer)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 12))
     }
 
     private var accent: Color {
