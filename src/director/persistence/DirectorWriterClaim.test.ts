@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'vitest';
 import {
   claimDirectorWriter,
   directorWriterChannelName,
+  type DirectorWriterChannel,
   type DirectorWriterClaim,
 } from './DirectorWriterClaim';
 
@@ -108,6 +109,36 @@ describe('Director writer claims', () => {
     holderChannel.close();
     const replacement = await claim('tournament-a', 'document-a', 'replacement');
     expect(replacement).toMatchObject({ held: true, mode: 'broadcast-channel' });
+  });
+
+  test('drops a fallback claim if its heartbeat channel breaks', async () => {
+    let posts = 0;
+    const channel: DirectorWriterChannel = {
+      postMessage: () => {
+        posts += 1;
+        // Probe, candidate, claim, and initial heartbeat succeed; the first scheduled heartbeat fails.
+        if (posts > 4) throw new Error('channel closed');
+      },
+      close: () => undefined,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    };
+
+    const holder = await claimDirectorWriter({
+      tournamentId: 'tournament-a',
+      documentId: 'document-a',
+      tabId: 'holder',
+      locks: null,
+      channel,
+      responseTimeoutMs: 1,
+      heartbeatMs: 5,
+    });
+    claims.push(holder);
+    expect(holder).toMatchObject({ held: true, mode: 'broadcast-channel' });
+    expect(holder.lost.aborted).toBe(false);
+
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    expect(holder.lost.aborted).toBe(true);
   });
 
   test('simultaneous contenders converge on one deterministic fallback holder', async () => {
