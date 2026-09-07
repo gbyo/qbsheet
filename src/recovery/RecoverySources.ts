@@ -108,12 +108,17 @@ export function inspectRecoveryCheckpoint(checkpoint: IRecoveryCheckpoint): IChe
   }
 }
 
+function checkpointTimestamp(checkpoint: IRecoveryCheckpoint): number {
+  const timestamp = new Date(checkpoint.capturedAt ?? '').getTime();
+  return Number.isFinite(timestamp) ? timestamp : Number.NEGATIVE_INFINITY;
+}
+
 /** Return checkpoint inspections newest first; invalid newest entries remain visible to diagnostics. */
 export function inspectCheckpoints(checkpoints: readonly IRecoveryCheckpoint[]): ICheckpointInspection[] {
   return checkpoints
     .slice()
     .sort((first, second) => {
-      const byTime = new Date(second.capturedAt ?? '').getTime() - new Date(first.capturedAt ?? '').getTime();
+      const byTime = checkpointTimestamp(second) - checkpointTimestamp(first);
       return byTime !== 0 ? byTime : String(second.id ?? '').localeCompare(String(first.id ?? ''));
     })
     .map(inspectRecoveryCheckpoint);
