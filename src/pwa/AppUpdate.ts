@@ -128,6 +128,10 @@ export class AppUpdateWatcher {
 
   private applyingWorkerStateHandler: (() => void) | null = null;
 
+  private installingWorker: IWorkerLike | null = null;
+
+  private installingWorkerStateHandler: (() => void) | null = null;
+
   private updateFoundHandler: (() => void) | null = null;
 
   private controllerChangeHandler: (() => void) | null = null;
@@ -166,6 +170,14 @@ export class AppUpdateWatcher {
     }
     this.applyingWorker = null;
     this.applyingWorkerStateHandler = null;
+  }
+
+  private clearInstallingWorkerListener(): void {
+    if (this.installingWorker && this.installingWorkerStateHandler) {
+      this.installingWorker.removeEventListener('statechange', this.installingWorkerStateHandler);
+    }
+    this.installingWorker = null;
+    this.installingWorkerStateHandler = null;
   }
 
   /**
@@ -227,15 +239,19 @@ export class AppUpdateWatcher {
       // screen that reloads into a half-cached build.
       const installing = registration.installing;
       if (!installing) {
+        this.clearInstallingWorkerListener();
         this.evaluate();
         return;
       }
+      this.clearInstallingWorkerListener();
       const onChange = () => {
         if (installing.state === 'installed' || installing.state === 'redundant') {
-          installing.removeEventListener('statechange', onChange);
+          this.clearInstallingWorkerListener();
         }
         this.evaluate();
       };
+      this.installingWorker = installing;
+      this.installingWorkerStateHandler = onChange;
       installing.addEventListener('statechange', onChange);
     };
     registration.addEventListener('updatefound', this.updateFoundHandler);
@@ -266,6 +282,7 @@ export class AppUpdateWatcher {
     if (this.applyResetTimer !== null) clearTimeout(this.applyResetTimer);
     this.applyResetTimer = null;
     this.clearApplyingWorkerListener();
+    this.clearInstallingWorkerListener();
     this.publish({ available: false, applying: false });
   }
 
