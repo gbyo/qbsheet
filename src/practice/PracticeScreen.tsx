@@ -175,7 +175,9 @@ export function shouldReplayPracticeProgress(
   if (replayedStepIndex >= currentStepIndex) return false;
   const currentStep = practiceSteps[currentStepIndex];
   const expectedUndo =
-    currentStep?.expectation.kind === 'undo' && eventCount === acceptedEventCount - 1;
+    currentStep?.expectation.kind === 'undo' &&
+    eventCount === acceptedEventCount - 1 &&
+    replayedStepIndex === currentStepIndex - 1;
   return !expectedUndo;
 }
 

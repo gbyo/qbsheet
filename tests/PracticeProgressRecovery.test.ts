@@ -14,4 +14,9 @@ describe('guided practice progress recovery', () => {
     expect(undoStepIndex).toBeGreaterThan(0);
     expect(shouldReplayPracticeProgress(undoStepIndex, 12, 9, 8)).toBe(true);
   });
+
+  it('rewinds when replay is several lessons behind despite a one-event count difference', () => {
+    expect(undoStepIndex).toBeGreaterThan(1);
+    expect(shouldReplayPracticeProgress(undoStepIndex, 12, 11, undoStepIndex - 2)).toBe(true);
+  });
 });
