@@ -33,6 +33,13 @@ describe('compareDayOrder', () => {
     expect(compareDayOrder({ id: 'a', dayOrder: 2 }, { id: 'b', dayOrder: 2 })).toBeLessThan(0);
     expect(compareDayOrder({ id: 'a', dayOrder: NaN }, { id: 'b' })).not.toBe(0);
   });
+
+  test.each([-1, 1.5, Number.MAX_SAFE_INTEGER + 1])(
+    'treats invalid sequence value %s as unordered',
+    (dayOrder) => {
+      expect(compareDayOrder({ id: 'z', dayOrder }, { id: 'a', dayOrder: 0 })).toBeGreaterThan(0);
+    },
+  );
 });
 
 describe('orderDayItems', () => {
@@ -126,6 +133,15 @@ describe('nextDayOrder', () => {
   test('appends after the highest explicit order', () => {
     expect(nextDayOrder([round('r1', 0), round('r2', 4)], [event('lunch', 2)])).toBe(5);
     expect(nextDayOrder([], [])).toBe(0);
+  });
+
+  test('ignores malformed sequence values when appending', () => {
+    expect(
+      nextDayOrder(
+        [round('r1', 4), round('negative', -10), round('fractional', 99.5)],
+        [event('unsafe', Number.MAX_SAFE_INTEGER + 1)],
+      ),
+    ).toBe(5);
   });
 });
 
