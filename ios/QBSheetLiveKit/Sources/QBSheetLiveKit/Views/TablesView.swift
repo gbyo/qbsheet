@@ -26,22 +26,7 @@ struct TablesView: View {
         } else {
             VStack(alignment: .leading, spacing: 20) {
                 if scopes.count > 1 {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            ForEach(scopes, id: \.id) { entry in
-                                Button {
-                                    scope = entry.id
-                                } label: {
-                                    Text(entry.label)
-                                        .font(.subheadline)
-                                }
-                                .buttonStyle(.bordered)
-                                .tint(entry.id == effectiveScope ? .accentColor : .secondary)
-                                .accessibilityAddTraits(entry.id == effectiveScope ? [.isSelected] : [])
-                            }
-                        }
-                        .padding(.horizontal, 1)
-                    }
+                    scopePicker
                 }
                 ForEach(titles, id: \.self) { title in
                     let forTitle = tables.filter { $0.title == title }
@@ -61,6 +46,25 @@ struct TablesView: View {
         }
     }
 
+    @ViewBuilder
+    private var scopePicker: some View {
+        if scopes.count <= 3 {
+            Picker("Scope", selection: scopeSelection) {
+                ForEach(scopes) { entry in
+                    Text(entry.label).tag(entry.id)
+                }
+            }
+            .pickerStyle(.segmented)
+        } else {
+            Picker("Scope", selection: scopeSelection) {
+                ForEach(scopes) { entry in
+                    Text(entry.label).tag(entry.id)
+                }
+            }
+            .pickerStyle(.menu)
+        }
+    }
+
     private struct ScopeEntry: Identifiable {
         let id: String
         let label: String
@@ -77,6 +81,15 @@ struct TablesView: View {
     /// The selected scope, or the first one the server actually published.
     private var effectiveScope: String {
         scopes.contains { $0.id == scope } ? scope : (scopes.first?.id ?? scope)
+    }
+
+    /// Keeps the native picker selected even when a server does not publish the conventional
+    /// `overall` scope. Writing through it still records the user's explicit choice.
+    private var scopeSelection: Binding<String> {
+        Binding(
+            get: { effectiveScope },
+            set: { scope = $0 }
+        )
     }
 
     private var titles: [String] {
