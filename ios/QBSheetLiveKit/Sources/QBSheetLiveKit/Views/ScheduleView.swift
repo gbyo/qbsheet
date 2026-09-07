@@ -10,8 +10,6 @@ struct ScheduleView: View {
     let teamId: String
 
     @State private var scope: Scope = .team
-    @State private var now = Date()
-    private let clock = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
 
     enum Scope: String, CaseIterable, Identifiable {
         case team, all
@@ -19,63 +17,66 @@ struct ScheduleView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Picker("Schedule", selection: $scope) {
-                Text(snapshot.teamName(teamId)).tag(Scope.team)
-                Text("All games").tag(Scope.all)
-            }
-            .pickerStyle(.segmented)
+        // Schedule changes presentation as events pass even when no new snapshot arrives. Let
+        // SwiftUI schedule those lightweight redraws instead of keeping a Combine timer alive.
+        TimelineView(.periodic(from: .now, by: 30)) { context in
+            VStack(alignment: .leading, spacing: 20) {
+                Picker("Schedule", selection: $scope) {
+                    Text(snapshot.teamName(teamId)).tag(Scope.team)
+                    Text("All games").tag(Scope.all)
+                }
+                .pickerStyle(.segmented)
 
-            let events = snapshot.timeline.filter { ($0.scheduledEnd ?? .distantFuture) >= now }
-            if scope == .team && !events.isEmpty {
-                GroupBox("Today") {
-                    VStack(spacing: 0) {
-                        ForEach(Array(events.enumerated()), id: \.element.id) { index, event in
-                            if index > 0 { Divider() }
-                            HStack {
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(event.title)
-                                    if let subtitle = event.location ?? event.description {
-                                        Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                let events = snapshot.timeline.filter { ($0.scheduledEnd ?? .distantFuture) >= context.date }
+                if scope == .team && !events.isEmpty {
+                    GroupBox("Today") {
+                        VStack(spacing: 0) {
+                            ForEach(Array(events.enumerated()), id: \.element.id) { index, event in
+                                if index > 0 { Divider() }
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(event.title)
+                                        if let subtitle = event.location ?? event.description {
+                                            Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    Spacer(minLength: 12)
+                                    if let start = event.scheduledStart {
+                                        Text(LiveFormat.time(start, in: snapshot.tournament.resolvedTimeZone))
+                                            .foregroundStyle(.secondary)
                                     }
                                 }
-                                Spacer(minLength: 12)
-                                if let start = event.scheduledStart {
-                                    Text(LiveFormat.time(start, in: snapshot.tournament.resolvedTimeZone))
-                                        .foregroundStyle(.secondary)
-                                }
+                                .padding(.vertical, 8)
                             }
-                            .padding(.vertical, 8)
                         }
                     }
                 }
-            }
 
-            let games = scope == .team ? snapshot.games(for: teamId) : snapshot.schedule
-            if games.isEmpty {
-                ContentUnavailableView(
-                    "Nothing released yet",
-                    systemImage: "calendar",
-                    description: Text("Games appear here when the tournament releases them.")
-                )
-            } else {
-                ForEach(rounds(of: games), id: \.id) { round in
-                    GroupBox(round.title) {
-                        VStack(spacing: 0) {
-                            ForEach(Array(round.games.enumerated()), id: \.element.id) { index, game in
-                                if index > 0 { Divider() }
-                                ScheduleRow(
-                                    game: game,
-                                    snapshot: snapshot,
-                                    followedTeamId: scope == .team ? teamId : nil
-                                )
+                let games = scope == .team ? snapshot.games(for: teamId) : snapshot.schedule
+                if games.isEmpty {
+                    ContentUnavailableView(
+                        "Nothing released yet",
+                        systemImage: "calendar",
+                        description: Text("Games appear here when the tournament releases them.")
+                    )
+                } else {
+                    ForEach(rounds(of: games), id: \.id) { round in
+                        GroupBox(round.title) {
+                            VStack(spacing: 0) {
+                                ForEach(Array(round.games.enumerated()), id: \.element.id) { index, game in
+                                    if index > 0 { Divider() }
+                                    ScheduleRow(
+                                        game: game,
+                                        snapshot: snapshot,
+                                        followedTeamId: scope == .team ? teamId : nil
+                                    )
+                                }
                             }
                         }
                     }
                 }
             }
         }
-        .onReceive(clock) { now = $0 }
     }
 
     private struct Round: Identifiable {
@@ -162,13 +163,18 @@ struct ScheduleRow: View {
             }
         } else if game.state == .live {
             if let live = snapshot.liveGames.first(where: { $0.gameId == game.id }), let scores = live.scores {
-                Text("\(Int(scores.first?.score ?? 0))–\(Int(scores.dropFirst().first?.score ?? 0))")
-                    .foregroundStyle(.red)
-                    .fontWeight(.semibold)
-                    .monospacedDigit()
+                let score = "\(Int(scores.first?.score ?? 0))–\(Int(scores.dropFirst().first?.score ?? 0))"
+                Label {
+                    Text(score)
+                        .monospacedDigit()
+                } icon: {
+                    Image(systemName: "dot.radiowaves.left.and.right")
+                }
+                .fontWeight(.semibold)
+                .foregroundStyle(.red)
+                .accessibilityLabel("Live score \(score)")
             } else {
                 Label("Live", systemImage: "dot.radiowaves.left.and.right")
-                    .labelStyle(.titleOnly)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.red)
             }

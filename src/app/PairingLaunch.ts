@@ -215,7 +215,6 @@ export function parsePairingLaunch(fragment: string): PairingLaunchResult {
  * discarded rather than checked.
  */
 export function parsePairingLaunchUrl(text: string): PairingLaunchResult {
-  if (text.length > maxLaunchLength) return { kind: 'none' };
   const hashAt = text.indexOf('#');
   if (hashAt === -1) return { kind: 'none' };
   return parsePairingLaunch(text.slice(hashAt));
