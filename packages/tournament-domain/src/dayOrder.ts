@@ -159,6 +159,9 @@ function compareOptionalTimestamp(left: string | null, right: string | null): nu
   if (left === right) return 0;
   if (left === null) return 1;
   if (right === null) return -1;
+  const leftInstant = Date.parse(left);
+  const rightInstant = Date.parse(right);
+  if (Number.isFinite(leftInstant) && Number.isFinite(rightInstant)) return leftInstant - rightInstant;
   return left < right ? -1 : 1;
 }
 
