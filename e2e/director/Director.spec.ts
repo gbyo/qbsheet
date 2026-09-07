@@ -411,7 +411,7 @@ test('Director supports keyboard search, inline edits, and audited result review
   await correction.locator('input[type="number"]').nth(0).fill('');
   await correction.getByRole('button', { name: 'Save correction' }).click();
   await expect(correction).toBeVisible();
-  await expect(page.getByRole('status')).toContainText('Corrected scores must be finite whole numbers.');
+  await expect(page.getByRole('alert')).toContainText('Corrected scores must be finite whole numbers.');
   await correction.locator('input[type="number"]').nth(0).fill('215');
   await correction.getByRole('button', { name: 'Save correction' }).click();
   await expect(page.locator('.director-score-cell').filter({ hasText: '215–180' }).last()).toBeVisible();
