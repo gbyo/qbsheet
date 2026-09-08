@@ -10,7 +10,7 @@ afterEach(() => {
 });
 
 test('state identifiers are normalized independently of locale-specific casing', () => {
-  vi.spyOn(String.prototype, 'toLocaleLowerCase').mockImplementation(function () {
+  vi.spyOn(String.prototype, 'toLocaleLowerCase').mockImplementation(function (this: string) {
     const value = String(this);
     return value === 'INFO' ? 'ınfo' : value.toLowerCase();
   });
