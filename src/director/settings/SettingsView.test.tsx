@@ -31,27 +31,38 @@ function stateWithAudit(count: number): DirectorState {
   return state;
 }
 
+/**
+ * Audit is one of Settings' four sections now — ordinary configuration,
+ * recovery, audit, and system diagnostics are separated rather than stacked —
+ * so the history is reached by selecting it. The paging behaviour it protects
+ * is unchanged: a full day's history is thousands of rows, and drawing them all
+ * before the page can paint is what the paging exists to prevent.
+ */
+function showAudit(): void {
+  fireEvent.click(screen.getByRole('button', { name: /^Audit/ }));
+}
+
 function auditRows(): string[] {
-  const panel = screen.getByText('Audit history').closest('.director-panel') as HTMLElement;
-  return within(panel)
-    .getAllByRole('row')
-    .slice(1)
+  return within(screen.getByRole('list', { name: 'Audit history' }))
+    .getAllByRole('listitem')
     .map((row) => row.querySelector('strong')?.textContent ?? '');
 }
 
 test('a long history draws one page, newest first, and says so', () => {
   render(<SettingsView state={stateWithAudit(130)} controller={controller} onAnnounce={vi.fn()} />);
+  showAudit();
 
   const rows = auditRows();
   expect(rows).toHaveLength(auditPageSize);
   expect(rows[0]).toBe('Event 129');
   expect(rows.at(-1)).toBe('Event 30');
-  expect(screen.getByText('100 of 130 events')).toBeTruthy();
+  expect(screen.getByText(/100 of 130 meaningful changes/)).toBeTruthy();
   expect(screen.getByText('30 earlier events')).toBeTruthy();
 });
 
 test('Load more reveals the earlier events without losing the newer ones', () => {
   render(<SettingsView state={stateWithAudit(130)} controller={controller} onAnnounce={vi.fn()} />);
+  showAudit();
 
   fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
 
@@ -61,13 +72,14 @@ test('Load more reveals the earlier events without losing the newer ones', () =>
   expect(rows.at(-1)).toBe('Event 0');
   // Everything is on screen, so there is nothing left to offer.
   expect(screen.queryByRole('button', { name: 'Load more' })).toBeNull();
-  expect(screen.getByText('130 events')).toBeTruthy();
+  expect(screen.getByText(/^130 meaningful changes/)).toBeTruthy();
 });
 
 test('a short history is drawn whole with no control at all', () => {
   render(<SettingsView state={stateWithAudit(3)} controller={controller} onAnnounce={vi.fn()} />);
+  showAudit();
 
   expect(auditRows()).toEqual(['Event 2', 'Event 1', 'Event 0']);
   expect(screen.queryByRole('button', { name: 'Load more' })).toBeNull();
-  expect(screen.getByText('3 events')).toBeTruthy();
+  expect(screen.getByText(/^3 meaningful changes/)).toBeTruthy();
 });

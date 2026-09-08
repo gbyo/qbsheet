@@ -93,13 +93,13 @@ test('backend choices are native radios in one group with keyboard support', () 
   const names = radios.map((radio) => (radio as HTMLInputElement).name);
   expect(new Set(names).size).toBe(1);
   // The default backend is checked and announced.
-  expect(screen.getByRole('radio', { name: /Set up with Cloudflare/ })).toBeChecked();
+  expect(screen.getByRole('radio', { name: /Cloudflare/ })).toBeChecked();
 
   // Native inputs: focusing and activating a radio selects it with no custom key handling.
-  (screen.getByRole('radio', { name: /Connect a custom server/ }) as HTMLElement).focus();
-  fireEvent.click(screen.getByRole('radio', { name: /Connect a custom server/ }));
-  expect(screen.getByRole('radio', { name: /Connect a custom server/ })).toBeChecked();
-  expect(screen.getByRole('radio', { name: /Set up with Cloudflare/ })).not.toBeChecked();
+  (screen.getByRole('radio', { name: /Custom QBLive server/ }) as HTMLElement).focus();
+  fireEvent.click(screen.getByRole('radio', { name: /Custom QBLive server/ }));
+  expect(screen.getByRole('radio', { name: /Custom QBLive server/ })).toBeChecked();
+  expect(screen.getByRole('radio', { name: /Cloudflare/ })).not.toBeChecked();
 });
 
 test('backend radios disable while the connection submits', () => {

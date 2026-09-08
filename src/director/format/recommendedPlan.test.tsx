@@ -38,7 +38,7 @@ test('a waitlisted roster is not offered a plan, and applying one keeps editable
       onAnnounce={vi.fn()}
     />,
   );
-  expect(screen.queryByRole('button', { name: /Use this plan/i })).toBeNull();
+  expect(screen.queryByRole('button', { name: /Use recommended plan/i })).toBeNull();
 
   // Applied directly, the plan still materializes its rounds and leaves pairings to the director
   // rather than throwing out of the action.
@@ -72,7 +72,7 @@ test('a confirmed roster is offered the plan and materializes its full rotation'
       onAnnounce={vi.fn()}
     />,
   );
-  expect(screen.getAllByRole('button', { name: /Use this plan/i }).length).toBeGreaterThan(0);
+  expect(screen.getAllByRole('button', { name: /Use recommended plan/i }).length).toBeGreaterThan(0);
   act(() => {
     expect(hook.result.current.applyTournamentPlan(recommendTournamentPlan(10)!.recommended)).toBe(true);
   });

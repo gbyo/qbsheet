@@ -1,5 +1,5 @@
 import { useCallback, useLayoutEffect } from 'react';
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { directorFixture, scoreAssignment } from '../transfers/testFixtures';
 import { MemoryTransferFileSystem } from '../transfers/ports';
