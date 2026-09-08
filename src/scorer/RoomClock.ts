@@ -113,8 +113,7 @@ function validRoomClockState(value: unknown, durationMs: number): value is IRoom
     return false;
   }
   return (
-    raw.status !== 'running' ||
-    (typeof raw.runningSince === 'number' && Number.isFinite(raw.runningSince))
+    raw.status !== 'running' || (typeof raw.runningSince === 'number' && Number.isFinite(raw.runningSince))
   );
 }
 
