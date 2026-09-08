@@ -145,14 +145,14 @@ const unprintable = /[\u0000-\u001f\u007f]/;
  * tail of a scanned URL without deciding which it has.
  */
 export function parsePairingLaunch(fragment: string): PairingLaunchResult {
+  const body = fragment.startsWith('#') ? fragment.slice(1) : fragment;
   if (fragment.length > maxLaunchLength) {
     // Too long to be a launch link. Refused rather than ignored only if it announces itself as one;
     // otherwise it is some other application's fragment and none of this file's business.
-    return fragment.startsWith(`#${pairingLaunchNamespace}`) || fragment.startsWith(pairingLaunchNamespace)
+    return body === pairingLaunchNamespace || body.startsWith(`${pairingLaunchNamespace}?`)
       ? problem(invalidPairingLaunchMessage)
       : { kind: 'none' };
   }
-  const body = fragment.startsWith('#') ? fragment.slice(1) : fragment;
   if (body !== pairingLaunchNamespace && !body.startsWith(`${pairingLaunchNamespace}?`)) {
     return { kind: 'none' };
   }
