@@ -4,9 +4,10 @@ import { useEffect, useLayoutEffect, useRef, type RefObject } from 'react';
  * One Director popover menu with real menu behavior.
  *
  * Every Director menu mounts this while open, so all of them share one contract: click outside
- * closes, Escape closes and returns focus to the opener, and Up/Down/Home/End move between the
- * enabled `role="menuitem"` buttons. The shell keeps a single `openMenu` value, so opening one
- * menu always closes the other — two popovers can never strand each other.
+ * closes, Escape closes and returns focus to the opener, Tab closes without intercepting normal
+ * keyboard travel, and Up/Down/Home/End move between the enabled `role="menuitem"` buttons. The
+ * shell keeps a single `openMenu` value, so opening one menu always closes the other — two popovers
+ * can never strand each other.
  */
 export function DirectorMenu({
   label,
@@ -63,6 +64,12 @@ export function DirectorMenu({
         event.stopPropagation();
         onCloseRef.current();
         openerRef.current?.focus({ preventScroll: true });
+        return;
+      }
+      if (event.key === 'Tab') {
+        // A menu is a temporary surface. Let the browser perform ordinary Tab/Shift+Tab travel,
+        // but dismiss the surface first so focus never moves behind a popover that remains open.
+        onCloseRef.current();
         return;
       }
       if (
