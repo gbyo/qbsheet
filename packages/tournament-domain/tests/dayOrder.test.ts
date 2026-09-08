@@ -174,4 +174,16 @@ describe('legacyDayOrder', () => {
     const ordered = [...rounds, ...timeline].sort((a, b) => (a.dayOrder ?? 0) - (b.dayOrder ?? 0));
     expect(ordered.map((entry) => entry.id)).toEqual(['r5', 'lunch', 'r6']);
   });
+
+  test('orders offset timestamps by their actual instant', () => {
+    const { rounds } = legacyDayOrder(
+      [
+        { ...round('later', undefined, 2), scheduledStart: '2026-01-10T10:30:00-04:00' },
+        { ...round('earlier', undefined, 1), scheduledStart: '2026-01-10T14:15:00Z' },
+      ],
+      [],
+    );
+    const ordered = [...rounds].sort((a, b) => (a.dayOrder ?? 0) - (b.dayOrder ?? 0));
+    expect(ordered.map((entry) => entry.id)).toEqual(['earlier', 'later']);
+  });
 });
