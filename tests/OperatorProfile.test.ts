@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { saveOperatorProfile } from '../src/director/operator/operatorProfile';
+import { operatorInitials, saveOperatorProfile } from '../src/director/operator/operatorProfile';
 
 describe('operator profile persistence', () => {
   afterEach(() => {
@@ -14,5 +14,10 @@ describe('operator profile persistence', () => {
 
     expect(() => saveOperatorProfile({ displayName: 'Gibson', role: 'Director' })).not.toThrow();
     expect(setItem).toHaveBeenCalledOnce();
+  });
+
+  it('keeps non-BMP characters intact when building initials', () => {
+    expect(operatorInitials('😀 Bell')).toBe('😀B');
+    expect(operatorInitials('😀A')).toBe('😀A');
   });
 });
