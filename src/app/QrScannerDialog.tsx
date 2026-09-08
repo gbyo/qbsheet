@@ -22,7 +22,7 @@
  * `getUserMedia` promise that resolves *after* the dialog has already been closed stops the stream it
  * was handed rather than attaching it to a component that is gone.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import NativeDialog from './NativeDialog';
 import { IQrDecoder, loadQrDecoder } from './QrDecoding';
 
@@ -74,10 +74,11 @@ export default function QrScannerDialog(props: {
   /** Anything the person has to act on: a denial, a missing camera, the wrong QR code. */
   const [failure, setFailure] = useState('');
 
-  // Kept current by a committed effect, because the reader is a timer that outlives any one render
-  // and a rejected scan must be judged by the current caller rather than the one that mounted this.
+  // The decode loop outlives any one render. Refresh the callback before a timer can run against
+  // the newly committed scanner; a passive effect leaves one paint where a decoded code can still
+  // be judged by the previous caller.
   const onDecodedRef = useRef(onDecoded);
-  useEffect(() => {
+  useLayoutEffect(() => {
     onDecodedRef.current = onDecoded;
   }, [onDecoded]);
 
