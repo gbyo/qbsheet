@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 import { isSafariBrowser } from '../src/app/browserCompatibility';
 
 describe('isSafariBrowser', () => {
@@ -31,5 +31,14 @@ describe('isSafariBrowser', () => {
         'Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) FxiOS/145.0 Mobile/15E148 Safari/605.1.15',
       ),
     ).toBe(false);
+  });
+
+  test('fails closed when browser globals are unavailable', () => {
+    vi.stubGlobal('navigator', undefined);
+    try {
+      expect(isSafariBrowser()).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
