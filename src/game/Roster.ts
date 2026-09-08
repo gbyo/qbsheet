@@ -75,7 +75,9 @@ export function rosterLineProblems(names: string[]): string[] {
       problems.push(`"${name.slice(0, 20)}…" is too long to be a name.`);
       continue;
     }
-    const key = name.trim().toLocaleLowerCase();
+    // Roster identity must not depend on the browser's locale. The QBJ parser uses ordinary
+    // Unicode case folding too, so typed and imported rosters should make the same duplicate call.
+    const key = name.trim().toLowerCase();
     if (seen.has(key)) problems.push(`"${name}" is listed more than once.`);
     seen.add(key);
   }
@@ -102,7 +104,7 @@ export function validatePlayerName(value: string, existingNames: readonly string
   if (name.length > playerNameMaxLength) {
     return { name, problem: `Player names can be at most ${playerNameMaxLength} characters.` };
   }
-  if (existingNames.some((existing) => existing.trim().toLocaleLowerCase() === name.toLocaleLowerCase())) {
+  if (existingNames.some((existing) => existing.trim().toLowerCase() === name.toLowerCase())) {
     return { name, problem: `${name} is already on this roster.` };
   }
   return { name };
