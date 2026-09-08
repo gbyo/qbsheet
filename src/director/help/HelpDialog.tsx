@@ -1,4 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useRef } from 'react';
+import type { MouseEvent as ReactMouseEvent } from 'react';
 
 export const DIRECTOR_SHORTCUTS = [
   { keys: ['⌘', 'K'], win: ['Ctrl', 'K'], description: 'Focus tournament search', action: 'search-focus' },
@@ -41,6 +42,20 @@ export function HelpDialog({ open, onClose }: { open: boolean; onClose: () => vo
     }
   }, [open]);
 
+  const scrollToHelpSection = (event: ReactMouseEvent<HTMLAnchorElement>) => {
+    const href = event.currentTarget.getAttribute('href');
+    if (!href?.startsWith('#')) return;
+    const sectionId = href.slice(1);
+    const target = document.getElementById(sectionId);
+    if (!target || !dialogRef.current?.contains(target)) return;
+
+    // These links navigate inside a modal, not to a new application location. Letting the browser
+    // follow the fragment would add each help section to history, so Back could walk through stale
+    // #help-* entries after the dialog had closed.
+    event.preventDefault();
+    target.scrollIntoView({ block: 'start' });
+  };
+
   return (
     <dialog ref={dialogRef} aria-labelledby={titleId} className="director-help-dialog" aria-modal="true">
       <div className="director-help-dialog-header">
@@ -56,15 +71,33 @@ export function HelpDialog({ open, onClose }: { open: boolean; onClose: () => vo
       </div>
       <div className="director-help-dialog-body">
         <nav aria-label="Help sections" className="director-help-toc">
-          <a href="#help-getting-started">Getting started</a>
-          <a href="#help-planning">Planning a tournament</a>
-          <a href="#help-running">Running rounds</a>
-          <a href="#help-results">Results / review</a>
-          <a href="#help-transfers">Transfers / USB workflow</a>
-          <a href="#help-qbtcp">QBTCP troubleshooting</a>
-          <a href="#help-live">QBSheet Live troubleshooting</a>
-          <a href="#help-storage">Recovery & storage</a>
-          <a href="#help-shortcuts">Keyboard shortcuts</a>
+          <a href="#help-getting-started" onClick={scrollToHelpSection}>
+            Getting started
+          </a>
+          <a href="#help-planning" onClick={scrollToHelpSection}>
+            Planning a tournament
+          </a>
+          <a href="#help-running" onClick={scrollToHelpSection}>
+            Running rounds
+          </a>
+          <a href="#help-results" onClick={scrollToHelpSection}>
+            Results / review
+          </a>
+          <a href="#help-transfers" onClick={scrollToHelpSection}>
+            Transfers / USB workflow
+          </a>
+          <a href="#help-qbtcp" onClick={scrollToHelpSection}>
+            QBTCP troubleshooting
+          </a>
+          <a href="#help-live" onClick={scrollToHelpSection}>
+            QBSheet Live troubleshooting
+          </a>
+          <a href="#help-storage" onClick={scrollToHelpSection}>
+            Recovery & storage
+          </a>
+          <a href="#help-shortcuts" onClick={scrollToHelpSection}>
+            Keyboard shortcuts
+          </a>
         </nav>
 
         <section id="help-getting-started">
