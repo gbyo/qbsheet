@@ -1,5 +1,7 @@
 import {
+  cloneElement,
   forwardRef,
+  isValidElement,
   useCallback,
   useEffect,
   useId,
@@ -7,6 +9,7 @@ import {
   useRef,
   useState,
   type InputHTMLAttributes,
+  type ReactElement,
   type ReactNode,
   type TextareaHTMLAttributes,
 } from 'react';
@@ -43,8 +46,13 @@ export function Field({
   htmlFor,
   spanAll = false,
   /**
-   * Render-prop form, so the field owns the ids that wire label → control →
-   * hint/error together. Custom controls take them as `id`/`ariaDescribedBy`.
+   * Render-prop form, for controls that take their ids as props — the custom
+   * `Select`, `Combobox`, `MultiSelect`, and `TimeZoneField`.
+   *
+   * Plain `children` are the common case and are wired up automatically: a
+   * single element child has `id`, `aria-describedby`, and `aria-invalid`
+   * injected, so `<Field label="Room name"><TextInput …/></Field>` is properly
+   * labelled without every call site repeating the plumbing.
    */
   render,
 }: {
@@ -62,13 +70,30 @@ export function Field({
   const hintId = `${generated}-hint`;
   const errorId = `${generated}-error`;
   const describedBy = [error ? errorId : null, hint ? hintId : null].filter(Boolean).join(' ') || undefined;
+  /*
+   * Without this, a `children` field rendered a `<label for=…>` pointing at an
+   * id nothing carried: visually a labelled field, but an unlabelled control to
+   * a screen reader, and unreachable via `getByLabelText`. Cloning is the least
+   * invasive fix — a child that already sets its own `id` keeps it.
+   */
+  const labelled =
+    !render && isValidElement(children)
+      ? cloneElement(children as ReactElement<Record<string, unknown>>, {
+          id: (children.props as { id?: string }).id ?? id,
+          'aria-describedby':
+            (children.props as { ['aria-describedby']?: string })['aria-describedby'] ?? describedBy,
+          'aria-invalid':
+            (children.props as { ['aria-invalid']?: boolean })['aria-invalid'] ?? (error ? true : undefined),
+        })
+      : children;
+
   return (
     <div className={`director-field ${spanAll ? 'director-field-span-all' : ''}`.trim()}>
       <label className="director-field-label" htmlFor={id}>
         <span>{label}</span>
         {optional && <span className="director-field-optional">optional</span>}
       </label>
-      {render ? render({ id, describedBy, invalid: Boolean(error) }) : children}
+      {render ? render({ id, describedBy, invalid: Boolean(error) }) : labelled}
       {error ? (
         <p className="director-field-error" id={errorId}>
           <Icon name="danger" size={13} />

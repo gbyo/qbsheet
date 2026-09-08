@@ -1,16 +1,22 @@
 /**
- * The three add-forms, and what they remember.
+ * What the logistics workspace has to get right.
  *
- * Add room / Add staff / Add equipment shared one set of fields and cleared them on every open, so
- * checking something on one form threw away whatever was typed into another. And staff could only
- * be created with a single "Primary role" even though the domain, and the edit form two lines
- * further down the same page, both take several.
+ * Rooms, staff, and equipment used to share one set of add-form fields, so
+ * typing into one threw away what was in another; and staff could only be
+ * created with a single "Primary role" even though the domain, and the edit
+ * form two lines further down the same page, both take several.
+ *
+ * The redesign made each of the three its own view with its own dialog, which
+ * removes the shared-state bug structurally. These tests hold that line: the
+ * three forms are independent, staff keep multiple roles, and a room's future
+ * assignability is not the same claim as what it is doing right now.
  */
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { DirectorController } from '../state/useDirectorController';
 import { scheduledGame, team, tournamentState } from '../../../tests/directorFixtures';
 import { RoomsView } from './RoomsView';
+import { ConfirmProvider } from '../components/Dialog';
 
 afterEach(cleanup);
 
@@ -20,76 +26,90 @@ function controllerWith(overrides: Partial<DirectorController> = {}): DirectorCo
     addStaff: vi.fn(() => true),
     addEquipment: vi.fn(() => true),
     updateStaff: vi.fn(() => true),
+    updateRoom: vi.fn(() => true),
     ...overrides,
   } as unknown as DirectorController;
 }
 
-function renderRooms(controller = controllerWith()) {
-  render(<RoomsView state={tournamentState()} controller={controller} onAnnounce={vi.fn()} />);
+function renderRooms(controller = controllerWith(), state = tournamentState()) {
+  render(
+    <ConfirmProvider>
+      <RoomsView state={state} controller={controller} onAnnounce={vi.fn()} />
+    </ConfirmProvider>,
+  );
   return controller;
 }
 
-describe('drafts that survive switching forms', () => {
-  test('a half-typed room is still there after a detour through Add staff', () => {
+/** Rooms, staff, and equipment are peer views of the same workspace. */
+function showView(name: RegExp): void {
+  fireEvent.click(screen.getByRole('button', { name }));
+}
+
+/** The open dialog, so a submit button is not confused with the page action that opened it. */
+function currentDialog(): HTMLElement {
+  return document.querySelector('dialog[open]') as HTMLElement;
+}
+
+/** Staff and equipment both label their name field "Name"; scope to the dialog. */
+function staffNameField(): HTMLInputElement {
+  return within(currentDialog()).getByLabelText('Name') as HTMLInputElement;
+}
+
+function queryStaffNameField(): HTMLElement | null {
+  const dialog = document.querySelector('dialog[open]');
+  return dialog ? within(dialog as HTMLElement).queryByLabelText('Name') : null;
+}
+
+const equipmentNameField = staffNameField;
+const queryEquipmentNameField = queryStaffNameField;
+
+function openAddStaff(): void {
+  showView(/^Staff/);
+  fireEvent.click(screen.getByRole('button', { name: 'Add staff' }));
+}
+
+describe('the three add forms are independent', () => {
+  test('each entity type has its own form with its own fields', () => {
     renderRooms();
 
     fireEvent.click(screen.getByRole('button', { name: 'Add room' }));
-    fireEvent.change(screen.getByPlaceholderText('Room 101'), { target: { value: 'Lecture Hall B' } });
-    fireEvent.change(screen.getByPlaceholderText('Anything the director or runners should know'), {
-      target: { value: 'Projector is broken' },
-    });
+    fireEvent.change(screen.getByLabelText('Room name'), { target: { value: 'Lecture Hall B' } });
+    // Nothing from the room form can reach another entity's form, because each
+    // is its own dialog over its own draft rather than one shared set of fields.
+    expect(queryStaffNameField()).toBeNull();
+    expect(queryEquipmentNameField()).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add staff' }));
-    expect(screen.queryByPlaceholderText('Room 101')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Add room' }));
+    openAddStaff();
+    expect(screen.queryByLabelText('Room name')).toBeNull();
+    expect((staffNameField() as HTMLInputElement).value).toBe('');
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
-    expect((screen.getByPlaceholderText('Room 101') as HTMLInputElement).value).toBe('Lecture Hall B');
-    expect(
-      (screen.getByPlaceholderText('Anything the director or runners should know') as HTMLTextAreaElement)
-        .value,
-    ).toBe('Projector is broken');
-  });
-
-  test('each form keeps its own name field rather than sharing one', () => {
-    renderRooms();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Add room' }));
-    fireEvent.change(screen.getByPlaceholderText('Room 101'), { target: { value: 'Room 12' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Add staff' }));
-    fireEvent.change(screen.getByPlaceholderText('Alex Morgan'), { target: { value: 'Alex Morgan' } });
+    showView(/^Equipment/);
     fireEvent.click(screen.getByRole('button', { name: 'Add equipment' }));
-
-    expect((screen.getByPlaceholderText('Buzzer set 1') as HTMLInputElement).value).toBe('');
-    fireEvent.click(screen.getByRole('button', { name: 'Add staff' }));
-    expect((screen.getByPlaceholderText('Alex Morgan') as HTMLInputElement).value).toBe('Alex Morgan');
-    fireEvent.click(screen.getByRole('button', { name: 'Add room' }));
-    expect((screen.getByPlaceholderText('Room 101') as HTMLInputElement).value).toBe('Room 12');
+    expect((equipmentNameField() as HTMLInputElement).value).toBe('');
   });
 
-  test('a closed form reopens with what was in it', () => {
+  test('Cancel discards the draft, as it does in every Director dialog', () => {
     renderRooms();
 
     fireEvent.click(screen.getByRole('button', { name: 'Add room' }));
-    fireEvent.change(screen.getByPlaceholderText('Room 101'), { target: { value: 'Room 12' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    fireEvent.change(screen.getByLabelText('Room name'), { target: { value: 'Room 12' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     fireEvent.click(screen.getByRole('button', { name: 'Add room' }));
 
-    expect((screen.getByPlaceholderText('Room 101') as HTMLInputElement).value).toBe('Room 12');
+    expect((screen.getByLabelText('Room name') as HTMLInputElement).value).toBe('');
   });
 
-  test('a save empties that form and only that form', () => {
-    renderRooms();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Add staff' }));
-    fireEvent.change(screen.getByPlaceholderText('Alex Morgan'), { target: { value: 'Alex Morgan' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Add room' }));
-    fireEvent.change(screen.getByPlaceholderText('Room 101'), { target: { value: 'Room 12' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save room' }));
+  test('a saved room reaches the controller and closes its form', () => {
+    const controller = renderRooms();
 
     fireEvent.click(screen.getByRole('button', { name: 'Add room' }));
-    expect((screen.getByPlaceholderText('Room 101') as HTMLInputElement).value).toBe('');
-    fireEvent.click(screen.getByRole('button', { name: 'Add staff' }));
-    expect((screen.getByPlaceholderText('Alex Morgan') as HTMLInputElement).value).toBe('Alex Morgan');
+    fireEvent.change(screen.getByLabelText('Room name'), { target: { value: 'Room 12' } });
+    fireEvent.click(within(currentDialog()).getByRole('button', { name: 'Add room' }));
+
+    expect(controller.addRoom).toHaveBeenCalledWith(expect.objectContaining({ name: 'Room 12' }));
+    expect(screen.queryByLabelText('Room name')).toBeNull();
   });
 });
 
@@ -97,10 +117,10 @@ describe('creating a staff member', () => {
   test('somebody who moderates and keeps score can be entered as both at once', () => {
     const controller = renderRooms();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add staff' }));
-    fireEvent.change(screen.getByPlaceholderText('Alex Morgan'), { target: { value: 'Alex Morgan' } });
+    openAddStaff();
+    fireEvent.change(staffNameField(), { target: { value: 'Alex Morgan' } });
     fireEvent.click(screen.getByRole('checkbox', { name: 'Scorekeeper' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Save staff member' }));
+    fireEvent.click(within(currentDialog()).getByRole('button', { name: 'Add staff member' }));
 
     expect(controller.addStaff).toHaveBeenCalledWith(
       expect.objectContaining({ name: 'Alex Morgan', roles: ['moderator', 'scorekeeper'] }),
@@ -110,7 +130,7 @@ describe('creating a staff member', () => {
   test('the single-choice Primary role select is gone', () => {
     renderRooms();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add staff' }));
+    openAddStaff();
 
     expect(screen.queryByLabelText('Primary role')).toBeNull();
     expect(screen.getByRole('checkbox', { name: 'Moderator' })).toBeChecked();
@@ -120,14 +140,14 @@ describe('creating a staff member', () => {
   test('an empty role set is refused rather than saved', () => {
     const controller = renderRooms();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add staff' }));
-    fireEvent.change(screen.getByPlaceholderText('Alex Morgan'), { target: { value: 'Alex Morgan' } });
+    openAddStaff();
+    fireEvent.change(staffNameField(), { target: { value: 'Alex Morgan' } });
     fireEvent.click(screen.getByRole('checkbox', { name: 'Moderator' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Save staff member' }));
+    fireEvent.click(within(currentDialog()).getByRole('button', { name: 'Add staff member' }));
 
     expect(controller.addStaff).not.toHaveBeenCalled();
     // And the typed name is still there to save once a role is chosen.
-    expect((screen.getByPlaceholderText('Alex Morgan') as HTMLInputElement).value).toBe('Alex Morgan');
+    expect((staffNameField() as HTMLInputElement).value).toBe('Alex Morgan');
   });
 });
 
@@ -155,10 +175,13 @@ describe('room operations visibility', () => {
       },
     );
 
-    render(<RoomsView state={state} controller={controllerWith()} onAnnounce={vi.fn()} />);
+    renderRooms(controllerWith(), state);
 
-    expect(screen.getByRole('button', { name: 'Available 1' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Available 1' }));
+    // "Assignable" says what the filter actually selects. A room marked
+    // available but still running a game is not assignable for the next round,
+    // which is the distinction the old "Available" label blurred.
+    expect(screen.getByRole('button', { name: 'Assignable 1' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Assignable 1' }));
 
     expect(screen.getByText('Ready room')).toBeInTheDocument();
     expect(screen.queryByText('Live room')).toBeNull();
@@ -205,14 +228,20 @@ describe('room operations visibility', () => {
       operatorName: 'Morgan',
     });
 
-    render(<RoomsView state={state} controller={controllerWith()} onAnnounce={vi.fn()} />);
+    renderRooms(controllerWith(), state);
 
-    expect(screen.getByText('Live', { selector: 'strong' })).toBeInTheDocument();
-    expect(screen.getByText(/Alpha vs Beta/, { selector: 'small' })).toBeInTheDocument();
-    expect(screen.getAllByText(/Morgan/).length).toBeGreaterThan(0);
-    expect(screen.getByText(/Stale · Last seen/)).toBeInTheDocument();
+    // What a director scanning the list needs: the room, what it is doing now,
+    // whether it can take the next round, and that it has asked for help.
+    expect(screen.getByText(/Alpha vs Beta/)).toBeInTheDocument();
+    expect(screen.getByText(/Waiting for current work/)).toBeInTheDocument();
+    expect(screen.getByText('Needs help')).toBeInTheDocument();
+
+    // The connection telemetry is still there, one disclosure away, rather than
+    // permanently occupying the row.
+    expect(screen.queryByText(/Last seen/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /Room details & QBTCP/ }));
+    expect(screen.getByText(/Last seen/)).toBeInTheDocument();
     expect(screen.getByText(/Resumable/)).toBeInTheDocument();
-    expect(screen.getByText(/Help open/)).toBeInTheDocument();
-    expect(screen.getByText('Not assignable while current work resolves')).toBeInTheDocument();
+    expect(screen.getAllByText(/Morgan/).length).toBeGreaterThan(0);
   });
 });
