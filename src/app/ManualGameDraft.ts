@@ -45,6 +45,28 @@ function isDraftTeam(value: unknown): value is IManualTeamInput {
   );
 }
 
+function readManualRoundOptions(value: unknown): IManualRoundOptions | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+  const candidate = value as Partial<IManualRoundOptions>;
+  if (candidate.breaks !== undefined) {
+    if (!Array.isArray(candidate.breaks)) return null;
+    const validBreaks = candidate.breaks.every(
+      (row) =>
+        typeof row === 'object' &&
+        row !== null &&
+        typeof row.key === 'string' &&
+        typeof row.label === 'string' &&
+        (row.afterTossup === undefined || typeof row.afterTossup === 'number'),
+    );
+    if (!validBreaks) return null;
+  }
+  return {
+    ...manualRoundOptionDefaults,
+    ...(candidate as object),
+    ...(candidate.breaks ? { breaks: candidate.breaks.map((row) => ({ ...row })) } : {}),
+  };
+}
+
 /** Read a draft defensively; a malformed local value should never stop the welcome screen opening. */
 export function readManualGameDraft(storageKey = manualDraftStorageKey): IManualGameInput | null {
   const storage = manualDraftStorage();
@@ -55,22 +77,21 @@ export function readManualGameDraft(storageKey = manualDraftStorageKey): IManual
       !parsed ||
       typeof parsed.gameLabel !== 'string' ||
       !isDraftTeam(parsed.left) ||
-      !isDraftTeam(parsed.right) ||
-      typeof parsed.options !== 'object' ||
-      parsed.options === null
+      !isDraftTeam(parsed.right)
     ) {
       return null;
     }
     // Migrated on read rather than behind a new storage key, because the point of a draft is that a
     // half-typed practice setup survives — including across the release that added advanced rules.
     const rules = readScoringRulesInput(parsed.rules);
-    if (!rules) return null;
+    const options = readManualRoundOptions(parsed.options);
+    if (!rules || !options) return null;
     return {
       gameLabel: parsed.gameLabel,
       left: parsed.left,
       right: parsed.right,
       rules,
-      options: { ...manualRoundOptionDefaults, ...(parsed.options as object) },
+      options,
     };
   } catch {
     return null;
@@ -166,20 +187,19 @@ export function readManualGamePresets(): IManualGamePreset[] {
           typeof candidate.label !== 'string' ||
           typeof candidate.savedAt !== 'string' ||
           !isDraftTeam(candidate.left) ||
-          !isDraftTeam(candidate.right) ||
-          typeof candidate.options !== 'object' ||
-          candidate.options === null
+          !isDraftTeam(candidate.right)
         ) {
           return [];
         }
         const rules = readScoringRulesInput(candidate.rules);
-        if (!rules) return [];
+        const options = readManualRoundOptions(candidate.options);
+        if (!rules || !options) return [];
         const input: IManualGameInput = {
           gameLabel: candidate.label,
           left: candidate.left,
           right: candidate.right,
           rules,
-          options: { ...manualRoundOptionDefaults, ...(candidate.options as object) },
+          options,
         };
         if (!defineManualGame(input).ok) return [];
         return [
