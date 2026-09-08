@@ -1,4 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useRef } from 'react';
+import type { MouseEvent as ReactMouseEvent } from 'react';
 
 export const DIRECTOR_SHORTCUTS = [
   { keys: ['⌘', 'K'], win: ['Ctrl', 'K'], description: 'Focus tournament search', action: 'search-focus' },
@@ -41,6 +42,23 @@ export function HelpDialog({ open, onClose }: { open: boolean; onClose: () => vo
     }
   }, [open]);
 
+  const scrollToHelpSection = (event: ReactMouseEvent<HTMLElement>) => {
+    if (!(event.target instanceof Element)) return;
+    const link = event.target.closest<HTMLAnchorElement>('a[href^="#"]');
+    if (!link || !event.currentTarget.contains(link)) return;
+    const href = link.getAttribute('href');
+    if (!href?.startsWith('#')) return;
+    const sectionId = href.slice(1);
+    const target = document.getElementById(sectionId);
+    if (!target || !dialogRef.current?.contains(target)) return;
+
+    // These links navigate inside a modal, not to a new application location. Letting the browser
+    // follow the fragment would add each help section to history, so Back could walk through stale
+    // #help-* entries after the dialog had closed.
+    event.preventDefault();
+    target.scrollIntoView({ block: 'start' });
+  };
+
   return (
     <dialog ref={dialogRef} aria-labelledby={titleId} className="director-help-dialog" aria-modal="true">
       <div className="director-help-dialog-header">
@@ -55,7 +73,7 @@ export function HelpDialog({ open, onClose }: { open: boolean; onClose: () => vo
         </button>
       </div>
       <div className="director-help-dialog-body">
-        <nav aria-label="Help sections" className="director-help-toc">
+        <nav aria-label="Help sections" className="director-help-toc" onClick={scrollToHelpSection}>
           <a href="#help-getting-started">Getting started</a>
           <a href="#help-planning">Planning a tournament</a>
           <a href="#help-running">Running rounds</a>

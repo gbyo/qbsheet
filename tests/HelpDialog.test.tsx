@@ -9,6 +9,7 @@ import { HelpDialog } from '../src/director/help/HelpDialog';
 
 const originalShowModal = HTMLDialogElement.prototype.showModal;
 const originalClose = HTMLDialogElement.prototype.close;
+const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
 
 beforeEach(() => {
   HTMLDialogElement.prototype.showModal = function showModal() {
@@ -18,11 +19,14 @@ beforeEach(() => {
     this.open = false;
     this.dispatchEvent(new Event('close'));
   };
+  HTMLElement.prototype.scrollIntoView = vi.fn();
 });
 
 afterEach(() => {
   HTMLDialogElement.prototype.showModal = originalShowModal;
   HTMLDialogElement.prototype.close = originalClose;
+  HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+  window.history.replaceState(null, '', '/');
 });
 
 describe('Director help dialog', () => {
@@ -56,7 +60,8 @@ describe('Director help dialog', () => {
     }
   });
 
-  test('the table of contents still moves within the dialog rather than out of it', () => {
+  test('the table of contents scrolls within the dialog without changing browser history', () => {
+    window.history.replaceState(null, '', '/director?mode=test#keep-this');
     render(<HelpDialog open onClose={vi.fn()} />);
 
     const toc = screen.getByRole('navigation', { name: 'Help sections' });
@@ -64,6 +69,13 @@ describe('Director help dialog', () => {
       expect(link.getAttribute('href')).toMatch(/^#help-/);
       expect(link.getAttribute('target')).toBeNull();
     }
+
+    fireEvent.click(screen.getByRole('link', { name: 'Recovery & storage' }));
+
+    expect(window.location.pathname).toBe('/director');
+    expect(window.location.search).toBe('?mode=test');
+    expect(window.location.hash).toBe('#keep-this');
+    expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalledTimes(1);
   });
 
   test('cancel uses the callback from the commit that is on screen', () => {
