@@ -3,6 +3,7 @@ import { availableTimeZones, isValidTimeZone, timeZoneLabel, type DirectorState 
 import type { DirectorController } from '../state/useDirectorController';
 import type { OperatorProfile } from '../operator/operatorProfile';
 import { Button, FormField, PanelBody, PanelFooter, StateLabel } from '../components/Controls';
+import { ConfirmationDialog } from '../components/ConfirmationDialog';
 import { PageHeader } from '../components/PageHeader';
 import { errorNotice, type AnnounceInput } from '../notices';
 
@@ -42,6 +43,7 @@ export function SettingsView({
    * rare director who is reading back through the morning and nothing at all for everybody else.
    */
   const [auditShown, setAuditShown] = useState(auditPageSize);
+  const [restoreCheckpointId, setRestoreCheckpointId] = useState<string | null>(null);
   const [tournamentDraft, setTournamentDraft] = useState({
     key: tournamentDraftKey,
     name: state.tournament?.name ?? '',
@@ -111,6 +113,8 @@ export function SettingsView({
    * identical to reversing the whole array and taking the head, without building the whole array.
    */
   const visibleAudit = state.audit.slice(Math.max(0, state.audit.length - auditShown)).reverse();
+  const restoreCheckpoint =
+    (controller.checkpoints ?? []).find((entry) => entry.id === restoreCheckpointId) ?? null;
   return (
     <>
       <PageHeader
@@ -348,25 +352,7 @@ export function SettingsView({
                     </span>
                     <Button
                       disabled={controller.recovering}
-                      onClick={() => {
-                        if (
-                          !confirm(
-                            `Restore tournament to the checkpoint from ${new Date(entry.createdAt).toLocaleString()}? A recovery point of the current state will be created first.`,
-                          )
-                        )
-                          return;
-                        void controller
-                          .restoreCheckpoint(entry.id)
-                          .then((restored) =>
-                            onAnnounce(
-                              restored
-                                ? 'Tournament restored. The previous state is also available in Recovery.'
-                                : errorNotice(
-                                    'The tournament could not be restored; review the Director error.',
-                                  ),
-                            ),
-                          );
-                      }}
+                      onClick={() => setRestoreCheckpointId(entry.id)}
                     >
                       Restore
                     </Button>
@@ -376,6 +362,44 @@ export function SettingsView({
             )}
           </PanelBody>
         </section>
+        <ConfirmationDialog
+          open={Boolean(restoreCheckpoint)}
+          title="Restore this recovery point?"
+          confirmLabel="Restore tournament"
+          danger
+          busy={controller.recovering}
+          onCancel={() => setRestoreCheckpointId(null)}
+          onConfirm={() => {
+            if (!restoreCheckpoint) return;
+            const checkpointId = restoreCheckpoint.id;
+            void controller
+              .restoreCheckpoint(checkpointId)
+              .then((restored) =>
+                onAnnounce(
+                  restored
+                    ? 'Tournament restored. The previous state is also available in Recovery.'
+                    : errorNotice('The tournament could not be restored; review the Director error.'),
+                ),
+              )
+              .finally(() => setRestoreCheckpointId(null));
+          }}
+        >
+          {restoreCheckpoint && (
+            <>
+              <p>
+                <strong>{restoreCheckpoint.reason}</strong>
+                <br />
+                <time dateTime={restoreCheckpoint.createdAt}>
+                  {new Date(restoreCheckpoint.createdAt).toLocaleString()}
+                </time>
+              </p>
+              <p>
+                Restoring replaces the open tournament with this recovery point. A recovery point of the
+                current state will be created first, so you can return to it if needed.
+              </p>
+            </>
+          )}
+        </ConfirmationDialog>
         <section className="director-panel">
           <div className="director-panel-heading">
             <div>
