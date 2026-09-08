@@ -85,8 +85,10 @@ export function scoringLayoutChosen(
     const answered = typeof parsed.answeredAt === 'string' ? new Date(parsed.answeredAt).getTime() : NaN;
     if (!Number.isFinite(answered)) return false;
     const age = now.getTime() - answered;
-    // A clock correction can make a fresh marker appear to come from the future. Treat that as age
-    // zero rather than asking the scorekeeper the same per-game question again after a reload.
+    // A small clock correction can make a fresh marker appear to come from the future. Keep treating
+    // that as answered, but reject implausibly future timestamps so a bad clock cannot pin the marker
+    // in place for months or years after the clock is corrected.
+    if (age < -scoringLayoutPromptMaxAgeMs) return false;
     return age <= scoringLayoutPromptMaxAgeMs;
   } catch {
     // A marker that cannot be read is a marker that is not there. The cost is one extra question.
