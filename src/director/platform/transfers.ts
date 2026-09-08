@@ -69,6 +69,7 @@ function nativeMessage(reason: unknown, fallback: string): string {
 
 export class NativeTransferFileSystem implements TransferFileSystem, RemovableVolumeSource {
   readonly kind = 'native' as const;
+  private volumeRequest: Promise<TransferVolume[]> | null = null;
 
   constructor(private readonly native: NativeBridge) {}
 
@@ -81,20 +82,29 @@ export class NativeTransferFileSystem implements TransferFileSystem, RemovableVo
   }
 
   async listVolumes(): Promise<TransferVolume[]> {
-    const volumes = await this.call<Array<Record<string, unknown>>>(
-      'transfers_list_volumes',
-      {},
-      'Connected drives could not be read.',
-    );
-    return volumes.map((volume) => ({
-      mountPoint: String(volume.mountPoint ?? ''),
-      name: String(volume.name ?? ''),
-      removable: volume.removable === true,
-      readOnly: volume.readOnly === true,
-      ...(typeof volume.totalBytes === 'number' ? { totalBytes: volume.totalBytes } : {}),
-      ...(typeof volume.availableBytes === 'number' ? { availableBytes: volume.availableBytes } : {}),
-      ...(typeof volume.fileSystem === 'string' ? { fileSystem: volume.fileSystem } : {}),
-    }));
+    if (this.volumeRequest) return this.volumeRequest;
+    const request = (async () => {
+      const volumes = await this.call<Array<Record<string, unknown>>>(
+        'transfers_list_volumes',
+        {},
+        'Connected drives could not be read.',
+      );
+      return volumes.map((volume) => ({
+        mountPoint: String(volume.mountPoint ?? ''),
+        name: String(volume.name ?? ''),
+        removable: volume.removable === true,
+        readOnly: volume.readOnly === true,
+        ...(typeof volume.totalBytes === 'number' ? { totalBytes: volume.totalBytes } : {}),
+        ...(typeof volume.availableBytes === 'number' ? { availableBytes: volume.availableBytes } : {}),
+        ...(typeof volume.fileSystem === 'string' ? { fileSystem: volume.fileSystem } : {}),
+      }));
+    })();
+    this.volumeRequest = request;
+    try {
+      return await request;
+    } finally {
+      if (this.volumeRequest === request) this.volumeRequest = null;
+    }
   }
 
   async listDirectory(path: string, limit: number): Promise<TransferDirectoryEntry[]> {
