@@ -159,7 +159,12 @@ function sanitize(ids: unknown, columns: StatsColumn[]): string[] {
   if (!Array.isArray(ids))
     return columns.filter((column) => column.defaultVisible).map((column) => column.id);
   const known = new Set(columns.map((column) => column.id));
-  const selected = ids.filter((id): id is string => typeof id === 'string' && known.has(id));
+  const seen = new Set<string>();
+  const selected = ids.filter((id): id is string => {
+    if (typeof id !== 'string' || !known.has(id) || seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
   return selected.length > 0
     ? selected
     : columns.filter((column) => column.defaultVisible).map((column) => column.id);
