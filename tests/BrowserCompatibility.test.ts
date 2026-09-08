@@ -15,7 +15,7 @@ describe('isSafariBrowser', () => {
     ).toBe(true);
   });
 
-  test('does not mistake Chromium or Firefox browsers for Safari', () => {
+  test('does not mistake Chromium, Firefox, or Opera browsers for Safari', () => {
     expect(
       isSafariBrowser(
         'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
@@ -29,6 +29,11 @@ describe('isSafariBrowser', () => {
     expect(
       isSafariBrowser(
         'Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) FxiOS/145.0 Mobile/15E148 Safari/605.1.15',
+      ),
+    ).toBe(false);
+    expect(
+      isSafariBrowser(
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1 OPT/6.4.0',
       ),
     ).toBe(false);
   });
