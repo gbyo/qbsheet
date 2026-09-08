@@ -1,0 +1,217 @@
+/*
+ * Director dialog and sheet layer.
+ *
+ * One modal design language for everything: New tournament, entity editing,
+ * manual result entry, confirmations, help, and the advanced/recovery surfaces.
+ * There is no `director-operator-dialog` doing duty as generic modal
+ * infrastructure any more, and no dialog invents its own header.
+ *
+ * # The action convention, applied everywhere
+ *
+ *   - The header carries the title and a single icon-only close (an affordance,
+ *     not a decision). It never carries Cancel.
+ *   - The footer carries the decisions: `Cancel` then the primary action,
+ *     right-aligned, in that order.
+ *   - A destructive action inside an editing dialog sits at the far left of the
+ *     footer, separated from the pair on the right.
+ *   - Escape and the close button do the same thing as Cancel.
+ */
+
+.director-dialog {
+  width: min(560px, calc(100vw - 2 * var(--director-space-6)));
+  max-width: none;
+  max-height: calc(100vh - 2 * var(--director-space-7));
+  padding: 0;
+  overflow: visible;
+  color: var(--director-ink);
+  background: var(--director-surface);
+  border: 1px solid var(--director-border);
+  border-radius: var(--director-radius-lg);
+  box-shadow: var(--director-shadow-modal);
+}
+
+.director-dialog::backdrop {
+  background: rgb(16 33 46 / 42%);
+}
+
+.director-dialog-sm {
+  width: min(440px, calc(100vw - 2 * var(--director-space-6)));
+}
+
+.director-dialog-lg {
+  width: min(760px, calc(100vw - 2 * var(--director-space-6)));
+}
+
+.director-dialog-xl {
+  width: min(1000px, calc(100vw - 2 * var(--director-space-6)));
+}
+
+/* The sheet form: anchored to the right edge, full height. Used for entity
+   editing that benefits from staying beside the list it came from — rooms,
+   teams, games — on wide windows, and for anything with more than a screenful
+   of fields. */
+.director-dialog-sheet {
+  width: min(560px, calc(100vw - var(--director-space-6)));
+  height: 100vh;
+  max-height: 100vh;
+  margin: 0 0 0 auto;
+  border-width: 0 0 0 1px;
+  border-radius: 0;
+}
+
+.director-dialog-form {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: inherit;
+}
+
+.director-dialog-header {
+  display: flex;
+  gap: var(--director-space-3);
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: var(--director-space-4) var(--director-space-5);
+  border-bottom: 1px solid var(--director-border-subtle);
+}
+
+.director-dialog-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.director-dialog-heading h2 {
+  font-size: var(--director-text-section);
+}
+
+.director-dialog-heading p {
+  color: var(--director-muted);
+  font-size: var(--director-text-secondary);
+  line-height: var(--director-leading-snug);
+}
+
+.director-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--director-space-5);
+  padding: var(--director-space-5);
+  overflow-y: auto;
+}
+
+.director-dialog-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--director-space-2);
+  align-items: center;
+  justify-content: flex-end;
+  padding: var(--director-space-3) var(--director-space-5);
+  background: var(--director-surface-soft);
+  border-top: 1px solid var(--director-border-subtle);
+  border-radius: 0 0 var(--director-radius-lg) var(--director-radius-lg);
+}
+
+.director-dialog-sheet .director-dialog-footer {
+  border-radius: 0;
+}
+
+/* The destructive action in an editing dialog, pushed away from Cancel/Save so
+   it cannot be hit by muscle memory. */
+.director-dialog-footer-danger {
+  margin-right: auto;
+}
+
+/* A titled group of fields inside a dialog. A heading and a rule, not a card. */
+.director-dialog-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--director-space-3);
+}
+
+.director-dialog-section + .director-dialog-section {
+  padding-top: var(--director-space-5);
+  border-top: 1px solid var(--director-border-subtle);
+}
+
+.director-dialog-section > h3 {
+  font-size: var(--director-text-subhead);
+}
+
+/* --------------------------------------------------------- Confirmation
+   One accessible confirmation pattern for the whole application. The
+   consequence is spelled out in the body; the confirm button names the action
+   rather than saying "OK"; destructive confirmations are the only place a solid
+   red button appears. */
+
+.director-confirm {
+  width: min(460px, calc(100vw - 2 * var(--director-space-6)));
+}
+
+.director-confirm-body {
+  display: flex;
+  gap: var(--director-space-3);
+  align-items: flex-start;
+  padding: var(--director-space-5);
+}
+
+.director-confirm-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+}
+
+.director-confirm[data-tone='danger'] .director-confirm-icon {
+  color: var(--director-danger-fg);
+  background: var(--director-danger-bg);
+}
+
+.director-confirm[data-tone='warning'] .director-confirm-icon {
+  color: var(--director-warning-fg);
+  background: var(--director-warning-bg);
+}
+
+.director-confirm[data-tone='neutral'] .director-confirm-icon {
+  color: var(--director-info-fg);
+  background: var(--director-info-bg);
+}
+
+.director-confirm-text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--director-space-2);
+  min-width: 0;
+}
+
+.director-confirm-text h2 {
+  font-size: var(--director-text-section);
+}
+
+.director-confirm-text p {
+  color: var(--director-muted);
+  font-size: var(--director-text-secondary);
+  line-height: var(--director-leading-normal);
+}
+
+/* The specific, factual consequence of confirming — which rooms lose an
+   assignment, how many results are discarded. Never omitted for a destructive
+   action. */
+.director-confirm-consequence {
+  padding: var(--director-space-2) var(--director-space-3);
+  color: var(--director-ink);
+  font-size: var(--director-text-secondary);
+  background: var(--director-surface-soft);
+  border-left: 3px solid var(--director-border-strong);
+  border-radius: 0 var(--director-radius-sm) var(--director-radius-sm) 0;
+}
+
+.director-confirm[data-tone='danger'] .director-confirm-consequence {
+  border-left-color: var(--director-danger-solid);
+}
+
+.director-confirm[data-tone='warning'] .director-confirm-consequence {
+  border-left-color: var(--director-warning-solid);
+}

@@ -1,0 +1,765 @@
+/*
+ * Director surface layer: page rhythm, panels, sections, status, callouts,
+ * empty states, and metadata presentation.
+ *
+ * # The rule that shapes this file
+ *
+ * Director used to give every idea its own white bordered rectangle. A page of
+ * eight cards has no hierarchy — everything is equally important, which means
+ * nothing is. So:
+ *
+ *   - A **panel** is a container for a body of related content that needs an
+ *     edge: a table, a list, a form. One page usually has one to three.
+ *   - A **section** is a heading plus content with no border at all, separated
+ *     from its neighbours by rhythm and, where useful, a rule.
+ *   - A **tinted surface** exists only for a semantic reason — one of the five
+ *     status tones — never for visual variety.
+ */
+
+/* ================================================================ Page rhythm */
+
+.director-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--director-space-6);
+  max-width: var(--director-page-max);
+}
+
+/* One page-header grammar for every primary destination: title, optional
+   supporting line, actions on the right. Overview included — the H1 names the
+   destination, not the tournament. */
+.director-page-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--director-space-4);
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.director-page-header > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: var(--director-space-1);
+  min-width: 0;
+}
+
+.director-page-header h1 {
+  font-size: var(--director-text-title);
+}
+
+.director-page-description {
+  max-width: 78ch;
+  color: var(--director-muted);
+  font-size: var(--director-text-secondary);
+  line-height: var(--director-leading-snug);
+}
+
+.director-page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--director-space-2);
+  align-items: center;
+}
+
+/* A section: heading, optional description, content. No border, no card. */
+.director-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--director-space-3);
+  min-width: 0;
+}
+
+.director-section-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--director-space-3);
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.director-section-header > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.director-section-header h2,
+.director-section-header h3 {
+  font-size: var(--director-text-section);
+}
+
+.director-section-description {
+  max-width: 78ch;
+  color: var(--director-muted);
+  font-size: var(--director-text-secondary);
+  line-height: var(--director-leading-snug);
+}
+
+.director-section-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--director-space-2);
+  align-items: center;
+}
+
+/* A rule between sibling sections, used instead of wrapping each in a card. */
+.director-section-divided {
+  padding-top: var(--director-space-6);
+  border-top: 1px solid var(--director-border-subtle);
+}
+
+.director-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--director-space-4);
+  min-width: 0;
+}
+
+.director-stack-tight {
+  gap: var(--director-space-2);
+}
+
+.director-stack-loose {
+  gap: var(--director-space-6);
+}
+
+/* Two-column operational layout: main column plus a narrower rail that drops
+   below it when the window narrows. */
+.director-split {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+  gap: var(--director-space-6);
+  align-items: start;
+}
+
+@media (max-width: 1100px) {
+  .director-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ===================================================================== Panels */
+
+.director-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--director-surface);
+  border: 1px solid var(--director-border);
+  border-radius: var(--director-radius);
+}
+
+.director-panel-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--director-space-3);
+  align-items: baseline;
+  justify-content: space-between;
+  padding: var(--director-space-4) var(--director-panel-inset);
+  border-bottom: 1px solid var(--director-border-subtle);
+}
+
+.director-panel-header > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.director-panel-header h2,
+.director-panel-header h3 {
+  font-size: var(--director-text-section);
+}
+
+.director-panel-header p {
+  color: var(--director-muted);
+  font-size: var(--director-text-secondary);
+}
+
+.director-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--director-space-2);
+  align-items: center;
+}
+
+.director-panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--director-space-4);
+  min-width: 0;
+  padding: var(--director-panel-inset);
+}
+
+.director-panel-body-flush {
+  padding: 0;
+}
+
+.director-panel-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--director-space-2);
+  align-items: center;
+  padding: var(--director-space-3) var(--director-panel-inset);
+  background: var(--director-surface-soft);
+  border-top: 1px solid var(--director-border-subtle);
+  border-radius: 0 0 var(--director-radius) var(--director-radius);
+}
+
+.director-panel-footnote {
+  color: var(--director-muted);
+  font-size: var(--director-text-secondary);
+  line-height: var(--director-leading-snug);
+}
+
+/* A panel may take a status tone, but only when the whole container really is
+   in that state — a failed save, a blocking preflight. Not for emphasis. */
+.director-panel[data-tone='warning'] {
+  background: var(--director-warning-bg);
+  border-color: var(--director-warning-border);
+}
+
+.director-panel[data-tone='danger'] {
+  background: var(--director-danger-bg);
+  border-color: var(--director-danger-border);
+}
+
+.director-panel[data-tone='info'] {
+  background: var(--director-info-bg);
+  border-color: var(--director-info-border);
+}
+
+/* An inset group: related fields or rows set into a panel without becoming
+   their own card. This is the answer to "these belong together" that used to be
+   solved with another border. */
+.director-inset {
+  display: flex;
+  flex-direction: column;
+  gap: var(--director-space-3);
+  padding: var(--director-space-4);
+  background: var(--director-surface-soft);
+  border: 1px solid var(--director-border-subtle);
+  border-radius: var(--director-radius);
+}
+
+.director-inset-quiet {
+  background: var(--director-surface-soft);
+  border: 0;
+}
+
+/* ==================================================================== Status
+ *
+ * One status model for the whole application:
+ *
+ *   Badge     the canonical inline state of an object (row, header, list item)
+ *   Dot       the same information where a badge would be too heavy
+ *   Callout   a state that needs the operator to read a sentence and maybe act
+ *   Panel     tone applied to a container that is itself in that state
+ *
+ * All four take the same five tones, so severity reads the same everywhere.
+ */
+
+.director-badge {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  padding: 2px var(--director-space-2);
+  font-size: var(--director-text-meta);
+  font-weight: var(--director-weight-semibold);
+  line-height: 18px;
+  white-space: nowrap;
+  border: 1px solid transparent;
+  border-radius: var(--director-radius-pill);
+}
+
+.director-badge[data-tone='neutral'] {
+  color: var(--director-neutral-fg);
+  background: var(--director-neutral-bg);
+  border-color: var(--director-neutral-border);
+}
+
+.director-badge[data-tone='info'] {
+  color: var(--director-info-fg);
+  background: var(--director-info-bg);
+  border-color: var(--director-info-border);
+}
+
+.director-badge[data-tone='success'] {
+  color: var(--director-success-fg);
+  background: var(--director-success-bg);
+  border-color: var(--director-success-border);
+}
+
+.director-badge[data-tone='warning'] {
+  color: var(--director-warning-fg);
+  background: var(--director-warning-bg);
+  border-color: var(--director-warning-border);
+}
+
+.director-badge[data-tone='danger'] {
+  color: var(--director-danger-fg);
+  background: var(--director-danger-bg);
+  border-color: var(--director-danger-border);
+}
+
+.director-badge-count {
+  min-width: 20px;
+  padding: 0 6px;
+  font-variant-numeric: tabular-nums;
+  justify-content: center;
+}
+
+/* The dot form. Kept for dense tables and the round list, where a row of pills
+   would out-shout the data. */
+.director-state {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--director-ink);
+  font-size: var(--director-text-secondary);
+  white-space: nowrap;
+}
+
+.director-state-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.director-state[data-tone='neutral'] .director-state-dot {
+  background: var(--director-border-strong);
+}
+
+.director-state[data-tone='info'] .director-state-dot {
+  background: var(--director-info-solid);
+}
+
+.director-state[data-tone='success'] .director-state-dot,
+.director-state[data-tone='positive'] .director-state-dot {
+  background: var(--director-success-solid);
+}
+
+.director-state[data-tone='warning'] .director-state-dot {
+  background: var(--director-warning-solid);
+}
+
+.director-state[data-tone='danger'] .director-state-dot,
+.director-state[data-tone='negative'] .director-state-dot {
+  background: var(--director-danger-solid);
+}
+
+/* ---------------------------------------------------------------- Callouts
+   A tone, a heading, a sentence that says what is wrong and why it matters, and
+   the action that fixes it. Replaces the mixture of banners, prose paragraphs,
+   tinted panels and helper text that used to carry this job. */
+
+.director-callout {
+  display: flex;
+  gap: var(--director-space-3);
+  align-items: flex-start;
+  padding: var(--director-space-3) var(--director-space-4);
+  border: 1px solid;
+  border-radius: var(--director-radius);
+}
+
+.director-callout-icon {
+  flex: none;
+  margin-top: 1px;
+}
+
+.director-callout-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--director-space-1);
+  min-width: 0;
+  flex: 1;
+}
+
+.director-callout-body > strong {
+  font-size: var(--director-text-body);
+  font-weight: var(--director-weight-semibold);
+}
+
+.director-callout-body > p {
+  font-size: var(--director-text-secondary);
+  line-height: var(--director-leading-snug);
+}
+
+.director-callout-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--director-space-2);
+  align-items: center;
+  margin-top: var(--director-space-1);
+}
+
+.director-callout[data-tone='neutral'] {
+  color: var(--director-ink);
+  background: var(--director-surface-soft);
+  border-color: var(--director-border);
+}
+
+.director-callout[data-tone='info'] {
+  color: var(--director-info-fg);
+  background: var(--director-info-bg);
+  border-color: var(--director-info-border);
+}
+
+.director-callout[data-tone='success'] {
+  color: var(--director-success-fg);
+  background: var(--director-success-bg);
+  border-color: var(--director-success-border);
+}
+
+.director-callout[data-tone='warning'] {
+  color: var(--director-warning-fg);
+  background: var(--director-warning-bg);
+  border-color: var(--director-warning-border);
+}
+
+.director-callout[data-tone='danger'] {
+  color: var(--director-danger-fg);
+  background: var(--director-danger-bg);
+  border-color: var(--director-danger-border);
+}
+
+.director-callout p,
+.director-callout strong {
+  color: inherit;
+}
+
+/* ================================================================= Attention
+   The Overview list of things needing a decision. Ranked by severity, each with
+   context and a deep link to the fix — not a flat column of quiet blue buttons. */
+
+.director-attention {
+  display: flex;
+  flex-direction: column;
+}
+
+.director-attention-item {
+  display: flex;
+  gap: var(--director-space-3);
+  align-items: flex-start;
+  padding: var(--director-space-3) var(--director-panel-inset);
+  border-bottom: 1px solid var(--director-border-subtle);
+}
+
+.director-attention-item:last-child {
+  border-bottom: 0;
+}
+
+.director-attention-marker {
+  flex: none;
+  width: 3px;
+  align-self: stretch;
+  margin: -2px 0;
+  border-radius: var(--director-radius-pill);
+}
+
+.director-attention-item[data-severity='blocker'] .director-attention-marker {
+  background: var(--director-danger-solid);
+}
+
+.director-attention-item[data-severity='warning'] .director-attention-marker {
+  background: var(--director-warning-solid);
+}
+
+.director-attention-item[data-severity='review'] .director-attention-marker {
+  background: var(--director-info-solid);
+}
+
+.director-attention-item[data-severity='info'] .director-attention-marker {
+  background: var(--director-border-strong);
+}
+
+.director-attention-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.director-attention-title {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--director-space-2);
+  align-items: baseline;
+  color: var(--director-ink-strong);
+  font-size: var(--director-text-body);
+  font-weight: var(--director-weight-medium);
+}
+
+.director-attention-detail {
+  color: var(--director-muted);
+  font-size: var(--director-text-secondary);
+  line-height: var(--director-leading-snug);
+}
+
+.director-attention-action {
+  flex: none;
+}
+
+/* ============================================================== Empty states
+   One language and one scale. An empty state says what this place is for and
+   what to do next; it does not explain where the data is stored. */
+
+.director-empty-state {
+  display: flex;
+  flex-direction: column;
+  gap: var(--director-space-2);
+  align-items: flex-start;
+  padding: var(--director-space-7) var(--director-space-6);
+  text-align: left;
+}
+
+.director-empty-state h2 {
+  font-size: var(--director-text-section);
+}
+
+.director-empty-state p {
+  max-width: 62ch;
+  color: var(--director-muted);
+  font-size: var(--director-text-secondary);
+  line-height: var(--director-leading-snug);
+}
+
+.director-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--director-space-2);
+  align-items: center;
+  margin-top: var(--director-space-2);
+}
+
+/* Inside a panel or table: no border of its own, centred, quiet. */
+.director-empty-state-contained {
+  align-items: center;
+  padding: var(--director-space-6) var(--director-space-5);
+  text-align: center;
+}
+
+.director-empty-state-contained p {
+  max-width: 52ch;
+}
+
+.director-empty-state-inline {
+  padding: var(--director-space-5);
+}
+
+/* A whole destination with nothing in it yet. Gets an edge, because it is the
+   page. */
+.director-empty-state-standalone {
+  align-items: center;
+  padding: var(--director-space-8) var(--director-space-6);
+  text-align: center;
+  background: var(--director-surface);
+  border: 1px solid var(--director-border);
+  border-radius: var(--director-radius);
+}
+
+/* ============================================================ Metadata & specs
+   Identifiers, revisions, session ids, protocol versions. Reachable, never
+   competing with tournament information. */
+
+.director-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--director-space-1) var(--director-space-3);
+  align-items: baseline;
+  color: var(--director-faint);
+  font-size: var(--director-text-meta);
+}
+
+.director-meta-row > span {
+  display: inline-flex;
+  gap: 5px;
+  align-items: baseline;
+}
+
+/* A term/value grid for detail surfaces. Terms are secondary weight so the
+   values carry the reading. */
+.director-specs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--director-space-3) var(--director-space-5);
+  margin: 0;
+}
+
+.director-specs > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.director-specs dt {
+  color: var(--director-muted);
+  font-size: var(--director-text-meta);
+  font-weight: var(--director-weight-medium);
+}
+
+.director-specs dd {
+  margin: 0;
+  color: var(--director-ink);
+  font-size: var(--director-text-body);
+}
+
+.director-specs dd.director-mono {
+  font-size: var(--director-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* Diagnostics: intentionally advanced content. Always inside a Disclosure
+   labelled for what it is, and set in the metadata register. */
+.director-diagnostics {
+  display: flex;
+  flex-direction: column;
+  gap: var(--director-space-3);
+  padding: var(--director-space-4);
+  background: var(--director-surface-soft);
+  border: 1px solid var(--director-border-subtle);
+  border-radius: var(--director-radius);
+}
+
+.director-diagnostics .director-specs dd {
+  font-size: var(--director-text-secondary);
+}
+
+/* ============================================================== Summary lists
+   The list-of-objects layout used where a table would be the wrong shape:
+   rooms, rounds, transfer locations, staff. A stable summary line, a status,
+   and one primary action with everything else in an overflow menu. */
+
+.director-list {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.director-list-item {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--director-space-3);
+  align-items: center;
+  padding: var(--director-space-3) var(--director-panel-inset);
+  border-bottom: 1px solid var(--director-border-subtle);
+}
+
+.director-list-item:last-child {
+  border-bottom: 0;
+}
+
+.director-list-item:hover {
+  background: var(--director-surface-soft);
+}
+
+.director-list-item[data-selected='true'] {
+  background: var(--director-surface-selected);
+}
+
+.director-list-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 180px;
+}
+
+.director-list-title {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--director-space-2);
+  align-items: baseline;
+  color: var(--director-ink-strong);
+  font-size: var(--director-text-body);
+  font-weight: var(--director-weight-medium);
+}
+
+.director-list-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--director-space-1) var(--director-space-3);
+  align-items: baseline;
+  color: var(--director-muted);
+  font-size: var(--director-text-secondary);
+}
+
+.director-list-actions {
+  display: flex;
+  gap: var(--director-space-2);
+  align-items: center;
+  margin-left: auto;
+}
+
+/* ================================================================ Progress
+   A plain determinate bar for round completion. No animation, no gradient. */
+
+.director-progress {
+  display: flex;
+  gap: var(--director-space-2);
+  align-items: center;
+  min-width: 120px;
+}
+
+.director-progress-track {
+  flex: 1;
+  height: 6px;
+  overflow: hidden;
+  background: var(--director-surface-sunken);
+  border-radius: var(--director-radius-pill);
+}
+
+.director-progress-fill {
+  height: 100%;
+  background: var(--director-accent);
+  border-radius: var(--director-radius-pill);
+  transition: width var(--director-duration) var(--director-ease);
+}
+
+.director-progress[data-tone='success'] .director-progress-fill {
+  background: var(--director-success-solid);
+}
+
+.director-progress-label {
+  color: var(--director-muted);
+  font-size: var(--director-text-meta);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* A short run of facts in the secondary register — what an export contains,
+   what a format implies. Replaces the standalone "What is included" cards. */
+.director-fact-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--director-space-1);
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.director-fact-list li {
+  display: flex;
+  gap: var(--director-space-2);
+  align-items: flex-start;
+  color: var(--director-muted);
+  font-size: var(--director-text-secondary);
+}
+
+.director-fact-list svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--director-success-fg);
+}
+
+/* The page title and, beside it, the destination's single overall state. */
+.director-page-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--director-space-3);
+  align-items: center;
+}

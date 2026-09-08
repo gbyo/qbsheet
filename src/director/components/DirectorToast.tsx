@@ -1,5 +1,13 @@
-import { Icon } from './Icon';
+import { Icon, type IconName } from './Icon';
+import { IconButton } from './Controls';
 import { toDirectorNotice, type AnnounceInput } from '../notices';
+
+const toneIcons: Record<string, IconName> = {
+  success: 'check',
+  info: 'info',
+  warning: 'alert',
+  error: 'warning',
+};
 
 /**
  * One Director toast with tone-appropriate treatment.
@@ -28,16 +36,12 @@ export function DirectorToast({
           ? ' director-toast-warning'
           : ' director-toast-error';
   return (
-    <div className={`${className}${toneClass}`} role={role}>
-      {notice.tone === 'success' && <Icon name="check" size={16} />}
-      {notice.tone === 'warning' && <Icon name="alert" size={16} />}
-      {notice.tone === 'error' && <Icon name="alert" size={16} />}
-      <span>{notice.message}</span>
-      {onDismiss && (
-        <button type="button" aria-label="Dismiss notification" onClick={onDismiss}>
-          ×
-        </button>
-      )}
+    <div className={`${className}${toneClass}`} role={role} data-tone={notice.tone}>
+      <span className="director-toast-icon" aria-hidden="true">
+        <Icon name={toneIcons[notice.tone] ?? 'info'} size={16} />
+      </span>
+      <p>{notice.message}</p>
+      {onDismiss && <IconButton icon="x" size="sm" label="Dismiss notification" onClick={onDismiss} />}
     </div>
   );
 }

@@ -11,12 +11,19 @@ import { useEffect, useLayoutEffect, useRef, type RefObject } from 'react';
 export function DirectorMenu({
   label,
   className,
+  id,
+  align = 'start',
+  placement = 'bottom',
   openerRef,
   onClose,
   children,
 }: {
   label: string;
   className?: string;
+  id?: string;
+  /** Which edge the popover is anchored to; read by the stylesheet. */
+  align?: 'start' | 'end';
+  placement?: 'bottom' | 'top';
   openerRef: RefObject<HTMLElement | null>;
   onClose: () => void;
   children: React.ReactNode;
@@ -92,7 +99,15 @@ export function DirectorMenu({
   }, [openerRef]);
 
   return (
-    <div ref={menuRef} role="menu" aria-label={label} className={className}>
+    <div
+      ref={menuRef}
+      id={id}
+      role="menu"
+      aria-label={label}
+      className={className}
+      data-align={align}
+      data-placement={placement}
+    >
       {children}
     </div>
   );

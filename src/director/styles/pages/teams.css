@@ -1,0 +1,372 @@
+/* Director teams surface styles. Rebased on the shared design tokens; page-specific rules only. */
+
+/* Teams: registration and roster editing are one roomy workflow rather than controls in a cell. */
+
+.director-team-registration .director-panel-body,
+.director-team-editor {
+  display: grid;
+  gap: 22px;
+}
+
+.director-fieldset {
+  display: grid;
+  min-width: 0;
+  gap: 14px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+}
+
+.director-fieldset > legend {
+  padding: 0;
+  margin-bottom: 2px;
+  color: var(--director-ink);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.director-roster-fieldset {
+  padding-top: 20px;
+  border-top: 1px solid var(--director-border);
+}
+
+.director-team-registration-grid {
+  grid-template-columns: minmax(220px, 1.35fr) minmax(100px, 0.45fr) minmax(220px, 1.2fr);
+}
+
+.director-team-edit-grid,
+.director-school-edit-grid {
+  grid-template-columns: repeat(4, minmax(130px, 1fr));
+}
+
+.director-section-heading-inline {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.director-section-heading-inline h3,
+.director-section-heading-inline p,
+.director-add-players-form h4 {
+  margin: 0;
+}
+
+.director-section-heading-inline > p {
+  color: var(--director-muted);
+  font-size: 12px;
+}
+
+.director-secondary-details > summary {
+  width: fit-content;
+  padding: 4px 0;
+  color: var(--director-accent);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.director-secondary-details[open] > summary {
+  margin-bottom: 10px;
+}
+
+.director-roster-paste {
+  display: grid;
+  grid-template-columns: minmax(240px, 520px) auto;
+  gap: 10px;
+  align-items: end;
+  padding: 12px;
+  background: var(--director-surface-soft);
+  border: 1px solid var(--director-border);
+  border-radius: 5px;
+}
+
+.director-roster-paste .director-form-field {
+  max-width: none;
+}
+
+.director-roster-paste .director-textarea {
+  min-height: 104px;
+}
+
+.director-roster-entry {
+  display: grid;
+  gap: 7px;
+}
+
+.director-roster-entry-row {
+  display: grid;
+  grid-template-columns: 24px minmax(170px, 1.2fr) minmax(64px, 0.35fr) auto minmax(150px, 0.85fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.director-roster-entry-row input {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  padding: 7px 9px;
+  color: var(--director-ink);
+  font-size: 13px;
+  background: var(--director-surface);
+  border: 1px solid var(--director-border-strong);
+  border-radius: 4px;
+}
+
+.director-roster-entry-row input:focus {
+  border-color: #88afc8;
+  box-shadow: 0 0 0 3px rgb(20 101 156 / 10%);
+  outline: 0;
+}
+
+.director-roster-entry-number {
+  color: var(--director-faint);
+  font-size: 11px;
+  text-align: right;
+}
+
+.director-roster-captain-field {
+  white-space: nowrap;
+}
+
+.director-roster-captain-field input {
+  width: 15px;
+  min-height: 15px;
+  padding: 0;
+}
+
+.director-roster-open-action {
+  min-height: 28px;
+  color: var(--director-accent);
+  white-space: nowrap;
+}
+
+.director-team-editor-row > td {
+  padding: 18px var(--director-panel-inset);
+}
+
+.director-team-editor .director-inline-edit {
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--director-border);
+}
+
+.director-team-editor .director-form-field,
+.director-school-edit-grid .director-form-field {
+  max-width: none;
+}
+
+.director-existing-roster,
+.director-add-players-form {
+  display: grid;
+  gap: 12px;
+}
+
+.director-add-players-form {
+  padding: 15px;
+  background: var(--director-surface);
+  border: 1px solid var(--director-border);
+  border-radius: 5px;
+}
+
+.director-roster-add-actions {
+  justify-content: space-between;
+}
+
+.director-roster-player-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px 16px;
+  align-items: center;
+  padding: 11px 12px;
+  background: var(--director-surface);
+  border: 1px solid var(--director-border);
+  border-radius: 4px;
+}
+
+.director-roster-player-card.is-inactive {
+  opacity: 0.68;
+}
+
+.director-roster-player-summary strong,
+.director-roster-player-summary span,
+.director-roster-player-summary small {
+  overflow-wrap: anywhere;
+}
+
+.director-roster-player-summary span,
+.director-roster-player-summary small {
+  color: var(--director-muted);
+  font-size: 11px;
+}
+
+.director-roster-player-edit {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--director-border);
+}
+
+.director-schools-panel .director-panel-heading > div:first-child {
+  min-width: 0;
+}
+
+.director-schools-panel .director-panel-description {
+  margin-top: 4px;
+  margin-bottom: 0;
+}
+
+.director-school-table {
+  min-width: 700px;
+}
+
+.director-merge-school {
+  max-width: 560px;
+}
+
+.director-roster-list {
+  display: grid;
+  gap: 6px;
+}
+
+.director-roster-row,
+.director-roster-add-row,
+.director-inline-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.director-roster-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.director-roster-player-summary {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.director-roster-row .director-roster-player-summary > span {
+  white-space: nowrap;
+}
+
+.director-roster-row.is-inactive {
+  opacity: 0.68;
+}
+
+.director-roster-status {
+  color: var(--director-muted);
+  font-style: normal;
+}
+
+.director-roster-player-edit {
+  padding: 8px 0 10px;
+  border-bottom: 1px solid var(--director-border);
+}
+
+.director-roster-row {
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--director-border);
+}
+
+.director-roster-remove-action,
+.director-roster-add-action,
+.director-inline-action {
+  flex: 0 0 auto;
+  padding: 0;
+  color: var(--director-accent);
+  font-size: 11px;
+  background: transparent;
+  border: 0;
+}
+
+.director-inline-action:hover {
+  color: var(--director-accent-hover);
+  text-decoration: underline;
+}
+
+.director-roster-add-row input,
+.director-inline-form input {
+  width: 150px;
+  min-height: 30px;
+  padding: 5px 7px;
+  color: var(--director-ink);
+  font-size: 12px;
+  background: var(--director-surface);
+  border: 1px solid var(--director-border-strong);
+  border-radius: 3px;
+}
+
+.director-checkbox-field {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  color: var(--director-ink);
+  font-size: 12px;
+}
+
+.director-check-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  min-height: 22px;
+  color: var(--director-ink);
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.director-check-group {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.director-check-row input {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  margin: 2px 0 0;
+  accent-color: var(--director-accent);
+}
+
+.director-roster-details {
+  position: relative;
+}
+
+.director-roster-summary {
+  display: inline-flex;
+  gap: 6px;
+  min-height: 28px;
+  align-items: center;
+  color: var(--director-accent);
+  font-size: 12px;
+  font-weight: 500;
+  list-style: none;
+}
+
+.director-roster-summary::before {
+  content: '›';
+  display: inline-block;
+  color: var(--director-faint);
+  font-size: 16px;
+  line-height: 1;
+  transition: transform 120ms ease;
+}
+
+.director-roster-details[open] .director-roster-summary::before {
+  transform: rotate(90deg);
+}
+
+.director-roster-editor {
+  display: grid;
+  gap: 8px;
+  min-width: 230px;
+  padding: 9px 0 3px;
+}

@@ -4,6 +4,7 @@ import { unresolvedScheduledGameForTeam, type DirectorState } from '../domain';
 import { Button, EmptyState, FormField, PanelBody, PanelFooter, StateLabel } from '../components/Controls';
 import { DirectorMenu } from '../components/DirectorMenu';
 import { PageHeader } from '../components/PageHeader';
+import { SearchField, Toolbar } from '../components/Filters';
 import { importQbj, importSqbsTeams, importTeamsCsv, type TeamRecord } from '@qbsheet/tournament-formats';
 import { toImportedTeamInputs } from './teamImport';
 import type { DirectorNavigationTarget } from '../app/navigationTarget';
@@ -42,18 +43,20 @@ const dialogStyle = {
 export function TeamsView({
   state,
   controller,
-  search,
   onAnnounce,
   navigationTarget,
   onClearNavigationTarget,
 }: {
   state: DirectorState;
   controller: DirectorController;
-  search: string;
   onAnnounce: (announcement: AnnounceInput) => void;
   navigationTarget?: DirectorNavigationTarget | null;
   onClearNavigationTarget?: () => void;
 }) {
+  // Teams filters its own list. It used to receive the global search box's
+  // value, so typing in the top bar to navigate also narrowed this table
+  // underneath the results popover.
+  const [search, setSearch] = useState('');
   const [teamDialog, setTeamDialog] = useState<{ mode: 'new' } | { mode: 'edit'; teamId: string } | null>(
     null,
   );
@@ -286,15 +289,21 @@ export function TeamsView({
           </EmptyState>
         ) : (
           <section className="director-panel" data-testid="director-teams">
-            <div className="director-panel-heading">
-              <div>
-                <p className="director-eyebrow">Teams</p>
-                <h2>{visibleTeams.length} shown</h2>
-              </div>
-              <span className="director-muted">
-                {state.teams.filter((team) => team.status === 'confirmed').length} confirmed
-              </span>
-            </div>
+            <Toolbar
+              filters={
+                <SearchField
+                  value={search}
+                  onChange={setSearch}
+                  label="Filter teams"
+                  placeholder="Filter by team, school, or player"
+                />
+              }
+              count={
+                search.trim()
+                  ? `${visibleTeams.length} of ${state.teams.length} teams`
+                  : `${state.teams.length} team${state.teams.length === 1 ? '' : 's'} · ${state.teams.filter((team) => team.status === 'confirmed').length} confirmed`
+              }
+            />
             <div className="director-table-wrap">
               <table className="director-table director-team-table">
                 <thead>

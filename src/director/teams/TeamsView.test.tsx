@@ -31,7 +31,6 @@ test('navigation opens a team repeatedly and pasted names preserve pending remov
           <TeamsView
             state={controller.state}
             controller={controller}
-            search=""
             onAnnounce={vi.fn()}
             navigationTarget={target}
             onClearNavigationTarget={() => setTarget(null)}

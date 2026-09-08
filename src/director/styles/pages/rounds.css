@@ -1,0 +1,178 @@
+/* Director rounds surface styles. Rebased on the shared design tokens; page-specific rules only. */
+
+/* Tournament workspace: open day sequence, not a card stack */
+
+.director-workspace-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--director-space-4);
+  margin-bottom: 8px;
+}
+
+.director-workspace-header h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+}
+
+.director-workspace-sub {
+  margin: 4px 0 0;
+  color: var(--director-muted);
+  font-size: 13px;
+}
+
+.director-workspace-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--director-space-2);
+}
+
+.director-day-sequence {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.director-round,
+.director-day-event {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 12px;
+  padding: 14px 4px;
+  border-top: 1px solid var(--director-border);
+}
+
+.director-day-sequence > li:first-child {
+  border-top: 0;
+}
+
+.director-round-number,
+.director-day-event-marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  color: var(--director-muted);
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  background: var(--director-surface-soft);
+  border: 1px solid var(--director-border);
+  border-radius: 50%;
+}
+
+.director-round.is-active .director-round-number {
+  color: var(--director-accent);
+  background: var(--director-accent-soft);
+  border-color: #b9d2e2;
+}
+
+.director-round.is-complete,
+.director-round.is-complete .director-round-context {
+  color: var(--director-muted);
+}
+
+.director-round-main {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.director-round-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+
+.director-round-title-row strong {
+  font-size: 14px;
+}
+
+.director-round-title-row strong:focus {
+  outline: none;
+}
+
+.director-round-status {
+  color: var(--director-muted);
+  font-size: 12px;
+}
+
+.director-round.is-active .director-round-status {
+  color: var(--director-accent);
+  font-weight: 600;
+}
+
+.director-round-context,
+.director-round-progress {
+  margin: 0;
+  color: var(--director-muted);
+  font-size: 12px;
+}
+
+.director-round-failure {
+  margin: 4px 0 0;
+  padding: 8px 10px;
+  color: var(--director-red);
+  font-size: 12px;
+  background: var(--director-red-soft);
+  border-radius: var(--director-radius);
+}
+
+.director-round-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--director-space-2);
+  margin-top: 6px;
+}
+
+.director-round-advanced {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: var(--director-surface-soft);
+  border: 1px solid var(--director-border);
+  border-radius: var(--director-radius);
+}
+
+.director-round-advanced-note {
+  margin: 0;
+  color: var(--director-muted);
+  font-size: 12px;
+}
+
+.director-round-advanced-grid {
+  display: grid;
+  gap: 8px;
+}
+
+@media (max-width: 760px) {
+  .director-workspace-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .director-workspace-actions {
+    justify-content: flex-start;
+  }
+
+  .director-round,
+  .director-day-event {
+    grid-template-columns: 30px minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .director-round-number,
+  .director-day-event-marker {
+    width: 26px;
+    height: 26px;
+    font-size: 11px;
+  }
+}
